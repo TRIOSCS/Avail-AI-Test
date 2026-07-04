@@ -45,7 +45,7 @@
         {% if req.creator %}
         <span>By: <span class="text-gray-900">{{ req.creator.name }}</span></span>
         {% endif %}
-        <span>Created: <span class="text-gray-900">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "—" }}</span></span>
+        <span>Created: <span class="text-gray-900">{{ req.created_at|localdate('%b %d, %Y') if req.created_at else "—" }}</span></span>
       </div>
     </div>
     {# flex-wrap (no flex-shrink-0): the action buttons wrap within the viewport on

@@ -57,7 +57,7 @@
               <span class="badge-warning ml-1" title="Over 14 days old">Stale</span>
             {% endif %}
           </td>
-          <td class="compact-cell text-gray-600 whitespace-nowrap">{{ offer.created_at.strftime('%m/%d/%y') if offer.created_at else '—' }}</td>
+          <td class="compact-cell text-gray-600 whitespace-nowrap">{{ offer.created_at|localdate('%m/%d/%y') if offer.created_at else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>

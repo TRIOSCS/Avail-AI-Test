@@ -47,7 +47,7 @@
           </td>
           <td class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-600">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ bp.created_at|localdate('%b %d, %Y') if bp.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>

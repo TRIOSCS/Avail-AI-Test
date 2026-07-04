@@ -110,11 +110,11 @@
 {% endmacro %}
 
 {% macro cell_updated() %}
-  <td class="table-cell text-sm text-gray-600" title="{{ req.updated_at.strftime('%b %d, %Y') if req.updated_at else '' }}">{{ req.updated_at|timeago if req.updated_at else "—" }}</td>
+  <td class="table-cell text-sm text-gray-600" title="{{ req.updated_at|localdate('%b %d, %Y') if req.updated_at else '' }}">{{ req.updated_at|timeago if req.updated_at else "—" }}</td>
 {% endmacro %}
 
 {% macro cell_created() %}
-  <td class="table-cell text-sm text-gray-600" title="{{ req.created_at.strftime('%b %d, %Y') if req.created_at else '' }}">{{ req.created_at|timeago if req.created_at else "—" }}</td>
+  <td class="table-cell text-sm text-gray-600" title="{{ req.created_at|localdate('%b %d, %Y') if req.created_at else '' }}">{{ req.created_at|timeago if req.created_at else "—" }}</td>
 {% endmacro %}
 
 {% macro cell_actions() %}

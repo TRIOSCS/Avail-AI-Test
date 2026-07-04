@@ -67,7 +67,7 @@
           <p>
             <span class="text-gray-400">Created by:</span>
             <span class="text-gray-700">{{ quote.created_by.name }}</span>
-            <span class="text-gray-400 ml-1">{{ quote.created_at.strftime('%b %d, %Y') if quote.created_at else '' }}</span>
+            <span class="text-gray-400 ml-1">{{ quote.created_at|localdate('%b %d, %Y') if quote.created_at else '' }}</span>
           </p>
           {% endif %}
         </div>
@@ -103,7 +103,7 @@
     <div>
       <p class="text-sm font-medium text-amber-800">Follow-up Alert</p>
       <p class="text-sm text-amber-700 mt-0.5">
-        Follow-up alert was sent on {{ quote.followup_alert_sent_at.strftime('%b %d, %Y at %I:%M %p') if quote.followup_alert_sent_at else '' }}.
+        Follow-up alert was sent on {{ quote.followup_alert_sent_at|localtime('%b %d, %Y at %I:%M %p') if quote.followup_alert_sent_at else '' }}.
         Consider following up with the customer.
       </p>
     </div>

@@ -29,7 +29,7 @@
       </div>
       <div class="text-secondary whitespace-nowrap flex-shrink-0">
         {{ c.user.name if c.user else 'System' }}
-        {% if c.created_at %} &middot; {{ c.created_at.strftime('%b %d %H:%M') }}{% endif %}
+        {% if c.created_at %} &middot; {{ c.created_at|localtime('%b %d %H:%M') }}{% endif %}
       </div>
     </div>
     {% endfor %}

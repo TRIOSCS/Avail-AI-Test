@@ -180,7 +180,7 @@
                       <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-accent-100 text-accent-600 text-[10px] font-bold" title="{{ req.requisition.claimed_by.name }}">{{ req.requisition.claimed_by.name[:1] }}</span>
                     {% else %}—{% endif %}
                   {% elif col_key == 'created' %}
-                    {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
+                    {{ req.created_at|localdate('%m/%d') if req.created_at else '—' }}
                   {% elif col_key == 'specs' %}
                     {% set spec_count = [req.customer_pn, req.condition, req.date_codes, req.packaging, req.firmware, req.hardware_codes]|reject('none')|reject('equalto', '')|list|length %}
                     {% if spec_count > 0 %}

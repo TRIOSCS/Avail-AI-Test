@@ -7,7 +7,7 @@
   <div class="flex items-start justify-between mb-2">
     <div>
       <h4 class="font-semibold text-gray-900">{{ r.vendor_name or "Unknown Vendor" }}</h4>
-      <p class="text-xs text-gray-600">{{ r.vendor_email or "" }} &middot; {{ r.received_at.strftime('%b %d, %Y %H:%M') if r.received_at else "&mdash;" }}</p>
+      <p class="text-xs text-gray-600">{{ r.vendor_email or "" }} &middot; {{ r.received_at|localtime('%b %d, %Y %H:%M') if r.received_at else "&mdash;" }}</p>
     </div>
     <div class="flex items-center gap-2">
       {% set class_colors = {
