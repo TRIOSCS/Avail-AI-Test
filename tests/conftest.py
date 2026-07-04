@@ -212,6 +212,37 @@ def _reset_ai_gate_state():
 
 
 @pytest.fixture(autouse=True)
+def _reset_rate_limiter_state():
+    """Reset the shared rate limiter's in-memory state before AND after each test.
+
+    Two process-wide stores leak across tests within an xdist worker and cause
+    intermittent full-suite flakes that pass in isolation:
+
+    - ``rate_limit._fallback_counts`` — the per-(user, bucket, window) outreach counter's
+      in-memory fallback (Redis is unavailable under TESTING). The window index is
+      ``int(time.time() // window_seconds)``, so two fast-running tests hitting the same
+      (user, bucket) inside one 60s window share the counter; the second sees an
+      already-incremented count and a spurious 429.
+    - ``limiter`` — the slowapi IP-based HTTP limiter's in-memory storage. A test that
+      exhausts a route's limit leaves the count elevated for a later test that hits the
+      same route in the same worker. ``.reset()`` clears only the counter storage, not the
+      registered route limits, so limiter-config tests are unaffected.
+
+    Centralizing the reset here (mirrors ``_clear_connector_token_cache`` /
+    ``_reset_ai_gate_state``) means no per-file reset discipline is load-bearing.
+    """
+    from app.rate_limit import limiter, reset_rate_limit_state
+
+    def _reset() -> None:
+        reset_rate_limit_state()
+        limiter.reset()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _clear_known_html_hashes():
     """Clear the shared HTML-structure-hash registry before and after each test.
 
