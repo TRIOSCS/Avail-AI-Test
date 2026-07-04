@@ -161,7 +161,8 @@ def test_sp4_config_defaults(monkeypatch):
 
     s = Settings(_env_file=None)
     assert s.account_sweep_enabled is False
-    assert s.account_sweep_inactivity_days == 90
+    assert s.account_sweep_inactivity_days == 45
+    assert s.account_sweep_reclaim_cooldown_days == 30
     assert s.account_sweep_manager_email == ""
     assert s.account_reactivation_sweep_enabled is True
 
