@@ -15,7 +15,7 @@
   <tbody>
     {% for s in snapshots %}
     <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
-      <td class="py-2 px-3">{{ s.recorded_at.strftime('%Y-%m-%d %H:%M') if s.recorded_at else '-' }}</td>
+      <td class="py-2 px-3">{{ s.recorded_at|localtime('%Y-%m-%d %H:%M') if s.recorded_at else '-' }}</td>
       <td class="py-2 px-3 font-semibold text-gray-900">{{ s.vendor_name }}</td>
       <td class="py-2 px-3 text-right"><span class="text-emerald-700 font-medium">${{ "%.4f"|format(s.price) }}</span></td>
       <td class="py-2 px-3 text-right">{{ "{:,}".format(s.quantity) if s.quantity else '-' }}</td>

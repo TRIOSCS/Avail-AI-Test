@@ -59,6 +59,7 @@ from ..models.quality_plan import Prepayment
 from ..services.admin_service import get_config_values
 from ..services.teams_notifications import post_teams_channel_card
 from ..utils.async_helpers import safe_background_task
+from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localtime
 
 _CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_webhook"]
 
@@ -297,10 +298,7 @@ def _requester(prepayment: Prepayment) -> str:
 
 
 def _fmt_dt(dt) -> str:
-    try:
-        return dt.strftime("%Y-%m-%d %H:%M UTC")
-    except Exception:
-        return str(dt)
+    return format_localtime(dt, "%Y-%m-%d %H:%M %Z", tz=DEFAULT_DISPLAY_TZ)
 
 
 def _confirm_url(prepayment: Prepayment) -> str | None:

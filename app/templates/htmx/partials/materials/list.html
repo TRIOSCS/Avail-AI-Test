@@ -192,7 +192,7 @@
             <span class="text-gray-400 text-xs">--</span>
             {% endif %}
           </td>
-          <td class="td-label text-gray-600">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
+          <td class="td-label text-gray-600">{{ m.last_searched_at|localdate('%b %d') if m.last_searched_at else "--" }}</td>
         </tr>
         {% endfor %}
       </tbody>

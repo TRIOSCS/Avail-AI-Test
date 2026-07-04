@@ -274,7 +274,11 @@ def test_sweep_notification_sends_to_rep(db_session, test_user):
     recipients = call_args["message"]["toRecipients"]
     assert any(r["emailAddress"]["address"] == test_user.email for r in recipients)
     body = call_args["message"]["body"]["content"]
-    assert "2026-01-01" in body
+    # Last-activity date renders in the business display zone (DEFAULT_DISPLAY_TZ), so a
+    # UTC-midnight instant lands on the prior Eastern calendar day.
+    from app.utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
+
+    assert format_localdate(last_dt, "%Y-%m-%d", tz=DEFAULT_DISPLAY_TZ) in body
 
 
 def test_sweep_notification_skips_on_no_token(db_session, test_user):

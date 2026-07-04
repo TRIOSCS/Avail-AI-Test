@@ -37,7 +37,7 @@
       </td>
       <td class="py-2 px-3 text-right">{{ "{:,}".format(r.target_qty) if r.target_qty else '-' }}</td>
       <td class="py-2 px-3 text-right">{% if r.target_price %}<span class="text-emerald-700">${{ "%.4f"|format(r.target_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
-      <td class="py-2 px-3">{{ r.created_at.strftime('%Y-%m-%d') if r.created_at else '-' }}</td>
+      <td class="py-2 px-3">{{ r.created_at|localdate('%Y-%m-%d') if r.created_at else '-' }}</td>
     </tr>
     {% else %}
     <tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">No sourcing activity for this part</td></tr>
