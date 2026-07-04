@@ -25,7 +25,7 @@
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for bp in buy_plans %}
-        <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+        <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
             role="button" tabindex="0"
             hx-get="/v2/partials/buy-plans/{{ bp.id }}"
             hx-target="#main-content"

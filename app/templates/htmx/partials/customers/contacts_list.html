@@ -127,7 +127,7 @@
         <thead class="bg-gray-50">
           <tr>
             <th class="compact-cell--head w-6">
-              <input type="checkbox" class="rounded border-gray-300 input-focus text-brand-500"
+              <input type="checkbox" class="rounded border-gray-300 input-focus text-accent-500"
                      :checked="allSelected"
                      @change="toggleAll($event.target.checked)"
                      aria-label="Select all contacts on this page">
@@ -145,7 +145,7 @@
           {% for c in contacts %}
           {% set site = c.customer_site %}
           {% set company = site.company if site else None %}
-          <tr class="hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+          <tr class="hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
               {% if company %}
               role="button" tabindex="0"
               hx-get="/v2/partials/customers/{{ company.id }}?tab=contacts"
@@ -156,7 +156,7 @@
               {% endif %}>
             {# Checkbox — @click.stop so ticking a row doesn't also navigate to the account #}
             <td class="compact-cell">
-              <input type="checkbox" class="rounded border-gray-300 input-focus text-brand-500"
+              <input type="checkbox" class="rounded border-gray-300 input-focus text-accent-500"
                      :checked="selectedIds['{{ c.id }}']"
                      @click.stop="toggle('{{ c.id }}')"
                      aria-label="Select {{ c.full_name or c.email or 'contact' }}">

@@ -20,7 +20,7 @@
           hx-swap='outerHTML'>
       <select name='disposition'
               onchange='this.form.requestSubmit()'
-              class='text-xs text-gray-600 font-medium bg-transparent border border-gray-200 rounded px-1.5 py-0.5 hover:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-400 cursor-pointer'>
+              class='text-xs text-gray-600 font-medium bg-transparent border border-gray-200 rounded px-1.5 py-0.5 hover:border-brand-300 input-focus cursor-pointer'>
         <option value='active' {% if _disp == 'active' %}selected{% endif %}>Active</option>
         <option value='bucket' {% if _disp == 'bucket' %}selected{% endif %}>Bucket</option>
       </select>
@@ -34,7 +34,7 @@
         hx-swap='outerHTML'
         hx-confirm='Send {{ company.name }} back to prospecting? This clears your ownership.'>
     <button type='submit'
-            class='inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-brand-400'
+            class='inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500'
             title='Relinquish ownership and return this account to the prospecting pool'>
       Send to Prospecting
     </button>

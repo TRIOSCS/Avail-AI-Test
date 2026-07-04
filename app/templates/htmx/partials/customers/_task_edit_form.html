@@ -9,11 +9,11 @@
       class="mt-2 space-y-2">
   <input type="text" name="title" value="{{ task.title }}" required
          placeholder="Task title"
-         class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+         class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus"
          aria-label="Task title">
   <input type="date" name="due_at"
          value="{{ task.due_at.strftime('%Y-%m-%d') if task.due_at else '' }}"
-         class="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus"
          aria-label="Due date">
   <div id="task-edit-error-{{ task.id }}"></div>
   <div class="flex gap-2">

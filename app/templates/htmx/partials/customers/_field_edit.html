@@ -18,7 +18,7 @@
     <select name='value'
             onchange='this.form.requestSubmit()'
             @keydown.escape.prevent="htmx.ajax('GET', '{{ display_url }}', {target: '#{{ _span_id }}', swap: 'outerHTML', indicator: 'none'})"
-            class='text-sm border border-brand-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white'
+            class='text-sm border border-brand-300 rounded px-1.5 py-0.5 input-focus bg-white'
             x-init='$el.focus()'>
       <option value=''>— clear —</option>
       {# Preserve a legacy / out-of-list current value so it stays selectable
@@ -45,6 +45,6 @@
          hx-trigger="blur, keyup[key=='Enter']"
          @keydown.escape.prevent="htmx.ajax('GET', '{{ display_url }}', {target: '#{{ _span_id }}', swap: 'outerHTML', indicator: 'none'})"
          x-init='$el.focus(); $el.select()'
-         class='text-sm border border-brand-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 min-w-0 w-40'>
+         class='text-sm border border-brand-300 rounded px-1.5 py-0.5 input-focus min-w-0 w-40'>
 </span>
 {% endif %}

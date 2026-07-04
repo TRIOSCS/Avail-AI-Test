@@ -22,7 +22,7 @@
 {# copy=True: render a <button> that copies `value` to the clipboard and shows a toast.
    All data-outreach-log attributes are preserved so the existing JS logger still fires. #}
 <button type="button"
-   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1"
+   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
    data-outreach-log
    data-channel="{{ channel }}"
    data-value="{{ value }}"
@@ -40,7 +40,7 @@
 {% else %}
 <a href="{{ href }}"
    {% if new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}
-   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1"
+   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
    data-outreach-log
    data-channel="{{ channel }}"
    data-value="{{ value }}"
@@ -413,13 +413,13 @@
             <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
                   hx-target='#contacts-tab-list' hx-swap='innerHTML' class='inline'>
               <input type='hidden' name='do_not_contact' value=''>
-              <button type='submit' @click.stop='' class='w-full text-left px-3 py-1.5 text-red-600 text-xs'>Clear DNC</button>
+              <button type='submit' @click.stop='' class='w-full text-left px-3 py-1.5 text-rose-600 text-xs'>Clear DNC</button>
             </form>
             {% else %}
             <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
                   hx-target='#contacts-tab-list' hx-swap='innerHTML' class='inline'>
               <input type='hidden' name='do_not_contact' value='1'>
-              <button type='submit' @click.stop='' class='w-full text-left px-3 py-1.5 text-gray-600 hover:text-red-600 text-xs'>Set DNC</button>
+              <button type='submit' @click.stop='' class='w-full text-left px-3 py-1.5 text-gray-600 hover:text-rose-600 text-xs'>Set DNC</button>
             </form>
             {% endif %}
             <div class='border-t border-gray-100 my-1'></div>
@@ -582,7 +582,7 @@
                     onchange='this.form.requestSubmit()'
                     @blur='editing=false'
                     x-init='$nextTick(() => { if (editing) $el.focus() })'
-                    class='text-xs border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500'>
+                    class='text-xs border border-brand-300 rounded px-1 py-0.5 input-focus'>
               <option value=''>— clear —</option>
               {% for r in roles %}<option value='{{ r }}' {% if contact.contact_role == r %}selected{% endif %}>{{ role_labels.get(r, r|replace('_', ' ')|title) }}</option>{% endfor %}
             </select>
