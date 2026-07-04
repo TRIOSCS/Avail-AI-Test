@@ -19,7 +19,7 @@
       <span class="font-medium text-gray-900 break-all">{{ h.new_value or '—' }}</span>
     </div>
     <p class="mt-1 text-[11px] text-gray-400">
-      {{ (h.created_at.strftime('%b %-d, %Y %-I:%M %p') if h.created_at else '—') }}
+      {{ (h.created_at|localtime('%b %-d, %Y %-I:%M %p') if h.created_at else '—') }}
       {% if h.changed_by %}· {{ h.changed_by.name or h.changed_by.email }}{% endif %}
     </p>
   </div>

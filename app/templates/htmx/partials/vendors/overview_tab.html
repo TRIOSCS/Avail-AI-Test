@@ -145,7 +145,7 @@
             {% set source_name = s.source_type %}
             {% include "htmx/partials/shared/source_badge.html" %}
           </td>
-          <td class="px-4 py-2.5 text-sm text-gray-600">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ s.created_at|localdate('%b %d, %Y') if s.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>

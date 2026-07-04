@@ -20,7 +20,7 @@
         <p class="text-sm font-medium text-gray-900">{{ c.full_name or c.email or '—' }}</p>
         <p class="text-xs text-gray-600">
           {% if c.last_interaction_at %}
-          Last contacted {{ c.last_interaction_at.strftime('%b %d, %Y') }}
+          Last contacted {{ c.last_interaction_at|localdate('%b %d, %Y') }}
           {% else %}
           Never contacted
           {% endif %}
