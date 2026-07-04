@@ -161,14 +161,73 @@ def test_lists_mine_shows_customer(client, db_session, trader_user, posted_list)
 
 
 def test_lists_open_lens_hides_customer(client, db_session, trader_user, posted_list):
-    """Open-to-Me lens (offerer view) lists the posting but NEVER the seller name."""
+    """Open-to-Me lens (offerer view) lists the posting but NEVER the seller name —
+    including via the owner's free-text title (finding H2)."""
     # The default client user is the buyer fixture (!= owner) → sees it under 'open'.
     resp = client.get("/v2/partials/resell/lists?lens=open")
     assert resp.status_code == 200
     body = resp.text
-    assert posted_list.title in body
+    assert posted_list.title not in body  # raw free-text title is anonymized, not leaked
+    assert f"Excess listing #{posted_list.id}" in body  # neutral, id-derived label instead
     assert "Acme Electronics" not in body  # customer hidden from non-owner
     assert "Anonymized" in body
+
+
+def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, trader_user, test_company):
+    """H2: a trader who names a list after the customer must not leak that name to offerers.
+
+    Non-owners (the open lens + the non-owner detail) get a neutral "Excess listing #N"
+    label; the owner still sees the real free-text title in both the mine lens and detail.
+    Proves the anonymization gate now covers the one field it used to miss — the title.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+
+    # Title deliberately carries the customer's company name — the natural trader habit.
+    leaky_title = f"{test_company.name} — surplus FPGAs Q3"
+    el = ExcessList(
+        title=leaky_title,
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.OPEN,
+        total_line_items=1,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(el)
+    db_session.flush()
+    db_session.add(
+        ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="XCVU9P-2FLGA2104I",
+            normalized_part_number=normalize_mpn_key("XCVU9P-2FLGA2104I"),
+            quantity=50,
+            condition="New",
+        )
+    )
+    db_session.commit()
+    db_session.refresh(el)
+    neutral = f"Excess listing #{el.id}"
+
+    # ── Non-owner (default buyer client): open lens + detail hide the title. ──
+    open_body = client.get("/v2/partials/resell/lists?lens=open").text
+    assert leaky_title not in open_body
+    assert test_company.name not in open_body
+    assert neutral in open_body
+
+    detail_body = client.get(f"/v2/partials/resell/{el.id}").text
+    assert leaky_title not in detail_body
+    assert test_company.name not in detail_body
+    assert neutral in detail_body
+
+    # ── Owner: the real free-text title is still shown (mine lens + detail). ──
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        mine_body = client.get("/v2/partials/resell/lists?lens=mine").text
+        assert leaky_title in mine_body
+        owner_detail = client.get(f"/v2/partials/resell/{el.id}").text
+        assert leaky_title in owner_detail
+    finally:
+        app.dependency_overrides.pop(require_user, None)
 
 
 # ── Detail + tabs ────────────────────────────────────────────────────
@@ -185,7 +244,11 @@ def test_detail_renders_tabs(client, trader_user, posted_list):
     resp = client.get(f"/v2/partials/resell/{posted_list.id}")
     assert resp.status_code == 200
     body = resp.text
-    assert "Resell" in body and posted_list.title in body
+    # Non-owner detail: the breadcrumb "Resell" link renders, but the header shows the
+    # anonymized label — never the seller-named free-text title (finding H2).
+    assert "Resell" in body
+    assert posted_list.title not in body
+    assert f"Excess listing #{posted_list.id}" in body
     for label in ("Lines", "Offers", "Build Bid"):
         assert label in body
     # Activity tab intentionally absent (audit-approved removal of dead-end placeholder)

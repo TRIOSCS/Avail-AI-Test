@@ -3,8 +3,8 @@
   Each row swaps the detail panel and pushes /v2/resell/{id}. Status pills map
   onto EXISTING status_badge keys (open→sky, collecting→sourcing, bid_out→quoted,
   awarded→won, draft→muted) — no new colors (spec §"Design consistency").
-  Receives: cards [{list, customer_name, coverage_filled, coverage_total,
-            offer_count, hours_until}], lens, stage, q, can_post, user.
+  Receives: cards [{list, display_title, customer_name, coverage_filled,
+            coverage_total, offer_count, hours_until}], lens, stage, q, can_post, user.
   Called by: resell.resell_lists.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text, filter_pill %}
@@ -50,7 +50,9 @@
        class="block px-3 py-2.5 border-b border-line-subtle cursor-pointer hover:bg-brand-50/60 transition-colors">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold text-gray-900 truncate">{{ el.title }}</p>
+          {# Owner sees the real free-text title; the "open" lens shows a neutral,
+             id-derived label (customer-hiding — the title is offerer-visible). #}
+          <p class="text-sm font-semibold text-gray-900 truncate">{{ c.display_title }}</p>
           {% if c.customer_name %}
           <p class="text-secondary truncate mt-0.5">{{ c.customer_name }}</p>
           {% else %}

@@ -3,13 +3,14 @@
   Single-line quick-add path this slice; the paste/upload funnel reuses the same
   import_preview grid. Price is OPTIONAL (a broker may bid "take-all, price TBD").
   The service enforces can_offer + the self-offer guard.
-  Receives: list (ExcessList).
+  Receives: list (ExcessList), display_title (anonymized label — non-owner viewer).
   Called by: resell.resell_offer_form.
 #}
 {% set el = list %}
 <div class="p-5" x-data="{ scope: 'per_line' }">
   <h2 class="h2 mb-1">Submit offer</h2>
-  <p class="text-sm text-gray-500 mb-4">On <span class="font-medium text-gray-700">{{ el.title }}</span></p>
+  {# Offerer-facing: show the anonymized label, never the seller-named free-text title. #}
+  <p class="text-sm text-gray-500 mb-4">On <span class="font-medium text-gray-700">{{ display_title }}</span></p>
 
   <form hx-post="/api/resell/{{ el.id }}/offers"
         hx-target="#tab-offers-{{ el.id }}"

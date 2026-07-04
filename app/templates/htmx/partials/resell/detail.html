@@ -2,7 +2,7 @@
   resell/detail.html — Right detail panel: slim header + breadcrumb + chips + lazy tabs.
   One adaptive surface for all three deal shapes — the tab bodies reshape, the
   panel never branches to a new page (spec §"Flexible detail").
-  Receives: list, line_items, line_count, offer_count, take_all_count,
+  Receives: list, display_title, line_items, line_count, offer_count, take_all_count,
             can_see_customer, can_post, can_offer, shape, hours_until, is_posted, user.
   Called by: resell.resell_detail (+ publish re-render).
   Depends on: shared/_macros.html, partials/resell/_lines.html, _offers.html.
@@ -21,12 +21,14 @@
          hx-target="#main-content" hx-push-url="/v2/resell"
          class="hover:text-brand-500">Resell</a>
       <span class="mx-1">›</span>
-      <span class="text-gray-600">{{ el.title }}</span>
+      <span class="text-gray-600">{{ display_title }}</span>
     </nav>
 
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="text-xl font-bold text-gray-900 truncate">{{ el.title }}</h1>
+        {# Owner-only real title; non-owner detail shows the anonymized label
+           (customer-hiding — display_title is gated on can_see_customer). #}
+        <h1 class="text-xl font-bold text-gray-900 truncate">{{ display_title }}</h1>
         {# Metadata chips — refreshed in place by the award/unaward OOB response, so the
            id'd flex container is the swap target (chip content lives in _header_chips). #}
         <div id="resell-chips-{{ el.id }}" class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-secondary">

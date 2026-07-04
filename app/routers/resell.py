@@ -103,11 +103,27 @@ def _offer_coverage(items: list[ExcessLineItem]) -> tuple[int, int]:
     return covered, total
 
 
+def _display_title(el: ExcessList, *, can_see_customer: bool) -> str:
+    """The list title as shown to *this* viewer.
+
+    Customer-identity hiding is view discipline: the owner sees the real free-text
+    title, but a non-owner (the anonymized "Open to Me" lens, the non-owner detail,
+    the submit-offer modal) gets a neutral, id-derived label instead. Traders name
+    lists after the customer ("Acme Corp — surplus FPGAs"), so the raw title is the
+    one field the ``customer_name`` anonymization doesn't sanitize — gate it the
+    same way (same predicate that nulls the seller name in ``_list_card``).
+    """
+    if can_see_customer:
+        return el.title
+    return f"Excess listing #{el.id}"
+
+
 def _list_card(db: Session, el: ExcessList, *, can_see_customer: bool) -> dict:
     """Project one ExcessList into the left-list row context.
 
     ``can_see_customer`` gates the seller name (False for the offerer-facing
-    "Open to Me" lens — pure whitelist, never leak the customer).
+    "Open to Me" lens — pure whitelist, never leak the customer). The same gate
+    swaps the free-text ``title`` for a neutral label (``_display_title``).
     """
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).all()
     covered, total = _offer_coverage(items)
@@ -122,6 +138,7 @@ def _list_card(db: Session, el: ExcessList, *, can_see_customer: bool) -> dict:
     )
     return {
         "list": el,
+        "display_title": _display_title(el, can_see_customer=can_see_customer),
         "customer_name": (el.company.name if (can_see_customer and el.company) else None),
         "coverage_filled": covered,
         "coverage_total": total,
@@ -239,6 +256,7 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
         "request": request,
         "user": user,
         "list": el,
+        "display_title": _display_title(el, can_see_customer=can_see_customer),
         "line_items": items,
         "line_count": len(items),
         "awarded_line_count": sum(1 for it in items if it.status == ExcessLineItemStatus.AWARDED),
@@ -679,9 +697,11 @@ async def resell_offer_form(
         raise HTTPException(403, "You cannot offer on your own excess list")
     if el.status not in {s.value for s in _POSTED_STATUSES}:
         raise HTTPException(404, "List not found")
+    # Only ever rendered to a non-owner (is_owner 403s above), so the header shows the
+    # anonymized label — never the seller-named free-text title.
     return template_response(
         "htmx/partials/resell/offer_form.html",
-        {"request": request, "list": el},
+        {"request": request, "list": el, "display_title": _display_title(el, can_see_customer=is_owner)},
     )
 
 
