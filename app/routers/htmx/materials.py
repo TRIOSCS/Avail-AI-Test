@@ -15,7 +15,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 import html
 import json
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -680,11 +680,16 @@ async def material_enrich_status_partial(
     """Render the enrichment-status badge for the card detail header.
 
     While the card is still ``unenriched`` the badge polls this route every 15s
-    ("Queued for enrichment"). Once enrichment_status leaves ``unenriched`` the route
-    answers HTTP 286 — htmx swaps the final badge and STOPS polling.
+    ("Queued for enrichment"). When the on-demand enrichment lands a terminal status the
+    route returns the WHOLE refreshed detail (retargeted to #main-content) so the user
+    sees the new category/specs — not just a swapped badge — and answers HTTP 286 to STOP
+    polling. If the background run finished blocked/no-op (which leaves the card
+    ``unenriched``), it surfaces the "couldn't complete" toast once and keeps polling.
     """
     from ...constants import MaterialEnrichmentStatus
     from ...models.intelligence import MaterialCard
+    from ...services import material_enrich_runs
+    from ...services.material_enrich_runs import enrich_runs
 
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
@@ -694,12 +699,32 @@ async def material_enrich_status_partial(
         # empty body clears the badge.
         return HTMLResponse("", status_code=286)
 
+    if card.enrichment_status != MaterialEnrichmentStatus.UNENRICHED:
+        # Enrichment landed a terminal status — refresh the WHOLE detail (new category,
+        # specs, badges), not just the badge, then stop polling. HX-Retarget/Reswap
+        # redirect the badge poll's outerHTML swap onto the full detail surface.
+        enrich_runs.clear(card_id)
+        response = await material_detail_partial(request, card_id, user, db)
+        response.headers["HX-Retarget"] = "#main-content"
+        response.headers["HX-Reswap"] = "innerHTML"
+        response.status_code = 286  # htmx's stop-polling status — the detail still swaps in.
+        return response
+
+    # Still unenriched → keep polling. If the background run finished blocked/no-op,
+    # surface the existing "couldn't complete" toast ONCE (consume_outcome pops it).
     ctx = _base_ctx(request, user, "materials")
     ctx["card"] = card
     response = template_response("htmx/partials/materials/enrich_status.html", ctx)
-    if card.enrichment_status != MaterialEnrichmentStatus.UNENRICHED:
-        # 286: htmx's stop-polling status — the final badge still swaps in.
-        response.status_code = 286
+    if enrich_runs.consume_outcome(card_id) == material_enrich_runs.BLOCKED:
+        # Bridged to the global $store.toast via the showToast HX-Trigger convention.
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {
+                    "message": "Enrichment couldn't complete — a data source was unavailable. Try again shortly.",
+                    "type": "error",
+                }
+            }
+        )
     return response
 
 
@@ -1037,68 +1062,93 @@ async def update_material_card(
     return response
 
 
+async def _run_card_enrichment(material_id: int) -> None:
+    """Background worker: run the authoritative ladder + structured-spec pass for one card.
+
+    Scheduled by ``enrich_material`` so the click never blocks on the ~30s of web
+    extraction. Runs the authoritative ladder (verified -> web -> OEM -> flagged
+    inference) with refresh=True so even a terminal card re-enters the ladder, then a
+    status-gated structured-spec pass. The Haiku card-enrichment path was removed in SP1
+    (2026-06-09). Records the run's outcome in ``enrich_runs`` so the enrich-status poller
+    can surface the "couldn't complete" toast on a blocked/no-op run (which leaves the
+    card ``unenriched``, indistinguishable from success by the status column alone).
+
+    Opens its own session — FastAPI has already returned the response and closed the
+    request session by the time this runs. Must NEVER raise: it is a fire-and-forget task.
+    """
+    from ...constants import MaterialEnrichmentStatus
+    from ...database import SessionLocal
+    from ...services.material_enrich_runs import enrich_runs
+
+    db = SessionLocal()
+    blocked = False
+    try:
+        # enrich_cards self-handles ClaudeError / disabled-source outages internally and
+        # returns a counts dict (it does NOT raise on a backend outage). Capture it so the
+        # poller can tell the user when nothing actually happened, not report false success.
+        counts: dict = {}
+        try:
+            from ...services.authoritative_enrichment_service import enrich_cards
+
+            counts = await enrich_cards([material_id], db, refresh=True)
+        except Exception as e:
+            logger.exception("Enrichment failed for material {}: {}", material_id, e)
+            blocked = True
+
+        # A single card produces exactly one status tally on success. If no real status
+        # landed, or a Claude outage / disabled source blocked the run, the card is unchanged.
+        status_tallies = sum(int(counts.get(s, 0)) for s in MaterialEnrichmentStatus)
+        if counts.get("claude_error") or counts.get("disabled_sources") or status_tallies == 0:
+            blocked = True
+            logger.warning("Enrichment no-op for material {} (counts={})", material_id, counts)
+
+        try:
+            from ...services.spec_enrichment_service import enrich_card_specs
+
+            await enrich_card_specs([material_id], db, force=True)
+        except Exception as e:  # noqa: BLE001 — card-level enrichment may still have succeeded
+            logger.warning("Spec enrichment failed for material {}: {}", material_id, e)
+    except Exception:  # noqa: BLE001 — a background task must not crash the worker
+        logger.exception("Card enrichment task crashed for material {}", material_id)
+        blocked = True
+    finally:
+        db.close()
+        enrich_runs.finish(material_id, blocked=blocked)
+
+
 @router.post("/v2/partials/materials/{material_id}/enrich", response_class=HTMLResponse)
 async def enrich_material(
     request: Request,
     material_id: int,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_access(AccessKey.MATERIALS)),
     db: Session = Depends(get_db),
 ):
-    """Trigger authoritative enrichment for a material card.
+    """Queue authoritative enrichment for a material card and return immediately.
 
-    Runs the authoritative ladder (verified -> web -> OEM -> flagged inference) with
-    refresh=True so even a terminal card re-enters the ladder, then a status-gated
-    structured-spec pass. The Haiku card-enrichment path was removed in SP1
-    (2026-06-09).
+    The heavy work (authoritative ladder + structured-spec pass, ~30s of web extraction)
+    runs in a FastAPI background task so the click never blocks. The card is flipped to
+    the ``unenriched`` ("Queued for enrichment") marker and the detail partial is returned
+    right away with the enrich-status badge polling; that poller lands the refreshed detail
+    on success — or the "couldn't complete" toast on a blocked run — when the task finishes.
     """
     from ...constants import MaterialEnrichmentStatus
     from ...models.intelligence import MaterialCard
-    from ...services.authoritative_enrichment_service import enrich_cards
+    from ...services.material_enrich_runs import enrich_runs
 
     mc = db.get(MaterialCard, material_id)
     if not mc:
         raise HTTPException(404, "Material not found")
 
-    # enrich_cards self-handles ClaudeError / disabled-source outages internally and
-    # returns a counts dict (it does NOT raise on a backend outage). Capture it so we can
-    # tell the user when nothing actually happened instead of reporting false success.
-    enrich_blocked = False
-    counts: dict = {}
-    try:
-        counts = await enrich_cards([material_id], db, refresh=True)
-    except Exception as e:
-        logger.exception("Enrichment failed for material {}: {}", material_id, e)
-        enrich_blocked = True
+    # Guard double-enqueue: a run already in flight for this card must not stack another.
+    if enrich_runs.begin(material_id):
+        # Flip to the queued/in-progress marker so the badge polls while the worker runs
+        # (also resets an already-terminal card so its poller re-activates on re-enrich).
+        mc.enrichment_status = MaterialEnrichmentStatus.UNENRICHED
+        db.commit()
+        background_tasks.add_task(_run_card_enrichment, material_id)
 
-    # A single card produces exactly one status tally on success. If no real status landed,
-    # or a Claude outage / disabled source blocked the run, the card is unchanged.
-    status_tallies = sum(int(counts.get(s, 0)) for s in MaterialEnrichmentStatus)
-    if counts.get("claude_error") or counts.get("disabled_sources") or status_tallies == 0:
-        enrich_blocked = True
-
-    try:
-        from ...services.spec_enrichment_service import enrich_card_specs
-
-        await enrich_card_specs([material_id], db, force=True)
-    except Exception as e:  # noqa: BLE001 — card-level enrichment may still have succeeded
-        logger.warning("Spec enrichment failed for material {}: {}", material_id, e)
-
-    db.refresh(mc)
-
-    response = await material_detail_partial(request, material_id, user, db)
-    if enrich_blocked:
-        # Surface a user-facing toast WITHOUT breaking the partial swap, via the existing
-        # showToast HX-Trigger convention bridged to the global $store.toast (htmx_app.js).
-        logger.warning("Enrichment no-op for material {} (counts={}) — surfacing toast", material_id, counts)
-        response.headers["HX-Trigger"] = json.dumps(
-            {
-                "showToast": {
-                    "message": "Enrichment couldn't complete — a data source was unavailable. Try again shortly.",
-                    "type": "error",
-                }
-            }
-        )
-    return response
+    return await material_detail_partial(request, material_id, user, db)
 
 
 @router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)

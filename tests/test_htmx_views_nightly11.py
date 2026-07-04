@@ -655,18 +655,28 @@ class TestMaterialsEnrichment:
         test_material_card: MaterialCard,
     ):
         """enrich_cards self-handles a Claude outage (returns counts, does NOT raise) —
-        the card is unchanged, so the user must get a failure toast, not false
-        success."""
+        the background run is a no-op, so the ENRICH-STATUS POLLER (not the instant POST
+        response) must surface the failure toast.
+
+        The heavy work is async now: the POST
+        returns immediately and the toast rides the next poll.
+        """
+        from app.services.material_enrich_runs import enrich_runs
+
+        enrich_runs.clear(test_material_card.id)
         with (
             patch("app.services.authoritative_enrichment_service.enrich_cards", new_callable=AsyncMock) as auth,
             patch("app.services.spec_enrichment_service.enrich_card_specs", new_callable=AsyncMock),
         ):
             auth.return_value = {"claude_error": 1}
+            # POST returns immediately (queued); the background run marks the outcome blocked.
             resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
             assert resp.status_code == 200
-        # Still returns the detail partial AND a showToast trigger.
-        assert "HX-Trigger" in resp.headers
-        trigger = json.loads(resp.headers["HX-Trigger"])
+            assert "HX-Trigger" not in resp.headers  # no toast on the instant response
+        # The poller surfaces the failure toast once the blocked run is recorded.
+        poll = client.get(f"/v2/partials/materials/{test_material_card.id}/enrich-status")
+        assert "HX-Trigger" in poll.headers
+        trigger = json.loads(poll.headers["HX-Trigger"])
         assert "showToast" in trigger
         assert trigger["showToast"]["type"] == "error"
         assert "couldn't complete" in trigger["showToast"]["message"]
@@ -677,7 +687,11 @@ class TestMaterialsEnrichment:
         db_session: Session,
         test_material_card: MaterialCard,
     ):
-        """A disabled source (quota/auth wall) blocks the run → failure toast."""
+        """A disabled source (quota/auth wall) blocks the run → failure toast via the
+        poller."""
+        from app.services.material_enrich_runs import enrich_runs
+
+        enrich_runs.clear(test_material_card.id)
         with (
             patch("app.services.authoritative_enrichment_service.enrich_cards", new_callable=AsyncMock) as auth,
             patch("app.services.spec_enrichment_service.enrich_card_specs", new_callable=AsyncMock),
@@ -685,8 +699,9 @@ class TestMaterialsEnrichment:
             auth.return_value = {"not_found": 1, "disabled_sources": ["digikey"]}
             resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
             assert resp.status_code == 200
-        assert "HX-Trigger" in resp.headers
-        assert "showToast" in json.loads(resp.headers["HX-Trigger"])
+            assert "HX-Trigger" not in resp.headers
+        poll = client.get(f"/v2/partials/materials/{test_material_card.id}/enrich-status")
+        assert "showToast" in json.loads(poll.headers["HX-Trigger"])
 
     def test_enrich_service_error_graceful(
         self,
@@ -694,6 +709,9 @@ class TestMaterialsEnrichment:
         db_session: Session,
         test_material_card: MaterialCard,
     ):
+        from app.services.material_enrich_runs import enrich_runs
+
+        enrich_runs.clear(test_material_card.id)
         with (
             patch(
                 "app.services.authoritative_enrichment_service.enrich_cards",
@@ -703,10 +721,10 @@ class TestMaterialsEnrichment:
             patch("app.services.spec_enrichment_service.enrich_card_specs", new_callable=AsyncMock),
         ):
             resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
-            assert resp.status_code == 200
-        # A raised exception is also a blocked run → failure toast.
-        assert "HX-Trigger" in resp.headers
-        assert "showToast" in json.loads(resp.headers["HX-Trigger"])
+            assert resp.status_code == 200  # background crash is swallowed; no 500
+        # A raised exception in the background run is also a blocked run → failure toast.
+        poll = client.get(f"/v2/partials/materials/{test_material_card.id}/enrich-status")
+        assert "showToast" in json.loads(poll.headers["HX-Trigger"])
 
 
 # ── Section 13: Materials find-crosses ────────────────────────────────────
