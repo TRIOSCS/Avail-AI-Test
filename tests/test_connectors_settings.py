@@ -876,3 +876,42 @@ def test_test_all_is_rate_limited(admin_client):
     r4 = admin_client.post("/v2/partials/settings/connectors/test-all")
     assert r4.status_code == 200
     assert "rate-limited" in r4.headers.get("HX-Trigger", ""), "4th Test-all in a minute must be rate-limited"
+
+
+# ── O5: connector-field build reads the already-loaded row (no per-field N+1) ──
+
+
+def test_connector_field_reads_loaded_row_no_extra_api_source_queries(db_session):
+    """O5: building credential fields from an already-loaded ApiSource row issues ZERO
+    api_sources SELECTs — it must not re-query the DB per env var (the old N+1 where
+    credential_is_set + get_credential each ran a fresh SELECT for every field)."""
+    from sqlalchemy import event
+
+    from app.routers.htmx.settings import _build_connector_field
+
+    _seed_sources(db_session)
+    src = db_session.query(ApiSource).filter_by(name="eight_by_eight").first()
+    assert src is not None
+    env_vars = list(src.env_vars)
+    assert len(env_vars) >= 5, "8x8 seed should carry several env vars to make an N+1 visible"
+    _ = src.credentials  # force the row fully loaded before we start counting
+
+    selects: list[str] = []
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        stmt = statement.lstrip().lower()
+        if stmt.startswith("select") and "api_sources" in stmt:
+            selects.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "after_cursor_execute", _count)
+    try:
+        fields = [_build_connector_field(src, ev) for ev in env_vars]
+    finally:
+        event.remove(engine, "after_cursor_execute", _count)
+
+    assert len(fields) == len(env_vars)
+    assert selects == [], (
+        f"Expected 0 api_sources SELECTs building {len(env_vars)} fields from the loaded row, "
+        f"got {len(selects)} (N+1 regression)"
+    )

@@ -498,23 +498,29 @@ async def settings_api_keys_tab(
 _DEAD_CONNECTORS = frozenset({"rocketreach_enrichment", "clearbit_enrichment"})
 
 
-def _build_connector_field(db, source_name: str, env_var: str, *, mask_fully: bool = False) -> dict:
+def _build_connector_field(source, env_var: str, *, mask_fully: bool = False) -> dict:
     """Return {is_set, masked} for one env-var credential field.
+
+    Reads directly from the already-loaded ``source`` (ApiSource) row rather than
+    re-querying per env var. ``_build_connector_groups`` loads every ApiSource once, so
+    the old ``credential_is_set``/``get_credential`` calls (a fresh SELECT each) were
+    ~2 redundant queries per field, i.e. ~70 across a full render (O5). ``is_set_for`` /
+    ``decrypt_from`` take the row and fall back to env vars without touching the DB.
 
     ``mask_fully`` renders dots ONLY (no last-4 tail) for password-type credentials —
     used for browser_login account logins (TBF/ICS). The default ``mask_value`` shows the
     last 4 chars to help identify an API key, but for a reused human account password even
     a 4-char tail in the DOM is a leak, so those are fully masked.
     """
-    from ...services.credential_service import credential_is_set, get_credential, mask_value
+    from ...services.credential_service import decrypt_from, is_set_for, mask_value
 
-    is_set = credential_is_set(db, source_name, env_var)
+    is_set = is_set_for(source, env_var)
     masked = ""
     if is_set:
         if mask_fully:
             masked = "••••••••"
         else:
-            plain = get_credential(db, source_name, env_var)
+            plain = decrypt_from(source, env_var)
             masked = mask_value(plain) if plain else "••••••••"
     return {"is_set": is_set, "masked": masked}
 
@@ -547,7 +553,7 @@ def _enrich_source(source, db) -> dict:
     # masked — no last-4 tail in the DOM.
     env_vars = source.env_vars or []
     mask_fully = ct == "browser_login"
-    creds = {ev: _build_connector_field(db, name, ev, mask_fully=mask_fully) for ev in env_vars}
+    creds = {ev: _build_connector_field(source, ev, mask_fully=mask_fully) for ev in env_vars}
     credential_set = any(c["is_set"] for c in creds.values())
 
     # Clay OAuth state

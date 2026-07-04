@@ -95,27 +95,49 @@ def mask_value(plaintext: str) -> str:
     return "●" * min(8, len(plaintext) - 4) + plaintext[-4:]
 
 
-def get_credential(db: Session, source_name: str, env_var_name: str) -> str | None:
-    """Get a credential value: DB first, then env var fallback."""
-    src = db.query(ApiSource).filter_by(name=source_name).first()
+def is_set_for(source: ApiSource | None, env_var_name: str) -> bool:
+    """Check if a credential is set, reading from an already-loaded ApiSource row.
+
+    Row (DB) first, env var fallback — identical semantics to ``credential_is_set`` but
+    without a DB round-trip. Callers that already hold the row (e.g. the connectors
+    settings render, which loads every ApiSource once) use this to avoid an N+1.
+    """
+    if source and source.credentials and source.credentials.get(env_var_name):
+        return True
+    return bool(os.getenv(env_var_name))
+
+
+def decrypt_from(source: ApiSource | None, env_var_name: str) -> str | None:
+    """Decrypt a credential from an already-loaded ApiSource row.
+
+    Row (DB) first with env var fallback — including fallback on a decrypt error —
+    identical semantics to ``get_credential`` but without re-querying ApiSource. The
+    caller passes the row it already loaded, eliminating the per-field round-trip.
+    """
     decrypt_failed = False
-    if src and src.credentials:
-        encrypted = src.credentials.get(env_var_name)
+    if source and source.credentials:
+        encrypted = source.credentials.get(env_var_name)
         if encrypted:
             try:
                 return decrypt_value(encrypted)
             except Exception:
                 logger.error(
                     "Credential decrypt FAILED for {}/{} — falling back to env var. DB credentials may be corrupted.",
-                    source_name,
+                    source.name,
                     env_var_name,
                     exc_info=True,
                 )
                 decrypt_failed = True
     fallback = os.getenv(env_var_name) or None
     if decrypt_failed and fallback:
-        logger.warning("Using env var fallback for {}/{}", source_name, env_var_name)
+        logger.warning("Using env var fallback for {}/{}", source.name, env_var_name)
     return fallback
+
+
+def get_credential(db: Session, source_name: str, env_var_name: str) -> str | None:
+    """Get a credential value: DB first, then env var fallback."""
+    src = db.query(ApiSource).filter_by(name=source_name).first()
+    return decrypt_from(src, env_var_name)
 
 
 def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, str]:
@@ -140,9 +162,7 @@ def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, s
 def credential_is_set(db: Session, source_name: str, env_var_name: str) -> bool:
     """Check if a credential has a value (DB or env var)."""
     src = db.query(ApiSource).filter_by(name=source_name).first()
-    if src and src.credentials and src.credentials.get(env_var_name):
-        return True
-    return bool(os.getenv(env_var_name))
+    return is_set_for(src, env_var_name)
 
 
 def get_credentials_batch(db: Session, requests: list[tuple[str, str]]) -> dict[tuple[str, str], str | None]:
