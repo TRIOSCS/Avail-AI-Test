@@ -469,6 +469,7 @@ async def requisition_import_save(
     deadline: str = Form(""),
     urgency: str = Form("normal"),
     prospect_id: str = Form(""),
+    hotlist: bool = Form(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -477,6 +478,13 @@ async def requisition_import_save(
     When ``prospect_id`` is present (the modal was launched from a claimed prospect's
     "Create Requisition" button), the newly-created requisition flips that prospect to
     CONVERTED — closing the prospect→opportunity loop (H1/M4).
+
+    When ``hotlist`` is set, the requisition is created as a monitored Hot List
+    (``RequisitionStatus.HOTLIST``) rather than an active sourcing deal (OPEN): parts are
+    stored + market data built, and the Proactive matcher surfaces offers when stock
+    appears — nothing is sourced. That matcher joins Company on ``Requisition.company_id``,
+    so ``company_id`` is populated from the chosen site for every create (hotlist or not),
+    guarded for the no-site case.
     """
     from app.utils.normalization import normalize_mpn_key, parse_substitute_mpns
 
@@ -533,15 +541,22 @@ async def requisition_import_save(
             "</div>"
         )
 
-    # Create requisition
+    # Create requisition. Populate company_id from the chosen site so the Proactive
+    # matcher's Company join resolves (a Hot List req with no company_id gets zero matches).
     site_id = int(customer_site_id) if customer_site_id.strip() else None
+    company_id = None
+    if site_id is not None:
+        site = db.get(CustomerSite, site_id)
+        if site is not None:
+            company_id = site.company_id
     req = Requisition(
         name=name.strip() or "Untitled",
         customer_name=customer_name.strip() or None,
         customer_site_id=site_id,
+        company_id=company_id,
         deadline=deadline.strip() or None,
         urgency=urgency,
-        status=RequisitionStatus.OPEN,
+        status=RequisitionStatus.HOTLIST if hotlist else RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
     )

@@ -452,6 +452,17 @@
         </div>
       </template>
 
+      {# Hot List toggle — create as a monitored Hot List (RequisitionStatus.HOTLIST)
+         instead of an active sourcing deal: parts are stored + market data built and the
+         Proactive matcher surfaces offers when stock appears; nothing is sourced. A native
+         checkbox (value 'true' → FastAPI hotlist=True; unchecked → absent → False). #}
+      <label class="flex items-center gap-2 mr-auto cursor-pointer select-none"
+             title="Monitor only — track this part and get proactive matches, don't source it now">
+        <input type="checkbox" name="hotlist" value="true"
+               class="h-4 w-4 rounded border-gray-300 text-accent-500 focus:ring-accent-500 focus:ring-offset-0">
+        <span class="text-xs font-medium text-gray-700">Hot List — monitor only</span>
+      </label>
+
       <button type="submit"
               :disabled="parts.length === 0 || !parts.some(p => p.primary_mpn) || hasErrors || saving"
               :class="hasErrors ? 'bg-amber-500' : 'bg-accent-500'"
