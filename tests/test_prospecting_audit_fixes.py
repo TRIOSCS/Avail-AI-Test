@@ -112,6 +112,45 @@ class TestM15CreditsRecorded:
         assert batch.credits_used == 9
 
 
+# ── M8 — scheduler refresh uses the shared scorers (historical bonus + composite) ─
+
+
+class TestM8SharedScorers:
+    @pytest.mark.asyncio
+    async def test_refresh_applies_historical_bonus(self, db_session):
+        from datetime import datetime, timezone
+
+        from app.services.prospect_scheduler import job_refresh_scores
+
+        p = ProspectAccount(
+            name="Warm Co",
+            domain="warm-m8.com",
+            discovery_source="reactivation",
+            status="suggested",
+            historical_context={
+                "bought_before": True,
+                "quote_count": 25,
+                "last_activity": str(datetime.now(timezone.utc).year),
+            },
+        )
+        db_session.add(p)
+        db_session.commit()
+
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.services.prospect_scheduler.calculate_fit_score", return_value=(50, "base")),
+            patch("app.services.prospect_scheduler.calculate_readiness_score", return_value=(40, {})),
+        ):
+            await job_refresh_scores()
+
+        db_session.refresh(p)
+        # bought_before → fit +15; recent last_activity → readiness +10; quote_count>20 → +5.
+        # Pre-fix: no bonus applied → fit stayed 50, readiness 40.
+        assert p.fit_score == 65
+        assert p.readiness_score == 55
+
+
 # ── M16 — email-discovery exclusion sets must be unbounded ────────────────────
 
 

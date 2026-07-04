@@ -27,7 +27,12 @@ from app.constants import ProspectAccountStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_free_enrichment import run_contact_enrichment_batch
-from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
+from app.services.prospect_scoring import (
+    apply_historical_bonus,
+    calculate_composite_score,
+    calculate_fit_score,
+    calculate_readiness_score,
+)
 
 
 def _ensure_utc(dt: datetime | None) -> datetime | None:
@@ -367,13 +372,20 @@ async def job_refresh_scores() -> dict:
             signals = p.readiness_signals or {}
             new_readiness, _ = calculate_readiness_score(prospect_data, signals)
 
+            # Apply the shared historical bonus so a past Trio customer scores warm rather
+            # than ice-cold (audit M8) — same helper the reactivation surface uses, keeping
+            # one source of truth for the "prior relationship" boost.
+            new_fit, new_readiness = apply_historical_bonus(new_fit, new_readiness, p.historical_context or {})
+
             p.fit_score = new_fit
             p.fit_reasoning = reasoning
             p.readiness_score = new_readiness
             refreshed += 1
 
-            composite_old = old_fit * 0.6 + old_readiness * 0.4
-            composite_new = new_fit * 0.6 + new_readiness * 0.4
+            # Use the shared composite (60/40) instead of a hand-coded copy so a weight
+            # change lands in exactly one place (audit M8).
+            composite_old = calculate_composite_score(old_fit, old_readiness)
+            composite_new = calculate_composite_score(new_fit, new_readiness)
 
             if composite_new > composite_old + 10:
                 upgraded += 1
