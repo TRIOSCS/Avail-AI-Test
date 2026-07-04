@@ -263,6 +263,20 @@ def mark_prospect_converted(prospect_id: int, user_id: int, db: Session) -> bool
         )
         return False
 
+    # Authorization (IDOR guard): only the buyer who CLAIMED this prospect may convert it.
+    # ``prospect_id`` rides in as a client-controlled hidden form field on the requisition
+    # save, so without this check an authenticated user could forge another user's claimed
+    # prospect id and flip it CONVERTED — yanking it out of that buyer's pipeline. Not the
+    # claimer → silent no-op (best-effort, consistent with the rest of this function).
+    if prospect.claimed_by != user_id:
+        logger.warning(
+            "mark_prospect_converted: user {} is not the claimer of prospect {} (claimed_by={}); refusing",
+            user_id,
+            prospect_id,
+            prospect.claimed_by,
+        )
+        return False
+
     prospect.status = ProspectAccountStatus.CONVERTED
     ed = dict(prospect.enrichment_data or {})
     ed["converted_at"] = datetime.now(timezone.utc).isoformat()

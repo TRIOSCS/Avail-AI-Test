@@ -681,6 +681,18 @@ class TestConvertToOpportunity:
         db_session.refresh(p)
         assert p.status == "suggested"
 
+    def test_mark_prospect_converted_blocks_non_claimer_idor(self, db_session, test_user, manager_user):
+        """IDOR guard: a user who did NOT claim the prospect cannot convert it, even with a
+        valid CLAIMED prospect id (prospect_id rides in as a client-controlled hidden field
+        on the requisition save)."""
+        from app.services.prospect_claim import mark_prospect_converted
+
+        p = make_prospect(db_session, status="claimed", claimed_by=manager_user.id)
+        assert mark_prospect_converted(p.id, test_user.id, db_session) is False
+        db_session.refresh(p)
+        assert p.status == "claimed"
+        assert (p.enrichment_data or {}).get("converted_by") is None
+
     def test_import_save_with_prospect_id_converts(self, client, db_session, test_user):
         """Creating a requisition from a claimed prospect flips it to CONVERTED (H1)."""
         from app.services.prospect_claim import claim_prospect
