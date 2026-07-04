@@ -548,3 +548,104 @@ class TestCompleteTaskEndpointAuthz:
         )
         resp = second_client.post(f"/v2/partials/tasks/{task.id}/complete")
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# L4 (CRM half): priority + assignee are editable from the create forms
+# ---------------------------------------------------------------------------
+
+
+class TestAccountTaskPriorityAssignee:
+    def test_add_form_renders_priority_and_assignee(self, client, test_company: Company):
+        """The account add-task form exposes both a priority and an assignee picker
+        (previously it captured only title + due, so priority was stuck at Medium and
+        tasks were always self-assigned)."""
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/tasks/add-form")
+        assert resp.status_code == 200
+        assert 'name="priority"' in resp.text
+        assert 'name="assigned_to_id"' in resp.text
+
+    def test_post_account_task_sets_priority_and_assignee(
+        self, client, db_session: Session, test_company: Company, test_user, admin_user
+    ):
+        """Submitting priority + assignee persists them onto the task."""
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/tasks",
+            data={"title": "High-pri call", "priority": "3", "assigned_to_id": str(admin_user.id)},
+        )
+        assert resp.status_code == 200
+        task = (
+            db_session.query(RequisitionTask)
+            .filter(RequisitionTask.company_id == test_company.id, RequisitionTask.title == "High-pri call")
+            .one()
+        )
+        assert task.priority == 3
+        assert task.assigned_to_id == admin_user.id
+
+    def test_post_account_task_blank_defaults_medium_and_creator(
+        self, client, db_session: Session, test_company: Company, test_user
+    ):
+        """Omitting priority/assignee keeps the prior behavior: Medium, self-
+        assigned."""
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/tasks",
+            data={"title": "Default fields task"},
+        )
+        assert resp.status_code == 200
+        task = (
+            db_session.query(RequisitionTask)
+            .filter(RequisitionTask.company_id == test_company.id, RequisitionTask.title == "Default fields task")
+            .one()
+        )
+        assert task.priority == 2
+        assert task.assigned_to_id == test_user.id
+
+
+class TestContactTaskPriorityAssignee:
+    def test_post_contact_task_sets_priority_and_assignee(
+        self,
+        client,
+        db_session: Session,
+        test_company: Company,
+        test_site_contact: SiteContact,
+        test_user,
+        admin_user,
+    ):
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts/{test_site_contact.id}/tasks",
+            data={"title": "Low-pri contact task", "priority": "1", "assigned_to_id": str(admin_user.id)},
+        )
+        assert resp.status_code == 200
+        task = (
+            db_session.query(RequisitionTask)
+            .filter(
+                RequisitionTask.site_contact_id == test_site_contact.id,
+                RequisitionTask.title == "Low-pri contact task",
+            )
+            .one()
+        )
+        assert task.priority == 1
+        assert task.assigned_to_id == admin_user.id
+
+
+# ---------------------------------------------------------------------------
+# completion_note wiring on the CRM/My-Day complete endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestCrmCompleteNote:
+    def test_complete_account_task_stores_completion_note(
+        self, client, db_session: Session, test_company: Company, test_user
+    ):
+        """POST /v2/partials/tasks/{id}/complete persists an optional completion_note
+        instead of discarding it (the endpoint previously hard-coded "")."""
+        task = create_company_task(db_session, company_id=test_company.id, title="Note me", created_by=test_user.id)
+        resp = client.post(
+            f"/v2/partials/tasks/{task.id}/complete",
+            data={"completion_note": "Closed via email"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        refreshed = db_session.get(RequisitionTask, task.id)
+        assert refreshed.status == TaskStatus.DONE
+        assert refreshed.completion_note == "Closed via email"

@@ -41,11 +41,26 @@ from ...models import (
 )
 from ...template_env import template_response
 from .._lookup_helpers import get_vendor_card_or_404
-from ._shared import _base_ctx
+from ._shared import _base_ctx, _safe_int
 from .companies import company_tab
 from .vendors import vendor_tab
 
 router = APIRouter(tags=["htmx-views"])
+
+
+def _coerce_task_priority(raw: str | None) -> int:
+    """Map a submitted priority ('1'|'2'|'3') to a valid int, defaulting to 2
+    (medium)."""
+    try:
+        p = int(raw) if raw not in (None, "") else 2
+    except (TypeError, ValueError):
+        return 2
+    return p if p in (1, 2, 3) else 2
+
+
+def _active_users(db: Session) -> list[User]:
+    """Active users for the task-create assignee picker, ordered by name."""
+    return db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
 
 # ── Trouble Tickets ──────────────────────────────────────────────────────
@@ -195,6 +210,8 @@ async def account_task_add_form(
         raise HTTPException(404, "Company not found")
     ctx = _base_ctx(request, user, "customers")
     ctx["company_id"] = company_id
+    ctx["users"] = _active_users(db)
+    ctx["current_user_id"] = user.id
     return template_response("htmx/partials/customers/_account_task_form.html", ctx)
 
 
@@ -204,6 +221,8 @@ async def create_account_task(
     company_id: int,
     title: str = Form(""),
     due_at: str = Form(""),
+    priority: str = Form("2"),
+    assigned_to_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -231,8 +250,9 @@ async def create_account_task(
         company_id=company_id,
         title=title.strip(),
         due_at=due_dt,
+        priority=_coerce_task_priority(priority),
         created_by=user.id,
-        assigned_to_id=user.id,
+        assigned_to_id=_safe_int(assigned_to_id) or user.id,
     )
     tasks = get_open_tasks_for_company(db, company_id)
     ctx = _base_ctx(request, user, "customers")
@@ -264,6 +284,8 @@ async def contact_task_add_form(
     ctx = _base_ctx(request, user, "customers")
     ctx["company_id"] = company_id
     ctx["contact_id"] = contact_id
+    ctx["users"] = _active_users(db)
+    ctx["current_user_id"] = user.id
     return template_response("htmx/partials/customers/_contact_task_form.html", ctx)
 
 
@@ -277,6 +299,8 @@ async def create_contact_task_endpoint(
     contact_id: int,
     title: str = Form(""),
     due_at: str = Form(""),
+    priority: str = Form("2"),
+    assigned_to_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -312,8 +336,9 @@ async def create_contact_task_endpoint(
         site_contact_id=contact_id,
         title=title.strip(),
         due_at=due_dt,
+        priority=_coerce_task_priority(priority),
         created_by=user.id,
-        assigned_to_id=user.id,
+        assigned_to_id=_safe_int(assigned_to_id) or user.id,
     )
     tasks = get_open_tasks_for_contact(db, contact_id)
     ctx = _base_ctx(request, user, "customers")
@@ -360,6 +385,7 @@ async def complete_task_endpoint(
     request: Request,
     task_id: int,
     from_my_day: bool = False,
+    completion_note: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -368,6 +394,10 @@ async def complete_task_endpoint(
 
     Permissive auth: the caller only needs require_user — any logged-in user may mark
     a vendor task done (vendor tasks carry no ownership gate at complete time).
+
+    An optional ``completion_note`` form field (a "how was this resolved?" note) is stored
+    on the task when supplied — mirroring the part comms-tab complete path — instead of the
+    endpoint silently discarding it. Empty submissions leave the note blank as before.
 
     Returns the refreshed parent task list (account, contact, or vendor card). When
     from_my_day=true, returns an empty fragment so the row removes itself via outerHTML
@@ -383,7 +413,13 @@ async def complete_task_endpoint(
     if not task:
         raise HTTPException(404, "Task not found")
     try:
-        complete_crm_task(db, task_id, user.id, is_admin=(user.role == UserRole.ADMIN))
+        complete_crm_task(
+            db,
+            task_id,
+            user.id,
+            completion_note=completion_note.strip(),
+            is_admin=(user.role == UserRole.ADMIN),
+        )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     # My Day context: caller handles its own row removal via outerHTML swap.
@@ -748,6 +784,8 @@ async def vendor_task_add_form(
     get_vendor_card_or_404(db, vendor_id)
     ctx = _base_ctx(request, user, "vendors")
     ctx["vendor_id"] = vendor_id
+    ctx["users"] = _active_users(db)
+    ctx["current_user_id"] = user.id
     return template_response("htmx/partials/vendors/tabs/_vendor_task_form.html", ctx)
 
 
@@ -757,6 +795,8 @@ async def create_vendor_task_endpoint(
     vendor_id: int,
     title: str = Form(""),
     due_at: str = Form(""),
+    priority: str = Form("2"),
+    assigned_to_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -781,8 +821,9 @@ async def create_vendor_task_endpoint(
         vendor_card_id=vendor_id,
         title=title.strip(),
         due_at=due_dt,
+        priority=_coerce_task_priority(priority),
         created_by=user.id,
-        assigned_to_id=user.id,
+        assigned_to_id=_safe_int(assigned_to_id) or user.id,
     )
     tasks = get_open_tasks_for_vendor_card(db, vendor_id)
     ctx = _base_ctx(request, user, "vendors")

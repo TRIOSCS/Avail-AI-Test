@@ -593,26 +593,6 @@ class TestMarkUnavailableAuth:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Task with assigned_to_id + due_at
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestRequirementTaskWithAssignee:
-    def test_create_task_with_assignee(self, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        resp = client.post(
-            f"/api/requirements/{req_item.id}/tasks",
-            json={
-                "title": "Task with assignee",
-                "assigned_to_id": test_user.id,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["title"] == "Task with assignee"
-
-
-# ══════════════════════════════════════════════════════════════════════════
 # list_requirement_history — offer changes
 # ══════════════════════════════════════════════════════════════════════════
 

@@ -38,6 +38,22 @@ def _as_utc(dt: datetime | None) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
+def _persist_task(db: Session, **fields) -> RequisitionTask:
+    """Build, persist, refresh, and return a RequisitionTask from the given column
+    values.
+
+    Shared constructor core for the create_* entry points below — they are otherwise
+    copy-paste bodies that differ only in which parent FK they set, so this centralizes
+    the identical ``RequisitionTask(...)`` + add/commit/refresh. Callers pass exactly the
+    columns they set, so behavior is unchanged from an inline construction.
+    """
+    task = RequisitionTask(**fields)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def create_task(
     db: Session,
     *,
@@ -61,7 +77,8 @@ def create_task(
         now = datetime.now(timezone.utc)
         if _as_utc(due_at) < now + timedelta(hours=24):
             raise ValueError("Due date must be at least 24 hours from now")
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         requisition_id=requisition_id,
         title=title,
         description=description,
@@ -73,9 +90,6 @@ def create_task(
         source_ref=source_ref,
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Task created: {} (req={}, type={}, source={})", task.id, requisition_id, task_type, source)
     return task
 
@@ -390,7 +404,8 @@ def create_company_task(
     due_at: datetime | None = None,
 ) -> RequisitionTask:
     """Create a task scoped to an account (company)."""
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         company_id=company_id,
         title=title,
         description=description,
@@ -401,9 +416,6 @@ def create_company_task(
         source="manual",
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Account task created: {} (company={})", task.id, company_id)
     return task
 
@@ -420,7 +432,8 @@ def create_contact_task(
     due_at: datetime | None = None,
 ) -> RequisitionTask:
     """Create a task scoped to a contact."""
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         site_contact_id=site_contact_id,
         title=title,
         description=description,
@@ -431,9 +444,6 @@ def create_contact_task(
         source="manual",
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Contact task created: {} (contact={})", task.id, site_contact_id)
     return task
 
@@ -480,7 +490,8 @@ def create_vendor_task(
     due_at: datetime | None = None,
 ) -> RequisitionTask:
     """Create a task scoped to a vendor card."""
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         vendor_card_id=vendor_card_id,
         title=title,
         description=description,
@@ -491,9 +502,6 @@ def create_vendor_task(
         source="manual",
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Vendor task created: {} (vendor_card={})", task.id, vendor_card_id)
     return task
 

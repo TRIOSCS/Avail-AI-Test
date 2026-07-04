@@ -230,13 +230,5 @@ class RequirementNoteAdd(BaseModel):
         return v
 
 
-class RequirementTaskCreate(BaseModel):
-    """Create a task linked to a requirement."""
-
-    title: str = Field(..., min_length=1, max_length=255)
-    assigned_to_id: int | None = None
-    due_at: datetime | None = None
-
-
 class SearchOptions(BaseModel):
     requirement_ids: list[int] | None = None

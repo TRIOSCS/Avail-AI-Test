@@ -1,7 +1,7 @@
 """Tests for part-level (requirement-scoped) API endpoints and quote expiration.
 
-Covers: /api/requirements/{id}/offers, /api/requirements/{id}/notes,
-/api/requirements/{id}/tasks — used by the part-number expansion panel.
+Covers: /api/requirements/{id}/offers, /api/requirements/{id}/notes — used by the
+part-number expansion panel.
 Also covers: quote expiration badges (is_expired, days_until_expiry).
 
 Called by: pytest
@@ -209,47 +209,6 @@ def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_se
     assert data["notes"][0]["note"] == "Good price, ships fast"
 
 
-# ── Part-level Tasks ────────────────────────────────────────────────
-
-
-def test_list_requirement_tasks_empty(client, test_requisition, db_session):
-    """GET /api/requirements/{id}/tasks returns empty when no tasks."""
-    req = _first_requirement(db_session, test_requisition)
-    resp = client.get(f"/api/requirements/{req.id}/tasks")
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-def test_create_requirement_task(client, test_requisition, db_session):
-    """POST /api/requirements/{id}/tasks creates a task linked to the requirement."""
-    req = _first_requirement(db_session, test_requisition)
-    resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": "Follow up on pricing"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["title"] == "Follow up on pricing"
-    assert data["status"] == "todo"
-
-    # Verify it shows in the list
-    list_resp = client.get(f"/api/requirements/{req.id}/tasks")
-    assert list_resp.status_code == 200
-    tasks = list_resp.json()
-    assert len(tasks) == 1
-    assert tasks[0]["title"] == "Follow up on pricing"
-
-
-def test_create_requirement_task_empty_title(client, test_requisition, db_session):
-    """POST /api/requirements/{id}/tasks rejects empty title."""
-    req = _first_requirement(db_session, test_requisition)
-    resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": ""})
-    assert resp.status_code == 422
-
-
-def test_requirement_tasks_404(client):
-    """GET /api/requirements/99999/tasks returns 404 for nonexistent requirement."""
-    resp = client.get("/api/requirements/99999/tasks")
-    assert resp.status_code == 404
-
-
 # ── Part comms-tab task create (HTMX) — due-date binding (H1) ─────────
 
 
@@ -369,6 +328,44 @@ def test_mark_part_task_done_without_note_ok(client, test_requisition, db_sessio
     task = db_session.get(RequisitionTask, task.id)
     assert task.status == "done"
     assert task.completion_note == ""
+
+
+# ── Part comms-tab date rendering — shared helper + unified format (L5) ─────
+
+
+def test_comms_tab_renders_overdue_task_via_shared_helper(client, test_requisition, db_session, test_user):
+    """The comms tab renders an overdue part task through the shared task_due_state
+    helper and the ONE task-row date format (|fmtdate('%b %-d')).
+
+    Regression guard for L5: the tab used to do `task.due_at.date() < today` in-template
+    (raised AttributeError on a string due_at) and rendered the date as %m/%d/%y — diverging
+    from the My-Day / requisition-tab formats. It now routes through task_due_state (no
+    in-template datetime math) and the unified compact format.
+    """
+    from app.models.task import RequisitionTask
+
+    req = _first_requirement(db_session, test_requisition)
+    task = RequisitionTask(
+        requisition_id=req.requisition_id,
+        requirement_id=req.id,
+        title="Overdue comms task",
+        task_type="general",
+        status="todo",
+        source="manual",
+        created_by=test_user.id,
+        due_at=datetime(2020, 1, 15, tzinfo=timezone.utc),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{req.id}/tab/comms")
+    assert resp.status_code == 200
+    body = resp.text
+    # Unified compact format ("Jan 15"), NOT the old "%m/%d/%y" ("01/15/20").
+    assert "Jan 15" in body
+    assert "01/15/20" not in body
+    # Overdue styling applied via task_due_state (rose text on the due span).
+    assert "text-rose-500" in body
 
 
 # ── Requisition Status Filters ─────────────────────────────────────

@@ -35,7 +35,6 @@ from ...models import (
 from ...schemas.requisitions import (
     RequirementCreate,
     RequirementNoteAdd,
-    RequirementTaskCreate,
     RequirementUpdate,
     SightingUnavailableIn,
 )
@@ -1353,107 +1352,6 @@ async def add_requirement_note(
     req.notes = f"{req.notes}\n{entry}" if req.notes else entry
     db.commit()
     return {"ok": True, "notes": req.notes}
-
-
-@router.get("/api/requirements/{requirement_id}/tasks")
-async def list_requirement_tasks(
-    requirement_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """List tasks linked to this requirement or its offers via source_ref.
-
-    Merges part-level tasks (source_ref=requirement:{id}) and offer-level tasks
-    (source_ref=offer:{offer_id} where the offer belongs to this requirement).
-    """
-    from ...models import RequisitionTask
-
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
-    require_requisition_access(db, req_item.requisition_id, user, label="Requirement")
-
-    # Part-level tasks
-    part_ref = f"requirement:{requirement_id}"
-
-    # Offer-level tasks: find offer IDs for this requirement
-    offer_ids = [oid for (oid,) in db.query(Offer.id).filter(Offer.requirement_id == requirement_id).all()]
-    offer_refs = [f"offer:{oid}" for oid in offer_ids]
-
-    all_refs = [part_ref] + offer_refs
-    tasks = (
-        db.query(RequisitionTask)
-        .filter(
-            RequisitionTask.requisition_id == req_item.requisition_id,
-            RequisitionTask.source_ref.in_(all_refs),
-        )
-        .order_by(RequisitionTask.created_at.desc())
-        .all()
-    )
-
-    # Look up assignee names
-    user_ids = {t.assigned_to_id for t in tasks if t.assigned_to_id}
-    user_ids |= {t.created_by for t in tasks if t.created_by}
-    user_map = {}
-    if user_ids:
-        for u in db.query(User).filter(User.id.in_(user_ids)).all():
-            user_map[u.id] = u.name or u.email
-
-    return [
-        {
-            "id": t.id,
-            "title": t.title,
-            "description": t.description,
-            "task_type": t.task_type,
-            "status": t.status,
-            "priority": t.priority,
-            "assigned_to": user_map.get(t.assigned_to_id, ""),
-            "created_by_name": user_map.get(t.created_by, ""),
-            "source_ref": t.source_ref,
-            "source": t.source,
-            "due_date": t.due_at.isoformat() if t.due_at else None,
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in tasks
-    ]
-
-
-@router.post("/api/requirements/{requirement_id}/tasks")
-async def create_requirement_task(
-    requirement_id: int,
-    body: RequirementTaskCreate,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Create a task linked to a specific requirement."""
-    from ...models import RequisitionTask
-
-    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req:
-        raise HTTPException(404, "Requirement not found")
-    require_requisition_access(db, req.requisition_id, user, label="Requirement")
-
-    task = RequisitionTask(
-        requisition_id=req.requisition_id,
-        title=body.title,
-        task_type="general",
-        status=TaskStatus.TODO,
-        source="manual",
-        source_ref=f"requirement:{requirement_id}",
-        created_by=user.id,
-        assigned_to_id=body.assigned_to_id,
-        due_at=body.due_at,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    return {
-        "id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-    }
 
 
 @router.get("/api/requirements/{requirement_id}/history")

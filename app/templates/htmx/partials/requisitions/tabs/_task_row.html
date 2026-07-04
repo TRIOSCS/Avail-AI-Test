@@ -60,7 +60,7 @@
 
   {# Due date #}
   {% if t.due_at %}
-    <span class="flex-shrink-0 text-xs text-gray-600">{{ t.due_at.strftime('%b %d') }}</span>
+    <span class="flex-shrink-0 text-xs text-gray-600">{{ t.due_at|fmtdate('%b %-d') }}</span>
   {% endif %}
 
   {# Delete button #}

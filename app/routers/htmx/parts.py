@@ -12,7 +12,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
 import json
-from datetime import date, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -854,7 +854,7 @@ async def part_tab_comms(
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requirement": req, "tasks": tasks, "users": users_list, "today": date.today()})
+    ctx.update({"requirement": req, "tasks": tasks, "users": users_list})
     return template_response("htmx/partials/parts/tabs/comms.html", ctx)
 
 

@@ -100,17 +100,3 @@ def test_requirement_notes_blocks_non_owner_sales(client, db_session, test_requi
 def test_requirement_notes_allows_buyer(client, db_session, test_requisition, test_user):
     rid = _rid(db_session, test_requisition)
     assert client.get(f"/api/requirements/{rid}/notes").status_code == 200
-
-
-# ── GET /api/requirements/{requirement_id}/tasks ─────────────────────────────
-
-
-def test_requirement_tasks_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    _make_foreign(db_session, test_requisition, test_user, admin_user)
-    rid = _rid(db_session, test_requisition)
-    assert client.get(f"/api/requirements/{rid}/tasks").status_code == 404
-
-
-def test_requirement_tasks_allows_buyer(client, db_session, test_requisition, test_user):
-    rid = _rid(db_session, test_requisition)
-    assert client.get(f"/api/requirements/{rid}/tasks").status_code == 200

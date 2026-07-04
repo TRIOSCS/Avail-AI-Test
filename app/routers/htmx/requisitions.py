@@ -14,7 +14,7 @@ Depends on: app.models, app.dependencies, app.database, app.search_service,
 
 import html as html_mod
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -46,7 +46,7 @@ from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
-from ._shared import _base_ctx, _parse_date_safe
+from ._shared import _base_ctx, _parse_date_safe, _parse_task_due_date
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -1169,22 +1169,6 @@ async def requisition_tab(
 # of its tasks (gated by require_requisition_access, unlike the assignee-only
 # part-comms complete). Templates: _task_list.html (create swap) / _task_row.html
 # (complete swap).
-
-
-def _parse_task_due_date(raw: str | None) -> datetime | None:
-    """Parse an HTML ``<input type=date>`` value into an aware UTC datetime.
-
-    Empty → None. A bare date (YYYY-MM-DD) becomes UTC midnight so it binds cleanly to
-    the timestamptz ``due_at`` column — never a raw string, which UTCDateTime would pass
-    through unnormalized (wrong-TZ on PostgreSQL, AttributeError on SQLite). Raises 422 on
-    a malformed non-empty value.
-    """
-    if not raw or not raw.strip():
-        return None
-    d = _parse_date_safe(raw.strip(), date)
-    if d is None:
-        raise HTTPException(422, "Invalid due date")
-    return datetime.combine(d, datetime.min.time()).replace(tzinfo=timezone.utc)
 
 
 def _coerce_task_priority(raw: str | None) -> int:

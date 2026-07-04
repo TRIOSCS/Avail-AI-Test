@@ -385,6 +385,33 @@ class TestVendorTaskEndpoints:
 # ---------------------------------------------------------------------------
 
 
+class TestVendorTaskPriorityAssignee:
+    """L4 (CRM half): the vendor add-task form + endpoint accept priority and
+    assignee."""
+
+    def test_add_form_renders_priority_and_assignee(self, client, vendor_card: VendorCard):
+        resp = client.get(f"/v2/partials/vendors/{vendor_card.id}/tasks/add-form")
+        assert resp.status_code == 200
+        assert 'name="priority"' in resp.text
+        assert 'name="assigned_to_id"' in resp.text
+
+    def test_post_vendor_task_sets_priority(self, client, db_session: Session, vendor_card: VendorCard):
+        resp = client.post(
+            f"/v2/partials/vendors/{vendor_card.id}/tasks",
+            data={"title": "High-pri vendor task", "priority": "3"},
+        )
+        assert resp.status_code == 200
+        task = (
+            db_session.query(RequisitionTask)
+            .filter(
+                RequisitionTask.vendor_card_id == vendor_card.id,
+                RequisitionTask.title == "High-pri vendor task",
+            )
+            .one()
+        )
+        assert task.priority == 3
+
+
 class TestVendorTaskEditForm:
     def test_vendor_task_edit_form_renders(self, client, db_session: Session, vendor_card: VendorCard, test_user):
         """GET edit-form for a vendor task must target #vendor-tasks-{id}, NOT #contact-

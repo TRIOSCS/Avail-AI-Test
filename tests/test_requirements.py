@@ -463,57 +463,6 @@ class TestRequirementNotes:
         assert resp.status_code == 404
 
 
-# ── GET /api/requirements/{requirement_id}/tasks ──────────────────
-
-
-class TestRequirementTasks:
-    def test_list_tasks_empty(self, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        resp = client.get(f"/api/requirements/{req_item.id}/tasks")
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-    def test_list_tasks_with_task(self, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        task = RequisitionTask(
-            requisition_id=test_requisition.id,
-            title="Call vendor",
-            task_type="sourcing",
-            status="todo",
-            source="manual",
-            source_ref=f"requirement:{req_item.id}",
-            created_by=test_user.id,
-            assigned_to_id=test_user.id,
-        )
-        db_session.add(task)
-        db_session.commit()
-        resp = client.get(f"/api/requirements/{req_item.id}/tasks")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 1
-        assert data[0]["title"] == "Call vendor"
-        assert data[0]["assigned_to"] != ""
-
-    def test_list_tasks_not_found(self, client):
-        resp = client.get("/api/requirements/99999/tasks")
-        assert resp.status_code == 404
-
-    def test_create_task(self, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        resp = client.post(
-            f"/api/requirements/{req_item.id}/tasks",
-            json={"title": "Follow up with Arrow"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["title"] == "Follow up with Arrow"
-        assert data["status"] == "todo"
-
-    def test_create_task_not_found(self, client):
-        resp = client.post("/api/requirements/99999/tasks", json={"title": "Test"})
-        assert resp.status_code == 404
-
-
 # ── GET /api/requirements/{requirement_id}/history ────────────────
 
 

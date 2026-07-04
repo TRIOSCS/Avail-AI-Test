@@ -61,7 +61,7 @@
       {# Due date with overdue/due-today/future badge #}
       {% if t.due_at %}
         <span class="text-xs {% if is_done %}text-gray-400{% elif is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-600{% endif %}">
-          {% if is_done %}&middot; done{% elif is_overdue %}&middot; Overdue ({{ t.due_at.strftime('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at.strftime('%b %-d') }}{% endif %}
+          {% if is_done %}&middot; done{% elif is_overdue %}&middot; Overdue ({{ t.due_at|fmtdate('%b %-d') }}){% elif is_due_today %}&middot; Due today{% else %}&middot; due {{ t.due_at|fmtdate('%b %-d') }}{% endif %}
         </span>
       {% endif %}
     </div>
