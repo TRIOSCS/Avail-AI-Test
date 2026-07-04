@@ -44,11 +44,21 @@ def _has_strong_intent(signals: dict) -> bool:
 
 
 def _persist_discovery_results(db: Session, batch: DiscoveryBatch, results: list) -> int:
-    """Add discovery results to the session as ProspectAccount rows; return the count.
+    """Add discovery results to the session as ProspectAccount rows; return the saved
+    count.
 
     Each result may be a Pydantic model (has ``model_dump``) or a plain dict. Caller is
-    responsible for committing.
+    responsible for the final commit.
+
+    Each row is inserted inside its own SAVEPOINT (audit H8). ``ProspectAccount.domain`` is
+    ``unique=True``, so a single re-discovered domain (the pool only grows, and a domain may
+    already have been written by an earlier step in the same job) would otherwise raise
+    ``IntegrityError`` on the batch commit and roll back EVERY row — 0 prospects saved that
+    month. Per-row nesting means one duplicate rolls back only itself; the rest persist.
     """
+    from sqlalchemy.exc import IntegrityError
+
+    saved = 0
     for r in results:
         pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
         pa.discovery_batch_id = batch.id
@@ -66,8 +76,14 @@ def _persist_discovery_results(db: Session, batch: DiscoveryBatch, results: list
         }
         pa.fit_score, pa.fit_reasoning = calculate_fit_score(prospect_data)
         pa.readiness_score, _ = calculate_readiness_score(prospect_data, pa.readiness_signals or {})
-        db.add(pa)
-    return len(results)
+        try:
+            with db.begin_nested():
+                db.add(pa)
+                db.flush()
+            saved += 1
+        except IntegrityError:
+            logger.debug("Discovery persist: duplicate domain {} skipped", pa.domain)
+    return saved
 
 
 # ── Discovery Slice Rotation ─────────────────────────────────────────
@@ -185,16 +201,22 @@ async def job_discover_prospects() -> dict:
         try:
             from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-            existing_domains = {d[0] for d in db.query(ProspectAccount.domain).limit(10000).all() if d[0]}
+            # No dedup cap (audit H8) — a capped exclusion set lets an already-known domain
+            # slip through and abort the persist. Per-row SAVEPOINTs make that safe anyway.
+            existing_domains = {d[0] for d in db.query(ProspectAccount.domain).all() if d[0]}
             # Honor the rotation slice — scan ONLY this slice's segment×region cells so
             # discovery spends ~1/6 the credits instead of scanning all 12 every run.
+            credit_meter: dict = {}
             results = await run_explorium_discovery_batch(
                 batch_id,
                 existing_domains,
                 segment_keys=slice_info.get("segment_keys"),
                 region_keys=slice_info.get("regions"),
+                credit_meter=credit_meter,
             )
             explorium_count = _persist_discovery_results(db, batch, results)
+            # Record credit spend for the pool-health cost report (audit M15).
+            batch.credits_used = (batch.credits_used or 0) + credit_meter.get("credits_est", 0)
             db.commit()
         except Exception as e:
             logger.exception("Explorium discovery failed: {}", e)

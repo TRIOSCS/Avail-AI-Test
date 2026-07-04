@@ -82,14 +82,17 @@ async def mine_unknown_domains(
         if row[0]
     }
 
+    # Exclusion sets must be UNBOUNDED (audit M16): a .limit() here lets known vendor /
+    # prospect domains past the cap slip the exclusion and get re-mined as "new" (then hit
+    # the unique-domain constraint on persist). customer_domains above is already unbounded.
     vendor_domains = set()
-    for row in db.query(VendorCard.emails).filter(VendorCard.emails.isnot(None)).limit(5000).all():
+    for row in db.query(VendorCard.emails).filter(VendorCard.emails.isnot(None)).all():
         for email in row[0] or []:
             d = _normalize_domain(email)
             if d:
                 vendor_domains.add(d)
 
-    prospect_domains = {row[0].lower() for row in db.query(ProspectAccount.domain).limit(5000).all() if row[0]}
+    prospect_domains = {row[0].lower() for row in db.query(ProspectAccount.domain).all() if row[0]}
 
     exclude_domains = customer_domains | vendor_domains | prospect_domains | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
 

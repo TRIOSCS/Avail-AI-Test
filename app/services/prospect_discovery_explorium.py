@@ -21,6 +21,7 @@ from loguru import logger
 from app.config import settings
 from app.connectors import explorium
 from app.schemas.prospect_account import ProspectAccountCreate
+from app.services.enrichment_credit_guard import ProviderQuotaError
 from app.services.prospect_scoring import (
     calculate_fit_score,
     calculate_readiness_score,
@@ -102,7 +103,11 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
     ``app.connectors.explorium.discover_businesses`` (documented ``POST /v1/businesses``
     Fetch endpoint). Returns normalized dicts (firmographics + any signals present on the
     record). Returns ``[]`` when the key is missing, the segment is unknown, or the API
-    errors out (including quota / ProviderQuotaError).
+    errors out.
+
+    A ``ProviderQuotaError`` (402/403/429) is deliberately RE-RAISED, not swallowed, so the
+    batch caller can short-circuit the remaining slices instead of burning one doomed call
+    per slice after the quota is already exhausted (audit M19).
     """
     api_key = _get_api_key()
     if not api_key:
@@ -138,6 +143,10 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
 
         return [normalize_explorium_result(b, segment_key) for b in businesses]
 
+    except ProviderQuotaError:
+        # Quota/rate-limit — propagate so run_explorium_discovery_batch can stop the whole
+        # scan (every remaining slice would hit the same wall). M19.
+        raise
     except Exception as e:
         logger.error("Explorium discovery error for {}/{}: {}", segment_key, region_key, e)
         return []
@@ -181,7 +190,10 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
         component_topics = [
             t
             for t in intent_topics
-            if any(
+            # Guard the element type (M18): a dict/None topic would raise AttributeError on
+            # ``t.lower()`` and the broad except below would drop the whole 50-row page.
+            if isinstance(t, str)
+            and any(
                 kw in t.lower()
                 for kw in [
                     "electronic",
@@ -378,6 +390,7 @@ async def run_explorium_discovery_batch(
     existing_domains: set[str] | None = None,
     segment_keys: list[str] | None = None,
     region_keys: list[str] | None = None,
+    credit_meter: dict | None = None,
 ) -> list[ProspectAccountCreate]:
     """Run discovery across the requested ICP segments x regions.
 
@@ -388,6 +401,11 @@ async def run_explorium_discovery_batch(
             ``None`` scans every segment. Unknown keys are dropped.
         region_keys: REGIONS keys to scan; ``None`` scans every region. Unknown keys are
             dropped.
+        credit_meter: optional out-dict; when supplied, ``credit_meter["credits_est"]`` is
+            set to the number of raw results returned (~1 credit each) so the scheduler can
+            record it on ``DiscoveryBatch.credits_used`` for cost visibility (audit M15).
+            Passing a dict avoids breaking the ``-> list`` contract every existing caller
+            relies on.
 
     Honoring the slice is what keeps monthly credit spend to ~1/6 of a full 12-cell scan:
     the scheduler hands in one rotation slot's segment/region set rather than letting the
@@ -410,10 +428,28 @@ async def run_explorium_discovery_batch(
     prospects: list[ProspectAccountCreate] = []
     total_raw = 0
     credits_est = 0
+    quota_hit = False
 
     for seg_key in segs:
+        if quota_hit:
+            break
         for region_key in regs:
-            results = await discover_companies_with_signals(seg_key, region_key)
+            try:
+                results = await discover_companies_with_signals(seg_key, region_key)
+            except ProviderQuotaError:
+                # Quota exhausted — trip the circuit and stop; the remaining slices would
+                # only burn more failed calls (audit M19). Credits used so far are still
+                # reported via credit_meter below.
+                from app.services import enrichment_credit_guard as cg
+
+                cg.trip_circuit("explorium", settings.explorium_cooldown_minutes)
+                logger.warning(
+                    "Explorium quota exhausted on batch {} — short-circuiting remaining slices",
+                    batch_id,
+                )
+                quota_hit = True
+                break
+
             total_raw += len(results)
             credits_est += len(results)  # ~1 credit per result
 
@@ -471,6 +507,9 @@ async def run_explorium_discovery_batch(
 
             # Small delay between searches to be polite to the API
             await asyncio.sleep(0.5)
+
+    if credit_meter is not None:
+        credit_meter["credits_est"] = credits_est
 
     logger.info(
         "Explorium batch {}: {} raw results, {} unique after dedup, ~{} credits",
