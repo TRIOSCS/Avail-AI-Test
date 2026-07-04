@@ -118,3 +118,35 @@ class TestCheckHtmlStructureHash:
         html = "<div>content</div>"
         h = check_html_structure_hash(html, "PART1", component_name="HASH_TEST_SET")
         assert h in _known_html_hashes["HASH_TEST_SET"]
+
+    def test_attributes_ignored_same_hash(self):
+        """Same tag structure with DIFFERENT attribute values hashes identically.
+
+        This is the false-"layout changed" churn the strip fixes: per-row class/id/
+        data-* values must not register as a structure change.
+        """
+        _known_html_hashes.pop("HASH_TEST_ATTR", None)
+        html1 = '<table><tr class="row-1" data-mpn="A"><td style="width:10px">x</td></tr></table>'
+        html2 = '<table><tr class="row-2" data-mpn="B"><td style="width:99px">y</td></tr></table>'
+        h1 = check_html_structure_hash(html1, "PART1", component_name="HASH_TEST_ATTR")
+        h2 = check_html_structure_hash(html2, "PART2", component_name="HASH_TEST_ATTR")
+        assert h1 == h2
+
+    def test_real_layout_change_still_detected(self):
+        """A genuine tag-sequence change (table → list) still produces a new hash."""
+        _known_html_hashes.pop("HASH_TEST_REAL", None)
+        h1 = check_html_structure_hash('<table><tr><td class="a">x</td></tr></table>', "P1", "HASH_TEST_REAL")
+        h2 = check_html_structure_hash('<ul><li class="a">x</li></ul>', "P2", "HASH_TEST_REAL")
+        assert h1 != h2
+
+    def test_hash_set_is_bounded(self):
+        """The stored hash set never exceeds the cap, even under many distinct
+        structures."""
+        import app.services.search_worker_base.monitoring as mon
+
+        _known_html_hashes.pop("HASH_TEST_CAP", None)
+        # Feed far more distinct tag structures than the cap by growing a nesting chain.
+        for i in range(mon._MAX_STRUCTURE_HASHES * 3):
+            html = "<div>" * i + "content" + "</div>" * i
+            check_html_structure_hash(html, f"PART{i}", component_name="HASH_TEST_CAP")
+        assert len(_known_html_hashes["HASH_TEST_CAP"]) <= mon._MAX_STRUCTURE_HASHES

@@ -631,6 +631,19 @@ heartbeat read + enrich in `htmx_views._enrich_source` /
 (`worker_detail` macro). Tests: `tests/test_connector_service.py` (pure
 verdict/state) and `tests/test_connectors_settings.py` (rendered badges).
 
+**HTML structure-hash drift alert (2026-07-04, Phase 2).** Each browser worker
+fingerprints the results HTML it parses via
+`search_worker_base.monitoring.check_html_structure_hash` and warns (Loguru + Sentry)
+when a page's structure is one it has not seen — an early signal that a supplier
+changed its markup and the parser may need updating. The fingerprint hashes only the
+sequence of tag NAMES (open/close), never attributes: attribute values (`class`, `id`,
+`data-*`, inline `style`) vary per row and per part, so folding them in made almost
+every page read as a "layout change" — spamming Sentry and growing the stored
+per-component hash set without bound. Genuine layout changes (a table becoming a list,
+a wrapper appearing) still alter the tag sequence and are still caught. The stored set
+is additionally capped at `_MAX_STRUCTURE_HASHES` (evict-arbitrary-at-cap) as a hard
+bound. Tests: `tests/test_search_worker_monitoring.py`.
+
 ### Removed (2026-05-14)
 
 - Daily 3 AM `_job_refresh_stale_requisitions` cron — no background refresh
