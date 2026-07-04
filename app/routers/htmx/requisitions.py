@@ -318,11 +318,50 @@ async def requisitions_list_partial(
 @router.get("/v2/partials/requisitions/create-form", response_class=HTMLResponse)
 async def requisition_create_form(
     request: Request,
+    prospect_id: str = "",
+    company_id: str = "",
+    customer_name: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the create requisition modal form."""
+    """Return the create requisition modal form.
+
+    Optionally PREFILLED when launched from a claimed prospect's "Create Requisition"
+    button (H1): ``company_id`` resolves the customer's HQ site so the picker opens with
+    it selected, and ``prospect_id`` rides through as a hidden field so a successful save
+    flips the prospect to CONVERTED (see requisition_import_save). With no params it is
+    the plain create modal.
+    """
     ctx = _base_ctx(request, user, "requisitions")
+
+    prefill_site_id = ""
+    prefill_customer_name = ""
+    if company_id.strip().isdigit():
+        company = db.get(Company, int(company_id))
+        if company:
+            prefill_customer_name = company.name
+            site = (
+                db.query(CustomerSite)
+                .filter(CustomerSite.company_id == company.id, CustomerSite.is_active.is_(True))
+                .order_by(CustomerSite.id)
+                .first()
+            )
+            if site:
+                prefill_site_id = str(site.id)
+                prefill_customer_name = f"{company.name} — {site.site_name}"
+    # Fall back to the passed-in customer name (e.g. the prospect name) when the company
+    # has no match/site — the picker still shows the name so the buyer isn't lost.
+    if not prefill_customer_name and customer_name.strip():
+        prefill_customer_name = customer_name.strip()
+
+    ctx.update(
+        {
+            "prefill_prospect_id": prospect_id.strip(),
+            "prefill_customer_site_id": prefill_site_id,
+            "prefill_customer_name": prefill_customer_name,
+            "prefill_req_name": f"{prefill_customer_name} RFQ" if prefill_customer_name else "",
+        }
+    )
     return template_response("htmx/partials/requisitions/unified_modal.html", ctx)
 
 
@@ -429,10 +468,16 @@ async def requisition_import_save(
     customer_site_id: str = Form(""),
     deadline: str = Form(""),
     urgency: str = Form("normal"),
+    prospect_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Save AI-parsed requirements as a new requisition."""
+    """Save AI-parsed requirements as a new requisition.
+
+    When ``prospect_id`` is present (the modal was launched from a claimed prospect's
+    "Create Requisition" button), the newly-created requisition flips that prospect to
+    CONVERTED — closing the prospect→opportunity loop (H1/M4).
+    """
     from app.utils.normalization import normalize_mpn_key, parse_substitute_mpns
 
     form = await request.form()
@@ -541,6 +586,17 @@ async def requisition_import_save(
             resolve_material_card(sub_mpn, db, manufacturer=sub_mfr)
 
     db.commit()
+
+    # Prospect → opportunity handoff (H1/M4): if this modal was launched from a claimed
+    # prospect, flip it to CONVERTED. Best-effort — the requisition is already committed,
+    # so a conversion hiccup must never fail the save.
+    if prospect_id.strip().isdigit():
+        from ...services.prospect_claim import mark_prospect_converted
+
+        try:
+            mark_prospect_converted(int(prospect_id), user.id, db)
+        except Exception:
+            logger.warning("Prospect {} conversion after requisition create failed", prospect_id, exc_info=True)
 
     # Return success — close modal + toast, and fire reqListRefresh so whichever surface
     # opened this modal refreshes itself. The old snippet hard-targeted #parts-list, which

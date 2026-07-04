@@ -3,7 +3,14 @@
    Called by: "+ Req" button in parts workspace filter bar.
    Depends on: Alpine.js (unifiedReqModal, customerPicker), HTMX, brand palette.
 #}
-<div class="p-4 sm:p-5 lg:p-6 flex flex-col h-full min-h-0" x-data="unifiedReqModal()">
+{# Optional prefill (H1) — set when launched from a claimed prospect's "Create
+   Requisition" button; empty defaults keep the plain create/import modal unchanged. #}
+{% set p_prospect_id = prefill_prospect_id|default('') %}
+{% set p_site_id = prefill_customer_site_id|default('') %}
+{% set p_cust_name = prefill_customer_name|default('') %}
+{% set p_req_name = prefill_req_name|default('') %}
+<div class="p-4 sm:p-5 lg:p-6 flex flex-col h-full min-h-0" x-data="unifiedReqModal()"
+     x-init='reqName = {{ p_req_name|tojson }}'>
 
   {# ── Header ──────────────────────────────────────────────────────── #}
   <div class="flex items-center justify-between mb-4 flex-shrink-0">
@@ -22,6 +29,7 @@
 
     {# Customer picker #}
     <div x-data="customerPicker()" class="relative"
+         x-init='selectedSiteId = {{ p_site_id|tojson }}; selectedName = {{ p_cust_name|tojson }}'
          x-effect="customerSiteId = selectedSiteId; customerName = selectedName">
       <label class="form-label">Customer</label>
 
@@ -416,6 +424,9 @@
       <input type="hidden" name="customer_name" :value="customerName">
       <input type="hidden" name="deadline" :value="deadline">
       <input type="hidden" name="urgency" :value="urgency">
+      {# Prospect handoff (H1): non-empty only when launched from a claimed prospect —
+         a successful save flips that prospect to CONVERTED. #}
+      <input type="hidden" name="prospect_id" value="{{ p_prospect_id }}">
 
       {# Hidden inputs for parts array #}
       <template x-for="(part, i) in parts" :key="'hidden-' + i">

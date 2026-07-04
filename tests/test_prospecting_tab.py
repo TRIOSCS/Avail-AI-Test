@@ -658,3 +658,110 @@ class TestGridConsistency:
         assert resp.status_code == 200
         assert "Buyer-ready score" in resp.text  # full detail returned
         assert 'id="prospect-stats"' not in resp.text  # no grid OOB on the detail path
+
+
+# ── Convert to opportunity (H1/M4) ────────────────────────────────────────
+
+
+class TestConvertToOpportunity:
+    def test_mark_prospect_converted_flips_claimed(self, db_session, test_user):
+        from app.services.prospect_claim import mark_prospect_converted
+
+        p = make_prospect(db_session, status="claimed", claimed_by=test_user.id)
+        assert mark_prospect_converted(p.id, test_user.id, db_session) is True
+        db_session.refresh(p)
+        assert p.status == "converted"
+        assert (p.enrichment_data or {}).get("converted_by") == test_user.id
+
+    def test_mark_prospect_converted_noop_when_not_claimed(self, db_session, test_user):
+        from app.services.prospect_claim import mark_prospect_converted
+
+        p = make_prospect(db_session, status="suggested")
+        assert mark_prospect_converted(p.id, test_user.id, db_session) is False
+        db_session.refresh(p)
+        assert p.status == "suggested"
+
+    def test_import_save_with_prospect_id_converts(self, client, db_session, test_user):
+        """Creating a requisition from a claimed prospect flips it to CONVERTED (H1)."""
+        from app.services.prospect_claim import claim_prospect
+
+        p = make_prospect(db_session, status="suggested")
+        claim_prospect(p.id, test_user.id, db_session)  # service claim; no bg enrichment
+        db_session.refresh(p)
+        assert p.status == "claimed"
+
+        resp = client.post(
+            "/v2/partials/requisitions/import-save",
+            data={
+                "name": "Prospect RFQ",
+                "prospect_id": str(p.id),
+                "urgency": "normal",
+                "reqs[0].primary_mpn": "LM317T",
+                "reqs[0].manufacturer": "Texas Instruments",
+                "reqs[0].target_qty": "100",
+                "reqs[0].condition": "new",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(p)
+        assert p.status == "converted"
+
+    def test_import_save_without_prospect_id_unaffected(self, client, db_session, test_user):
+        """A plain requisition create (no prospect_id) touches no prospect."""
+        p = make_prospect(db_session, status="claimed", claimed_by=test_user.id)
+        resp = client.post(
+            "/v2/partials/requisitions/import-save",
+            data={
+                "name": "Plain RFQ",
+                "urgency": "normal",
+                "reqs[0].primary_mpn": "LM317T",
+                "reqs[0].manufacturer": "Texas Instruments",
+                "reqs[0].target_qty": "100",
+                "reqs[0].condition": "new",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(p)
+        assert p.status == "claimed"  # untouched
+
+    def test_create_form_prefills_from_company(self, client, db_session, test_user):
+        """create-form?company_id=..
+
+        prefills the customer picker + carries prospect_id.
+        """
+        from app.services.prospect_claim import claim_prospect
+
+        p = make_prospect(db_session, status="suggested", name="Prefill Co")
+        claim_prospect(p.id, test_user.id, db_session)  # service claim; no bg enrichment
+        db_session.refresh(p)
+
+        resp = client.get(
+            f"/v2/partials/requisitions/create-form?prospect_id={p.id}&company_id={p.company_id}&customer_name=Prefill+Co"
+        )
+        assert resp.status_code == 200
+        # Hidden prospect_id rides through for the conversion flip.
+        assert f'name="prospect_id" value="{p.id}"' in resp.text
+        # Customer picker is prefilled with the linked company.
+        assert "Prefill Co" in resp.text
+        assert "selectedName" in resp.text
+
+    def test_create_form_plain_has_no_prefill(self, client, db_session, test_user):
+        """Create-form with no params is the plain modal (empty prospect_id)."""
+        resp = client.get("/v2/partials/requisitions/create-form")
+        assert resp.status_code == 200
+        assert "unifiedReqModal" in resp.text
+        assert 'name="prospect_id" value=""' in resp.text
+
+    def test_converted_pill_and_filter(self, client, db_session, test_user):
+        """The Converted pill exists; status=converted surfaces converted prospects."""
+        p = make_prospect(db_session, status="converted", name="WonDeal", claimed_by=test_user.id)
+
+        resp_all = client.get("/v2/partials/prospecting")
+        assert resp_all.status_code == 200
+        assert "Converted" in resp_all.text  # filter pill present
+        assert "WonDeal" not in resp_all.text  # converted hidden in the default view
+
+        resp_conv = client.get("/v2/partials/prospecting?status=converted")
+        assert resp_conv.status_code == 200
+        assert "WonDeal" in resp_conv.text  # visible under the Converted filter
+        assert str(p.id) in resp_conv.text

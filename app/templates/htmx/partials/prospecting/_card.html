@@ -8,6 +8,7 @@
 {% set prospect_status_colors = {
   'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
   'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'converted': 'bg-violet-100 text-violet-700 border-violet-200',
   'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
 } %}
 {% set snap = (snapshots or {}).get(prospect.id, {}) %}

@@ -237,6 +237,43 @@ def release_prospect(prospect_id: int, user_id: int, db: Session, *, is_admin: b
     }
 
 
+# ── Convert to opportunity ───────────────────────────────────────────
+
+
+def mark_prospect_converted(prospect_id: int, user_id: int, db: Session) -> bool:
+    """Flip a CLAIMED prospect to CONVERTED after a requisition is created from it.
+
+    The terminal "became a real opportunity" state (H1/M4): a won account leaves the
+    claimed bucket for good. Called by requisition_import_save when the create-
+    requisition modal was launched from a prospect's "Create Requisition" button (it
+    rides a hidden prospect_id through the save). Best-effort and idempotent — only a
+    CLAIMED prospect converts; a missing / already-converted / non-claimed prospect is a
+    silent no-op, so conversion never blocks the requisition that already committed.
+
+    Returns True when the status actually flipped.
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        return False
+    if prospect.status != ProspectAccountStatus.CLAIMED:
+        logger.info(
+            "mark_prospect_converted: prospect {} not CLAIMED (status={}); skipping",
+            prospect_id,
+            prospect.status,
+        )
+        return False
+
+    prospect.status = ProspectAccountStatus.CONVERTED
+    ed = dict(prospect.enrichment_data or {})
+    ed["converted_at"] = datetime.now(timezone.utc).isoformat()
+    ed["converted_by"] = user_id
+    prospect.enrichment_data = ed
+    db.commit()
+
+    logger.info("Prospect {} ({}) converted to opportunity by user {}", prospect.name, prospect_id, user_id)
+    return True
+
+
 def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, is_admin: bool = False) -> dict:
     """Send an owned Company back to the prospecting pool.
 

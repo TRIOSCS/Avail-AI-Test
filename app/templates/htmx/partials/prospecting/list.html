@@ -75,9 +75,10 @@
     {# Filter pills + sort #}
     <div class="flex flex-wrap items-center gap-2">
       {% set pill_counts = {'': all_total, 'suggested': status_counts.get('suggested', 0),
-                            'claimed': status_counts.get('claimed', 0), 'dismissed': status_counts.get('dismissed', 0),
+                            'claimed': status_counts.get('claimed', 0), 'converted': status_counts.get('converted', 0),
+                            'dismissed': status_counts.get('dismissed', 0),
                             'expired': status_counts.get('expired', 0)} %}
-      {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed'), ('expired', 'Expired')] %}
+      {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('converted', 'Converted'), ('dismissed', 'Dismissed'), ('expired', 'Expired')] %}
       <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
                      {% if status == val %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
               aria-pressed="{{ 'true' if status == val else 'false' }}"

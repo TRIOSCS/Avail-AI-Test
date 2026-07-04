@@ -27,6 +27,7 @@
           {% set prospect_status_colors = {
             'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
             'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'converted': 'bg-violet-100 text-violet-700 border-violet-200',
             'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
           } %}
           <span class="badge {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-700 border-gray-200') }}">
@@ -96,13 +97,13 @@
           Enrich
         </button>
         {% if prospect.status == 'claimed' %}
-        <a href="/v2/requisitions?action=create&customer={{ prospect.name|urlencode }}"
-           hx-get="/v2/partials/requisitions?action=create&customer={{ prospect.name|urlencode }}"
-           hx-target="#main-content"
-           hx-push-url="true"
-           class="btn-primary btn-sm">
+        {# Convert-to-opportunity (H1): open the create-requisition modal PREFILLED from
+           this prospect's linked company; a successful save flips it to CONVERTED. #}
+        <button type="button" x-data
+                @click="$dispatch('open-modal', {url: '/v2/partials/requisitions/create-form?prospect_id={{ prospect.id }}&company_id={{ prospect.company_id or '' }}&customer_name={{ prospect.name|urlencode }}'})"
+                class="btn-primary btn-sm">
           Create Requisition
-        </a>
+        </button>
         {% endif %}
       </div>
     </div>
