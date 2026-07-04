@@ -144,7 +144,7 @@
     </form>
     {% endif %}
   </div>
-  <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ row.resolved_at.strftime('%b %d') if row.resolved_at else '' }}</span>
+  <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ row.resolved_at|localdate('%b %d') if row.resolved_at else '' }}</span>
 </div>
 {% endmacro %}
 

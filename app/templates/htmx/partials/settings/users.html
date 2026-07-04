@@ -205,7 +205,7 @@
               <span class="badge bg-gray-100 text-gray-600 border-gray-200">Disabled</span>
               {% endif %}
             </td>
-            <td class="table-cell text-xs text-gray-600">{{ row.last_login_at | fmtdate }}</td>
+            <td class="table-cell text-xs text-gray-600">{{ row.last_login_at | localtime('%b %d, %H:%M') }}</td>
             <td class="table-cell text-right">
               <div class="inline-flex items-center gap-2">
                 <button class="btn-secondary btn-sm"

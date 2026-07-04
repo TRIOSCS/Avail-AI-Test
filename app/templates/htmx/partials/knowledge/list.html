@@ -47,7 +47,7 @@
         </div>
         <p class="text-sm text-gray-600">{{ e.content[:200] }}{{ '...' if e.content|length > 200 }}</p>
         {% if e.created_at %}
-        <p class="text-xs text-gray-400 mt-1">{{ e.created_at.strftime('%b %d, %Y') }}</p>
+        <p class="text-xs text-gray-400 mt-1">{{ e.created_at|localdate('%b %d, %Y') }}</p>
         {% endif %}
       </div>
       {% endfor %}

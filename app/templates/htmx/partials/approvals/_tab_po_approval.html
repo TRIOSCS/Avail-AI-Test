@@ -92,7 +92,7 @@
           </div>
         </div>
         <span class="{{ pill.get(h.kind, 'badge-neutral') }}">{{ h.kind | capitalize }}</span>
-        <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ h.when.strftime('%b %d') if h.when else '' }}</span>
+        <span class="text-xs text-gray-400 tabular-nums justify-self-end">{{ h.when|localdate('%b %d') if h.when else '' }}</span>
       </div>
       {% endfor %}
     </div>

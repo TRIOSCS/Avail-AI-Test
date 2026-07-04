@@ -87,7 +87,7 @@
       {% elif mode == "paid" %}
         <div class="banner banner-ok">Already recorded as paid</div>
         <h1>This prepayment is already marked paid</h1>
-        <p>Already marked paid on <strong>{{ pp.paid_at|fmtdate }}</strong>
+        <p>Already marked paid on <strong>{{ pp.paid_at|localtime('%b %d, %H:%M') }}</strong>
           by <strong>{{ pp.paid_by_label or "Accounting" }}</strong>. No further action is
           needed — nothing was changed.</p>
         <table class="facts">

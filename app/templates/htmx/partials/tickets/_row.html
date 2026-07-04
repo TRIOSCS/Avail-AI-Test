@@ -23,5 +23,5 @@
     {% elif t.status == 'resolved' %}bg-green-100 text-green-700
     {% elif t.status == 'wont_fix' %}bg-gray-100 text-gray-600
     {% else %}bg-gray-100 text-gray-600{% endif %}">{{ t.status|replace('_', ' ')|title }}</span>
-  <span class="text-xs text-gray-400 w-24 shrink-0 text-right">{{ t.created_at|fmtdate }}</span>
+  <span class="text-xs text-gray-400 w-24 shrink-0 text-right">{{ t.created_at|localtime('%b %d, %H:%M') }}</span>
 </div>

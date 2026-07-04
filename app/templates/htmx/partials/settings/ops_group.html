@@ -36,7 +36,7 @@
               <div class="text-xs text-gray-600">{{ row.user.email }}</div>
             </td>
             <td class="table-cell text-sm text-gray-600">{{ (row.user.role | replace('_', ' ') | title) if row.user.role else '—' }}</td>
-            <td class="table-cell text-xs text-gray-600">{{ row.member.added_at | fmtdate if row.is_member else '—' }}</td>
+            <td class="table-cell text-xs text-gray-600">{{ row.member.added_at | localtime('%b %d, %H:%M') if row.is_member else '—' }}</td>
             <td class="table-cell">
               {% if row.is_member %}
               <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">Active</span>

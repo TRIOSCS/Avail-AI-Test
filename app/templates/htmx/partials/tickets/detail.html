@@ -22,7 +22,7 @@
         {% endif %}
       </div>
       <p class="text-sm text-gray-600 mt-1">
-        Submitted {{ ticket.created_at|fmtdate("%b %d, %Y %H:%M") }}
+        Submitted {{ ticket.created_at|localtime("%b %d, %Y %H:%M") }}
         {% if ticket.submitter %} by {{ ticket.submitter.name or ticket.submitter.email }}{% endif %}
       </p>
     </div>

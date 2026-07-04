@@ -76,7 +76,7 @@
       </template>
     </div>
     <div class="mt-2 text-xs text-gray-400">
-      Created {{ offer.created_at.strftime('%b %d, %Y') if offer.created_at else '-' }}
+      Created {{ offer.created_at|localdate('%b %d, %Y') if offer.created_at else '-' }}
     </div>
 
     {# Action buttons #}
