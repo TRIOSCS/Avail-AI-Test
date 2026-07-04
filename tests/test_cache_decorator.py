@@ -183,6 +183,73 @@ def test_cache_prefix_attribute():
     assert my_func.cache_prefix == "my_prefix"
 
 
+# ── Async-target guard (Phase-4 audit) ────────────────────────────────
+
+
+def test_async_wrapper_preserves_coroutine_function():
+    """An async endpoint keeps its async-ness (+ cache_prefix) so FastAPI awaits it."""
+    import asyncio
+
+    from app.cache.decorators import cached_endpoint
+
+    @cached_endpoint(prefix="test_async_flag", ttl_hours=1)
+    async def my_async_func():
+        return {}
+
+    assert asyncio.iscoroutinefunction(my_async_func)
+    assert my_async_func.cache_prefix == "test_async_flag"
+
+
+@pytest.mark.asyncio
+async def test_async_endpoint_cache_miss_then_hit():
+    """Async endpoint: MISS awaits the coroutine + caches the dict; HIT returns the
+    cached value without re-calling — and the wrapper stays awaitable both times."""
+    from app.cache.decorators import cached_endpoint
+
+    call_count = 0
+
+    @cached_endpoint(prefix="test_async", ttl_hours=1, key_params=["x"])
+    async def my_async_func(x, db=None):
+        nonlocal call_count
+        call_count += 1
+        return {"value": x}
+
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached") as mock_set,
+    ):
+        result = await my_async_func(x=7)
+    assert result == {"value": 7}
+    assert call_count == 1
+    mock_set.assert_called_once()
+
+    with patch("app.cache.decorators.get_cached", return_value={"value": 7, "cached": True}):
+        result = await my_async_func(x=7)
+    assert result == {"value": 7, "cached": True}
+    assert call_count == 1  # not re-called on hit
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_result_not_cached():
+    """A streaming/Response target from an async endpoint is awaited and returned but
+    NOT cached (only dict/list results are cached)."""
+    from app.cache.decorators import cached_endpoint
+
+    sentinel = object()  # stands in for a StreamingResponse
+
+    @cached_endpoint(prefix="test_async_stream", ttl_hours=1, key_params=["x"])
+    async def stream_endpoint(x):
+        return sentinel
+
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached") as mock_set,
+    ):
+        result = await stream_endpoint(x=1)
+    assert result is sentinel
+    mock_set.assert_not_called()
+
+
 def test_invalidate_prefix_with_redis():
     """invalidate_prefix uses Redis SCAN to delete by pattern (lines 89-99)."""
     from unittest.mock import MagicMock
