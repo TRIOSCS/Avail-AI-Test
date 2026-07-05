@@ -195,7 +195,8 @@ class TestBatchAssignCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Assigned" in resp.text
+        # batch-assign now re-renders #sightings-table; the toast rides the HX-Trigger header.
+        assert "Assigned" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_assign_with_unknown_buyer_id(
         self, client: TestClient, req_item, db_session: Session, test_user: User
@@ -228,7 +229,7 @@ class TestBatchAssignCoverage:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "Assigned" in resp.text
+        assert "Assigned" in resp.headers.get("HX-Trigger", "")
 
     def test_batch_assign_no_buyer_id(self, client: TestClient, req_item):
         """Lines 715-729: no buyer_id → buyer_name stays 'nobody'."""
@@ -239,7 +240,7 @@ class TestBatchAssignCoverage:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "nobody" in resp.text
+        assert "nobody" in resp.headers.get("HX-Trigger", "")
 
 
 # ── batch-status ─────────────────────────────────────────────────────────────

@@ -3699,7 +3699,8 @@ class TestBatchAssign:
             data={"requirement_ids": json.dumps([r.id]), "buyer_id": str(buyer.id)},
         )
         assert resp.status_code == 200
-        assert "Assigned 1 requirement" in resp.text
+        # batch-assign now re-renders #sightings-table; the toast rides the HX-Trigger header.
+        assert "Assigned 1 requirement" in resp.headers.get("HX-Trigger", "")
         db_session.refresh(r)
         assert r.assigned_buyer_id == buyer.id
 
@@ -3712,7 +3713,7 @@ class TestBatchAssign:
             data={"requirement_ids": json.dumps([r.id]), "buyer_id": ""},
         )
         assert resp.status_code == 200
-        assert "Assigned 1 requirement" in resp.text
+        assert "Assigned 1 requirement" in resp.headers.get("HX-Trigger", "")
         db_session.refresh(r)
         assert r.assigned_buyer_id is None
 

@@ -232,7 +232,8 @@ async def test_batch_assign_with_buyer(db_session: Session, test_user: User, tes
     )
 
     assert resp.status_code == 200
-    assert "Assigned" in resp.body.decode()
+    # batch-assign now re-renders #sightings-table; the toast rides the HX-Trigger header.
+    assert "Assigned" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_assign_no_buyer_id(db_session: Session, test_user: User, test_requisition: Requisition):
@@ -255,7 +256,7 @@ async def test_batch_assign_no_buyer_id(db_session: Session, test_user: User, te
     )
 
     assert resp.status_code == 200
-    assert "nobody" in resp.body.decode()
+    assert "nobody" in resp.headers.get("HX-Trigger", "")
 
 
 async def test_batch_assign_unknown_buyer(db_session: Session, test_user: User, test_requisition: Requisition):

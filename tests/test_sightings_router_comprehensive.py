@@ -705,7 +705,8 @@ class TestBatchAssignBranches:
             },
         )
         assert resp.status_code == 200
-        assert "2 requirements" in resp.text
+        # batch-assign now re-renders #sightings-table; the toast rides the HX-Trigger header.
+        assert "2 requirements" in resp.headers.get("HX-Trigger", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

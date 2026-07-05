@@ -117,7 +117,9 @@ class TestBatchAssign:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "nobody" in resp.text.lower() or "Assigned" in resp.text
+        # batch-assign now re-renders #sightings-table; the toast rides the HX-Trigger header.
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "nobody" in trigger.lower() or "Assigned" in trigger
 
     def test_batch_assign_with_buyer(self, client: TestClient, req_with_item: tuple, test_user: User):
         _, item = req_with_item
@@ -127,7 +129,7 @@ class TestBatchAssign:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Assigned" in resp.text
+        assert "Assigned" in resp.headers.get("HX-Trigger", "")
 
 
 class TestBatchStatus:

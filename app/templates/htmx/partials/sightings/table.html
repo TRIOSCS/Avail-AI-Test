@@ -410,6 +410,41 @@
     </form>
 
 
+    {# ── Batch Assign Dropdown ─────────────────────────────── #}
+    <div x-data="{ open: false }" class="relative">
+      <button @click="open = !open" class="btn-secondary btn-sm">
+        Assign
+        <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <div x-show="open" @click.outside="open = false" x-cloak
+           class="absolute bottom-full mb-1 left-0 bg-white border border-line-base rounded-lg shadow-float p-3 w-48 z-50">
+        {# Re-renders the board on apply (target #sightings-table, innerHTML) so the assigned
+           rows show their new buyer — mirrors the Refresh Sightings form. Board filters ride
+           hidden inputs so the refreshed list keeps the active view. Empty option = unassign
+           (buyer_id="" → assigned_buyer_id NULL). Buyers come from `assignable_buyers`. #}
+        <form hx-post="/v2/partials/sightings/batch-assign"
+              hx-target="#sightings-table" hx-swap="innerHTML"
+              @htmx:after-request="open = false">
+          <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">
+          <input type="hidden" name="status" value="{{ status }}">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="group_by" value="{{ group_by }}">
+          <input type="hidden" name="manufacturer" value="{{ manufacturer|default('') }}">
+          <label class="form-label">Assign to buyer</label>
+          <select name="buyer_id"
+                  class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm mb-2">
+            <option value="">Unassigned</option>
+            {% for b in assignable_buyers %}
+            <option value="{{ b.id }}">{{ b.name or b.email }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn-primary btn-sm w-full">
+            Apply
+          </button>
+        </form>
+      </div>
+    </div>
+
     {# ── Batch Status Dropdown ─────────────────────────────── #}
     <div x-data="{ open: false }" class="relative">
       <button @click="open = !open" class="btn-secondary btn-sm">
@@ -418,11 +453,19 @@
       </button>
       <div x-show="open" @click.outside="open = false" x-cloak
            class="absolute bottom-full mb-1 left-0 bg-white border border-line-base rounded-lg shadow-float p-3 w-48 z-50">
+        {# Re-renders the board on apply (target #sightings-table, innerHTML) so the moved
+           rows show their fresh status — mirrors the Refresh Sightings form. The `status`
+           select is the TARGET status; the board filters (q/group_by/manufacturer) ride
+           hidden inputs to keep the active view (status filter is intentionally not carried
+           — it would collide with the target field; see _rerender_board_with_toast). #}
         <form hx-post="/v2/partials/sightings/batch-status"
-              hx-swap="none"
+              hx-target="#sightings-table" hx-swap="innerHTML"
               @htmx:after-request="open = false"
               x-data="{ status: '' }">
           <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="group_by" value="{{ group_by }}">
+          <input type="hidden" name="manufacturer" value="{{ manufacturer|default('') }}">
           <label class="form-label">New status</label>
           <select name="status" x-model="status"
                   class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm mb-2">
@@ -451,11 +494,18 @@
       </button>
       <div x-show="open" @click.outside="open = false" x-cloak
            class="absolute bottom-full mb-1 left-0 bg-white border border-line-base rounded-lg shadow-float p-3 w-64 z-50">
+        {# Re-renders the board on apply (target #sightings-table, innerHTML) so the noted
+           rows reflect the activity — mirrors the Refresh Sightings form. Board filters ride
+           hidden inputs so the refreshed list keeps the active view. #}
         <form hx-post="/v2/partials/sightings/batch-notes"
-              hx-swap="none"
+              hx-target="#sightings-table" hx-swap="innerHTML"
               @htmx:after-request="open = false"
               x-data="{ noteText: '' }">
           <input type="hidden" name="requirement_ids" :value="JSON.stringify($store.sightingSelection.array)">
+          <input type="hidden" name="status" value="{{ status }}">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="group_by" value="{{ group_by }}">
+          <input type="hidden" name="manufacturer" value="{{ manufacturer|default('') }}">
           <label class="form-label">Note</label>
           <textarea name="notes" x-model="noteText" rows="3" placeholder="Add a note to all selected..."
                     class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm mb-2 resize-none"></textarea>

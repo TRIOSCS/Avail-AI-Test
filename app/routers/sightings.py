@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
+from starlette.datastructures import FormData
 
 from ..config import settings
 from ..constants import (
@@ -44,6 +45,7 @@ from ..constants import (
     SightingsSkipReason,
     SourcingStatus,
     UnavailabilityReason,
+    UserRole,
 )
 from ..database import get_db
 from ..dependencies import (
@@ -611,6 +613,16 @@ async def _render_sightings_table(
             if urgency in ("critical", "hot"):
                 heatmap_req_ids.add(r.id)
 
+    # ── Assignable buyers (action-bar "Assign to buyer" picker) ──
+    # Active buyers + traders — the roles a requirement can be assigned to (mirrors the
+    # buy-plan/leaderboard buyer pool). Feeds the multi-select action bar's Assign dropdown.
+    assignable_buyers = (
+        db.query(User)
+        .filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), User.is_active.is_(True))
+        .order_by(User.name)
+        .all()
+    )
+
     # ── MPN → MaterialCard link map ─────────────────────────────
     link_map = _mpn_link_map(db, requirements) if requirements else {}
 
@@ -655,8 +667,45 @@ async def _render_sightings_table(
         "user": user,
         "manufacturer": filters.manufacturer,
         "searching_req_ids": searching_req_ids,
+        "assignable_buyers": assignable_buyers,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
+
+
+async def _rerender_board_with_toast(
+    request: Request,
+    db: Session,
+    user: User,
+    form: FormData,
+    msg: str,
+    level: str = "success",
+    *,
+    include_status: bool = True,
+) -> HTMLResponse:
+    """Re-render the sightings board table from the filters the action-bar form carried,
+    then attach the toast via the HX-Trigger bridge.
+
+    Shared by the multi-select batch handlers (assign/status/notes) so applying a bulk
+    action refreshes the affected rows in place instead of leaving stale status/notes/buyer.
+    Callers set ``hx-target="#sightings-table" hx-swap="innerHTML"``, mirroring batch-refresh.
+
+    ``include_status=False`` is used by batch-status, whose ``status`` form field is the
+    *target* status to apply (not a board filter) — so the refreshed board shows all
+    statuses, keeping the just-moved rows visible with their fresh badges.
+    """
+
+    def _fs(key: str) -> str:
+        val = form.get(key, "")
+        return val if isinstance(val, str) else ""
+
+    filters = SightingsListParams(
+        status=_fs("status") if include_status else "",
+        q=_fs("q"),
+        group_by=_fs("group_by"),
+        manufacturer=_fs("manufacturer"),
+    )
+    resp = await _render_sightings_table(request, db, user, filters)
+    return _with_toast(resp, msg, level)
 
 
 # CSV export column order — the REAL electronic-component sighting fields (vendor stock of a
@@ -1203,7 +1252,9 @@ async def sightings_batch_assign(
 
     _invalidate_cache("sightings_stat_counts")
     msg = f"Assigned {len(reqs)} requirement{'s' if len(reqs) != 1 else ''} to {buyer_name}"
-    return _oob_toast(msg)
+    # Re-render the board so the assigned rows reflect their new buyer in place (the form
+    # targets #sightings-table with hx-swap="innerHTML"). The toast rides HX-Trigger.
+    return await _rerender_board_with_toast(request, db, user, form, msg)
 
 
 @router.post("/v2/partials/sightings/batch-status", response_class=HTMLResponse)
@@ -1270,9 +1321,11 @@ async def sightings_batch_status(
     if skipped:
         msg += f" {skipped} skipped (invalid transition)."
     level = "success" if skipped == 0 else "warning"
-    # Empty body + HX-Trigger:showToast — the working toast bridge (htmx_app.js). The
-    # form posts hx-swap="none", so there is no body to swap and nothing is wiped.
-    return _with_toast(HTMLResponse(""), msg, level)
+    # Re-render the board so the updated rows show their fresh status in place (the form
+    # targets #sightings-table with hx-swap="innerHTML"). include_status=False: the
+    # ``status`` field here is the applied TARGET, not a board filter, so the refresh shows
+    # all statuses and the just-moved rows stay visible with their new badges.
+    return await _rerender_board_with_toast(request, db, user, form, msg, level, include_status=False)
 
 
 @router.post("/v2/partials/sightings/batch-notes", response_class=HTMLResponse)
@@ -1321,8 +1374,9 @@ async def sightings_batch_notes(
 
     count = len(reqs)
     msg = f"Added note to {count} requirement{'s' if count != 1 else ''}"
-    # Empty body + HX-Trigger:showToast (form posts hx-swap="none").
-    return _with_toast(HTMLResponse(""), msg)
+    # Re-render the board so the noted rows reflect the activity in place (the form targets
+    # #sightings-table with hx-swap="innerHTML"). The toast rides HX-Trigger.
+    return await _rerender_board_with_toast(request, db, user, form, msg)
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/unavailable-form", response_class=HTMLResponse)
