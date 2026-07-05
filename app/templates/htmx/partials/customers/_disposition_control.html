@@ -26,17 +26,18 @@
       </select>
     </form>
   </div>
-  {# Send to Prospecting — relinquishes ownership + pools the account.
+  {# Park in prospecting (SP4 manual park) — relinquishes ownership + pools the account
+     with sales-park provenance for anyone to pick up.
      Targets `closest [data-detail-root]` (not #cdm-detail) so it re-swaps the detail
      partial in both the CDM workspace and the standalone/deep-linked full-page view. #}
   <form hx-post='/v2/partials/customers/{{ company.id }}/send-to-prospecting'
         hx-target='closest [data-detail-root]'
         hx-swap='outerHTML'
-        hx-confirm='Send {{ company.name }} back to prospecting? This clears your ownership.'>
+        hx-confirm='Park {{ company.name }} in prospecting? This clears your ownership and returns it to the pool for anyone to pick up.'>
     <button type='submit'
             class='inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500'
-            title='Relinquish ownership and return this account to the prospecting pool'>
-      Send to Prospecting
+            title='Relinquish ownership and park this account in the prospecting pool'>
+      Park in prospecting
     </button>
   </form>
 </div>

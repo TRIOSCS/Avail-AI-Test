@@ -465,13 +465,20 @@ async def create_company(
                             from ...services.customer_enrichment_service import enrich_customer_account
 
                             waterfall = await enrich_customer_account(cid, s, force=True)
-                            if waterfall.get("contacts_added", 0) > 0:
+                            # Commit on ANY successful run so both the discovered contacts
+                            # and the enrichment_at/status stamp (the cooldown clock) persist
+                            # — even when the run added 0 contacts (providers degraded, or the
+                            # account was already covered). Previously only >0 committed, so a
+                            # degraded run left no cooldown and re-enriched on every trigger.
+                            if waterfall.get("ok"):
                                 s.commit()
-                                logger.info(
-                                    "Auto-enriched company {}: {} contacts via waterfall",
-                                    cid,
-                                    waterfall["contacts_added"],
-                                )
+                                added = waterfall.get("contacts_added", 0)
+                                if added:
+                                    logger.info(
+                                        "Auto-enriched company {}: {} contacts via waterfall",
+                                        cid,
+                                        added,
+                                    )
                         except Exception as we:
                             logger.warning("Waterfall auto-enrich error for company {}: {}", cid, we)
                             s.rollback()

@@ -27,6 +27,50 @@ from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 # startup cooldown backfill (app/startup.py).
 RECLAIM_COOLDOWN_DAYS = settings.account_sweep_reclaim_cooldown_days
 
+# ── Manual park (SP4 Task 1) ──────────────────────────────────────────────────
+
+
+def park_company_in_prospecting(company_id: int, user_id: int, db: Session, *, is_admin: bool = False) -> dict:
+    """Manually park a CRM Company into the prospecting pool (SP4 "Park in
+    prospecting").
+
+    The rep/manual counterpart to the 90-day auto-sweep: reuses
+    ``prospect_claim.send_company_to_prospecting`` (clear ownership + find-or-create the
+    pooled SUGGESTED ProspectAccount by domain) and then stamps the SP4 sales-park
+    provenance (``discovery_source="sales_park"``, ``parked_by_id``) so the pool row records
+    who parked it and why. Unlike the auto-sweep it sets NO reclaim cooldown — a manually
+    parked account is immediately claimable by anyone (Idea O: Claim/Dismiss for reps,
+    Assign for managers).
+
+    Permission is enforced by ``send_company_to_prospecting`` (owner-or-admin); callers pass
+    ``is_admin=is_manager_or_admin(user)`` so a manager can park any account while a rep can
+    park only their own.
+
+    Returns: ``send_company_to_prospecting``'s result + ``{"discovery_source",
+    "parked_by_id"}``.
+    Raises: LookupError (company missing), ValueError (permission denied).
+
+    Called by: app/routers/htmx/companies.py (the "Park in prospecting" detail action).
+    Note: does NOT touch the 45d/30d auto-sweep or its alerts.
+    """
+    from .prospect_claim import send_company_to_prospecting
+
+    result = send_company_to_prospecting(company_id, user_id, db, is_admin=is_admin)
+
+    prospect_id = result.get("prospect_id")
+    if prospect_id:
+        pa = db.get(ProspectAccount, prospect_id)
+        if pa is not None:
+            pa.discovery_source = "sales_park"
+            pa.parked_by_id = user_id
+            db.commit()
+
+    result["discovery_source"] = "sales_park" if prospect_id else None
+    result["parked_by_id"] = user_id if prospect_id else None
+    logger.info("SP4 manual park: user {} parked company {} (prospect {})", user_id, company_id, prospect_id)
+    return result
+
+
 # ── Internal DB-injectable sweep (testable) ───────────────────────────────────
 
 

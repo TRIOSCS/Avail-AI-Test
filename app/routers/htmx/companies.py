@@ -2089,15 +2089,25 @@ async def send_company_to_prospecting_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Send an owned account back to the prospecting pool.
+    """Park an owned account into the prospecting pool (SP4 "Park in prospecting").
 
-    Owner-or-admin only. Clears ownership, surfaces the account as a SUGGESTED prospect
-    (by domain), and re-renders the company detail partial with a toast.
+    Gate: the account owner OR a manager/admin (``can_manage_account_team``) — else 403.
+    Clears ownership, surfaces the account as a SUGGESTED prospect (by domain) stamped with
+    the SP4 sales-park provenance (``discovery_source="sales_park"``, ``parked_by_id``), and
+    returns a toast. A manager/admin — who still oversees the now-unassigned account — gets
+    the re-rendered detail partial; the former owner, who just relinquished access, is
+    redirected back to the customers list (re-rendering the detail would 404 for them).
     """
-    from ...services.prospect_claim import send_company_to_prospecting
+    from ...services.prospect_reclamation import park_company_in_prospecting
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account_team(user, company):
+        raise HTTPException(403, "Only the account owner or a manager can park this account")
 
     try:
-        result = send_company_to_prospecting(company_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+        result = park_company_in_prospecting(company_id, user.id, db, is_admin=is_manager_or_admin(user))
     except LookupError:
         raise HTTPException(404, "Company not found")
     except ValueError as e:
@@ -2108,11 +2118,20 @@ async def send_company_to_prospecting_htmx(
     invalidate_prefix("company_list")
     invalidate_prefix("companies_typeahead")
 
-    msg = f"Sent {result['company_name']} back to prospecting"
+    msg = f"Parked {result['company_name']} in prospecting"
     if not result["pooled"]:
         msg += " (no domain — ownership cleared, not pooled)"
-    response = await company_detail_partial(request, company_id, user=user, db=db)
-    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    trigger = json.dumps({"showToast": {"message": msg}})
+
+    if is_manager_or_admin(user):
+        response = await company_detail_partial(request, company_id, user=user, db=db)
+        response.headers["HX-Trigger"] = trigger
+        return response
+
+    # Former owner relinquished access — send them back to the customers list.
+    response = HTMLResponse("")
+    response.headers["HX-Redirect"] = "/v2/customers"
+    response.headers["HX-Trigger"] = trigger
     return response
 
 
