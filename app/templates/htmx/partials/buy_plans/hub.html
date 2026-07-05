@@ -53,12 +53,16 @@
 
   {# ── Lazy body ──
      The active stage key maps to its dash-cased tab body URL (buy_plans → buy-plans).
+     With start_new set (?new=1 — the Approvals "New Buy Plan" entry point, epic H) the body
+     lands straight on the Sales-Order origination picker instead of a lens; the picker still
+     renders into #bp-hub-body so its requisition links resolve exactly as usual.
      LANDMINE: hx-trigger="load" MUST carry the explicit hx-target="#bp-hub-body".
      Without it the element inherits #main-content's hx-target="this" and the load
      wipes the whole page (known cards-vanish regression). #}
   {% set lens_path = lens | replace('_', '-') %}
+  {% set body_url = '/v2/partials/buy-plans/sales-orders/new' if start_new else '/v2/partials/buy-plans/' ~ lens_path %}
   <div id="bp-hub-body"
-       hx-get="/v2/partials/buy-plans/{{ lens_path }}"
+       hx-get="{{ body_url }}"
        hx-trigger="load"
        hx-target="#bp-hub-body"
        hx-swap="innerHTML">

@@ -19,6 +19,14 @@
   <div class="flex items-center justify-between">
     <h2 class="h2">Buy Plans / Sales Orders <span class="text-sm font-normal text-gray-500">({{ rows | length }})</span></h2>
     <div class="flex items-center gap-2">
+      {# New Buy Plan (epic H) — surfaces the create flow on this console. Loads the Buy Plans
+         hub landed straight on the Sales-Order origination picker (?new=1); the picker renders
+         into #bp-hub-body inside that shell, so its requisition links resolve normally. #}
+      <a hx-get="/v2/partials/buy-plans?new=1" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+         class="btn-primary btn-sm inline-flex items-center gap-1 cursor-pointer" title="Start a new buy plan">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Buy Plan
+      </a>
       {# Export CSV — a REAL browser download: hx-boost="false" opts this anchor out of the
          app's nav-boost so it does a plain GET that streams the file (never swapping into
          #main-content). ?scope forwards the current SEE-ALL / SEE-MINE toggle. #}
@@ -32,36 +40,58 @@
   <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
     {% for row in rows %}
     {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan_id %}
-    <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-4 py-2.5">
-      {# identity: customer + Plan #/SO# (whole cell links to the plan detail) #}
+    {% set gp_margin = row.margin_pct | float if row.margin_pct is not none else none %}
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-2.5">
+      {# identity: customer + Plan #/SO# + part count (whole cell links to the plan detail) #}
       <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ detail_url | replace('/partials', '') }}"
          class="min-w-0 cursor-pointer group">
         <div class="text-sm font-semibold text-gray-900 truncate group-hover:text-accent-600">{{ row.customer_name or ('Plan #' ~ row.plan_id) }}</div>
         <div class="text-tertiary truncate">
           Plan #{{ row.plan_id }}{% if row.so_number %} · <span class="font-mono">SO {{ row.so_number }}</span>{% endif %}
+          · {{ row.part_count }} part{{ 's' if row.part_count != 1 }}
         </div>
       </a>
-      {# lifecycle status badge — the tracking signal (reuses the canonical status_badge) #}
-      <span>{{ status_badge(row.status) }}</span>
-      {# value #}
-      <span class="text-sm font-semibold tabular-nums text-gray-900 text-right w-24">
-        {%- if row.amount is not none -%}${{ '{:,.0f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
-      </span>
-      {# action rail: inline decide only where the viewer may approve this plan now #}
-      <div class="justify-self-end">
-        {% if row.can_decide %}
-        <form hx-post="{{ detail_url }}/approve" hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false"
-              class="flex items-center gap-1.5">
-          <input type="hidden" name="origin" value="approvals_hub">
-          <input type="hidden" name="hub_scope" value="{{ scope }}">
-          <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Approve</button>
-          {# Reject needs a reason — open the detail screen where the reason modal lives. #}
-          <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ detail_url | replace('/partials', '') }}"
-             class="btn-secondary btn-sm cursor-pointer">Review</a>
-        </form>
-        {% else %}
-        <span class="text-xs font-medium text-accent-600 whitespace-nowrap">View &rarr;</span>
-        {% endif %}
+      {# right rail: money figures (Cost · Rev · Sales GP) + status + action #}
+      <div class="flex items-center gap-4 flex-shrink-0">
+        <div class="hidden sm:flex items-center gap-4 text-right tabular-nums">
+          <div class="w-20">
+            <div class="text-[11px] uppercase tracking-wide text-gray-400">Cost</div>
+            <div class="text-sm font-medium text-gray-700">
+              {%- if row.amount is not none -%}${{ '{:,.0f}'.format(row.amount | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+            </div>
+          </div>
+          <div class="w-20">
+            <div class="text-[11px] uppercase tracking-wide text-gray-400">Rev</div>
+            <div class="text-sm font-semibold text-gray-900">
+              {%- if row.revenue is not none -%}${{ '{:,.0f}'.format(row.revenue | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+            </div>
+          </div>
+          <div class="w-24">
+            <div class="text-[11px] uppercase tracking-wide text-gray-400">Sales GP</div>
+            <div class="text-sm font-semibold {% if gp_margin is not none and gp_margin >= 30 %}text-emerald-700{% elif gp_margin is not none and gp_margin >= 15 %}text-amber-700{% elif gp_margin is not none %}text-rose-700{% else %}text-gray-700{% endif %}">
+              {%- if row.gross_profit is not none -%}${{ '{:,.0f}'.format(row.gross_profit | float) }}{%- else -%}<span class="text-gray-400">—</span>{%- endif -%}
+              {%- if gp_margin is not none %} · {{ '{:.0f}'.format(gp_margin) }}%{% endif -%}
+            </div>
+          </div>
+        </div>
+        {# lifecycle status badge — the tracking signal (reuses the canonical status_badge) #}
+        <span>{{ status_badge(row.status) }}</span>
+        {# action rail: inline decide only where the viewer may approve this plan now #}
+        <div class="justify-self-end">
+          {% if row.can_decide %}
+          <form hx-post="{{ detail_url }}/approve" hx-target="#ap-hub-body" hx-swap="innerHTML" hx-push-url="false"
+                class="flex items-center gap-1.5">
+            <input type="hidden" name="origin" value="approvals_hub">
+            <input type="hidden" name="hub_scope" value="{{ scope }}">
+            <button type="submit" name="action" value="approve" data-loading-disable class="btn-primary btn-sm">Approve</button>
+            {# Reject needs a reason — open the detail screen where the reason modal lives. #}
+            <a hx-get="{{ detail_url }}" hx-target="#main-content" hx-push-url="{{ detail_url | replace('/partials', '') }}"
+               class="btn-secondary btn-sm cursor-pointer">Review</a>
+          </form>
+          {% else %}
+          <span class="text-xs font-medium text-accent-600 whitespace-nowrap">View &rarr;</span>
+          {% endif %}
+        </div>
       </div>
     </div>
     {% endfor %}

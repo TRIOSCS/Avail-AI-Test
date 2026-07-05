@@ -1,8 +1,9 @@
 """routers/htmx/buy_plans.py — Buy Plans / Approvals partial views (HTMX + Alpine).
 
 Server-rendered HTML partials for the Approvals (Buy Plans) hub: the two-tab lens
-shell (My Queue + Pipeline), sales-order new/create, buy-plan detail, and per-plan
-lifecycle actions (submit, approve, halt, confirm-po, resource, claim, verify-po,
+shell (My Queue + Pipeline), sales-order new/create, buy-plan detail, editable lines
+(add/edit/remove — role×status gated), the SO-number field, and per-plan lifecycle
+actions (submit, approve, halt, resume, confirm-po, resource, claim, verify-po,
 issue, cancel, reset). Plus the legacy /v2/buy-plans full-page redirect.
 
 Called by: app/main.py (router mount).
@@ -29,6 +30,7 @@ from ...constants import (
 from ...database import get_db
 from ...dependencies import (
     get_buyplan_for_user,
+    is_manager_or_admin,
     require_access,
     require_buyplan_approver,
     require_buyplan_po_approver,
@@ -93,6 +95,26 @@ def _require_po_cutter(user: User) -> None:
         raise HTTPException(403, "Only buyers and managers can re-source / claim lines")
 
 
+def _parse_optional_int(raw: str | None) -> int | None:
+    """Parse an optional whole-number form field: blank → None; non-numeric → 400."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Expected a whole number.")
+
+
+def _parse_optional_float(raw: str | None) -> float | None:
+    """Parse an optional decimal form field: blank → None; non-numeric → 400."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Expected a number.")
+
+
 _APPROVALS_TABS = ("my_queue", "pipeline")
 
 
@@ -112,6 +134,7 @@ def _default_lens(user: User, db: Session) -> str:
 async def buy_plans_list_partial(
     request: Request,
     lens: str = "",
+    new: bool = False,
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
@@ -121,6 +144,11 @@ async def buy_plans_list_partial(
     into ``#bp-hub-body``. Row data is fetched by the body, not here. This is the personal
     "what needs YOU" hub at /v2/buy-plans; the org-wide 3-tab decide console lives
     separately at /v2/approvals (routers/htmx/approvals_hub.py).
+
+    ``new=1`` lands the hub directly on the Sales-Order origination picker (the create
+    flow) instead of a lens body — the entry point the Approvals Buy-Plans tab links to
+    (epic H). The picker still renders into ``#bp-hub-body``, so its inner requisition
+    links resolve exactly as they do from the hub's own "New Buy Plan" button.
     """
     active_lens = lens if lens in _APPROVALS_TABS else _default_lens(user, db)
 
@@ -135,6 +163,7 @@ async def buy_plans_list_partial(
         {
             "lens": active_lens,
             "alert_markers": alert_markers,
+            "start_new": new,
         }
     )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
@@ -466,10 +495,39 @@ async def buy_plan_detail_partial(
         ],
     )
 
-    from ...services.buyplan_workflow import plan_needs_approver_reason
+    from ...services.buyplan_workflow import can_edit_buy_plan_lines, plan_needs_approver_reason
     from ...services.prepayment_service import prepayment_state_for_lines
 
     lines = bp.lines or []
+
+    # Editing surface (epics I/J/K). ``can_edit_lines`` is the SAME server-side gate the
+    # add/edit/remove endpoints enforce, so the template hides the controls with the exact
+    # predicate the POSTs check (never UI-only). ``can_manage_plan`` = owner-or-manager, the
+    # gate the Cancel + SO-number endpoints enforce. Offers/requirements power the vendor
+    # picker + add-line form; loaded only when the viewer can actually edit (no wasted query).
+    can_edit_lines = can_edit_buy_plan_lines(user, bp)
+    can_manage_plan = is_manager_or_admin(user) or (bp.requisition and bp.requisition.created_by == user.id)
+    terminal = bp.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value)
+    offers_by_requirement: dict[int, list] = {}
+    plan_requirements: list = []
+    if can_edit_lines:
+        from ...constants import OfferStatus
+        from ...models import Offer, Requirement
+
+        plan_requirements = (
+            db.query(Requirement).filter(Requirement.requisition_id == bp.requisition_id).order_by(Requirement.id).all()
+        )
+        active_offers = (
+            db.query(Offer)
+            .options(joinedload(Offer.vendor_card))
+            .filter(Offer.requisition_id == bp.requisition_id, Offer.status == OfferStatus.ACTIVE.value)
+            .order_by(Offer.unit_price)
+            .all()
+        )
+        for off in active_offers:
+            if off.requirement_id is not None:
+                offers_by_requirement.setdefault(off.requirement_id, []).append(off)
+
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
@@ -480,6 +538,15 @@ async def buy_plan_detail_partial(
             # Supervisors/ops resolve flagged-issue lines (the buyer who raised them can't).
             "can_supervise": _can_supervise(user, db),
             "user": user,
+            # Line-editing gate (epic I) + owner/manager gate for Cancel + SO number (J/K).
+            "can_edit_lines": can_edit_lines,
+            "can_manage_plan": can_manage_plan,
+            # Resume is manager-only and only meaningful on a halted plan (epic K).
+            "can_resume": is_manager_or_admin(user) and bp.status == BuyPlanStatus.HALTED.value,
+            # SO number is editable by owner/manager at any non-terminal status (epic J).
+            "can_edit_so": can_manage_plan and not terminal,
+            "offers_by_requirement": offers_by_requirement,
+            "plan_requirements": plan_requirements,
             # Most-urgent flag reason so the indicator states the issue at first glance.
             "top_flag": summarize_top_flag(bp.ai_flags),
             # Why the plan is silently stalled for lack of a configured approver (or None).
@@ -698,8 +765,14 @@ async def buy_plan_halt_partial(
     form = await request.form()
     origin = form.get("origin", "")
 
+    # A halt is an off-ramp on a money-governing deal — the reason is required so the case
+    # report + salesperson notification always say WHY (stored on so_rejection_note; no column).
+    reason = (form.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "A reason is required to halt a buy plan.")
+
     try:
-        plan = halt_plan(plan_id, user, db, reason=form.get("reason"))
+        plan = halt_plan(plan_id, user, db, reason=reason)
         db.commit()
         await run_notify_bg(notify_so_rejected, plan.id, action="halt")
     except PermissionError as e:
@@ -983,18 +1056,186 @@ async def buy_plan_cancel_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Cancel a buy plan — delegates to the service (line cascade + notification)."""
+    """Cancel a buy plan — delegates to the service (line cascade + notification).
+
+    Gated to the plan owner (salesperson) or a manager/admin (epic K): a non-owner restricted
+    role 404s at ``get_buyplan_for_user``; a non-owner non-manager (e.g. a buyer on someone
+    else's plan) 403s. The cancellation reason is REQUIRED (400 if blank).
+    """
     from ...services.buyplan_notifications import notify_cancelled, run_notify_bg
     from ...services.buyplan_workflow import cancel_buy_plan
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
+    if not (is_manager_or_admin(user) or (plan.requisition and plan.requisition.created_by == user.id)):
+        raise HTTPException(403, "Only the plan owner or a manager can cancel this buy plan.")
+
+    form = await request.form()
+    reason = (form.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "A reason is required to cancel a buy plan.")
+
+    try:
+        plan = cancel_buy_plan(plan_id, user, db, reason=reason)
+        db.commit()
+        await run_notify_bg(notify_cancelled, plan.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/resume", response_class=HTMLResponse)
+async def buy_plan_resume_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Resume a HALTED plan back to ACTIVE — manager-only (epic K).
+
+    Unlike Reset (which returns to DRAFT and nulls the halt audit), Resume preserves
+    ``halted_by/at`` as the halt→resume history. The service raises PermissionError for a
+    non-manager (→ 403) and ValueError for a non-halted plan (→ 400).
+    """
+    from ...services.buyplan_workflow import resume_plan
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    try:
+        resume_plan(plan_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/so-number", response_class=HTMLResponse)
+async def buy_plan_set_so_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set/edit the plan's active Sales Order number (epic J).
+
+    Owner (salesperson) or manager, at any non-terminal status. A non-owner restricted
+    role 404s; a non-owner non-manager 403s; a terminal plan 400s (service ValueError).
+    """
+    from ...services.buyplan_workflow import set_sales_order_number
+
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
+    if not (is_manager_or_admin(user) or (plan.requisition and plan.requisition.created_by == user.id)):
+        raise HTTPException(403, "Only the plan owner or a manager can edit the Sales Order number.")
+
+    form = await request.form()
+    try:
+        set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/add", response_class=HTMLResponse)
+async def buy_plan_add_line_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a line (vendor offer + qty + sell) to an editable plan (epic I).
+
+    Role×status gate is enforced in the service (PermissionError → 403). Bad input (non-
+    numeric / missing offer / wrong requisition) → 400.
+    """
+    from ...services.buyplan_workflow import add_buy_plan_line
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     try:
-        plan = cancel_buy_plan(plan_id, user, db, reason=form.get("reason"))
+        requirement_id = int(form.get("requirement_id") or 0)
+        offer_id = int(form.get("offer_id") or 0)
+        quantity = int(form.get("quantity") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Requirement, vendor offer and a whole-number quantity are required.")
+    unit_sell = _parse_optional_float(form.get("unit_sell"))
+
+    try:
+        add_buy_plan_line(plan_id, requirement_id, offer_id, quantity, user, db, unit_sell=unit_sell)
         db.commit()
-        await run_notify_bg(notify_cancelled, plan.id)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/edit", response_class=HTMLResponse)
+async def buy_plan_edit_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Edit a line's qty / sell price / vendor(offer) on an editable plan (epic I).
+
+    Only the submitted fields change (blank = unchanged). Role×status gate in the
+    service (PermissionError → 403); a cut-PO vendor/qty change or bad input → 400.
+    """
+    from ...services.buyplan_workflow import edit_buy_plan_line
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    form = await request.form()
+    quantity = _parse_optional_int(form.get("quantity"))
+    unit_sell = _parse_optional_float(form.get("unit_sell"))
+    offer_id = _parse_optional_int(form.get("offer_id"))
+
+    try:
+        edit_buy_plan_line(plan_id, line_id, user, db, quantity=quantity, unit_sell=unit_sell, offer_id=offer_id)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/remove", response_class=HTMLResponse)
+async def buy_plan_remove_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a line from an editable plan (epic I).
+
+    Role×status gate in the service (PermissionError → 403); removing a cut-PO line →
+    400.
+    """
+    from ...services.buyplan_workflow import remove_buy_plan_line
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    try:
+        remove_buy_plan_line(plan_id, line_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

@@ -86,23 +86,34 @@
           Halt
         </button>
         {% endif %}
-        {# Cancel/Reset only shown here when NOT in action banner #}
-        {% if not has_action_banner %}
-          {% if bp.status in ('halted', 'cancelled') %}
-          <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
-                  hx-target="#main-content"
-                  hx-confirm="Reset this buy plan to draft?"
-                  data-loading-disable
-                  class="btn btn-secondary btn-sm">
-            Reset to Draft
-          </button>
-          {% endif %}
-          {% if bp.status not in ('completed', 'cancelled') %}
-          <button @click="modalType = 'cancel'; showModal = true"
-                  class="btn btn-secondary btn-sm">
-            Cancel
-          </button>
-          {% endif %}
+        {# Resume — manager-only, un-halts back to ACTIVE (epic K). Preserves the halt audit
+           (NOT a reset). Shown only on a halted plan for a manager. #}
+        {% if can_resume %}
+        <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/resume"
+                hx-target="#main-content"
+                hx-confirm="Resume this halted buy plan back to active?"
+                data-loading-disable
+                class="btn btn-primary btn-sm">
+          Resume
+        </button>
+        {% endif %}
+        {# Reset to Draft — owner's re-work path, only when not driven by the action banner. #}
+        {% if bp.status in ('halted', 'cancelled') and not has_action_banner %}
+        <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
+                hx-target="#main-content"
+                hx-confirm="Reset this buy plan to draft?"
+                data-loading-disable
+                class="btn btn-secondary btn-sm">
+          Reset to Draft
+        </button>
+        {% endif %}
+        {# Cancel — owner (salesperson) or manager, any non-terminal status (epic K). Reason
+           required (enforced in the modal + server). #}
+        {% if can_manage_plan and bp.status not in ('completed', 'cancelled') %}
+        <button @click="modalType = 'cancel'; showModal = true"
+                class="btn btn-secondary btn-sm">
+          Cancel
+        </button>
         {% endif %}
       </div>
     </div>
@@ -126,7 +137,29 @@
            class="font-mono text-brand-600 hover:text-brand-500 cursor-pointer">{{ bp.quote.quote_number }}</a>
         {% else %}-{% endif %}
       </span>
+      {# SO number — inline-editable for the owner/manager at any non-terminal status (epic J).
+         Own Alpine scope in a SINGLE-quoted attribute so the |tojson seed can't break init. #}
+      {% if can_edit_so %}
+      <span x-data='{ editing: false, val: {{ (bp.sales_order_number or "") | tojson }} }' class="inline-flex items-center gap-1">
+        <template x-if="!editing">
+          <span class="inline-flex items-center gap-1">
+            SO: <span class="font-mono">{{ bp.sales_order_number or '—' }}</span>
+            <button type="button" @click="editing = true" class="text-brand-500 hover:text-brand-600 text-xs font-medium">Edit</button>
+          </span>
+        </template>
+        <template x-if="editing">
+          <span class="inline-flex items-center gap-1.5">
+            SO: <input x-model="val" type="text" class="input input-sm w-40" placeholder="Sales Order #">
+            <button type="button" data-loading-disable
+                    @click="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/so-number', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {sales_order_number: val}}); editing = false"
+                    class="btn btn-primary btn-sm">Save</button>
+            <button type="button" @click="editing = false" class="btn btn-secondary btn-sm">Cancel</button>
+          </span>
+        </template>
+      </span>
+      {% else %}
       <span>SO: <span class="font-mono">{{ bp.sales_order_number or '-' }}</span></span>
+      {% endif %}
       {% if bp.customer_po_number %}
       <span>CPO: <span class="font-mono">{{ bp.customer_po_number }}</span></span>
       {% endif %}
@@ -288,19 +321,20 @@
       <template x-if="modalType === 'halt'" x-cloak>
         <div x-data="{ reason: '' }">
           <h3 class="h2 mb-4">Halt Buy Plan</h3>
-          <p class="text-sm text-gray-600 mb-3">This stops everything. The plan can be reset to draft and resubmitted later.</p>
+          <p class="text-sm text-gray-600 mb-3">This stops everything. A manager can resume it, or it can be reset to draft and resubmitted later.</p>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-            <textarea x-model="reason" rows="2"
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason <span class="text-rose-500">*</span></label>
+            <textarea x-model="reason" rows="2" required
                       class="input w-full"
                       placeholder="Why is this being halted?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
             {# Imperative htmx.ajax so the confirm works inside this <template x-if> clone
-               (a static hx-post would be dead). Reason is optional (service default). #}
+               (a static hx-post would be dead). Reason is REQUIRED (epic K): the short-circuit
+               guard keeps the modal open on empty input; the server also 400s a blank reason. #}
             <button type="button"
-                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/halt', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}); showModal = false"
+                    @click.prevent="reason.trim() && (htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/halt', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}), showModal = false)"
                     data-loading-disable
                     class="btn btn-danger">
               Halt Plan
@@ -315,17 +349,18 @@
         <div x-data="{ reason: '' }">
           <h3 class="h2 mb-4">Cancel Buy Plan</h3>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-            <textarea x-model="reason" rows="2"
+            <label class="block text-sm font-medium text-gray-700 mb-1">Reason <span class="text-rose-500">*</span></label>
+            <textarea x-model="reason" rows="2" required
                       class="input w-full"
                       placeholder="Why is this being cancelled?"></textarea>
           </div>
           <div class="mt-5 flex justify-end gap-2">
             {{ modal_cancel_btn() }}
             {# Imperative htmx.ajax so the confirm works inside this <template x-if> clone
-               (a static hx-post would be dead). Reason is optional (service default). #}
+               (a static hx-post would be dead). Reason is REQUIRED (epic K): the short-circuit
+               guard keeps the modal open on empty input; the server also 400s a blank reason. #}
             <button type="button"
-                    @click.prevent="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/cancel', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}); showModal = false"
+                    @click.prevent="reason.trim() && (htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/cancel', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {reason: reason}}), showModal = false)"
                     data-loading-disable
                     class="btn btn-danger">
               Cancel Plan

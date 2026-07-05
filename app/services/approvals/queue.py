@@ -190,6 +190,10 @@ class PlanTrackingRow:
     ``can_decide`` marks a plan the viewer may approve inline (an open BUY_PLAN request on
     which they hold a PENDING recipient slot); every other plan renders as a status-only
     tracking row.
+
+    ``amount`` is the plan cost (Σ line cost). ``revenue`` (Σ line sell), ``gross_profit``
+    (revenue − cost, $) and ``margin_pct`` (%) are the free header rollups already persisted
+    on the plan; ``part_count`` is the plan's line count (one batched aggregate, no N+1).
     """
 
     plan_id: int
@@ -198,6 +202,10 @@ class PlanTrackingRow:
     so_number: str | None
     amount: Decimal | None
     can_decide: bool
+    revenue: Decimal | None = None
+    gross_profit: Decimal | None = None
+    margin_pct: Decimal | None = None
+    part_count: int = 0
 
 
 def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> list[PlanTrackingRow]:
@@ -251,6 +259,16 @@ def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> li
     for p in db.execute(recent).unique().scalars():
         plans.setdefault(p.id, p)
 
+    # Part count per plan — ONE batched aggregate for the whole page (no per-row join / N+1).
+    part_counts: dict[int, int] = {}
+    if plans:
+        for plan_id, cnt in db.execute(
+            select(BuyPlanLine.buy_plan_id, func.count(BuyPlanLine.id))
+            .where(BuyPlanLine.buy_plan_id.in_(list(plans.keys())))
+            .group_by(BuyPlanLine.buy_plan_id)
+        ).all():
+            part_counts[plan_id] = int(cnt)
+
     out = [
         PlanTrackingRow(
             plan_id=p.id,
@@ -262,6 +280,14 @@ def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> li
             so_number=p.sales_order_number,
             amount=p.total_cost,
             can_decide=p.id in decidable_plan_ids,
+            # Revenue / Sales-GP are free header rollups (already persisted on the plan);
+            # gross_profit = revenue − cost when both are present.
+            revenue=p.total_revenue,
+            gross_profit=(
+                p.total_revenue - p.total_cost if p.total_revenue is not None and p.total_cost is not None else None
+            ),
+            margin_pct=p.total_margin_pct,
+            part_count=part_counts.get(p.id, 0),
         )
         for p in plans.values()
     ]

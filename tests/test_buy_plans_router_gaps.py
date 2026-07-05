@@ -366,7 +366,7 @@ def test_halt_permission_error(client, buy_plan):
     ):
         resp = client.post(
             f"/v2/partials/buy-plans/{buy_plan.id}/halt",
-            data={},
+            data={"reason": "stop"},
         )
     assert resp.status_code == 403
 
@@ -379,8 +379,14 @@ def test_halt_value_error(client, buy_plan):
     ):
         resp = client.post(
             f"/v2/partials/buy-plans/{buy_plan.id}/halt",
-            data={},
+            data={"reason": "stop"},
         )
+    assert resp.status_code == 400
+
+
+def test_halt_blank_reason_400(client, buy_plan):
+    """A blank halt reason is rejected BEFORE the service runs (epic K)."""
+    resp = client.post(f"/v2/partials/buy-plans/{buy_plan.id}/halt", data={"reason": "  "})
     assert resp.status_code == 400
 
 
@@ -397,7 +403,7 @@ def test_halt_origin_my_queue(client, buy_plan):
             ):
                 resp = client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/halt",
-                    data={"origin": "my_queue"},
+                    data={"origin": "my_queue", "reason": "stop"},
                 )
     assert resp.status_code == 200
 
