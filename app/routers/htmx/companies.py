@@ -22,7 +22,7 @@ import json
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -2950,6 +2950,43 @@ async def contacts_tab_create(
 # ── Suggested-contacts UI (account-building loop) ──────────────────────
 
 
+async def _run_contact_discovery(company_id: int, domain: str, name: str) -> None:
+    """Background worker: run the contact-discovery waterfall for one company.
+
+    Scheduled by ``contacts_tab_suggested`` (the "Find contacts" button) so the click never
+    blocks on the ~10-40s of external-provider calls (``find_suggested_contacts_with_errors``:
+    Hunter/Clay/Lusha/Explorium). The transient result (discovered contacts + which providers
+    errored) is recorded in ``contact_discovery_runs`` so the status poller can render the same
+    ``_suggested_contacts.html`` panel the old synchronous path produced.
+
+    This is a pure external-API call — it never touches the DB — so, unlike the account-enrich
+    runner, it opens no session. It degrades gracefully: any failure is folded into
+    ``errored_providers`` (the amber "couldn't reach" banner), mirroring the old inline
+    behavior. Must NEVER raise: it is a fire-and-forget task.
+    """
+    from app.enrichment_service import find_suggested_contacts_with_errors
+    from app.services.contact_discovery_runs import ContactDiscoveryOutcome, contact_discovery_runs
+
+    suggested: list[dict] = []
+    errored: list[str] = []
+    try:
+        suggested, errored = await find_suggested_contacts_with_errors(domain, name)
+    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
+        import httpx
+
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+            logger.warning("Contact discovery connectivity error for company {}: {}", company_id, exc)
+        else:
+            logger.error("Contact discovery unexpected error for company {}: {}", company_id, exc, exc_info=True)
+        suggested = []
+        errored = ["all"]
+    finally:
+        contact_discovery_runs.finish(
+            company_id,
+            ContactDiscoveryOutcome(suggested=suggested, errored_providers=errored),
+        )
+
+
 @router.get(
     "/v2/partials/customers/{company_id}/suggested-contacts",
     response_class=HTMLResponse,
@@ -2957,19 +2994,20 @@ async def contacts_tab_create(
 async def contacts_tab_suggested(
     request: Request,
     company_id: int,
+    background_tasks: BackgroundTasks,
     domain: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return suggested-contacts partial for the Contacts tab.
+    """The "Find contacts" button — **enqueue** the discovery waterfall, return a
+    poller.
 
-    Calls the enrichment waterfall and renders _suggested_contacts.html with:
-    - per-row Add buttons (hx-post to /suggested-contacts/add)
-    - zero results + no errors → neutral "No contacts found"
-    - zero results + provider errors → amber "Couldn't reach <provider>" state
+    The multi-provider suggested-contacts waterfall (Hunter/Clay/Lusha/Explorium, ~10-40s)
+    used to run INLINE here, so the click felt hung. It now schedules that work as a FastAPI
+    background task and returns the "Finding contacts…" poller immediately; the status route
+    (:contacts_tab_suggested_status) swaps in the ``_suggested_contacts.html`` result panel
+    once the run lands (or the amber "couldn't reach" banner if providers degraded).
     """
-    from app.enrichment_service import find_suggested_contacts_with_errors
-
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
@@ -2982,40 +3020,74 @@ async def contacts_tab_suggested(
     # Normalize (strip scheme/www/path)
     domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
 
+    from app.services.contact_discovery_runs import contact_discovery_runs
+
+    # Double-enqueue guard: a run already in flight must not stack a second waterfall.
+    if contact_discovery_runs.begin(company_id):
+        background_tasks.add_task(_run_contact_discovery, company_id, domain, company.name or "")
+
+    return template_response(
+        "htmx/partials/customers/tabs/_suggested_contacts_finding.html",
+        {"request": request, "company": company},
+    )
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/suggested-contacts/status",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_suggested_status(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll target for the "Finding contacts…" panel — reflects the background run's
+    state.
+
+    While the run is in flight, re-renders the poller (keep polling). When it lands, returns
+    the ``_suggested_contacts.html`` result panel (discovered contacts / neutral empty state /
+    amber "couldn't reach" banner) and answers HTTP 286 to STOP polling. A deleted company or
+    an already-consumed outcome stops polling with an empty body.
+    """
+    from app.services.contact_discovery_runs import contact_discovery_runs
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        # Polling sub-resource: htmx neither swaps nor cancels an `every 2s` poll on a 4xx,
+        # so a 404 would leave the panel hammering this route. 286 stops it; empty clears it.
+        return HTMLResponse("", status_code=286)
+
+    if contact_discovery_runs.is_running(company_id):
+        return template_response(
+            "htmx/partials/customers/tabs/_suggested_contacts_finding.html",
+            {"request": request, "company": company},
+        )
+
+    outcome = contact_discovery_runs.consume_outcome(company_id)
+    if outcome is None:
+        # No run in flight and no pending outcome (already consumed, or lost on restart) —
+        # stop polling and clear the panel.
+        return HTMLResponse("", status_code=286)
+
     active_sites = (
         db.query(CustomerSite)
         .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
         .order_by(CustomerSite.site_name)
         .all()
     )
-
-    try:
-        contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
-    except Exception as exc:
-        import httpx
-
-        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
-            logger.warning("find_suggested_contacts_with_errors connectivity error for company {}: {}", company_id, exc)
-        else:
-            logger.error(
-                "find_suggested_contacts_with_errors unexpected error for company {}: {}",
-                company_id,
-                exc,
-                exc_info=True,
-            )
-        contacts = []
-        errored = ["all"]
-
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
             "company": company,
-            "suggested": contacts,
-            "errored_providers": errored,
+            "suggested": outcome.suggested,
+            "errored_providers": outcome.errored_providers,
             "active_sites": active_sites,
         }
     )
-    return template_response("htmx/partials/customers/tabs/_suggested_contacts.html", ctx)
+    response = template_response("htmx/partials/customers/tabs/_suggested_contacts.html", ctx)
+    response.status_code = 286  # htmx's stop-polling status — the result panel still swaps in.
+    return response
 
 
 @router.post(

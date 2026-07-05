@@ -3916,23 +3916,35 @@ class TestC4SuggestedContactsUI:
         assert resp.status_code == 200
         assert "Find contacts" not in resp.text
 
-    # ── GET /suggested-contacts renders _suggested_contacts.html ─────────
+    # ── "Find contacts" is async: button GET returns the "Finding contacts…" poller,
+    #    the status route renders _suggested_contacts.html once the bg run lands. ──────
+    #    (The TestClient runs the scheduled BackgroundTask synchronously, so the mocked
+    #     waterfall has already populated contact_discovery_runs by the status GET.)
+
+    def _find_then_status(self, client: TestClient, company_id: int):
+        """Click "Find contacts" (schedules + runs the bg task), then poll the status
+        route."""
+        first = client.get(
+            f"/v2/partials/customers/{company_id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert first.status_code == 200
+        assert "Finding contacts" in first.text  # immediate poller, not the results
+        return client.get(f"/v2/partials/customers/{company_id}/suggested-contacts/status")
 
     @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
     def test_get_suggested_contacts_renders_html(
         self, mock_contacts, client: TestClient, db_session: Session, test_user: User
     ):
-        """GET suggested contacts for a company renders an HTML partial (not JSON)."""
+        """The status poll renders an HTML partial (not JSON) with the discovered
+        contact."""
         mock_contacts.return_value = (
             [{"full_name": "Bob Buyer", "email": "bob@acme.com", "title": "VP Procurement"}],
             [],  # no errored providers
         )
         company, site, _ = self._make_company_with_hq(db_session)
-        resp = client.get(
-            f"/v2/partials/customers/{company.id}/suggested-contacts",
-            params={"domain": "acme.com"},
-        )
-        assert resp.status_code == 200
+        resp = self._find_then_status(client, company.id)
+        assert resp.status_code == 286  # results + stop-polling
         assert "text/html" in resp.headers.get("content-type", "")
         assert "Bob Buyer" in resp.text
 
@@ -3943,11 +3955,8 @@ class TestC4SuggestedContactsUI:
         """Zero results + no provider error → neutral 'No contacts found' state."""
         mock_contacts.return_value = ([], [])
         company, site, _ = self._make_company_with_hq(db_session)
-        resp = client.get(
-            f"/v2/partials/customers/{company.id}/suggested-contacts",
-            params={"domain": "acme.com"},
-        )
-        assert resp.status_code == 200
+        resp = self._find_then_status(client, company.id)
+        assert resp.status_code == 286
         # Neutral empty state — no provider error badge
         assert "No contacts found" in resp.text
         # Should NOT show an error/warning banner
@@ -3960,11 +3969,8 @@ class TestC4SuggestedContactsUI:
         """Zero results + provider errored → amber 'Couldn't reach <provider>' state."""
         mock_contacts.return_value = ([], ["hunter"])
         company, site, _ = self._make_company_with_hq(db_session)
-        resp = client.get(
-            f"/v2/partials/customers/{company.id}/suggested-contacts",
-            params={"domain": "acme.com"},
-        )
-        assert resp.status_code == 200
+        resp = self._find_then_status(client, company.id)
+        assert resp.status_code == 286
         # Amber error banner mentioning the provider
         assert "hunter" in resp.text.lower()
         # Should indicate something went wrong (Couldn't reach or try again)
@@ -3980,11 +3986,8 @@ class TestC4SuggestedContactsUI:
             [],
         )
         company, site, _ = self._make_company_with_hq(db_session)
-        resp = client.get(
-            f"/v2/partials/customers/{company.id}/suggested-contacts",
-            params={"domain": "acme.com"},
-        )
-        assert resp.status_code == 200
+        resp = self._find_then_status(client, company.id)
+        assert resp.status_code == 286
         # Each row should have an Add action targeting the add endpoint
         assert "suggested-contacts/add" in resp.text
 

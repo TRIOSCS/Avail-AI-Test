@@ -1,0 +1,25 @@
+{# _suggested_contacts_finding.html — "Finding contacts…" in-progress poller for the
+   Contacts tab.
+
+   Returned by contacts_tab_suggested (GET .../suggested-contacts, the "Find contacts"
+   button) into #suggested-contacts-panel, then polls its own status route every 2s while
+   the background discovery waterfall (Hunter/Clay/Lusha/Explorium) runs. When the run
+   finishes the status route replaces this element (outerHTML) with the
+   _suggested_contacts.html result panel and answers HTTP 286 to STOP polling.
+
+   hx-target is set explicitly to "this" so the poll swaps this panel — never the whole
+   page under <main id="main-content" hx-target="this">.
+
+   Receives: company (Company).
+   Called by: companies.contacts_tab_suggested + companies.contacts_tab_suggested_status. #}
+<div hx-get="/v2/partials/customers/{{ company.id }}/suggested-contacts/status"
+     hx-trigger="every 2s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 flex items-center gap-2 text-sm text-gray-600">
+  <svg class="h-4 w-4 animate-spin flex-shrink-0 text-brand-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+  </svg>
+  <span class="truncate">Finding contacts at {{ company.name }}… this can take a moment.</span>
+</div>

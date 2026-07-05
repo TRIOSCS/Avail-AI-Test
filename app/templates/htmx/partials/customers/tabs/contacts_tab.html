@@ -67,7 +67,6 @@
         <button hx-get='/v2/partials/customers/{{ company.id }}/suggested-contacts?domain={{ company_domain | urlencode }}'
                 hx-target='#suggested-contacts-panel'
                 hx-swap='innerHTML'
-                hx-indicator='#suggested-contacts-spinner'
                 class='btn-secondary btn-sm'>
           Find contacts
         </button>
@@ -84,8 +83,8 @@
     </p>
   </div>
 
-  {# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
-  <div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-secondary py-2">Finding contacts…</div>
+  {# ── Suggested contacts panel (empty until "Find contacts" clicked, then holds
+       the "Finding contacts…" poller and, on completion, the results). ─────── #}
   <div id="suggested-contacts-panel" class="mt-2"></div>
 
   {# ── Grouped list wrapped in stable swap target ──────────────────────────── #}
