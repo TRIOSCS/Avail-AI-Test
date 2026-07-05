@@ -101,11 +101,9 @@ async def settings_scorecard_tab(
         raise HTTPException(403, "Managers and admins only")
     from ...services.activity_scorecard import (
         DEFAULT_TIME_RANGE,
-        TALK_TIME_BUCKET_SECONDS,
         TIME_RANGE_LABELS,
         TIME_RANGES,
         compute_scorecard,
-        scoring_formula_parts,
     )
 
     if time_range not in TIME_RANGES:
@@ -118,8 +116,6 @@ async def settings_scorecard_tab(
             "time_range": time_range,
             "time_ranges": TIME_RANGES,
             "time_range_labels": TIME_RANGE_LABELS,
-            "formula_parts": scoring_formula_parts(),
-            "talk_bucket_min": TALK_TIME_BUCKET_SECONDS // 60,
         }
     )
 

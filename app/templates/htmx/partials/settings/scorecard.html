@@ -1,11 +1,10 @@
 {#
   settings/scorecard.html — Activity Scorecard tab (manager/admin only).
-  A ranked per-user activity leaderboard with a tunable weighted score, a time-range
-  selector (hx-get refresh), and the scoring formula shown transparently.
+  A per-user activity leaderboard of raw counts (calls, emails, accounts, contacts)
+  ranked by total, with a time-range selector (hx-get refresh).
 
   Receives: rows (list[ScorecardRow]), time_range (str), time_range_labels (dict),
-            time_ranges (tuple[str]), formula_parts (list[{label, weight}]),
-            talk_bucket_min (int).
+            time_ranges (tuple[str]).
   Called by: htmx_views.settings_scorecard_tab (GET /v2/partials/settings/scorecard).
   Depends on: HTMX, Tailwind, the user_avatar macro, _scorecard_table.html fragment.
 #}
@@ -14,12 +13,12 @@
 <div class="space-y-5" id="scorecard-root">
 
   {# Header + time-range selector. The select swaps ONLY the table fragment so the
-     formula/header stay put and the whole page never gets replaced. #}
+     header stays put and the whole page never gets replaced. #}
   <div class="flex flex-wrap items-end justify-between gap-4">
     <div>
       <h2 class="text-lg font-semibold text-gray-900">Activity Scorecard</h2>
       <p class="text-sm text-gray-600">
-        Per-user activity leaderboard — ranked by a weighted activity score.
+        Per-user activity — calls, emails, and data entry.
       </p>
     </div>
 
@@ -41,17 +40,6 @@
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
     </label>
-  </div>
-
-  {# Scoring formula — shown transparently so the ranking is never a black box.
-     Numbers come from the service WEIGHTS constant, so this stays in sync. #}
-  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-3">
-    <p class="text-xs font-semibold uppercase tracking-wider text-gray-600 mb-2">How the score is calculated</p>
-    <div class="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-700">
-      {% for part in formula_parts %}
-      <span><span class="font-medium text-gray-900">{{ part.label }}</span> &middot; {{ part.weight }}</span>
-      {% endfor %}
-    </div>
   </div>
 
   {# Leaderboard table — swapped in place on time-range change. #}
