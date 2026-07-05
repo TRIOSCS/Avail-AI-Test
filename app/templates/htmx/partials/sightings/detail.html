@@ -13,11 +13,11 @@
      flush flex header (mirror requisitions2/_detail_panel.html:27) then a
      dt/dd metadata grid. The inline status <select> hx-patch is Sightings-
      specific and stays AS-IS. ─────────────────────────────────────────── #}
-<div class="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0 sightings-slide-down">
+<div class="flex items-center gap-3 px-5 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0 sightings-slide-down">
   <div class="flex-1 min-w-0">
     {{ mpn_chips(requirement, link_map=link_map) }}
     {% if requirement.manufacturer %}
-    <p class="text-xs text-gray-600 mt-1">{{ requirement.manufacturer }}</p>
+    <p class="text-xs text-gray-600 mt-0.5">{{ requirement.manufacturer }}</p>
     {% endif %}
   </div>
   <div class="flex items-center gap-2 flex-shrink-0">
@@ -27,26 +27,28 @@
   </div>
 </div>
 
-<div class="grid grid-cols-2 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-200 text-sm flex-shrink-0">
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Qty</dt>
-      <dd class="text-gray-900 mt-0.5 font-mono font-semibold">{{ requirement.target_qty or '—' }}</dd>
+{# Denser meta strip: label + value share a baseline row (was a stacked dt-over-dd
+   2×2 grid that ran ~4 lines tall); 4-up on wider panes, 2-up on a narrow split. #}
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1.5 px-5 py-2 border-b border-gray-200 text-sm flex-shrink-0">
+    <div class="flex items-baseline gap-1.5 min-w-0">
+      <dt class="text-[11px] font-medium text-gray-400 uppercase shrink-0">Qty</dt>
+      <dd class="text-gray-900 font-mono font-semibold truncate">{{ requirement.target_qty or '—' }}</dd>
     </div>
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Target</dt>
-      <dd class="figure-accent mt-0.5 font-semibold">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</dd>
+    <div class="flex items-baseline gap-1.5 min-w-0">
+      <dt class="text-[11px] font-medium text-gray-400 uppercase shrink-0">Target</dt>
+      <dd class="figure-accent font-semibold truncate">{{ '$%.2f'|format(requirement.target_price) if requirement.target_price else '—' }}</dd>
     </div>
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Customer</dt>
-      <dd class="mt-0.5">
+    <div class="flex items-baseline gap-1.5 min-w-0">
+      <dt class="text-[11px] font-medium text-gray-400 uppercase shrink-0">Customer</dt>
+      <dd class="min-w-0 truncate">
         <a href="/v2/requisitions/{{ requisition.id }}" class="text-accent-600 hover:underline">
           {{ requisition.customer_name or '—' }}
         </a>
       </dd>
     </div>
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Status</dt>
-      <dd class="mt-0.5">
+    <div class="flex items-baseline gap-1.5 min-w-0">
+      <dt class="text-[11px] font-medium text-gray-400 uppercase shrink-0">Status</dt>
+      <dd class="min-w-0">
       {% set status_styles = {
         'open': 'text-gray-700',
         'sourcing': 'text-blue-700',
@@ -96,9 +98,9 @@
   </div>
 
   {# ── Vendors panel (default) ──────────────────────────────── #}
-  <div x-show="activeTab === 'vendors'" x-cloak class="px-5 py-3">
-<div class="mb-4">
-  <h4 class="h4 mb-2">
+  <div x-show="activeTab === 'vendors'" x-cloak class="px-5 py-2.5">
+<div class="mb-2">
+  <h4 class="h4 mb-1.5">
     Vendors ({{ summaries|length }})
   </h4>
 
@@ -113,7 +115,7 @@
     {# overflow-x-auto: on a narrow split pane / phone the 5 columns scroll
        horizontally instead of crushing (compact-table cells are nowrap). #}
     <div class="overflow-x-auto">
-    <table class="compact-table w-full">
+    <table class="compact-table compact-table--dense w-full">
       <thead>
         <tr>
           <th class="compact-cell--head text-left">Vendor</th>

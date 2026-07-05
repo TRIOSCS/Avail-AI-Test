@@ -12,7 +12,7 @@
   {# ── Hero Header ─────────────────────────────────────────── #}
   {# pr-8 keeps the top-right stats/Enrich cluster clear of the global modal
      close X (base.html chrome), which floats over the panel's top-right. #}
-  <div class="bg-white border border-line-base rounded-lg p-3 mb-4">
+  <div class="bg-white border border-line-base rounded-lg p-3 mb-3">
     <div class="flex items-start justify-between pr-8">
       <div>
         <h1 class="text-3xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
@@ -71,8 +71,8 @@
   </div>
 
   {# ── Collapsible Specs ───────────────────────────────────── #}
-  <div class="bg-white border border-line-base rounded-lg mb-4" x-data="{ specsOpen: true }">
-    <div class="px-6 py-4 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="specsOpen = !specsOpen" @keydown.enter="specsOpen = !specsOpen" @keydown.space.prevent="specsOpen = !specsOpen" aria-expanded="specsOpen">
+  <div class="bg-white border border-line-base rounded-lg mb-3" x-data="{ specsOpen: true }">
+    <div class="px-5 py-3 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="specsOpen = !specsOpen" @keydown.enter="specsOpen = !specsOpen" @keydown.space.prevent="specsOpen = !specsOpen" aria-expanded="specsOpen">
       <h2 class="text-base font-semibold text-gray-900">Specifications</h2>
       <div class="flex items-center gap-2">
         <button hx-get="/v2/partials/materials/{{ card.id }}/insights"
@@ -89,7 +89,7 @@
       </div>
     </div>
 
-    <div x-show="specsOpen" x-transition x-cloak class="px-6 pb-6">
+    <div x-show="specsOpen" x-transition x-cloak class="px-5 pb-5">
       {# ── Validation conflicts (needs review) ─────────────────────────
          The F1 ladder KEPT the manual value; an authoritative (tier>=80) source
          reported something else. One row per (key, evidence source); "Use this value"
@@ -128,7 +128,7 @@
       {% endif %}
 
       {# Display mode #}
-      <div x-show="!editing" x-cloak class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div x-show="!editing" x-cloak class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2.5 text-sm">
         <div><span class="text-secondary font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>
         <div><span class="text-secondary font-medium block mb-0.5">Package</span> <span class="font-medium text-gray-900">{{ card.package_type or "--" }}</span></div>
         <div><span class="text-secondary font-medium block mb-0.5">Pin Count</span> <span class="font-medium text-gray-900">{{ card.pin_count or "--" }}</span></div>

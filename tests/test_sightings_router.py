@@ -4444,14 +4444,19 @@ class TestSightingsSalesHubLook:
 
     # ── Detail panel tokens ──────────────────────────────────────────
     def test_detail_header_is_flush_sales_hub(self, client, db_session):
-        """Part header adopts the flush requisitions2 header shell (px-5 py-3 + bg-
-        gray-50 + border-b) and the .h4 vendors heading."""
+        """Part header adopts the flush requisitions2 header shell (bg-gray-50 +
+        border-b, self-padded px-5) and the .h4 vendors heading.
+
+        Vertical padding was tightened (py-2.5 header, mb-1.5 heading) in the density
+        pass — the flush shell + .h4 invariants are what this guards, not the exact
+        reclaimed gap.
+        """
         _, r, _ = _seed_data(db_session)
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         body = resp.text
         assert resp.status_code == 200
-        assert "px-5 py-3 border-b border-gray-200 bg-gray-50" in body  # flush header
-        assert 'class="h4 mb-2"' in body  # vendors heading uses .h4
+        assert "px-5 py-2.5 border-b border-gray-200 bg-gray-50" in body  # flush header
+        assert 'class="h4 mb-1.5"' in body  # vendors heading uses .h4
 
     def test_detail_target_price_uses_figure_accent(self, client, db_session):
         _, r, _ = _seed_data(db_session)
