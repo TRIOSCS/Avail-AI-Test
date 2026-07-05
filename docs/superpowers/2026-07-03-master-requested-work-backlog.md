@@ -9,6 +9,28 @@ Don't block momentum by fully implementing each before capturing the next.
 
 ---
 
+## ✅ PLANNING DECISIONS — 2026-07-05 (buy-plan epic G–K · prospecting O · hover C)
+
+**Buy-plan epic (G–K):**
+- **G** list rows show **customer, Revenue, Sales GP, part numbers** (display; Rev/GP derived from line sell/cost).
+- **H** "Create Buy Plan" button (confirm at build: from-scratch vs seeded from a requisition/SO).
+- **I edit gate:** BEFORE approval, sales OR manager can edit (change vendor / add-remove lines / qty / price); AFTER approval, **MANAGER-ONLY** edits (sales locked out). **No re-approval trigger** — the manager's edit authority IS the control (respects "leave Approvals unchanged").
+- **J** salesperson enters the active **SO number**, editable at any non-terminal stage.
+- **K Cancel** (sales) → `Cancelled`, **reason required**; **Halt** (manager) → paused, **reason required**, **manager can resume** → Active. Completed/Cancelled are locked (no edits).
+
+**Prospecting O:**
+- Pool = unassigned accounts. Rep actions = **Claim** (→ assigned to self, moves to CRM) + **Dismiss**. Remove the general Reclaim/Reassign from the pool grid.
+- **Manager-only "Assign"** action → pick ANY rep → assigns the account to that rep (moves to CRM under them). This **subsumes the sweep "put-it-back"** (a manager can assign a swept account to any rep incl. the original), preserving the 45d/30d sweep policy.
+- Claim/Assign → account leaves prospecting, appears on CRM/Customers owned by the assignee.
+
+**Score/price hover (C):**
+- **Header hover** → static definition of the metric.
+- **Value hover (score)** → deterministic **factor breakdown** (actual weighted drivers + contributions; instant, free, exact — NO AI).
+- **Value hover (historic price)** → the real price-history sparkline/list.
+- Applies across score + historic-price columns (buyer-ready / avail / multiplier / vendor / sighting / prospect; part & material price history). Build note: expose each score's factor breakdown (persist/surface where a score doesn't already).
+
+---
+
 ## 🆕 NEW REQUESTS — 2026-07-04 (requisition-lifecycle theme; capture + phase)
 
 | # | Idea | Decision / scope | Status |
