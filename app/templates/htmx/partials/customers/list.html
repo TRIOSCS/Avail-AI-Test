@@ -113,23 +113,30 @@
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
-  {# Saved views — per-user filter presets for the accounts list. The wrapper holds the
-     apply/save Alpine behavior; #saved-views-customers is the hx swap target for
-     save/delete. applyFilters writes a preset's stored filters back onto #cdm-filters
-     and dispatches change (reusing the normal filter-submit pathway). x-data uses ONLY
-     single-quoted JS strings (no literal double-quote, no // comment) so Alpine init is
-     not broken per the CLAUDE.md attribute-quoting rule. #}
-  <div id="saved-views-customers"
-       class="flex items-center gap-1.5 flex-wrap pb-1 flex-shrink-0"
-       x-data="{ saveOpen: false, applyFilters(el){ const form=document.getElementById('cdm-filters'); if(!form){ return } let filters={}; try{ filters=JSON.parse(el.dataset.filters||'{}') }catch(e){} Array.from(form.elements).forEach(function(field){ if(!field.name||field.type==='hidden'){ return } if(field.type==='checkbox'){ field.checked=!!filters[field.name]; return } if(field.tagName==='SELECT'){ field.value=(filters[field.name]!==undefined)?String(filters[field.name]):(field.options.length?field.options[0].value:''); return } field.value=(filters[field.name]!==undefined)?filters[field.name]:''; }); form.dispatchEvent(new Event('change',{bubbles:true})); } }">
-    {% include "htmx/partials/customers/_saved_views.html" %}
-  </div>
+  {# ── Single utility bar ────────────────────────────────────────────
+     Saved views (left) + "+ New account" and Export/Import utilities (right) fold onto
+     ONE row to minimise toolbar height (idea M) — "+ New account" no longer sits alone
+     on a separate full-width row below the VIEWS row. Each half keeps its own Alpine
+     scope (saved-views apply/save vs. importOpen), so the fold is layout-only. #}
+  <div id="cdm-utility-bar" class="flex items-center justify-between gap-3 flex-wrap pb-1 mb-0.5 flex-shrink-0">
 
-  {# New account (primary CTA) + Export/contacts/Import utilities — below the filter bar,
-     above the split workspace. Until now accounts arrived only via CSV import (F7); the
+    {# Saved views — per-user filter presets for the accounts list. The wrapper holds the
+       apply/save Alpine behavior; #saved-views-customers is the hx swap target for
+       save/delete. applyFilters writes a preset's stored filters back onto #cdm-filters
+       and dispatches change (reusing the normal filter-submit pathway). x-data uses ONLY
+       single-quoted JS strings (no literal double-quote, no // comment) so Alpine init is
+       not broken per the CLAUDE.md attribute-quoting rule. #}
+    <div id="saved-views-customers"
+         class="flex items-center gap-1.5 flex-wrap"
+         x-data="{ saveOpen: false, applyFilters(el){ const form=document.getElementById('cdm-filters'); if(!form){ return } let filters={}; try{ filters=JSON.parse(el.dataset.filters||'{}') }catch(e){} Array.from(form.elements).forEach(function(field){ if(!field.name||field.type==='hidden'){ return } if(field.type==='checkbox'){ field.checked=!!filters[field.name]; return } if(field.tagName==='SELECT'){ field.value=(filters[field.name]!==undefined)?String(filters[field.name]):(field.options.length?field.options[0].value:''); return } field.value=(filters[field.name]!==undefined)?filters[field.name]:''; }); form.dispatchEvent(new Event('change',{bubbles:true})); } }">
+      {% include "htmx/partials/customers/_saved_views.html" %}
+    </div>
+
+  {# New account (primary CTA) + Export/contacts/Import utilities — right-aligned on the
+     shared utility bar. Until now accounts arrived only via CSV import (F7); the
      "+ New account" button surfaces the existing create-account form as a modal. #}
   {# Import modal uses the shared modal-* primitives to match vendors import and the rest of the app. #}
-  <div class="flex items-center justify-between gap-3 mb-0.5" x-data="{ importOpen: false }">
+  <div class="flex items-center gap-3" x-data="{ importOpen: false }">
     {# + New account — loads the create-account form into #modal-content and opens the
        global modal (base.html). On success the new account's detail fills #cdm-detail and
        the list refreshes via HX-Trigger=cdmListRefresh. #}
@@ -206,7 +213,8 @@
         </div>
       </div>
     </div>
-  </div>
+  </div>{# /new-account + utilities group #}
+  </div>{# /#cdm-utility-bar #}
 
   {# Error region — failed list refreshes / row loads land here instead of
      silently leaving stale rows behind (response-targets extension). #}

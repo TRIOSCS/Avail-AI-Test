@@ -11,9 +11,17 @@
 <div class="page-fluid">
 
   {# ── Page header ─────────────────────────────────────────────────── #}
-  <div class="flex items-center justify-between mb-3">
-    <div>
-      <h1 class="h2">Prospecting</h1>
+  {# Result count rides inline with the title (reclaims the empty space that the
+     old standalone count row wasted above the grid). #}
+  <div class="flex items-start justify-between gap-3 mb-3">
+    <div class="min-w-0">
+      <div class="flex items-baseline gap-2 flex-wrap">
+        <h1 class="h2">Prospecting</h1>
+        <span id="prospect-count" class="text-sm text-gray-600">
+          {{ total }} {% if status %}{{ status }}{% endif %} prospect{{ "s" if total != 1 }}
+          {% if q %}matching &ldquo;{{ q }}&rdquo;{% endif %}
+        </span>
+      </div>
       <p class="text-secondary mt-0.5">Suggested accounts ranked by fit + buying signals</p>
     </div>
     {# Add-prospect control #}
@@ -48,32 +56,14 @@
        hx-get="/v2/partials/prospecting/stats" hx-trigger="load"
        hx-target="#prospect-stats" hx-swap="innerHTML"></div>
 
-  <div class="flex items-center mb-4">
-    <span class="text-sm text-gray-600">
-      {{ total }} {% if status %}{{ status }}{% endif %} prospect{{ "s" if total != 1 }}
-      {% if q %}matching &ldquo;{{ q }}&rdquo;{% endif %}
-    </span>
-  </div>
-
-  {# Search + Filter + Sort bar #}
-  <div id="prospect-filters" class="space-y-2 mb-4">
+  {# Condensed toolbar — pills, inline search, scope + sort all on ONE row. #}
+  <div id="prospect-filters" class="mb-3">
     {# status + scope carriers so search/sort requests preserve the active filter + scope #}
     <input type="hidden" name="status" value="{{ status }}">
     <input type="hidden" name="scope" value="{{ scope }}">
 
-    {# Search bar #}
-    <div>
-      <input aria-label="Search prospects" type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
-             class="input w-full sm:w-80"
-             hx-get="/v2/partials/prospecting"
-             hx-trigger="keyup changed delay:300ms"
-             hx-target="#main-content"
-             hx-push-url="true"
-             hx-include="[name='sort'], [name='status'], [name='scope']">
-    </div>
-
-    {# Filter pills + sort #}
-    <div class="flex flex-wrap items-center gap-2">
+    {# Filter pills + inline search + sort #}
+    <div id="prospect-toolbar" class="flex flex-wrap items-center gap-2">
       {% set pill_counts = {'': all_total, 'suggested': status_counts.get('suggested', 0),
                             'claimed': status_counts.get('claimed', 0), 'converted': status_counts.get('converted', 0),
                             'dismissed': status_counts.get('dismissed', 0),
@@ -90,10 +80,19 @@
       </button>
       {% endfor %}
 
-      <div class="ml-auto flex items-center gap-2">
-        {# See-All / See-Mine scope toggle — scopes grid + pill counts to my own claims. #}
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        {# Search — inline on the toolbar row (reclaims the old full-width search row). #}
+        <input aria-label="Search prospects" type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
+               class="input input-sm w-full sm:w-80"
+               hx-get="/v2/partials/prospecting"
+               hx-trigger="keyup changed delay:300ms"
+               hx-target="#main-content"
+               hx-push-url="true"
+               hx-include="[name='sort'], [name='status'], [name='scope']">
+        {# Everyone / Mine scope toggle — relabelled from All/Mine so it no longer reads
+           as a duplicate of the "All" status pill. Scopes grid + pill counts to my claims. #}
         <div class="inline-flex rounded-lg border border-line-base overflow-hidden" role="group" aria-label="Scope">
-          {% for s, lbl in [('all', 'All'), ('mine', 'Mine')] %}
+          {% for s, lbl in [('all', 'Everyone'), ('mine', 'Mine')] %}
           <button class="px-3 py-1.5 text-sm font-medium transition-colors
                          {% if scope == s %}bg-accent-500 text-white{% else %}bg-white text-accent-600 hover:bg-accent-100{% endif %}"
                   aria-pressed="{{ 'true' if scope == s else 'false' }}"
