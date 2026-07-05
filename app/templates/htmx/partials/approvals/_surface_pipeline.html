@@ -50,9 +50,10 @@
   </div>
 
   {# ── Stage columns: Build · Approve · Purchase, plus a Halted lane for can-see-all
-       viewers (buyers regain HALTED visibility — rework parity). The grid widens to 4 when
-       the Halted lane shows. ── #}
-  <div class="grid grid-cols-1 sm:grid-cols-2 {% if can_see_all_deals %}lg:grid-cols-4{% else %}lg:grid-cols-3{% endif %} gap-3">
+       viewers (buyers regain HALTED visibility — rework parity). The grid widens to 4 only
+       when there are halted deals to show; otherwise it stays a clean 3-column layout
+       (no dead 4th column). ── #}
+  <div class="grid grid-cols-1 sm:grid-cols-2 {% if can_see_all_deals and halted_col %}lg:grid-cols-4{% else %}lg:grid-cols-3{% endif %} gap-3">
     {% for label, cards in columns %}
     {# needs-my-action cards sort first (matches the de-noised board). #}
     {% set sorted_cards = cards | sort(attribute='needs_my_action', reverse=True) %}
@@ -64,15 +65,16 @@
       <div class="p-2 space-y-1.5 flex-1">
         {% for card in sorted_cards %}{{ deal_card(card) }}{% endfor %}
         {% if not cards %}
-        <div class="px-2 py-4 text-center text-xs text-gray-300">—</div>
+        <div class="px-2 py-6 text-center text-xs text-gray-400">Nothing here yet</div>
         {% endif %}
       </div>
     </div>
     {% endfor %}
 
-    {# Halted lane — the off-ramp, always rendered (empty "—") for can-see-all viewers so
-       managers/buyers never lose sight of halted deals. Rose tint = at-risk health hue. #}
-    {% if can_see_all_deals %}
+    {# Halted lane — the off-ramp, shown to can-see-all viewers ONLY when there are halted
+       deals; an empty lane would just be a dead 4th column, so we drop it and fall back to
+       the 3-column grid above. Rose tint = at-risk health hue. #}
+    {% if can_see_all_deals and halted_col %}
     <div class="bg-rose-50/40 rounded-lg border border-rose-200 flex flex-col min-h-[120px]">
       <div class="px-3 py-2 border-b border-rose-200 flex items-center justify-between">
         <span class="text-xs font-semibold text-rose-700 uppercase tracking-wider">Halted</span>
@@ -80,9 +82,6 @@
       </div>
       <div class="p-2 space-y-1.5 flex-1">
         {% for card in halted_col %}{{ deal_card(card) }}{% endfor %}
-        {% if not halted_col %}
-        <div class="px-2 py-4 text-center text-xs text-gray-300">—</div>
-        {% endif %}
       </div>
     </div>
     {% endif %}

@@ -135,7 +135,10 @@
 
   {% if not requirements %}
   <div class="p-8">
-    {% with message="No requirements match your filters", action_label="Clear Filters" %}
+    {% with message="No requirements match your filters",
+            action_url="/v2/partials/sightings",
+            action_label="Clear Filters",
+            action_hx_target="#sightings-table" %}
     {% include "htmx/partials/shared/empty_state.html" %}
     {% endwith %}
   </div>

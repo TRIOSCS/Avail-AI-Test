@@ -46,25 +46,39 @@
       </div>
     </div>
 
-    {# Fit + Readiness score bars #}
+    {# Fit + Readiness score bars. An un-scored prospect (manual add / not-yet-enriched) has a
+       null/0 score — show a neutral gray "Not scored yet" placeholder rather than an alarming
+       red 0% bar that would read as a genuine bad-fit account. #}
     <div class="mb-2">
       {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
         <span class="text-gray-600">Fit <span class="text-gray-300">(ICP match)</span></span>
+        {% if prospect.fit_score %}
         <span class="font-medium {{ score.score_text_color(fit) }}">{{ fit }}%</span>
+        {% else %}
+        <span class="text-gray-400">Not scored yet</span>
+        {% endif %}
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        {% if prospect.fit_score %}
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}" style="width: {{ fit }}%"></div>
+        {% endif %}
       </div>
     </div>
     <div class="mb-2.5">
       {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
         <span class="text-gray-600">Readiness <span class="text-gray-300">(timing)</span></span>
+        {% if prospect.readiness_score %}
         <span class="font-medium {{ score.score_text_color(ready) }}">{{ ready }}%</span>
+        {% else %}
+        <span class="text-gray-400">Not scored yet</span>
+        {% endif %}
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        {% if prospect.readiness_score %}
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}" style="width: {{ ready }}%"></div>
+        {% endif %}
       </div>
     </div>
 

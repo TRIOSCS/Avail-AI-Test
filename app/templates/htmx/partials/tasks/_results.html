@@ -145,5 +145,49 @@
   {{ task_group('No due date', ns.undated, now_utc) }}
 </div>
 {% else %}
+{# Zero rows: distinguish a filtered-to-empty view (keep the quiet "no match" line) from a
+   genuinely empty worklist (default Open view, no filters) — the latter gets a real empty
+   state with a working "New task" CTA, matching the requisition task-board empty state. #}
+{% if filter_status or filter_priority or filter_due %}
 <p class="text-sm text-gray-600 italic">No tasks match these filters.</p>
+{% else %}
+<div x-data="{ newOpen: false }">
+  {% with message="No tasks yet",
+          description="Create a personal to-do to track your own work.",
+          action_alpine_click="newOpen = !newOpen",
+          action_label="New task" %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
+  {# Inline quick-add — reveals on the CTA and posts to the same My-Day create route,
+     swapping the refreshed results back into #tasks-results (mirrors the header form). #}
+  <div x-show="newOpen" x-cloak x-transition class="mx-auto max-w-sm mt-3">
+    <form hx-post="/v2/partials/my-day/tasks"
+          hx-target="#tasks-results"
+          hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()"
+          class="bg-white border border-line-base rounded-lg shadow-float p-3 space-y-2 text-left">
+      <label class="block text-xs font-medium text-gray-600">
+        Title
+        <input type="text" name="title" required placeholder="What needs doing?"
+               class="input w-full mt-1" aria-label="Task title">
+      </label>
+      <div class="flex gap-2">
+        <label class="flex-1 block text-xs font-medium text-gray-600">
+          Due
+          <input type="date" name="due_at" class="input w-full mt-1" aria-label="Due date">
+        </label>
+        <label class="flex-1 block text-xs font-medium text-gray-600">
+          Priority
+          <select name="task_priority" class="input w-full mt-1" aria-label="Priority">
+            <option value="3">High</option>
+            <option value="2" selected>Medium</option>
+            <option value="1">Low</option>
+          </select>
+        </label>
+      </div>
+      <button type="submit" class="btn-primary btn-sm w-full">Add task</button>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endif %}

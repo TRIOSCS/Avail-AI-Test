@@ -7,6 +7,8 @@
     message (str)
     description (str, optional) — a quieter secondary line under the message
     action_url (str, optional) — renders an hx-get anchor
+    action_hx_target (str, optional) — hx-target for the action_url anchor (default "#main-content";
+      pass e.g. "#sightings-table" so the action re-fetches into a sub-container, not the whole page)
     action_alpine_click (str, optional) — renders an Alpine @click button instead of hx-get anchor
     action_label (str, optional)
 #}
@@ -26,7 +28,7 @@
   {% elif action_url %}
   <a href="{{ action_url }}"
      hx-get="{{ action_url }}"
-     hx-target="#main-content"
+     hx-target="{{ action_hx_target|default('#main-content') }}"
      class="mt-6 btn-primary">
     {{ action_label|default("Create one") }}
   </a>

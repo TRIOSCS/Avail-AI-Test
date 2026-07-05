@@ -145,27 +145,38 @@
 
   {# Scores section — side by side #}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-    {# Fit score #}
+    {# Fit score. Un-scored (null/0) prospects show a neutral "Not scored yet" placeholder
+       instead of a red 0% bar that would misread as a genuine bad-fit account. #}
     <div class="card p-6">
       <div class="text-sm font-medium text-gray-600 mb-2">Fit Score <span class="text-gray-300">· ICP match</span></div>
       {% set fit = prospect.fit_score or 0 %}
+      {% if prospect.fit_score %}
       <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ fit }}%</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}" style="width: {{ fit }}%"></div>
       </div>
+      {% else %}
+      <div class="text-lg font-semibold text-gray-400 mt-1">Not scored yet</div>
+      <div class="mt-3 w-full h-2.5 bg-gray-100 rounded-full"></div>
+      {% endif %}
       {% if prospect.fit_reasoning %}
       <p class="mt-3 text-xs text-gray-600 leading-relaxed">{{ prospect.fit_reasoning }}</p>
       {% endif %}
     </div>
 
-    {# Readiness score #}
+    {# Readiness score (same un-scored placeholder treatment as Fit). #}
     <div class="card p-6">
       <div class="text-sm font-medium text-gray-600 mb-2">Readiness Score <span class="text-gray-300">· near-term timing</span></div>
       {% set ready = prospect.readiness_score or 0 %}
+      {% if prospect.readiness_score %}
       <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ ready }}%</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}" style="width: {{ ready }}%"></div>
       </div>
+      {% else %}
+      <div class="text-lg font-semibold text-gray-400 mt-1">Not scored yet</div>
+      <div class="mt-3 w-full h-2.5 bg-gray-100 rounded-full"></div>
+      {% endif %}
       {% if signal_tags %}
       <div class="mt-3 flex flex-wrap gap-1.5">
         {% for tag in signal_tags %}
@@ -295,15 +306,12 @@
   </div>
   {% endif %}
 
-  {# Discovery info #}
-  <div class="card p-4 mb-6">
-    <div class="flex items-center gap-3 text-sm">
-      <span class="text-gray-600">Discovery Source:</span>
-      <span class="chip bg-brand-100 text-brand-600 border-brand-200">
-        {{ prospect.discovery_source }}
-      </span>
-      <span class="text-gray-400">{{ prospect.created_at|localdate('%b %d, %Y') if prospect.created_at else '—' }}</span>
-    </div>
+  {# Discovery info — one line of metadata, rendered as an inline meta line rather than a
+     full padded card (it never warranted the p-4 card chrome). #}
+  <div class="flex items-center flex-wrap gap-2 text-xs text-gray-500 mb-6">
+    <span class="text-gray-600">Discovery source:</span>
+    <span class="chip bg-brand-100 text-brand-600 border-brand-200">{{ prospect.discovery_source }}</span>
+    <span class="text-gray-400">{{ prospect.created_at|localdate('%b %d, %Y') if prospect.created_at else '—' }}</span>
   </div>
 
   {# Enrichment data #}
