@@ -54,6 +54,18 @@ repos:
   # recursion). Bypass with `git push --no-verify` if it false-positives.
   - repo: local
     hooks:
+      # DOWN-only ratchet: fails if new legacy SQLAlchemy 1.x `<session>.query(`
+      # sites are introduced under app/ (see tests/test_query_api_ratchet.py and
+      # scripts/query_api_baseline.py). Scans the whole tree, so pass_filenames
+      # is off and it always runs. Removing sites + lowering the baseline json is
+      # the sanctioned path.
+      - id: query-api-ratchet
+        name: legacy SQLAlchemy Query-API ratchet (down-only)
+        entry: bash -c 'exec "$(command -v python3 || command -v python)" -m scripts.query_api_baseline --check'
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: changed-files-on-push
         name: pre-commit on files changed vs origin/main
         entry: bash -c 'base=$(git merge-base origin/main HEAD 2>/dev/null || echo origin/main); pre-commit run --from-ref "$base" --to-ref HEAD --hook-stage pre-commit'
