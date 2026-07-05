@@ -3,11 +3,25 @@
   Receives: snapshots (list of MaterialPriceSnapshot), card (MaterialCard).
   Called by: htmx_views.py material_tab_partial endpoint.
 #}
+{% from "htmx/partials/shared/_score_hover.html" import score_def, sparkline_svg %}
+{% if snapshots %}
+{# Real recorded price series as a glanceable trend (snapshots arrive newest-first;
+   reverse to chronological for a left-to-right sparkline). #}
+{% set _prices = (snapshots|map(attribute='price')|map('float')|list)[::-1] %}
+<div class="mb-3 flex items-center justify-between gap-4">
+  <div class="flex-1 max-w-[240px] text-brand-400">{{ sparkline_svg(_prices) }}</div>
+  <div class="flex gap-3 text-xs font-mono text-gray-600">
+    <span>min <span class="text-gray-900">${{ '%.2f'|format(_prices|min) }}</span></span>
+    <span>last <span class="text-gray-900">${{ '%.2f'|format(_prices[-1]) }}</span></span>
+    <span>max <span class="text-gray-900">${{ '%.2f'|format(_prices|max) }}</span></span>
+  </div>
+</div>
+{% endif %}
 <table class="w-full text-xs font-mono">
   <thead><tr class="text-left text-gray-500 border-b border-gray-200">
     <th class="py-2 px-3 font-medium">Date</th>
     <th class="py-2 px-3 font-medium">Vendor</th>
-    <th class="py-2 px-3 text-right font-medium">Price</th>
+    <th class="py-2 px-3 text-right font-medium">{{ score_def('Price', 'Unit price recorded at each observation, over time. The sparkline above shows the trend (oldest to newest).') }}</th>
     <th class="py-2 px-3 text-right font-medium">Qty</th>
     <th class="py-2 px-3 font-medium">Currency</th>
     <th class="py-2 px-3 font-medium">Source</th>

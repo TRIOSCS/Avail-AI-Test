@@ -1,0 +1,112 @@
+{#
+  _score_hover.html — Shared hover layer for score + historic-price columns (idea C).
+
+  What it does: three reusable hover variants + a bare sparkline, so every scored /
+  historic-price column explains itself the same way. NO AI — every value hover is a
+  deterministic, instant, exact breakdown derived from the same weights the score uses
+  (see app/services/*_breakdown helpers) or the real recorded price series.
+
+  Called by: prospecting/_card.html, prospecting/detail.html (fit + readiness),
+             sightings/_vendor_row.html + detail.html (sighting score, best price),
+             search/dossier_hero.html (market price), materials/tabs/price_history.html.
+  Depends on: Alpine.js (role="tooltip" click-popover — the parts/tabs/sourcing.html
+              convention), Tailwind tokens already in the bundle (shadow-float, w-64,
+              decoration-dotted, cursor-help). No new Tailwind classes.
+
+  Usage:
+    {% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown, price_history, sparkline_svg %}
+    <th>{{ score_def('Score', 'How useful this lead is: vendor trust, price, qty, freshness.') }}</th>
+    {{ score_breakdown(fit ~ '%', prospect_fit_breakdown(prospect), title='Fit factors') }}
+    {{ price_history('$' ~ (pt.last_price|pricefmt), prices, currency=pt.currency) }}
+#}
+
+
+{# ── Header definition hover ──────────────────────────────────────────
+   A column-HEADER label carrying a static definitional tooltip (native title,
+   dotted-underline + cursor-help — the app's decorated hover-help convention). #}
+{% macro score_def(label, definition) -%}
+<span class="cursor-help underline decoration-dotted underline-offset-2" title="{{ definition }}">{{ label }}</span>
+{%- endmacro %}
+
+
+{# ── Bare sparkline ───────────────────────────────────────────────────
+   Inline SVG polyline over a numeric series (oldest→newest). Colors via currentColor,
+   so wrap in a text-* class. Renders nothing for an empty series; a flat line for one
+   point. `prices` may hold Decimals — coerced to float here (Decimal/float math errors
+   otherwise). #}
+{% macro sparkline_svg(prices, klass='w-full h-8 text-brand-400') -%}
+{%- set nums = prices|map('float')|list -%}
+{%- if nums|length >= 2 -%}
+{%- set lo = nums|min -%}{%- set hi = nums|max -%}
+{%- set span = (hi - lo) if (hi - lo) > 0 else 1.0 -%}
+{%- set n = nums|length -%}
+<svg viewBox="0 0 120 32" class="{{ klass }}" preserveAspectRatio="none" aria-hidden="true">
+  <polyline fill="none" stroke="currentColor" stroke-width="1.5" points="{% for p in nums %}{{ '%.1f'|format(loop.index0 * (120.0 / (n - 1))) }},{{ '%.1f'|format(30 - ((p - lo) / span) * 28) }} {% endfor %}"/>
+  <circle cx="120" cy="{{ '%.1f'|format(30 - ((nums[-1] - lo) / span) * 28) }}" r="2" fill="currentColor"/>
+</svg>
+{%- elif nums|length == 1 -%}
+<svg viewBox="0 0 120 32" class="{{ klass }}" preserveAspectRatio="none" aria-hidden="true">
+  <line x1="0" y1="16" x2="120" y2="16" stroke="currentColor" stroke-width="1.5"/>
+  <circle cx="120" cy="16" r="2" fill="currentColor"/>
+</svg>
+{%- endif -%}
+{%- endmacro %}
+
+
+{# ── Score-value breakdown popover ────────────────────────────────────
+   Click the score VALUE → a popover listing the deterministic weighted drivers
+   (`factors` = list of (label, contribution)). Contributions sum to the score.
+   `trigger_class` styles the value (e.g. its score color); `align` = left|right
+   anchors the panel so it doesn't clip at a table edge. `@click.stop` keeps the
+   click off any row-expander the cell sits inside. #}
+{% macro score_breakdown(value, factors, title='Score factors', suffix='', trigger_class='', align='right') -%}
+<span class="relative inline-block" x-data="{ open: false }">
+  <span role="button" tabindex="0" @click.stop="open = !open" @keydown.enter.stop="open = !open" @keydown.space.stop.prevent="open = !open"
+        class="cursor-pointer hover:text-brand-500 {{ trigger_class }}" aria-label="Show {{ title|lower }}">{{ value }}</span>
+  <div x-show="open" role="tooltip" @click.away="open = false" x-cloak
+       class="absolute z-50 mt-1 {{ 'left-0' if align == 'left' else 'right-0' }} w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-float text-xs text-left font-sans">
+    <p class="font-semibold text-gray-900 mb-1.5">{{ title }}</p>
+    {% if factors %}
+    <table class="w-full">
+      {% for label, contrib in factors %}
+      <tr>
+        <td class="text-gray-600 pr-2 py-0.5">{{ label }}</td>
+        <td class="text-right font-mono whitespace-nowrap {{ 'text-emerald-600' if contrib > 0 else ('text-rose-500' if contrib < 0 else 'text-gray-400') }}">{{ '%+.0f'|format(contrib) }}{{ suffix }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="text-gray-400 mt-1.5 pt-1.5 border-t border-gray-100">Deterministic — sums to the score.</p>
+    {% else %}
+    <p class="text-gray-400">No breakdown available yet.</p>
+    {% endif %}
+  </div>
+</span>
+{%- endmacro %}
+
+
+{# ── Historic-price popover ───────────────────────────────────────────
+   Click a historic-price VALUE → a popover with the real recorded price series as a
+   sparkline + min / last / max. `prices` = list of observed prices oldest→newest
+   (floats or Decimals). #}
+{% macro price_history(value, prices, currency='USD', title='Price history', trigger_class='', align='right') -%}
+{%- set nums = (prices or [])|map('float')|list -%}
+<span class="relative inline-block" x-data="{ open: false }">
+  <span role="button" tabindex="0" @click.stop="open = !open" @keydown.enter.stop="open = !open" @keydown.space.stop.prevent="open = !open"
+        class="cursor-pointer hover:text-brand-500 {{ trigger_class }}" aria-label="Show price history">{{ value }}</span>
+  <div x-show="open" role="tooltip" @click.away="open = false" x-cloak
+       class="absolute z-50 mt-1 {{ 'left-0' if align == 'left' else 'right-0' }} w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-float text-xs text-left font-sans">
+    <p class="font-semibold text-gray-900 mb-1">{{ title }}</p>
+    {% if nums %}
+    <div class="text-brand-400">{{ sparkline_svg(nums) }}</div>
+    <div class="flex justify-between mt-1.5 font-mono text-gray-600">
+      <span>min ${{ '%.2f'|format(nums|min) }}</span>
+      <span>last ${{ '%.2f'|format(nums[-1]) }}</span>
+      <span>max ${{ '%.2f'|format(nums|max) }}</span>
+    </div>
+    <p class="text-gray-400 mt-1">{{ currency }} · {{ nums|length }} observation{{ 's' if nums|length != 1 }}</p>
+    {% else %}
+    <p class="text-gray-400">No price history yet.</p>
+    {% endif %}
+  </div>
+</span>
+{%- endmacro %}

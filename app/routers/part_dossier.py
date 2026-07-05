@@ -119,8 +119,17 @@ async def dossier_hero(
             logger.exception("dossier_hero get_fru_view failed mpn={} key={}", mpn, key)
             fru_view = None
 
+    # Real recorded price series (oldest→newest) for the Market-price hover sparkline.
+    price_series: list = []
+    if card is not None and not history_error:
+        from ..services.part_history_service import price_series_for_card
+
+        price_series = price_series_for_card(db, card.id)
+
     ctx = _ctx(request, user)
-    ctx.update({"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view})
+    ctx.update(
+        {"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view, "price_series": price_series}
+    )
 
     # Auto-datasheet capture (background, never blocks the dossier render).
     if display_mpn:

@@ -6,6 +6,7 @@
   Called by: htmx_views.py prospecting_detail_partial / claim / dismiss / release / enrich.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
+{% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
 
 <div class="page-readable">
 
@@ -130,10 +131,10 @@
     {# Fit score. Un-scored (null/0) prospects show a neutral "Not scored yet" placeholder
        instead of a red 0% bar that would misread as a genuine bad-fit account. #}
     <div class="card p-6">
-      <div class="text-sm font-medium text-gray-600 mb-2">Fit Score <span class="text-gray-300">· ICP match</span></div>
+      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Fit Score', 'ICP fit (0-100): industry match, company size, procurement staff, NAICS, geography, and broker usage.') }} <span class="text-gray-300">· ICP match</span></div>
       {% set fit = prospect.fit_score or 0 %}
       {% if prospect.fit_score %}
-      <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ fit }}%</div>
+      <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ score_breakdown(fit ~ '%', prospect_fit_breakdown(prospect), title='Fit factors', align='left') }}</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}" style="width: {{ fit }}%"></div>
       </div>
@@ -148,10 +149,10 @@
 
     {# Readiness score (same un-scored placeholder treatment as Fit). #}
     <div class="card p-6">
-      <div class="text-sm font-medium text-gray-600 mb-2">Readiness Score <span class="text-gray-300">· near-term timing</span></div>
+      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Readiness Score', 'Buy-now readiness (0-100): buying intent, company events, hiring, new procurement hires, and contact quality.') }} <span class="text-gray-300">· near-term timing</span></div>
       {% set ready = prospect.readiness_score or 0 %}
       {% if prospect.readiness_score %}
-      <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ ready }}%</div>
+      <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ score_breakdown(ready ~ '%', prospect_readiness_breakdown(prospect), title='Readiness factors', align='left') }}</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
         <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}" style="width: {{ ready }}%"></div>
       </div>

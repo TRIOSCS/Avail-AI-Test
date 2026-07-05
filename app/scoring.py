@@ -25,6 +25,25 @@ MISSING_DATA_SCORE = 25.0
 
 WEAK_LEAD_THRESHOLD = 30.0
 
+# Single source of truth for the score_sighting_v2 factor weights. Both the score
+# (score_sighting_v2) AND its deterministic breakdown (score_sighting_v2_breakdown)
+# read this map, so the weighted drivers a hover shows can never drift from the number.
+SIGHTING_V2_WEIGHTS: dict[str, float] = {
+    "trust": 0.30,
+    "price": 0.25,
+    "qty": 0.20,
+    "freshness": 0.15,
+    "completeness": 0.10,
+}
+# Human-readable labels for the same five factors (used by the breakdown hover).
+SIGHTING_V2_LABELS: dict[str, str] = {
+    "trust": "Vendor trust",
+    "price": "Price competitiveness",
+    "qty": "Quantity coverage",
+    "freshness": "Freshness",
+    "completeness": "Data completeness",
+}
+
 
 def score_sighting(vendor_score: float | None, is_authorized: bool) -> float:
     """Score a sighting based on the vendor's unified score.
@@ -88,15 +107,37 @@ def score_sighting_v2(
     fields_present = sum(1 for f in [has_price, has_qty, has_lead_time, has_condition] if f)
     completeness = (fields_present / 4.0) * 100.0
 
-    total = trust * 0.30 + price_f * 0.25 + qty_f * 0.20 + freshness * 0.15 + completeness * 0.10
-    components = {
-        "trust": round(trust, 1),
-        "price": round(price_f, 1),
-        "qty": round(qty_f, 1),
-        "freshness": round(freshness, 1),
-        "completeness": round(completeness, 1),
+    factors = {
+        "trust": trust,
+        "price": price_f,
+        "qty": qty_f,
+        "freshness": freshness,
+        "completeness": completeness,
     }
+    total = sum(factors[k] * SIGHTING_V2_WEIGHTS[k] for k in SIGHTING_V2_WEIGHTS)
+    components = {k: round(v, 1) for k, v in factors.items()}
     return round(total, 1), components
+
+
+def score_sighting_v2_breakdown(components: dict) -> list[tuple[str, float]]:
+    """Deterministic weighted contributions behind a sighting's score_components.
+
+    Takes the persisted ``{trust, price, qty, freshness, completeness}`` factor
+    values (0-100 each, as returned by ``score_sighting_v2`` / stored on
+    ``Sighting.score_components``) and multiplies each by its ``SIGHTING_V2_WEIGHTS``
+    weight — the SAME weights the score itself uses. The returned contributions sum
+    to the sighting's total score (within factor-rounding), so a hover shows the real
+    drivers, not a re-derivation. Factors absent from ``components`` are skipped.
+
+    Returns a list of ``(label, contribution)`` ordered by the canonical factor order.
+    """
+    out: list[tuple[str, float]] = []
+    for key, weight in SIGHTING_V2_WEIGHTS.items():
+        val = components.get(key) if components else None
+        if val is None:
+            continue
+        out.append((SIGHTING_V2_LABELS[key], round(float(val) * weight, 1)))
+    return out
 
 
 def classify_lead(

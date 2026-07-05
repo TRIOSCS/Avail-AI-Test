@@ -18,6 +18,7 @@
             vendor_matched_mpns, unavailable_intel, requirement, stale_days
 #}
 
+{% from "htmx/partials/shared/_score_hover.html" import score_breakdown %}
 {% set intel = vendor_intel.get(s.vendor_name, {}) %}
 {% set vendor_phone = vendor_phones.get(s.vendor_name) %}
 {% set ooo = ooo_map.get(s.vendor_name|lower|trim) if ooo_map is defined else none %}
@@ -144,8 +145,13 @@
       {% if s.best_price %}${{ '%.2f'|format(s.best_price) }}{% else %}—{% endif %}
     </td>
 
-    {# 4 · Score #}
-    <td class="px-2 py-1.5 text-right font-mono text-xs {{ score_color }}">{{ (s.score|round|int ~ '%') if s.score is not none else '—' }}</td>
+    {# 4 · Score — value hover shows the deterministic factor breakdown when the
+         winning sighting's persisted components are available (route: vendor_intel). #}
+    <td class="px-2 py-1.5 text-right font-mono text-xs {{ score_color }}">
+      {%- if s.score is not none and intel.get('score_breakdown') -%}
+      {{ score_breakdown(s.score|round|int ~ '%', intel.score_breakdown, title='Score factors') }}
+      {%- else -%}{{ (s.score|round|int ~ '%') if s.score is not none else '—' }}{%- endif -%}
+    </td>
 
     {# 5 · Actions — visible RFQ pill + kebab. @click.stop on the cell keeps
          menu clicks off the row expander. #}

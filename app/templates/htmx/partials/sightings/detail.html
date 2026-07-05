@@ -8,6 +8,7 @@
 
 {% import "htmx/partials/shared/_macros.html" as m %}
 {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
+{% from "htmx/partials/shared/_score_hover.html" import score_def %}
 
 {# ── Part Header (always visible above tabs) — Sales Hub look:
      flush flex header (mirror requisitions2/_detail_panel.html:27) then a
@@ -120,8 +121,8 @@
         <tr>
           <th class="compact-cell--head text-left">Vendor</th>
           <th class="compact-cell--head text-right">Qty</th>
-          <th class="compact-cell--head text-right">Best Price</th>
-          <th class="compact-cell--head text-right">Score</th>
+          <th class="compact-cell--head text-right">{{ score_def('Best Price', 'Lowest observed price for this part across this vendor\'s sightings.') }}</th>
+          <th class="compact-cell--head text-right">{{ score_def('Score', 'Sighting usefulness (0-100): vendor trust, price competitiveness, quantity coverage, freshness, and data completeness. Hover a value for its breakdown.') }}</th>
           <th class="compact-cell--head w-8" aria-hidden="true"></th>
         </tr>
       </thead>

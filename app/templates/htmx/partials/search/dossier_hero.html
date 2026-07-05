@@ -8,6 +8,7 @@
                endpoints land in the NEXT task (404 for now is fine).
    Replaces #dossier-hero (outerHTML swap) — keeps the id so the rail observer still tracks it. #}
 
+{% from "htmx/partials/shared/_score_hover.html" import price_history %}
 {% set pt = history.price_trend %}
 {% set known = card is not none %}
 
@@ -76,8 +77,9 @@
         <p class="text-xs uppercase tracking-wide text-gray-400 font-semibold">Market price</p>
         {% if pt %}
         <div class="mt-1 flex items-baseline gap-1.5">
-          {# figure-accent: tabular-nums + accent color for the decision-driving numeral #}
-          <span class="font-mono text-2xl font-bold figure-accent">${{ (pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt }}</span>
+          {# figure-accent: tabular-nums + accent color for the decision-driving numeral.
+             Value hover → the real recorded price series (price_series), not a proxy. #}
+          {{ price_history('$' ~ ((pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt), price_series, currency=pt.currency, title='Recorded price history', trigger_class='font-mono text-2xl font-bold figure-accent') }}
           <span class="text-secondary">last</span>
         </div>
         <p class="font-mono text-xs text-gray-600 mt-0.5">${{ pt.min_price|pricefmt }} – ${{ pt.max_price|pricefmt }}</p>

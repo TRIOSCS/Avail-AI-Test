@@ -857,7 +857,24 @@ async def sightings_detail(
     )
 
     # ── Vendor Intelligence (Phase 3) ─────────────────────────────
-    from ..scoring import explain_lead
+    from ..scoring import explain_lead, score_sighting_v2_breakdown
+
+    # Deterministic score-hover feed: for each vendor, the persisted score_components of
+    # its highest-scoring sighting (which defines the summary score) → the exact weighted
+    # drivers behind the displayed Score. Keyed on the same normalized-lowercase vendor
+    # name the summary rows carry (see sighting_aggregation grouping). Best-effort — a
+    # vendor without stored components simply gets no breakdown popover.
+    winning_components: dict[str, tuple[float, dict]] = {}
+    for vn_raw, sc, comp in (
+        db.query(Sighting.vendor_name, Sighting.score, Sighting.score_components)
+        .filter(Sighting.requirement_id == requirement_id, Sighting.is_unavailable.isnot(True))
+        .all()
+    ):
+        if not comp:
+            continue
+        key = (vn_raw or "unknown").lower().strip()
+        if key not in winning_components or (sc or 0.0) > winning_components[key][0]:
+            winning_components[key] = (sc or 0.0, comp)
 
     normalized_names = [normalize_vendor_name(s.vendor_name) for s in summaries]
 
@@ -902,6 +919,7 @@ async def sightings_detail(
             age_days=age_days,
         )
 
+        _wc = winning_components.get(s.vendor_name)
         vendor_intel[s.vendor_name] = {
             "response_rate": card.response_rate if card else None,
             "ghost_rate": card.ghost_rate if card else None,
@@ -916,6 +934,7 @@ async def sightings_detail(
             "min_moq": s.min_moq,
             "newest_sighting_at": s.newest_sighting_at,
             "age_days": age_days,
+            "score_breakdown": score_sighting_v2_breakdown(_wc[1]) if _wc else None,
         }
 
     # ── OOO Contact Detection (Phase 3) ──────────────────────────

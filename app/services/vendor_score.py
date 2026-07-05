@@ -114,6 +114,41 @@ def compute_vendor_score(
     }
 
 
+def compute_vendor_score_breakdown(
+    offer_count: int,
+    stage_points_sum: float,
+    avg_rating: float | None,
+    *,
+    cancel_count: int = 0,
+    slow_cancel_count: int = 0,
+    total_pos: int = 0,
+) -> list[tuple[str, float]]:
+    """Deterministic driver contributions behind ``compute_vendor_score``.
+
+    Re-runs the SAME advancement / review blend and cancellation dampener from the
+    identical inputs and weight constants (``ADVANCEMENT_WEIGHT``/``REVIEW_WEIGHT``/
+    ``_cancel_dampener``), returning post-dampener ``(label, contribution)`` pairs whose
+    sum reconciles to ``vendor_score`` (within rounding). Below the cold-start floor
+    (``MIN_OFFERS_FOR_SCORE``) there is no score, so the breakdown is empty.
+    """
+    if offer_count < MIN_OFFERS_FOR_SCORE:
+        return []
+
+    advancement_score = (stage_points_sum / (offer_count * MAX_STAGE_POINTS)) * 100
+    advancement_score = min(100.0, max(0.0, advancement_score))
+    dampener = _cancel_dampener(cancel_count, slow_cancel_count, total_pos)
+
+    factors: list[tuple[str, float]] = []
+    if avg_rating is not None:
+        review_factor = min(100.0, max(0.0, (avg_rating / 5.0) * 100))
+        factors.append(("Order advancement", round(advancement_score * ADVANCEMENT_WEIGHT * dampener, 1)))
+        factors.append(("Buyer reviews", round(review_factor * REVIEW_WEIGHT * dampener, 1)))
+    else:
+        # No reviews → advancement carries the whole (un-blended) score.
+        factors.append(("Order advancement", round(advancement_score * dampener, 1)))
+    return factors
+
+
 def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
     """Compute vendor score for one vendor.
 

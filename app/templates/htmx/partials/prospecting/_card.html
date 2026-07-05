@@ -5,6 +5,7 @@
   Called by: prospecting/list.html (loop include), claim/dismiss/release endpoints (OOB swap).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
+{% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
 {% set prospect_status_colors = {
   'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
   'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -51,9 +52,9 @@
     <div class="mb-2">
       {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-600">Fit <span class="text-gray-300">(ICP match)</span></span>
+        <span class="text-gray-600">{{ score_def('Fit', 'ICP fit (0-100): industry match, company size, procurement staff, NAICS, geography, and broker usage.') }} <span class="text-gray-300">(ICP match)</span></span>
         {% if prospect.fit_score %}
-        <span class="font-medium {{ score.score_text_color(fit) }}">{{ fit }}%</span>
+        {{ score_breakdown(fit ~ '%', prospect_fit_breakdown(prospect), title='Fit factors', trigger_class='font-medium ' ~ score.score_text_color(fit)) }}
         {% else %}
         <span class="text-gray-400">Not scored yet</span>
         {% endif %}
@@ -67,9 +68,9 @@
     <div class="mb-2.5">
       {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-600">Readiness <span class="text-gray-300">(timing)</span></span>
+        <span class="text-gray-600">{{ score_def('Readiness', 'Buy-now readiness (0-100): buying intent, company events, hiring, new procurement hires, and contact quality.') }} <span class="text-gray-300">(timing)</span></span>
         {% if prospect.readiness_score %}
-        <span class="font-medium {{ score.score_text_color(ready) }}">{{ ready }}%</span>
+        {{ score_breakdown(ready ~ '%', prospect_readiness_breakdown(prospect), title='Readiness factors', trigger_class='font-medium ' ~ score.score_text_color(ready)) }}
         {% else %}
         <span class="text-gray-400">Not scored yet</span>
         {% endif %}

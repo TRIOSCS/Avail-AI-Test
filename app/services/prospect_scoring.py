@@ -221,67 +221,54 @@ def score_company_size(employee_range: str | None) -> int:
     return SIZE_NEUTRAL  # pragma: no cover — defensive: brackets cover all non-negative ints
 
 
-def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
-    """Calculate ICP fit score (0-100).
+def _fit_factors(prospect_data: dict) -> list[tuple[str, str, int, int]]:
+    """The single source of truth for the six ICP fit factors.
 
-    Args:
-        prospect_data: dict with keys: industry, naics_code, employee_count_range,
-            region, has_procurement_staff (bool|None), uses_brokers (bool|None)
-
-    Returns:
-        (score, reasoning_text) — score is 0-100, reasoning is human-readable.
+    Returns an ordered list of ``(label, detail, score, max)`` — ``label`` is a short
+    tag for the breakdown hover, ``detail`` is the human-readable reason prefix (the
+    per-factor ``reasoning`` text minus its ``(score/max)`` suffix). ``calculate_fit_score``
+    (reasoning + total) and ``calculate_fit_breakdown`` (the hover) both derive from this,
+    so the score number and the drivers a hover shows can never drift apart.
     """
-    reasons = []
-    total = 0
+    factors: list[tuple[str, str, int, int]] = []
 
     # 1. Industry/segment match (0-30)
     segment, ind_score = match_industry_segment(
         prospect_data.get("industry"),
         prospect_data.get("naics_code"),
     )
-    total += ind_score
-    if segment:
-        reasons.append(f"Industry: {segment} ({ind_score}/{FIT_WEIGHT_INDUSTRY})")
-    else:
-        reasons.append(f"Industry: no ICP match ({ind_score}/{FIT_WEIGHT_INDUSTRY})")
+    ind_detail = f"Industry: {segment}" if segment else "Industry: no ICP match"
+    factors.append(("Industry", ind_detail, ind_score, FIT_WEIGHT_INDUSTRY))
 
     # 2. Company size (0-20)
     size_score = score_company_size(prospect_data.get("employee_count_range"))
-    total += size_score
     emp = prospect_data.get("employee_count_range", "unknown")
-    reasons.append(f"Size: {emp} ({size_score}/{FIT_WEIGHT_SIZE})")
+    factors.append(("Company size", f"Size: {emp}", size_score, FIT_WEIGHT_SIZE))
 
     # 3. Has procurement/supply chain staff (0-15)
     has_staff = prospect_data.get("has_procurement_staff")
     if has_staff is True:
-        staff_score = FIT_WEIGHT_PROCUREMENT_STAFF  # 15
-        reasons.append(f"Procurement staff: yes ({staff_score}/{FIT_WEIGHT_PROCUREMENT_STAFF})")
+        staff_score, staff_detail = FIT_WEIGHT_PROCUREMENT_STAFF, "Procurement staff: yes"
     elif has_staff is False:
-        staff_score = 0
-        reasons.append(f"Procurement staff: no (0/{FIT_WEIGHT_PROCUREMENT_STAFF})")
+        staff_score, staff_detail = 0, "Procurement staff: no"
     else:
-        staff_score = FIT_WEIGHT_PROCUREMENT_STAFF // 2  # neutral: 8 (truncated from 7.5)
-        reasons.append(f"Procurement staff: unknown ({staff_score}/{FIT_WEIGHT_PROCUREMENT_STAFF})")
-    total += staff_score
+        staff_score = FIT_WEIGHT_PROCUREMENT_STAFF // 2  # neutral: 7 (truncated from 7.5)
+        staff_detail = "Procurement staff: unknown"
+    factors.append(("Procurement staff", staff_detail, staff_score, FIT_WEIGHT_PROCUREMENT_STAFF))
 
     # 4. NAICS code match (0-15) — separate from industry keyword match
     naics = (prospect_data.get("naics_code") or "").strip()
     if naics and naics in ALL_NAICS_CODES:
-        naics_score = FIT_WEIGHT_NAICS  # 15
-        reasons.append(f"NAICS: exact match {naics} ({naics_score}/{FIT_WEIGHT_NAICS})")
+        naics_score, naics_detail = FIT_WEIGHT_NAICS, f"NAICS: exact match {naics}"
     elif naics and len(naics) >= 4 and naics[:4] in ALL_NAICS_4DIGIT:
-        naics_score = 10
-        reasons.append(f"NAICS: 4-digit match {naics[:4]} ({naics_score}/{FIT_WEIGHT_NAICS})")
+        naics_score, naics_detail = 10, f"NAICS: 4-digit match {naics[:4]}"
     elif naics and len(naics) >= 3 and naics[:3] in ALL_NAICS_3DIGIT:
-        naics_score = 5
-        reasons.append(f"NAICS: 3-digit match {naics[:3]} ({naics_score}/{FIT_WEIGHT_NAICS})")
+        naics_score, naics_detail = 5, f"NAICS: 3-digit match {naics[:3]}"
     elif naics:
-        naics_score = 0
-        reasons.append(f"NAICS: no match {naics} (0/{FIT_WEIGHT_NAICS})")
+        naics_score, naics_detail = 0, f"NAICS: no match {naics}"
     else:
-        naics_score = FIT_WEIGHT_NAICS // 3  # neutral: 5
-        reasons.append(f"NAICS: unknown ({naics_score}/{FIT_WEIGHT_NAICS})")
-    total += naics_score
+        naics_score, naics_detail = FIT_WEIGHT_NAICS // 3, "NAICS: unknown"  # neutral: 5
+    factors.append(("NAICS", naics_detail, naics_score, FIT_WEIGHT_NAICS))
 
     # 5. Geographic fit (0-10)
     region = prospect_data.get("region")
@@ -293,8 +280,7 @@ def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
         geo_score = 3
     else:
         geo_score = FIT_WEIGHT_GEOGRAPHY // 2  # neutral: 5
-    total += geo_score
-    reasons.append(f"Geography: {region or 'unknown'} ({geo_score}/{FIT_WEIGHT_GEOGRAPHY})")
+    factors.append(("Geography", f"Geography: {region or 'unknown'}", geo_score, FIT_WEIGHT_GEOGRAPHY))
 
     # 6. Already buys from brokers (0-10)
     uses_brokers = prospect_data.get("uses_brokers")
@@ -304,18 +290,40 @@ def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
         broker_score = 0
     else:
         broker_score = FIT_WEIGHT_BROKER_USAGE // 2  # neutral: 5
-    total += broker_score
-    reasons.append(
-        f"Broker usage: {'yes' if uses_brokers is True else 'no' if uses_brokers is False else 'unknown'} "
-        f"({broker_score}/{FIT_WEIGHT_BROKER_USAGE})"
-    )
+    broker_label = "yes" if uses_brokers is True else "no" if uses_brokers is False else "unknown"
+    factors.append(("Broker usage", f"Broker usage: {broker_label}", broker_score, FIT_WEIGHT_BROKER_USAGE))
 
+    return factors
+
+
+def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
+    """Calculate ICP fit score (0-100).
+
+    Args:
+        prospect_data: dict with keys: industry, naics_code, employee_count_range,
+            region, has_procurement_staff (bool|None), uses_brokers (bool|None)
+
+    Returns:
+        (score, reasoning_text) — score is 0-100, reasoning is human-readable.
+    """
+    factors = _fit_factors(prospect_data)
+    total = sum(score for _label, _detail, score, _max in factors)
+    reasoning = "; ".join(f"{detail} ({score}/{maximum})" for _label, detail, score, maximum in factors)
     score = min(100, max(0, total))
-    reasoning = "; ".join(reasons)
 
     logger.debug("Fit score for {}: {} — {}", prospect_data.get("name", "?"), score, reasoning)
 
     return score, reasoning
+
+
+def calculate_fit_breakdown(prospect_data: dict) -> list[tuple[str, int]]:
+    """Deterministic ``(label, contribution)`` drivers behind ``calculate_fit_score``.
+
+    Derived from the SAME ``_fit_factors`` computation as the score, so the contributions
+    sum to the fit score (which is clamped to 100, unreachable given the weights sum to
+    exactly 100). Powers the fit-score hover.
+    """
+    return [(label, score) for label, _detail, score, _max in _fit_factors(prospect_data)]
 
 
 def calculate_readiness_score(prospect_data: dict, signals: dict) -> tuple[int, dict]:
@@ -437,6 +445,58 @@ def calculate_readiness_score(prospect_data: dict, signals: dict) -> tuple[int, 
     )
 
     return score, breakdown
+
+
+# Short hover labels for the five readiness signals (keyed on calculate_readiness_score's
+# breakdown dict keys — single source of truth for the readiness drivers).
+READINESS_FACTOR_LABELS = {
+    "intent": "Buying intent",
+    "events": "Company events",
+    "hiring": "Hiring",
+    "new_procurement_hire": "New procurement hire",
+    "contacts": "Contact quality",
+}
+
+
+def calculate_readiness_breakdown(signals: dict) -> list[tuple[str, int]]:
+    """Deterministic ``(label, contribution)`` drivers behind the readiness score.
+
+    Reuses ``calculate_readiness_score``'s already-structured breakdown (same inputs,
+    same weights — single source of truth), so the contributions sum to the readiness
+    score. Powers the readiness-score hover.
+    """
+    _score, breakdown = calculate_readiness_score({}, signals or {})
+    return [
+        (READINESS_FACTOR_LABELS.get(key, key.replace("_", " ").title()), part["score"])
+        for key, part in breakdown.items()
+    ]
+
+
+def fit_breakdown_for_prospect(prospect) -> list[tuple[str, int]]:
+    """Fit-score drivers for a ProspectAccount, rebuilt from its stored firmographics.
+
+    Mirrors how prospect_signals builds ``prospect_data`` at scoring time (industry /
+    naics / employee range / region are persisted columns), so the breakdown reconstructs
+    the same fit score the row displays. Registered as a Jinja global for the hover.
+    """
+    return calculate_fit_breakdown(
+        {
+            "name": prospect.name,
+            "industry": prospect.industry,
+            "naics_code": prospect.naics_code,
+            "employee_count_range": prospect.employee_count_range,
+            "region": prospect.region,
+        }
+    )
+
+
+def readiness_breakdown_for_prospect(prospect) -> list[tuple[str, int]]:
+    """Readiness-score drivers for a ProspectAccount, from its persisted
+    readiness_signals.
+
+    Registered as a Jinja global for the hover.
+    """
+    return calculate_readiness_breakdown(getattr(prospect, "readiness_signals", None) or {})
 
 
 def classify_readiness(score: int) -> str:

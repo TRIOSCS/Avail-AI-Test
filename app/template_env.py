@@ -477,3 +477,14 @@ def _crm_completeness(obj):
 
 
 templates.env.globals["crm_completeness"] = _crm_completeness
+
+# Score/price hover layer (idea C) — deterministic prospect fit/readiness factor
+# breakdowns exposed as Jinja globals so the prospect card (rendered from the list AND
+# from claim/dismiss OOB swaps, none of which share route context) can render the value
+# hover without every endpoint re-assembling the breakdown. Each returns an ordered
+# list of (label, contribution) derived from the SAME weights the score uses.
+from .services.prospect_scoring import fit_breakdown_for_prospect as _fit_breakdown  # noqa: E402
+from .services.prospect_scoring import readiness_breakdown_for_prospect as _readiness_breakdown  # noqa: E402
+
+templates.env.globals["prospect_fit_breakdown"] = _fit_breakdown
+templates.env.globals["prospect_readiness_breakdown"] = _readiness_breakdown

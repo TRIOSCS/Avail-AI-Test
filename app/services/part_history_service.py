@@ -168,6 +168,39 @@ def price_trend_for_card(db: Session, card_id: int) -> PriceTrend | None:
     )
 
 
+def price_series_for_card(db: Session, card_id: int, currency: str | None = None, limit: int = 60) -> list[Decimal]:
+    """Ordered price observations for a card, oldest→newest, for the hover sparkline.
+
+    Scopes to a single currency (the passed one, else the most-recent snapshot's) so the
+    trend line is meaningful — mixing currencies would be nonsense (same reasoning as
+    ``price_trend_for_card``). Returns at most ``limit`` prices as a plain list; the most
+    recent ``limit`` are kept but returned oldest-first so a left-to-right sparkline reads
+    chronologically. Empty when the card has no snapshots.
+    """
+    if currency is None:
+        last = (
+            db.query(MaterialPriceSnapshot.currency)
+            .filter(MaterialPriceSnapshot.material_card_id == card_id)
+            .order_by(MaterialPriceSnapshot.recorded_at.desc().nullslast())
+            .first()
+        )
+        if last is None:
+            return []
+        currency = last[0] or "USD"
+    # Pull the most-recent `limit` (desc) then reverse to chronological order.
+    rows = (
+        db.query(MaterialPriceSnapshot.price)
+        .filter(
+            MaterialPriceSnapshot.material_card_id == card_id,
+            MaterialPriceSnapshot.currency == currency,
+        )
+        .order_by(MaterialPriceSnapshot.recorded_at.desc().nullslast())
+        .limit(limit)
+        .all()
+    )
+    return [price for (price,) in reversed(rows) if price is not None]
+
+
 # ── Resolution + assembly ──
 
 
