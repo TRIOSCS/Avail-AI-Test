@@ -329,6 +329,127 @@ def force_card_category(db: Session, card: MaterialCard, raw_value: str) -> None
     db.expire(card, ["category"])
 
 
+# ── PostgreSQL-only path support ─────────────────────────────────────
+# A few code paths are PostgreSQL-only — pg_trgm ``similarity()``, the FTS
+# ``search_vector @@ plainto_tsquery`` ranking, ``jsonb_each`` aggregation — and
+# CANNOT execute on the in-memory SQLite engine the main suite uses (they raise, or
+# silently fall back, so a real regression there is invisible). Those tests carry
+# the ``requires_postgres`` marker: they RUN against a real Postgres only when
+# ``PG_TEST_DSN`` is set (the dedicated CI "postgres-paths" job sets it), and SKIP
+# cleanly on SQLite so the default local ``-n auto`` suite stays GREEN.
+
+PG_TEST_DSN = os.environ.get("PG_TEST_DSN", "")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers (keeps ``-m requires_postgres`` selection + strict-
+    markers clean)."""
+    config.addinivalue_line(
+        "markers",
+        "requires_postgres: PostgreSQL-only path; runs only when PG_TEST_DSN is set, skipped on SQLite.",
+    )
+
+
+def requires_postgres(obj):
+    """Mark a test/class as exercising a PostgreSQL-only code path.
+
+    Applies BOTH a *named* ``requires_postgres`` mark (so the dedicated CI Postgres
+    job selects them with ``pytest -m requires_postgres``) AND a ``skipif`` that
+    skips unless ``PG_TEST_DSN`` points at a real Postgres — so the in-memory-SQLite
+    suite (local + the main CI job) stays green rather than erroring on SQL SQLite
+    cannot run. Usage: ``@requires_postgres`` on a test function or class.
+    """
+    obj = pytest.mark.requires_postgres(obj)
+    return pytest.mark.skipif(
+        not PG_TEST_DSN,
+        reason="PostgreSQL-only path — set PG_TEST_DSN to a real Postgres DSN to run (skipped on SQLite).",
+    )(obj)
+
+
+@pytest.fixture(scope="session")
+def pg_engine():
+    """A real PostgreSQL engine with the full ORM schema + the pg_trgm extension.
+
+    Session-scoped: builds the schema once via ``Base.metadata.create_all``. The
+    ``pg_trgm`` extension is created FIRST so the GIN trigram indexes on
+    ``vendor_cards``/``site_contacts`` build. Every consumer is gated by the
+    ``requires_postgres`` marker, so this only runs when ``PG_TEST_DSN`` is set.
+    """
+    if not PG_TEST_DSN:
+        pytest.skip("PG_TEST_DSN not set")
+    from sqlalchemy import text as sa_text
+
+    eng = create_engine(PG_TEST_DSN)
+    with eng.begin() as conn:
+        conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+    Base.metadata.create_all(bind=eng)
+    yield eng
+    eng.dispose()
+
+
+@pytest.fixture()
+def pg_session(pg_engine) -> Session:
+    """A function-scoped session on the PG engine; TRUNCATEs every table on teardown so
+    tests are isolated (CASCADE handles the companies/customer_sites/site_contacts FK
+    cycle)."""
+    from sqlalchemy import text as sa_text
+
+    session_local = sessionmaker(bind=pg_engine, autoflush=False, expire_on_commit=True)
+    session = session_local()
+    all_tables = ", ".join(f'"{name}"' for name in Base.metadata.tables)
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        if all_tables:
+            with pg_engine.begin() as conn:
+                conn.execute(sa_text(f"TRUNCATE {all_tables} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture()
+def pg_client(pg_session: Session) -> TestClient:
+    """FastAPI TestClient bound to the PG session, authed as a seeded buyer.
+
+    Mirrors the SQLite ``client`` fixture but talks to real Postgres so the PG-only
+    endpoint paths (vendor-list FTS ranking, pg_trgm duplicate check) actually assert.
+    """
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    user = User(
+        email="pgbuyer@trioscs.com",
+        name="PG Buyer",
+        role="buyer",
+        azure_id="pg-azure-id-001",
+        m365_connected=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    pg_session.add(user)
+    pg_session.commit()
+
+    def _override_db():
+        yield pg_session
+
+    async def _override_fresh_token():
+        return "mock-token"
+
+    overridden_deps = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = lambda: user
+    app.dependency_overrides[require_admin] = lambda: user
+    app.dependency_overrides[require_buyer] = lambda: user
+    app.dependency_overrides[require_fresh_token] = _override_fresh_token
+
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in overridden_deps:
+            app.dependency_overrides.pop(dep, None)
+
+
 @pytest.fixture()
 def test_user(db_session: Session) -> User:
     """A standard buyer user."""

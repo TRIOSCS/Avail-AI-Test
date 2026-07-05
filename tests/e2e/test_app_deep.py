@@ -13,7 +13,6 @@ Tests cover:
 
 import re
 
-import pytest
 from playwright.sync_api import Page, expect
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -32,10 +31,14 @@ def goto_requisitions(page: Page, base_url: str):
 
 
 def nav_click(page: Page, href: str):
-    """Click a bottom nav link by its href and wait for HTMX swap."""
+    """Click a bottom nav link by its href and wait for HTMX swap.
+
+    Core nav links are part of the always-rendered app shell (not data-dependent), so a
+    missing one is a real, structural regression — FAIL rather than skip (which would
+    let a broken shell read green).
+    """
     link = page.locator(f"nav a[href='{href}']")
-    if link.count() == 0:
-        pytest.skip(f"Nav link with href='{href}' not found")
+    assert link.count() > 0, f"core nav link with href='{href}' missing from the app shell"
     link.first.click()
     page.wait_for_timeout(800)
 

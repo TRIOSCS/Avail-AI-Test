@@ -688,7 +688,7 @@ def _api_client(db_session, current_user):
 
 @pytest.mark.skipif(
     os.environ.get("MVP_MODE", "true").lower() == "true",
-    reason="Performance router disabled in MVP mode",
+    reason="post-MVP Performance module (MVP_MODE-gated by design)",
 )
 class TestAvailScoreAPI:
     def test_get_avail_scores_buyer(self, db_session):

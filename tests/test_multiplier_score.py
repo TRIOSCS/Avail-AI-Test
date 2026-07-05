@@ -672,7 +672,7 @@ class TestGetMultiplierScores:
 
 @pytest.mark.skipif(
     os.environ.get("MVP_MODE", "true").lower() == "true",
-    reason="Disabled in MVP mode",
+    reason="post-MVP Performance module (MVP_MODE-gated by design)",
 )
 class TestMultiplierAPI:
     def test_get_multiplier_scores_buyer(self, db_session):

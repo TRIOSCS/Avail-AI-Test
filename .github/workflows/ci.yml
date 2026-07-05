@@ -243,6 +243,66 @@ jobs:
             test-results.xml
             coverage.xml
 
+  postgres-paths:
+    # PG-only code paths — pg_trgm similarity(), the FTS `search_vector @@
+    # plainto_tsquery` ranking, jsonb_each aggregation — CANNOT run on the
+    # in-memory SQLite the main `test` job uses (they raise or silently fall back),
+    # so a real regression there is invisible. This job runs the
+    # `requires_postgres`-marked tests against a real Postgres 16 (PG_TEST_DSN set)
+    # so those paths actually get asserted. The main job leaves PG_TEST_DSN unset,
+    # so the same tests skip cleanly there.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: availai
+          POSTGRES_PASSWORD: availai
+          POSTGRES_DB: availai_pgtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U availai -d availai_pgtest"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install system dependencies
+        # app import pulls in WeasyPrint (PDF) — its shared libs must be present or
+        # collection fails before a single PG test runs.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libffi-dev shared-mime-info
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run PostgreSQL-only path tests
+        # PG_TEST_DSN activates the `requires_postgres` tests (skipped everywhere it
+        # is unset). -n 0 disables xdist so the session-scoped `pg_engine` fixture
+        # builds the schema once, with no concurrent create_all race between workers.
+        env:
+          TESTING: "1"
+          PYTHONPATH: ${{ github.workspace }}
+          PG_TEST_DSN: postgresql://availai:availai@localhost:5432/availai_pgtest
+        run: |
+          pytest tests/ -m requires_postgres -n 0 -v
+
   migration-full-cycle:
     # HIGH-DEVOPS-7: full chain-replay (downgrade base → re-upgrade head) of all
     # 160+ migrations. Too slow/fragile to gate every PR, so it runs nightly via

@@ -137,3 +137,77 @@ def authed_page(page, base_url):
         ]
     )
     return page
+
+
+# ── Deterministic seed ───────────────────────────────────────────────
+# The e2e suite drives the LIVE app, so core pages (requisitions, sightings,
+# vendors, …) render nothing when the DB is empty — and several tests then
+# ``pytest.skip`` on the missing element, so a genuinely broken page reads green.
+# This fixture guarantees a deterministic core dataset exists by running the
+# idempotent, additive ``seed_sample_data`` command INSIDE the app container. Once
+# it succeeds, core-page tests can hard-ASSERT their elements (a miss is a real
+# failure). Where the app is remote / docker-less (no container to exec into),
+# seeding is genuinely unavailable → ``seed_e2e_data`` is False and data-dependent
+# tests keep their environment-specific skip.
+
+
+def _run_seed() -> bool:
+    """Run the idempotent sample-data seeder inside the app container.
+
+    True on success.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "-e",
+                "ALLOW_SAMPLE_DATA_SEED=true",
+                "app",
+                "python",
+                "-m",
+                "app.management.seed_sample_data",
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/root/availai",
+            timeout=300,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+@pytest.fixture(scope="session")
+def seed_e2e_data() -> bool:
+    """Session-scoped: ensure deterministic core data exists. Returns whether seeding ran.
+
+    ``True``  → the app DB is under our control; core pages MUST render their
+                elements and a missing element is a hard FAILURE.
+    ``False`` → the environment cannot be seeded (remote / no docker); data-dependent
+                tests may skip (genuinely environment-specific).
+    """
+    return _run_seed()
+
+
+def _require_core_or_skip(seeded: bool, present: bool, element: str) -> None:
+    """Assert a core element is present when we control the data; else skip (env-
+    specific).
+
+    Bridges "core pages MUST render" with "keep skips for genuinely optional /
+    environment-specific cases": when ``seed_e2e_data`` succeeded a missing element
+    FAILS the test; when seeding was unavailable the test skips instead.
+    """
+    if seeded:
+        assert present, f"core element missing after deterministic seed: {element}"
+    elif not present:
+        pytest.skip(f"{element} absent and environment could not be seeded (env-specific)")
+
+
+@pytest.fixture()
+def core_guard():
+    """Return the ``_require_core_or_skip`` helper (a fixture so no cross-module import
+    is needed)."""
+    return _require_core_or_skip

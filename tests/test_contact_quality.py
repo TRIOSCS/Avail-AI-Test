@@ -147,11 +147,57 @@ class TestDedupContacts:
         assert c2.is_active is False
 
     def test_merge_preserves_existing_fields(self, db_session: Session, test_customer_site):
-        """Primary already has phone/title, should NOT be overwritten.
+        """Primary already has phone/title/linkedin/role — the merge must NOT overwrite
+        them.
 
-        Skipped: UNIQUE constraint on (customer_site_id, email) prevents duplicate creation.
+        ``dedup_contacts`` normalizes emails with ``.lower().strip()``, so two rows whose
+        emails differ ONLY by case/whitespace collide as duplicates under dedup while
+        staying byte-distinct to the ``uq_site_contacts_site_email`` UNIQUE index — that
+        is how a real (pre-guard / mixed-case) duplicate arises. Here the primary (created
+        first) is fully populated and the later duplicate carries DIFFERENT values, so the
+        ``if <field> and not primary.<field>`` guards must leave every primary field intact.
         """
-        pytest.skip("UNIQUE constraint on (customer_site_id, email) prevents duplicate creation")
+        primary = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Frank Primary",
+            email="frank@example.com",
+            phone="+1-555-PRIMARY",
+            phone_verified=True,
+            title="Director",
+            linkedin_url="https://linkedin.com/in/frank-primary",
+            contact_role="approver",
+            is_active=True,
+            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+        duplicate = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Frank Dupe",
+            email="Frank@Example.com",  # same email normalized; byte-distinct → dodges UNIQUE
+            phone="+1-555-DUPE",
+            phone_verified=False,
+            title="Manager",
+            linkedin_url="https://linkedin.com/in/frank-dupe",
+            contact_role="buyer",
+            is_active=True,
+            created_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        )
+        db_session.add_all([primary, duplicate])
+        db_session.commit()
+
+        merged = dedup_contacts(db_session, test_customer_site.id)
+        assert merged == 1
+
+        db_session.refresh(primary)
+        db_session.refresh(duplicate)
+
+        # Primary keeps ALL of its own populated fields (nothing pulled from the duplicate).
+        assert primary.phone == "+1-555-PRIMARY"
+        assert primary.phone_verified is True
+        assert primary.title == "Director"
+        assert primary.linkedin_url == "https://linkedin.com/in/frank-primary"
+        assert primary.contact_role == "approver"
+        # The duplicate is deactivated.
+        assert duplicate.is_active is False
 
     def test_contacts_with_no_email_skipped(self, db_session: Session, test_customer_site):
         c1 = SiteContact(
@@ -173,11 +219,45 @@ class TestDedupContacts:
         assert merged == 0
 
     def test_inactive_contacts_excluded(self, db_session: Session, test_customer_site):
-        """Inactive contacts should not be merged.
+        """An INACTIVE duplicate is excluded from dedup — not merged, not touched.
 
-        Skipped: UNIQUE constraint on (customer_site_id, email) prevents duplicate creation.
+        ``dedup_contacts`` only loads ``is_active=True`` rows, so an inactive contact
+        sharing an active contact's (normalized) email must be ignored entirely: no
+        merge counted, and none of its fields leak into the active primary. The two
+        rows use case-differing emails so both persist past the byte-exact UNIQUE index
+        while normalizing equal under dedup's ``.lower().strip()``.
         """
-        pytest.skip("UNIQUE constraint on (customer_site_id, email) prevents duplicate creation")
+        active = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Eve Active",
+            email="eve@example.com",
+            phone=None,
+            title=None,
+            is_active=True,
+            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+        inactive = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Eve Inactive",
+            email="EVE@example.com",  # same email normalized; byte-distinct → dodges UNIQUE
+            phone="+1-555-GHOST",
+            title="Ghost",
+            is_active=False,
+            created_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        )
+        db_session.add_all([active, inactive])
+        db_session.commit()
+
+        merged = dedup_contacts(db_session, test_customer_site.id)
+        assert merged == 0  # inactive dup never enters the merge
+
+        db_session.refresh(active)
+        db_session.refresh(inactive)
+        # The inactive contact's data was NOT merged into the active primary.
+        assert active.phone is None
+        assert active.title is None
+        # The inactive contact is left untouched.
+        assert inactive.is_active is False
 
     def test_empty_site(self, db_session: Session, test_customer_site):
         merged = dedup_contacts(db_session, test_customer_site.id)

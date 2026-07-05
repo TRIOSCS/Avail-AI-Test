@@ -29,6 +29,7 @@ from app.utils.vendor_helpers import (
     merge_contact_into_card,
     scrape_website_contacts,
 )
+from tests.conftest import requires_postgres
 
 # ── Stub factories ───────────────────────────────────────────────────────
 
@@ -805,8 +806,14 @@ def test_vendor_list_engagement_score_null():
 
 
 def test_list_vendors_empty(db_session, test_user):
-    """GET /api/vendors with no data returns empty or 500 (response model
-    validation)."""
+    """GET /api/vendors with no data returns an empty list (200).
+
+    On SQLite the PG-only FTS branch is never reached (no ``q``), so the endpoint's
+    SQLite-safe path must return 200 with an empty list. The real PostgreSQL FTS /
+    pg_trgm paths are asserted in ``TestVendorListPostgres`` / ``TestVendorDuplicatePostgres``
+    below (the ``requires_postgres``-gated PG CI job) — no more silent xfail masking a
+    regression here.
+    """
     from app.database import get_db
     from app.dependencies import require_buyer, require_user
     from app.main import app
@@ -828,9 +835,10 @@ def test_list_vendors_empty(db_session, test_user):
         for dep in [get_db, require_user, require_buyer]:
             app.dependency_overrides.pop(dep, None)
 
-    if resp.status_code == 500:
-        pytest.xfail("SQLite test DB cannot execute PostgreSQL-only vendor list path")
     assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    assert vendors == []
 
 
 def test_list_vendors_with_data(client, db_session):
@@ -1897,3 +1905,87 @@ def test_list_vendors_no_contact_returns_null(client, db_session):
     vendor = next((v for v in vendors if v["display_name"] == "Lonely Vendor"), None)
     assert vendor is not None
     assert vendor.get("top_contact") is None
+
+
+# ── PostgreSQL-only paths (pg_trgm + FTS) ────────────────────────────
+# These execute the vendor-list / duplicate-check SQL that ONLY runs on real
+# Postgres (search_vector @@ plainto_tsquery + ts_rank ranking; pg_trgm
+# similarity()). On SQLite the endpoint silently falls back to name-ILIKE /
+# rapidfuzz, so a regression in the PG SQL is invisible to the main suite.
+# The ``requires_postgres`` marker skips these on SQLite and RUNs them in the
+# dedicated CI Postgres job (PG_TEST_DSN set). See tests/conftest.py::pg_client.
+
+
+@requires_postgres
+class TestVendorListPostgres:
+    """`/api/vendors` against real Postgres — exercises the FTS ranking branch."""
+
+    def test_list_vendors_empty_pg(self, pg_client):
+        """Empty DB returns 200 with an empty list on Postgres (no fallback)."""
+        resp = pg_client.get("/api/vendors")
+        assert resp.status_code == 200
+        data = resp.json()
+        vendors = data if isinstance(data, list) else data.get("vendors", [])
+        assert vendors == []
+
+    def test_list_vendors_fts_search_pg(self, pg_client, pg_session):
+        """A >=3-char query drives the PG-only FTS path (plainto_tsquery + ts_rank).
+
+        search_vector is normally populated by an FTS trigger; here we set it
+        directly so the ``fts_count > 0`` branch (the PostgreSQL-only ranking query)
+        actually executes instead of falling back to the name filter.
+        """
+        from sqlalchemy import text as sa_text
+
+        pg_session.add_all(
+            [
+                VendorCard(normalized_name="alpha chips inc", display_name="Alpha Chips Inc", sighting_count=1),
+                VendorCard(normalized_name="beta semiconductors", display_name="Beta Semiconductors", sighting_count=1),
+            ]
+        )
+        pg_session.commit()
+        # Populate the tsvector the FTS branch requires (trigger-free test DB).
+        pg_session.execute(sa_text("UPDATE vendor_cards SET search_vector = to_tsvector('english', display_name)"))
+        pg_session.commit()
+
+        resp = pg_client.get("/api/vendors", params={"q": "alpha"})
+        assert resp.status_code == 200
+        data = resp.json()
+        vendors = data if isinstance(data, list) else data.get("vendors", [])
+        names = [v["display_name"] for v in vendors]
+        assert "Alpha Chips Inc" in names
+        assert "Beta Semiconductors" not in names
+
+
+@requires_postgres
+class TestVendorDuplicatePostgres:
+    """`/api/vendors/check-duplicate` against real Postgres — exercises pg_trgm
+    similarity()."""
+
+    def test_check_duplicate_exact_match_pg(self, pg_client, pg_session):
+        """An exact normalized-name match short-circuits as the confident duplicate."""
+        pg_session.add(
+            VendorCard(normalized_name="pinnacle components", display_name="Pinnacle Components", sighting_count=1)
+        )
+        pg_session.commit()
+
+        resp = pg_client.get("/api/vendors/check-duplicate", params={"name": "Pinnacle Components"})
+        assert resp.status_code == 200
+        matches = resp.json()["matches"]
+        assert any(m["match"] == "exact" and m["score"] == 100 for m in matches)
+
+    def test_check_duplicate_trgm_fuzzy_pg(self, pg_client, pg_session):
+        """A misspelling with no exact match surfaces via the pg_trgm similarity()
+        path."""
+        pg_session.add(
+            VendorCard(normalized_name="pinnacle components", display_name="Pinnacle Components", sighting_count=1)
+        )
+        pg_session.commit()
+
+        # 'Pinnacle Componets' (typo) has no exact match -> pg_trgm similarity() fuzzy branch.
+        resp = pg_client.get("/api/vendors/check-duplicate", params={"name": "Pinnacle Componets"})
+        assert resp.status_code == 200
+        matches = resp.json()["matches"]
+        assert matches, "expected a pg_trgm fuzzy suggestion for a near-duplicate name"
+        assert all(m["match"] == "fuzzy" for m in matches)
+        assert any(m["name"] == "Pinnacle Components" for m in matches)

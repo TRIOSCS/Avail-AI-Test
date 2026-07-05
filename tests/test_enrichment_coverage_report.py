@@ -34,7 +34,7 @@ from app.management.enrichment_coverage_report import (
 from app.models import MaterialCard, MaterialSpecFacet
 from app.models.fru_link import FruLink
 from app.services.commodity_registry import CANONICAL_COMMODITY_KEYS
-from tests.conftest import force_card_category
+from tests.conftest import force_card_category, requires_postgres
 
 
 def _card(db, mpn, **kwargs):
@@ -272,7 +272,7 @@ class TestSpecSourceBranches:
         m = collect_metrics(db_session)
         assert "'' 1" in format_report(m)
 
-    @pytest.mark.skipif(not os.environ.get("PG_TEST_DSN"), reason="set PG_TEST_DSN to verify the PG jsonb_each branch")
+    @requires_postgres
     def test_pg_jsonb_each_branch_matches_sqlite(self):
         """Opt-in parity check for _PG_SOURCES_SQL (CI runs SQLite only)."""
         engine = create_engine(os.environ["PG_TEST_DSN"])
