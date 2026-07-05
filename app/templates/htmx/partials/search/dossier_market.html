@@ -31,6 +31,50 @@
     Refresh market
   </button>
 </div>
+
+{# ── Sort / filter bar ──
+   Drives the cached vendor rows through the search_filter endpoint
+   (GET /v2/partials/search/filter), which reads the SAME Redis result set by
+   cached_search_id and re-renders the vendor cards into #search-results-cards.
+   hx-get on the <form> serializes every named control, so changing any one select
+   re-sorts / re-filters the whole list in a single request. The three controls map
+   exactly to what the endpoint accepts: sort (best|cheapest|stock),
+   confidence (all|high|medium|low), source (all|<source-name>). The <form> itself
+   is untouched by the innerHTML swap, so each select natively retains its choice. #}
+{% set market_sources = cached_rows | map(attribute='sources_found') | select | sum(start=[]) | unique | list %}
+<form class="px-4 py-2 border-b border-brand-100 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]"
+      hx-get="/v2/partials/search/filter"
+      hx-target="#search-results-cards"
+      hx-swap="innerHTML"
+      hx-trigger="change">
+  <input type="hidden" name="search_id" value="{{ cached_search_id }}">
+  <label class="flex items-center gap-1.5 text-gray-600">Sort
+    <select name="sort" class="input input-sm w-auto" aria-label="Sort vendor offers">
+      <option value="best">Best match</option>
+      <option value="cheapest">Cheapest</option>
+      <option value="stock">Most stock</option>
+    </select>
+  </label>
+  <label class="flex items-center gap-1.5 text-gray-600">Confidence
+    <select name="confidence" class="input input-sm w-auto" aria-label="Filter by confidence">
+      <option value="all">All</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+  </label>
+  {% if market_sources %}
+  <label class="flex items-center gap-1.5 text-gray-600">Source
+    <select name="source" class="input input-sm w-auto" aria-label="Filter by source">
+      <option value="all">All sources</option>
+      {% for src in market_sources %}
+      <option value="{{ src }}">{{ src }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+</form>
+
 <div id="search-results-cards" class="divide-y divide-brand-100" data-search-id="{{ cached_search_id }}">
   {% for card in cached_rows %}
   {% with card_index=loop.index0, search_id=cached_search_id, swap_oob=False %}
