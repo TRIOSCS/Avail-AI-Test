@@ -20,15 +20,19 @@ import pytest
 
 
 def _patch_graph_client(*, pages_return=None, pages_side_effect=None):
-    """Patch GraphClient with a mock whose get_all_pages is stubbed.
+    """Patch GraphClient with a mock whose calendarView/delta query is stubbed.
+
+    scan_calendar_events fetches via GraphClient.delta_query, which returns a
+    ``(events, delta_token)`` tuple — so the stub wraps ``pages_return`` in that
+    shape. ``pages_side_effect`` (e.g. an exception) is applied directly.
 
     Returns the patch context manager so callers can use it in a `with` block.
     """
     mock_gc = MagicMock()
     if pages_side_effect is not None:
-        mock_gc.get_all_pages = AsyncMock(side_effect=pages_side_effect)
+        mock_gc.delta_query = AsyncMock(side_effect=pages_side_effect)
     else:
-        mock_gc.get_all_pages = AsyncMock(return_value=pages_return)
+        mock_gc.delta_query = AsyncMock(return_value=(pages_return or [], "https://graph/delta?token=cov"))
     return patch("app.utils.graph_client.GraphClient", return_value=mock_gc)
 
 

@@ -424,14 +424,11 @@ class TestScanCalendarEvents:
 
         with patch("app.utils.graph_client.GraphClient") as MockGC:
             mock_gc = MockGC.return_value
-            mock_gc.get_all_pages = AsyncMock(return_value=[event])
+            mock_gc.delta_query = AsyncMock(return_value=([event], "https://graph/delta?token=t1"))
 
-            result = asyncio.run(
-                __import__(
-                    "app.services.calendar_intelligence",
-                    fromlist=["scan_calendar_events"],
-                ).scan_calendar_events("token", None, db_session)
-            )
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            result = asyncio.run(scan_calendar_events("token", None, db_session))
 
         assert result["events_scanned"] == 1
         assert result["activities_logged"] == 1
@@ -454,7 +451,7 @@ class TestScanCalendarEvents:
 
         with patch("app.utils.graph_client.GraphClient") as MockGC:
             mock_gc = MockGC.return_value
-            mock_gc.get_all_pages = AsyncMock(return_value=[event])
+            mock_gc.delta_query = AsyncMock(return_value=([event], "https://graph/delta?token=t1"))
 
             from app.services.calendar_intelligence import scan_calendar_events
 
@@ -479,7 +476,7 @@ class TestScanCalendarEvents:
 
         with patch("app.utils.graph_client.GraphClient") as MockGC:
             mock_gc = MockGC.return_value
-            mock_gc.get_all_pages = AsyncMock(return_value=[event])
+            mock_gc.delta_query = AsyncMock(return_value=([event], "https://graph/delta?token=t1"))
 
             from app.services.calendar_intelligence import scan_calendar_events
 
@@ -494,7 +491,7 @@ class TestScanCalendarEvents:
         """A Graph API exception returns zeroed result dict without crashing."""
         with patch("app.utils.graph_client.GraphClient") as MockGC:
             mock_gc = MockGC.return_value
-            mock_gc.get_all_pages = AsyncMock(side_effect=RuntimeError("network error"))
+            mock_gc.delta_query = AsyncMock(side_effect=RuntimeError("network error"))
 
             from app.services.calendar_intelligence import scan_calendar_events
 
@@ -502,6 +499,155 @@ class TestScanCalendarEvents:
 
         assert result["events_scanned"] == 0
         assert result["activities_logged"] == 0
+
+
+# ── Tests: calendarView/delta incremental sync (Phase 4.6) ────────────────────
+
+
+class TestCalendarDeltaSync:
+    """scan_calendar_events uses /me/calendarView/delta + SyncState delta tokens.
+
+    Covers the three delta contract paths:
+      - initial sync stores the deltaLink from a paged response,
+      - incremental sync uses the stored token, applying a changed event and an
+        @removed deletion,
+      - a 410 on the delta call discards the token and performs a full resync.
+    """
+
+    def _graph_event(self, event_id, subject, start_offset_h, attendee_emails, organizer_email=None):
+        start = _dt(start_offset_h)
+        end = start + timedelta(hours=1)
+        organizer_email = organizer_email or "me@trioscs.com"
+        attendees = [{"emailAddress": {"address": e, "name": ""}, "type": "required"} for e in attendee_emails]
+        return {
+            "id": event_id,
+            "subject": subject,
+            "start": {"dateTime": start.isoformat()},
+            "end": {"dateTime": end.isoformat()},
+            "attendees": attendees,
+            "organizer": {"emailAddress": {"address": organizer_email, "name": ""}},
+            "location": {"displayName": ""},
+        }
+
+    def _sync_state(self, db, user_id):
+        from app.models.pipeline import SyncState
+
+        return db.query(SyncState).filter(SyncState.user_id == user_id, SyncState.folder == "calendar_scan").first()
+
+    def test_initial_sync_stores_delta_link(self, db_session, test_user):
+        """No stored token → initial delta call (token=None) whose deltaLink is
+        persisted."""
+        co = _make_company(db_session, domain="delta-init.com")
+        _make_site(db_session, co.id, email="rep@delta-init.com")
+        db_session.commit()
+
+        event = self._graph_event("evt-init-1", "Kickoff", -3, ["rep@delta-init.com"])
+
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MockGC.return_value
+            mock_gc.delta_query = AsyncMock(return_value=([event], "https://graph/delta?$deltatoken=INIT"))
+
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            result = asyncio.run(scan_calendar_events("token", test_user.id, db_session))
+
+        # Initial sync passes delta_token=None to delta_query.
+        assert mock_gc.delta_query.await_args.kwargs["delta_token"] is None
+        assert result["events_scanned"] == 1
+        assert result["activities_logged"] == 1
+
+        ss = self._sync_state(db_session, test_user.id)
+        assert ss is not None
+        assert ss.delta_token == "https://graph/delta?$deltatoken=INIT"
+        assert ss.last_sync_at is not None
+
+    def test_incremental_applies_change_and_removal(self, db_session, test_user):
+        """Stored token is used; a changed event is logged and an @removed entry
+        deleted."""
+
+        co = _make_company(db_session, domain="delta-inc.com")
+        _make_site(db_session, co.id, email="rep@delta-inc.com")
+        db_session.commit()
+
+        removed_event = self._graph_event("evt-remove-1", "Old Meeting", -5, ["rep@delta-inc.com"])
+        changed_event = self._graph_event("evt-change-1", "New Meeting", -2, ["rep@delta-inc.com"])
+
+        # Initial scan logs the event that will later be removed and stores link1.
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MockGC.return_value
+            mock_gc.delta_query = AsyncMock(return_value=([removed_event], "https://graph/delta?$deltatoken=link1"))
+
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            asyncio.run(scan_calendar_events("token", test_user.id, db_session))
+
+        ss = self._sync_state(db_session, test_user.id)
+        assert ss.delta_token == "https://graph/delta?$deltatoken=link1"
+        assert db_session.query(ActivityLog).filter(ActivityLog.external_id == "calendar-evt-remove-1").count() == 1
+
+        # Incremental scan: one new/changed event + one @removed for the earlier event.
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MockGC.return_value
+            mock_gc.delta_query = AsyncMock(
+                return_value=(
+                    [changed_event, {"@removed": {"reason": "deleted"}, "id": "evt-remove-1"}],
+                    "https://graph/delta?$deltatoken=link2",
+                )
+            )
+
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            result = asyncio.run(scan_calendar_events("token", test_user.id, db_session))
+
+        # Incremental sync passes the stored deltaLink as the token.
+        assert mock_gc.delta_query.await_args.kwargs["delta_token"] == "https://graph/delta?$deltatoken=link1"
+        assert result["activities_logged"] == 1  # only the changed event
+        assert result["events_removed"] == 1
+
+        assert db_session.query(ActivityLog).filter(ActivityLog.external_id == "calendar-evt-remove-1").count() == 0
+        assert db_session.query(ActivityLog).filter(ActivityLog.external_id == "calendar-evt-change-1").count() == 1
+
+        db_session.refresh(ss)
+        assert ss.delta_token == "https://graph/delta?$deltatoken=link2"
+
+    def test_410_discards_token_and_full_resync(self, db_session, test_user):
+        """410 Gone on the delta call → stored token discarded, full resync, no
+        crash."""
+        from app.models.pipeline import SyncState
+        from app.utils.graph_client import GraphSyncStateExpired
+
+        co = _make_company(db_session, domain="delta-410.com")
+        _make_site(db_session, co.id, email="rep@delta-410.com")
+        db_session.add(
+            SyncState(user_id=test_user.id, folder="calendar_scan", delta_token="https://graph/delta?$deltatoken=STALE")
+        )
+        db_session.commit()
+
+        event = self._graph_event("evt-410-1", "Resynced Meeting", -2, ["rep@delta-410.com"])
+
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MockGC.return_value
+            mock_gc.delta_query = AsyncMock(
+                side_effect=[
+                    GraphSyncStateExpired("410 Gone"),
+                    ([event], "https://graph/delta?$deltatoken=FRESH"),
+                ]
+            )
+
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            result = asyncio.run(scan_calendar_events("token", test_user.id, db_session))
+
+        # Two calls: the stale token, then a full resync with delta_token=None.
+        assert mock_gc.delta_query.await_count == 2
+        assert mock_gc.delta_query.await_args_list[0].kwargs["delta_token"] == "https://graph/delta?$deltatoken=STALE"
+        assert mock_gc.delta_query.await_args_list[1].kwargs["delta_token"] is None
+
+        assert result["activities_logged"] == 1
+        assert db_session.query(ActivityLog).filter(ActivityLog.external_id == "calendar-evt-410-1").count() == 1
+
+        ss = self._sync_state(db_session, test_user.id)
+        assert ss.delta_token == "https://graph/delta?$deltatoken=FRESH"
 
 
 # ── Tests: calendar scan flag guard (FIX 3a) ─────────────────────────────────
