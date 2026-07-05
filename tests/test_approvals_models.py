@@ -1,9 +1,8 @@
 """test_approvals_models.py — ORM smoke tests for the approval engine models.
 
 Tests: ApprovalRequest / ApprovalStep / ApprovalStepRecipient chain integrity,
-       per-user prepayment approval toggle + limit on User, QualityPlan,
-       Prepayment, and the 6 new Offer columns (is_primary, sourcing_type,
-       vendor_rating, terms, location, specifics).
+       per-user prepayment approval toggle + limit on User, QualityPlan, and
+       Prepayment.
 
 Called by: pytest
 Depends on: conftest (db_session, test_user), app.models.approvals,
@@ -21,7 +20,6 @@ from app.constants import (
     PaymentMethod,
     QPOrderType,
     QualityPlanStatus,
-    SourcingType,
 )
 from app.models.approvals import (
     ApprovalEvent,
@@ -220,31 +218,3 @@ def test_prepayment_create(db_session, test_user, test_buy_plan):
     assert pp.id is not None
     assert pp.total_incl_fees == Decimal("5000.00")
     assert pp.test_report_sent is False
-
-
-# ── Offer 6-column extension ──────────────────────────────────────────────────
-
-
-def test_offer_new_columns(db_session, test_offer):
-    """The 6 new Offer columns accept values and default correctly."""
-    test_offer.is_primary = True
-    test_offer.sourcing_type = SourcingType.SPOT
-    test_offer.vendor_rating = Decimal("8.5")
-    test_offer.terms = {"net": 30, "currency": "USD"}
-    test_offer.location = "Shenzhen, CN"
-    test_offer.specifics = "RoHS compliant, COC available"
-    db_session.flush()
-
-    assert test_offer.is_primary is True
-    assert test_offer.sourcing_type == SourcingType.SPOT
-    assert test_offer.vendor_rating == Decimal("8.5")
-    assert test_offer.terms["net"] == 30
-    assert test_offer.location == "Shenzhen, CN"
-    assert test_offer.specifics == "RoHS compliant, COC available"
-
-
-def test_offer_is_primary_default(db_session, test_offer):
-    """is_primary defaults to False when not set."""
-    # test_offer is created without is_primary
-    db_session.flush()
-    assert test_offer.is_primary in (False, None)  # False by default; None before flush on SQLite

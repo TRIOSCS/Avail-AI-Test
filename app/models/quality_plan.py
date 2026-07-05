@@ -42,9 +42,10 @@ __all__ = [
 class QualityPlan(Base):
     """Quality plan document linked to a buy-plan order.
 
-    One QualityPlan per buy-plan + vendor-card pair (new orders) or per revision cycle.
-    status transitions: draft → in_review → approved/rejected. order_type distinguishes
-    first-time plans ('new') from revisions ('revision').
+    One QualityPlan per buy-plan + vendor-card pair. status stays 'draft' — the
+    submit/review lifecycle was never built; review folded into the per-section Mark-
+    Reviewed stamps (sales/purchasing_section_reviewed_at). order_type is always 'new'
+    (the 'revision' supersede-flow was never built).
     """
 
     __tablename__ = "quality_plans"

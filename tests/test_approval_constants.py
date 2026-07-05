@@ -1,7 +1,7 @@
 """Tests for Approvals Engine + Quality Plan StrEnum constants.
 
-Verifies that all gate types, status enums, payment, sourcing, and QP enums
-are present with the correct string values.
+Verifies that all gate types, status enums, payment, and QP enums are present
+with the correct string values.
 
 Called by: pytest
 Depends on: app.constants
@@ -15,7 +15,6 @@ from app.constants import (
     PaymentMethod,
     QPOrderType,
     QualityPlanStatus,
-    SourcingType,
 )
 
 
@@ -72,29 +71,18 @@ def test_payment_method_members() -> None:
     assert len(PaymentMethod) == 3
 
 
-def test_sourcing_type_members() -> None:
-    """All four sourcing-type members present."""
-    assert SourcingType.SPOT == "spot"
-    assert SourcingType.CONTRACT == "contract"
-    assert SourcingType.COMMODITY == "commodity"
-    assert SourcingType.PREFERRED == "preferred"
-    assert len(SourcingType) == 4
-
-
 def test_quality_plan_status_members() -> None:
-    """All four QP-status members present."""
+    """Only the live 'draft' QP-status member remains (the submit/review lifecycle was
+    never built — see QualityPlanStatus docstring)."""
     assert QualityPlanStatus.DRAFT == "draft"
-    assert QualityPlanStatus.IN_REVIEW == "in_review"
-    assert QualityPlanStatus.APPROVED == "approved"
-    assert QualityPlanStatus.REJECTED == "rejected"
-    assert len(QualityPlanStatus) == 4
+    assert len(QualityPlanStatus) == 1
 
 
 def test_qp_order_type_members() -> None:
-    """Both QP-order-type members present."""
+    """Only the live 'new' QP-order-type member remains (the 'revision' supersede-flow
+    was never built)."""
     assert QPOrderType.NEW == "new"
-    assert QPOrderType.REVISION == "revision"
-    assert len(QPOrderType) == 2
+    assert len(QPOrderType) == 1
 
 
 def test_all_enums_are_str_comparable() -> None:
@@ -104,6 +92,5 @@ def test_all_enums_are_str_comparable() -> None:
     assert ApprovalRecipientStatus.PENDING == "pending"
     assert ApprovalStepRule.ALL == "all"
     assert PaymentMethod.CC == "cc"
-    assert SourcingType.PREFERRED == "preferred"
-    assert QualityPlanStatus.IN_REVIEW == "in_review"
-    assert QPOrderType.REVISION == "revision"
+    assert QualityPlanStatus.DRAFT == "draft"
+    assert QPOrderType.NEW == "new"

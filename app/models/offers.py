@@ -84,19 +84,6 @@ class Offer(Base):
     notes = Column(Text)
     status = Column(String(20), default="active")  # active | sold
 
-    # ── QP / Approval engine extension (Task 2) ──────────────────────────────
-    # is_primary: buyer designates this as the primary offer for the requirement
-    is_primary = Column(Boolean, nullable=True, default=False, server_default="false")
-    # sourcing_type: spot / contract / commodity / preferred (SourcingType enum)
-    sourcing_type = Column(String(50), nullable=True)
-    # vendor_rating: 0.0–10.0 buyer-assigned rating snapshot at offer entry
-    vendor_rating = Column(Numeric(3, 1), nullable=True)
-    # terms: structured payment/delivery terms (JSON object)
-    terms = Column(JSON, nullable=True)
-    # location: vendor warehouse / ship-from location string
-    location = Column(String(255), nullable=True)
-    # specifics: free-text additional product specifics / certs
-    specifics = Column(Text, nullable=True)
     is_stale = Column(
         Boolean, nullable=False, default=False, server_default="false"
     )  # display-only: True if >14 days old

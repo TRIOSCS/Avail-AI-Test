@@ -561,14 +561,6 @@ class RiskFlagType(StrEnum):
     STALE_OFFER = "stale_offer"
 
 
-class RiskFlagSeverity(StrEnum):
-    """Severity levels for risk flags."""
-
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
-
-
 class ProspectAccountStatus(StrEnum):
     """Status lifecycle for ProspectAccount records in the prospect pool."""
 
@@ -1184,40 +1176,23 @@ class PrepaymentStatus(StrEnum):
     VOID = "void"
 
 
-class SourcingType(StrEnum):
-    """Sourcing strategy classification for a buy plan or line item.
-
-    spot       — one-time open-market purchase. contract   — negotiated long-term supply
-    agreement. commodity  — standard commodity purchase. preferred  — preferred-vendor
-    program purchase.
-    """
-
-    SPOT = "spot"
-    CONTRACT = "contract"
-    COMMODITY = "commodity"
-    PREFERRED = "preferred"
-
-
 class QualityPlanStatus(StrEnum):
     """Lifecycle state of a QualityPlan document.
 
-    draft      — being authored, not yet submitted for review. in_review  — submitted;
-    reviewer(s) have been assigned. approved   — all required reviewers approved the
-    plan. rejected   — one or more reviewers rejected; requires revision.
+    Only ``draft`` is live. The submit/review lifecycle (in_review/approved/rejected)
+    was never built — QP review folded into the per-section lightweight Mark-Reviewed
+    stamps (QualityPlan.sales_section_reviewed_at / purchasing_section_reviewed_at), so
+    every QualityPlan is authored and stays ``draft``.
     """
 
     DRAFT = "draft"
-    IN_REVIEW = "in_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
 
 
 class QPOrderType(StrEnum):
-    """Whether a QualityPlan is for a new order or a revision to an existing one.
+    """Order type for a QualityPlan.
 
-    new      — first-time quality plan for this part / supplier pair. revision — updated
-    plan superseding a previously approved version.
+    Only ``new`` is live — every QualityPlan is a first-time plan for its part / supplier
+    pair. The ``revision`` supersede-flow was never built (no writer ever set it).
     """
 
     NEW = "new"
-    REVISION = "revision"
