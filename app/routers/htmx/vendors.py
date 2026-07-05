@@ -21,7 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Qu
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import ActivityType
@@ -34,6 +34,7 @@ from ...services.crm_service import cadence_state as _cadence_state
 from ...services.crm_service import next_best_touch as _next_best_touch
 from ...services.crm_service import order_by_clock as _order_by_clock
 from ...template_env import template_response
+from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_vendor_card_or_404
@@ -45,24 +46,25 @@ router = APIRouter(tags=["htmx-views"])
 # ── Vendor partials ─────────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/vendors", response_class=HTMLResponse)
-async def vendors_list_partial(
-    request: Request,
+def build_vendor_list_query(
+    db: Session,
+    user: User,
+    *,
     q: str = "",
     hide_blacklisted: bool = True,
     include_archived: bool = False,
-    sort: str = "sighting_count",
-    dir: str = "desc",
     my_only: bool = False,
-    limit: int = Query(30, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
 ):
-    """Return vendor list as HTML partial with blacklisted toggle and sorting."""
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
+    """Filtered (unordered, unpaginated) VendorCard query shared by the list partial and
+    the CSV export.
+
+    Applies the EXACT filter predicates the vendor list uses — the "My Vendors"
+    (StrategicVendor) scoping, the hide-blacklisted default, the soft-archive
+    (is_active) filter, and the name/domain/brand-tag/commodity-tag search. It layers on
+    NO ordering, pagination, or eager loads, so each caller adds those; this is the
+    single source of truth for "what the list matches" so the export can never drift
+    from the on-screen list.
+    """
     from ...models.strategic import StrategicVendor
 
     query = db.query(VendorCard)
@@ -96,6 +98,37 @@ async def vendors_list_partial(
                 cast(VendorCard.commodity_tags, Text).ilike(term, escape="\\"),
             )
         )
+
+    return query
+
+
+@router.get("/v2/partials/vendors", response_class=HTMLResponse)
+async def vendors_list_partial(
+    request: Request,
+    q: str = "",
+    hide_blacklisted: bool = True,
+    include_archived: bool = False,
+    sort: str = "sighting_count",
+    dir: str = "desc",
+    my_only: bool = False,
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return vendor list as HTML partial with blacklisted toggle and sorting."""
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
+
+    query = build_vendor_list_query(
+        db,
+        user,
+        q=q,
+        hide_blacklisted=hide_blacklisted,
+        include_archived=include_archived,
+        my_only=my_only,
+    )
 
     total = query.count()
 
@@ -138,6 +171,117 @@ async def vendors_list_partial(
         }
     )
     return template_response("htmx/partials/vendors/list.html", ctx)
+
+
+# CSV export column order for the vendor list — the REAL VendorCard fields. There is no
+# broker/vendor "type" column on VendorCard, so "Source" carries the real provenance field
+# (v.source). Header row written first, then one row per matching vendor (no pagination).
+_VENDOR_EXPORT_COLUMNS = [
+    "Vendor",
+    "Domain",
+    "Website",
+    "Source",
+    "Blacklisted",
+    "Active",
+    "Commodity Tags",
+    "Contacts",
+    "Created",
+]
+
+# Plain-column sort whitelist for the export (mirrors the list's sortable columns; the
+# list's "outbound_asc" clock sort falls back to Sightings here since ordering is cosmetic
+# and filter parity is what matters).
+_VENDOR_EXPORT_SORT_COLUMNS = {
+    "display_name": VendorCard.display_name,
+    "sighting_count": VendorCard.sighting_count,
+    "overall_win_rate": VendorCard.overall_win_rate,
+    "hq_country": VendorCard.hq_country,
+    "industry": VendorCard.industry,
+}
+
+
+def _vendor_export_rows(
+    db: Session,
+    user: User,
+    *,
+    q: str,
+    hide_blacklisted: bool,
+    include_archived: bool,
+    my_only: bool,
+    sort: str,
+    direction: str,
+):
+    """Yield one CSV row per vendor matching the list's filters (no pagination).
+
+    Reuses build_vendor_list_query so the exported set is exactly the filtered list. A
+    correlated scalar subquery supplies the contact count so the vendor_contacts
+    collection never has to be loaded, keeping the streamed export memory-flat via
+    yield_per.
+    """
+    contact_count_sub = (
+        select(sqlfunc.count(VendorContact.id))
+        .where(VendorContact.vendor_card_id == VendorCard.id)
+        .correlate(VendorCard)
+        .scalar_subquery()
+    )
+    query = build_vendor_list_query(
+        db,
+        user,
+        q=q,
+        hide_blacklisted=hide_blacklisted,
+        include_archived=include_archived,
+        my_only=my_only,
+    )
+
+    sort_col = _VENDOR_EXPORT_SORT_COLUMNS.get(sort, VendorCard.sighting_count)
+    order = sort_col.desc().nullslast() if direction == "desc" else sort_col.asc().nullslast()
+
+    rows = query.add_columns(contact_count_sub.label("contact_count")).order_by(order).yield_per(500)
+    for v, contact_count in rows:
+        yield (
+            v.display_name,
+            v.domain or "",
+            v.website or "",
+            v.source or "",
+            "Yes" if v.is_blacklisted else "No",
+            "Yes" if v.is_active else "No",
+            "; ".join(str(t) for t in (v.commodity_tags or [])),
+            contact_count,
+            v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "",
+        )
+
+
+@router.get("/v2/partials/vendors/export")
+async def vendors_export(
+    q: str = "",
+    hide_blacklisted: bool = True,
+    include_archived: bool = False,
+    my_only: bool = False,
+    sort: str = "sighting_count",
+    dir: str = "desc",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream every list-matching vendor as a CSV download (attachment, no pagination).
+
+    Same auth (require_user) and same filter params as the list route
+    (GET /v2/partials/vendors) — the export mirrors the list's active view
+    (search/hide-blacklisted/show-archived/my-vendors).
+    """
+    return stream_csv(
+        "vendors_export.csv",
+        _VENDOR_EXPORT_COLUMNS,
+        _vendor_export_rows(
+            db,
+            user,
+            q=q,
+            hide_blacklisted=hide_blacklisted,
+            include_archived=include_archived,
+            my_only=my_only,
+            sort=sort,
+            direction=dir,
+        ),
+    )
 
 
 # ── Global vendor-contacts list ────────────────────────────────────────────

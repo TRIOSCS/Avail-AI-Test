@@ -198,6 +198,18 @@
           Clean &amp; reset
         </button>
 
+        {# Export CSV — a REAL browser download, not an htmx request: hx-boost="false" opts
+           this anchor out of the app's global nav-boost so it does a plain GET that streams
+           the file as an attachment (never swapping into #main-content). The querystring is
+           server-rendered from the SAME filter context the list used, so the CSV mirrors
+           exactly what's on screen (every filter change re-renders this whole partial). #}
+        <a hx-boost="false"
+           href="/v2/partials/requisitions/export?q={{ q|urlencode }}&status={{ status|urlencode }}&owner={{ owner }}&urgency={{ urgency|urlencode }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&sort={{ sort|urlencode }}&dir={{ dir|urlencode }}"
+           class="btn btn-sm btn-secondary self-center"
+           title="Download all matching requisitions as a CSV file">
+          Export CSV
+        </a>
+
         {# Clear all filters #}
         {% if q or status or urgency or date_from or date_to or (owner and owner != 0) %}
         <span class="text-gray-300 mx-1 self-center">|</span>

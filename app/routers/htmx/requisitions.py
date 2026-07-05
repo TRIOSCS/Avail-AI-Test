@@ -43,6 +43,7 @@ from ...services.freeform_parser_service import parse_freeform_rfq
 from ...services.quote_requisitions import quotes_for_requisition
 from ...services.task_service import create_requisition_task, delete_task, update_task
 from ...template_env import template_response
+from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
@@ -63,45 +64,28 @@ def _best_quote_status(quotes) -> str | None:
     return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
 
 
-# ── Requisition partials ────────────────────────────────────────────────
-
-
-@router.get("/v2/partials/requisitions", response_class=HTMLResponse)
-async def requisitions_list_partial(
-    request: Request,
+def build_requisition_list_query(
+    db: Session,
+    user: User,
+    *,
     q: str = "",
     status: str = "",
-    owner: int = Query(0, ge=0),
+    owner: int = 0,
     urgency: str = "",
     date_from: str = "",
     date_to: str = "",
-    sort: str = "created_at",
-    sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
-    group_by: str = "",
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
 ):
-    """Return requisitions list as HTML partial with filters and sorting.
+    """Filtered (unordered, unpaginated) Requisition query shared by the list partial
+    and the CSV export.
 
-    ``group_by='customer'`` renders a 2-level nested tree (Customer → Requisition →
-    requirement lines) built server-side over the current page's rows; any other value
-    is the default flat list.
+    Applies the EXACT filter predicates the requisitions list uses — the ``is_scratch``
+    exclusion, search (name/customer + a part-number EXISTS subquery), status, owner,
+    urgency, created-at date range — plus the restricted-role ownership boundary
+    (sales/trader see only their own). It layers on NO ordering, pagination, or eager
+    loads, so each caller adds those; this is the single source of truth for "what the
+    list matches" so the export can never drift from the on-screen list.
     """
-    query = (
-        db.query(Requisition)
-        .filter(Requisition.is_scratch.is_(False))
-        .options(
-            joinedload(Requisition.creator),
-            # selectinload (not joinedload) for the three collections: stacking
-            # collection joinedloads multiplies the base query's rows per requisition
-            # (requirements × offers × quotes cartesian before entity dedup).
-            selectinload(Requisition.requirements),
-            selectinload(Requisition.offers),
-            selectinload(Requisition.quotes),
-        )
-    )
+    query = db.query(Requisition).filter(Requisition.is_scratch.is_(False))
 
     search_term = q.strip()
     if search_term:
@@ -131,20 +115,69 @@ async def requisitions_list_partial(
         query = query.filter(Requisition.urgency == urgency)
     if date_from:
         try:
-            dt = datetime.fromisoformat(date_from)
-            query = query.filter(Requisition.created_at >= dt)
+            query = query.filter(Requisition.created_at >= datetime.fromisoformat(date_from))
         except ValueError:
             pass
     if date_to:
         try:
-            dt = datetime.fromisoformat(date_to)
-            query = query.filter(Requisition.created_at <= dt)
+            query = query.filter(Requisition.created_at <= datetime.fromisoformat(date_to))
         except ValueError:
             pass
 
     # Restricted roles (sales/trader) only see their own
     if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
+
+    return query
+
+
+# ── Requisition partials ────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/requisitions", response_class=HTMLResponse)
+async def requisitions_list_partial(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    owner: int = Query(0, ge=0),
+    urgency: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    sort: str = "created_at",
+    sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
+    group_by: str = "",
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return requisitions list as HTML partial with filters and sorting.
+
+    ``group_by='customer'`` renders a 2-level nested tree (Customer → Requisition →
+    requirement lines) built server-side over the current page's rows; any other value
+    is the default flat list.
+    """
+    query = build_requisition_list_query(
+        db,
+        user,
+        q=q,
+        status=status,
+        owner=owner,
+        urgency=urgency,
+        date_from=date_from,
+        date_to=date_to,
+    ).options(
+        joinedload(Requisition.creator),
+        # selectinload (not joinedload) for the three collections: stacking
+        # collection joinedloads multiplies the base query's rows per requisition
+        # (requirements × offers × quotes cartesian before entity dedup).
+        selectinload(Requisition.requirements),
+        selectinload(Requisition.offers),
+        selectinload(Requisition.quotes),
+    )
+
+    # Retained for the per-row match-reason/scope logic below.
+    search_term = q.strip()
 
     total = query.count()
 
@@ -313,6 +346,126 @@ async def requisitions_list_partial(
         }
     )
     return template_response("htmx/partials/requisitions/list.html", ctx)
+
+
+# CSV export column order for the requisitions list — the REAL Requisition fields. Header
+# row written first, then one row per matching requisition (no pagination).
+_REQ_EXPORT_COLUMNS = [
+    "Name",
+    "Customer",
+    "Status",
+    "Owner",
+    "Value",
+    "Deadline",
+    "Created",
+    "# Requirements",
+]
+
+# Plain-column sort whitelist for the export (mirrors the list's sortable columns; the
+# list's computed subquery sorts — req_count/offer_count/quote_status — fall back to
+# Created here since ordering is cosmetic and filter parity is what matters).
+_REQ_EXPORT_SORT_COLUMNS = {
+    "name": Requisition.name,
+    "customer_name": Requisition.customer_name,
+    "status": Requisition.status,
+    "urgency": Requisition.urgency,
+    "created_at": Requisition.created_at,
+    "updated_at": Requisition.updated_at,
+    "deadline": Requisition.deadline,
+}
+
+
+def _requisition_export_rows(
+    db: Session,
+    user: User,
+    *,
+    q: str,
+    status: str,
+    owner: int,
+    urgency: str,
+    date_from: str,
+    date_to: str,
+    sort: str,
+    sort_dir: str,
+):
+    """Yield one CSV row per requisition matching the list's filters (no pagination).
+
+    Reuses build_requisition_list_query so the exported set is exactly the filtered
+    list. A correlated scalar subquery supplies the requirement count so the
+    requirements collection never has to be loaded, keeping the streamed export memory-
+    flat via yield_per; claimed_by (Owner) is eager-loaded as a many-to-one join.
+    """
+    req_count_sub = (
+        select(sqlfunc.count(Requirement.id))
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+    )
+    query = build_requisition_list_query(
+        db,
+        user,
+        q=q,
+        status=status,
+        owner=owner,
+        urgency=urgency,
+        date_from=date_from,
+        date_to=date_to,
+    ).options(joinedload(Requisition.claimed_by))
+
+    sort_col = _REQ_EXPORT_SORT_COLUMNS.get(sort, Requisition.created_at)
+    order = sort_col.desc().nullslast() if sort_dir == "desc" else sort_col.asc().nullslast()
+
+    rows = query.add_columns(req_count_sub.label("req_count")).order_by(order).yield_per(500)
+    for req, req_count in rows:
+        yield (
+            req.name,
+            req.customer_name or "",
+            req.status or "",
+            req.claimed_by.name if req.claimed_by else "",
+            req.opportunity_value if req.opportunity_value is not None else "",
+            req.deadline or "",
+            req.created_at.strftime("%Y-%m-%d %H:%M") if req.created_at else "",
+            req_count,
+        )
+
+
+@router.get("/v2/partials/requisitions/export")
+async def requisitions_export(
+    q: str = "",
+    status: str = "",
+    owner: int = Query(0, ge=0),
+    urgency: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    sort: str = "created_at",
+    sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream every list-matching requisition as a CSV download (attachment, no
+    pagination).
+
+    Same auth (require_user) and same filter params as the list route (GET
+    /v2/partials/requisitions) — the export mirrors the list's active view
+    (search/status/owner/urgency/date-range) including the restricted-role ownership
+    boundary.
+    """
+    return stream_csv(
+        "requisitions_export.csv",
+        _REQ_EXPORT_COLUMNS,
+        _requisition_export_rows(
+            db,
+            user,
+            q=q,
+            status=status,
+            owner=owner,
+            urgency=urgency,
+            date_from=date_from,
+            date_to=date_to,
+            sort=sort,
+            sort_dir=sort_dir,
+        ),
+    )
 
 
 @router.get("/v2/partials/requisitions/create-form", response_class=HTMLResponse)
