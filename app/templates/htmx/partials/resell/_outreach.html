@@ -4,14 +4,25 @@
   touch (buyer · when · by-whom · channel · status), under a one-glance summary
   reading "offered N · M responded · K bid". Reuses the compact-table + status_badge
   vocabulary so it reads native. Refreshed after every offer-to-buyers submit.
-  Receives: list, rows (ExcessOutreach[]), summary {offered, responded, bid}, user.
+  Receives: list, rows (ExcessOutreach[]), summary {offered, responded, bid}, user,
+            any_sending (bool — a background email send is still in flight).
   Called by: resell.resell_outreach_tracker + the submit re-render.
   Depends on: shared/_macros.html.
+  An email campaign is written optimistically as "sending" and finalized by a background
+  job, so while any_sending is true the tab self-polls (every 3s) for the final status;
+  once every row settles the re-render drops the poll and it stops on its own.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge %}
 {% set el = list %}
 
-<div class="space-y-4">
+<div class="space-y-4"
+     {% if any_sending %}
+     hx-get="/v2/partials/resell/{{ el.id }}/outreach"
+     hx-trigger="every 3s"
+     hx-target="#tab-outreach-{{ el.id }}"
+     hx-swap="innerHTML"
+     hx-push-url="false"
+     {% endif %}>
 
   {# ── Glance summary + the primary action ───────────────────────── #}
   <div class="flex items-center justify-between gap-3">
@@ -68,6 +79,7 @@
           <td>
             <div class="flex items-center gap-2">
               {{ status_badge(row.status, status_map={
+                'sending': 'bg-slate-50 text-slate-500 border-slate-200',
                 'sent': 'bg-sky-50 text-sky-600 border-sky-200',
                 'opened': 'bg-indigo-50 text-indigo-600 border-indigo-200',
                 'responded': 'bg-amber-50 text-amber-600 border-amber-200',

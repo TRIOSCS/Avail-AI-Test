@@ -278,18 +278,24 @@ def test_submit_outreach_log_path(client, db_session, trader_user, posted_list):
 
 
 def test_submit_outreach_email_path(client, db_session, trader_user, posted_list):
-    """The email channel routes through submit_outreach_email (send mocked at
-    source)."""
+    """The email channel enqueues 'sending' rows + a background send, returning at once.
+
+    The send + per-buyer Graph lookups no longer run inline (they hung the modal for a
+    multi-buyer send) — they are a background job (stubbed here so the response reflects
+    the optimistic 'sending' state the modal sees). The finalization is covered by
+    tests/test_resell_outreach_async.py::TestRunOutreachEmailSend.
+    """
+    from unittest.mock import MagicMock
+
     buyer = _reachable_buyer(db_session, "Email Buyer", engagement=10.0, commodity=_CAP)
     db_session.commit()
     restore = _own(db_session, None, trader_user)
-    sent_payload = [{"vendor_email": buyer.emails[0], "status": "sent"}]
+    send_mock = AsyncMock()
+    run_stub = MagicMock()
     try:
         with (
-            patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=sent_payload)),
-            patch(
-                "app.email_service._find_sent_message", new=AsyncMock(return_value={"id": "m1", "conversationId": "c1"})
-            ),
+            patch("app.email_service.send_batch_rfq", new=send_mock),
+            patch("app.services.resell_outreach_service.run_outreach_email_send", new=run_stub),
         ):
             resp = client.post(
                 f"/api/resell/{posted_list.id}/outreach",
@@ -302,11 +308,14 @@ def test_submit_outreach_email_path(client, db_session, trader_user, posted_list
                 },
             )
         assert resp.status_code == 200
+        # The request path never ran the send loop — that is the background job's work.
+        send_mock.assert_not_called()
+        run_stub.assert_called_once()
         rows = db_session.query(ExcessOutreach).filter_by(excess_list_id=posted_list.id).all()
         assert len(rows) == 1
         assert rows[0].channel == "email"
-        assert rows[0].status == ExcessOutreachStatus.SENT
-        assert rows[0].graph_conversation_id == "c1"
+        assert rows[0].status == ExcessOutreachStatus.SENDING
+        assert rows[0].graph_conversation_id is None
     finally:
         restore()
 

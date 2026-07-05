@@ -13,7 +13,13 @@ Three entry points:
   - ``submit_outreach_email``  — email path: build the per-buyer payload, send via
     the ``send_batch_rfq`` adapter (DNC-at-send / save-to-sent / retry come free),
     stamp graph ids onto the rows, then ActivityLog per touch. Skipped recipients
-    (no email / DNC) are recorded ``no_response`` — never silently dropped.
+    (no email / DNC) are recorded ``no_response`` — never silently dropped. Split into
+    ``enqueue_outreach_email`` (SYNC — writes the rows in the transient ``sending``
+    state and returns at once, so the modal never blocks on a multi-buyer send) +
+    ``run_outreach_email_send`` (the BACKGROUND job the router enqueues — it performs
+    the sends + per-buyer sent-message lookups off the request path and advances each
+    row to ``sent`` / ``no_response``). ``submit_outreach_email`` itself is the inline
+    convenience that runs both phases on one session (direct callers / tests).
   - ``record_response``        — reply adapter consumed by the inbox poll (or
     Chunk D): match a reply (conversation/message id) → the ExcessOutreach rows,
     advance ``status`` (responded → bid / declined), and link/create the inbound
@@ -51,6 +57,7 @@ from ..constants import (
     ExcessOutreachStatus,
     OfferLineMatchStatus,
 )
+from ..database import SessionLocal
 from ..models import ActivityLog, Company, User, VendorCard, VendorResponse
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
 from ..utils.normalization import normalize_mpn_key
@@ -331,6 +338,220 @@ def submit_outreach(
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def enqueue_outreach_email(
+    db: Session,
+    *,
+    list_id: int,
+    owner: User,
+    buyers: list[dict],
+    scope: str,
+    subject: str,
+    body: str,
+    line_item_ids: list[int] | None = None,
+) -> tuple[list[ExcessOutreach], list[dict]]:
+    """Phase 1 (SYNC, request path): write the tracker rows in the transient ``sending``
+    state + build a serializable send plan, WITHOUT touching Graph.
+
+    Guards identical to :func:`submit_outreach`. Each buyer ({vendor_card_id} |
+    {company_id} + optional ``email`` override) is canonicalized to a VendorCard and gets
+    one ExcessOutreach row per (buyer × line) for ``per_line`` or per buyer for
+    ``whole_list``, all ``status=sending`` with no graph ids yet. Commits so the tracker
+    re-render shows them immediately. Returns ``(rows, plan)`` where ``plan`` is a list of
+    one group per buyer — ``{card_id, email, row_ids, parts}`` — that the router hands to
+    :func:`run_outreach_email_send` as a FastAPI ``BackgroundTask`` so the actual send +
+    per-buyer sent-message lookups never block the modal.
+    """
+    excess_list = _guard_owner(db, list_id, owner)
+    line_ids = _target_line_ids(db, excess_list, scope, line_item_ids)
+    # The offered-parts list is campaign-wide (same for every buyer); compute it once.
+    parts = [p["part_number"] for line_id in line_ids for p in _parts_snapshot(db, excess_list, line_id)]
+
+    all_rows: list[ExcessOutreach] = []
+    plan: list[dict] = []
+    for buyer in buyers:
+        card = _resolve_buyer_card(db, buyer)
+        email = buyer.get("email") or _primary_email(card)
+        rows = _make_outreach_rows(
+            db,
+            excess_list=excess_list,
+            owner=owner,
+            card=card,
+            channel=ExcessOutreachChannel.EMAIL,
+            line_ids=line_ids,
+            status=ExcessOutreachStatus.SENDING,
+        )
+        all_rows.extend(rows)
+        plan.append({"card_id": card.id, "email": email, "row_ids": [r.id for r in rows], "parts": parts})
+
+    db.commit()
+    for row in all_rows:
+        db.refresh(row)
+    logger.info(
+        "Enqueued {} outreach email row(s) on list={} ({} buyer(s)) by owner={} — sending in background",
+        len(all_rows),
+        list_id,
+        len(buyers),
+        owner.id,
+    )
+    return all_rows, plan
+
+
+async def _finalize_outreach_send(
+    db: Session,
+    *,
+    excess_list: ExcessList,
+    owner: User,
+    subject: str,
+    body: str,
+    token: str,
+    plan: list[dict],
+) -> list[ExcessOutreach]:
+    """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
+    status. Shared by :func:`submit_outreach_email` (inline) and
+    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup live.
+
+    Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
+    the live RFQ tracking path is untouched). Graph ids do NOT come back in
+    ``send_batch_rfq``'s result (it only stamps them onto Contact rows), so for each SENT
+    buyer we reuse ``email_service._find_sent_message`` — the SAME source-level lookup —
+    to fetch the just-sent message's ids. A skipped recipient (no email / DNC) or a total
+    send failure is recorded ``no_response`` — never silently dropped, never stuck
+    ``sending``. Idempotent: only rows still in ``sending`` are sent, so re-running the
+    plan never double-sends. Flushes the status changes; the caller commits.
+    """
+    from app import email_service
+    from app.utils.graph_client import GraphClient
+
+    # Idempotency guard: resolve each group's rows and keep only the ones still in
+    # ``sending`` (a re-run after a partial finalize must not re-send an already-sent
+    # buyer). A group with no live rows is dropped from the send entirely.
+    pending: list[tuple[VendorCard | None, str | None, list[ExcessOutreach]]] = []
+    vendor_groups: list[dict] = []
+    for group in plan:
+        rows = [db.get(ExcessOutreach, rid) for rid in group["row_ids"]]
+        live = [r for r in rows if r is not None and r.status == ExcessOutreachStatus.SENDING]
+        if not live:
+            continue
+        card = db.get(VendorCard, group["card_id"])
+        email = group["email"]
+        pending.append((card, email, live))
+        vendor_groups.append(
+            {
+                "vendor_name": card.display_name if card else "",
+                "vendor_email": email or "",
+                "parts": group.get("parts", []),
+                "subject": subject,
+                "body": body,
+            }
+        )
+
+    if not pending:
+        return []
+
+    try:
+        send_results = await email_service.send_batch_rfq(
+            token=token,
+            db=db,
+            user_id=owner.id,
+            requisition_id=None,
+            vendor_groups=vendor_groups,
+        )
+    except Exception:
+        # A total send failure must not strand rows in ``sending``: an empty result set
+        # flags every pending buyer ``no_response`` below (the row is kept, not lost).
+        logger.exception(
+            "Outreach send_batch_rfq raised for list={} — flagging pending rows no_response", excess_list.id
+        )
+        send_results = []
+    # Index results by recipient email (send_batch_rfq preserves vendor identity in each
+    # result dict) so we can map a per-buyer outcome back to its rows.
+    result_by_email: dict[str, dict] = {(r.get("vendor_email") or "").lower(): r for r in send_results}
+
+    gc = GraphClient(token)
+    send_time = datetime.now(timezone.utc)
+    finalized: list[ExcessOutreach] = []
+    for card, email, rows in pending:
+        result = result_by_email.get((email or "").lower(), {})
+        sent_ok = result.get("status") == "sent"
+        status = ExcessOutreachStatus.SENT if sent_ok else ExcessOutreachStatus.NO_RESPONSE
+        for row in rows:
+            row.status = status
+            row.sent_at = send_time if sent_ok else None
+
+        # Stamp graph ids on the SENT buyer's rows via the same source-level lookup
+        # send_batch_rfq uses internally (we cannot get them from the result dict).
+        if sent_ok and email:
+            try:
+                sent_msg = await email_service._find_sent_message(gc, subject, email)
+            except Exception:  # lookup is best-effort — a failure must not lose the row
+                logger.warning("Outreach sent-message lookup failed for <{}>", email, exc_info=True)
+                sent_msg = None
+            if isinstance(sent_msg, dict) and sent_msg:
+                for row in rows:
+                    row.graph_message_id = sent_msg.get("id")
+                    row.graph_conversation_id = sent_msg.get("conversationId")
+            else:
+                logger.warning(
+                    "Outreach graph ids left NULL for buyer '{}' <{}> — reply matching degrades",
+                    card.display_name if card else "?",
+                    email,
+                )
+
+        finalized.extend(rows)
+        _log_outreach_activity(
+            db,
+            owner=owner,
+            excess_list=excess_list,
+            card=card,
+            channel=ExcessOutreachChannel.EMAIL,
+            sent=sent_ok,
+        )
+
+    db.flush()
+    return finalized
+
+
+async def run_outreach_email_send(
+    *,
+    list_id: int,
+    owner_id: int,
+    subject: str,
+    body: str,
+    token: str,
+    groups: list[dict],
+    session_factory=None,
+) -> None:
+    """Phase 2 (BACKGROUND job the router enqueues): perform the sends + per-buyer sent-
+    message lookups off the request path and advance each ``sending`` row.
+
+    Opens its OWN session — the request session is already closed by the time a FastAPI
+    ``BackgroundTask`` runs — via ``session_factory`` (defaults to the app ``SessionLocal``;
+    injectable so tests can bind it to the test session). Reloads the owner + list, runs
+    :func:`_finalize_outreach_send` over ``groups`` (the plan from
+    :func:`enqueue_outreach_email`), and commits. Idempotent (only ``sending`` rows are
+    sent) and self-contained (own try/rollback/close) so a failure can never poison a
+    request. Returns nothing — the tracker's ``sending`` poll surfaces the final state.
+    """
+    factory = session_factory or SessionLocal
+    db = factory()
+    try:
+        owner = db.get(User, owner_id)
+        excess_list = db.get(ExcessList, list_id)
+        if owner is None or excess_list is None:
+            logger.error("Outreach send job: owner={} or list={} missing — aborting", owner_id, list_id)
+            return
+        await _finalize_outreach_send(
+            db, excess_list=excess_list, owner=owner, subject=subject, body=body, token=token, plan=groups
+        )
+        db.commit()
+        logger.info("Background outreach send finished for list={} by owner={}", list_id, owner_id)
+    except Exception:
+        logger.exception("Background outreach send failed for list={}", list_id)
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def submit_outreach_email(
     db: Session,
     *,
@@ -345,117 +566,39 @@ async def submit_outreach_email(
 ) -> list[ExcessOutreach]:
     """Send an outreach email per buyer (reusing send_batch_rfq), then track + stamp.
 
-    Guards identical to :func:`submit_outreach`. Each buyer ({vendor_card_id} |
-    {company_id} + optional ``email`` override) is canonicalized to a VendorCard. The
-    adapter builds one ``vendor_groups`` entry per buyer (buyer as the recipient, the
-    excess lines as the parts) and hands them to ``email_service.send_batch_rfq`` with
-    NO requisition — so the email goes out with DNC-at-send / save-to-sent / retry, but
-    no RFQ Contact rows are written (the live RFQ tracking path is untouched). We do our
-    OWN tracking: one ExcessOutreach row per (buyer × line) for ``per_line`` or per
-    buyer for ``whole_list``.
-
-    Graph ids do NOT come back in ``send_batch_rfq``'s result (it only stamps them onto
-    Contact rows), so for each SENT buyer we reuse ``email_service._find_sent_message``
-    — the SAME source-level lookup send_batch_rfq uses — to fetch the just-sent
-    message's ids and stamp them onto the buyer's rows. A skipped recipient (no email /
-    DNC, surfaced by send_batch_rfq) is recorded ``status=no_response`` — never silently
-    dropped. Commits. Returns the rows.
+    Inline convenience that runs both phases on ONE session:
+    :func:`enqueue_outreach_email` (write the ``sending`` rows + build the plan) then
+    :func:`_finalize_outreach_send` (send + stamp + advance to ``sent`` / ``no_response``).
+    Direct callers / tests that want the fully-finalized rows in one call use this; the
+    ROUTER instead enqueues the finalize as a background job (via
+    :func:`run_outreach_email_send`) so the modal returns immediately. Commits. Returns
+    the rows.
     """
-    from app import email_service
-    from app.utils.graph_client import GraphClient
-
-    excess_list = _guard_owner(db, list_id, owner)
-    line_ids = _target_line_ids(db, excess_list, scope, line_item_ids)
-
-    # Resolve every buyer up front (card + send address) so the payload and the row
-    # writing share one canonical "who" per buyer.
-    resolved: list[tuple[dict, VendorCard, str | None]] = []
-    vendor_groups: list[dict] = []
-    for buyer in buyers:
-        card = _resolve_buyer_card(db, buyer)
-        email = buyer.get("email") or _primary_email(card)
-        resolved.append((buyer, card, email))
-        vendor_groups.append(
-            {
-                "vendor_name": card.display_name,
-                "vendor_email": email or "",
-                "parts": [p["part_number"] for line_id in line_ids for p in _parts_snapshot(db, excess_list, line_id)],
-                "subject": subject,
-                "body": body,
-            }
-        )
-
-    # Reuse the RFQ send engine in its no-requisition mode (email out, no Contact rows).
-    send_results = await email_service.send_batch_rfq(
-        token=token,
-        db=db,
-        user_id=owner.id,
-        requisition_id=None,
-        vendor_groups=vendor_groups,
+    rows, plan = enqueue_outreach_email(
+        db,
+        list_id=list_id,
+        owner=owner,
+        buyers=buyers,
+        scope=scope,
+        subject=subject,
+        body=body,
+        line_item_ids=line_item_ids,
     )
-    # Index results by recipient email (send_batch_rfq preserves vendor identity in each
-    # result dict) so we can map a per-buyer outcome back to its rows.
-    result_by_email: dict[str, dict] = {(r.get("vendor_email") or "").lower(): r for r in send_results}
-
-    gc = GraphClient(token)
-    send_time = datetime.now(timezone.utc)
-    all_rows: list[ExcessOutreach] = []
-    for _buyer, card, email in resolved:
-        result = result_by_email.get((email or "").lower(), {})
-        sent_ok = result.get("status") == "sent"
-        status = ExcessOutreachStatus.SENT if sent_ok else ExcessOutreachStatus.NO_RESPONSE
-
-        rows = _make_outreach_rows(
-            db,
-            excess_list=excess_list,
-            owner=owner,
-            card=card,
-            channel=ExcessOutreachChannel.EMAIL,
-            line_ids=line_ids,
-            status=status,
-            sent_at=send_time if sent_ok else None,
-        )
-
-        # Stamp graph ids on the SENT buyer's rows via the same source-level lookup
-        # send_batch_rfq uses internally (we cannot get them from the result dict).
-        if sent_ok and email:
-            try:
-                sent_msg = await email_service._find_sent_message(gc, subject, email)
-            except Exception:  # pragma: no cover - lookup is best-effort
-                logger.warning("Outreach sent-message lookup failed for <{}>", email, exc_info=True)
-                sent_msg = None
-            if isinstance(sent_msg, dict) and sent_msg:
-                for row in rows:
-                    row.graph_message_id = sent_msg.get("id")
-                    row.graph_conversation_id = sent_msg.get("conversationId")
-            else:
-                logger.warning(
-                    "Outreach graph ids left NULL for buyer '{}' <{}> — reply matching degrades",
-                    card.display_name,
-                    email,
-                )
-
-        all_rows.extend(rows)
-        _log_outreach_activity(
-            db,
-            owner=owner,
-            excess_list=excess_list,
-            card=card,
-            channel=ExcessOutreachChannel.EMAIL,
-            sent=sent_ok,
-        )
-
+    excess_list = get_excess_list(db, list_id)
+    await _finalize_outreach_send(
+        db, excess_list=excess_list, owner=owner, subject=subject, body=body, token=token, plan=plan
+    )
     db.commit()
-    for row in all_rows:
+    for row in rows:
         db.refresh(row)
     logger.info(
         "Sent {} outreach email row(s) on list={} ({} buyer(s)) by owner={}",
-        len(all_rows),
+        len(rows),
         list_id,
         len(buyers),
         owner.id,
     )
-    return all_rows
+    return rows
 
 
 def _primary_email(card: VendorCard) -> str | None:

@@ -26,7 +26,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
@@ -1266,6 +1266,9 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
         "list": el,
         "rows": rows,
         "summary": {"offered": len(offered), "responded": len(responded), "bid": len(bid)},
+        # Drives the tracker's self-poll: while any row is still ``sending`` (its
+        # background send job has not finalized), the tab polls itself for the final state.
+        "any_sending": any(r.status == ExcessOutreachStatus.SENDING for r in rows),
     }
 
 
@@ -1392,6 +1395,7 @@ async def resell_not_yet_strip(
 @router.post("/api/resell/{list_id}/outreach", response_class=HTMLResponse)
 async def resell_submit_outreach(
     request: Request,
+    background_tasks: BackgroundTasks,
     list_id: int,
     vendor_card_ids: str = Form(""),
     company_ids: str = Form(""),
@@ -1409,10 +1413,14 @@ async def resell_submit_outreach(
 
     Buyers arrive as ``vendor_card_ids`` (ranked picks) and/or ``company_ids`` (a
     manual-add company with no card yet — the service backfills a card). ``channel`` ==
-    ``email`` routes through :func:`resell_outreach_service.submit_outreach_email` (the
-    RFQ send engine, DNC-at-send + save-to-sent for free); any other channel is a
-    manual log via :func:`submit_outreach`. ``scope`` is ``per_line`` (scoped to
-    ``line_ids``) or ``whole_list``. The service enforces the owner + can_post guards.
+    ``email`` writes the tracker rows in the transient ``sending`` state via
+    :func:`resell_outreach_service.enqueue_outreach_email` and hands the actual send +
+    per-buyer sent-message lookups to a background job
+    (:func:`resell_outreach_service.run_outreach_email_send`) so a multi-buyer send never
+    blocks the modal — the tracker re-renders at once showing ``sending`` and polls itself
+    to the final status. Any other channel is a manual log via :func:`submit_outreach`.
+    ``scope`` is ``per_line`` (scoped to ``line_ids``) or ``whole_list``. The service
+    enforces the owner + can_post guards.
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
@@ -1432,16 +1440,27 @@ async def resell_submit_outreach(
     if channel == ExcessOutreachChannel.EMAIL:
         if not subject.strip() or not body.strip():
             raise HTTPException(400, "An email outreach needs a subject and a message")
-        await resell_outreach_service.submit_outreach_email(
+        # Phase 1 (fast, inline): write the rows as ``sending`` and return at once.
+        _rows, plan = resell_outreach_service.enqueue_outreach_email(
             db,
             list_id=list_id,
             owner=user,
             buyers=buyers,
             scope=scope_value,
-            token=token,
             subject=subject.strip(),
             body=body.strip(),
             line_item_ids=parsed_lines,
+        )
+        # Phase 2 (background): the multi-buyer send + per-buyer Graph sent-message
+        # lookups run off the request path and advance each row to its final status.
+        background_tasks.add_task(
+            resell_outreach_service.run_outreach_email_send,
+            list_id=list_id,
+            owner_id=user.id,
+            subject=subject.strip(),
+            body=body.strip(),
+            token=token,
+            groups=plan,
         )
     else:
         resell_outreach_service.submit_outreach(

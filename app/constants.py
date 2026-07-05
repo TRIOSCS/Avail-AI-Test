@@ -240,11 +240,15 @@ class ExcessOutreachChannel(StrEnum):
 class ExcessOutreachStatus(StrEnum):
     """Response lifecycle for a resell outreach (ExcessOutreach.status).
 
-    sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer) or
-    declined; ``no_response`` is the terminal silence state used by the don't-forget
-    nudge. Advanced by the reply adapter (see resell_outreach_service in Chunk B).
+    sending -> sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer)
+    or declined; ``no_response`` is the terminal silence state used by the don't-forget
+    nudge. ``sending`` is the transient optimistic state a multi-buyer email campaign is
+    written in while its background send job runs (the modal returns immediately) — the
+    job advances each row to ``sent`` / ``no_response``. Advanced by the reply adapter
+    (see resell_outreach_service in Chunk B).
     """
 
+    SENDING = "sending"
     SENT = "sent"
     OPENED = "opened"
     RESPONDED = "responded"
