@@ -1,4 +1,4 @@
-{# shell.html — CRM shell: Customers/Vendors tab bar + lazy tab content.
+{# shell.html — CRM shell: Customers/Vendors/Activity tab bar + lazy tab content.
    Receives: user (User), default_tab (str).
    Called by: crm/views.py crm_shell route.
    Depends on: Alpine.js, HTMX, accent palette (post-PR0), _shell_macros.html.
@@ -14,6 +14,8 @@
   <div class="flex gap-1 mb-6 border-b border-line-base">
     {{ tab_button('customers', '/v2/partials/customers', 'Customers', 'load, click' if default_tab == 'customers' else 'click') }}
     {{ tab_button('vendors', '/v2/partials/vendors?hx_target=%23crm-tab-content&push_url_base=/v2/crm', 'Vendors', 'load, click' if default_tab == 'vendors' else 'click') }}
+    {# Activity Scorecard — per-user leaderboard, visible to ALL users (loads on click). #}
+    {{ tab_button('scorecard', '/v2/partials/crm/scorecard', 'Activity', 'load, click' if default_tab == 'scorecard' else 'click') }}
   </div>
 
   {# Tab content — lazy-loaded by HTMX.

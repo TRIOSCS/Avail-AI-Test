@@ -1,10 +1,10 @@
 {#
-  settings/_scorecard_table.html — the ranked leaderboard table fragment.
+  crm/_scorecard_table.html — the ranked leaderboard table fragment.
   Swapped into #scorecard-table on time-range change (and included on first paint).
   Raw counts per user: calls, emails, accounts, contacts, and their total.
 
   Receives: rows (list[ScorecardRow]), time_range_labels (dict), time_range (str).
-  Called by: settings/scorecard.html (include) and htmx_views.settings_scorecard_tab
+  Called by: crm/scorecard.html (include) and crm.views.crm_scorecard
              (HX-Request fragment render).
   Depends on: the user_avatar macro, .data-table styles.
 #}

@@ -5,7 +5,8 @@ Covers:
   - channel/direction mapping correctness (only the right rows count)
   - time-range windowing (this_week/month/quarter/all_time)
   - ranking order (total desc, deterministic tie-break) + 1-based ranks
-  - the settings/scorecard route: manager/admin → 200, buyer → 403
+  - the CRM /v2/partials/crm/scorecard route: ALL users → 200 (no manager gate),
+    the time-range fragment swap, and the retired settings route → 404
   - the leaderboard table renders the six columns (User/Calls/Emails/Accounts/
     Contacts/Total) and no longer shows a Score / Talk time / IMs column
 
@@ -222,8 +223,7 @@ def _client_as(db_session, user) -> TestClient:
     return TestClient(app)
 
 
-def test_scorecard_route_renders_six_columns_for_manager(db_session, users):
-    mgr = users["manager"]
+def test_scorecard_route_renders_six_columns(db_session, users):
     _log(db_session, users["buyer"], Channel.PHONE, duration=300)
     _log(db_session, users["buyer"], Channel.EMAIL, direction=Direction.OUTBOUND)
     db_session.commit()
@@ -231,9 +231,9 @@ def test_scorecard_route_renders_six_columns_for_manager(db_session, users):
     from app.dependencies import require_user
     from app.main import app
 
-    client = _client_as(db_session, mgr)
+    client = _client_as(db_session, users["manager"])
     try:
-        resp = client.get("/v2/partials/settings/scorecard")
+        resp = client.get("/v2/partials/crm/scorecard")
         assert resp.status_code == 200
         body = resp.text
         assert "Activity Scorecard" in body
@@ -256,7 +256,7 @@ def test_scorecard_route_honors_time_range_param(db_session, users):
 
     client = _client_as(db_session, users["admin"])
     try:
-        resp = client.get("/v2/partials/settings/scorecard?time_range=this_quarter")
+        resp = client.get("/v2/partials/crm/scorecard?time_range=this_quarter")
         assert resp.status_code == 200
         assert "This quarter" in resp.text
     finally:
@@ -264,15 +264,59 @@ def test_scorecard_route_honors_time_range_param(db_session, users):
         app.dependency_overrides.pop(require_user, None)
 
 
-def test_scorecard_route_forbidden_for_buyer(db_session, users):
+def test_scorecard_route_visible_to_buyer(db_session, users):
+    """The CRM scorecard has no manager gate — a buyer/sales user gets 200, not 403."""
     from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
 
     client = _client_as(db_session, users["buyer"])
     try:
+        resp = client.get("/v2/partials/crm/scorecard")
+        assert resp.status_code == 200
+        assert "Activity Scorecard" in resp.text
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_scorecard_time_range_selector_swaps_only_the_table_fragment(db_session, users):
+    """An HX-Request triggered by the time_range select returns the bare table fragment
+    (no page header / selector chrome), so it swaps into #scorecard-table in place."""
+    _log(db_session, users["buyer"], Channel.PHONE)
+    db_session.commit()
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    client = _client_as(db_session, users["buyer"])
+    try:
+        resp = client.get(
+            "/v2/partials/crm/scorecard?time_range=this_week",
+            headers={"HX-Request": "true", "HX-Trigger-Name": "time_range"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        # The fragment is the table only — no header / selector chrome.
+        assert ">Total<" in body
+        assert "Activity Scorecard" not in body
+        assert 'id="scorecard-root"' not in body
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_old_settings_scorecard_route_is_gone(db_session, users):
+    """The scorecard moved to the CRM tab; the retired settings route no longer
+    exists."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    client = _client_as(db_session, users["admin"])
+    try:
         resp = client.get("/v2/partials/settings/scorecard")
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(require_user, None)

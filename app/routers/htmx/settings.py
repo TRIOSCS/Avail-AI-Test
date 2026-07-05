@@ -29,7 +29,6 @@ from ...constants import (
 )
 from ...database import get_db
 from ...dependencies import (
-    is_manager_or_admin,
     require_access,
     require_admin,
     require_user,
@@ -83,48 +82,6 @@ async def settings_users_tab(
     return template_response("htmx/partials/settings/users.html", ctx)
 
 
-@router.get("/v2/partials/settings/scorecard", response_class=HTMLResponse)
-async def settings_scorecard_tab(
-    request: Request,
-    time_range: str = "this_month",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Activity Scorecard tab — per-user activity leaderboard. Manager/admin only.
-
-    A leaderboard of all users' activity is oversight/performance data, so it is gated
-    to the supervisor tier (MANAGER + ADMIN) via is_manager_or_admin — buyers/sales/
-    traders never see it. On an HX-Request triggered by the time-range selector only the
-    table fragment is swapped; the first paint (and a direct hit) renders the full tab.
-    """
-    if not is_manager_or_admin(user):
-        raise HTTPException(403, "Managers and admins only")
-    from ...services.activity_scorecard import (
-        DEFAULT_TIME_RANGE,
-        TIME_RANGE_LABELS,
-        TIME_RANGES,
-        compute_scorecard,
-    )
-
-    if time_range not in TIME_RANGES:
-        time_range = DEFAULT_TIME_RANGE
-
-    ctx = _base_ctx(request, user, "settings")
-    ctx.update(
-        {
-            "rows": compute_scorecard(db, time_range),
-            "time_range": time_range,
-            "time_ranges": TIME_RANGES,
-            "time_range_labels": TIME_RANGE_LABELS,
-        }
-    )
-
-    # Time-range selector swaps only the table fragment; full-tab on first paint.
-    if request.headers.get("HX-Request") == "true" and request.headers.get("HX-Trigger-Name") == "time_range":
-        return template_response("htmx/partials/settings/_scorecard_table.html", ctx)
-    return template_response("htmx/partials/settings/scorecard.html", ctx)
-
-
 def settings_toast(response, message: str, kind: str = "success") -> None:
     """Attach a showToast HX-Trigger for settings mutation responses.
 
@@ -158,8 +115,6 @@ async def settings_partial(
     ctx["active_tab"] = tab
     ctx["is_admin"] = is_admin
     ctx["can_manage_connectors"] = can_manage_connectors
-    # Supervisor-tier flag — gates the Activity Scorecard tab (manager + admin).
-    ctx["is_manager"] = is_manager_or_admin(user)
     return template_response("htmx/partials/settings/index.html", ctx)
 
 

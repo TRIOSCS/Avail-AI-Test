@@ -1,11 +1,11 @@
 {#
-  settings/scorecard.html — Activity Scorecard tab (manager/admin only).
+  crm/scorecard.html — Activity Scorecard CRM tab (visible to ALL users).
   A per-user activity leaderboard of raw counts (calls, emails, accounts, contacts)
   ranked by total, with a time-range selector (hx-get refresh).
 
   Receives: rows (list[ScorecardRow]), time_range (str), time_range_labels (dict),
             time_ranges (tuple[str]).
-  Called by: htmx_views.settings_scorecard_tab (GET /v2/partials/settings/scorecard).
+  Called by: crm.views.crm_scorecard (GET /v2/partials/crm/scorecard).
   Depends on: HTMX, Tailwind, the user_avatar macro, _scorecard_table.html fragment.
 #}
 {% from "htmx/partials/shared/_macros.html" import user_avatar %}
@@ -25,7 +25,7 @@
     <label class="flex items-center gap-2 text-xs font-medium text-gray-600">
       Time range
       <select name="time_range"
-              hx-get="/v2/partials/settings/scorecard"
+              hx-get="/v2/partials/crm/scorecard"
               hx-trigger="change"
               hx-target="#scorecard-table"
               hx-swap="innerHTML"
@@ -44,6 +44,6 @@
 
   {# Leaderboard table — swapped in place on time-range change. #}
   <div id="scorecard-table">
-    {% include "htmx/partials/settings/_scorecard_table.html" %}
+    {% include "htmx/partials/crm/_scorecard_table.html" %}
   </div>
 </div>

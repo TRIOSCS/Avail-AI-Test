@@ -80,11 +80,16 @@ class TestCRMShell:
         [
             pytest.param("Customers", id="customers_tab"),
             pytest.param("Vendors", id="vendors_tab"),
+            pytest.param("Activity", id="activity_tab"),
+            pytest.param("/v2/partials/crm/scorecard", id="activity_tab_route"),
             pytest.param('id="crm-tab-content"', id="tab_content_container"),
         ],
     )
     def test_crm_shell_renders_element(self, client: TestClient, snippet: str):
-        """Shell renders the tab buttons and the #crm-tab-content container."""
+        """Shell renders the tab buttons (incl.
+
+        the Activity scorecard tab) and the #crm-tab-content container.
+        """
         resp = client.get("/v2/partials/crm/shell")
         assert snippet in resp.text
 

@@ -239,7 +239,7 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   `_render_my_queue_body` + `_render_pipeline_body` (the two surviving lens-body builders, also
   shared by the `origin=my_queue` action returns), and the `_APPROVALS_TABS`/`_PO_CUTTER_ROLES`
   constants. Imports `_is_ops_member` from `_shared` (a quotes route in the monolith still uses
-  it). **Trap:** the `settings/ops-group|users|scorecard` routes are interleaved in the source
+  it). **Trap:** the `settings/ops-group|users` routes are interleaved in the source
   between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they now
   live in `app/routers/htmx/settings.py`.
 - `app/routers/htmx/offers.py` — **deal/sourcing-cluster split (offer/RFQ/follow-up slice)**:
@@ -268,7 +268,7 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
   `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`/`_prospect_toast`).
 - `app/routers/htmx/settings.py` — **tail split (settings/ops/user-mgmt slice)**: the
-  `settings/ops-group|users|scorecard|sources|system|profile|data-ops|connectors|api-keys` tabs,
+  `settings/ops-group|users|sources|system|profile|data-ops|connectors|api-keys` tabs,
   inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
   vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health +
   data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
