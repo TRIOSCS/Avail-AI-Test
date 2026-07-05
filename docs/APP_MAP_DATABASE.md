@@ -99,6 +99,7 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | target_qty | Integer | |
 | target_price | Numeric 12,4 | |
 | sourcing_status | String 20 | open -> sourcing -> offered -> quoted -> won -> lost |
+| outcome_reason | Text, nullable | Migration 185. The per-part "why won / why lost" close reason. Set by the Sales-Hub bulk Won/Lost action (`POST /v2/partials/parts/bulk-outcome`) when a part-line is marked WON/LOST — the per-part replacement for the removed bulk Archive. Nullable at the DB level (existing/non-closed lines stay valid); enforcement is **app-side** — `bulk_outcome` (routers/htmx/parts.py) 400s on a blank reason, then stamps the reason on every selected `Requirement` it transitions to WON/LOST via the sourcing state machine (`transition_requirement`). Mirrors the requisition-level `Requisition.outcome_reason` (migration 158). |
 | substitutes | JSON | Alternative MPNs |
 | substitutes_text | Text, indexed (GIN) | Flattened substitute MPNs for ILIKE search (used by global search + parts list) |
 | assigned_buyer_id | FK -> users | |

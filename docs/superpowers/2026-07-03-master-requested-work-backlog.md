@@ -9,6 +9,42 @@ Don't block momentum by fully implementing each before capturing the next.
 
 ---
 
+## ✅ RECONCILIATION — Shipped 2026-07-04/05 (this doc understated completion)
+
+The tables below list several of these as "Captured / building" — they are **DONE**
+(shipped to `main`; deployed/verified). Correcting the record:
+
+- **A — Sales Hub per-part Won/Lost** ✅ DONE. `POST /v2/partials/parts/bulk-outcome`
+  replaced the bulk Archive; each selected `Requirement` → `SourcingStatus.WON`/`LOST`
+  with a required shared reason. **Migration 185** added `requirements.outcome_reason`
+  (documented in APP_MAP_DATABASE + APP_MAP_INTERACTIONS § 1b).
+- **B — New-Requisition "Hot List" toggle** ✅ DONE. `hotlist` form flag creates the req
+  in `RequisitionStatus.HOTLIST` (monitor-only, Proactive-matched, not sourced);
+  `company_id` now populated on every create; Hot List list-filter pill added
+  (APP_MAP_INTERACTIONS § 1a).
+- **P — Sightings board Bulk Export CSV** ✅ DONE. `GET /v2/sightings/export` (board
+  filters, no pagination). Part of the shared CSV-export work below.
+- **Common-sense audit (2026-07-04, 46 findings)** — **~43/46 shipped**, including **all
+  HIGH** (4 dead controls + all 5 slow-sync→background conversions), **all 7 CSV
+  exports** (parts, materials, requisitions, vendors, sightings, resell, approvals —
+  shared `app/utils/csv_export.py` helper, APP_MAP_INTERACTIONS § "Shared CSV Export"),
+  compact empty states, bulk actions, and the **density pass D/E/F/L/M/N**
+  (Sightings panel, Material Card, Search dossier, Resell tiles, CRM toolbar, Prospect
+  top bar). See `docs/superpowers/2026-07-04-common-sense-audit-findings.md` for the
+  per-finding status.
+- **"Enrich not working" bug** ✅ FIXED — it was a ~30s **synchronous** request; enrichment
+  (and Find-Crosses / account+vendor Find-Contacts) now enqueue on `BackgroundTasks` and
+  return a self-polling partial (async-run/self-poller pattern, APP_MAP_INTERACTIONS
+  § "Async Background-Run + Self-Poller Pattern").
+- **Search dossier (F)** — the "Live market" section sort was fixed as part of the density
+  pass.
+
+Still open from that wave: idea **C** (score/price hover — decided, build after buy-plan)
+and idea **O** (prospecting Claim/Dismiss + manager Assign — building now); the buy-plan
+epic **G–K** is next. The `Captured` labels below predate this reconciliation.
+
+---
+
 ## ✅ PLANNING DECISIONS — 2026-07-05 (buy-plan epic G–K · prospecting O · hover C)
 
 **Buy-plan epic (G–K):**

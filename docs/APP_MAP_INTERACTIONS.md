@@ -104,6 +104,39 @@ column (not encoded in `activity_type`). Readers that distinguish direction
    reverse-matched to a CRM company with an open requisition appear on that
    requisition's Activity tab as `call_logged` events.
 
+### 1a. New-Requisition "Hot List" toggle (monitor-only create)
+
+The unified create/import modal (`requisitions/unified_modal.html`) carries a
+**Hot List** monitor-only checkbox. `POST /v2/partials/requisitions/import-save`
+(`requisition_import_save`, `routers/htmx/requisitions.py`) takes it as
+`hotlist: bool = Form(False)` and, when set, creates the requisition in
+`RequisitionStatus.HOTLIST` **instead of** `OPEN`. A Hot List requisition is
+**not sourced** (there is no create-time search kickoff, and the search queue is
+`OPEN_PIPELINE`-scoped so `HOTLIST` is excluded): its parts are stored and market
+data is built, but nothing is queried out to vendors. Instead the **Proactive
+matcher** (§ 7) surfaces offers when matching stock appears — its query filters
+`status == HOTLIST` and joins `Company` on `Requisition.company_id`, so the
+create path populates `company_id` from the chosen site for **every** create
+(Hot List or not), guarded for the no-site case. A "Hot List" filter pill on the
+requisitions list (`requisitions/list.html`) surfaces created monitor deals.
+
+### 1b. Sales-Hub per-part Won/Lost (replaced the bulk Archive)
+
+The Sales-Hub parts workspace selection bar offers **Mark Won** / **Mark Lost**
+in place of the removed bulk Archive. `POST /v2/partials/parts/bulk-outcome`
+(`bulk_outcome`, `routers/htmx/parts.py`) takes
+`{requirement_ids, outcome: "won"|"lost", reason}` and resolves each selected
+line at the **part level**: every `Requirement` is transitioned to
+`SourcingStatus.WON`/`LOST` via the sourcing state machine
+(`transition_requirement`) and stamped with the one shared `outcome_reason`
+(migration 185; see APP_MAP_DATABASE § requirements). A **blank reason 400s** the
+whole request; ids missing or not in a legal source state are logged and skipped
+(never 500 the batch); the handler commits once and re-renders the parts list
+with a "N part(s) marked Won/Lost" toast. Ownership is guarded per line via
+`require_requisition_access` (mirrors the retired `bulk_archive`). This is the
+per-line analogue of the requisition-level required-reason close to Won/Lost
+(§ 1) — there is no part-line archive.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no
@@ -5377,6 +5410,96 @@ See `docs/htmx-conventions.md` for the do/don't rules and pointers into
 the current implementation.
 
 ---
+
+## Shared CSV Export (list downloads)
+
+List/table "Export CSV" downloads share one formula-injection-safe streaming
+helper, `app/utils/csv_export.py`:
+
+- **`safe_cell(value)`** — stringifies a cell (`None` → `""`) and neutralises CSV
+  formula injection: a value whose first character is one of `= + - @ \t \r`
+  (the tab/CR whitespace triggers are included — omitting them is a known
+  sanitizer bypass) is prefixed with a single quote so a spreadsheet treats it as
+  text, not a formula.
+- **`stream_csv(filename, header, rows)`** — returns a
+  `StreamingResponse` (`text/csv`, `Content-Disposition: attachment`). `rows` is
+  consumed lazily through a reused `StringIO` buffer (pass a generator /
+  `yield_per` query so a large export never fully materialises in memory); every
+  header + body cell passes through `safe_cell`.
+
+Each `/…/export` endpoint builds a lazy row generator off **the list's own
+filtered query** so the download mirrors exactly what the user is looking at (same
+filters, no pagination), then hands it to `stream_csv`. Endpoints reusing the
+shared helper:
+
+| Surface | Endpoint | Router |
+|---------|----------|--------|
+| Parts (Sales Hub) | `GET /v2/partials/parts/export` | `routers/htmx/parts.py` |
+| Materials | `GET /v2/partials/materials/export` | `routers/htmx/materials.py` |
+| Requisitions | `GET /v2/partials/requisitions/export` | `routers/htmx/requisitions.py` |
+| Vendors | `GET /v2/partials/vendors/export` | `routers/htmx/vendors.py` |
+| Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` | `routers/resell.py` |
+| Approvals | `GET /v2/partials/approvals/{tab}/export` | `routers/htmx/approvals_hub.py` |
+
+The **Sightings board** export (`GET /v2/sightings/export`, `routers/sightings.py`)
+and the **CRM** exports (`GET /v2/customers/export.csv` +
+`.../contacts/export.csv`, `routers/crm/export.py`) implement the identical
+formula-injection-safe streaming pattern but with their own local `_safe_cell` /
+`StreamingResponse` — they are the two origins the shared helper was extracted
+from (see the `csv_export.py` module docstring), and remain candidates to fold
+onto `stream_csv`. Frontend: each export button is a plain
+`<a hx-boost="false">` that forwards the current filter query-string, so it
+downloads without an HTMX navigation.
+
+## Async Background-Run + Self-Poller Pattern (heavy on-demand jobs)
+
+Several on-demand actions run a heavy Claude / web-extraction call (~30s) that
+would otherwise block the click for the whole request. The pattern: the endpoint
+schedules the work on FastAPI `BackgroundTasks` and returns **immediately** with a
+partial that **polls itself** until the run finishes. Because these subjects have
+**no DB status column to flip** — a blocked or no-op run leaves the persisted
+state indistinguishable from "never ran" (e.g. `material_cards.enrichment_status`
+stays `unenriched`; `cross_references` stays empty on a legitimate no-results
+run) — the transient per-subject run state lives in **process-wide in-memory
+registries** guarded by a `threading.Lock` (the app runs a single uvicorn worker
+and the background task executes in that same process, so a module-level dict
+suffices; it resets cleanly on restart, losing only a stale in-flight guard the
+next click clears).
+
+**Worked example — material enrichment** (`app/services/material_enrich_runs.py`,
+`routers/htmx/materials.py`):
+
+1. `POST …/enrich` (`enrich_material`) calls `enrich_runs.begin(card_id)` — a
+   `threading.Lock`-guarded claim that returns `False` if a run is already in
+   flight (the **double-enqueue guard**). On a fresh claim it flips the card to
+   the `unenriched` "Queued for enrichment" marker, `background_tasks.add_task`s
+   the worker (`_run_card_enrichment`, which opens its **own** session since the
+   request session is already closed), and returns the detail partial right away
+   with an enrich-status badge polling every 15s.
+2. The worker records its terminal outcome via `enrich_runs.finish(card_id,
+   blocked=…)` — `blocked` for a no-op / unavailable-source run, else `done`.
+3. The poller (`GET …/enrich-status`, `material_enrich_status_partial`) reads the
+   registry, not just the column: on a terminal status it **OOB-swaps the whole
+   refreshed detail** (`HX-Retarget: #main-content` / `HX-Reswap: innerHTML`) so
+   the user sees the new category/specs, and answers **HTTP 286** — htmx's
+   stop-polling status. On a blocked run it surfaces the "couldn't complete" toast
+   **once** via `consume_outcome` (pop-once) and keeps polling. A 404 (deleted
+   card) also returns 286 so a dangling poll can't hammer the route forever.
+
+The registry API is uniform: `begin` (claim / double-enqueue guard), `finish`
+(record terminal outcome), `is_running`, `consume_outcome` (pop-once), `clear`.
+The registries in use:
+
+| Registry module | Singleton(s) | Action / trigger |
+|-----------------|--------------|------------------|
+| `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `_RunRegistry` singletons) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
+| `company_enrich_runs.py` | `company_enrich_runs` | Account (Company) "Enrich" (`routers/crm/enrichment.py`) |
+| `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies.py`) — deliberately separate from `company_enrich_runs` |
+| `vendor_contact_runs.py` | `vendor_contact_runs` | Vendor "Find Contacts" (`routers/htmx/vendors.py`) |
+
+(The Prospects tab enrich flow — § Prospect Enrichment — uses the same
+schedule-then-poll-to-286 shape but tracks its run via a DB status, so it needs no
+registry.)
 
 ## Routes Summary (400+ endpoints)
 

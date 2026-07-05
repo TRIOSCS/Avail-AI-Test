@@ -7,7 +7,8 @@
 
 It searches supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets,
 Element14, Sourcengine, eBay, AI web search, email mining), tracks vendor intelligence,
-enriches companies/contacts (Apollo), automates RFQ workflows via Microsoft Graph,
+enriches companies/contacts (SAM.gov, Clay, Explorium, Lusha, Hunter + AI web
+search), automates RFQ workflows via Microsoft Graph,
 mines inboxes with Claude AI, and runs a full CRM (companies, quotes, buy plans,
 customer matching).
 
