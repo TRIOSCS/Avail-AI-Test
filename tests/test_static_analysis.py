@@ -635,7 +635,6 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/customers/detail.html",
 )
 _PAGE_READABLE_SHELLS = (
-    "app/templates/htmx/partials/admin/data_ops.html",
     "app/templates/htmx/partials/knowledge/list.html",
     "app/templates/htmx/partials/proactive/prepare.html",
     "app/templates/htmx/partials/prospecting/detail.html",

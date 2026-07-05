@@ -549,43 +549,6 @@ class TestProactiveDoNotOffer:
         assert count == 1
 
 
-# ── Section 10: Proactive legacy send ────────────────────────────────────
-
-
-class TestProactiveLegacySend:
-    """Covers POST /v2/partials/proactive/{match_id}/send."""
-
-    def test_send_not_found_returns_404(self, client: TestClient):
-        resp = client.post("/v2/partials/proactive/99999/send", data={"body": "Hello"})
-        assert resp.status_code == 404
-
-    def test_send_empty_body_returns_400(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_offer: Offer,
-        test_user: User,
-        test_customer_site: CustomerSite,
-    ):
-        m = make_proactive_match(db_session, test_offer, test_user, test_customer_site)
-        resp = client.post(f"/v2/partials/proactive/{m.id}/send", data={"body": ""})
-        assert resp.status_code == 400
-
-    def test_send_success_marks_sent(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_offer: Offer,
-        test_user: User,
-        test_customer_site: CustomerSite,
-    ):
-        m = make_proactive_match(db_session, test_offer, test_user, test_customer_site)
-        resp = client.post(f"/v2/partials/proactive/{m.id}/send", data={"body": "Hello, we have parts."})
-        assert resp.status_code == 200
-        db_session.refresh(m)
-        assert m.status == "sent"
-
-
 # ── Section 11: Proactive convert ─────────────────────────────────────────
 
 
@@ -867,17 +830,11 @@ class TestKnowledgePartial:
         assert entry.entry_type == "note"
 
 
-# ── Section 16: Admin data-ops ───────────────────────────────────────────
+# ── Section 16: Admin api-health ─────────────────────────────────────────
 
 
 class TestAdminDataOps:
-    """Covers GET /v2/partials/admin/data-ops and /api-health."""
-
-    def test_admin_data_ops_returns_200_for_admin(self, client: TestClient, db_session: Session, admin_user: User):
-        """Admin users can access data-ops panel."""
-        with admin_client(db_session, admin_user) as admin:
-            resp = admin.get("/v2/partials/admin/data-ops")
-            assert resp.status_code == 200
+    """Covers GET /v2/partials/admin/api-health."""
 
     def test_admin_api_health(self, client: TestClient, db_session: Session, admin_user: User):
         with admin_client(db_session, admin_user) as admin:

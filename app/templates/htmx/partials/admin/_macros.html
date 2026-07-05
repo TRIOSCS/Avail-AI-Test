@@ -6,22 +6,9 @@
    so the shared components are NOT drop-in equivalents.
 
    Usage:
-     {% from "htmx/partials/admin/_macros.html" import data_ops_count_card %}
-     {{ data_ops_count_card("Vendors", vendor_count) }}
+     {% from "htmx/partials/admin/_macros.html" import spec_code_th %}
+     {{ spec_code_th("Brand") }}
 #}
-
-{# ── Data Ops Count Card ──────────────────────────────────────────────
-   One entry in the Data Operations summary grid: a label over a
-   comma-grouped integer count. Output is byte-identical to the inline
-   markup it replaced in data_ops.html.
-#}
-{% macro data_ops_count_card(label, count) -%}
-<div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
-      <p class="text-xs text-gray-600">{{ label }}</p>
-      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(count) }}</p>
-    </div>
-{%- endmacro %}
-
 
 {# ── Pending Spec-Code Table Header Cell ──────────────────────────────
    One <th> in the pending-mappings table head. Every column shares the

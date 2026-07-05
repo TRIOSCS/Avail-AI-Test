@@ -528,47 +528,10 @@ async def proactive_send_offer(
         raise HTTPException(500, "Send failed. Please try again or contact support.")
 
 
-# ── Sprint 8: Proactive Selling + Prospecting Completion (legacy routes kept for compat) ──
-
-
-@router.post("/v2/partials/proactive/{match_id}/send", response_class=HTMLResponse)
-async def proactive_send_legacy(
-    request: Request,
-    match_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Send a proactive offer email."""
-    from ...models import ProactiveMatch
-
-    match = (
-        db.query(ProactiveMatch).filter(ProactiveMatch.id == match_id, ProactiveMatch.salesperson_id == user.id).first()
-    )
-    if not match:
-        raise HTTPException(404, "Match not found")
-
-    form = await request.form()
-    body = form.get("body", "").strip()
-    if not body:
-        raise HTTPException(400, "Email body is required")
-
-    # Mark as sent
-    match.status = ProactiveMatchStatus.SENT
-    db.commit()
-    logger.info("Proactive match {} sent by {}", match_id, user.email)
-
-    # Redirect to list with success message (send_success.html removed in redesign)
-    return template_response(
-        "htmx/partials/proactive/list.html",
-        _base_ctx(request, user, "proactive")
-        | {
-            "matches": [],
-            "sent": [],
-            "tab": "matches",
-            "match_count": 0,
-            "success_msg": f"Offer for {match.mpn} marked as sent",
-        },
-    )
+# ── Sprint 8: Proactive Selling + Prospecting Completion ──
+# (proactive_send_legacy, POST /v2/partials/proactive/{match_id}/send, was removed as a
+# dead twin of POST /v2/proactive/send — no template/JS caller. The prepare form posts to
+# /v2/proactive/send.)
 
 
 @router.post("/v2/partials/proactive/{offer_id}/convert", response_class=HTMLResponse)

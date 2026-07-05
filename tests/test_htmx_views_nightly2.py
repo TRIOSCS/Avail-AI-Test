@@ -737,10 +737,6 @@ class TestProactiveRoutes:
 
 
 class TestAdminRoutes:
-    def test_admin_data_ops_as_admin(self, admin_client, db_session: Session):
-        resp = admin_client.get("/v2/partials/admin/data-ops")
-        assert resp.status_code == 200
-
     def test_admin_api_health(self, admin_client, db_session: Session):
         # Route catches ImportError and returns fallback — no patch needed
         resp = admin_client.get("/v2/partials/admin/api-health")

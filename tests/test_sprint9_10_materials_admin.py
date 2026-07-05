@@ -115,18 +115,5 @@ class TestAdminApiHealth:
         assert "Connector Health" in resp.text
 
 
-# ── Admin Data Ops ───────────────────────────────────────────────────
-
-
-class TestAdminDataOps:
-    def test_data_ops_renders(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/admin/data-ops",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Data Operations" in resp.text
-        marker = 'hx-get="/v2/partials/admin/api-health"'
-        assert marker in resp.text
-        start = resp.text.index(marker)
-        assert 'hx-target="this"' in resp.text[start : start + 280]
+# (TestAdminDataOps removed — GET /v2/partials/admin/data-ops was deleted as a superseded
+# dupe of the settings Data Ops tab, GET /v2/partials/settings/data-ops.)

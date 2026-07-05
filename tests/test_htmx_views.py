@@ -2067,10 +2067,6 @@ class TestAdminEndpoints:
             )
             assert resp.status_code == 200
 
-    def test_admin_data_ops(self, client: TestClient):
-        resp = client.get("/v2/partials/admin/data-ops")
-        assert resp.status_code == 200
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Follow-ups

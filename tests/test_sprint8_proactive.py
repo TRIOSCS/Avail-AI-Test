@@ -63,29 +63,6 @@ class TestProactiveDraft:
         assert "No valid matches" in resp.text
 
 
-# ── Proactive Send ──────────────────────────────────────────────────
-
-
-class TestProactiveSend:
-    def test_send(self, client: TestClient, proactive_match, db_session: Session):
-        resp = client.post(
-            f"/v2/partials/proactive/{proactive_match.id}/send",
-            data={"subject": "Stock Available: LM317T", "body": "We have parts available."},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(proactive_match)
-        assert proactive_match.status == "sent"
-
-    def test_send_empty_body(self, client: TestClient, proactive_match):
-        resp = client.post(
-            f"/v2/partials/proactive/{proactive_match.id}/send",
-            data={"subject": "Test", "body": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400
-
-
 # ── Proactive Scorecard ─────────────────────────────────────────────
 
 

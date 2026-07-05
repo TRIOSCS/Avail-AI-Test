@@ -1,6 +1,9 @@
 {# insights_panel.html — Reusable AI insights panel for any detail page.
-   Receives: insights (list[KnowledgeEntry]), entity_type (str), entity_id (int).
-   Called by: requisition/vendor/company detail pages via hx-get.
+   Receives: insights (list[KnowledgeEntry]), entity_type (str), entity_id (int),
+             refresh_url (str — the Refresh button's POST target, computed by
+             _render_insights so the dashboard panel uses its fixed pipeline-insights
+             route instead of the unregistered /{entity_type}/{entity_id}/ pattern).
+   Called by: requisition/vendor/company detail pages + the dashboard via hx-get.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 <div id="insights-panel" class="bg-white border border-brand-200 rounded-lg overflow-hidden">
@@ -11,7 +14,7 @@
       </svg>
       <h3 class="text-sm font-semibold text-gray-900">AI Insights</h3>
     </div>
-    <button hx-post="/v2/partials/{{ entity_type }}/{{ entity_id }}/insights/refresh"
+    <button hx-post="{{ refresh_url }}"
             hx-target="#insights-panel"
             hx-swap="outerHTML"
             hx-indicator="#insights-spinner"

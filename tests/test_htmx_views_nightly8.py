@@ -950,24 +950,6 @@ class TestLogPhoneCall:
         assert resp.status_code == 404
 
 
-# ── Section 18: rfq_prepare_panel ───────────────────────────────────
-
-
-class TestRfqPreparePanel:
-    """Covers lines 5383 area (rfq-prepare partial)."""
-
-    def test_rfq_prepare_with_requirements(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        _requirement(db_session, req, primary_mpn="LM317T")
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-prepare")
-        assert resp.status_code == 200
-
-    def test_rfq_prepare_empty_req(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-prepare")
-        assert resp.status_code == 200
-
-
 # ── Section 19: inline_save for requisition ──────────────────────────
 
 

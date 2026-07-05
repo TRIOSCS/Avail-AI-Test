@@ -1605,6 +1605,14 @@ def _render_insights(request, user, insights, entity_type, entity_id):
     ctx["insights"] = insights
     ctx["entity_type"] = entity_type
     ctx["entity_id"] = entity_id
+    # The dashboard panel lives at a fixed route (pipeline-insights), not the
+    # /{entity_type}/{entity_id}/ pattern the per-entity panels use. Compute the
+    # refresh URL here so the template never emits the unregistered
+    # /v2/partials/dashboard/0/insights/refresh (which 404'd the Refresh button).
+    if entity_type == "dashboard":
+        ctx["refresh_url"] = "/v2/partials/dashboard/pipeline-insights/refresh"
+    else:
+        ctx["refresh_url"] = f"/v2/partials/{entity_type}/{entity_id}/insights/refresh"
     return template_response("htmx/partials/shared/insights_panel.html", ctx)
 
 

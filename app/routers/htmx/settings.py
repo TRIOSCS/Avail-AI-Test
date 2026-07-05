@@ -21,7 +21,6 @@ import time
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
-from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ...constants import (
@@ -1058,25 +1057,6 @@ async def admin_api_health(
     )
 
 
-@router.get("/v2/partials/admin/data-ops", response_class=HTMLResponse)
-async def admin_data_ops(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Return admin data operations panel."""
-    from ...models.intelligence import MaterialCard
-
-    vendor_count = db.query(sqlfunc.count(VendorCard.id)).scalar() or 0
-    company_count = db.query(sqlfunc.count(Company.id)).filter(Company.is_active.is_(True)).scalar() or 0
-    material_count = db.query(sqlfunc.count(MaterialCard.id)).scalar() or 0
-
-    return template_response(
-        "htmx/partials/admin/data_ops.html",
-        {
-            "request": request,
-            "vendor_count": vendor_count,
-            "company_count": company_count,
-            "material_count": material_count,
-        },
-    )
+# admin_data_ops (GET /v2/partials/admin/data-ops) + its admin/data_ops.html template were
+# removed as superseded dupes of the settings Data Ops tab (GET /v2/partials/settings/data-ops,
+# settings_data_ops_tab above). No template/JS/nav referenced the admin/data-ops route.

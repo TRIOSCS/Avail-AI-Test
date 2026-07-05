@@ -568,10 +568,6 @@ class TestProactiveRoutes:
         resp = client.post("/v2/proactive/send", data={"match_ids": "1"})
         assert resp.status_code == 400
 
-    def test_proactive_legacy_send_404(self, client: TestClient):
-        resp = client.post("/v2/partials/proactive/99999/send", data={"body": "hello"})
-        assert resp.status_code == 404
-
     def test_proactive_convert_404(self, client: TestClient):
         resp = client.post("/v2/partials/proactive/99999/convert")
         assert resp.status_code == 404
@@ -787,16 +783,6 @@ class TestRfqRoutes:
         # "clone" is a valid action but req 99999 doesn't exist → 404
         resp = client.post("/v2/partials/requisitions/99999/action/clone")
         assert resp.status_code == 404
-
-    def test_rfq_prepare_404(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/rfq-prepare")
-        assert resp.status_code == 404
-
-    def test_rfq_prepare_exists(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-prepare")
-        assert resp.status_code == 200
 
     def test_log_phone_404(self, client: TestClient):
         resp = client.post("/v2/partials/requisitions/99999/log-phone", data={})

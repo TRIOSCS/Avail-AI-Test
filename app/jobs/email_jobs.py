@@ -379,7 +379,10 @@ async def _job_email_reverification():
 
     db = SessionLocal()
     try:
-        result = await run_email_reverification(db, max_contacts=200)
+        # NOTE: the service param is `_max_contacts` (default 200); pass nothing and let
+        # the default apply. Passing max_contacts=<n> raised TypeError on every quarterly
+        # run. Re-add an explicit batch size here once a real verifier replaces the stub.
+        result = await run_email_reverification(db)
         db.commit()
         logger.info(
             "Email re-verification: {} processed, {} invalidated",

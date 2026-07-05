@@ -98,19 +98,6 @@ class TestEditQuoteMetadata:
         assert resp.status_code == 200
 
 
-# ── RFQ Prepare Panel ─────────────────────────────────────────────────────
-
-
-class TestRfqPreparePanel:
-    def test_prepare_panel_empty(self, client: TestClient, test_requisition: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/rfq-prepare")
-        assert resp.status_code == 200
-
-    def test_prepare_panel_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/rfq-prepare")
-        assert resp.status_code == 404
-
-
 # ── Sourcing Results ──────────────────────────────────────────────────────
 
 

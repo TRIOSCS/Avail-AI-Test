@@ -355,7 +355,9 @@ class TestJobEmailReverification:
         ):
             await _job_email_reverification.__wrapped__()
 
-        mock_reverify.assert_called_once_with(mock_db, max_contacts=200)
+        # Call site passes db only (default _max_contacts); the old max_contacts= kwarg
+        # raised TypeError against the run_email_reverification(_max_contacts=...) signature.
+        mock_reverify.assert_called_once_with(mock_db)
         mock_db.commit.assert_called_once()
 
     @pytest.mark.asyncio

@@ -23,7 +23,6 @@ PARTIAL_PATHS = [
     "paste-offer-form",
     "add-offer-form",
     "rfq-compose",
-    "rfq-prepare",
 ]
 
 

@@ -1679,70 +1679,10 @@ async def send_reply_htmx(
     return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
 
 
-@router.get("/v2/partials/requisitions/{req_id}/rfq-prepare", response_class=HTMLResponse)
-async def rfq_prepare_panel(
-    request: Request,
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return RFQ preparation panel — vendor data + exhaustion check."""
-    from ...models.offers import Contact as RfqContact
-
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-
-    # Get requirements for this req
-    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
-    mpns = [r.primary_mpn for r in requirements if r.primary_mpn]
-
-    # Get vendors already contacted
-    existing_contacts = (
-        db.query(RfqContact.vendor_name_normalized).filter(RfqContact.requisition_id == req_id).distinct().all()
-    )
-    contacted_norms = {c[0] for c in existing_contacts if c[0]}
-
-    # Get suggested vendors from sightings (join on normalized vendor name)
-    from ...models import Sighting
-
-    suggested_vendors = (
-        (
-            db.query(
-                VendorCard.id,
-                VendorCard.display_name,
-                VendorCard.normalized_name,
-                sqlfunc.count(Sighting.id).label("sighting_count"),
-            )
-            .join(Sighting, Sighting.vendor_name_normalized == VendorCard.normalized_name)
-            .filter(
-                Sighting.mpn_matched.in_(mpns) if mpns else sqlfunc.literal(False),
-                VendorCard.is_blacklisted.isnot(True),
-            )
-            .group_by(VendorCard.id)
-            .order_by(sqlfunc.count(Sighting.id).desc())
-            .limit(20)
-            .all()
-        )
-        if mpns
-        else []
-    )
-
-    vendors = []
-    for v in suggested_vendors:
-        vendors.append(
-            {
-                "id": v.id,
-                "display_name": v.display_name,
-                "normalized_name": v.normalized_name,
-                "sighting_count": v.sighting_count,
-                "already_contacted": v.normalized_name in contacted_norms,
-            }
-        )
-
-    return template_response(
-        "htmx/partials/requisitions/rfq_prepare.html",
-        {"request": request, "req": req, "vendors": vendors, "mpns": mpns, "total_contacted": len(contacted_norms)},
-    )
+# rfq_prepare_panel (GET /v2/partials/requisitions/{req_id}/rfq-prepare) + its
+# rfq_prepare.html template were removed as superseded by rfq-compose (GET
+# /v2/partials/requisitions/{req_id}/rfq-compose above). No template/JS referenced
+# rfq-prepare — detail_header.html's Send-RFQ button posts to rfq-compose.
 
 
 @router.post("/v2/partials/requisitions/{req_id}/log-phone", response_class=HTMLResponse)
