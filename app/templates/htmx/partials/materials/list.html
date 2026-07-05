@@ -26,6 +26,20 @@
 <div class="flex items-baseline gap-2 mb-2 px-1">
   <span class="text-sm font-semibold text-gray-700 tabular-nums">{{ "{:,}".format(total) }}</span>
   <span class="text-sm text-gray-600">result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} &middot; matching &ldquo;{{ q }}&rdquo;{% endif %}</span>
+  {# Export CSV — a REAL browser download, not an htmx request: hx-boost="false" opts this
+     anchor out of the app's global nav-boost so it does a plain GET that streams the file as
+     an attachment (never swapping into #main-content). :href binds the LIVE faceted-filter
+     state (this fragment renders inside the #materials-workspace materialsFilter scope, so it
+     inherits commodity/q/subFilters/… exactly like the results container's hx-vals) so the CSV
+     mirrors what the buyer has filtered to; the static href is the pre-Alpine fallback. No
+     literal double-quote inside the :href expression (Alpine quoting rule). #}
+  <a hx-boost="false"
+     href="/v2/partials/materials/export"
+     :href="'/v2/partials/materials/export?' + new URLSearchParams({commodity: commodity || '', q: q || '', sub_filters: JSON.stringify(subFilters || {}), statuses: (statuses || []).join(','), lifecycle: (lifecycle || []).join(','), rohs: (rohs || []).join(','), condition: (condition || []).join(','), has_datasheet: hasDatasheet || false, has_stock: hasStock || false, has_price: hasPrice || false, has_crosses: hasCrosses || false, internal: internal || 'all', searched_within: searchedWithin || 'any', min_searches: minSearches || 0}).toString()"
+     class="btn-secondary btn-sm ml-auto whitespace-nowrap"
+     title="Download all matching materials as a CSV file">
+    Export CSV
+  </a>
 </div>
 {# Screen-reader announcement of the new count on each swap. #}
 <div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} matching {{ q }}{% endif %}</div>

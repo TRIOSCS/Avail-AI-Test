@@ -55,6 +55,20 @@
         </button>
         {% endfor %}
 
+        {# Export CSV — a REAL browser download, not an htmx request: hx-boost="false" opts
+           this anchor out of the app's global nav-boost so it does a plain GET that streams
+           the file as an attachment (never swapping into #main-content). :href binds the
+           LIVE Alpine filter state so the CSV mirrors exactly what the buyer has filtered
+           to; the static href is the pre-Alpine fallback. No literal double-quote inside the
+           :href expression (Alpine quoting rule). #}
+        <a hx-boost="false"
+           href="/v2/partials/parts/export"
+           :href="'/v2/partials/parts/export?' + new URLSearchParams({q: pQ, status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived}).toString()"
+           class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap"
+           title="Download all matching parts as a CSV file">
+          Export CSV
+        </a>
+
         {# ── Top horizontal scrollbar — right of filters ──── #}
         <div class="top-scroll-bar flex-1 min-w-[60px]" id="left-top-scroll" data-sync-target="left-table-content">
           <div class="scroll-spacer h-px"></div>

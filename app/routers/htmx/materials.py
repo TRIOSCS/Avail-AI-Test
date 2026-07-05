@@ -53,6 +53,7 @@ from ...services.part_history_service import (
     sightings_for_card,
 )
 from ...template_env import template_response
+from ...utils.csv_export import stream_csv
 from ...utils.sql_helpers import escape_like
 from ._shared import _base_ctx
 
@@ -650,6 +651,141 @@ async def materials_faceted_partial(
         }
     )
     return template_response("htmx/partials/materials/list.html", ctx)
+
+
+# CSV export column order — the real MaterialCard fields the buyer scans on the results list.
+_MATERIALS_EXPORT_COLUMNS = [
+    "MPN",
+    "Manufacturer",
+    "Category",
+    "Package",
+    "Lifecycle",
+    "Enrichment Status",
+    "Vendor Count",
+    "Best Price",
+    "Created",
+    "Updated",
+]
+
+
+def _materials_export_rows(db, *, commodity, q, sub_filters, manufacturers, verified_only, card_params):
+    """Yield one CSV row per faceted-search match (header handled by stream_csv).
+
+    Pages through ``search_materials_faceted`` — the SAME filtered query the results list
+    runs — in chunks so the export can never diverge from the visible list, batch-loading
+    each chunk's vendor stats (count + min recorded price) exactly the way
+    ``materials_faceted_partial`` does. No pagination cap on the exported set.
+    """
+    from ...models.intelligence import MaterialVendorHistory
+
+    chunk = 500
+    offset = 0
+    while True:
+        materials, _total = search_materials_faceted(
+            db,
+            commodity=commodity,
+            q=q,
+            sub_filters=sub_filters,
+            manufacturers=manufacturers,
+            verified_only=verified_only,
+            **card_params,
+            limit=chunk,
+            offset=offset,
+        )
+        if not materials:
+            break
+        card_ids = [m.id for m in materials]
+        vendor_stats: dict[int, tuple[int, object]] = {}
+        for cid, cnt, best in (
+            db.query(
+                MaterialVendorHistory.material_card_id,
+                sqlfunc.count(MaterialVendorHistory.id),
+                sqlfunc.min(MaterialVendorHistory.last_price),
+            )
+            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+            .group_by(MaterialVendorHistory.material_card_id)
+            .all()
+        ):
+            vendor_stats[cid] = (cnt, best)
+        for m in materials:
+            cnt, best = vendor_stats.get(m.id, (0, None))
+            yield (
+                m.display_mpn or m.normalized_mpn or "",
+                m.manufacturer or "",
+                m.category or "",
+                m.package_type or "",
+                m.lifecycle_status or "",
+                m.enrichment_status or "",
+                cnt,
+                best if best is not None else "",
+                m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else "",
+                m.updated_at.strftime("%Y-%m-%d %H:%M") if m.updated_at else "",
+            )
+        if len(materials) < chunk:
+            break
+        offset += chunk
+
+
+@router.get("/v2/partials/materials/export")
+async def materials_export(
+    commodity: str = "",
+    q: str = "",
+    sub_filters: str = "{}",
+    verified_only: bool = Query(False),
+    statuses: str = Query(""),
+    lifecycle: str = Query(""),
+    rohs: str = Query(""),
+    condition: str = Query(""),
+    has_datasheet: str = Query("false"),
+    has_validation_conflict: str = Query("false"),
+    has_stock: str = Query("false"),
+    has_price: str = Query("false"),
+    has_crosses: str = Query("false"),
+    internal: str = Query("all"),
+    searched_within: str = Query("any"),
+    min_searches: str = Query("0"),
+    user: User = Depends(require_access(AccessKey.MATERIALS)),
+    db: Session = Depends(get_db),
+):
+    """Stream every faceted-search-matching material card as a CSV download (attachment,
+    no pagination).
+
+    Same auth (MATERIALS access) and the same faceted filter params as the results list —
+    the export mirrors the visible list (commodity / search / manufacturers / sub-filters /
+    trust + global + sourcing facets) via the shared ``search_materials_faceted``, so the
+    download can never drift from what the list shows. Shares the exact degrade-don't-500
+    param parsing (``_parse_card_filter_params`` / ``_parse_filter_json`` /
+    ``_pop_manufacturers``) with the list and the sidebar count routes.
+
+    NOTE: must stay registered BEFORE /v2/partials/materials/{card_id} — the path would
+    otherwise be captured by the card_id route.
+    """
+    parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
+    manufacturers = _pop_manufacturers(parsed_filters)
+    card_params = _parse_card_filter_params(
+        statuses,
+        lifecycle,
+        rohs,
+        condition,
+        has_datasheet,
+        has_validation_conflict,
+        has_stock,
+        has_price,
+        has_crosses,
+        internal,
+        searched_within,
+        min_searches,
+    )
+    rows = _materials_export_rows(
+        db,
+        commodity=commodity or None,
+        q=q or None,
+        sub_filters=parsed_filters or None,
+        manufacturers=manufacturers,
+        verified_only=verified_only,
+        card_params=card_params,
+    )
+    return stream_csv("materials_export.csv", _MATERIALS_EXPORT_COLUMNS, rows)
 
 
 @router.get("/v2/partials/materials/add-form", response_class=HTMLResponse)
