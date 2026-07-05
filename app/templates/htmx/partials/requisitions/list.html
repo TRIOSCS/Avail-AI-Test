@@ -184,9 +184,9 @@
           <option value="customer" {% if group_by == 'customer' %}selected{% endif %}>By Customer</option>
         </select>
 
-        {# Clean & reset — FULL reset: server GET with no params clears search + every filter
-           + grouping; @click re-expands all groups (mutate in place, never reassign) and
-           clears the selection. Always visible (distinct from the filters-only Clear link). #}
+        {# Clean & reset — the single reset control: FULL reset via a server GET with no
+           params clears search + every filter + grouping; @click re-expands all groups
+           (mutate in place, never reassign) and clears the selection. Always visible. #}
         <button type="button"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
@@ -210,16 +210,6 @@
           Export CSV
         </a>
 
-        {# Clear all filters #}
-        {% if q or status or urgency or date_from or date_to or (owner and owner != 0) %}
-        <span class="text-gray-300 mx-1 self-center">|</span>
-        <a hx-get="/v2/partials/requisitions"
-           hx-target="#main-content"
-           hx-push-url="true"
-           class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 rounded-full border border-gray-200 hover:bg-gray-50 cursor-pointer self-center">
-          Clear filters
-        </a>
-        {% endif %}
       </div>
     </form>
     {# Error target for failed filter requests #}

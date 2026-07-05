@@ -93,9 +93,11 @@
             <div class="flex items-center gap-1.5">
               <span class="font-data font-semibold text-accent-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
               {% if m.datasheet_url %}
-              {# target=_blank anchor inside the hx-get row — same pattern as the
-                 web-sourced/OEM status links below. #}
-              <a href="{{ m.datasheet_url }}" target="_blank" rel="noopener"
+              {# target=_blank anchor inside the hx-get row — @click.stop keeps the click
+                 from bubbling to the row's htmx handler, so opening the datasheet in a new
+                 tab doesn't ALSO swap #main-content to this part's detail. Same pattern as
+                 the web-sourced/OEM status links below. #}
+              <a href="{{ m.datasheet_url }}" target="_blank" rel="noopener" @click.stop
                  class="text-gray-400 hover:text-brand-600" title="Open datasheet"
                  aria-label="Open datasheet for {{ m.display_mpn or m.normalized_mpn }}">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -152,14 +154,18 @@
               </span>
               {% elif es == "web_sourced" %}
               {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-              <a href="{{ _u or '#' }}" target="_blank" rel="noopener"
+              {# @click.stop — opening the source in a new tab must not bubble to the row's
+                 htmx click handler (which would swap #main-content to this part's detail). #}
+              <a href="{{ _u or '#' }}" target="_blank" rel="noopener" @click.stop
                  class="badge bg-sky-50 text-sky-700 border-sky-200"
                  title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
                 WEB-SOURCED
               </a>
               {% elif es == "oem_sourced" %}
               {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-              <a href="{{ _ou or '#' }}" target="_blank" rel="noopener"
+              {# @click.stop — see WEB-SOURCED above: keep the new-tab open from bubbling
+                 to the row's htmx click handler. #}
+              <a href="{{ _ou or '#' }}" target="_blank" rel="noopener" @click.stop
                  class="badge bg-indigo-50 text-indigo-700 border-indigo-200"
                  title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
                 OEM-SOURCED
