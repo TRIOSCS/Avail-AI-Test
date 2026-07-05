@@ -17,7 +17,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
 import html as html_mod  # aliased: vendor_tab binds a local `html` string var that would shadow a plain `import html`
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -1247,37 +1247,36 @@ async def delete_vendor_review(
 # ── AI Contact Finder actions (Phase 3A) ───────────────────────────────
 
 
-@router.post("/v2/partials/vendors/{vendor_id}/ai/find-contacts", response_class=HTMLResponse)
-async def vendor_find_contacts(
-    request: Request,
-    vendor_id: int,
-    title_keywords: str = Form(""),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Trigger AI web search for contacts at this vendor, return HTML results."""
-    vendor = get_vendor_card_or_404(db, vendor_id)
+async def _run_vendor_find_contacts(vendor_id: int, keywords: str | None) -> None:
+    """Background worker: run the AI web-search contact finder for one vendor.
 
-    from ...config import settings as app_settings
+    Scheduled by ``vendor_find_contacts`` so the click never blocks on the >15s Claude +
+    web-search call. Opens its own session (FastAPI has already returned the response and
+    closed the request session by the time this runs), deduplicates and persists the
+    discovered contacts as ``ProspectContact`` rows, and records the run's outcome in
+    ``vendor_contact_runs`` so the find-contacts poller can swap in the results (new count),
+    the "none found" state, or the error/retry state. Because a legitimate no-results run
+    saves no rows — indistinguishable from "never ran" by the table alone — the registry
+    outcome is what the poller trusts.
 
-    # Check AI feature gate
-    ai_flag = app_settings.ai_features_enabled
-    if ai_flag == "off":
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
-            "AI features are currently disabled. Contact your admin to enable them.</div>"
-        )
+    Must NEVER raise: it is a fire-and-forget task.
+    """
+    from ...database import SessionLocal
+    from ...services.vendor_contact_runs import VendorContactRunOutcome, vendor_contact_runs
 
-    ctx = _base_ctx(request, user, "vendors")
-    ctx["vendor"] = vendor
-
+    db = SessionLocal()
+    outcome = VendorContactRunOutcome()
     try:
+        vendor = db.get(VendorCard, vendor_id)
+        if not vendor:
+            outcome = VendorContactRunOutcome(error="Vendor not found.")
+            return
+
         from app.services.ai_service import enrich_contacts_websearch
 
-        keywords = title_keywords.strip() if title_keywords else None
         web_results = await enrich_contacts_websearch(vendor.display_name, vendor.domain, keywords, limit=10)
 
-        # Dedup and save as ProspectContact records
+        # Dedup within this batch and save as ProspectContact records.
         seen: set[str] = set()
         new_count = 0
         for c in web_results:
@@ -1287,29 +1286,110 @@ async def vendor_find_contacts(
                 continue
             seen.add(key)
 
-            pc = ProspectContact(
-                vendor_card_id=vendor_id,
-                full_name=c["full_name"],
-                title=c.get("title"),
-                email=c.get("email"),
-                email_status=c.get("email_status"),
-                phone=c.get("phone"),
-                linkedin_url=c.get("linkedin_url"),
-                source=c.get("source", "web_search"),
-                confidence=c.get("confidence", "low"),
+            db.add(
+                ProspectContact(
+                    vendor_card_id=vendor_id,
+                    full_name=c["full_name"],
+                    title=c.get("title"),
+                    email=c.get("email"),
+                    email_status=c.get("email_status"),
+                    phone=c.get("phone"),
+                    linkedin_url=c.get("linkedin_url"),
+                    source=c.get("source", "web_search"),
+                    confidence=c.get("confidence", "low"),
+                )
             )
-            db.add(pc)
             new_count += 1
 
         db.commit()
-    except Exception as exc:
-        logger.error(f"AI contact finder error for vendor {vendor_id}: {exc}")
+        outcome = VendorContactRunOutcome(new_count=new_count)
+    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
+        logger.error("AI contact finder error for vendor {}: {}", vendor_id, exc)
+        db.rollback()
+        outcome = VendorContactRunOutcome(error=f"AI search failed: {exc}")
+    finally:
+        db.close()
+        vendor_contact_runs.finish(vendor_id, outcome)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/ai/find-contacts", response_class=HTMLResponse)
+async def vendor_find_contacts(
+    request: Request,
+    vendor_id: int,
+    background_tasks: BackgroundTasks,
+    title_keywords: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Queue the AI web-search contact finder and return the "Finding contacts…" poller.
+
+    The Claude + web-search call (``enrich_contacts_websearch``, commonly >15s) used to run
+    INLINE before responding, so it blew past htmx's 15s client timeout and the Find
+    Contacts tab spun then errored out. It now runs in a FastAPI background task and this
+    handler returns the polling partial immediately; the find-contacts-status poller swaps
+    in the discovered contacts (or the none-found / error state) when the task finishes.
+
+    Called by: HTMX "Find Contacts" button on the vendor detail Find Contacts tab.
+    Depends on: _run_vendor_find_contacts (background worker), vendor_contact_runs
+        (double-enqueue guard + outcome carrier).
+    """
+    vendor = get_vendor_card_or_404(db, vendor_id)
+
+    from ...config import settings as app_settings
+    from ...services.vendor_contact_runs import vendor_contact_runs
+
+    # Check AI feature gate
+    if app_settings.ai_features_enabled == "off":
         return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
-            f"AI search failed: {exc}</div>"
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "AI features are currently disabled. Contact your admin to enable them.</div>"
         )
 
-    # Reload all prospects for this vendor
+    keywords = title_keywords.strip() if title_keywords else None
+
+    # Guard double-enqueue: a search already in flight for this vendor must not stack another.
+    if vendor_contact_runs.begin(vendor_id):
+        background_tasks.add_task(_run_vendor_find_contacts, vendor_id, keywords)
+
+    # Return the polling in-progress state immediately (no inline >15s block).
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
+    return template_response("htmx/partials/vendors/find_contacts_status.html", ctx)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/ai/find-contacts-status", response_class=HTMLResponse)
+async def vendor_find_contacts_status(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll the in-flight AI contact search and swap in the results when it lands.
+
+    While the background search is running this returns the "Finding contacts…" polling
+    partial (keep polling). On the terminal outcome it reloads the vendor's prospects and
+    returns ``find_contacts_results.html`` (discovered contacts, the "none found" state, or
+    — on a failed run — the error/retry state) with HTTP 286 so htmx swaps the results in
+    and STOPS polling. If no run is tracked (e.g. the process restarted mid-run) it stops
+    polling and renders the current prospects rather than spinning forever.
+    """
+    from ...services.vendor_contact_runs import vendor_contact_runs
+
+    vendor = db.get(VendorCard, vendor_id)
+    if not vendor:
+        # Polling sub-resource, not a navigable page: htmx neither swaps nor cancels an
+        # `every 3s` poll on a 4xx, so a 404 would hammer this route forever after the
+        # vendor is gone. 286 stops the poll; the empty body clears the spinner.
+        return HTMLResponse("", status_code=286)
+
+    outcome = vendor_contact_runs.consume_outcome(vendor_id)
+    if outcome is None and vendor_contact_runs.is_running(vendor_id):
+        # Still running → keep polling.
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor"] = vendor
+        return template_response("htmx/partials/vendors/find_contacts_status.html", ctx)
+
+    # Terminal (done / error) or no tracked run → reload prospects, swap in, stop polling.
     prospects = (
         db.query(ProspectContact)
         .filter(ProspectContact.vendor_card_id == vendor_id)
@@ -1317,9 +1397,14 @@ async def vendor_find_contacts(
         .limit(50)
         .all()
     )
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
     ctx["prospects"] = prospects
-    ctx["search_count"] = new_count
-    return template_response("htmx/partials/vendors/find_contacts_results.html", ctx)
+    ctx["search_count"] = outcome.new_count if outcome else 0
+    ctx["error"] = outcome.error if outcome else None
+    response = template_response("htmx/partials/vendors/find_contacts_results.html", ctx)
+    response.status_code = 286  # htmx's stop-polling status — the results still swap in.
+    return response
 
 
 @router.post(

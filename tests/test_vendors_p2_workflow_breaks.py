@@ -160,16 +160,27 @@ class TestFindContactsFilter:
         # The keyword input lives inside that form.
         assert 'name="title_keywords"' in resp.text
 
+    @pytest.mark.asyncio
     @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_title_keywords_reach_search_service(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):
-        """Server side: once the form is included, its title_keywords value drives the
-        AI search (proving the filter is honoured, not dropped)."""
+    async def test_title_keywords_reach_search_service(
+        self, mock_search, db_session: Session, vendor_with_domain: VendorCard, monkeypatch
+    ):
+        """Server side: the title_keywords value drives the AI search (proving the filter is
+        honoured, not dropped).
+
+        The search now runs in the background runner (the POST returns a poller instantly),
+        so this drives ``_run_vendor_find_contacts`` directly to assert the keyword string
+        reaches the search service.
+        """
+        from app.routers.htmx.vendors import _run_vendor_find_contacts
+        from app.services.vendor_contact_runs import vendor_contact_runs
+
         mock_search.return_value = []
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
-            data={"title_keywords": "procurement, buyer"},
-        )
-        assert resp.status_code == 200
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db_session)
+
+        vendor_contact_runs.begin(vendor_with_domain.id)
+        await _run_vendor_find_contacts(vendor_with_domain.id, "procurement, buyer")
+
         # enrich_contacts_websearch(display_name, domain, keywords, limit=...)
         assert mock_search.await_count == 1
         assert mock_search.await_args.args[2] == "procurement, buyer"

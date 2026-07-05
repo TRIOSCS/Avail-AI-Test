@@ -1,0 +1,26 @@
+{# find_contacts_status.html — in-progress poller for the vendor AI contact finder.
+   Rendered by vendor_find_contacts (POST) right after it schedules the background AI web
+   search, and by vendor_find_contacts_status (GET) while the run is still in flight. The
+   div polls its own status route every 3s (hx-target="this" so it swaps into ITSELF, never
+   the whole #main-content; hx-push-url="false" so the poll never rewrites the URL); when
+   the background search finishes the route returns the refreshed find_contacts_results.html
+   with HTTP 286, so htmx swaps the results in and stops polling.
+   Receives: vendor (VendorCard).
+   Called by: vendors.py vendor_find_contacts + vendor_find_contacts_status.
+#}
+<div id="find-contacts-poller"
+     hx-get="/v2/partials/vendors/{{ vendor.id }}/ai/find-contacts-status"
+     hx-trigger="every 3s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     hx-push-url="false"
+     class="p-6 text-center bg-white rounded-lg border border-gray-200">
+  <div class="flex items-center justify-center gap-2 text-sm text-gray-500">
+    <svg class="h-4 w-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    Finding contacts…
+  </div>
+  <p class="text-xs text-gray-400 mt-1.5">Searching the web with AI — this can take up to a minute.</p>
+</div>

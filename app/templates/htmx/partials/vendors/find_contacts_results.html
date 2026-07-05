@@ -1,9 +1,14 @@
 {# find_contacts_results.html — Results after AI contact search.
-   Receives: vendor (VendorCard), prospects (list[ProspectContact]), search_count (int).
-   Called by: vendor_find_contacts POST in htmx_views.py.
+   Receives: vendor (VendorCard), prospects (list[ProspectContact]), search_count (int),
+             error (str | None — set when the AI web search failed).
+   Called by: vendor_find_contacts_status GET (poller terminal swap) in vendors.py.
    Depends on: prospect_card.html partial.
 #}
-{% if prospects %}
+{% if error %}
+<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">
+  {{ error }}
+</div>
+{% elif prospects %}
 <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
   <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
     <h3 class="text-sm font-semibold text-gray-900">Found Contacts ({{ search_count }} new)</h3>

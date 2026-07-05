@@ -17,12 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import VendorCard, VendorContact
 from app.models.enrichment import ProspectContact
 
-
-def _prospect_count(db_session: Session, vendor_id: int) -> int:
-    """Number of ProspectContact rows linked to a vendor card."""
-    return db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_id).count()
-
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -118,73 +112,28 @@ class TestFindContactsSearch:
         assert resp.status_code == 200
         assert "AI features are currently disabled" in resp.text
 
-    @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_returns_found_contacts(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):
-        """Successful AI search should return contact cards."""
-        mock_search.return_value = [
-            {
-                "full_name": "Bob Jones",
-                "title": "VP Sales",
-                "email": "bob@digikey.com",
-                "confidence": "medium",
-                "source": "web_search",
-            },
-        ]
+    def test_search_returns_finding_poller(self, client: TestClient, vendor_with_domain: VendorCard, monkeypatch):
+        """The AI search is now async: the POST returns the "Finding contacts…" poller
+        immediately (never awaiting the >15s web search inline).
+
+        The persistence / dedup / error behaviours of the background runner and the poller's
+        terminal swap are covered in test_vendor_find_contacts_async.py.
+        """
+        from app.routers.htmx import vendors as ven
+        from app.services.vendor_contact_runs import vendor_contact_runs
+
+        vendor_contact_runs.clear(vendor_with_domain.id)
+        # Neutralise the background runner (TestClient runs background tasks synchronously
+        # after the response) so this test asserts only the immediate response.
+        monkeypatch.setattr(ven, "_run_vendor_find_contacts", AsyncMock())
+
         resp = client.post(
             f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
             data={"title_keywords": "sales"},
         )
         assert resp.status_code == 200
-        assert "Bob Jones" in resp.text
-        assert "VP Sales" in resp.text
-
-    @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_creates_prospect_records(
-        self,
-        mock_search,
-        client: TestClient,
-        db_session: Session,
-        vendor_with_domain: VendorCard,
-    ):
-        """AI search should create ProspectContact records in DB."""
-        mock_search.return_value = [
-            {"full_name": "Alice Test", "email": "alice@digikey.com", "confidence": "low", "source": "web_search"},
-        ]
-        client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
-            data={"title_keywords": ""},
-        )
-        assert _prospect_count(db_session, vendor_with_domain.id) >= 1
-
-    @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_deduplicates_by_email(
-        self,
-        mock_search,
-        client: TestClient,
-        db_session: Session,
-        vendor_with_domain: VendorCard,
-    ):
-        """AI search should deduplicate contacts by email."""
-        mock_search.return_value = [
-            {"full_name": "Bob Jones", "email": "bob@digikey.com", "confidence": "medium", "source": "web_search"},
-            {"full_name": "Robert Jones", "email": "bob@digikey.com", "confidence": "low", "source": "web_search"},
-        ]
-        client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
-            data={},
-        )
-        assert _prospect_count(db_session, vendor_with_domain.id) == 1
-
-    @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_handles_error_gracefully(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):
-        """AI search error should return error message, not 500."""
-        mock_search.side_effect = RuntimeError("API timeout")
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
-            data={},
-        )
-        assert resp.status_code == 200
-        assert "AI search failed" in resp.text
+        assert "Finding contacts" in resp.text
+        assert f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts-status" in resp.text
 
     def test_search_404_for_missing_vendor(self, client: TestClient):
         """Should return 404 for non-existent vendor."""
