@@ -262,7 +262,9 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   build-buy-plan-from-quote).
 - `app/routers/htmx/prospecting.py` — **tail split (prospecting slice)**: the prospect list/grid,
   stats, add-domain, detail panel, claim/dismiss/release/enrich + enrich-status poller, and the
-  `/v2/partials/prospects/{id}/reclaim|reassign` admin actions. Owns the prospect-context helpers
+  manager-only `/v2/partials/prospects/{id}/assign[-form]` action (rep picker → assigns the account
+  to a chosen rep; the O-rework successor to the retired reclaim/reassign controls). Owns the
+  prospect-context helpers
   (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
   `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`/`_prospect_toast`).
 - `app/routers/htmx/settings.py` — **tail split (settings/ops/user-mgmt slice)**: the

@@ -2,8 +2,10 @@
 
 Server-rendered HTML partials for the prospecting surface: the prospect list/grid,
 stats, add-domain, detail panel, claim/dismiss/release/enrich + enrich-status poller,
-and the reclaim/reassign admin actions. Extracted verbatim from htmx_views.py (same
-`/v2/partials/prospecting` + `/v2/partials/prospects` paths, same `htmx-views` tag).
+and the manager-only Assign action (rep picker). The pool per-account actions are Claim +
+Dismiss for reps, plus Assign for managers (the retired reclaim/reassign controls' successor).
+The `/v2/partials/prospecting` (grid) and `/v2/partials/prospects` (assign) paths share the
+`htmx-views` tag and are both gated by the PROSPECTING access key (app/access_paths.py).
 
 Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
@@ -115,64 +117,19 @@ def _wants_detail(request: Request) -> bool:
     return request.headers.get("HX-Target") == "main-content"
 
 
-def _reclaim_ui_flags(user: User, prospect) -> dict:
-    """Reclaim/reassign button visibility for one (user, prospect) pair.
-
-    A prospect is "swept" when ``swept_from_owner_id`` is set — an auto-swept dormant
-    account parked back in the pool. The sweep email tells the former owner to reclaim it
-    "from the Prospecting tab", so these flags drive that UI:
-
-    - can_reclaim: former owner, a manager/admin, or the configured sweep-manager email
-      (mirrors ``reclaim_prospect_account``'s permission gate).
-    - in_cooldown: the plain former owner is inside the 30-day post-sweep cooldown
-      (supervisors bypass it) — the reclaim button is shown disabled with the unlock date.
-    - can_reassign: a manager/admin (mirrors ``reassign_account``'s gate); requires a
-      linked company since reassign acts on the company.
-    """
-    if prospect.swept_from_owner_id is None:
-        return {
-            "is_swept": False,
-            "can_reclaim": False,
-            "can_reassign": False,
-            "in_cooldown": False,
-            "cooldown_until": None,
-        }
-
-    from ...config import settings
-
-    supervisor = is_manager_or_admin(user)
-    manager_email = settings.account_sweep_manager_email
-    is_email_manager = bool(manager_email and user.email == manager_email)
-    is_former_owner = prospect.swept_from_owner_id == user.id
-    is_supervisor = supervisor or is_email_manager
-
-    in_cooldown = False
-    cooldown_until = None
-    blocked = prospect.reclaim_blocked_until
-    if is_former_owner and not is_supervisor and blocked is not None:
-        if blocked.tzinfo is None:
-            blocked = blocked.replace(tzinfo=timezone.utc)
-        if blocked > datetime.now(timezone.utc):
-            in_cooldown = True
-            cooldown_until = blocked.strftime("%b %d, %Y")
-
-    return {
-        "is_swept": True,
-        "can_reclaim": is_former_owner or is_supervisor,
-        "can_reassign": supervisor and prospect.company_id is not None,
-        "in_cooldown": in_cooldown,
-        "cooldown_until": cooldown_until,
-    }
-
-
 def _prospect_card_ctx(request: Request, user: User, prospect) -> dict:
     """Context for rendering a single prospect card (snapshot + contact summary maps,
-    keyed by id so _card.html renders identically in the grid and in OOB swaps)."""
+    keyed by id so _card.html renders identically in the grid and in OOB swaps).
+
+    ``can_assign`` gates the manager-only "Assign to rep" control (O-rework) — the same
+    is_manager_or_admin predicate the assign endpoints enforce on POST, so a rep never sees
+    a button they'd get 403 from.
+    """
     ctx = _base_ctx(request, user, "prospecting")
     ctx["prospect"] = prospect
     ctx["snapshots"] = {prospect.id: build_priority_snapshot(prospect)}
     ctx["contact_stats_map"] = {prospect.id: contacts_summary(prospect.contacts_preview)}
-    ctx["reclaim_ui_map"] = {prospect.id: _reclaim_ui_flags(user, prospect)}
+    ctx["can_assign"] = is_manager_or_admin(user)
     return ctx
 
 
@@ -188,7 +145,7 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     ctx["contacts"] = prospect.contacts_preview or []
     ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
     ctx["similar_customers"] = prospect.similar_customers or []
-    ctx["reclaim_ui"] = _reclaim_ui_flags(user, prospect)
+    ctx["can_assign"] = is_manager_or_admin(user)
     # Resume the enrich poller only if a background enrichment is genuinely in flight; a
     # stale 'running' (crashed worker) leaves enrich_state None so the button re-enables.
     ctx["enrich_state"] = "running" if _enrich_in_progress(prospect.enrichment_data) else None
@@ -373,7 +330,6 @@ async def prospecting_list_partial(
 
     snapshots = {p.id: build_priority_snapshot(p) for p in prospects}
     contact_stats_map = {p.id: contacts_summary(p.contacts_preview) for p in prospects}
-    reclaim_ui_map = {p.id: _reclaim_ui_flags(user, p) for p in prospects}
 
     # Per-status counts for the filter pills (respect the active search, not the active
     # status filter, so each pill shows its own stable total).
@@ -394,7 +350,7 @@ async def prospecting_list_partial(
             "prospects": prospects,
             "snapshots": snapshots,
             "contact_stats_map": contact_stats_map,
-            "reclaim_ui_map": reclaim_ui_map,
+            "can_assign": is_manager_or_admin(user),
             "q": q,
             "status": status,
             "sort": sort,
@@ -707,59 +663,14 @@ async def enrich_status_partial(
     return resp
 
 
-# ── Reclaim endpoint ─────────────────────────────────────────────────
+# ── Manager Assign endpoints (O-rework) ──────────────────────────────
+# Successors to the retired reclaim/reassign controls. A manager hands ANY suggested pool
+# account to a chosen rep: the account moves to that rep's CRM and leaves the pool. Both live
+# under /v2/partials/prospects (module-gated by the PROSPECTING access key in access_paths).
 
 
-@router.post("/v2/partials/prospects/{prospect_id}/reclaim", response_class=HTMLResponse)
-async def reclaim_prospect_htmx(
-    request: Request,
-    prospect_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Reclaim a swept prospect: re-assign Company owner, dismiss from pool.
-
-    Former owner, admin, or sweep manager only.
-    Returns refreshed prospect card or detail with showToast trigger.
-    """
-    from ...services.prospect_reclamation import reclaim_prospect_account
-
-    error = None
-    result = None
-    try:
-        result = reclaim_prospect_account(
-            prospect_id,
-            user.id,
-            db,
-            is_admin=(user.role == UserRole.ADMIN),
-        )
-    except LookupError:
-        raise HTTPException(404, "Prospect not found")
-    except RuntimeError:
-        raise HTTPException(500, "Session user record not found")
-    except ValueError as e:
-        error = str(e)
-
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        raise HTTPException(404, "Prospect not found")
-
-    form = await request.form()
-    flt_status = form.get("flt_status", "")
-    msg = error or f"Reclaimed {result['company_name']} — account re-assigned to you"
-    return _prospect_action_response(
-        request,
-        user,
-        db,
-        prospect,
-        message=msg,
-        kind="error" if error else "success",
-        flt_status=flt_status,
-    )
-
-
-@router.get("/v2/partials/prospects/{prospect_id}/reassign-form", response_class=HTMLResponse)
-async def reassign_prospect_form(
+@router.get("/v2/partials/prospects/{prospect_id}/assign-form", response_class=HTMLResponse)
+async def assign_prospect_form(
     request: Request,
     prospect_id: int,
     ctx: str = "grid",
@@ -767,14 +678,14 @@ async def reassign_prospect_form(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Modal body for reassigning a swept prospect's company to another owner.
+    """Modal body for a manager to assign a pool prospect to a chosen rep.
 
-    Manager/admin only. Loaded into #modal-content by the Reassign button. ``ctx`` is
-    "grid" (posts back to the in-grid card) or "detail" (posts back to #main-content) so
-    the reassign response swaps the surface the action came from.
+    Manager/admin only (403 otherwise). Loaded into #modal-content by the "Assign to rep"
+    button. ``ctx`` is "grid" (posts back to the in-grid card) or "detail" (posts back to
+    #main-content) so the assign response swaps the surface the action came from.
     """
     if not is_manager_or_admin(user):
-        raise HTTPException(403, "Only a manager or admin can reassign an account")
+        raise HTTPException(403, "Only a manager or admin can assign an account")
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
@@ -782,7 +693,7 @@ async def reassign_prospect_form(
 
     users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
     return template_response(
-        "htmx/partials/prospecting/reassign_modal.html",
+        "htmx/partials/prospecting/assign_modal.html",
         {
             "request": request,
             "prospect": prospect,
@@ -793,56 +704,55 @@ async def reassign_prospect_form(
     )
 
 
-@router.post("/v2/partials/prospects/{prospect_id}/reassign", response_class=HTMLResponse)
-async def reassign_prospect_htmx(
+@router.post("/v2/partials/prospects/{prospect_id}/assign", response_class=HTMLResponse)
+async def assign_prospect_htmx(
     request: Request,
     prospect_id: int,
     to_user_id: int = Form(...),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Manager/admin reassigns a swept prospect's company to another owner.
+    """Manager/admin assigns a pool prospect to the chosen rep.
 
-    Overrides the Phase 4 reclaim cooldown: dismisses the swept prospect, sets the new
-    owner, and clears the cooldown. Manager/admin only. Returns the refreshed prospect
-    card/detail with a showToast trigger.
+    Sets the rep as the CRM Company owner (links/creates the Company like a claim does)
+    and removes the account from the pool. Manager/admin only — a non-manager POST is a
+    403. On a service error (target inactive, company owned by another, prospect gone)
+    returns a 200 + error showToast with HX-Reswap:none so the modal keeps its context
+    instead of a silently-suppressed 4xx (mirrors the claim/dismiss toast pattern).
     """
     if not is_manager_or_admin(user):
-        return _prospect_error_toast("Only a manager or admin can reassign an account")
+        raise HTTPException(403, "Only a manager or admin can assign an account")
 
-    from ...services.prospect_reclamation import reassign_account
+    from ...services.prospect_claim import assign_prospect, trigger_deep_enrichment_bg
+    from ...utils.async_helpers import safe_background_task
 
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        return _prospect_error_toast("Prospect not found")
+    try:
+        assign_prospect(prospect_id, to_user_id, user, db)
+    except PermissionError:
+        raise HTTPException(403, "Only a manager or admin can assign an account")
+    except (LookupError, ValueError) as e:
+        return _prospect_error_toast(str(e))
 
-    error = None
-    result = None
-    if not prospect.company_id:
-        error = "Prospect is not linked to a company; nothing to reassign"
-    else:
-        try:
-            result = reassign_account(prospect.company_id, to_user_id, user, db)
-        except PermissionError as e:
-            error = str(e)
-        except LookupError:
-            error = "Company not found"
-        except ValueError as e:
-            error = str(e)
+    # Same background deep-enrichment a self-claim triggers, so an assigned account is
+    # enriched for the rep it landed with.
+    await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
 
-    prospect = db.get(ProspectAccount, prospect_id)
+    prospect = (
+        db.query(ProspectAccount)
+        .options(joinedload(ProspectAccount.claimed_by_user))
+        .filter(ProspectAccount.id == prospect_id)
+        .first()
+    )
     if not prospect:
         return _prospect_error_toast("Prospect not found")
 
     form = await request.form()
-    flt_status = form.get("flt_status", "")
-    msg = error or f"Reassigned {result['company_name']}"
     return _prospect_action_response(
         request,
         user,
         db,
         prospect,
-        message=msg,
-        kind="error" if error else "success",
-        flt_status=flt_status,
+        message=f"Assigned {prospect.name}",
+        kind="success",
+        flt_status=form.get("flt_status", ""),
     )

@@ -13,7 +13,6 @@
 } %}
 {% set snap = (snapshots or {}).get(prospect.id, {}) %}
 {% set cstats = (contact_stats_map or {}).get(prospect.id, {}) %}
-{% set rc = (reclaim_ui_map or {}).get(prospect.id, {}) %}
 
 <div id="prospect-{{ prospect.id }}"
      class="card p-4 hover:shadow-md transition-all">
@@ -133,35 +132,10 @@
     </div>
   </a>
 
-  {# Quick action buttons #}
+  {# Quick action buttons — pool actions are Claim + Dismiss (reps), plus a manager-only
+     "Assign to rep" control (O-rework; the retired reclaim/reassign successor). #}
   {% if prospect.status == 'suggested' %}
   <div class="mt-3 pt-3 border-t border-line-subtle flex gap-2">
-    {% if rc.is_swept and rc.can_reclaim %}
-    {# Swept account — the former owner / a supervisor reclaims ownership (Phase-4 flow) #}
-    {% if rc.in_cooldown %}
-    <button type="button" disabled
-            title="In cooldown until {{ rc.cooldown_until }} — ask a manager to reassign"
-            class="btn-secondary btn-sm flex-1 opacity-50 cursor-not-allowed">
-      Reclaim
-    </button>
-    {% else %}
-    <button hx-post="/v2/partials/prospects/{{ prospect.id }}/reclaim"
-            hx-target="#prospect-{{ prospect.id }}"
-            hx-swap="outerHTML"
-            hx-vals='{"flt_status": "{{ status|default('') }}"}'
-            data-loading-disable
-            class="btn-primary btn-sm flex-1">
-      Reclaim
-    </button>
-    {% endif %}
-    {% if rc.can_reassign %}
-    <button type="button" x-data
-            @click="$dispatch('open-modal', {url: '/v2/partials/prospects/{{ prospect.id }}/reassign-form?ctx=grid&flt_status={{ status|default('')|urlencode }}'})"
-            class="btn-secondary btn-sm flex-1">
-      Reassign
-    </button>
-    {% endif %}
-    {% else %}
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
@@ -170,7 +144,6 @@
             class="btn-primary btn-sm flex-1">
       Claim
     </button>
-    {% endif %}
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
@@ -181,6 +154,15 @@
       Dismiss
     </button>
   </div>
+  {% if can_assign %}
+  <div class="mt-2">
+    <button type="button" x-data
+            @click="$dispatch('open-modal', {url: '/v2/partials/prospects/{{ prospect.id }}/assign-form?ctx=grid&flt_status={{ status|default('')|urlencode }}'})"
+            class="btn-secondary btn-sm w-full">
+      Assign to rep
+    </button>
+  </div>
+  {% endif %}
   {% elif prospect.status == 'dismissed' %}
   <div class="mt-3 pt-3 border-t border-line-subtle">
     <span class="text-secondary">Dismissed {{ prospect.dismissed_at|localdate('%b %d') if prospect.dismissed_at else '' }}</span>

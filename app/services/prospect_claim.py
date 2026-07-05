@@ -62,6 +62,79 @@ def _format_similar_names(similar: list, limit: int) -> str:
 # ── Claim ────────────────────────────────────────────────────────────
 
 
+def _link_or_create_company(prospect: ProspectAccount, owner_id: int, db: Session) -> tuple[str, str | None]:
+    """Point a Company at ``owner_id`` for this prospect and link it back.
+
+    The shared company-linking core of both claim_prospect (owner = the claiming rep) and
+    assign_prospect (owner = the manager-chosen rep). Three mutually-exclusive paths, all
+    setting ``Company.account_owner_id = owner_id`` so the account surfaces on the CRM
+    (Customers) tab under that owner:
+
+    - ``existing_company``   — prospect.company_id already set: transfer ownership.
+    - ``domain_collision``   — another Company shares the domain: link + transfer.
+    - ``new_company``        — create a Company (+ default HQ site) from the prospect data.
+
+    Returns ``(path, warning)`` — ``warning`` is set only on a domain collision (the claim
+    merged into a DIFFERENT existing account). Raises ``ValueError`` when the target Company
+    is already owned by a different user (never silently steal an owned account).
+    """
+    if prospect.company_id:
+        # PATH A: SF-migrated / already-linked — update existing Company
+        company = db.query(Company).filter(Company.id == prospect.company_id).with_for_update().first()
+        if company:
+            if company.account_owner_id and company.account_owner_id != owner_id:
+                raise ValueError(f"Company '{company.name}' is already owned by another user.")
+            company.account_owner_id = owner_id
+        return "existing_company", None
+
+    # PATH B: New discovery — check for domain collision first
+    existing = (
+        db.query(Company).filter(Company.domain == prospect.domain).with_for_update().first()
+        if prospect.domain
+        else None
+    )
+
+    if existing:
+        # Domain collision: link to existing Company instead of creating
+        if existing.account_owner_id and existing.account_owner_id != owner_id:
+            raise ValueError(f"Company '{existing.name}' (same domain) is already owned by another user.")
+        existing.account_owner_id = owner_id
+        prospect.company_id = existing.id
+        logger.warning(
+            "Domain collision on claim/assign: prospect {} matched company {} ({})",
+            prospect.id,
+            existing.id,
+            existing.domain,
+        )
+        return "domain_collision", f"Linked to existing company '{existing.name}' (same domain)"
+
+    # Create new Company from prospect data
+    hq_city, hq_state = _split_hq_location(prospect.hq_location)
+    company = Company(
+        name=prospect.name,
+        domain=prospect.domain,
+        website=prospect.website,
+        industry=prospect.industry,
+        hq_city=hq_city,
+        hq_state=hq_state,
+        employee_size=prospect.employee_count_range,
+        is_active=True,
+        account_owner_id=owner_id,
+        source="prospecting",
+    )
+    db.add(company)
+    db.flush()
+    # Auto-create default HQ site so company appears in pickers
+    default_site = CustomerSite(company_id=company.id, site_name="HQ")
+    db.add(default_site)
+    db.flush()
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("companies_typeahead")
+    prospect.company_id = company.id
+    return "new_company", None
+
+
 def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     """Claim a prospect account — atomic, handles both paths.
 
@@ -106,65 +179,7 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             "Release inactive accounts before claiming new ones."
         )
 
-    warning = None
-    path = None
-
-    if prospect.company_id:
-        # PATH A: SF-migrated — update existing Company
-        company = db.query(Company).filter(Company.id == prospect.company_id).with_for_update().first()
-        if company:
-            if company.account_owner_id and company.account_owner_id != user_id:
-                raise ValueError(f"Company '{company.name}' is already owned by another user.")
-            company.account_owner_id = user_id
-        path = "existing_company"
-    else:
-        # PATH B: New discovery — check for domain collision first
-        existing = (
-            db.query(Company).filter(Company.domain == prospect.domain).with_for_update().first()
-            if prospect.domain
-            else None
-        )
-
-        if existing:
-            # Domain collision: link to existing Company instead of creating
-            if existing.account_owner_id and existing.account_owner_id != user_id:
-                raise ValueError(f"Company '{existing.name}' (same domain) is already owned by another user.")
-            existing.account_owner_id = user_id
-            prospect.company_id = existing.id
-            path = "domain_collision"
-            warning = f"Linked to existing company '{existing.name}' (same domain)"
-            logger.warning(
-                "Domain collision on claim: prospect {} matched company {} ({})",
-                prospect.id,
-                existing.id,
-                existing.domain,
-            )
-        else:
-            # Create new Company from prospect data
-            hq_city, hq_state = _split_hq_location(prospect.hq_location)
-            company = Company(
-                name=prospect.name,
-                domain=prospect.domain,
-                website=prospect.website,
-                industry=prospect.industry,
-                hq_city=hq_city,
-                hq_state=hq_state,
-                employee_size=prospect.employee_count_range,
-                is_active=True,
-                account_owner_id=user_id,
-                source="prospecting",
-            )
-            db.add(company)
-            db.flush()
-            # Auto-create default HQ site so company appears in pickers
-            default_site = CustomerSite(company_id=company.id, site_name="HQ")
-            db.add(default_site)
-            db.flush()
-            from app.cache.decorators import invalidate_prefix
-
-            invalidate_prefix("companies_typeahead")
-            prospect.company_id = company.id
-            path = "new_company"
+    path, warning = _link_or_create_company(prospect, user_id, db)
 
     # Update prospect status
     prospect.status = ProspectAccountStatus.CLAIMED
@@ -190,6 +205,82 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
         "prospect_id": prospect.id,
         "company_id": prospect.company_id,
         "company_name": prospect.name,
+        "status": "claimed",
+        "enrichment_status": "pending",
+        "path": path,
+    }
+    if warning:
+        result["warning"] = warning
+    return result
+
+
+def assign_prospect(prospect_id: int, to_user_id: int, by_user: User, db: Session) -> dict:
+    """Manager/admin assigns a pool prospect to a chosen rep (the O-rework Assign
+    action).
+
+    The supervisor counterpart of claim_prospect and the single successor to the retired
+    reclaim/reassign controls: instead of a rep grabbing an account for themselves, a manager
+    hands ANY suggested pool account to a chosen rep. It links/creates the CRM Company owned
+    by that rep (same three paths as a claim, via _link_or_create_company) and removes the
+    account from the pool (status -> CLAIMED, claimed_by = to_user_id).
+
+    Because a manager action is authoritative it deliberately bypasses the two rep-facing
+    guards claim_prospect enforces: the former-owner 30-day sweep cooldown (so a swept account
+    can be handed back to ANY rep, incl. the original owner, at any time — this subsumes the
+    old "put-it-back" reclaim) and the per-rep anti-hoarding cap (mirroring the CRM
+    assign-owner + legacy reassign_account, which never checked it). Any lingering sweep
+    cooldown is cleared since the account has left the pool.
+
+    Gate: is_manager_or_admin(by_user) -> PermissionError.
+    Returns: {prospect_id, company_id, company_name, to_user_id, status:"claimed", path, warning?}
+    Raises: PermissionError (not a supervisor), LookupError (prospect / target user missing),
+            ValueError (prospect not SUGGESTED / target inactive / company owned by another).
+    """
+    from ..dependencies import is_manager_or_admin
+
+    if not is_manager_or_admin(by_user):
+        raise PermissionError("Only a manager or admin can assign an account")
+
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
+    if not prospect:
+        raise LookupError("Prospect not found")
+
+    if prospect.status != ProspectAccountStatus.SUGGESTED:
+        raise ValueError(f"Only a suggested prospect can be assigned (status='{prospect.status}').")
+
+    target = db.get(User, to_user_id)
+    if not target:
+        raise LookupError("Target user not found")
+    if not target.is_active:
+        raise ValueError("Target user is inactive")
+
+    path, warning = _link_or_create_company(prospect, to_user_id, db)
+
+    prospect.status = ProspectAccountStatus.CLAIMED
+    prospect.claimed_by = to_user_id
+    prospect.claimed_at = datetime.now(timezone.utc)
+    # A manager assignment ends any sweep cooldown — the account has left the pool.
+    prospect.reclaim_blocked_until = None
+    ed = dict(prospect.enrichment_data or {})
+    ed["claim_enrichment_status"] = "pending"
+    prospect.enrichment_data = ed
+
+    db.commit()
+
+    logger.info(
+        "Manager {} assigned prospect {} ({}) to user {} via {}",
+        by_user.id,
+        prospect.name,
+        prospect.id,
+        to_user_id,
+        path,
+    )
+
+    result = {
+        "prospect_id": prospect.id,
+        "company_id": prospect.company_id,
+        "company_name": prospect.name,
+        "to_user_id": to_user_id,
         "status": "claimed",
         "enrichment_status": "pending",
         "path": path,

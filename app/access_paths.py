@@ -42,10 +42,10 @@ from .constants import AccessKey
 # (parts/sightings/materials/search/buy-plans) are SHARED and intentionally omitted.
 #
 # NOTE the two Prospecting bases: the tab + grid live under ``/v2/partials/prospecting``
-# (with -ing), but the reclaim/reassign admin actions live under ``/v2/partials/prospects``
+# (with -ing), but the manager Assign action lives under ``/v2/partials/prospects``
 # (plural, no -ing). Both are Prospecting-exclusive, so BOTH require the PROSPECTING key
 # (audit M12 — without the plural entry a user with Prospecting revoked could still hit
-# reclaim/reassign). The two are disjoint under the EQUALS-or-``base + "/"`` rule
+# the assign endpoints). The two are disjoint under the EQUALS-or-``base + "/"`` rule
 # ("/v2/partials/prospecting" does not start with "/v2/partials/prospects/"), so ordering
 # is irrelevant.
 _GUARDED_BASES: tuple[tuple[str, AccessKey], ...] = (

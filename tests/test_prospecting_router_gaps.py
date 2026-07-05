@@ -7,15 +7,12 @@ Targets uncovered lines:
   331-351: add_prospect_domain ValueError/RuntimeError error path
   408    : claim endpoint second 404 (prospect gone after claim service succeeds)
   487    : release endpoint second 404 (prospect gone after release service succeeds)
-  583-608: reclaim endpoint body (happy path, LookupError, RuntimeError, ValueError)
-  640    : reassign endpoint 404 when prospect not found
-  642    : reassign endpoint 400 when prospect has no company_id
-  648-657: reassign endpoint PermissionError / LookupError / ValueError branches
+  assign : manager-only Assign endpoint — the 403 gate + service-error → error-toast
+           branches (the reclaim/reassign endpoints it replaced were retired in the O-rework)
 
 Called by: pytest autodiscovery
 Depends on: conftest.py (client, db_session, test_user, admin_user, manager_user),
-            app.routers.htmx.prospecting, app.services.prospect_claim,
-            app.services.prospect_reclamation
+            app.routers.htmx.prospecting, app.services.prospect_claim
 """
 
 import os
@@ -27,11 +24,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Company
 from app.models.prospect_account import ProspectAccount
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -187,174 +182,61 @@ class TestReleaseSecond404:
         assert resp.status_code == 404
 
 
-# ── 6. Reclaim endpoint: lines 583-608 ───────────────────────────────────────
+# ── 6. Assign endpoint (O-rework): manager gate + error branches ─────────────
+# The reclaim/reassign endpoints were retired; the manager-only Assign action replaced
+# them. Behavioral coverage lives in test_prospecting_o_rework.py — here we pin the router
+# branches: the manager 403 gate and the service-error → error-toast path.
 
 
-class TestReclaimEndpoint:
-    def test_lookup_error_returns_404(self, client, db_session):
-        """LookupError from reclaim_prospect_account → HTTPException 404."""
+class TestAssignEndpoint:
+    def test_non_manager_post_is_403(self, client, db_session):
+        """The default client is a buyer — a non-manager Assign POST is a 403."""
         p = make_prospect(db_session)
-        with patch(
-            "app.services.prospect_reclamation.reclaim_prospect_account",
-            side_effect=LookupError("prospect missing"),
-        ):
-            resp = client.post(f"/v2/partials/prospects/{p.id}/reclaim")
-        assert resp.status_code == 404
+        resp = client.post(
+            f"/v2/partials/prospects/{p.id}/assign",
+            data={"to_user_id": "1"},
+        )
+        assert resp.status_code == 403
 
-    def test_runtime_error_returns_500(self, client, db_session):
-        """RuntimeError from reclaim_prospect_account → HTTPException 500."""
+    def test_service_value_error_surfaces_as_error_toast(self, db_session, admin_user):
+        """ValueError from assign_prospect → 200 + error showToast, HX-Reswap:none (the
+        modal keeps its context instead of a silently-suppressed 4xx)."""
         p = make_prospect(db_session)
-        with patch(
-            "app.services.prospect_reclamation.reclaim_prospect_account",
-            side_effect=RuntimeError("session user record not found"),
-        ):
-            resp = client.post(f"/v2/partials/prospects/{p.id}/reclaim")
-        assert resp.status_code == 500
-
-    def test_value_error_surfaces_as_error_toast(self, client, db_session):
-        """ValueError → error is captured and returned via _prospect_action_response."""
-        p = make_prospect(db_session)
-        with (
-            patch(
-                "app.services.prospect_reclamation.reclaim_prospect_account",
-                side_effect=ValueError("reclaim cooldown active"),
-            ),
-            patch(
-                "app.routers.htmx.prospecting.template_response",
-                return_value=HTMLResponse("<html/>"),
-            ),
-        ):
-            resp = client.post(f"/v2/partials/prospects/{p.id}/reclaim")
-        assert resp.status_code == 200
-        assert "error" in resp.headers.get("HX-Trigger", "")
-
-    def test_happy_path_returns_success_toast(self, client, db_session):
-        """Successful reclaim returns 200 with success toast."""
-        p = make_prospect(db_session)
-        with (
-            patch(
-                "app.services.prospect_reclamation.reclaim_prospect_account",
-                return_value={"company_name": "Reclaimed Corp"},
-            ),
-            patch(
-                "app.routers.htmx.prospecting.template_response",
-                return_value=HTMLResponse("<html/>"),
-            ),
-        ):
-            resp = client.post(f"/v2/partials/prospects/{p.id}/reclaim")
-        assert resp.status_code == 200
-        assert "success" in resp.headers.get("HX-Trigger", "")
-
-
-# ── 7. Reassign endpoint: lines 640, 642, 648-657 ────────────────────────────
-
-
-class TestReassignEndpointErrors:
-    def test_missing_prospect_returns_error_toast(self, db_session, admin_user):
-        """Unknown prospect_id → 200 + error showToast (DC-02 toast pattern; a 4xx would
-        leave the HTMX modal with zero feedback)."""
         with _client_as(db_session, admin_user) as c:
-            resp = c.post(
-                "/v2/partials/prospects/999996/reassign",
-                data={"to_user_id": str(admin_user.id)},
-            )
+            with patch(
+                "app.services.prospect_claim.assign_prospect",
+                side_effect=ValueError("Target user is inactive"),
+            ):
+                resp = c.post(
+                    f"/v2/partials/prospects/{p.id}/assign",
+                    data={"to_user_id": str(admin_user.id)},
+                )
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Reswap") == "none"
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "error" in trigger
+        assert "inactive" in trigger
+
+    def test_missing_prospect_after_assign_returns_error_toast(self, db_session, admin_user):
+        """assign_prospect mocked to succeed on a non-existent id → the second look-up
+        returns None → error toast (never a bare 4xx that no-ops the modal)."""
+        with _client_as(db_session, admin_user) as c:
+            with (
+                patch("app.services.prospect_claim.assign_prospect"),
+                patch(
+                    "app.services.prospect_claim.trigger_deep_enrichment_bg",
+                    return_value=MagicMock(),
+                ),
+                patch(
+                    "app.utils.async_helpers.safe_background_task",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                resp = c.post(
+                    "/v2/partials/prospects/999996/assign",
+                    data={"to_user_id": str(admin_user.id)},
+                )
         assert resp.status_code == 200
         trigger = resp.headers.get("HX-Trigger", "")
         assert "error" in trigger
         assert "Prospect not found" in trigger
-
-    def test_no_company_returns_error_toast(self, db_session, admin_user):
-        """prospect.company_id is None → 200 + 'not linked to a company' error toast."""
-        p = make_prospect(db_session, company_id=None)
-        with _client_as(db_session, admin_user) as c:
-            resp = c.post(
-                f"/v2/partials/prospects/{p.id}/reassign",
-                data={"to_user_id": str(admin_user.id)},
-            )
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "error" in trigger
-        assert "not linked to a company" in trigger
-
-    def test_permission_error_returns_error_toast(self, db_session, admin_user):
-        """PermissionError from reassign_account → 200 + its message as an error
-        toast."""
-        co = Company(
-            name="PermCo",
-            domain=f"permco-{uuid.uuid4().hex[:6]}.com",
-            is_active=True,
-        )
-        db_session.add(co)
-        db_session.commit()
-        db_session.refresh(co)
-        p = make_prospect(db_session, company_id=co.id)
-
-        with _client_as(db_session, admin_user) as c:
-            with patch(
-                "app.services.prospect_reclamation.reassign_account",
-                side_effect=PermissionError("not your territory"),
-            ):
-                resp = c.post(
-                    f"/v2/partials/prospects/{p.id}/reassign",
-                    data={"to_user_id": str(admin_user.id)},
-                )
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "error" in trigger
-        assert "not your territory" in trigger
-
-    def test_lookup_error_returns_error_toast(self, db_session, admin_user):
-        """LookupError from reassign_account → 200 + 'Company not found' error toast."""
-        co = Company(
-            name="LookupCo",
-            domain=f"lookupco-{uuid.uuid4().hex[:6]}.com",
-            is_active=True,
-        )
-        db_session.add(co)
-        db_session.commit()
-        db_session.refresh(co)
-        p = make_prospect(db_session, company_id=co.id)
-
-        with _client_as(db_session, admin_user) as c:
-            with patch(
-                "app.services.prospect_reclamation.reassign_account",
-                side_effect=LookupError("company vanished"),
-            ):
-                resp = c.post(
-                    f"/v2/partials/prospects/{p.id}/reassign",
-                    data={"to_user_id": str(admin_user.id)},
-                )
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "error" in trigger
-        assert "Company not found" in trigger
-
-    def test_value_error_surfaces_as_error_toast(self, db_session, admin_user):
-        """Line 653: ValueError from reassign_account → error captured, 200 response."""
-        co = Company(
-            name="ValErrCo",
-            domain=f"valerr-{uuid.uuid4().hex[:6]}.com",
-            is_active=True,
-        )
-        db_session.add(co)
-        db_session.commit()
-        db_session.refresh(co)
-        p = make_prospect(db_session, company_id=co.id)
-
-        with _client_as(db_session, admin_user) as c:
-            with (
-                patch(
-                    "app.services.prospect_reclamation.reassign_account",
-                    side_effect=ValueError("cooldown not expired yet"),
-                ),
-                patch(
-                    "app.routers.htmx.prospecting.template_response",
-                    return_value=HTMLResponse("<html/>"),
-                ),
-            ):
-                resp = c.post(
-                    f"/v2/partials/prospects/{p.id}/reassign",
-                    data={"to_user_id": str(admin_user.id)},
-                )
-        assert resp.status_code == 200
-        assert "error" in resp.headers.get("HX-Trigger", "")

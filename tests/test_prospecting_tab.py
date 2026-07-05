@@ -20,7 +20,6 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -319,79 +318,6 @@ class TestWriteAuth:
         finally:
             for dep in (get_db, require_user, require_buyer):
                 app.dependency_overrides.pop(dep, None)
-
-
-# ── Phase 4: manager reassign route (cooldown override) ───────────────────
-
-
-class TestReassignRoute:
-    def _swept_prospect(self, db_session, *, owner_id):
-        from datetime import timedelta
-
-        domain = f"swept-{uuid.uuid4().hex[:6]}.com"
-        co = Company(name="Swept Co", domain=domain, is_active=True, account_owner_id=None)
-        db_session.add(co)
-        db_session.commit()
-        db_session.refresh(co)
-        p = make_prospect(
-            db_session,
-            status="suggested",
-            domain=domain,
-            company_id=co.id,
-            swept_from_owner_id=owner_id,
-            swept_at=datetime.now(timezone.utc),
-            reclaim_blocked_until=datetime.now(timezone.utc) + timedelta(days=15),
-        )
-        return co, p
-
-    def test_rep_reassign_denied_shows_error_toast(self, client, db_session, test_user):
-        # The default `client` is authenticated as a buyer (test_user) → reassign is denied.
-        # HTMX suppresses non-2xx swaps, so instead of a silent 403 no-op the handler returns
-        # 200 with HX-Reswap:none + an error showToast (honest feedback) and reassigns nothing.
-        co, p = self._swept_prospect(db_session, owner_id=test_user.id)
-        resp = client.post(
-            f"/v2/partials/prospects/{p.id}/reassign",
-            data={"to_user_id": str(test_user.id)},
-        )
-        assert resp.status_code == 200
-        assert resp.headers.get("HX-Reswap") == "none"
-        trigger = json.loads(resp.headers["HX-Trigger"])
-        assert trigger["showToast"]["type"] == "error"
-        assert "manager or admin" in trigger["showToast"]["message"]
-        # The denied action changed nothing — still a swept suggestion, owner not set.
-        db_session.refresh(p)
-        db_session.refresh(co)
-        assert p.status == "suggested"
-        assert co.account_owner_id is None
-
-    def test_manager_reassign_sets_owner_and_dismisses(self, db_session, test_user, manager_user):
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        co, p = self._swept_prospect(db_session, owner_id=test_user.id)
-
-        def _od():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _od
-        app.dependency_overrides[require_user] = lambda: manager_user
-        try:
-            with TestClient(app) as c:
-                resp = c.post(
-                    f"/v2/partials/prospects/{p.id}/reassign",
-                    data={"to_user_id": str(test_user.id)},
-                )
-            assert resp.status_code == 200
-        finally:
-            for dep in (get_db, require_user):
-                app.dependency_overrides.pop(dep, None)
-
-        db_session.refresh(co)
-        assert co.account_owner_id == test_user.id
-        db_session.refresh(p)
-        assert p.status == "dismissed"
-        assert p.reclaim_blocked_until is None
 
 
 # ── Stats: canonical buyer-ready definition ───────────────────────────────

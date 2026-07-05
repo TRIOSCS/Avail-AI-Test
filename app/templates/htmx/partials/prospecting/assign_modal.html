@@ -1,0 +1,39 @@
+{#
+  prospecting/assign_modal.html — Manager/admin assigns a pool prospect to a chosen rep.
+  Loaded into #modal-content by the "Assign to rep" button (grid + detail).
+  Receives: prospect (ORM), users (list of active User), ctx ("grid"|"detail"),
+            flt_status (active grid filter, forwarded so the card swap respects it).
+  Posts to /v2/partials/prospects/<id>/assign, which sets the rep as the CRM Company owner
+  (links/creates the Company) and removes the account from the prospecting pool.
+  Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
+#}
+{% set target = '#main-content' if ctx == 'detail' else '#prospect-' ~ prospect.id %}
+{% set swap = 'innerHTML' if ctx == 'detail' else 'outerHTML' %}
+<div class="p-4">
+  <h3 id="modal-title" class="text-sm font-semibold text-gray-900 mb-1">Assign account</h3>
+  <p class="text-secondary mb-3">
+    Assign <strong>{{ prospect.name }}</strong> to a rep. The account moves to their CRM
+    (Customers) tab, owned by them, and leaves the prospecting pool.
+  </p>
+
+  <form hx-post="/v2/partials/prospects/{{ prospect.id }}/assign"
+        hx-target="{{ target }}"
+        hx-swap="{{ swap }}"
+        hx-vals='{"flt_status": "{{ flt_status|default('') }}"}'
+        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        data-loading-disable
+        class="space-y-3">
+    <div>
+      <label class="block text-xs font-medium text-gray-600 mb-1" for="assign-to">Assign to</label>
+      <select id="assign-to" name="to_user_id" required class="input w-full">
+        {% for u in users %}
+        <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" @click="$dispatch('close-modal')" class="btn-secondary btn-sm">Cancel</button>
+      <button type="submit" data-loading-disable class="btn-primary btn-sm">Assign</button>
+    </div>
+  </form>
+</div>
