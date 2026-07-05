@@ -7,6 +7,12 @@ bloated toolbars, wasted space. Build status tracked inline. Full per-agent deta
 
 Status key: ⬜ todo · 🔵 building · ✅ done+deployed
 
+## STATUS 2026-07-05 — ~42 of 46 SHIPPED + DEPLOYED (11 deploys, all green)
+- ✅ **All 9 HIGH** (4 dead controls + 5 slow-sync hangs) done + live.
+- ✅ **All 7 slow-sync** → background+poll/SSE; **all 7 CSV exports** (shared helper + CSV-injection security fix); **6 empty states**; the dead-control mediums; **bulk actions** (resell per-line, sightings assign+refresh); **density D/E/F + toolbars L/M/N + prospecting/CRM bars**.
+- 🔵 **In flight (final cleanup):** dossier Live-market sort (wire the orphaned `/v2/partials/search/filter`) + buy-plans hub `<title>` disambiguation.
+- ⏸ **Deferred (decision-adjacent, NOT autonomous):** prospecting bulk claim/dismiss (build with idea **O**); approvals bulk-approve (approval-adjacent — respects "leave Approvals unchanged"); resell demote-triage-cards-to-KPI (would undo the recent triage-card filter fix — skip); parts dead undo-archive toast (LOW nit, parts/list.html allowlist-sensitive — low value).
+
 ## 🔴 HIGH (9)
 
 ### Dead / broken controls
