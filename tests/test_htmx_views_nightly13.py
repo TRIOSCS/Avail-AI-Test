@@ -163,32 +163,6 @@ class TestToggleBlacklist:
         assert resp.status_code == 404
 
 
-class TestContactTimeline:
-    def test_contact_timeline_returns_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_vendor_card: VendorCard,
-        test_vendor_contact: VendorContact,
-    ) -> None:
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline")
-        assert resp.status_code == 200
-
-    def test_contact_timeline_not_found(self, client: TestClient, test_vendor_card: VendorCard) -> None:
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/99999/timeline")
-        assert resp.status_code == 404
-
-
-class TestContactNudges:
-    def test_contact_nudges_returns_200(self, client: TestClient, test_vendor_card: VendorCard) -> None:
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges")
-        assert resp.status_code == 200
-
-    def test_contact_nudges_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/vendors/99999/contact-nudges")
-        assert resp.status_code == 404
-
-
 class TestVendorReviews:
     def test_get_reviews_empty(self, client: TestClient, test_vendor_card: VendorCard) -> None:
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/reviews")

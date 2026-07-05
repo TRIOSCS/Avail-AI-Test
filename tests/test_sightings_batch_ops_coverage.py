@@ -431,51 +431,6 @@ def test_mark_unavailable_no_matching_sightings_still_succeeds(client, db_sessio
     assert resp.status_code == 200
 
 
-# ── assign-buyer: broker.publish (lines 941-947) ──────────────────────
-
-
-def test_assign_buyer_broker_publish_called(client, db_session, test_user):
-    """Assign-buyer publishes SSE event after updating (lines 941-944)."""
-    _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ASGN01")
-    db_session.commit()
-
-    with _patched_broker() as mock_broker:
-        with patch(
-            "app.routers.sightings.sightings_detail",
-            new_callable=AsyncMock,
-            return_value=_HTMLResponse("<div>ok</div>"),
-        ):
-            resp = client.patch(
-                f"/v2/partials/sightings/{requirement.id}/assign",
-                data={"assigned_buyer_id": str(test_user.id)},
-            )
-
-    assert resp.status_code == 200
-    mock_broker.publish.assert_awaited_once()
-
-
-def test_assign_buyer_clears_assignment_with_empty_id(client, db_session, test_user):
-    """Assign-buyer with empty assigned_buyer_id clears the assignment (line 932)."""
-    _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="CLEAR01")
-    requirement.assigned_buyer_id = test_user.id
-    db_session.commit()
-
-    with _patched_broker():
-        with patch(
-            "app.routers.sightings.sightings_detail",
-            new_callable=AsyncMock,
-            return_value=_HTMLResponse("<div>ok</div>"),
-        ):
-            resp = client.patch(
-                f"/v2/partials/sightings/{requirement.id}/assign",
-                data={"assigned_buyer_id": ""},
-            )
-
-    assert resp.status_code == 200
-    db_session.refresh(requirement)
-    assert requirement.assigned_buyer_id is None
-
-
 # ── advance-status: full paths (lines 963-992) ────────────────────────
 
 

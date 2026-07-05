@@ -1739,10 +1739,8 @@ async def log_phone_call(
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 
-    return template_response(
-        "htmx/partials/requisitions/phone_log_success.html",
-        {"request": request, "vendor_name": vendor_name, "vendor_phone": vendor_phone},
-    )
+    # Return the refreshed activity tab so the logged call appears in the timeline.
+    return await requisition_tab(request=request, req_id=req_id, tab="activity", user=user, db=db)
 
 
 @router.post("/v2/partials/follow-ups/send-batch", response_class=HTMLResponse)
@@ -1898,7 +1896,10 @@ async def update_response_status(
     db.commit()
     logger.info("Response {} status → {} by {}", response_id, new_status, user.email)
 
-    return template_response(
-        "htmx/partials/requisitions/response_status_badge.html",
-        {"request": request, "response": vr},
-    )
+    # Return the refreshed response card so the status control + badge update in place
+    # (mirrors review_response_htmx). The card's hx-target swaps #response-{id}.
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = vr
+    ctx["req"] = req
+    return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)

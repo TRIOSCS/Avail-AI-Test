@@ -397,44 +397,6 @@ async def lead_status_update(
     return template_response("htmx/partials/sourcing/lead_card.html", ctx)
 
 
-@router.post("/v2/partials/sourcing/leads/{lead_id}/feedback", response_class=HTMLResponse)
-async def lead_feedback(
-    request: Request,
-    lead_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Add feedback event to a lead without changing status.
-
-    Returns updated lead detail.
-    """
-    from ...models.sourcing_lead import SourcingLead
-    from ...services.sourcing_leads import append_lead_feedback
-
-    _lead = db.get(SourcingLead, lead_id)
-    if not _lead:
-        raise HTTPException(404, "Lead not found")
-    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
-
-    form = await request.form()
-    note = form.get("note", "").strip() or None
-    reason_code = form.get("reason_code", "").strip() or None
-    contact_method = form.get("contact_method", "").strip() or None
-
-    lead = append_lead_feedback(
-        db,
-        lead_id,
-        note=note,
-        reason_code=reason_code,
-        contact_method=contact_method,
-        actor_user_id=user.id,
-    )
-    if not lead:
-        raise HTTPException(404, "Lead not found")
-
-    return await lead_detail_partial(request, lead_id, user, db)
-
-
 @router.get("/v2/sourcing/{requirement_id}/workspace", response_class=HTMLResponse)
 async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: Session = Depends(get_db)):
     """Full page load for sourcing workspace (split-panel view)."""

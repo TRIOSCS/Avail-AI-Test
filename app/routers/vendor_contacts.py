@@ -284,22 +284,6 @@ async def get_contact_timeline(
     ]
 
 
-@router.get("/api/vendors/{card_id}/contact-nudges")
-async def get_contact_nudges(
-    card_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get nudge suggestions for dormant/cooling contacts."""
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
-
-    from ..services.contact_intelligence import generate_contact_nudges
-
-    return generate_contact_nudges(db, card_id)
-
-
 @router.get("/api/vendors/{card_id}/contacts/{contact_id}/summary")
 async def get_contact_summary(
     card_id: int,

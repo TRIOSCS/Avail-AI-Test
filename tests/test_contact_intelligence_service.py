@@ -10,7 +10,6 @@ Tests the service functions that require a database session:
 Also tests the new API endpoints:
   - GET /api/vendors/{card_id}/contacts (enhanced response)
   - GET /api/vendors/{card_id}/contacts/{contact_id}/timeline
-  - GET /api/vendors/{card_id}/contact-nudges
   - GET /api/vendors/{card_id}/contacts/{contact_id}/summary
   - POST /api/vendors/{card_id}/contacts/{contact_id}/log-call
 
@@ -561,22 +560,6 @@ class TestContactEndpoints:
 
     def test_contact_timeline_not_found(self, client, test_vendor_card):
         resp = client.get(f"/api/vendors/{test_vendor_card.id}/contacts/99999/timeline")
-        assert resp.status_code == 404
-
-    def test_contact_nudges_endpoint(self, client, db_session, test_vendor_card):
-        vc = _make_contact(db_session, test_vendor_card, "dormant@arrow.com", full_name="Dormant Person")
-        vc.activity_trend = "dormant"
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=45)
-        db_session.commit()
-
-        resp = client.get(f"/api/vendors/{test_vendor_card.id}/contact-nudges")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 1
-        assert data[0]["nudge_type"] == "dormant"
-
-    def test_contact_nudges_not_found(self, client):
-        resp = client.get("/api/vendors/99999/contact-nudges")
         assert resp.status_code == 404
 
     def test_contact_summary_endpoint(self, client, db_session, test_vendor_card, test_vendor_contact):

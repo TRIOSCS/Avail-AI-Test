@@ -603,18 +603,6 @@ class TestLeadDetailAndStatus:
             )
         assert resp.status_code in (200, 404)
 
-    def test_lead_feedback(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        lead = _sourcing_lead(db_session, req, requirement)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/sourcing/leads/{lead.id}/feedback",
-            data={"feedback": "good", "note": "Great price"},
-        )
-        assert resp.status_code in (200, 404)
-
 
 # ── Material Card Update ──────────────────────────────────────────────────
 

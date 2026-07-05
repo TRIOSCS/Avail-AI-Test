@@ -128,31 +128,6 @@ def test_shared_timeline_keeps_empty_state():
     assert "No activity yet" in html
 
 
-# ── Surface migration: vendors/contact_timeline.html ──────────────────────
-
-
-def test_contact_timeline_now_renders_canonical_icon_markup():
-    """The vendor contact timeline now emits the canonical icon markup."""
-    tmpl = templates.env.get_template("htmx/partials/vendors/contact_timeline.html")
-    a = _vendor_activity(summary="Called about pricing", channel="phone")
-    contact = SimpleNamespace(full_name="Dana Vendor", email="dana@arrow.com")
-    html = tmpl.render(activities=[a], contact=contact, vendor_id=1)
-
-    assert "h-8 w-8" in html
-    assert "<svg" in html
-    assert "Called about pricing" in html
-    # Header chrome is preserved.
-    assert "Dana Vendor" in html
-
-
-def test_contact_timeline_keeps_empty_state():
-    """The vendor contact timeline preserves its empty state after migration."""
-    tmpl = templates.env.get_template("htmx/partials/vendors/contact_timeline.html")
-    contact = SimpleNamespace(full_name="Dana Vendor", email="dana@arrow.com")
-    html = tmpl.render(activities=[], contact=contact, vendor_id=1)
-    assert "No activity recorded for this contact." in html
-
-
 # ── Direction pill + call-outcome badge (little-thing #4) ──────────────────
 
 

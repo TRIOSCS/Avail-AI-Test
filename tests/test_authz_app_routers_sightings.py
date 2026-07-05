@@ -162,16 +162,6 @@ def test_mark_unavailable_blocks_non_owner_sales(client, db_session, _as_sales_n
     assert resp.status_code == 404
 
 
-def test_assign_blocks_non_owner_sales(client, db_session, _as_sales_nonowner):
-    req = _as_sales_nonowner
-    requirement = _requirement(db_session, req)
-    resp = client.patch(
-        f"/v2/partials/sightings/{requirement.id}/assign",
-        data={"assigned_buyer_id": ""},
-    )
-    assert resp.status_code == 404
-
-
 def test_log_activity_blocks_non_owner_sales(client, db_session, _as_sales_nonowner):
     req = _as_sales_nonowner
     requirement = _requirement(db_session, req)

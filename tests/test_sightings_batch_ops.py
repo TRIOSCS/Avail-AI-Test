@@ -416,40 +416,6 @@ def test_mark_unavailable_marks_sightings(client, db_session, test_user):
     assert sighting.is_unavailable is True
 
 
-# ── assign-buyer ──────────────────────────────────────────────────
-
-
-def test_assign_buyer_not_found(client, db_session):
-    """Assign-buyer for non-existent requirement returns 404."""
-    resp = client.patch(
-        "/v2/partials/sightings/99999/assign",
-        data={"assigned_buyer_id": "1"},
-    )
-    assert resp.status_code == 404
-
-
-def test_assign_buyer_updates_requirement(client, db_session, test_user):
-    """Assign-buyer updates assigned_buyer_id on the requirement."""
-
-    _, requirement = _make_req_and_requirement(db_session, test_user.id)
-    db_session.commit()
-
-    from fastapi.responses import HTMLResponse as _HTMLResponse
-
-    with patch(
-        "app.routers.sightings.sightings_detail",
-        new_callable=AsyncMock,
-        return_value=_HTMLResponse("<div>ok</div>"),
-    ):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement.id}/assign",
-            data={"assigned_buyer_id": str(test_user.id)},
-        )
-
-    db_session.refresh(requirement)
-    assert requirement.assigned_buyer_id == test_user.id
-
-
 # ── log-activity ──────────────────────────────────────────────────
 
 

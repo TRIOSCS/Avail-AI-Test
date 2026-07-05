@@ -15,7 +15,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
 """
 
 import html as html_mod  # aliased: vendor_tab binds a local `html` string var that would shadow a plain `import html`
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -916,43 +916,6 @@ async def unarchive_vendor(
     return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/timeline", response_class=HTMLResponse)
-async def contact_timeline(
-    request: Request,
-    vendor_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return activity timeline for a vendor contact."""
-    from ...models.intelligence import ActivityLog
-
-    contact = (
-        db.query(VendorContact)
-        .filter(VendorContact.id == contact_id, VendorContact.vendor_card_id == vendor_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    activities = (
-        (
-            db.query(ActivityLog)
-            .filter(ActivityLog.contact_email == contact.email)
-            .order_by(ActivityLog.created_at.desc())
-            .limit(20)
-            .all()
-        )
-        if contact.email
-        else []
-    )
-
-    return template_response(
-        "htmx/partials/vendors/contact_timeline.html",
-        {"request": request, "contact": contact, "activities": activities, "vendor_id": vendor_id},
-    )
-
-
 # ── Vendor Contact CRUD (HTMX, parity P1) ──────────────────────────────────
 
 
@@ -1273,36 +1236,6 @@ async def vendor_delete_custom_field(
     db.refresh(vendor)
     logger.info("Vendor {} custom field '{}' removed by {}", vendor_id, label, user.email)
     return _render_vendor_custom_fields(request, vendor)
-
-
-@router.get("/v2/partials/vendors/{vendor_id}/contact-nudges", response_class=HTMLResponse)
-async def vendor_contact_nudges(
-    request: Request,
-    vendor_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return nudge suggestions for dormant vendor contacts."""
-    vendor = get_vendor_card_or_404(db, vendor_id)
-
-    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == vendor_id).all()
-    # Contacts with no interaction in 30+ days are nudge candidates
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    nudges = []
-    for c in contacts:
-        if not c.last_interaction_at:
-            nudges.append(c)
-        else:
-            # Handle both tz-aware and tz-naive datetimes
-            last = c.last_interaction_at
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=timezone.utc)
-            if last < cutoff:
-                nudges.append(c)
-    return template_response(
-        "htmx/partials/vendors/contact_nudges.html",
-        {"request": request, "nudges": nudges, "vendor": vendor},
-    )
 
 
 @router.get("/v2/partials/vendors/{vendor_id}/reviews", response_class=HTMLResponse)

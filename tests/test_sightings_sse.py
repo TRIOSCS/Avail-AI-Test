@@ -67,10 +67,9 @@ class TestSSEPublishOnMutation:
                 _seed_sighting,
                 False,
             ),
-            ("patch", "assign", {"assigned_buyer_id": "1"}, None, False),
             ("post", "refresh", None, None, False),
         ],
-        ids=["advance_status", "log_activity", "mark_unavailable", "assign_buyer", "refresh"],
+        ids=["advance_status", "log_activity", "mark_unavailable", "refresh"],
     )
     def test_publishes_sighting_updated(
         self, client, db_session, method, path_suffix, data, extra_setup, asserts_event_name
@@ -121,18 +120,3 @@ class TestSSEPublishOnBatchRefresh:
             assert mock_broker.publish.call_count == 2
             published_ids = {json.loads(call[0][2])["requirement_id"] for call in mock_broker.publish.call_args_list}
             assert published_ids == {r1.id, r2.id}
-
-
-class TestSSEPublishChannelFormat:
-    """Verify SSE events are published to the correct user channel."""
-
-    def test_channel_includes_user_id(self, client, db_session, test_user):
-        _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.broker") as mock_broker:
-            mock_broker.publish = AsyncMock()
-            client.patch(
-                f"/v2/partials/sightings/{r.id}/assign",
-                data={"assigned_buyer_id": "1"},
-            )
-            channel = mock_broker.publish.call_args[0][0]
-            assert channel == f"user:{test_user.id}"

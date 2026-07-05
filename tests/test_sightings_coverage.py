@@ -382,42 +382,6 @@ class TestMarkUnavailableEndpoint:
         assert resp.status_code == 200
 
 
-class TestAssignBuyerEndpoint:
-    """Assign buyer endpoint sets assigned_buyer_id (lines 605-615)."""
-
-    def test_assigns_buyer_id_to_requirement(self, client, db_session, test_user):
-        """Sets assigned_buyer_id from form data."""
-        _, r, _ = _seed_active(db_session)
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": str(test_user.id)},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(r)
-        assert r.assigned_buyer_id == test_user.id
-
-    def test_clears_buyer_id_when_empty(self, client, db_session, test_user):
-        """Empty string for buyer_id clears the assignment."""
-        _, r, _ = _seed_active(db_session)
-        r.assigned_buyer_id = test_user.id
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": ""},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(r)
-        assert r.assigned_buyer_id is None
-
-    def test_404_for_missing_requirement(self, client, db_session):
-        """Returns 404 when requirement not found."""
-        resp = client.patch(
-            "/v2/partials/sightings/99999/assign",
-            data={"assigned_buyer_id": "1"},
-        )
-        assert resp.status_code == 404
-
-
 class TestSendInquiryEndpoint:
     """Send-inquiry endpoint (lines 690-759)."""
 

@@ -848,7 +848,7 @@ class TestSearchRoutes:
 class TestVendorDetailRoutes:
     @pytest.mark.parametrize(
         "suffix",
-        ["edit-form", "reviews", "contact-nudges"],
+        ["edit-form", "reviews"],
     )
     def test_vendor_get_404(self, client: TestClient, suffix: str):
         resp = client.get(f"/v2/partials/vendors/99999/{suffix}")
@@ -859,7 +859,6 @@ class TestVendorDetailRoutes:
         [
             "edit-form",
             "reviews",
-            "contact-nudges",
             "tab/contacts",
             "tab/overview",
             "tab/offers",

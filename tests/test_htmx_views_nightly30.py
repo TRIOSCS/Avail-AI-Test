@@ -538,33 +538,6 @@ class TestLeadStatusUpdate:
         assert resp.status_code == 200
 
 
-class TestLeadFeedback:
-    """POST /v2/partials/sourcing/leads/{lead_id}/feedback."""
-
-    def test_feedback_not_found(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/sourcing/leads/99999/feedback",
-            data={"verdict": "good"},
-            headers=HX,
-        )
-        assert resp.status_code == 404
-
-    def test_feedback_ok(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ):
-        req = test_requisition.requirements[0]
-        lead = _make_sourcing_lead(db_session, req)
-        resp = client.post(
-            f"/v2/partials/sourcing/leads/{lead.id}/feedback",
-            data={"verdict": "good", "note": ""},
-            headers=HX,
-        )
-        assert resp.status_code == 200
-
-
 class TestSourcingLeadPanel:
     """GET /v2/partials/sourcing/leads/{lead_id}/panel."""
 
@@ -792,21 +765,6 @@ class TestBuyPlanCancel:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestVendorContactTimeline:
-    """GET /v2/partials/vendors/{vendor_id}/contacts/{contact_id}/timeline."""
-
-    def test_timeline(self, client: TestClient, test_vendor_card: VendorCard, test_vendor_contact):
-        resp = client.get(
-            f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline",
-            headers=HX,
-        )
-        assert resp.status_code == 200
-
-    def test_timeline_vendor_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/99999/contacts/1/timeline", headers=HX)
-        assert resp.status_code == 404
-
-
 class TestVendorOwnership:
     """GET /v2/partials/vendors/{vendor_id}/ownership."""
 
@@ -816,18 +774,6 @@ class TestVendorOwnership:
 
     def test_ownership_404(self, client: TestClient):
         resp = client.get("/v2/partials/vendors/99999/ownership", headers=HX)
-        assert resp.status_code == 404
-
-
-class TestVendorContactNudges:
-    """GET /v2/partials/vendors/{vendor_id}/contact-nudges."""
-
-    def test_nudges(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges", headers=HX)
-        assert resp.status_code == 200
-
-    def test_nudges_404(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/99999/contact-nudges", headers=HX)
         assert resp.status_code == 404
 
 

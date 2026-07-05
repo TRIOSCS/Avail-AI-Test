@@ -79,14 +79,6 @@ def test_lead_status_blocks_non_owner_sales(client, db_session, test_requisition
     assert resp.status_code == 404
 
 
-def test_lead_feedback_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    req = _requirement(db_session, test_requisition)
-    _as_sales_non_owner(db_session, test_user, test_requisition, admin_user)
-    lead = _make_lead(db_session, req.id, test_requisition.id)
-    resp = client.post(f"/v2/partials/sourcing/leads/{lead.id}/feedback", data={"note": "x"})
-    assert resp.status_code == 404
-
-
 # ── sightings batch (form-body multi-id) ─────────────────────────────────────
 def test_batch_assign_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
     req = _requirement(db_session, test_requisition)

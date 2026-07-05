@@ -643,35 +643,6 @@ class TestMarkUnavailable:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Assign buyer
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestAssignBuyer:
-    def test_assign_buyer(self, client, db_session, test_user):
-        _, r, _ = _seed(db_session)
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": str(test_user.id)},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(r)
-        assert r.assigned_buyer_id == test_user.id
-
-    def test_unassign_buyer(self, client, db_session):
-        _, r, _ = _seed(db_session)
-        r.assigned_buyer_id = 1
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": ""},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(r)
-        assert r.assigned_buyer_id is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Batch assign
 # ═══════════════════════════════════════════════════════════════════════════
 

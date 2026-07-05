@@ -90,4 +90,33 @@
   </div>
   <div id="reply-area-{{ r.id }}" class="mt-2"></div>
   {% endif %}
+
+  {# ── Status control — PATCHes .../responses/{id}/status (reviewed/flagged/rejected)
+       and swaps the whole refreshed card. Idle/active classes are literal so Tailwind
+       JIT keeps them (never build class names dynamically). #}
+  {% set status_btns = [
+    ('reviewed', 'Reviewed',
+     'bg-emerald-100 text-emerald-700',
+     'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'),
+    ('flagged', 'Flag',
+     'bg-amber-100 text-amber-700',
+     'text-amber-600 bg-amber-50 hover:bg-amber-100'),
+    ('rejected', 'Reject',
+     'bg-rose-100 text-rose-700',
+     'text-rose-600 bg-rose-50 hover:bg-rose-100'),
+  ] %}
+  <div class="mt-3 flex items-center gap-1.5 border-t border-gray-100 pt-2">
+    <span class="text-[11px] font-medium text-gray-400 mr-0.5">Status</span>
+    {% for value, label, active_cls, idle_cls in status_btns %}
+    <button hx-patch="/v2/partials/requisitions/{{ req.id }}/responses/{{ r.id }}/status"
+            hx-vals='{"status": "{{ value }}"}'
+            hx-target="#response-{{ r.id }}"
+            hx-swap="outerHTML"
+            data-loading-disable
+            {% if r.status == value %}aria-current="true"{% endif %}
+            class="px-2 py-1 text-[11px] font-medium rounded {{ active_cls if r.status == value else idle_cls }}">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
 </div>

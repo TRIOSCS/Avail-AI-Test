@@ -2663,31 +2663,6 @@ class TestSightingsVendorRowStatusTreatment:
         assert "bg-emerald-50/50" not in resp.text
 
 
-class TestSightingsAssignBuyer:
-    def test_assigns_buyer(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": "1"},
-        )
-        assert resp.status_code == 200
-
-    def test_unassigns_buyer(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        resp = client.patch(
-            f"/v2/partials/sightings/{r.id}/assign",
-            data={"assigned_buyer_id": ""},
-        )
-        assert resp.status_code == 200
-
-    def test_404_for_missing(self, client, db_session):
-        resp = client.patch(
-            "/v2/partials/sightings/99999/assign",
-            data={"assigned_buyer_id": "1"},
-        )
-        assert resp.status_code == 404
-
-
 class TestSightingsBatchRefresh:
     def test_returns_200(self, client, db_session):
         _, r, _ = _seed_data(db_session)

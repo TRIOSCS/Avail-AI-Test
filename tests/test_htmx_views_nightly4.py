@@ -253,51 +253,6 @@ class TestVendorEditForm:
         assert resp.status_code == 404
 
 
-# ── Tests: Vendor contact timeline ───────────────────────────────────
-
-
-class TestContactTimeline:
-    def test_returns_timeline(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        contact = _vendor_contact(db_session, test_vendor_card, email=f"t{uuid.uuid4().hex[:6]}@v.com")
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{contact.id}/timeline")
-        assert resp.status_code == 200
-
-    def test_contact_not_found(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/99999/timeline")
-        assert resp.status_code == 404
-
-
-# ── Tests: Vendor contact nudges ─────────────────────────────────────
-
-
-class TestVendorContactNudges:
-    def test_no_contacts(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges")
-        assert resp.status_code == 200
-
-    def test_with_dormant_contact(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        contact = _vendor_contact(db_session, test_vendor_card, email=f"n{uuid.uuid4().hex[:6]}@v.com")
-        contact.last_interaction_at = None  # no interaction → nudge candidate
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges")
-        assert resp.status_code == 200
-
-    def test_with_stale_contact(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        contact = _vendor_contact(db_session, test_vendor_card, email=f"s{uuid.uuid4().hex[:6]}@v.com")
-        contact.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=60)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges")
-        assert resp.status_code == 200
-
-    def test_vendor_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/99999/contact-nudges")
-        assert resp.status_code == 404
-
-
 # ── Tests: Vendor reviews ────────────────────────────────────────────
 
 

@@ -1536,32 +1536,6 @@ async def sightings_mark_available(
     return _append_oob_toast(detail, f"{vendor_name} marked available again")
 
 
-@router.patch("/v2/partials/sightings/{requirement_id}/assign", response_class=HTMLResponse)
-async def sightings_assign_buyer(
-    request: Request,
-    requirement_id: int,
-    source: Literal["user", "sse"] = Query(default="user"),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_user),
-):
-    """Update the assigned buyer for a requirement."""
-    form = await request.form()
-    buyer_id_str = form.get("assigned_buyer_id", "")
-    buyer_id = int(buyer_id_str) if buyer_id_str else None
-
-    requirement = db.get(Requirement, requirement_id)
-    if not requirement:
-        raise HTTPException(status_code=404, detail="Requirement not found")
-    require_requisition_access(db, requirement.requisition_id, user)
-
-    requirement.assigned_buyer_id = buyer_id
-    db.commit()
-
-    await _publish_if_user_source(source, user.id, requirement_id)
-
-    return await sightings_detail(request, requirement_id, db, user)
-
-
 @router.patch("/v2/partials/sightings/{requirement_id}/advance-status", response_class=HTMLResponse)
 async def sightings_advance_status(
     request: Request,

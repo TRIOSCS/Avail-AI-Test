@@ -117,53 +117,6 @@ class TestToggleBlacklist:
         assert vendor.is_blacklisted is False
 
 
-# ── Contact Timeline ──────────────────────────────────────────────────
-
-
-class TestContactTimeline:
-    def test_timeline_renders(self, client: TestClient, vendor: VendorCard, vendor_contact: VendorContact):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor.id}/contacts/{vendor_contact.id}/timeline",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Timeline" in resp.text
-
-    def test_timeline_nonexistent_contact(self, client: TestClient, vendor: VendorCard):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor.id}/contacts/99999/timeline",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 404
-
-
-# ── Contact Nudges ────────────────────────────────────────────────────
-
-
-class TestContactNudges:
-    def test_nudges_shows_dormant(self, client: TestClient, vendor: VendorCard, vendor_contact: VendorContact):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor.id}/contact-nudges",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Contact Nudges" in resp.text
-        # Contact was last contacted 45 days ago, should be in nudges
-        assert vendor_contact.full_name in resp.text
-
-    def test_nudges_empty_when_all_recent(
-        self, client: TestClient, vendor: VendorCard, vendor_contact: VendorContact, db_session: Session
-    ):
-        vendor_contact.last_interaction_at = datetime.now(timezone.utc)
-        db_session.commit()
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor.id}/contact-nudges",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "All contacts have been contacted" in resp.text
-
-
 # ── Vendor Reviews ────────────────────────────────────────────────────
 
 

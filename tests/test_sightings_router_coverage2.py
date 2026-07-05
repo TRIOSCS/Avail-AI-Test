@@ -6,7 +6,6 @@ Targets uncovered branches:
 - sightings_list: filter branches (status, sales_person, assigned, q, group_by)
 - sightings_detail: not found, various suggestion paths
 - sightings_mark_unavailable: success path
-- sightings_assign_buyer: with buyer id
 - sightings_log_activity: all channels, invalid channel, empty notes
 - sightings_preview_inquiry: success, missing params
 - sightings_send_inquiry: success, missing params, failed send
@@ -177,20 +176,6 @@ class TestMarkUnavailableSuccess:
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/mark-unavailable",
             data={"vendor_name": "Arrow Electronics", "reason": "sold_elsewhere"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-
-# ── sightings_assign_buyer ─────────────────────────────────────────────────
-
-
-class TestAssignBuyerWithId:
-    def test_assign_buyer_with_valid_id(self, client: TestClient, req_with_item: tuple, test_user: User):
-        _, item = req_with_item
-        resp = client.patch(
-            f"/v2/partials/sightings/{item.id}/assign",
-            data={"assigned_buyer_id": str(test_user.id)},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200

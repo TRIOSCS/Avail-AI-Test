@@ -294,27 +294,6 @@ class TestLeadStatusUpdate:
         assert resp.status_code == 200
 
 
-# ── Lead Feedback ─────────────────────────────────────────────────────────
-
-
-class TestLeadFeedback:
-    def test_feedback_success(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        lead = _make_lead(db_session, req)
-        resp = client.post(
-            f"/v2/partials/sourcing/leads/{lead.id}/feedback",
-            data={"note": "Called but no answer", "reason_code": "no_answer"},
-        )
-        assert resp.status_code == 200
-
-    def test_feedback_lead_not_found(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/sourcing/leads/99999/feedback",
-            data={"note": "test"},
-        )
-        assert resp.status_code == 404
-
-
 # ── Bulk Archive / Unarchive ──────────────────────────────────────────────
 
 

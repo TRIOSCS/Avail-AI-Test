@@ -211,25 +211,6 @@ class TestBatchNotes:
         assert "Added note" in resp.headers.get("HX-Trigger", "")
 
 
-class TestAssignBuyer:
-    def test_assign_buyer_not_found(self, client: TestClient):
-        resp = client.patch(
-            "/v2/partials/sightings/99999/assign",
-            data={"assigned_buyer_id": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 404
-
-    def test_assign_buyer_clears_assignment(self, client: TestClient, req_with_item: tuple):
-        _, item = req_with_item
-        resp = client.patch(
-            f"/v2/partials/sightings/{item.id}/assign",
-            data={"assigned_buyer_id": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-
 class TestAdvanceStatus:
     def test_advance_status_missing_status(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
