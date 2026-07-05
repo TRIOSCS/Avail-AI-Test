@@ -290,14 +290,16 @@ def test_ctx_matches_old_algorithm_including_duplicates_and_nulls(db_session: Se
 
 
 def _export_names(db, user, *, cadence_state) -> set[str]:
-    import csv as _csv
-    import io as _io
+    # The CRM export was consolidated onto the shared stream_csv helper: the row source
+    # `_contacts_rows` now yields raw tuples (in _CONTACT_EXPORT_COLUMNS order) instead of
+    # CSV text. Pull full_name by its column index — same filtered set, new API.
+    from app.routers.crm.export import _CONTACT_EXPORT_COLUMNS, _contacts_rows
 
-    from app.routers.crm.export import _contacts_generator
-
-    text = "".join(_contacts_generator(db, user, search="", company_id=0, contact_role="", cadence_state=cadence_state))
-    reader = _csv.DictReader(_io.StringIO(text))
-    return {row["full_name"] for row in reader}
+    name_idx = _CONTACT_EXPORT_COLUMNS.index("full_name")
+    return {
+        row[name_idx]
+        for row in _contacts_rows(db, user, search="", company_id=0, contact_role="", cadence_state=cadence_state)
+    }
 
 
 def test_contacts_csv_export_cadence_filter_matches_python(db_session: Session, admin_user: User):
