@@ -149,16 +149,20 @@ def compute_vendor_score_breakdown(
     return factors
 
 
-def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
-    """Compute vendor score for one vendor.
+def _gather_vendor_score_inputs(db: Session, vendor_card_id: int) -> dict | None:
+    """Gather the raw inputs behind ONE vendor's score.
 
-    Returns same dict as compute_vendor_score.
+    Returns the kwargs dict shared by ``compute_vendor_score`` and
+    ``compute_vendor_score_breakdown`` — so the score and its hover breakdown are
+    derived from byte-identical inputs — or ``None`` when the card is missing or sits
+    below the cold-start offer floor (``MIN_OFFERS_FOR_SCORE``), i.e. there is no score
+    to explain.
     """
     from app.models import Offer, VendorCard, VendorReview
 
     card = db.get(VendorCard, vendor_card_id)
     if not card:
-        return {"vendor_score": None, "advancement_score": None, "is_new_vendor": True}
+        return None
 
     # Get all offers for this vendor
     offers = db.query(Offer.id).filter(Offer.vendor_card_id == vendor_card_id).all()
@@ -171,9 +175,8 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
         offer_ids = {o.id for o in offers}
 
     offer_count = len(offer_ids)
-
     if offer_count < MIN_OFFERS_FOR_SCORE:
-        return {"vendor_score": None, "advancement_score": None, "is_new_vendor": True}
+        return None
 
     # Build sets of offer_ids at each stage
     quote_offer_ids = _get_quote_offer_ids(db, offer_ids)
@@ -190,14 +193,38 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
     # Cancellation pressure — same po_cancellations table the nightly batch reads.
     cancel_count, slow_cancel_count = _vendor_cancel_counts(db, vendor_card_id)
 
-    return compute_vendor_score(
-        offer_count,
-        stage_points_sum,
-        avg_rating,
-        cancel_count=cancel_count,
-        slow_cancel_count=slow_cancel_count,
-        total_pos=card.total_pos or 0,
-    )
+    return {
+        "offer_count": offer_count,
+        "stage_points_sum": stage_points_sum,
+        "avg_rating": avg_rating,
+        "cancel_count": cancel_count,
+        "slow_cancel_count": slow_cancel_count,
+        "total_pos": card.total_pos or 0,
+    }
+
+
+def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
+    """Compute vendor score for one vendor.
+
+    Returns same dict as compute_vendor_score.
+    """
+    inputs = _gather_vendor_score_inputs(db, vendor_card_id)
+    if inputs is None:
+        return {"vendor_score": None, "advancement_score": None, "is_new_vendor": True}
+    return compute_vendor_score(**inputs)
+
+
+def compute_single_vendor_score_breakdown(db: Session, vendor_card_id: int) -> list[tuple[str, float]]:
+    """Deterministic (label, contribution) drivers behind ONE vendor's score.
+
+    Threads the SAME inputs ``compute_single_vendor_score`` uses into
+    ``compute_vendor_score_breakdown`` so the vendor-detail Score hover reconciles to the
+    displayed score. Empty below the cold-start floor / for an unknown vendor.
+    """
+    inputs = _gather_vendor_score_inputs(db, vendor_card_id)
+    if inputs is None:
+        return []
+    return compute_vendor_score_breakdown(**inputs)
 
 
 def _vendor_cancel_counts(db: Session, vendor_card_id: int) -> tuple[int, int]:

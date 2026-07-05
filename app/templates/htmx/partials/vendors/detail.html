@@ -7,6 +7,7 @@
                partials/shared/_macros.html (cadence_hero).
 #}
 {% from "htmx/partials/shared/_macros.html" import cadence_hero %}
+{% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
 
 <title hx-swap-oob="true">{{ vendor.display_name }} — Vendors — AvailAI</title>
 
@@ -55,8 +56,8 @@
         {# Vendor score (large) #}
         {% if vendor.vendor_score and not vendor.is_blacklisted %}
           <div class="text-center px-3">
-            <p class="text-3xl font-bold text-emerald-600">{{ "%.0f"|format(vendor.vendor_score) }}</p>
-            <p class="text-xs font-medium text-gray-600">Score</p>
+            <p class="text-3xl font-bold text-emerald-600">{{ score_breakdown("%.0f"|format(vendor.vendor_score), vendor_score_breakdown, title='Score factors') }}</p>
+            <p class="text-xs font-medium text-gray-600">{{ score_def('Score', 'Vendor score (0-100): how far the vendor advances offers through the pipeline (order advancement), blended 80/20 with buyer review ratings.') }}</p>
           </div>
         {% endif %}
         {# Toggle blacklist #}

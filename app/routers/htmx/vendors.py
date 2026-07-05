@@ -496,10 +496,17 @@ async def vendor_detail_partial(
     vendor_cadence = _cadence_state(None, vendor.last_outbound_at, now_utc)
     vendor_nbt = _next_best_touch(None, vendor.last_outbound_at, now_utc)
 
+    # Score hover (idea C): deterministic driver breakdown behind the header score,
+    # threaded from the SAME inputs the score uses. Only computed when a score shows.
+    from ...services.vendor_score import compute_single_vendor_score_breakdown
+
+    vendor_score_breakdown = compute_single_vendor_score_breakdown(db, vendor_id) if vendor.vendor_score else []
+
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
         {
             "vendor": vendor,
+            "vendor_score_breakdown": vendor_score_breakdown,
             "contacts": contacts,
             "recent_sightings": recent_sightings,
             "safety_band": safety_band,

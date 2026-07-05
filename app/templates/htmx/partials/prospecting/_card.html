@@ -89,7 +89,7 @@
     <div class="mb-2">
       {% set match = ai_screen.get('trio_match_score', 0) %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-600">AI Match <span class="text-gray-300">(procurement fit)</span></span>
+        <span class="text-gray-600">{{ score_def('AI Match', 'AI procurement-fit screen (0-100): how strongly this account needs the electronic components TRIO supplies. AI-assessed — see rationale below.') }} <span class="text-gray-300">(procurement fit)</span></span>
         <span class="font-medium {{ score.score_text_color(match) }}">{{ match }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">

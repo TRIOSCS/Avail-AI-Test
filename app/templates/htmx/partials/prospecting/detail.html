@@ -202,17 +202,17 @@
       <div class="text-center">
         <p class="text-2xl font-bold {{ 'text-emerald-600' if match >= 70 else ('text-amber-600' if match >= 40 else 'text-rose-600') }}">
           {{ match }}</p>
-        <p class="text-xs text-gray-600 mt-0.5">Match</p>
+        <p class="text-xs text-gray-600 mt-0.5">{{ score_def('Match', 'AI procurement-fit screen (0-100): how strongly this account needs the electronic components TRIO supplies. AI-assessed, not a weighted sum.') }}</p>
       </div>
       {% set opp = ai_screen.get('opportunity_score', 0) %}
       <div class="text-center">
         <p class="text-2xl font-bold text-gray-700">{{ opp }}</p>
-        <p class="text-xs text-gray-600 mt-0.5">Opportunity</p>
+        <p class="text-xs text-gray-600 mt-0.5">{{ score_def('Opportunity', 'AI opportunity size (0-100): estimated spend potential from company size and industry. AI-assessed, not a weighted sum.') }}</p>
       </div>
       {% set excess = ai_screen.get('excess_likelihood', 0) %}
       <div class="text-center">
         <p class="text-2xl font-bold text-gray-600">{{ excess }}</p>
-        <p class="text-xs text-gray-600 mt-0.5">Excess</p>
+        <p class="text-xs text-gray-600 mt-0.5">{{ score_def('Excess', 'AI excess-inventory likelihood (0-100): chance this account holds surplus electronic inventory TRIO could buy. Secondary AI signal.') }}</p>
       </div>
     </div>
 

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from app.models.intelligence import MaterialCard
 from app.models.price_snapshot import MaterialPriceSnapshot
 from app.models.prospect_account import ProspectAccount
+from app.models.vendors import VendorCard
 from app.scoring import score_sighting_v2, score_sighting_v2_breakdown
 from app.services.part_history_service import price_series_for_card
 from app.services.prospect_scoring import (
@@ -31,10 +32,13 @@ from app.services.prospect_scoring import (
 )
 from app.services.vendor_score import (
     MIN_OFFERS_FOR_SCORE,
+    compute_single_vendor_score,
+    compute_single_vendor_score_breakdown,
     compute_vendor_score,
     compute_vendor_score_breakdown,
 )
 from app.template_env import templates
+from tests.test_vendor_score import _make_offers, _make_vendor_card
 
 HOVER = "htmx/partials/shared/_score_hover.html"
 
@@ -318,3 +322,138 @@ def test_prospecting_card_renders_fit_hover_wired_to_real_data():
     assert 'role="tooltip"' in html
     # Header-definition hover present on the Fit label.
     assert "ICP fit" in html
+
+
+# ── Vendor-detail order-advancement score hover (breakdown) ─────────────
+
+
+def test_vendor_score_breakdown_db_reconciles_with_score(db_session):
+    """The DB-access breakdown helper threads the SAME inputs as the score, so its
+    contributions reconcile to compute_single_vendor_score's number — no AI."""
+    card = _make_vendor_card(db_session, "hover vendor")
+    _make_offers(db_session, card.id, "hover vendor", 6)  # above the cold-start floor
+    db_session.commit()
+
+    score = compute_single_vendor_score(db_session, card.id)["vendor_score"]
+    breakdown = compute_single_vendor_score_breakdown(db_session, card.id)
+    assert score is not None
+    assert breakdown  # non-empty above the floor
+    assert breakdown[0][0] == "Order advancement"
+    assert abs(sum(c for _, c in breakdown) - score) <= 0.5
+
+
+def test_vendor_score_breakdown_db_empty_below_floor_and_unknown(db_session):
+    """No score → no breakdown: below the offer floor and for an unknown vendor."""
+    cold = _make_vendor_card(db_session, "cold vendor")
+    _make_offers(db_session, cold.id, "cold vendor", MIN_OFFERS_FOR_SCORE - 1)
+    db_session.commit()
+    assert compute_single_vendor_score_breakdown(db_session, cold.id) == []
+    assert compute_single_vendor_score_breakdown(db_session, 999999) == []
+
+
+def test_vendor_detail_renders_score_hover_wired_to_real_data():
+    """Vendor detail renders the Score header definition + the value breakdown popover
+    wired to a real (label, contribution) list — deterministic, no AI call."""
+    vendor = VendorCard(
+        id=1,
+        normalized_name="acme corp",
+        display_name="Acme Corp",
+        vendor_score=56.0,
+        is_blacklisted=False,
+        is_active=True,
+        total_pos=10,
+    )
+    # Real breakdown from the same weights the score uses (reconciles to 56.0).
+    breakdown = compute_vendor_score_breakdown(offer_count=10, stage_points_sum=40.0, avg_rating=4.0)
+    html = templates.get_template("htmx/partials/vendors/detail.html").render(
+        vendor=vendor,
+        contacts=[],
+        recent_sightings=[],
+        safety_band=None,
+        mpn_filter=None,
+        cadence_state="new",
+        next_best_touch="Reach out soon",
+        now_utc=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        vendor_score_breakdown=breakdown,
+    )
+    # Value breakdown popover wired to the real drivers.
+    assert 'role="tooltip"' in html
+    assert "Score factors" in html
+    assert "Order advancement" in html
+    assert "Buyer reviews" in html
+    # Header definition hover on the "Score" label.
+    assert 'title="Vendor score (0-100):' in html
+    assert "decoration-dotted" in html
+
+
+# ── Prospecting AI-screen trio — def-only hover (no fabricated breakdown) ──
+
+
+def test_prospecting_card_ai_match_renders_def_only_hover():
+    """The AI Match label carries a header-definition hover only (AI score, no
+    deterministic decomposition) — never a fabricated breakdown popover."""
+    prospect = ProspectAccount(
+        id=1,
+        name="Initech",
+        domain="initech.example",
+        discovery_source="test",
+        status="suggested",
+        enrichment_data={"ai_screen": {"verdict": "pass", "trio_match_score": 82, "rationale": "Aerospace OEM."}},
+    )
+    html = templates.get_template("htmx/partials/prospecting/_card.html").render(
+        prospect=prospect, snapshots={}, contact_stats_map={}, status="", can_assign=False
+    )
+    assert "AI Match" in html
+    assert "82%" in html
+    # Definition tooltip (score_def), not a breakdown popover.
+    assert 'title="AI procurement-fit screen (0-100):' in html
+    assert "decoration-dotted" in html
+
+
+def test_prospecting_detail_ai_trio_renders_def_only_hover():
+    """The AI Screening trio (Match / Opportunity / Excess) each get a header-definition
+    hover — AI scores with no weighted breakdown, so def-only (no fabrication)."""
+    prospect = ProspectAccount(
+        id=1,
+        name="Initech",
+        domain="initech.example",
+        discovery_source="test",
+        status="claimed",
+        fit_score=72,
+        readiness_score=40,
+        readiness_signals={"intent": {"strength": "moderate"}},
+        enrichment_data={},
+    )
+    enrichment = {
+        "ai_screen": {
+            "verdict": "pass",
+            "trio_match_score": 82,
+            "opportunity_score": 65,
+            "excess_likelihood": 30,
+            "rationale": "Aerospace OEM with verified procurement contact.",
+            "evidence": ["industry=Aerospace & Defense"],
+            "confidence": 80,
+            "model": "claude",
+        }
+    }
+    html = templates.get_template("htmx/partials/prospecting/detail.html").render(
+        prospect=prospect,
+        enrichment=enrichment,
+        snapshot={},
+        signal_tags=[],
+        contacts=[],
+        contact_stats={},
+        similar_customers=[],
+        warm_intro={},
+        enrich_state=None,
+        can_assign=False,
+    )
+    assert "AI Screening" in html
+    # Each trio label carries its definitional tooltip (def-only).
+    assert 'title="AI procurement-fit screen (0-100):' in html
+    assert 'title="AI opportunity size (0-100):' in html
+    assert 'title="AI excess-inventory likelihood (0-100):' in html
+    assert "decoration-dotted" in html
+    # Raw AI numbers still render (opportunity=65, excess=30 are distinctive).
+    assert "65" in html
+    assert "30" in html
