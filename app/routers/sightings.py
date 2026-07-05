@@ -12,8 +12,6 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 """
 
 import asyncio
-import csv
-import io
 import json
 import re
 import time
@@ -24,7 +22,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response
 from loguru import logger
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
@@ -80,6 +78,7 @@ from ..services.vendor_unavailability import (
 )
 from ..template_env import template_response
 from ..utils import safe_float, safe_int
+from ..utils.csv_export import stream_csv
 from ..utils.normalization import normalize_condition
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
@@ -730,18 +729,6 @@ _EXPORT_COLUMNS: Final = [
     "Seen Date",
 ]
 
-_FORMULA_PREFIXES: Final = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _safe_cell(value: object) -> str:
-    """Stringify a CSV cell, defusing spreadsheet formula injection.
-
-    ``None`` → empty string; a leading formula char (=, +, -, @, tab, CR) gets a single-quote
-    prefix so Excel/Sheets treat the cell as text (matches the CRM export guard).
-    """
-    s = "" if value is None else str(value)
-    return "'" + s if s[:1] in _FORMULA_PREFIXES else s
-
 
 def _fmt_seen_date(dt: datetime | None) -> str:
     """Readable minute-precision timestamp for CSV (empty string when missing)."""
@@ -749,25 +736,14 @@ def _fmt_seen_date(dt: datetime | None) -> str:
 
 
 def _sighting_export_rows(db: Session, user: User, filters: SightingsListParams):
-    """Stream CSV text: a header row, then one row per Sighting on a board-matching
-    requirement.
+    """Yield one raw CSV row per Sighting on a board-matching requirement (header via
+    stream_csv).
 
-    Reuses build_board_requirement_query so the exported set is exactly the board's filtered
-    requirements expanded to their underlying vendor sightings — with NO pagination. Writes
-    through a reused StringIO buffer so memory stays flat regardless of row count.
+    Reuses build_board_requirement_query so the exported set is exactly the board's
+    filtered requirements expanded to their underlying vendor sightings — with NO
+    pagination. Rows stream lazily via yield_per so memory stays flat regardless of row
+    count.
     """
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-
-    def _flush() -> str:
-        out = buf.getvalue()
-        buf.seek(0)
-        buf.truncate(0)
-        return out
-
-    writer.writerow(_EXPORT_COLUMNS)
-    yield _flush()
-
     matching_req_ids = build_board_requirement_query(db, user, filters).with_entities(Requirement.id).subquery()
     rows = (
         db.query(Sighting)
@@ -779,28 +755,24 @@ def _sighting_export_rows(db: Session, user: User, filters: SightingsListParams)
     for s in rows:
         req = s.requirement
         requisition = req.requisition if req else None
-        writer.writerow(
-            _safe_cell(c)
-            for c in (
-                s.requirement_id,
-                requisition.customer_name if requisition else None,
-                req.primary_mpn if req else None,
-                s.mpn_matched,
-                s.manufacturer,
-                s.vendor_name,
-                s.source_type,
-                s.qty_available,
-                s.unit_price,
-                s.currency,
-                s.condition,
-                s.moq,
-                s.lead_time_days,
-                s.score,
-                s.evidence_tier,
-                _fmt_seen_date(s.source_searched_at or s.created_at),
-            )
+        yield (
+            s.requirement_id,
+            requisition.customer_name if requisition else None,
+            req.primary_mpn if req else None,
+            s.mpn_matched,
+            s.manufacturer,
+            s.vendor_name,
+            s.source_type,
+            s.qty_available,
+            s.unit_price,
+            s.currency,
+            s.condition,
+            s.moq,
+            s.lead_time_days,
+            s.score,
+            s.evidence_tier,
+            _fmt_seen_date(s.source_searched_at or s.created_at),
         )
-        yield _flush()
 
 
 @router.get("/v2/sightings/export")
@@ -815,11 +787,7 @@ async def sightings_export(
     Same auth (require_user) and same filters as the board list route — the export mirrors
     the board's active view (status/urgent/stale/search/manufacturer/assignment/ownership).
     """
-    return StreamingResponse(
-        _sighting_export_rows(db, user, filters),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="sightings_export.csv"'},
-    )
+    return stream_csv("sightings_export.csv", _EXPORT_COLUMNS, _sighting_export_rows(db, user, filters))
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/detail", response_class=HTMLResponse)

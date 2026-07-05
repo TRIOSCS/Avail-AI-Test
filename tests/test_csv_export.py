@@ -2,8 +2,11 @@
 
 import csv
 import io
+from pathlib import Path
 
 from app.utils.csv_export import safe_cell, stream_csv
+
+_APP_ROOT = Path(__file__).resolve().parent.parent / "app"
 
 
 def test_safe_cell_none_and_plain():
@@ -36,3 +39,11 @@ async def test_stream_csv_headers_and_rows():
     assert rows[1] == ["ABC", "5"]
     # Formula-injection cell is quoted.
     assert rows[2][0] == "'=EVIL"
+
+
+def test_shared_safe_cell_is_the_single_implementation():
+    """The sightings + CRM exports must reuse the shared safe_cell — no private
+    ``_safe_cell`` copies may linger in either router."""
+    for rel in ("routers/sightings.py", "routers/crm/export.py"):
+        src = (_APP_ROOT / rel).read_text()
+        assert "_safe_cell" not in src, f"{rel} still defines/uses a local _safe_cell"
