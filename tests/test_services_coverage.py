@@ -802,14 +802,24 @@ class TestCustomerEnrichmentService:
 
     @pytest.mark.asyncio
     async def test_enrich_no_providers(self, db_session, test_company, test_customer_site):
+        """No provider yields a contact → the run degrades gracefully (was the old no-op
+        'no_providers' stub; enrich now drives the live gather_contacts path)."""
         from app.services.customer_enrichment_service import enrich_customer_account
 
-        with patch("app.services.customer_enrichment_service.settings") as mock_settings:
+        with (
+            patch("app.services.customer_enrichment_service.settings") as mock_settings,
+            patch(
+                "app.enrichment_service.find_suggested_contacts_with_errors",
+                new=AsyncMock(return_value=([], ["all"])),
+            ),
+        ):
             mock_settings.customer_enrichment_enabled = True
             mock_settings.customer_enrichment_cooldown_days = 90
             mock_settings.customer_enrichment_contacts_per_account = 5
             result = await enrich_customer_account(test_company.id, db_session)
-        assert result["status"] == "no_providers"
+        assert result["contacts_added"] == 0
+        assert result["status"] == "degraded"
+        assert result["errored_providers"] == ["all"]
 
     def test_get_enrichment_gaps(self, db_session, test_company, test_customer_site):
         from app.services.customer_enrichment_service import get_enrichment_gaps
