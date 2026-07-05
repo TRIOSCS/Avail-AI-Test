@@ -3106,14 +3106,21 @@ class TestDashboardCounters:
         db_session.commit()
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        assert "pending" in resp.text.lower()
+        # The redundant "Pending" dashboard counter was removed (it duplicated the
+        # Offered status pill — both filtered ?status=offered). The endpoint still
+        # renders fine with a pending offer, and the Offered control survives.
+        assert "offered" in resp.text.lower()
 
     def test_counters_present_in_response(self, client, db_session):
-        """Dashboard counters appear in the HTML (no buyer assignment)."""
+        """Dashboard counters appear in the HTML (no buyer assignment).
+
+        The "Pending" counter was intentionally dropped (duplicate of the Offered pill);
+        Urgent + Stale remain.
+        """
         _seed_data(db_session)
         resp = client.get("/v2/partials/sightings")
         text = resp.text.lower()
-        for label in ["urgent", "stale", "pending"]:
+        for label in ["urgent", "stale"]:
             assert label in text, f"Dashboard counter '{label}' missing from response"
 
 
