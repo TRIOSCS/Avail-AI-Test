@@ -1407,13 +1407,22 @@ per-subscription `clientState` (`secrets.token_hex(16)`) on `graph_subscriptions
   `X-Content-Type-Options: nosniff` so the endpoint can't be coerced into reflecting
   oversized or HTML/script payloads.
 - **Change notifications** — validated by `validate_notifications`: unknown
-  `subscriptionId` rejected, `clientState` checked against the stored secret with a
-  timing-safe `hmac.compare_digest` (wrong/missing/empty → rejected), plus a 5-min
-  replay window keyed on `subscriptionId:resource`. An all-invalid batch → 403; valid
-  `created` notifications fetch the message and feed the same activity-log + inbox-poll
-  path as section 4. The Teams endpoint shares this contract but is gated off in
-  `MVP_MODE` (returns 404); the mail/graph endpoint runs in MVP mode (mail subscriptions
-  are created regardless of `MVP_MODE`).
+  `subscriptionId` rejected, `clientState` checked against the **random
+  per-subscription secret** stored on `graph_subscriptions` with a timing-safe
+  `hmac.compare_digest` (wrong/missing/empty → rejected), plus a 5-min replay window
+  keyed on `subscriptionId:resource`. An all-invalid batch → 403 (a genuine Graph
+  batch always carries the matching `clientState`, so this only trips on
+  spoofed/probe traffic, never on live notifications); valid `created` notifications
+  fetch the message and feed the same activity-log + inbox-poll path as section 4.
+  **Fail-open safety valve:** a subscription row with *no* stored `clientState`
+  (legacy / mis-provisioned) is accepted rather than hard-rejected — so a
+  mis-provisioned subscription can't silently drop *every* notification and break
+  live inbox/RFQ monitoring — but the bypass is logged at `logger.error` (captured
+  as a Sentry event) so it gets noticed and re-provisioned. The per-subscription
+  random secret is deliberately used instead of a single shared `clientState` config
+  secret: a leak compromises one subscription, not all of them. The Teams endpoint
+  shares this contract but is gated off in `MVP_MODE` (returns 404); the mail/graph
+  endpoint runs in MVP mode (mail subscriptions are created regardless of `MVP_MODE`).
 
 ## 5. Quote Building
 

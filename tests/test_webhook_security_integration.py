@@ -342,3 +342,52 @@ def test_is_safe_validation_token_bounds():
     assert is_safe_validation_token("line\nbreak") is False
     assert is_safe_validation_token("nul\x00byte") is False
     assert is_safe_validation_token("héllo") is False  # non-ASCII
+
+
+# ── Fail-open alerting for missing stored clientState (HIGH-SEC-4) ────
+#
+# Every subscription created by this app stores a random per-subscription
+# clientState, so a row with NO stored secret means a legacy / mis-provisioned
+# subscription. We deliberately FAIL OPEN there (accept + alert) rather than
+# hard-reject, so a mis-provisioned subscription can't silently drop every
+# notification and break live inbox/RFQ monitoring — but the bypass must be
+# LOUD (ERROR → Sentry event) so it gets noticed and re-provisioned.
+
+
+def test_missing_stored_client_state_fails_open_with_error_log(admin_client, sub_no_state):
+    """No stored clientState → notification still accepted (fail-open) but an ERROR-
+    level log fires so Sentry captures the unauthenticated processing."""
+    from loguru import logger
+
+    captured: list[str] = []
+    sink_id = logger.add(lambda m: captured.append(str(m)), level="ERROR")
+    try:
+        r = webhook_post(
+            admin_client,
+            {"value": [notif("sub-sec-004", "literally-anything", "Users('d')/Messages('m-failopen')")]},
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert r.status_code in (200, 502)  # accepted (fail-open), not dropped
+    joined = "\n".join(captured)
+    assert "sub-sec-004" in joined
+    assert "WITHOUT clientState authentication" in joined
+
+
+def test_valid_client_state_emits_no_fail_open_error(admin_client, sub1, client_state_1):
+    """A subscription WITH a stored secret + matching clientState must NOT trip the
+    fail-open error path (only genuinely unauthenticated rows should alert)."""
+    from loguru import logger
+
+    captured: list[str] = []
+    sink_id = logger.add(lambda m: captured.append(str(m)), level="ERROR")
+    try:
+        webhook_post(
+            admin_client,
+            {"value": [notif("sub-sec-001", client_state_1, "Users('a')/Messages('m-ok-noerr')")]},
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert "WITHOUT clientState authentication" not in "\n".join(captured)

@@ -369,10 +369,26 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
             logger.warning(f"Unknown subscription {sub_id}, ignoring")
             continue
 
-        # Timing-safe clientState comparison
-        if sub.client_state and not hmac.compare_digest(sub.client_state, client_state or ""):
-            logger.warning(f"Client state mismatch for {sub_id}, ignoring")
-            continue
+        # clientState authentication. Every subscription this app creates stores a
+        # random per-subscription secret (create_mail_subscription /
+        # create_teams_subscription), so an absent stored secret means a legacy or
+        # mis-provisioned row.
+        if sub.client_state:
+            # Timing-safe comparison — a wrong/missing/empty clientState against a
+            # secret-bearing subscription is a spoofed/forged POST; drop it.
+            if not hmac.compare_digest(sub.client_state, client_state or ""):
+                logger.warning(f"Client state mismatch for {sub_id}, ignoring")
+                continue
+        else:
+            # Fail-open: no stored secret to validate against. Accept (so a
+            # mis-provisioned subscription can't silently drop EVERY notification and
+            # break live inbox/RFQ monitoring) but alert loudly — ERROR is captured
+            # as a Sentry event so the subscription gets re-provisioned.
+            logger.error(
+                f"Graph subscription {sub_id} has no stored clientState — processing "
+                "notification WITHOUT clientState authentication (fail-open). "
+                "Re-provision the subscription to restore validation."
+            )
 
         # Replay protection
         resource = notif.get("resource", "")
@@ -432,9 +448,17 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
             if not sub:
                 logger.warning(f"Unknown subscription {sub_id}, ignoring")
                 continue
-            if sub.client_state and not hmac.compare_digest(sub.client_state, client_state or ""):
-                logger.warning(f"Client state mismatch for {sub_id}, ignoring")
-                continue
+            if sub.client_state:
+                if not hmac.compare_digest(sub.client_state, client_state or ""):
+                    logger.warning(f"Client state mismatch for {sub_id}, ignoring")
+                    continue
+            else:
+                # Fail-open with a loud, Sentry-captured alert — see validate_notifications.
+                logger.error(
+                    f"Graph subscription {sub_id} has no stored clientState — processing "
+                    "notification WITHOUT clientState authentication (fail-open). "
+                    "Re-provision the subscription to restore validation."
+                )
 
             user = db.get(User, sub.user_id)
             if not user:
