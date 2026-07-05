@@ -67,6 +67,15 @@
 {% else %}
 <div class="space-y-5">
 
+  {# ── Export CSV — owner-only competing-broker bids as a real download ─── #}
+  {# hx-boost="false" opts this anchor out of nav-boost so it streams the file instead of
+     swapping into #main-content. Owner-only (this whole branch is is_owner), matching the
+     export endpoint's owner gate. #}
+  <div class="flex items-center justify-end">
+    <a hx-boost="false" href="/v2/partials/resell/{{ el.id }}/offers/export"
+       class="btn-secondary btn-sm" title="Download all offers on this list as a CSV file">Export CSV</a>
+  </div>
+
   {# ── Pinned take-all banner(s) ──────────────────────────────── #}
   {% set active_line_count = line_items|rejectattr('status', 'equalto', 'withdrawn')|list|length %}
   {% for offer in take_all_offers %}

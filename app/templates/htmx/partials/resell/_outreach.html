@@ -32,13 +32,19 @@
       · <span class="font-medium text-gray-700">{{ summary.responded }}</span> responded
       · <span class="font-medium text-emerald-700">{{ summary.bid }}</span> bid
     </p>
-    <button @click="$dispatch('open-modal')"
-            hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
-            hx-target="#modal-content"
-            class="btn-primary btn-sm">
-      <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-      Offer to buyers
-    </button>
+    <div class="flex items-center gap-2">
+      {# Export CSV — plain (non-htmx) download of the outreach tracker; hx-boost="false"
+         opts it out of nav-boost so it streams the file instead of swapping the page. #}
+      <a hx-boost="false" href="/v2/partials/resell/{{ el.id }}/outreach/export"
+         class="btn-secondary btn-sm" title="Download the outreach tracker as a CSV file">Export CSV</a>
+      <button @click="$dispatch('open-modal')"
+              hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
+              hx-target="#modal-content"
+              class="btn-primary btn-sm">
+        <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        Offer to buyers
+      </button>
+    </div>
   </div>
 
   {% if not rows %}

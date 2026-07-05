@@ -18,7 +18,14 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <h2 class="h2">Buy Plans / Sales Orders <span class="text-sm font-normal text-gray-500">({{ rows | length }})</span></h2>
-    {{ scope_toggle('buy-plan', scope) }}
+    <div class="flex items-center gap-2">
+      {# Export CSV — a REAL browser download: hx-boost="false" opts this anchor out of the
+         app's nav-boost so it does a plain GET that streams the file (never swapping into
+         #main-content). ?scope forwards the current SEE-ALL / SEE-MINE toggle. #}
+      <a hx-boost="false" href="/v2/partials/approvals/buy-plan/export?scope={{ scope }}"
+         class="btn-secondary btn-sm" title="Download this list as a CSV file">Export CSV</a>
+      {{ scope_toggle('buy-plan', scope) }}
+    </div>
   </div>
 
   {% if rows %}

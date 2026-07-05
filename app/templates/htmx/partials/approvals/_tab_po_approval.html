@@ -79,7 +79,13 @@
 
   {% if view.history %}
   <div>
-    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Recently resolved</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Recently resolved</h3>
+      {# Export CSV — plain (non-htmx) download of the resolved PO decision feed (org-wide,
+         matching this section); ?scope threads the toggle for URL parity with the tab. #}
+      <a hx-boost="false" href="/v2/partials/approvals/po-approval/export?scope={{ scope }}"
+         class="btn-secondary btn-sm" title="Download the resolved PO decisions as a CSV file">Export CSV</a>
+    </div>
     <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
       {% set pill = {'verified': 'badge-success', 'rejected': 'badge-warning', 'cancelled': 'badge-danger'} %}
       {% for h in view.history %}

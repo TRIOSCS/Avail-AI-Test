@@ -167,7 +167,13 @@
 
   {% if resolved_rows %}
   <div>
-    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Recently resolved</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Recently resolved</h3>
+      {# Export CSV — plain (non-htmx) download of the resolved audit feed; ?scope forwards
+         the SEE-ALL / SEE-MINE toggle so the CSV mirrors the visible list. #}
+      <a hx-boost="false" href="/v2/partials/approvals/prepayment/export?scope={{ scope }}"
+         class="btn-secondary btn-sm" title="Download the resolved prepayments as a CSV file">Export CSV</a>
+    </div>
     <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
       {% for row in resolved_rows %}{{ prepay_resolved_row(row, scope, is_manager_admin) }}{% endfor %}
     </div>

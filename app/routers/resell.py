@@ -54,6 +54,7 @@ from ..services import (
     task_service,
 )
 from ..template_env import template_response
+from ..utils.csv_export import stream_csv
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["resell"])
@@ -543,6 +544,95 @@ async def resell_offers(
     """Lazy Offers tab body — per-line offer stacks + pinned take-all banner."""
     el, _ = _get_list_for_user(db, list_id, user)
     return template_response("htmx/partials/resell/_offers.html", _offers_context(request, db, el, user))
+
+
+@router.get("/v2/partials/resell/{list_id}/offers/export")
+async def resell_offers_export(
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Stream the list's collected inbound offers as a CSV download (owner-only).
+
+    Mirrors the Offers tab: the SAME owner-only gate (offers are the owner's private view —
+    a non-owner 403s, matching resell_line_offer_compare) and the SAME visible-offer set
+    (open/late/won/lost). One row per per-line offer line, plus one row per take-all offer
+    (which carries no lines). Broker identity is always shown here — the endpoint is
+    owner-only, so the customer-anonymization that governs the "Open to Me" lens never applies.
+    """
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "Offers are only visible to the list owner")
+
+    offers = (
+        db.query(ExcessOffer)
+        .filter(
+            ExcessOffer.excess_list_id == el.id,
+            ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
+        )
+        .options(
+            joinedload(ExcessOffer.offerer_company),
+            joinedload(ExcessOffer.offerer_vendor_card),
+            joinedload(ExcessOffer.lines).joinedload(ExcessOfferLine.excess_line_item),
+        )
+        .order_by(ExcessOffer.created_at.desc(), ExcessOffer.id.desc())
+        .all()
+    )
+
+    header = [
+        "Offer ID",
+        "Broker",
+        "Scope",
+        "MPN",
+        "Quantity",
+        "Unit Price",
+        "Condition",
+        "Lead Time (Days)",
+        "Terms",
+        "Take-All Total",
+        "Status",
+        "Received",
+    ]
+
+    def _rows():
+        for offer in offers:
+            broker = _offer_broker_label(offer)
+            received = _fmt_dt(offer.created_at)
+            if offer.scope == ExcessOfferScope.TAKE_ALL or not offer.lines:
+                # Take-all binds the whole list with no line rows — one summary row.
+                yield [
+                    offer.id,
+                    broker,
+                    offer.scope,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    offer.notes,
+                    offer.take_all_total_price,
+                    offer.status,
+                    received,
+                ]
+                continue
+            for line in offer.lines:
+                item = line.excess_line_item
+                yield [
+                    offer.id,
+                    broker,
+                    offer.scope,
+                    line.mpn_raw,
+                    line.quantity,
+                    line.unit_price,
+                    item.condition if item else "",
+                    line.lead_time_days,
+                    line.terms_text,
+                    "",
+                    offer.status,
+                    received,
+                ]
+
+    return stream_csv(f"resell_offers_list_{el.id}.csv", header, _rows())
 
 
 @router.get("/v2/partials/resell/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
@@ -1355,6 +1445,49 @@ async def resell_outreach_tracker(
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 
 
+@router.get("/v2/partials/resell/{list_id}/outreach/export")
+async def resell_outreach_export(
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Stream the list's outreach tracker as a CSV download (owner-only).
+
+    Reuses the tracker's row query + the SAME owner gate (_require_owner) as the tracker
+    tab: one row per buyer x line touch — buyer · line · channel · by · status · sent ·
+    last activity — newest first (identical order to the tab).
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    rows = (
+        db.query(ExcessOutreach)
+        .filter(ExcessOutreach.excess_list_id == el.id)
+        .options(
+            joinedload(ExcessOutreach.target_vendor_card),
+            joinedload(ExcessOutreach.excess_line_item),
+            joinedload(ExcessOutreach.submitted_by_user),
+        )
+        .order_by(ExcessOutreach.created_at.desc(), ExcessOutreach.id.desc())
+        .all()
+    )
+
+    header = ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity"]
+
+    def _rows():
+        for r in rows:
+            yield [
+                r.target_vendor_card.display_name if r.target_vendor_card else "Unknown buyer",
+                r.excess_line_item.part_number if r.excess_line_item else "Whole list",
+                r.channel,
+                r.submitted_by_user.name if r.submitted_by_user else "",
+                r.status,
+                _fmt_dt(r.sent_at or r.created_at),
+                _fmt_dt(r.updated_at),
+            ]
+
+    return stream_csv(f"resell_outreach_list_{el.id}.csv", header, _rows())
+
+
 @router.get("/v2/partials/resell/{list_id}/not-yet-strip", response_class=HTMLResponse)
 async def resell_not_yet_strip(
     request: Request,
@@ -1574,6 +1707,27 @@ async def resell_outreach_convert_offer(
 
     el = excess_service.get_excess_list(db, list_id)
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+# ── CSV export helpers ───────────────────────────────────────────────
+
+
+def _fmt_dt(dt: datetime | None) -> str:
+    """Minute-precision timestamp for a CSV cell (empty string when missing)."""
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+def _offer_broker_label(offer: ExcessOffer) -> str:
+    """The competing broker's name for the owner-only offers export.
+
+    Mirrors the ``_broker_label`` macro's owner branch (company → vendor card → id
+    fallback). Only ever called from the owner-gated export, so it never anonymizes.
+    """
+    if offer.offerer_company:
+        return offer.offerer_company.name
+    if offer.offerer_vendor_card:
+        return offer.offerer_vendor_card.display_name
+    return f"Broker #{offer.id}"
 
 
 # ── tiny parse helpers (forms send strings) ──────────────────────────

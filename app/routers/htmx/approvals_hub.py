@@ -19,6 +19,8 @@ Depends on: app.dependencies, app.database, app.services.approvals.{queue,po_que
     ._shared (_base_ctx), app.template_env.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
@@ -36,6 +38,7 @@ from ...services.approvals.queue import (
     resolved_rows_for_gate,
 )
 from ...template_env import template_response
+from ...utils.csv_export import stream_csv
 from ._shared import _base_ctx
 
 router = APIRouter(tags=["htmx-views"])
@@ -96,6 +99,86 @@ async def approvals_hub_tab(
     if tab not in _TABS:
         raise HTTPException(404, "Unknown approvals tab")
     return render_tab_body(request, user, db, tab, scope)
+
+
+def _fmt_dt(dt: datetime | None) -> str:
+    """Minute-precision timestamp for a CSV cell (empty string when missing)."""
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+@router.get("/v2/partials/approvals/{tab}/export")
+async def approvals_hub_export(
+    tab: str,
+    scope: str = "all",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream one Approvals hub list as a CSV download (attachment).
+
+    Same auth (require_user) and SEE-ALL / SEE-MINE scope as the console tab body, reusing
+    each tab's exact read model so the download can never drift from what the console shows:
+      - ``buy-plan``    → the Buy Plans / Sales Orders tracking list (buy_plan_tracking_rows);
+      - ``prepayment``  → the Prepayment "Recently resolved" audit feed (resolved_rows_for_gate);
+      - ``po-approval`` → the PO Approval "Recently resolved" audit feed (build_po_queue_view
+        .history — org-wide by construction, so ``scope`` is threaded but does not narrow it,
+        matching the console's own PO history section).
+    Any ``tab`` outside the three surviving gate tabs 404s.
+    """
+    if tab not in _TABS:
+        raise HTTPException(404, "Unknown approvals tab")
+    scope = "mine" if scope == "mine" else "all"
+
+    if tab == "buy-plan":
+        header = ["Plan ID", "Customer", "Sales Order", "Status", "Value"]
+        rows = (
+            [r.plan_id, r.customer_name, r.so_number, r.status, r.amount]
+            for r in buy_plan_tracking_rows(db, user, scope=scope)
+        )
+        return stream_csv(f"approvals_buy_plans_{scope}.csv", header, rows)
+
+    if tab == "prepayment":
+        header = [
+            "Prepayment ID",
+            "Beneficiary",
+            "Plan ID",
+            "PO Number",
+            "SO Number",
+            "Amount",
+            "Currency",
+            "Request Status",
+            "Payment Status",
+            "Decided By",
+            "Wire Reference",
+            "Resolution Note",
+            "Resolved Date",
+        ]
+        rows = (
+            [
+                r.subject_id,
+                r.beneficiary or r.subject_label,
+                r.plan_id,
+                r.po_number,
+                r.so_number,
+                r.amount,
+                r.currency,
+                r.status,
+                r.prepay_status,
+                r.decided_by,
+                r.wire_reference,
+                r.resolution_note,
+                _fmt_dt(r.resolved_at),
+            ]
+            for r in resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user)
+        )
+        return stream_csv(f"approvals_prepayments_resolved_{scope}.csv", header, rows)
+
+    # po-approval — the org-wide Recently-resolved PO decision feed.
+    header = ["Plan ID", "Outcome", "Description", "Actor", "Note", "Resolved Date"]
+    rows = (
+        [h.plan_id, h.kind, h.label, h.actor_name, h.note, _fmt_dt(h.when)]
+        for h in build_po_queue_view(db, user, scope=scope).history
+    )
+    return stream_csv("approvals_po_resolved.csv", header, rows)
 
 
 def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
