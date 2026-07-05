@@ -13,10 +13,14 @@ def test_safe_cell_none_and_plain():
 
 
 def test_safe_cell_neutralises_formula_injection():
-    for trigger in ("=", "+", "-", "@"):
+    # Including the tab/CR whitespace triggers that spreadsheets strip before evaluating
+    # (omitting those was a sanitizer bypass).
+    for trigger in ("=", "+", "-", "@", "\t", "\r"):
         assert safe_cell(f"{trigger}cmd()") == f"'{trigger}cmd()"
     # A hyphen inside (not leading) is untouched.
     assert safe_cell("PART-123") == "PART-123"
+    # A leading tab/CR before a formula char is neutralised (the bypass case).
+    assert safe_cell("\t=HYPERLINK()").startswith("'\t=")
 
 
 async def test_stream_csv_headers_and_rows():

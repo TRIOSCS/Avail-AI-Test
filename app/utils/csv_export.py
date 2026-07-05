@@ -17,9 +17,12 @@ from collections.abc import Iterable, Sequence
 
 from fastapi.responses import StreamingResponse
 
-# Leading characters a spreadsheet may interpret as a formula. Prefixing with a single
-# quote neutralises CSV-injection without visibly altering the value in most tools.
-_FORMULA_TRIGGERS = ("=", "+", "-", "@")
+# Leading characters a spreadsheet may interpret as a formula, INCLUDING the tab (\t) and
+# carriage-return (\r) whitespace that Excel/Sheets strip before evaluating what follows —
+# omitting those is a known sanitizer bypass. Matches the established guard in
+# app/routers/crm/export.py + app/routers/sightings.py. Prefixing with a single quote
+# neutralises CSV-injection without visibly altering the value in most tools.
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
 
 
 def safe_cell(value: object) -> str:
