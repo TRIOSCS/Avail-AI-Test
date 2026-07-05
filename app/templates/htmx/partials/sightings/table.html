@@ -30,14 +30,8 @@
     {{ dc.get('stale', 0) }} Stale
   </button>
 
-  {# Pending counter #}
-  <button hx-get="/v2/partials/sightings?status=offered&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
-          hx-target="#sightings-table" hx-swap="innerHTML"
-          class="btn btn-sm btn-secondary inline-flex items-center gap-1.5
-                 {{ 'border-blue-300 text-blue-700 bg-blue-50' if dc.get('pending', 0) > 0 else '' }}">
-    <span class="inline-block w-2 h-2 rounded-full {{ 'bg-blue-500' if dc.get('pending', 0) > 0 else 'bg-gray-300' }}"></span>
-    {{ dc.get('pending', 0) }} Pending
-  </button>
+  {# Pending counter removed — it filtered status=offered, identical to the Offered
+     status pill below (duplicate control); the pill is the single source of truth. #}
 
   {# Status filter pills (moved to right) #}
   <div class="ml-auto flex items-center gap-1">

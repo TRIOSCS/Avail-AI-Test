@@ -9,7 +9,6 @@
   Called by: resell.resell_workspace.
   Depends on: shared/_macros.html, partials/resell/_lists.html, splitPanel JS.
 #}
-{% from "htmx/partials/shared/_macros.html" import stat_card %}
 <title hx-swap-oob="true">Resell — AvailAI</title>
 
 <div class="page-fluid flex flex-col h-[calc(100vh-7.5rem)]"
@@ -58,7 +57,7 @@
      exactly one (the old empty `stage=''` on both offer cards double-lit them and reset
      the list to "All"). #}
   <div x-show="lens === 'mine'" x-cloak
-       class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4 flex-shrink-0">
+       class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3 flex-shrink-0">
     {% set glance = [
       ('open', 'stage=open', 'Open', stats.open, 'Posted, awaiting offers'),
       ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
@@ -67,14 +66,22 @@
       ('awarded', 'stage=awarded', 'Awarded', stats.awarded, 'Closed deals')
     ] %}
     {% for token, query, label, value, sub in glance %}
+    {# Condensed triage tile — inlined (not the shared stat_card) so it can run tighter
+       than the shared card WITHOUT touching that macro: text-lg value + py-1.5 padding +
+       a clamped subtitle reclaim ~25% of the strip's height and push the list up. The
+       filter wiring is unchanged — hx-get carries the real needs=/stage= query, @click
+       sets the unique token, and the active-ring :class keys off it — only chrome shrank.
+       Label/subtitle truncate with a title tooltip, so no information is lost. #}
     <button type="button"
             hx-get="/v2/partials/resell/lists?lens=mine&{{ query }}"
             hx-target="#resell-list-body"
             hx-swap="innerHTML"
             @click="filter = '{{ token }}'"
             :class="filter === '{{ token }}' ? 'ring-2 ring-accent-400' : ''"
-            class="text-left rounded-xl transition-shadow hover:shadow-card">
-      {{ stat_card(label, value, sub) }}
+            class="text-left rounded-lg border border-brand-200 bg-white px-2.5 py-1.5 transition-shadow hover:shadow-card">
+      <p class="text-[11px] text-gray-500 uppercase tracking-wider truncate" title="{{ label }}">{{ label }}</p>
+      <p class="text-lg font-bold text-gray-900 leading-tight">{{ value }}</p>
+      <p class="text-[11px] text-gray-400 leading-tight truncate" title="{{ sub }}">{{ sub }}</p>
     </button>
     {% endfor %}
   </div>
