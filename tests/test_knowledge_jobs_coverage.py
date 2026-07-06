@@ -1,6 +1,6 @@
 """Tests for app/jobs/knowledge_jobs.py — targeting missing coverage.
 
-Covers register_knowledge_jobs, _job_refresh_insights, _job_expire_stale.
+Covers register_knowledge_jobs and _job_expire_stale.
 
 Called by: pytest
 Depends on: conftest fixtures, knowledge_jobs
@@ -10,61 +10,19 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from contextlib import ExitStack
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
-
-from app.models import User
-from app.models.sourcing import Requisition
-
-# The five knowledge_service insight generators _job_refresh_insights calls.
-_INSIGHT_GENERATORS = (
-    "generate_insights",
-    "generate_pipeline_insights",
-    "generate_vendor_insights",
-    "generate_company_insights",
-    "generate_mpn_insights",
-)
-
-
-def _patch_insight_generators(stack: ExitStack, **overrides):
-    """Patch every knowledge_service insight generator on the given ExitStack.
-
-    Each generator defaults to an AsyncMock returning []. Pass a generator name as a
-    keyword (e.g. generate_insights=mock) to override one with a specific mock.
-    """
-    for name in _INSIGHT_GENERATORS:
-        mock = overrides.get(name, AsyncMock(return_value=[]))
-        stack.enter_context(patch(f"app.services.knowledge_service.{name}", new=mock))
-
-
-@pytest.fixture()
-def active_req(db_session: Session, test_user: User) -> Requisition:
-    req = Requisition(
-        name="KJ-TEST-REQ",
-        customer_name="Test Co",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.commit()
-    db_session.refresh(req)
-    return req
 
 
 class TestRegisterKnowledgeJobs:
-    def test_registers_at_least_one_job(self):
+    def test_registers_exactly_one_job(self):
         from app.jobs.knowledge_jobs import register_knowledge_jobs
 
         mock_scheduler = MagicMock()
         mock_settings = MagicMock()
         register_knowledge_jobs(mock_scheduler, mock_settings)
-        assert mock_scheduler.add_job.call_count >= 1
+        assert mock_scheduler.add_job.call_count == 1
 
     def test_registers_expire_job(self):
         from app.jobs.knowledge_jobs import register_knowledge_jobs
@@ -118,115 +76,3 @@ class TestJobExpireStale:
         with patch("app.database.SessionLocal", return_value=mock_session):
             with pytest.raises(RuntimeError):
                 await _job_expire_stale()
-
-
-def _make_mock_session(req_ids=None, vendor_ids=None, company_ids=None, mpns=None):
-    """Build a mock session returning configurable query results."""
-    mock_session = MagicMock()
-    mock_session.close = MagicMock()
-    mock_session.rollback = MagicMock()
-
-    req_rows = [(rid,) for rid in (req_ids or [])]
-    vendor_rows = [(vid,) for vid in (vendor_ids or [])]
-    company_rows = [(cid,) for cid in (company_ids or [])]
-    mpn_rows = [(mpn,) for mpn in (mpns or [])]
-
-    call_count = [0]
-
-    def query_side_effect(*args, **kwargs):
-        mock_q = MagicMock()
-        # Chain: .filter(...).order_by(...).limit(...).all() -> rows
-        # or .filter(...).group_by(...).order_by(...).limit(...).all() -> rows
-        results = [req_rows, vendor_rows, company_rows, mpn_rows]
-        idx = call_count[0] % len(results)
-        call_count[0] += 1
-        mock_q.filter.return_value.order_by.return_value.limit.return_value.all.return_value = results[idx]
-        mock_q.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            results[idx]
-        )
-        return mock_q
-
-    mock_session.query.side_effect = query_side_effect
-    return mock_session
-
-
-class TestJobRefreshInsights:
-    async def test_refresh_insights_empty_db(self):
-        """With empty DB (no rows), job runs without errors."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_session = _make_mock_session()
-        with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
-            _patch_insight_generators(stack)
-            await _job_refresh_insights()
-
-        mock_session.close.assert_called_once()
-
-    async def test_refresh_insights_with_req_ids(self):
-        """generate_insights is called for each returned req id."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_generate = AsyncMock(return_value=[MagicMock()])
-        mock_session = _make_mock_session(req_ids=[1, 2, 3])
-
-        with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
-            _patch_insight_generators(stack, generate_insights=mock_generate)
-            await _job_refresh_insights()
-
-        assert mock_generate.call_count == 3
-
-    async def test_refresh_insights_req_exception_continues(self):
-        """If generate_insights raises for a req, job continues."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_generate = AsyncMock(side_effect=Exception("AI failed"))
-        mock_session = _make_mock_session(req_ids=[1])
-
-        with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
-            _patch_insight_generators(stack, generate_insights=mock_generate)
-            await _job_refresh_insights()  # Should not raise
-
-    async def test_refresh_pipeline_exception_continues(self):
-        """If pipeline insights fail, rest of job continues."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_session = _make_mock_session()
-        with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
-            _patch_insight_generators(
-                stack,
-                generate_pipeline_insights=AsyncMock(side_effect=Exception("pipeline fail")),
-            )
-            await _job_refresh_insights()  # Should not raise
-
-    async def test_refresh_insights_db_error_logs_and_continues(self):
-        """DB errors within each section are caught and logged; job completes."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_session = MagicMock()
-        mock_session.query.side_effect = RuntimeError("Section DB failure")
-        mock_session.close = MagicMock()
-        mock_session.rollback = MagicMock()
-
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            # Each section catches its own error, so the job should complete without raising
-            await _job_refresh_insights()
-
-        mock_session.close.assert_called_once()
-
-    async def test_refresh_vendor_insights_called(self):
-        """generate_vendor_insights is called for each vendor id returned."""
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        mock_vendor = AsyncMock(return_value=[MagicMock()])
-        mock_session = _make_mock_session(vendor_ids=[10, 20])
-
-        with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
-            _patch_insight_generators(stack, generate_vendor_insights=mock_vendor)
-            await _job_refresh_insights()
-
-        assert mock_vendor.call_count == 2

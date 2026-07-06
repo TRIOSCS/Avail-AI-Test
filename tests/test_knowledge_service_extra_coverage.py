@@ -3,7 +3,6 @@ knowledge_service.
 
 Targets uncovered branches in:
 - build_context: MPN entries, vendor entries, company entries (lines 445-510)
-- build_mpn_context: offer history, requisition links (lines 680-716)
 - build_vendor_context: vendor meta (ghost_rate etc.), offer history (lines 738-791)
 - build_pipeline_context: stale deals (lines 853-866)
 - build_company_context: industry/account/strategic/last_activity, site-linked reqs (lines 888-944)
@@ -238,82 +237,6 @@ class TestBuildContextExtended:
 
         ctx = knowledge_service.build_context(db_session, requisition_id=req.id)
         assert "Acme" in ctx or "Customer" in ctx
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  build_mpn_context — offer history and requisition links
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestBuildMpnContextExtended:
-    def test_includes_offer_history(self, db_session: Session, test_user: User, requisition: Requisition):
-        """Offer history for an MPN is included in the context."""
-        offer = Offer(
-            requisition_id=requisition.id,
-            vendor_name="Arrow Electronics",
-            mpn="LM317T",
-            qty_available=1000,
-            unit_price=0.50,
-            lead_time="2 weeks",
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(offer)
-        db_session.commit()
-
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
-        assert "Arrow" in ctx or "Offer history" in ctx
-
-    def test_includes_offer_without_price(self, db_session: Session, test_user: User, requisition: Requisition):
-        """Offer without price shows N/A in context."""
-        offer = Offer(
-            requisition_id=requisition.id,
-            vendor_name="Unknown Vendor",
-            mpn="NOPRICE_PART",
-            qty_available=100,
-            unit_price=None,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(offer)
-        db_session.commit()
-
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="NOPRICE_PART")
-        assert "N/A" in ctx or "NOPRICE_PART" in ctx
-
-    def test_includes_requisition_links(self, db_session: Session, test_user: User, requisition: Requisition):
-        """Requisitions containing the MPN are listed in context."""
-        req_item = Requirement(
-            requisition_id=requisition.id,
-            primary_mpn="LM317T",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req_item)
-        db_session.commit()
-
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
-        assert "Requisition" in ctx or str(requisition.id) in ctx
-
-    def test_expired_mpn_entry_marked_outdated(self, db_session: Session, test_user: User):
-        """Expired entries in MPN context are marked [OUTDATED]."""
-        # Pass aware expires_at in the past; _is_expired handles naive/aware comparison.
-        past = datetime.now(timezone.utc) - timedelta(days=5)
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T old data",
-            mpn="OLDPART",
-            expires_at=past,
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="OLDPART")
-        assert "[OUTDATED]" in ctx
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -596,33 +519,6 @@ class TestGenerateInsightsClaudeError:
 
         with patch("app.utils.claude_client.claude_structured", new=_raise_claude_error):
             result = await knowledge_service.generate_insights(db_session, requisition.id)
-        assert result == []
-
-
-class TestGenerateMpnInsightsClaudeError:
-    @pytest.mark.parametrize(
-        "claude_stub",
-        [
-            pytest.param(_raise_claude_error, id="claude_error"),
-            pytest.param(_raise_claude_unavailable, id="claude_unavailable"),
-            pytest.param(_return_none, id="no_result"),
-        ],
-    )
-    async def test_failure_returns_empty(self, db_session: Session, test_user: User, claude_stub):
-        """ClaudeError, ClaudeUnavailableError, and None result all return empty
-        list."""
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T data",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        with patch("app.utils.claude_client.claude_structured", new=claude_stub):
-            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
         assert result == []
 
 

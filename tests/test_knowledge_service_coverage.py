@@ -424,39 +424,6 @@ class TestGenerateInsights:
         assert surviving[0].content == "Cached insight worth keeping"
 
 
-class TestBuildMpnContext:
-    def test_returns_empty_for_unknown_mpn(self, db_session: Session):
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="UNKNOWN_XYZ")
-        assert ctx == ""
-
-    def test_returns_context_with_entries(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T $0.50 from Arrow",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
-        assert "LM317T" in ctx
-
-    def test_excludes_ai_insights(self, db_session: Session, test_user: User):
-        insight = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="ai_insight",
-            content="AI insight about LM317T",
-            mpn="LM317T",
-        )
-        insight.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
-        # ai_insight entries are excluded from context
-        assert ctx == "" or "ai_insight" not in ctx
-
-
 class TestBuildVendorContext:
     def test_returns_empty_for_unknown_vendor(self, db_session: Session):
         ctx = knowledge_service.build_vendor_context(db_session, vendor_card_id=99999)
@@ -552,32 +519,6 @@ class TestGetCachedEntityInsights:
         )
         insights = knowledge_service.get_cached_company_insights(db_session, test_company.id)
         assert len(insights) >= 1
-
-
-class TestGenerateMpnInsights:
-    async def test_empty_context_returns_empty(self, db_session: Session):
-        result = await knowledge_service.generate_mpn_insights(db_session, "UNKNOWN_PART")
-        assert result == []
-
-    async def test_success(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T $0.50",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        mock_result = {"insights": [{"content": "MPN insight", "confidence": 0.8, "based_on_expired": False}]}
-
-        async def _mock(*a, **kw):
-            return mock_result
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
-            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
-        assert len(result) == 1
 
 
 class TestGenerateVendorInsights:

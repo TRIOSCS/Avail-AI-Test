@@ -987,43 +987,6 @@ class TestGenerateInsights:
         assert entries == []
 
 
-class TestGenerateMpnInsights:
-    """Test generate_mpn_insights()."""
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_when_no_context(self, db_session):
-        from app.services.knowledge_service import generate_mpn_insights
-
-        result = await generate_mpn_insights(db_session, mpn="NONEXISTENT-MPN")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_generates_mpn_insights(self, db_session):
-        from app.services.knowledge_service import create_entry, generate_mpn_insights
-
-        user = _make_user(db_session, email="test20@test.com", azure_id="az-020", name="Test20")
-
-        create_entry(
-            db_session,
-            user_id=user.id,
-            entry_type="fact",
-            content="LM358N at $1.50",
-            mpn="LM358N",
-        )
-
-        mock_result = {
-            "insights": [
-                {"content": "Stable pricing over 90 days", "confidence": 0.8, "based_on_expired": False},
-            ]
-        }
-
-        with patch("app.utils.claude_client.claude_structured", AsyncMock(return_value=mock_result)):
-            entries = await generate_mpn_insights(db_session, mpn="LM358N")
-
-        assert len(entries) == 1
-        assert entries[0].mpn == "LM358N"
-
-
 class TestGenerateVendorInsights:
     """Test generate_vendor_insights()."""
 
@@ -1117,32 +1080,6 @@ class TestGetCachedInsights:
 
         cached = get_cached_company_insights(db_session, company_id=99999)
         assert cached == []
-
-
-class TestBuildMpnContext:
-    """Test build_mpn_context()."""
-
-    def test_returns_empty_for_unknown_mpn(self, db_session):
-        from app.services.knowledge_service import build_mpn_context
-
-        assert build_mpn_context(db_session, mpn="UNKNOWN-12345") == ""
-
-    def test_includes_knowledge_entries(self, db_session):
-        from app.services.knowledge_service import build_mpn_context, create_entry
-
-        user = _make_user(db_session, email="test24@test.com", azure_id="az-024", name="Test24")
-
-        create_entry(
-            db_session,
-            user_id=user.id,
-            entry_type="fact",
-            content="Price at $2.00",
-            mpn="TEST-MPN-001",
-        )
-
-        context = build_mpn_context(db_session, mpn="TEST-MPN-001")
-        assert "Knowledge entries for MPN" in context
-        assert "Price at $2.00" in context
 
 
 class TestBuildVendorContext:

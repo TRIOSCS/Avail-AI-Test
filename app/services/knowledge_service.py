@@ -4,7 +4,9 @@ Central service for the knowledge base. Handles entry creation, Q&A
 threading, notification triggers, auto-capture from quotes/offers,
 and AI insight generation.
 
-Called by: routers/knowledge.py, jobs/knowledge_jobs.py
+Called by: routers/htmx_views.py (insight panels), routers/crm/quotes.py,
+routers/crm/offers.py, email_service.py, services/quote_builder_service.py,
+services/email_intelligence_service.py
 Depends on: models/knowledge.py, utils/claude_client.py
 """
 
@@ -470,18 +472,6 @@ def get_cached_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry
 # Entity-scoped context builders and insight generators
 # ---------------------------------------------------------------------------
 
-MPN_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
-Given knowledge entries about a specific MPN (manufacturer part number), generate 3-5 actionable insights.
-
-Focus on:
-- Pricing trends across quotes and offers (historical highs/lows, direction)
-- Quote frequency and demand signals
-- Vendor diversity (single-source risk, preferred vendors)
-- Availability patterns and lead time trends
-
-Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
-Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
-
 VENDOR_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
 Given knowledge entries about a specific vendor, generate 3-5 actionable insights.
 
@@ -516,84 +506,6 @@ Focus on:
 
 Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
 Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
-
-
-def build_mpn_context(db: Session, *, mpn: str) -> str:
-    """Gather all relevant knowledge for an MPN and format for AI prompt."""
-    from app.models.offers import Offer
-
-    now = datetime.now(timezone.utc)
-    sections = []
-
-    # 1. Knowledge entries for this MPN
-    entries = (
-        db.query(KnowledgeEntry)
-        .filter(KnowledgeEntry.mpn == mpn)
-        .filter(KnowledgeEntry.entry_type != "ai_insight")
-        .order_by(KnowledgeEntry.created_at.desc())
-        .limit(50)
-        .all()
-    )
-    if entries:
-        lines = []
-        for e in entries:
-            prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
-            lines.append(
-                "- {}{}: {} (source: {}, req #{}, {})".format(
-                    prefix,
-                    e.entry_type,
-                    e.content,
-                    e.source,
-                    e.requisition_id or "N/A",
-                    e.created_at.strftime("%Y-%m-%d"),
-                )
-            )
-        sections.append("## Knowledge entries for MPN {}\n{}".format(mpn, "\n".join(lines)))
-
-    # 2. Offers for this MPN
-    offers = db.query(Offer).filter(Offer.mpn == mpn).order_by(Offer.created_at.desc()).limit(30).all()
-    if offers:
-        lines = []
-        for o in offers:
-            price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
-            lines.append(
-                "- {} from {} — {} qty:{} lead:{} (req #{}, {})".format(
-                    o.mpn,
-                    o.vendor_name,
-                    price_str,
-                    o.qty_available or "?",
-                    o.lead_time or "?",
-                    o.requisition_id,
-                    o.created_at.strftime("%Y-%m-%d"),
-                )
-            )
-        sections.append("## Offer history for MPN {}\n{}".format(mpn, "\n".join(lines)))
-
-    # 3. Requisitions containing this MPN
-    from app.models.sourcing import Requirement, Requisition
-
-    req_ids = [
-        r.requisition_id
-        for r in db.query(Requirement.requisition_id).filter(Requirement.primary_mpn == mpn).distinct().limit(20).all()
-    ]
-    if req_ids:
-        reqs = db.query(Requisition).filter(Requisition.id.in_(req_ids)).all()
-        if reqs:
-            lines = []
-            for r in reqs:
-                lines.append(
-                    "- Req #{} '{}' status={} ({})".format(
-                        r.id,
-                        r.name,
-                        r.status,
-                        r.created_at.strftime("%Y-%m-%d"),
-                    )
-                )
-            sections.append("## Requisitions containing MPN {}\n{}".format(mpn, "\n".join(lines)))
-
-    if not sections:
-        return ""
-    return "\n\n".join(sections)
 
 
 def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
@@ -824,30 +736,6 @@ def build_company_context(db: Session, *, company_id: int) -> str:
 # ---------------------------------------------------------------------------
 # Entity-scoped insight generators
 # ---------------------------------------------------------------------------
-
-
-async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
-    """Generate AI insights for an MPN using the context engine."""
-    context = build_mpn_context(db, mpn=mpn)
-    return await _regenerate_insights(
-        db,
-        context=context,
-        # Old MPN insights are not tied to a specific requisition.
-        delete_filters=(
-            KnowledgeEntry.mpn == mpn,
-            KnowledgeEntry.entry_type == "ai_insight",
-            KnowledgeEntry.requisition_id.is_(None),
-        ),
-        prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
-        system=MPN_INSIGHT_PROMPT,
-        entry_kwargs={"mpn": mpn},
-        no_context_log="No context for MPN {} — skipping insight generation".format(mpn),
-        unavailable_log="Claude not configured — skipping MPN insight generation",
-        failed_log="Claude AI failed for MPN insight generation: {}",
-        no_results_log="AI insight generation returned no results for MPN {}".format(mpn),
-        generated_log="Generated {} insights for MPN {}",
-        generated_args=(mpn,),
-    )
 
 
 async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:

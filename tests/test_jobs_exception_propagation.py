@@ -215,41 +215,6 @@ class TestEmailJobsPropagation:
 class TestKnowledgeJobsPropagation:
     """Verify knowledge_jobs top-level handlers re-raise."""
 
-    def test_refresh_insights_has_raise_in_outer_handler(self):
-        """Verify _job_refresh_insights outer except has a raise statement.
-
-        The inner sub-operation try/except blocks (req insights, vendor insights, etc.)
-        intentionally catch and continue — similar to _safe_* wrappers. The outer
-        handler is hard to trigger in a unit test, so we verify the source code
-        directly.
-        """
-        import ast
-        import inspect
-
-        from app.jobs.knowledge_jobs import _job_refresh_insights
-
-        source = inspect.getsource(_job_refresh_insights)
-        tree = ast.parse(source)
-
-        # Find the outermost try/except in the function body
-        func_def = tree.body[0]
-        assert isinstance(func_def, (ast.FunctionDef, ast.AsyncFunctionDef))
-
-        # The outer try is in the function body (after db = SessionLocal())
-        outer_tries = [n for n in ast.walk(func_def) if isinstance(n, ast.Try)]
-        assert outer_tries, "Expected at least one try block"
-
-        # The outermost try is the first one at the top nesting level
-        outer_try = outer_tries[0]
-        # Check its except handlers for a Raise node
-        found_raise = False
-        for handler in outer_try.handlers:
-            for node in ast.walk(handler):
-                if isinstance(node, ast.Raise):
-                    found_raise = True
-                    break
-        assert found_raise, "Outer except handler in _job_refresh_insights must re-raise"
-
     @pytest.mark.asyncio
     async def test_expire_stale_reraises(self):
         db = _make_fake_db()
