@@ -6,12 +6,19 @@ Called by: pytest
 Depends on: app/file_utils.py
 """
 
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.file_utils import (
+os.environ["TESTING"] = "1"
+
+from app.file_utils import (  # noqa: E402
+    _looks_like_html,
+    _parse_html_table,
+    extract_mpns,
+    extract_mpns_with_rows,
     normalize_stock_row,
     parse_tabular_file,
 )
@@ -204,3 +211,251 @@ class TestNormalizeStockRow:
         assert result is not None
         assert result["qty"] is None
         assert result["price"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _looks_like_html
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestLooksLikeHtml:
+    def test_html_tag(self):
+        assert _looks_like_html(b"<html><body></body></html>") is True
+
+    def test_head_tag(self):
+        assert _looks_like_html(b"<head><title>t</title></head>") is True
+
+    def test_table_tag(self):
+        assert _looks_like_html(b"<table><tr><td>a</td></tr></table>") is True
+
+    def test_doctype(self):
+        assert _looks_like_html(b"<!DOCTYPE html>") is True
+
+    def test_meta_tag(self):
+        assert _looks_like_html(b"<meta charset='utf-8'>") is True
+
+    def test_csv_content_is_not_html(self):
+        assert _looks_like_html(b"mpn,qty,price\nABC123,10,1.50") is False
+
+    def test_leading_whitespace_before_html_tag(self):
+        assert _looks_like_html(b"  \n<html>") is True
+
+    def test_plain_text_is_not_html(self):
+        assert _looks_like_html(b"just some plain text") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _parse_html_table
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestParseHtmlTable:
+    _BASIC = (
+        b"<table>"
+        b"<tr><th>mpn</th><th>qty</th></tr>"
+        b"<tr><td>ABC123</td><td>10</td></tr>"
+        b"</table>"
+    )
+
+    def test_basic_table_returns_rows(self):
+        rows = _parse_html_table(self._BASIC)
+        assert len(rows) == 1
+        assert rows[0]["mpn"] == "ABC123"
+        assert rows[0]["qty"] == "10"
+
+    def test_empty_table_returns_empty(self):
+        assert _parse_html_table(b"<table></table>") == []
+
+    def test_blank_data_rows_skipped(self):
+        html = (
+            b"<table>"
+            b"<tr><th>mpn</th><th>qty</th></tr>"
+            b"<tr><td></td><td></td></tr>"
+            b"<tr><td>ABC123</td><td>10</td></tr>"
+            b"</table>"
+        )
+        rows = _parse_html_table(html)
+        assert len(rows) == 1
+        assert rows[0]["mpn"] == "ABC123"
+
+    def test_multiple_data_rows(self):
+        html = (
+            b"<table>"
+            b"<tr><th>mpn</th><th>qty</th></tr>"
+            b"<tr><td>ABC123</td><td>10</td></tr>"
+            b"<tr><td>DEF456</td><td>20</td></tr>"
+            b"</table>"
+        )
+        rows = _parse_html_table(html)
+        assert len(rows) == 2
+        assert rows[1]["mpn"] == "DEF456"
+
+    def test_headers_are_lowercased(self):
+        html = (
+            b"<table>"
+            b"<tr><th>MPN</th><th>QTY</th></tr>"
+            b"<tr><td>X1</td><td>5</td></tr>"
+            b"</table>"
+        )
+        rows = _parse_html_table(html)
+        assert "mpn" in rows[0]
+        assert "qty" in rows[0]
+
+    def test_values_are_stripped(self):
+        html = (
+            b"<table>"
+            b"<tr><th>mpn</th></tr>"
+            b"<tr><td>  ABC  </td></tr>"
+            b"</table>"
+        )
+        rows = _parse_html_table(html)
+        assert rows[0]["mpn"] == "ABC"
+
+    def test_iso_encoded_bytes(self):
+        html = "<table><tr><th>mpn</th></tr><tr><td>TEST</td></tr></table>"
+        rows = _parse_html_table(html.encode("iso-8859-1"))
+        assert len(rows) == 1
+        assert rows[0]["mpn"] == "TEST"
+
+    def test_no_table_returns_empty(self):
+        assert _parse_html_table(b"<html><body><p>No table</p></body></html>") == []
+
+    def test_th_cells_used_as_headers(self):
+        html = (
+            b"<table>"
+            b"<tr><th>part number</th></tr>"
+            b"<tr><td>R100</td></tr>"
+            b"</table>"
+        )
+        rows = _parse_html_table(html)
+        assert rows[0]["part number"] == "R100"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  parse_tabular_file — HTML branches and exception handler
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestParseTabularFileHtmlBranches:
+    _HTML = (
+        b"<table><tr><th>mpn</th><th>qty</th></tr>"
+        b"<tr><td>LM317T</td><td>100</td></tr></table>"
+    )
+
+    def test_xlsx_extension_with_html_content(self):
+        # ERP exports: .xlsx filename but the bytes are really HTML — line 79
+        rows = parse_tabular_file(self._HTML, "export.xlsx")
+        assert len(rows) == 1
+        assert rows[0]["mpn"] == "LM317T"
+
+    def test_xls_extension_with_html_content(self):
+        rows = parse_tabular_file(self._HTML, "export.xls")
+        assert len(rows) == 1
+
+    def test_non_xlsx_html_content(self):
+        # Non-xlsx filename + HTML body → line 83
+        rows = parse_tabular_file(self._HTML, "report.html")
+        assert len(rows) == 1
+        assert rows[0]["mpn"] == "LM317T"
+
+    def test_html_content_with_csv_extension(self):
+        # CSV extension but HTML content → falls through to HTML branch (line 83)
+        rows = parse_tabular_file(self._HTML, "data.csv")
+        assert len(rows) == 1
+
+    def test_exception_in_excel_parse_returns_empty(self):
+        # Invalid xlsx bytes → openpyxl raises → exception handler (lines 87-88)
+        rows = parse_tabular_file(b"not html and not valid xlsx at all", "data.xlsx")
+        assert rows == []
+
+    def test_exception_with_mock_returns_empty(self):
+        with patch("app.file_utils._parse_excel", side_effect=RuntimeError("corrupt")):
+            rows = parse_tabular_file(b"definitely not html content", "stock.xls")
+        assert rows == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  extract_mpns_with_rows
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestExtractMpnsWithRows:
+    def test_empty_rows_returns_empty(self):
+        assert extract_mpns_with_rows([]) == []
+
+    def test_recognized_mpn_column(self):
+        rows = [{"mpn": "ABC123"}, {"mpn": "DEF456"}]
+        assert extract_mpns_with_rows(rows) == [(2, "ABC123"), (3, "DEF456")]
+
+    def test_part_number_column(self):
+        rows = [{"part number": "XYZ789"}]
+        assert extract_mpns_with_rows(rows) == [(2, "XYZ789")]
+
+    def test_pn_column(self):
+        assert extract_mpns_with_rows([{"pn": "LM317T"}]) == [(2, "LM317T")]
+
+    def test_part_hash_column(self):
+        assert extract_mpns_with_rows([{"part#": "C0402"}]) == [(2, "C0402")]
+
+    def test_single_unknown_column_used_as_fallback(self):
+        # One col not in _MPN_COLUMN_NAMES → single-col fallback (line 150-151)
+        rows = [{"customcol": "ABC123"}]
+        assert extract_mpns_with_rows(rows) == [(2, "ABC123")]
+
+    def test_multiple_unknown_columns_returns_empty(self):
+        # Multiple unrecognized cols → col is None (line 152-153)
+        rows = [{"foo": "bar", "baz": "qux"}]
+        assert extract_mpns_with_rows(rows) == []
+
+    def test_blank_values_skipped_row_numbers_preserved(self):
+        rows = [{"mpn": "ABC"}, {"mpn": ""}, {"mpn": "DEF"}]
+        # Row 3 (blank) is skipped; row 4 is DEF
+        assert extract_mpns_with_rows(rows) == [(2, "ABC"), (4, "DEF")]
+
+    def test_file_row_numbering_starts_at_2(self):
+        rows = [{"mpn": "A"}, {"mpn": "B"}, {"mpn": "C"}]
+        result = extract_mpns_with_rows(rows)
+        assert result[0][0] == 2
+        assert result[1][0] == 3
+        assert result[2][0] == 4
+
+    def test_all_blank_mpns_returns_empty(self):
+        rows = [{"mpn": ""}, {"mpn": "   "}]
+        assert extract_mpns_with_rows(rows) == []
+
+    def test_whitespace_only_values_skipped(self):
+        rows = [{"mpn": "   "}, {"mpn": "ABC"}]
+        assert extract_mpns_with_rows(rows) == [(3, "ABC")]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  extract_mpns
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestExtractMpns:
+    def test_returns_mpn_strings(self):
+        rows = [{"mpn": "ABC123"}, {"mpn": "DEF456"}]
+        assert extract_mpns(rows) == ["ABC123", "DEF456"]
+
+    def test_empty_rows(self):
+        assert extract_mpns([]) == []
+
+    def test_blanks_dropped(self):
+        rows = [{"mpn": "ABC"}, {"mpn": ""}, {"mpn": "DEF"}]
+        assert extract_mpns(rows) == ["ABC", "DEF"]
+
+    def test_preserves_order(self):
+        rows = [{"mpn": "C"}, {"mpn": "A"}, {"mpn": "B"}]
+        assert extract_mpns(rows) == ["C", "A", "B"]
+
+    def test_no_recognized_column_returns_empty(self):
+        rows = [{"col1": "v1", "col2": "v2"}]
+        assert extract_mpns(rows) == []
+
+    def test_strips_row_tuples(self):
+        # Verify extract_mpns drops the file_row integer and returns only strings
+        rows = [{"part number": "R1"}, {"part number": "C2"}]
+        result = extract_mpns(rows)
+        assert result == ["R1", "C2"]
+        assert all(isinstance(v, str) for v in result)
