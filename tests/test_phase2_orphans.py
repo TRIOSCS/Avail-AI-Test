@@ -25,13 +25,17 @@ from app.models.auth import User
 from app.models.offers import Contact as RfqContact
 from app.models.offers import VendorResponse
 from app.models.sourcing import Requisition
+from tests._route_helpers import iter_routes
 
 _TEMPLATES = Path(__file__).resolve().parent.parent / "app" / "templates" / "htmx" / "partials"
 
 
 def _route_registered(path: str, method: str) -> bool:
     method = method.upper()
-    return any(getattr(r, "path", "") == path and method in (getattr(r, "methods", set()) or set()) for r in app.routes)
+    return any(
+        getattr(r, "path", "") == path and method in (getattr(r, "methods", set()) or set())
+        for r in iter_routes(app.routes)
+    )
 
 
 def _make_response(db: Session, user: User, req: Requisition, status: str = "new") -> VendorResponse:
@@ -227,7 +231,7 @@ class TestDeletedRoutes:
             "/v2/approvals/requests",
             "/v2/approvals/requests/{id}",
         ):
-            assert any(getattr(r, "path", "") == path for r in app.routes), f"{path} must remain"
+            assert any(getattr(r, "path", "") == path for r in iter_routes(app.routes)), f"{path} must remain"
 
     def test_no_import_breakage(self):
         import importlib
