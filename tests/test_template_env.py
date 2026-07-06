@@ -16,11 +16,20 @@ from app.request_context import current_user_display_tz_var
 from app.template_env import (
     _elapsed_seconds,
     _fmtdate_filter,
+    _fru_alias_mpns_filter,
+    _localdate_filter,
     _localday_filter,
+    _localtime_filter,
+    _now,
+    _part_description,
+    _pricefmt_filter,
+    _safe_url_filter,
     _sanitize_html_filter,
+    _sub_mpns_filter,
     _task_due_state,
     _timeago_filter,
     _timesince_filter,
+    page_response,
     template_response,
 )
 
@@ -360,3 +369,259 @@ class TestSanitizeHtmlFilter:
         result = _sanitize_html_filter(html)
         assert "https://example.com" in result
         assert "Link" in result
+
+
+class TestPageResponse:
+    def test_missing_request_raises(self):
+        with pytest.raises(ValueError, match="'request' must be present"):
+            page_response({})
+
+    def test_missing_request_key_raises(self):
+        with pytest.raises(ValueError):
+            page_response({"user": "alice"})
+
+
+class TestTemplateResponseSuccessPath:
+    def test_missing_request_raises(self):
+        with pytest.raises(ValueError, match="'request' must be present"):
+            template_response("htmx/base_page.html", {"title": "x"})
+
+
+class TestLocalTimeFilter:
+    def test_none_returns_default(self):
+        assert _localtime_filter(None) == "—"
+
+    def test_string_passthrough(self):
+        assert _localtime_filter("2024-01-01") == "2024-01-01"
+
+    def test_datetime_returns_string(self):
+        dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
+        result = _localtime_filter(dt, "%Y-%m-%d")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_custom_default_for_none(self):
+        assert _localtime_filter(None, default="N/A") == "N/A"
+
+
+class TestLocalDateFilter:
+    def test_none_returns_default(self):
+        assert _localdate_filter(None) == "—"
+
+    def test_string_passthrough(self):
+        assert _localdate_filter("2024-01-01") == "2024-01-01"
+
+    def test_datetime_returns_string(self):
+        dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
+        result = _localdate_filter(dt)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_custom_default(self):
+        assert _localdate_filter(None, default="TBD") == "TBD"
+
+
+class TestPricefmtFilter:
+    def test_none_returns_default(self):
+        assert _pricefmt_filter(None) == "—"
+
+    def test_empty_string_returns_default(self):
+        assert _pricefmt_filter("") == "—"
+
+    def test_strips_trailing_zeros(self):
+        assert _pricefmt_filter(0.79) == "0.79"
+
+    def test_integer_price(self):
+        assert _pricefmt_filter(5) == "5"
+
+    def test_four_decimal_places(self):
+        assert _pricefmt_filter(0.0084) == "0.0084"
+
+    def test_string_numeric(self):
+        assert _pricefmt_filter("12.34") == "12.34"
+
+    def test_invalid_string_returns_default(self):
+        assert _pricefmt_filter("not-a-price") == "—"
+
+    def test_custom_default(self):
+        assert _pricefmt_filter(None, default="—") == "—"
+
+    def test_zero(self):
+        result = _pricefmt_filter(0.0)
+        assert result == "0"
+
+
+class TestSubMpnsFilter:
+    def test_none_returns_empty(self):
+        assert _sub_mpns_filter(None) == []
+
+    def test_empty_list_returns_empty(self):
+        assert _sub_mpns_filter([]) == []
+
+    def test_list_of_strings(self):
+        result = _sub_mpns_filter(["ABC123", "XYZ456"])
+        assert "ABC123" in result
+        assert "XYZ456" in result
+
+    def test_list_of_dicts(self):
+        result = _sub_mpns_filter([{"mpn": "LM317T"}, {"mpn": "NE555"}])
+        assert "LM317T" in result
+        assert "NE555" in result
+
+    def test_mixed_str_and_dict(self):
+        result = _sub_mpns_filter(["ABC123", {"mpn": "LM317T"}])
+        assert "ABC123" in result
+        assert "LM317T" in result
+
+    def test_dict_without_mpn_key_skipped(self):
+        result = _sub_mpns_filter([{"manufacturer": "TI"}])
+        assert result == []
+
+    def test_unknown_type_skipped(self):
+        result = _sub_mpns_filter([42, None])
+        assert result == []
+
+    def test_short_mpn_filtered_out(self):
+        # normalize_mpn returns None for < 3 chars
+        result = _sub_mpns_filter(["AB"])
+        assert result == []
+
+
+class TestFruAliasMpnsFilter:
+    def test_none_returns_empty_set(self):
+        assert _fru_alias_mpns_filter(None) == set()
+
+    def test_empty_list_returns_empty_set(self):
+        assert _fru_alias_mpns_filter([]) == set()
+
+    def test_fru_source_included(self):
+        from app.constants import FRU_ALIAS_SOURCE
+
+        subs = [{"mpn": "LM317T", "source": FRU_ALIAS_SOURCE}]
+        result = _fru_alias_mpns_filter(subs)
+        assert "LM317T" in result
+
+    def test_non_fru_source_excluded(self):
+        subs = [{"mpn": "LM317T", "source": "manual"}, {"mpn": "NE555", "source": "user"}]
+        result = _fru_alias_mpns_filter(subs)
+        assert result == set()
+
+    def test_string_entries_skipped(self):
+        result = _fru_alias_mpns_filter(["ABC123"])
+        assert result == set()
+
+    def test_mixed_fru_and_other(self):
+        from app.constants import FRU_ALIAS_SOURCE
+
+        subs = [
+            {"mpn": "ABC123", "source": FRU_ALIAS_SOURCE},
+            {"mpn": "XYZ", "source": "other"},
+        ]
+        result = _fru_alias_mpns_filter(subs)
+        assert "ABC123" in result
+        assert "XYZ" not in result
+
+
+class TestPartDescription:
+    def test_material_card_description_preferred(self):
+        card = SimpleNamespace(description="  Resistor 10K  ")
+        obj = SimpleNamespace(material_card=card, description="Old desc")
+        assert _part_description(obj) == "Resistor 10K"
+
+    def test_fallback_to_own_description(self):
+        obj = SimpleNamespace(material_card=None, description="Capacitor 100uF")
+        assert _part_description(obj) == "Capacitor 100uF"
+
+    def test_no_description_returns_empty(self):
+        obj = SimpleNamespace(material_card=None, description=None)
+        assert _part_description(obj) == ""
+
+    def test_short_card_description_falls_through(self):
+        card = SimpleNamespace(description="AB")  # < 3 chars
+        obj = SimpleNamespace(material_card=card, description="Real description")
+        assert _part_description(obj) == "Real description"
+
+    def test_short_own_description_returns_empty(self):
+        obj = SimpleNamespace(material_card=None, description="AB")
+        assert _part_description(obj) == ""
+
+    def test_no_material_card_attr(self):
+        obj = SimpleNamespace(description="Some desc here")
+        assert _part_description(obj) == "Some desc here"
+
+    def test_card_with_no_description_attr(self):
+        card = SimpleNamespace()
+        obj = SimpleNamespace(material_card=card, description="Fallback desc")
+        assert _part_description(obj) == "Fallback desc"
+
+
+class TestSafeUrlFilter:
+    def test_https_url_allowed(self):
+        url = "https://example.com/path"
+        assert _safe_url_filter(url) == url
+
+    def test_http_url_allowed(self):
+        url = "http://example.com"
+        assert _safe_url_filter(url) == url
+
+    def test_none_returns_fallback(self):
+        assert _safe_url_filter(None) == "#"
+
+    def test_empty_string_returns_fallback(self):
+        assert _safe_url_filter("") == "#"
+
+    def test_javascript_returns_fallback(self):
+        assert _safe_url_filter("javascript:alert(1)") == "#"
+
+    def test_data_uri_returns_fallback(self):
+        assert _safe_url_filter("data:text/html,<h1>XSS</h1>") == "#"
+
+    def test_custom_fallback(self):
+        assert _safe_url_filter(None, fallback="/safe") == "/safe"
+
+    def test_ftp_returns_fallback(self):
+        assert _safe_url_filter("ftp://files.example.com") == "#"
+
+
+class TestNowGlobal:
+    def test_returns_datetime(self):
+        result = _now()
+        assert isinstance(result, datetime)
+
+    def test_returns_utc(self):
+        result = _now()
+        assert result.tzinfo is not None
+
+    def test_approximately_current_time(self):
+        from datetime import timedelta
+
+        before = datetime.now(timezone.utc)
+        result = _now()
+        after = datetime.now(timezone.utc)
+        assert before <= result <= after + timedelta(seconds=1)
+
+
+class TestCrmCompleteness:
+    def test_company_dispatches_to_company_compl(self):
+        from unittest.mock import MagicMock, patch
+
+        from app.models.crm import Company
+
+        company = MagicMock(spec=Company)
+        with patch("app.template_env._company_compl", return_value={"score": 80}) as mock_c:
+            from app.template_env import _crm_completeness
+
+            result = _crm_completeness(company)
+        mock_c.assert_called_once_with(company)
+        assert result == {"score": 80}
+
+    def test_non_company_dispatches_to_contact_compl(self):
+        from unittest.mock import patch
+
+        obj = SimpleNamespace(full_name="Jane Doe")
+        with patch("app.template_env._contact_compl", return_value={"score": 60}) as mock_c:
+            from app.template_env import _crm_completeness
+
+            result = _crm_completeness(obj)
+        mock_c.assert_called_once_with(obj)
+        assert result == {"score": 60}
