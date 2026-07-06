@@ -388,3 +388,192 @@ class TestFindVendorDedupCandidates:
             )
             assert key not in pair_keys, "Duplicate pair found"
             pair_keys.add(key)
+
+
+# ── _enrich_with_vendor_cards ─────────────────────────────────────────
+
+
+def _make_results(sightings: list[dict]) -> dict:
+    """Build a minimal results dict as produced by search_service."""
+    return {"ABC123": {"sightings": sightings, "blacklisted_count": 0}}
+
+
+def _make_sighting(
+    vendor_name: str = "Arrow Electronics",
+    mpn: str = "ABC123",
+    *,
+    email: str | None = None,
+    phone: str | None = None,
+    url: str | None = None,
+    is_historical: bool = False,
+    is_material_history: bool = False,
+) -> dict:
+    return {
+        "vendor_name": vendor_name,
+        "mpn_matched": mpn,
+        "vendor_email": email,
+        "vendor_phone": phone,
+        "vendor_url": url,
+        "is_historical": is_historical,
+        "is_material_history": is_material_history,
+    }
+
+
+class TestEnrichWithVendorCards:
+    def _enrich(self, results, db):
+        from app.vendor_utils import _enrich_with_vendor_cards
+
+        return _enrich_with_vendor_cards(results, db)
+
+    def _make_card(self, db, normalized_name: str, display_name: str, **kwargs):
+        from app.models import VendorCard
+
+        card = VendorCard(
+            normalized_name=normalized_name,
+            display_name=display_name,
+            sighting_count=kwargs.get("sighting_count", 0),
+            is_blacklisted=kwargs.get("is_blacklisted", False),
+            vendor_score=kwargs.get("vendor_score"),
+            is_new_vendor=kwargs.get("is_new_vendor", True),
+            emails=kwargs.get("emails", []),
+            phones=kwargs.get("phones", []),
+        )
+        db.add(card)
+        db.flush()
+        return card
+
+    def test_no_vendor_names_returns_early(self, db_session):
+        results = _make_results([{"vendor_name": None, "mpn_matched": "X", "is_historical": False}])
+        self._enrich(results, db_session)
+        # No crash, no cards created
+        from app.models import VendorCard
+
+        assert db_session.query(VendorCard).count() == 0
+
+    def test_existing_card_enriches_sighting(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics", vendor_score=72.5, is_new_vendor=False)
+        results = _make_results([_make_sighting("Arrow Electronics")])
+        self._enrich(results, db_session)
+        sightings = results["ABC123"]["sightings"]
+        assert len(sightings) == 1
+        vc = sightings[0]["vendor_card"]
+        assert vc["vendor_score"] == 72.5
+        assert vc["is_new_vendor"] is False
+
+    def test_unknown_vendor_auto_creates_card(self, db_session):
+        from app.models import VendorCard
+
+        results = _make_results([_make_sighting("BrandNew Vendor Inc")])
+        self._enrich(results, db_session)
+        # A new VendorCard should have been created
+        card = db_session.query(VendorCard).filter(VendorCard.display_name == "BrandNew Vendor Inc").first()
+        assert card is not None
+
+    def test_blacklisted_vendor_filtered_out(self, db_session):
+        self._make_card(db_session, "bad vendor", "Bad Vendor", is_blacklisted=True)
+        results = _make_results([_make_sighting("Bad Vendor")])
+        self._enrich(results, db_session)
+        assert results["ABC123"]["sightings"] == []
+        assert results["ABC123"]["blacklisted_count"] == 1
+
+    def test_garbage_vendor_name_filtered(self, db_session):
+        # These are non-empty but garbage → filtered in the enrichment loop
+        for name in ["unknown", "no seller listed", "n/a"]:
+            results = _make_results([_make_sighting(name)])
+            self._enrich(results, db_session)
+            assert results["ABC123"]["sightings"] == [], f"Expected {name!r} to be filtered"
+
+    def test_empty_vendor_name_early_return(self, db_session):
+        # Empty string → falsy → early return, sightings left unchanged
+        s = _make_sighting("")
+        results = _make_results([s])
+        self._enrich(results, db_session)
+        # Early return: sightings dict unchanged, no crash
+        assert len(results["ABC123"]["sightings"]) == 1
+
+    def test_email_harvested_into_card(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        results = _make_results([_make_sighting("Arrow Electronics", email="sales@arrow.com")])
+        self._enrich(results, db_session)
+        from app.models import VendorCard
+
+        card = db_session.query(VendorCard).filter(VendorCard.normalized_name == "arrow electronics").first()
+        assert "sales@arrow.com" in (card.emails or [])
+
+    def test_phone_harvested_into_card(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        results = _make_results([_make_sighting("Arrow Electronics", phone="+1-555-0100")])
+        self._enrich(results, db_session)
+        from app.models import VendorCard
+
+        card = db_session.query(VendorCard).filter(VendorCard.normalized_name == "arrow electronics").first()
+        assert "+1-555-0100" in (card.phones or [])
+
+    def test_website_harvested_into_card(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        results = _make_results([_make_sighting("Arrow Electronics", url="https://arrow.com")])
+        self._enrich(results, db_session)
+        from app.models import VendorCard
+
+        card = db_session.query(VendorCard).filter(VendorCard.normalized_name == "arrow electronics").first()
+        assert card.website == "https://arrow.com"
+
+    def test_historical_sightings_not_harvested(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        s = _make_sighting("Arrow Electronics", email="old@arrow.com", is_historical=True)
+        results = _make_results([s])
+        self._enrich(results, db_session)
+        from app.models import VendorCard
+
+        card = db_session.query(VendorCard).filter(VendorCard.normalized_name == "arrow electronics").first()
+        assert "old@arrow.com" not in (card.emails or [])
+
+    def test_material_history_sightings_not_harvested(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        s = _make_sighting("Arrow Electronics", email="stale@arrow.com", is_material_history=True)
+        results = _make_results([s])
+        self._enrich(results, db_session)
+        from app.models import VendorCard
+
+        card = db_session.query(VendorCard).filter(VendorCard.normalized_name == "arrow electronics").first()
+        assert "stale@arrow.com" not in (card.emails or [])
+
+    def test_multiple_sightings_multiple_vendors(self, db_session):
+        self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        self._make_card(db_session, "mouser electronics", "Mouser Electronics", is_blacklisted=True)
+        results = _make_results(
+            [
+                _make_sighting("Arrow Electronics"),
+                _make_sighting("Mouser Electronics"),
+                _make_sighting("unknown"),
+            ]
+        )
+        self._enrich(results, db_session)
+        sightings = results["ABC123"]["sightings"]
+        assert len(sightings) == 1  # Only Arrow survives
+        assert sightings[0]["vendor_name"] == "Arrow Electronics"
+        assert results["ABC123"]["blacklisted_count"] == 1
+
+    def test_empty_results_no_crash(self, db_session):
+        self._enrich({}, db_session)  # No error
+
+    def test_sighting_card_id_set(self, db_session):
+        card = self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        results = _make_results([_make_sighting("Arrow Electronics")])
+        self._enrich(results, db_session)
+        sightings = results["ABC123"]["sightings"]
+        assert sightings[0]["vendor_card"]["card_id"] == card.id
+
+    def test_review_avg_rating_computed(self, db_session, test_user):
+        from app.models import VendorReview
+
+        card = self._make_card(db_session, "arrow electronics", "Arrow Electronics")
+        review = VendorReview(vendor_card_id=card.id, user_id=test_user.id, rating=4)
+        db_session.add(review)
+        db_session.flush()
+
+        results = _make_results([_make_sighting("Arrow Electronics")])
+        self._enrich(results, db_session)
+        sightings = results["ABC123"]["sightings"]
+        assert sightings[0]["vendor_card"]["avg_rating"] == 4.0
+        assert sightings[0]["vendor_card"]["review_count"] == 1
