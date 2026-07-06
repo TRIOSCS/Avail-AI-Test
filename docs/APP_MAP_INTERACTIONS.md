@@ -1410,9 +1410,14 @@ per-subscription `clientState` (`secrets.token_hex(16)`) on `graph_subscriptions
   `subscriptionId` rejected, `clientState` checked against the **random
   per-subscription secret** stored on `graph_subscriptions` with a timing-safe
   `hmac.compare_digest` (wrong/missing/empty → rejected), plus a 5-min replay window
-  keyed on `subscriptionId:resource`. An all-invalid batch → 403 (a genuine Graph
-  batch always carries the matching `clientState`, so this only trips on
-  spoofed/probe traffic, never on live notifications); valid `created` notifications
+  keyed on `subscriptionId:resource`. An all-invalid batch → 403. Usually that is
+  spoofed/probe traffic, but genuine Graph batches can hit it too: Graph redelivers
+  on any non-2xx, so a batch that 500s *after* `validate_notifications` recorded its
+  replay keys is replay-dropped (→ all-invalid → 403) on every retry within the
+  5-min window, and notifications in flight when `renew_subscription` deletes a
+  Graph-404/410 row reject as unknown-subscription. When triaging 403s, check for a
+  preceding 5xx or subscription-row deletion before classifying as an attack probe —
+  those 403s are lost live notifications; valid `created` notifications
   fetch the message and feed the same activity-log + inbox-poll path as section 4.
   **Fail-open safety valve:** a subscription row with *no* stored `clientState`
   (legacy / mis-provisioned) is accepted rather than hard-rejected — so a
