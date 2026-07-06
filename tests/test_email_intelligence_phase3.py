@@ -157,19 +157,13 @@ class TestOOODetection:
 
 
 class TestCalendarIntelligence:
-    # scan_calendar_events fetches via GraphClient.delta_query, which returns a
-    # (events, delta_token) tuple — stub it in that shape.
-    _DELTA_LINK = "https://graph/delta?token=p3"
-
-    def _delta_gc(self, events):
-        return make_graph_client("delta_query", return_value=(events, self._DELTA_LINK))
-
     def test_scan_calendar_detects_vendor_meeting(self, db_session, test_user):
         """Calendar scan detects meetings with external (vendor) attendees."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = self._delta_gc(
-            [
+        mock_gc = make_graph_client(
+            "get_all_pages",
+            return_value=[
                 {
                     "subject": "Quarterly Business Review",
                     "attendees": [
@@ -187,7 +181,7 @@ class TestCalendarIntelligence:
                     "location": {"displayName": "Zoom"},
                     "organizer": {"emailAddress": {"address": "buyer@trioscs.com"}},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -203,8 +197,9 @@ class TestCalendarIntelligence:
         """Calendar scan detects trade show events by keyword."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = self._delta_gc(
-            [
+        mock_gc = make_graph_client(
+            "get_all_pages",
+            return_value=[
                 {
                     "subject": "Electronica 2026 Munich",
                     "attendees": [],
@@ -213,7 +208,7 @@ class TestCalendarIntelligence:
                     "location": {"displayName": "Messe München"},
                     "organizer": {},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -227,8 +222,9 @@ class TestCalendarIntelligence:
         """Internal meetings (only own-domain attendees) are not logged."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = self._delta_gc(
-            [
+        mock_gc = make_graph_client(
+            "get_all_pages",
+            return_value=[
                 {
                     "subject": "Team Standup",
                     "attendees": [
@@ -239,7 +235,7 @@ class TestCalendarIntelligence:
                     "location": {},
                     "organizer": {},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -254,7 +250,7 @@ class TestCalendarIntelligence:
         """Returns empty result on Graph API failure."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = make_graph_client("delta_query", side_effect=Exception("Calendar API error"))
+        mock_gc = make_graph_client("get_all_pages", side_effect=Exception("Calendar API error"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -278,7 +274,7 @@ class TestCalendarIntelligence:
             "organizer": {},
         }
 
-        mock_gc = self._delta_gc([event])
+        mock_gc = make_graph_client("get_all_pages", return_value=[event])
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             # First scan

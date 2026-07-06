@@ -12,7 +12,6 @@ Depends on: utils/graph_client.py, services/activity_service.py
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 # Trade shows commonly attended in electronic components industry
@@ -44,44 +43,28 @@ def _parse_graph_dt(dt_str: str | None) -> datetime | None:
         return None
 
 
-async def scan_calendar_events(token: str, user_id: int | None, db: Session, lookback_days: int = 30) -> dict:
-    """Scan user's calendar for meetings with external contacts (Delta Query).
+async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_days: int = 30) -> dict:
+    """Scan user's calendar for meetings with external contacts.
 
-    Uses Microsoft Graph ``/me/calendarView/delta`` so each run only fetches
-    events CHANGED since the previous scan instead of re-pulling the whole
-    window.  The delta token is persisted per user in ``SyncState`` (folder
-    ``calendar_scan``), reusing the same plumbing as contacts / sent-folder sync.
-
-    - Initial sync (no stored token): pages ``@odata.nextLink`` over the
-      ``[now - lookback_days, now]`` window until ``@odata.deltaLink``; the
-      deltaLink is stored for next time.
-    - Incremental sync (stored token): calls the stored deltaLink; changed
-      events are upserted via ``log_meeting_activity`` (unchanged dedupe/fields),
-      and ``@removed`` entries delete the matching local ActivityLog rows.
-    - Token expiry: Graph returns 410 Gone (``GraphSyncStateExpired``) when the
-      delta token is too old — the stored token is discarded and a fresh full
-      initial delta sync runs, without crashing.
+    Creates first-class ActivityLog rows via log_meeting_activity for each
+    event that has at least one matched external attendee.
 
     Args:
         token: Valid Graph API access token.
-        user_id: User ID for activity logging + SyncState scoping. When None
-            (callers without a persisted identity), SyncState is skipped and
-            every run behaves like a stateless initial delta pull.
+        user_id: User ID for activity logging.
         db: Database session.
-        lookback_days: How far back the delta window starts.
+        lookback_days: How far back to scan.
 
     Returns:
         {
-            events_scanned: int,   # changed event payloads processed
+            events_scanned: int,
             vendor_meetings: int,
             trade_shows: int,
             activities_logged: int,
-            events_removed: int,   # local rows deleted for @removed entries
         }
     """
     from app.config import settings
-    from app.models import SyncState
-    from app.utils.graph_client import GraphClient, GraphSyncStateExpired
+    from app.utils.graph_client import GraphClient
 
     gc = GraphClient(token)
 
@@ -89,80 +72,32 @@ async def scan_calendar_events(token: str, user_id: int | None, db: Session, loo
     start_time = (now - timedelta(days=lookback_days)).isoformat()
     end_time = now.isoformat()
 
-    # calendarView/delta takes the window as startDateTime/endDateTime query
-    # params (NOT $filter); $orderby/$top are unsupported on delta.
-    delta_params = {
-        "startDateTime": start_time,
-        "endDateTime": end_time,
-        "$select": "id,subject,attendees,start,end,location,organizer",
-    }
-
-    def _zero() -> dict:
+    try:
+        events = await gc.get_all_pages(
+            "/me/calendar/events",
+            params={
+                "$filter": f"start/dateTime ge '{start_time}' and start/dateTime le '{end_time}'",
+                "$select": "id,subject,attendees,start,end,location,organizer",
+                "$top": "50",
+                "$orderby": "start/dateTime desc",
+            },
+            max_items=500,
+        )
+    except Exception as e:
+        logger.warning("Calendar scan failed for user {}: {}", user_id, e)
         return {
             "events_scanned": 0,
             "vendor_meetings": 0,
             "trade_shows": 0,
             "activities_logged": 0,
-            "events_removed": 0,
         }
-
-    # Load the persisted delta token for incremental sync (per user per folder).
-    folder_key = "calendar_scan"
-    sync_state = None
-    delta_token: str | None = None
-    if user_id is not None:
-        sync_state = db.scalars(
-            select(SyncState).where(SyncState.user_id == user_id, SyncState.folder == folder_key)
-        ).first()
-        delta_token = sync_state.delta_token if sync_state else None
-
-    token_reset = False
-    try:
-        events, new_token = await gc.delta_query(
-            "/me/calendarView/delta",
-            delta_token=delta_token,
-            params=delta_params,
-            max_items=500,
-        )
-    except GraphSyncStateExpired:
-        # 410 Gone — the stored delta token is too old. Discard it and fall back
-        # to a full initial delta sync (do NOT crash).
-        token_reset = True
-        logger.warning("Calendar delta token expired for user {} — discarding token, full resync", user_id)
-        if sync_state:
-            sync_state.delta_token = None
-            db.flush()
-        try:
-            events, new_token = await gc.delta_query(
-                "/me/calendarView/delta",
-                delta_token=None,
-                params=delta_params,
-                max_items=500,
-            )
-        except Exception as e:
-            logger.warning("Calendar full resync failed for user {}: {}", user_id, e)
-            return _zero()
-    except Exception as e:
-        logger.warning("Calendar scan failed for user {}: {}", user_id, e)
-        return _zero()
 
     own_domains = settings.own_domains
     vendor_meetings = 0
     trade_shows = 0
     activities_logged = 0
-    events_removed = 0
-    events_changed = 0
 
     for event in events:
-        # @removed entry — the event was deleted/cancelled upstream. Remove the
-        # matching local ActivityLog row(s) so the timeline stays in sync.
-        if "@removed" in event:
-            removed_id = (event.get("id") or "").strip()
-            if removed_id:
-                events_removed += _remove_calendar_activity(db, removed_id)
-            continue
-
-        events_changed += 1
         subject = (event.get("subject") or "").strip()
         attendees = event.get("attendees", [])
         # Prefer the Graph-native stable id; synthesise a fallback key from
@@ -219,69 +154,24 @@ async def scan_calendar_events(token: str, user_id: int | None, db: Session, loo
             )
             activities_logged += len(rows)
 
-    # Persist the new delta link so the next run only fetches changes.
-    if new_token and user_id is not None:
-        if sync_state:
-            sync_state.delta_token = new_token
-            sync_state.last_sync_at = datetime.now(timezone.utc)
-        else:
-            db.add(
-                SyncState(
-                    user_id=user_id,
-                    folder=folder_key,
-                    delta_token=new_token,
-                    last_sync_at=datetime.now(timezone.utc),
-                )
-            )
-        db.flush()
-
-    try:
-        db.commit()
-    except Exception as e:
-        logger.warning("Calendar activities commit failed: {}", e)
-        db.rollback()
-
-    logger.info(
-        "Calendar delta scan [user {}]: {} fetched, {} changed, {} removed{}",
-        user_id,
-        len(events),
-        events_changed,
-        events_removed,
-        " (delta token reset after 410)" if token_reset else "",
-    )
+    if activities_logged:
+        try:
+            db.commit()
+        except Exception as e:
+            logger.warning("Calendar activities commit failed: {}", e)
+            db.rollback()
 
     return {
-        "events_scanned": events_changed,
+        "events_scanned": len(events),
         "vendor_meetings": vendor_meetings,
         "trade_shows": trade_shows,
         "activities_logged": activities_logged,
-        "events_removed": events_removed,
     }
-
-
-def _remove_calendar_activity(db: Session, graph_event_id: str) -> int:
-    """Delete local ActivityLog rows for a calendar event removed upstream.
-
-    Handles ``@removed`` delta entries (event deleted / cancelled in Outlook) by
-    deleting every ActivityLog whose ``external_id`` matches the event's dedupe
-    key.  Returns the number of rows deleted.
-
-    Called by: scan_calendar_events (incremental delta path).
-    """
-    from app.models import ActivityLog
-
-    external_id = f"calendar-{graph_event_id}"
-    rows = db.scalars(select(ActivityLog).where(ActivityLog.external_id == external_id)).all()
-    for row in rows:
-        db.delete(row)
-    if rows:
-        logger.info("Calendar event removed upstream: deleted {} local row(s) for {}", len(rows), graph_event_id)
-    return len(rows)
 
 
 def _log_calendar_activity(
     db: Session,
-    user_id: int | None,
+    user_id: int,
     graph_event_id: str,
     subject: str,
     start_dt: datetime,

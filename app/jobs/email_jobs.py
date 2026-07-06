@@ -79,9 +79,9 @@ def register_email_jobs(scheduler, settings, db=None):
             id="calendar_scan",
             name="Calendar vendor meeting scan",
         )
-        # scan_calendar_events uses /me/calendarView/delta with the SyncState
-        # delta-token plumbing (folder "calendar_scan"), so each run only fetches
-        # events changed since the last scan — including cancellations (@removed).
+        # TODO Phase 3 follow-up: switch to /me/calendarView/delta for incremental
+        # UPDATES/CANCELLATIONS (cheaper, captures edits) using SyncState plumbing
+        # already in place for contacts_sync and sent-folder scan.
 
     # Sent folder scan — track outbound emails, link [AVAIL-] tagged messages
     scheduler.add_job(

@@ -3513,25 +3513,6 @@ No mailbox or no token ⇒ the branch logs a warning and skips (email_count stay
 surrounding `except` keeps the scheduler resilient. (There is no `get_graph_client()`
 factory and `GraphClient` has no `list_messages` — both were dead references, now fixed.)
 
-### Calendar Meeting Scan — incremental delta sync (`email_jobs._job_calendar_scan`)
-
-Daily (06:00, activity-tracking only), for each M365-connected user
-`calendar_intelligence.scan_calendar_events(token, user.id, db)` pulls calendar changes
-via Microsoft Graph `/me/calendarView/delta` rather than re-scanning the whole window.
-The delta token persists in `SyncState` (folder `calendar_scan`), reusing the same
-plumbing as contacts sync and the sent-folder scan.
-
-- Initial run (no stored token): `GraphClient.delta_query("/me/calendarView/delta", …)`
-  with the `[now - lookback_days, now]` window passed as `startDateTime`/`endDateTime`
-  query params, paging `@odata.nextLink` until `@odata.deltaLink`, which is stored.
-- Incremental run (stored token): calls the stored deltaLink; changed events are upserted
-  through the unchanged `log_meeting_activity` path (dedupe key
-  `external_id = "calendar-{graph_event_id}"`); `@removed` entries delete the matching
-  local `ActivityLog` rows (`_remove_calendar_activity`).
-- Token expiry: a 410 Gone raises `GraphSyncStateExpired` → the stored token is discarded
-  and a fresh full initial delta sync runs (no crash). Loguru logs fetched/changed/removed
-  counts plus the token reset.
-
 ---
 
 ## Tagging & Classification Pipeline
