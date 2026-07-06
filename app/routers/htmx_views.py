@@ -1641,7 +1641,7 @@ async def requisition_insights_refresh(
     from ..services.knowledge_service import generate_insights, get_cached_insights
 
     try:
-        generate_insights(db, req_id)
+        await generate_insights(db, req_id)
     except Exception as e:
         logger.warning(f"Insight generation failed for req {req_id}: {e}")
     insights = get_cached_insights(db, req_id)
@@ -1673,7 +1673,7 @@ async def vendor_insights_refresh(
     from ..services.knowledge_service import generate_vendor_insights, get_cached_vendor_insights
 
     try:
-        generate_vendor_insights(db, vendor_id)
+        await generate_vendor_insights(db, vendor_id)
     except Exception as e:
         logger.warning(f"Insight generation failed for vendor {vendor_id}: {e}")
     insights = get_cached_vendor_insights(db, vendor_id)
@@ -1705,7 +1705,7 @@ async def company_insights_refresh(
     from ..services.knowledge_service import generate_company_insights, get_cached_company_insights
 
     try:
-        generate_company_insights(db, company_id)
+        await generate_company_insights(db, company_id)
     except Exception as e:
         logger.warning(f"Insight generation failed for company {company_id}: {e}")
     insights = get_cached_company_insights(db, company_id)
@@ -1735,7 +1735,7 @@ async def pipeline_insights_refresh(
     from ..services.knowledge_service import generate_pipeline_insights, get_cached_pipeline_insights
 
     try:
-        generate_pipeline_insights(db)
+        await generate_pipeline_insights(db)
     except Exception as e:
         logger.warning(f"Pipeline insight generation failed: {e}")
     insights = get_cached_pipeline_insights(db)

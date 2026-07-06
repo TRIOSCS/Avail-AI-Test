@@ -1758,10 +1758,11 @@ class TestInsights:
     def test_requisition_insights_refresh(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_insights"):
+        with patch("app.services.knowledge_service.generate_insights") as mock_gen:
             with patch("app.services.knowledge_service.get_cached_insights", return_value=None):
                 resp = client.post(f"/v2/partials/requisitions/{req.id}/insights/refresh")
                 assert resp.status_code == 200
+                mock_gen.assert_awaited_once()
 
     def test_vendor_insights(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
@@ -1773,10 +1774,11 @@ class TestInsights:
     def test_vendor_insights_refresh(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_vendor_insights"):
+        with patch("app.services.knowledge_service.generate_vendor_insights") as mock_gen:
             with patch("app.services.knowledge_service.get_cached_vendor_insights", return_value=None):
                 resp = client.post(f"/v2/partials/vendors/{vc.id}/insights/refresh")
                 assert resp.status_code == 200
+                mock_gen.assert_awaited_once()
 
     def test_company_insights(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
@@ -1788,10 +1790,11 @@ class TestInsights:
     def test_company_insights_refresh(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_company_insights"):
+        with patch("app.services.knowledge_service.generate_company_insights") as mock_gen:
             with patch("app.services.knowledge_service.get_cached_company_insights", return_value=None):
                 resp = client.post(f"/v2/partials/customers/{co.id}/insights/refresh")
                 assert resp.status_code == 200
+                mock_gen.assert_awaited_once()
 
     def test_dashboard_partial_pipeline_loader_targets_self(self, client: TestClient):
         """Pipeline lazy-load must set hx-target so it does not inherit <main hx-
@@ -1806,10 +1809,11 @@ class TestInsights:
             assert resp.status_code == 200
 
     def test_pipeline_insights_refresh(self, client: TestClient):
-        with patch("app.services.knowledge_service.generate_pipeline_insights"):
+        with patch("app.services.knowledge_service.generate_pipeline_insights") as mock_gen:
             with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
                 resp = client.post("/v2/partials/dashboard/pipeline-insights/refresh")
                 assert resp.status_code == 200
+                mock_gen.assert_awaited_once()
 
 
 # ══════════════════════════════════════════════════════════════════════════
