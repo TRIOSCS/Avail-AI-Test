@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, RequisitionTask, SiteContact, User, VendorCard
 from app.models.vendors import VendorContact
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import engine, sqlite_fk_disabled  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -258,23 +258,19 @@ def test_complete_task_vendor_contact_found(client, db_session, test_user):
 
 def test_complete_task_vendor_contact_deleted(client, db_session, test_user):
     """POST complete on a vendor_contact task when VendorContact row is gone."""
-    from sqlalchemy import text
-
     # Disable FK checks to insert a task with dangling vendor_contact_id.
-    db_session.execute(text("PRAGMA foreign_keys=OFF"))
-    task = RequisitionTask(
-        vendor_contact_id=99999,
-        title="Orphan VC Task",
-        task_type="general",
-        status="todo",
-        created_by=test_user.id,
-        assigned_to_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(task)
-    db_session.flush()
-    db_session.execute(text("PRAGMA foreign_keys=ON"))
-    db_session.commit()
+    with sqlite_fk_disabled(db_session):
+        task = RequisitionTask(
+            vendor_contact_id=99999,
+            title="Orphan VC Task",
+            task_type="general",
+            status="todo",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(task)
+        db_session.flush()
 
     resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
     assert resp.status_code == 200
@@ -363,22 +359,18 @@ def test_delete_task_vendor_contact_branch(admin_client, db_session, admin_user)
 
 def test_delete_task_vendor_contact_deleted_fallback(admin_client, db_session, admin_user):
     """DELETE task whose vendor_contact no longer exists returns safe ack."""
-    from sqlalchemy import text
-
-    db_session.execute(text("PRAGMA foreign_keys=OFF"))
-    task = RequisitionTask(
-        vendor_contact_id=99998,
-        title="Orphan Delete Task",
-        task_type="general",
-        status="todo",
-        created_by=admin_user.id,
-        assigned_to_id=admin_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(task)
-    db_session.flush()
-    db_session.execute(text("PRAGMA foreign_keys=ON"))
-    db_session.commit()
+    with sqlite_fk_disabled(db_session):
+        task = RequisitionTask(
+            vendor_contact_id=99998,
+            title="Orphan Delete Task",
+            task_type="general",
+            status="todo",
+            created_by=admin_user.id,
+            assigned_to_id=admin_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(task)
+        db_session.flush()
 
     resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
     assert resp.status_code == 200
@@ -698,22 +690,18 @@ def test_edit_task_site_contact_branch(client, db_session, test_user):
 
 def test_edit_task_vendor_contact_deleted_fallback(client, db_session, test_user):
     """POST edit on vendor_contact task when VC is gone returns empty fragment."""
-    from sqlalchemy import text
-
-    db_session.execute(text("PRAGMA foreign_keys=OFF"))
-    task = RequisitionTask(
-        vendor_contact_id=99997,
-        title="Edit VC Orphan",
-        task_type="general",
-        status="todo",
-        created_by=test_user.id,
-        assigned_to_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(task)
-    db_session.flush()
-    db_session.execute(text("PRAGMA foreign_keys=ON"))
-    db_session.commit()
+    with sqlite_fk_disabled(db_session):
+        task = RequisitionTask(
+            vendor_contact_id=99997,
+            title="Edit VC Orphan",
+            task_type="general",
+            status="todo",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(task)
+        db_session.flush()
 
     resp = client.post(
         f"/v2/partials/tasks/{task.id}/edit",
@@ -748,22 +736,18 @@ def test_snooze_task_site_contact_branch(client, db_session, test_user):
 
 def test_snooze_task_vendor_contact_deleted_fallback(client, db_session, test_user):
     """POST snooze on vendor_contact task when VC is gone returns empty fragment."""
-    from sqlalchemy import text
-
-    db_session.execute(text("PRAGMA foreign_keys=OFF"))
-    task = RequisitionTask(
-        vendor_contact_id=99996,
-        title="Snooze VC Orphan",
-        task_type="general",
-        status="todo",
-        created_by=test_user.id,
-        assigned_to_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(task)
-    db_session.flush()
-    db_session.execute(text("PRAGMA foreign_keys=ON"))
-    db_session.commit()
+    with sqlite_fk_disabled(db_session):
+        task = RequisitionTask(
+            vendor_contact_id=99996,
+            title="Snooze VC Orphan",
+            task_type="general",
+            status="todo",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(task)
+        db_session.flush()
 
     resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
     assert resp.status_code == 200

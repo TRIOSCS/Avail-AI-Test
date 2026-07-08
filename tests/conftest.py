@@ -14,6 +14,7 @@ Depends on: app.models (Base), app.database (get_db), app.dependencies
 """
 
 import os
+from contextlib import contextmanager
 
 import nest_asyncio
 
@@ -40,7 +41,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 from loguru import logger
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -308,10 +309,37 @@ def db_session():
         yield session
     finally:
         session.rollback()
+        # Restore FK enforcement in case a test flipped it OFF and never restored
+        # it — the StaticPool engine shares ONE connection per worker, so a leaked
+        # OFF poisons every later test in the process (the ``connect`` listener
+        # only fires once). Must run after rollback: the pragma is a no-op while
+        # a transaction is open.
+        session.execute(text("PRAGMA foreign_keys=ON"))
         # Delete all rows in FK-safe order — much faster than drop_all/create_all.
         # Per-table savepoints keep one failure from cascading (see _cleanup_all_rows).
         _cleanup_all_rows()
         session.close()
+
+
+@contextmanager
+def sqlite_fk_disabled(db: Session):
+    """Temporarily disable SQLite FK enforcement to seed/delete dangling-FK rows.
+
+    SQLite silently ignores ``PRAGMA foreign_keys`` while a transaction is open, and
+    the StaticPool engine shares ONE connection per worker — so a test that flips the
+    pragma OFF and either dies before restoring it, or "restores" it mid-transaction
+    (a no-op), leaves FK enforcement off for every later test in the process. This
+    manager issues both flips outside any transaction and restores in ``finally``.
+    Pending work in *db* is committed on success and rolled back on error.
+    """
+    db.rollback()  # close any open tx so the OFF pragma takes effect
+    db.execute(text("PRAGMA foreign_keys=OFF"))
+    try:
+        yield db
+        db.commit()
+    finally:
+        db.rollback()  # close the (possibly failed) tx so the ON pragma takes effect
+        db.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def force_card_category(db: Session, card: MaterialCard, raw_value: str) -> None:

@@ -119,10 +119,10 @@ def _orphan_card_via_dangling_delete(db: Session, card_id) -> None:
     """
     from sqlalchemy import text
 
-    db.execute(text("PRAGMA foreign_keys=OFF"))
-    db.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
-    db.commit()
-    db.execute(text("PRAGMA foreign_keys=ON"))
+    from tests.conftest import sqlite_fk_disabled
+
+    with sqlite_fk_disabled(db):
+        db.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
     db.expire_all()  # Expire ORM cache so it re-reads from DB
 
 
