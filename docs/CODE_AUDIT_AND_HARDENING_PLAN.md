@@ -53,7 +53,7 @@ These are confirmed defects shipping today, not style issues.
 - [ ] **P0.6 — `"complete"` vs `"completed"` status-string landmine.**
   `app/services/prospect_scheduler.py:260` sets `batch.status = "complete"` while
   `PendingBatchStatus.COMPLETED` is `"completed"`. Audit consumers of
-  `DiscoveryBatch.status`, pick one value, add a `DiscoveryBatchStatus` StrEnum (see P2.4).
+  `DiscoveryBatch.status`, pick one value, add a `DiscoveryBatchStatus` StrEnum (see P2.5).
 
 ---
 
@@ -118,11 +118,19 @@ These are confirmed defects shipping today, not style issues.
   release image is the production deploy (`deploy.yml:96`). Add
   `docker compose build app` as a required PR gate.
 
-- [ ] **P2.3 — CI lint against assertion-theater tests.**
+- [ ] **P2.3 — Shard the CI `test` job.**
+  The 22.7k-test suite needs ~24 min on a 2-vCPU runner; the timeout has been
+  re-tuned three times as the suite grew (15 → 25 → 40, `ci.yml:32`) and will be
+  outgrown again. Split into a 2-3 way matrix (`pytest-split` or directory
+  buckets) so wall-clock drops to ~10 min and the timeout stops being a moving
+  target. Pairs with P6.1 — retiring assertion-theater tests shrinks the
+  runtime this sharding has to carry.
+
+- [ ] **P2.4 — CI lint against assertion-theater tests.**
   Simple AST check flagging any test whose only assertion is a bare
   `status_code == 200` / `is not None`. (See P5.1 for the backfill.)
 
-- [ ] **P2.4 — StrEnum enforcement.**
+- [ ] **P2.5 — StrEnum enforcement.**
   - Add `SearchQueueStatus` (`queued/searching/completed/gated_out/pending` written raw
     in `search_worker_base/ai_gate.py:195-255`, `queue_manager.py:219-346`) and
     `DiscoveryBatchStatus` to `app/constants.py`; migrate call sites.
@@ -132,7 +140,7 @@ These are confirmed defects shipping today, not style issues.
     Add a validator so raw strings can't slip past.
   - Pre-commit grep hook rejecting `\.status\s*=\s*"` outside `app/constants.py`.
 
-- [ ] **P2.5 — Event-loop protection.**
+- [ ] **P2.6 — Event-loop protection.**
   - Move the 14 blocking file-I/O sites in `async def` to `anyio` (worst:
     `tagging_ai_batch.py:128-458`, `tagging_ai_triage.py:233-246` — large JSONL files;
     also fixes the 2 unclosed file handles at `tagging_ai_batch.py:437`,
@@ -140,7 +148,7 @@ These are confirmed defects shipping today, not style issues.
   - `htmx/requisitions.py:554` — run `openpyxl.load_workbook` in
     `anyio.to_thread.run_sync`; add an upload size cap.
 
-- [ ] **P2.6 — Startup/health-check decoupling.**
+- [ ] **P2.7 — Startup/health-check decoupling.**
   `app/main.py:124` runs ~20 sequential backfills/`ANALYZE` before `/health` can
   answer; on a prod-sized DB this can exceed both the compose healthcheck (~80s) and
   `deploy.sh`'s ~60s loop → false-failed deploys. Fix: split liveness (immediate) from
@@ -242,7 +250,7 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
 - [ ] **P6.1 — Retrofit the 542 status-200-only tests** (14.3% of the nightly/coverage
   files; suite-wide 971/18,709). Seed matching + non-matching rows, assert rendered
   content. Start with `test_coverage_nightly_2026_06_30.py:211-277` (sourcing filters)
-  and the `test_htmx_views_nightly{1..30}.py` series. Gate recurrence via P2.3.
+  and the `test_htmx_views_nightly{1..30}.py` series. Gate recurrence via P2.4.
 
 - [ ] **P6.2 — Close the Postgres blind spot.** 59 modules use
   ILIKE/JSONB/tsvector/pg_trgm; only 3 test files use `requires_postgres`. Priority:
@@ -277,8 +285,8 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
 
 ```
 Week 1:  Phase 0 (all)  +  P1.1, P1.2
-Week 2:  Phase 1 rest   +  P2.1, P2.2, P2.3
-Week 3:  P2.4-P2.6      +  Phase 3
+Week 2:  Phase 1 rest   +  P2.1, P2.2, P2.4
+Week 3:  P2.3, P2.5-P2.7  +  Phase 3
 Weeks 4-6: Phase 4 (one god-file split per PR)  ∥  Phase 5
 Ongoing: Phase 6 (fold P6.1 retrofits into every PR touching those areas)
 ```

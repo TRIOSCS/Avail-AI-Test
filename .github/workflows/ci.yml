@@ -25,11 +25,12 @@ jobs:
     # nightly too) — don't burn ~12 runner-minutes re-running it every night.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Suite has grown to ~13.8k tests; locally it runs in ~2.5 min, but the
-    # 2-vCPU GitHub runner takes longer. 15-min was being exceeded before the
-    # suite could finish (~32% complete at the 15-min mark). 25 leaves room for
-    # the suite to grow without immediate re-tuning.
-    timeout-minutes: 25
+    # Suite has grown to ~22.7k tests; locally it runs in ~5 min, but the
+    # 2-vCPU GitHub runner needs ~24 min — the previous 25-min cap was hit on
+    # most runs (third re-tune: 15 → 25 → 40). 40 leaves headroom while the
+    # real fix (sharding the job across a runner matrix) is tracked in
+    # docs/CODE_AUDIT_AND_HARDENING_PLAN.md Phase 2.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
