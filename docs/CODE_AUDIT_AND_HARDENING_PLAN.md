@@ -717,11 +717,41 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
   - `routers/htmx/companies.py` (5,234 lines) → ~8 modules: import, saved views,
     contacts, tags/segments, merge, custom fields, sites, detail-tab render.
   - `services/buyplan_workflow.py` (1,855) → `buyplan_approval / buyplan_lines /
-    buyplan_po / buyplan_reports`.
+    buyplan_po / buyplan_reports`. **Done:** split into
+    `services/buyplan_workflow/` package — `buyplan_approval.py` (submit/
+    approve/reject, halt/resume, reset/cancel/resubmit, auto-completion — kept
+    as one module since every transition shares the engine-request/prepayment
+    teardown helpers), `buyplan_po.py` (PO confirm + approver verify/scan),
+    `buyplan_lines.py` (claim/re-source, flag/resolve issue, add/edit/remove
+    line, SO# editor), `buyplan_reports.py` (favoritism detection, case-report
+    generation). `verify_po`'s completion check and `resource_line`'s
+    prepayment-teardown call are lazy (function-local) imports back into
+    `buyplan_approval` — the only two edges that would otherwise cycle;
+    everything else is a top-level import (P4.6). `__init__.py` re-exports
+    every public name + every test-patched internal. A handful of
+    `unittest.mock.patch(...)`/`monkeypatch.setattr(...)` targets that
+    isolate an internal collaborator (`assign_buyer`, `score_offer`,
+    `settings`, `_generate_buyer_tasks`, `_cancel_open_engine_requests_for_plan`)
+    were repointed from `app.services.buyplan_workflow.X` to
+    `app.services.buyplan_workflow.buyplan_approval.X` so the mock still
+    intercepts the call post-split (`tests/test_buyplan_workflow.py`,
+    `tests/test_buy_plan_service.py`, `tests/test_c1_buyplan_gate.py`).
+    `ruff.toml`'s BLE001 legacy-freeze entry updated to the 2 new file paths
+    that still carry a broad `except Exception`.
   - `routers/htmx_views.py` (2,063) → `htmx/my_day.py, email_views.py,
     insights_views.py, search_views.py`.
   - `routers/htmx/offers.py` (1,905) → `offers_crud / rfq_compose / follow_ups /
-    reply_handling`.
+    reply_handling`. **Done:** split into `routers/htmx/offers/` package —
+    `crud.py` (AI offer parsing, offer CRUD/review/promote/reject/changelog,
+    create-quote-from-offers), `rfq.py` (RFQ compose, AI cleanup/rephrase, RFQ
+    send), `follow_ups.py` (queue, single/batch send, AI draft, badge),
+    `replies.py` (vendor response review/reply, activity/phone-call logging).
+    `__init__.py` re-exports `router` + every name tests patch/import at
+    `app.routers.htmx.offers.X`; sub-modules pull `template_response` /
+    `requisition_tab` / `maybe_release_on_offer` / `offer_review_queue` back via
+    a function-local `from . import X` so those patches still intercept every
+    call site post-split. `ruff.toml`'s BLE001 legacy-freeze entry updated to
+    the 4 new file paths.
 
 - [x] **P4.4 — Shared fuzzy-dedup helper.** `vendor_duplicates.py:51-75` and
   `company_utils.py:154-227` copy-paste the rapidfuzz fallback loop; extract

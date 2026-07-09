@@ -207,8 +207,8 @@ class TestSubmitBuyPlan:
         edits = [{"requirement_id": req.id, "offer_id": test_offer.id, "quantity": 500}]
 
         with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
-            with patch("app.services.buyplan_workflow.assign_buyer", return_value=(test_user, "test")):
-                with patch("app.services.buyplan_workflow.score_offer", return_value=85.0):
+            with patch("app.services.buyplan_workflow.buyplan_approval.assign_buyer", return_value=(test_user, "test")):
+                with patch("app.services.buyplan_workflow.buyplan_approval.score_offer", return_value=85.0):
                     result = submit_buy_plan(plan.id, "SO-005", test_user, db_session, line_edits=edits)
 
         assert result.status == BuyPlanStatus.PENDING.value
@@ -251,7 +251,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="LGTM")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -274,7 +274,7 @@ class TestApproveBuyPlan:
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             approve_buy_plan(plan.id, "approve", manager_user, db_session)
 
         # The fold already cleared the SO gate — completion needs no verify_so call.
@@ -327,7 +327,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="ok")
 
         row = (
@@ -375,7 +375,7 @@ class TestApproveBuyPlan:
 
         overrides = [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap vendor"}]
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", manager_user, db_session, line_overrides=overrides)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -421,7 +421,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", test_user, db_session)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -455,7 +455,9 @@ class TestHaltPlan:
         """Halting a PENDING plan cancels its open engine request first (no orphan)."""
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
 
-        with patch("app.services.buyplan_workflow._cancel_open_engine_requests_for_plan") as cancel_mock:
+        with patch(
+            "app.services.buyplan_workflow.buyplan_approval._cancel_open_engine_requests_for_plan"
+        ) as cancel_mock:
             result = halt_plan(plan.id, manager_user, db_session, reason="halt it")
 
         cancel_mock.assert_called_once()
@@ -473,7 +475,9 @@ class TestHaltPlan:
         """
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
 
-        with patch("app.services.buyplan_workflow._cancel_open_engine_requests_for_plan") as cancel_mock:
+        with patch(
+            "app.services.buyplan_workflow.buyplan_approval._cancel_open_engine_requests_for_plan"
+        ) as cancel_mock:
             result = halt_plan(plan.id, manager_user, db_session, reason="halt it")
 
         cancel_mock.assert_called_once()

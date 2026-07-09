@@ -192,7 +192,10 @@ def test_decide_approve_rolls_back_on_side_effect_failure(db_session: Session, m
     db_session.commit()
     ar = _open_requests(db_session, plan.id)[0]
 
-    import app.services.buyplan_workflow as bw
+    # _generate_buyer_tasks is called from WITHIN buyplan_approval (same module, plain
+    # intra-module call) — the patch must target that submodule directly, not the
+    # `app.services.buyplan_workflow` package (P4.3 split).
+    import app.services.buyplan_workflow.buyplan_approval as bw
 
     def _boom(*args, **kwargs):
         raise RuntimeError("buyer task generation blew up")
@@ -467,7 +470,11 @@ def test_orphan_request_approval_does_not_resurrect_cancelled_plan(db_session: S
     The state guard in ``_run_approve_side_effects`` raises ValueError → the request stays
     open and the plan stays CANCELLED with no buyer tasks generated.
     """
-    import app.services.buyplan_workflow as bw
+    # _cancel_open_engine_requests_for_plan and _generate_buyer_tasks are both called from
+    # WITHIN buyplan_approval (same module, plain intra-module calls) — the patch must
+    # target that submodule directly, not the `app.services.buyplan_workflow` package
+    # (P4.3 split).
+    import app.services.buyplan_workflow.buyplan_approval as bw
 
     approver = _make_approver(db_session)
     plan = _make_draft_plan(db_session, approver)

@@ -1574,7 +1574,7 @@ class TestIsStockSale:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.buyplan_approval.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
 
@@ -1601,7 +1601,7 @@ class TestIsStockSale:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.buyplan_approval.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
 
@@ -2098,7 +2098,7 @@ class TestCoverageGaps2:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.buyplan_approval.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
         assert result is False
@@ -2143,7 +2143,7 @@ class TestCoverageGaps2:
             return real_get(model, pk, **kw)
 
         db_session.refresh(plan)
-        with patch("app.services.buyplan_workflow.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.buyplan_approval.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             with patch.object(db_session, "get", side_effect=fake_get):
                 result = _is_stock_sale(plan, db_session)

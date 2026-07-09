@@ -83,7 +83,6 @@ ignore = [
 # per-file-ignores for nonexistent paths are inert, so these can be dropped
 # whenever the corresponding split lands.
 "app/routers/htmx_views.py" = ["BLE001"]
-"app/services/buyplan_workflow.py" = ["BLE001"]
 "app/routers/htmx/companies.py" = ["BLE001"]
 "app/routers/htmx/materials.py" = ["BLE001"]
 "app/routers/htmx/offers/crud.py" = ["BLE001"]
