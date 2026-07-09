@@ -135,30 +135,21 @@ jobs:
         if: matrix.shard == 0
         run: ruff check app/ tests/
 
-      - name: Assertion-theater lint (changed test files only)
+      - name: Assertion-theater lint (ratchet vs baseline)
         # P2.4: scripts/lint_assertion_theater.py flags a test whose ONLY
-        # assertion is a bare `status_code == 200` / `is not None` check (the
-        # audit-identified pattern — 542 existing offenders, tracked as P6.1
-        # backfill). Scoped to files CHANGED vs the PR base — same merge-base
-        # pattern as the pre-commit step above — so the 542 pre-existing
-        # offenders never block an unrelated PR; only a NEWLY touched test
-        # file must pass. Shard 0 only (same rationale as pre-commit).
+        # assertion is a bare `status_code == 200` / `is not None` check.
+        # Ratchet model: scripts/assertion_theater_baseline.txt pins the
+        # pre-existing offenders (P6.1 backfill burns it down); only NEW
+        # violations fail. Whole-tree scan — changed-files scoping proved
+        # useless the moment a mechanical sweep touched every test file.
+        # To shrink the baseline after fixing tests:
+        #   python scripts/lint_assertion_theater.py tests \
+        #     --baseline scripts/assertion_theater_baseline.txt --write-baseline
+        # Shard 0 only (same rationale as pre-commit).
         if: matrix.shard == 0
         run: |
-          if [ -n "$GITHUB_BASE_REF" ]; then
-            git fetch -q origin "$GITHUB_BASE_REF"
-            base=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)
-          else
-            base=$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)
-          fi
-          CHANGED=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- 'tests/*.py' || true)
-          if [ -z "$CHANGED" ]; then
-            echo "No changed test files vs $base — skipping assertion-theater lint."
-            exit 0
-          fi
-          echo "Checking changed test files for assertion-theater:"
-          echo "$CHANGED"
-          python scripts/lint_assertion_theater.py $CHANGED
+          python scripts/lint_assertion_theater.py tests \
+            --baseline scripts/assertion_theater_baseline.txt
 
       - name: No raw DDL outside Alembic
         if: matrix.shard == 0

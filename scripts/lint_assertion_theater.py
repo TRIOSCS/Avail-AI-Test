@@ -126,27 +126,63 @@ def _resolve_paths(raw_paths: list[str]) -> list[Path]:
     return sorted(files)
 
 
+def _violation_key(path: Path, name: str) -> str:
+    """Stable baseline key: file::function (line numbers drift too much to key on)."""
+    return f"{path.as_posix()}::{name}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", default=["tests"], help="test files/dirs to check (default: tests/)")
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help=(
+            "ratchet file of known pre-existing offenders (file::function per line); "
+            "only violations NOT in it fail the run. Burn-down tracked as P6.1."
+        ),
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="rewrite the --baseline file from the current tree's violations and exit 0",
+    )
     args = parser.parse_args(argv)
 
     files = _resolve_paths(args.paths)
-    total_violations = 0
+    found: list[tuple[Path, int, str]] = []
     for f in files:
         for lineno, name in check_file(f):
-            print(f"{f}:{lineno}: {name}() -- only assertion is a bare status_code==200 / is-not-None check")
-            total_violations += 1
+            found.append((f, lineno, name))
 
-    if total_violations:
+    if args.write_baseline:
+        if args.baseline is None:
+            print("--write-baseline requires --baseline PATH", file=sys.stderr)
+            return 2
+        args.baseline.write_text("".join(f"{_violation_key(f, name)}\n" for f, _, name in found))
+        print(f"Baseline written: {len(found)} known offender(s) -> {args.baseline}")
+        return 0
+
+    baseline: set[str] = set()
+    if args.baseline is not None and args.baseline.is_file():
+        baseline = {line.strip() for line in args.baseline.read_text().splitlines() if line.strip()}
+
+    new_violations = [(f, lineno, name) for f, lineno, name in found if _violation_key(f, name) not in baseline]
+    for f, lineno, name in new_violations:
+        print(f"{f}:{lineno}: {name}() -- only assertion is a bare status_code==200 / is-not-None check")
+
+    if new_violations:
         print(
-            f"\n{total_violations} assertion-theater violation(s) in {len(files)} file(s). "
+            f"\n{len(new_violations)} NEW assertion-theater violation(s) in {len(files)} file(s) checked "
+            f"({len(found) - len(new_violations)} pre-existing offender(s) ratcheted in the baseline). "
             f"Seed matching + non-matching rows and assert on rendered content instead, "
             f"or add `# {ALLOW_MARKER}` if the shallow check is deliberate.",
             file=sys.stderr,
         )
         return 1
-    print(f"No assertion-theater violations in {len(files)} file(s) checked.")
+    suffix = f" ({len(found)} known offender(s) still in the baseline)" if found else ""
+    print(f"No NEW assertion-theater violations in {len(files)} file(s) checked{suffix}.")
     return 0
 
 
