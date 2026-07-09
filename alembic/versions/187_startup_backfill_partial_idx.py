@@ -32,7 +32,9 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "187_startup_backfill_partial_idx"
-down_revision = "a431c202afa4"
+# Serialized after P3.1's index migration (both landed on the same branch;
+# linear history keeps `alembic downgrade -1` unambiguous — no merge point).
+down_revision = "71d3fef96529"
 branch_labels = None
 depends_on = None
 
