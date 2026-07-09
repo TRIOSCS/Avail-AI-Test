@@ -215,7 +215,7 @@ class BaseConnector(ABC):
             return await self._search_with_retry(part_number)
 
     async def _search_with_retry(self, part_number: str) -> list[dict]:
-        last_err = None
+        last_err: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 result = await self._do_search(part_number)
@@ -823,7 +823,7 @@ class BrokerBinConnector(BaseConnector):
         if not isinstance(items, list):
             return []
 
-        results = []
+        results: list[dict] = []
         for item in items:
             if not isinstance(item, dict):
                 continue

@@ -625,9 +625,9 @@ async def _render_sightings_table(
     # ── MPN → MaterialCard link map ─────────────────────────────
     link_map = _mpn_link_map(db, requirements) if requirements else {}
 
-    groups = None
+    groups: dict[str, list] | None = None
     if filters.group_by in ("brand", "manufacturer"):
-        groups: dict[str, list] = {}
+        groups = {}
         for r in requirements:
             # Group by the ENRICHED value from the linked material card (the manufacturer/
             # brand derived from the MPN) first; fall back to the requirement's own field.
@@ -2401,7 +2401,7 @@ async def sightings_composer_vendor(
                     from ..utils.async_helpers import safe_background_task
                     from ..utils.vendor_helpers import _background_enrich_vendor
 
-                    await safe_background_task(
+                    _ = await safe_background_task(
                         _background_enrich_vendor(card.id, card.domain, card.display_name),
                         task_name="enrich_vendor_from_composer",
                     )

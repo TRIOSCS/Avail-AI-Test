@@ -168,7 +168,9 @@ def can_manage_account_team(user: User, company: Company) -> bool:
 
     Intentionally does NOT accept collaborators, site-owners, or buyers.
     """
-    return is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
+    return bool(
+        is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
+    )
 
 
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:
@@ -475,14 +477,14 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
 
         m = db.query(VerificationGroupMember).filter_by(user_id=user.id).first()
         return bool(m and m.is_active)
-    overrides = user.access_overrides or {}
+    overrides: dict = dict(user.access_overrides or {})
     if key_str in overrides:
         return bool(overrides[key_str])
     try:
         ak = AccessKey(key_str)
     except ValueError:
         return False
-    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())
+    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())  # type: ignore[call-overload, unused-ignore]  # user.role is a plain str at instance level; StrEnum-keyed lookup by str works
 
 
 def require_access(key):
@@ -588,7 +590,7 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
             else user.token_expires_at.replace(tzinfo=timezone.utc)
         )
         if datetime.now(timezone.utc) > expiry:
-            user.m365_connected = False
+            user.m365_connected = False  # type: ignore[assignment, unused-ignore]  # ORM Column[bool] instance write
             db.commit()
             raise HTTPException(401, "Session expired — please log in again")
 

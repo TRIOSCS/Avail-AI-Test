@@ -27,8 +27,8 @@ except Exception:  # pragma: no cover
         "approvals.notifications: Graph imports unavailable — email dispatch disabled",
         exc_info=True,
     )
-    GraphClient = None  # type: ignore[assignment,misc]
-    get_valid_token = None  # type: ignore[assignment]
+    GraphClient = None
+    get_valid_token = None
 
 
 async def send_email(user, subject: str, html_body: str, db: Session) -> None:

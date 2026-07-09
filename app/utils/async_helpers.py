@@ -13,6 +13,19 @@ from typing import Any, Coroutine
 
 from loguru import logger
 
+# Strong references to in-flight fire-and-forget tasks. asyncio only keeps a
+# weak reference to scheduled tasks, so a discarded create_task() result can be
+# garbage-collected mid-flight (P0.4 in docs/CODE_AUDIT_AND_HARDENING_PLAN.md).
+# Holding the ref HERE protects every caller; the done-callback drops it so the
+# set never grows unbounded.
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _hold_ref(task: asyncio.Task) -> asyncio.Task:
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
+
 
 async def safe_background_task(
     coro: Coroutine[Any, Any, Any],
@@ -36,7 +49,9 @@ async def safe_background_task(
         task_name: Label for logging on success/failure
 
     Returns:
-        The created asyncio.Task (can be awaited if needed, but usually ignored)
+        The created asyncio.Task (can be awaited if needed, but usually ignored;
+        a strong reference is held internally, so discarding it is safe —
+        fire-and-forget callers should write ``_ = await safe_background_task(...)``)
     """
     # Under the test suite, fire-and-forget tasks that open real async DB sessions
     # cause nondeterministic xdist worker segfaults during teardown.  Close the
@@ -49,7 +64,7 @@ async def safe_background_task(
         async def _noop():
             return None
 
-        return asyncio.create_task(_noop(), name=task_name)
+        return _hold_ref(asyncio.create_task(_noop(), name=task_name))
 
     async def _wrapper():
         try:
@@ -61,5 +76,4 @@ async def safe_background_task(
             logger.error("Background task '{}' failed", task_name, exc_info=True)
             return None
 
-    task = asyncio.create_task(_wrapper(), name=task_name)
-    return task
+    return _hold_ref(asyncio.create_task(_wrapper(), name=task_name))

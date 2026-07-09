@@ -108,7 +108,7 @@ async def run_prepayment_notify_bg(coro_fn, prepayment_id: int) -> None:
         finally:
             bg_db.close()
 
-    await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
+    _ = await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
 
 
 def schedule_prepayment_notify(coro) -> None:

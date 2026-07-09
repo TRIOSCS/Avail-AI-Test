@@ -42,7 +42,7 @@ def _auto_keep_rank(company: dict) -> tuple[int, int, int, int]:
     )
 
 
-def _pair_dict(a: dict, b: dict, score: int) -> dict:
+def _pair_dict(a: dict, b: dict, score: float) -> dict:
     """Build one nested candidate dict (the public shape both backends emit).
 
     auto_keep_id follows the heuristic: more sites → has owner → is strategic → older id.

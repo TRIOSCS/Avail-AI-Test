@@ -80,7 +80,7 @@ def parse_date_field(value: str, field_name: str = "date") -> datetime:
         dt = datetime.fromisoformat(value)
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, f"Invalid {field_name}: {value!r} — expected ISO 8601 format") from exc
-    return to_utc(dt)  # type: ignore[return-value]
+    return to_utc(dt)
 
 
 def parse_positive_int(value: str | int, field_name: str = "value") -> int:

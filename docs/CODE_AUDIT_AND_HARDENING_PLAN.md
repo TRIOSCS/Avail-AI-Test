@@ -40,7 +40,7 @@ These are confirmed defects shipping today, not style issues.
   task results unreferenced; `sighting-updated` events silently lost. Fix: hold refs
   (`_bg_tasks.add(task); task.add_done_callback(_bg_tasks.discard)`).
 
-- [ ] **P0.5 — The mypy CI gate is hollow.**
+- [x] **P0.5 — The mypy CI gate is hollow.**
   Two configs coexist: `mypy.ini` (bare run → 566 errors in 158 files) vs
   `pyproject.toml [tool.mypy]` with `ignore_errors = true` for `app.routers.*`,
   `app.services.*`, `app.connectors.*`, `app.jobs.*`, `app.schemas.*` — which is what
@@ -49,6 +49,31 @@ These are confirmed defects shipping today, not style issues.
   delete `mypy.ini`, remove `ignore_errors` at least for `app.routers.*`, enable
   `check_untyped_defs = true`, burn down errors module-group by module-group
   (273 `no-any-return`, 81 `attr-defined`, 73 `union-attr`, 46 `arg-type`, …).
+  **Fixed:** `mypy.ini` deleted; `pyproject.toml [tool.mypy]` is the single config.
+  `ignore_errors` is gone everywhere; every module is now checked with
+  `check_untyped_defs = true`, and `unused-coroutine` + `unused-awaitable` are enforced
+  across the whole tree (verified: deleting an `await` in `app/routers/htmx_views.py` or
+  discarding a `safe_background_task` Task fails the gate). Enabling the gate immediately
+  caught two real bug families: (1) `app/services/attachment_parser.py` called
+  `claude_structured(tool_schema=...)` — a stale kwarg + tool-definition wrapper that
+  raised `TypeError` on every call and silently disabled AI column detection (fixed,
+  regression test added); (2) 17 fire-and-forget `await safe_background_task(...)` sites
+  discarded their Task while the helper held no strong ref — the P0.4 GC bug at scale
+  (fixed once inside `app/utils/async_helpers.py`; call sites now `_ = await ...`).
+  Fully re-enabled, zero suppressions: `app.schemas.*`, `app.connectors.*`, `app.cache.*`,
+  `app.enrichment_service`, `app.scoring`, `app.utils.llm_router`, `app.utils.claude_client`.
+  **Honest remaining debt** (per-module `disable_error_code` lists in `pyproject.toml`,
+  all rooted in untyped `Column(...)` declarative models — migrate to `Mapped[]` to burn
+  down): `app.routers.*` ~1,380 (arg-type 638, assignment 377, union-attr 232, …);
+  `app.services.*` ~1,370 (assignment 540, arg-type 482, attr-defined 101, …);
+  `app.search_service` ~100; `app.management.*` ~92; `app.models.*` ~56 (var-annotated 46);
+  `app.email_service` ~50; `app.jobs.*` ~24; `app.startup` ~10; `app.utils.vendor_helpers` ~7.
+  Also not yet enabled globally: `warn_return_any` (~273 `no-any-return` from the old
+  `mypy.ini` wish-list). Dangerous codes stay live everywhere: `unused-coroutine`,
+  `unused-awaitable`, `call-arg`, `no-redef`, `name-defined`, `unused-ignore`, `return`.
+  Note: the pre-commit hook env (mypy 1.15.0, no project deps) and a full-deps run
+  (mypy 2.1.0) disagree on which errors exist; cross-env-sensitive suppressions use
+  `# type: ignore[code, unused-ignore]` so both stay green.
 
 - [x] **P0.6 — `"complete"` vs `"completed"` status-string landmine.**
   `app/services/prospect_scheduler.py:260` sets `batch.status = "complete"` while

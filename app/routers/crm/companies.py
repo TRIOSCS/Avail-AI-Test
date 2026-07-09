@@ -494,7 +494,7 @@ async def create_company(
             except Exception:
                 logger.exception("Background enrichment failed for company {}", cid)
 
-        await safe_background_task(
+        _ = await safe_background_task(
             _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"], user.id),
             task_name="enrich_company_bg",
         )

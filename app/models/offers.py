@@ -159,14 +159,14 @@ class Offer(Base):
             "packaging": self.packaging,
             "date_code": self.date_code,
             **{
-                k: (self.qualification or {}).get(k)
+                k: (self.qualification or {}).get(k)  # type: ignore[call-overload, unused-ignore]  # JSON column is a dict at instance level
                 for k in ("usage", "refurbished_by", "refurb_process", "cert_doc", "part_condition")
             },
         }
         has_images = bool(self.attachments)
-        filled, total = meter(self.condition, data, has_images)
+        filled, total = meter(self.condition, data, has_images)  # type: ignore[arg-type, unused-ignore]  # Column[str] is str at instance level
         return {
-            "status": compute_status(self.condition, data, has_images),
+            "status": compute_status(self.condition, data, has_images),  # type: ignore[arg-type, unused-ignore]  # Column[str] is str at instance level
             "filled": filled,
             "total": total,
             "note": self.qualification_note,

@@ -189,7 +189,7 @@ if settings.rate_limit_enabled:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type, unused-ignore]  # slowapi handler is narrower than Starlette's protocol
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse

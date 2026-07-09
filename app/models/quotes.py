@@ -172,7 +172,7 @@ def _quote_self_link(_mapper, connection, target) -> None:
     if target.requisition_id is None:
         return
     connection.execute(
-        QuoteRequisition.__table__.insert().values(
+        QuoteRequisition.__table__.insert().values(  # type: ignore[attr-defined, unused-ignore]  # __table__ is a Table at runtime
             quote_id=target.id,
             requisition_id=target.requisition_id,
             created_at=target.created_at or datetime.now(timezone.utc),

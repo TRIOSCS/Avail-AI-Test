@@ -783,7 +783,7 @@ async def _maybe_enrich_vendor(db: Session, result: StockListResult) -> bool:
     vendor_card = db.get(VendorCard, result.vendor_card_id)
     if not vendor_card or not vendor_card.domain:
         return False
-    await safe_background_task(
+    _ = await safe_background_task(
         _background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name),
         task_name="enrich_vendor_bg",
     )

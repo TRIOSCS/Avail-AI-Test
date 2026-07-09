@@ -18,7 +18,7 @@ from .config import TbfConfig
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # pragma: no cover
+    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

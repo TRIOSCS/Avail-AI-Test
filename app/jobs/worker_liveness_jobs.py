@@ -136,8 +136,8 @@ async def _job_monitor_worker_heartbeats():
             row = db.get(model, 1)
             if row is None:
                 continue
-            is_running = bool(row.is_running)
-            hb = row.last_heartbeat
+            is_running = bool(row.is_running)  # type: ignore[attr-defined, unused-ignore]  # dynamic per-worker status model
+            hb = row.last_heartbeat  # type: ignore[attr-defined, unused-ignore]  # dynamic per-worker status model
 
             # Stale: claims to be running but the heartbeat went silent (or never landed).
             if should_alert_stale_heartbeat(

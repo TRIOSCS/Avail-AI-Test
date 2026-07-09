@@ -267,7 +267,7 @@ async def maybe_trigger_vendor_enrichment(db: Session, result: StockListResult) 
     if not vc or not vc.domain:
         return False
 
-    await safe_background_task(
+    _ = await safe_background_task(
         _background_enrich_vendor(vc.id, vc.domain, vc.display_name),
         task_name="enrich_vendor_bg",
     )

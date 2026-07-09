@@ -44,7 +44,7 @@ class KnowledgeEntryUpdate(BaseModel):
     expires_at: datetime | None = None
 
 
-class KnowledgeEntryResponse(BaseModel, extra="allow"):
+class KnowledgeEntryResponse(BaseModel, extra="allow"):  # type: ignore[call-arg, unused-ignore]  # pydantic class kwargs; dep-less pre-commit env can't see them
     id: int
     entry_type: str
     content: str

@@ -647,7 +647,7 @@ async def claude_batch_results(
             return None
 
         # Parse JSONL results
-        parsed = {}
+        parsed: dict = {}
         for line in results_resp.text.strip().split("\n"):
             if not line.strip():
                 continue

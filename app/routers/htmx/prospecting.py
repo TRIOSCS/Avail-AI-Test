@@ -478,7 +478,7 @@ async def claim_prospect_htmx(
         error = str(e)
 
     if not error:
-        await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
+        _ = await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
 
     prospect = (
         db.query(ProspectAccount)
@@ -621,7 +621,7 @@ async def enrich_prospect_htmx(
         ed["enrich_started_at"] = datetime.now(timezone.utc).isoformat()
         prospect.enrichment_data = ed
         db.commit()
-        await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
+        _ = await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
 
     return template_response(
         "htmx/partials/prospecting/enrich_status.html",
@@ -735,7 +735,7 @@ async def assign_prospect_htmx(
 
     # Same background deep-enrichment a self-claim triggers, so an assigned account is
     # enriched for the rep it landed with.
-    await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
+    _ = await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
 
     prospect = (
         db.query(ProspectAccount)

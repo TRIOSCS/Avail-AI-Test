@@ -109,7 +109,7 @@ def get_cached(cache_key: str) -> dict | None:
     return None
 
 
-def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
+def set_cached(cache_key: str, data: dict | list, ttl_days: float = 7) -> None:
     """Store data in cache with TTL."""
     ttl_seconds = _ttl_seconds(ttl_days)
 

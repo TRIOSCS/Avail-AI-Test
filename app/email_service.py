@@ -727,7 +727,7 @@ async def poll_inbox(
     req_email_map: dict[tuple[int, str], Contact] = {}
     for c in all_contacts:
         if c.graph_conversation_id:
-            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)
+            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)  # type: ignore[call-overload, unused-ignore]  # Column[str] key is str at instance level
         # Build req+email map for Tier 2 (all contacts, not just this user's)
         if c.requisition_id and c.vendor_contact:
             req_email_map.setdefault((c.requisition_id, c.vendor_contact.lower()), c)
@@ -1661,7 +1661,7 @@ async def process_batch_results(db: Session) -> int:
             continue
 
         # Batch complete -- apply results
-        request_map = pb.request_map or {}
+        request_map: dict = pb.request_map or {}
         applied = 0
 
         for custom_id, parsed_data in results.items():

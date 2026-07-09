@@ -77,6 +77,26 @@ async def test_default_task_name():
 
 
 @pytest.mark.asyncio
+async def test_strong_reference_held_until_done():
+    """A strong ref is held internally until the task completes (P0.4: asyncio keeps
+    only weak refs to scheduled tasks, so a discarded create_task() result could be
+    garbage-collected mid-flight), then dropped so the set stays bounded."""
+    from app.utils import async_helpers
+
+    release = asyncio.Event()
+
+    async def _work():
+        await release.wait()
+
+    task = await safe_background_task(_work(), task_name="ref_test")
+    await asyncio.sleep(0)  # let the task start
+    assert task in async_helpers._bg_tasks
+    release.set()
+    await task
+    assert task not in async_helpers._bg_tasks
+
+
+@pytest.mark.asyncio
 async def test_cancellation_logged():
     """Cancellation logs an info message with the task name."""
     captured = []

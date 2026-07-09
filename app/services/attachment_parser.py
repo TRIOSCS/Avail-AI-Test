@@ -65,46 +65,45 @@ async def _ai_detect_columns(
     """
     from app.utils.claude_client import claude_structured
 
+    # Bare JSON Schema — claude_structured(schema=...) takes the schema itself,
+    # not a tool definition (the pre-Structured-Outputs {"name"/"input_schema"}
+    # wrapper broke this call with a TypeError that the except below swallowed).
     COLUMN_SCHEMA = {
-        "name": "column_mapping",
-        "description": "Map spreadsheet column indices to standard field names",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "mappings": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "column_index": {
-                                "type": "integer",
-                                "description": "0-based column index",
-                            },
-                            "field_name": {
-                                "type": "string",
-                                "enum": [
-                                    "mpn",
-                                    "manufacturer",
-                                    "qty",
-                                    "unit_price",
-                                    "currency",
-                                    "condition",
-                                    "date_code",
-                                    "lead_time",
-                                    "packaging",
-                                    "description",
-                                    "moq",
-                                    "ignore",
-                                ],
-                            },
-                            "confidence": {"type": "number", "description": "0.0-1.0"},
+        "type": "object",
+        "properties": {
+            "mappings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "column_index": {
+                            "type": "integer",
+                            "description": "0-based column index",
                         },
-                        "required": ["column_index", "field_name", "confidence"],
+                        "field_name": {
+                            "type": "string",
+                            "enum": [
+                                "mpn",
+                                "manufacturer",
+                                "qty",
+                                "unit_price",
+                                "currency",
+                                "condition",
+                                "date_code",
+                                "lead_time",
+                                "packaging",
+                                "description",
+                                "moq",
+                                "ignore",
+                            ],
+                        },
+                        "confidence": {"type": "number", "description": "0.0-1.0"},
                     },
+                    "required": ["column_index", "field_name", "confidence"],
                 },
             },
-            "required": ["mappings"],
         },
+        "required": ["mappings"],
     }
 
     prompt = f"""Analyze this spreadsheet from vendor domain "{vendor_domain}".
@@ -125,7 +124,7 @@ Rules:
     try:
         result = await claude_structured(
             prompt=prompt,
-            tool_schema=COLUMN_SCHEMA,
+            schema=COLUMN_SCHEMA,
             model_tier="fast",
         )
         if not result or "mappings" not in result:

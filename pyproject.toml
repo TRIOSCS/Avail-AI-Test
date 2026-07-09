@@ -2,33 +2,96 @@
 exclude_dirs = ["tests", "alembic"]
 skips = ["B101"]  # allow assert in non-test code (used in type narrowing)
 
+# ---------------------------------------------------------------------------
+# mypy — SINGLE source of truth (mypy.ini was deleted; P0.5 in
+# docs/CODE_AUDIT_AND_HARDENING_PLAN.md). CI/pre-commit run:
+#   mypy --ignore-missing-imports --no-strict-optional --config-file=pyproject.toml app/
+#
+# Every module is CHECKED (`ignore_errors` is banned — it silently disabled
+# ~90% of the codebase and let unawaited-coroutine bugs ship). Legacy
+# `Column[X]` declarative-model noise is suppressed per module group via
+# targeted `disable_error_code` lists below; everything NOT listed —
+# in particular unused-coroutine, unused-awaitable, name-defined, call-arg,
+# no-redef, truthy-*, return — stays live everywhere.
+# Burn-down of the disabled codes is tracked under P0.5.
+# ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.13"
 ignore_missing_imports = true
 no_strict_optional = true
+warn_unused_configs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-check_untyped_defs = false
+check_untyped_defs = true
 disallow_untyped_defs = false
+# unused-coroutine is on by default; listed for explicitness (it is the error
+# class that motivated P0.5). unused-awaitable is opt-in and catches dangling
+# asyncio.create_task/gather results (P0.4).
+enable_error_code = ["unused-coroutine", "unused-awaitable"]
 exclude = ["alembic/", "tests/"]
 
+# --- P0.5 burn-down overrides ----------------------------------------------
+# Each block suppresses ONLY the error codes that are systemic legacy noise
+# (untyped `Column(...)` declarative models make every attribute read/write a
+# Column[X] vs value mismatch: assignment/arg-type/union-attr/index/...).
+# Error counts at time of writing are noted per block. Do NOT add codes to
+# these lists — fix new errors instead. Fully re-enabled (no override needed):
+# app.schemas.*, app.connectors.*, app.cache.*, app.enrichment_service,
+# app.scoring, app.utils.llm_router, app.utils.claude_client.
+
 [[tool.mypy.overrides]]
-module = [
-    "app.routers.*",
-    "app.services.*",
-    "app.connectors.*",
-    "app.jobs.*",
-    "app.schemas.*",
-    "app.utils.claude_client",
-    "app.utils.llm_router",
-    "app.utils.vendor_helpers",
-    "app.enrichment_service",
-    "app.email_service",
-    "app.scoring",
-    "app.search_service",
-    "app.startup",
+# ~1380 ORM-noise errors (arg-type:638 assignment:377 union-attr:232 ...).
+# Live here: unused-coroutine, unused-awaitable, call-arg, no-redef, name-defined, ...
+module = ["app.routers.*"]
+disable_error_code = [
+    "arg-type", "assignment", "union-attr", "attr-defined", "call-overload",
+    "return-value", "var-annotated", "misc", "type-var", "index", "list-item",
 ]
-ignore_errors = true
+
+[[tool.mypy.overrides]]
+# ~1370 ORM-noise errors (assignment:540 arg-type:482 attr-defined:101 ...).
+module = ["app.services.*"]
+disable_error_code = [
+    "assignment", "arg-type", "attr-defined", "var-annotated", "call-overload",
+    "return-value", "union-attr", "index", "misc", "operator", "type-var",
+    "typeddict-item", "str-format", "list-item",
+]
+
+[[tool.mypy.overrides]]
+# ~100 ORM-noise errors (arg-type:57 attr-defined:23 assignment:15 ...).
+module = ["app.search_service"]
+disable_error_code = ["arg-type", "attr-defined", "assignment", "call-overload"]
+
+[[tool.mypy.overrides]]
+# ~50 ORM-noise errors (assignment:28 arg-type:22).
+module = ["app.email_service"]
+disable_error_code = ["assignment", "arg-type"]
+
+[[tool.mypy.overrides]]
+# ~24 ORM-noise errors (arg-type:13 assignment:11).
+module = ["app.jobs.*"]
+disable_error_code = ["assignment", "arg-type"]
+
+[[tool.mypy.overrides]]
+# ~56 ORM-noise errors: Column(UTCDateTime) columns need Mapped[] annotations
+# (var-annotated:46) and Column[str] attribute writes (assignment:10).
+module = ["app.models.*"]
+disable_error_code = ["var-annotated", "assignment"]
+
+[[tool.mypy.overrides]]
+# One-off CLI scripts; ~92 ORM-noise errors (arg-type:67 assignment:18 ...).
+module = ["app.management.*"]
+disable_error_code = ["arg-type", "assignment", "index", "call-overload", "return-value"]
+
+[[tool.mypy.overrides]]
+# ~10 ORM-noise errors (assignment:5 arg-type:2 ...).
+module = ["app.startup"]
+disable_error_code = ["assignment", "arg-type"]
+
+[[tool.mypy.overrides]]
+# ~7 ORM-noise errors (assignment:3 union-attr:3 arg-type:1).
+module = ["app.utils.vendor_helpers"]
+disable_error_code = ["assignment", "union-attr", "arg-type"]
 
 [tool.docformatter]
 wrap-summaries = 88

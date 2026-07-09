@@ -187,7 +187,7 @@ def get_all_pns(req: Requirement) -> list[str]:
         if key:
             pns.append(display)
             seen_keys.add(key)
-    for sub in req.substitutes or []:
+    for sub in req.substitutes or []:  # type: ignore[union-attr, unused-ignore]  # JSON column is a list at instance level
         if isinstance(sub, dict):
             s = (sub.get("mpn") or "").strip()
         else:
@@ -1356,7 +1356,7 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     e14_key = _c("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
-    return connectors, source_stats_map, disabled_sources
+    return connectors, source_stats_map, disabled_sources  # type: ignore[return-value, unused-ignore]  # set holds instance-level str values
 
 
 # Canonical display names for the live-market connectors (used by the dossier
@@ -1946,7 +1946,7 @@ def _save_sightings(
 
     rebuild_vendor_summaries_from_sightings(db, req.id, sightings)
 
-    return sightings
+    return sightings  # type: ignore[return-value, unused-ignore]  # mypy misinfers element type via ORM columns
 
 
 def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
@@ -2287,7 +2287,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     for s in pn_sightings:
         if not s.vendor_name:
             continue
-        raw = s.raw_data or {}
+        raw: dict = s.raw_data or {}
         vn_key = normalize_vendor_name(s.vendor_name)
         vh = existing_vh.get(vn_key)
 
@@ -2484,11 +2484,11 @@ async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> No
         finally:
             session.close()
 
-    await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
+    _ = await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
 
 
 def sighting_to_dict(s: Sighting) -> dict:
-    raw = s.raw_data or {}
+    raw: dict = s.raw_data or {}
     has_contact = bool(s.vendor_email or s.vendor_phone)
     has_price = s.unit_price is not None
     has_qty = s.qty_available is not None

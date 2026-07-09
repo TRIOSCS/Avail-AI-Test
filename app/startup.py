@@ -648,7 +648,7 @@ def _backfill_normalized_mpn() -> None:
                 )
             ).fetchall()
             # Build candidate map: normalized_mpn -> list of (id, norm)
-            candidates = {}
+            candidates: dict = {}
             for c in cards:
                 new_norm = _norm_key(c[1])
                 if new_norm:
@@ -1188,7 +1188,7 @@ def _backfill_material_cards() -> None:
             if card:
                 r.material_card_id = card.id
                 linked += 1
-            for sub in r.substitutes or []:
+            for sub in r.substitutes or []:  # type: ignore[union-attr, unused-ignore]  # JSON column is a list at instance level
                 sub_mpn = sub.get("mpn") if isinstance(sub, dict) else sub
                 if sub_mpn:
                     resolve_material_card(sub_mpn, db)
@@ -1410,7 +1410,7 @@ def seed_api_sources() -> None:
 
         # Remove legacy "newark" source (renamed to "element14")
         if "newark" in existing_map and "element14" in existing_map:
-            old_newark = existing_map["newark"]
+            old_newark = existing_map["newark"]  # type: ignore[index, unused-ignore]  # dict is keyed by instance-level str values
             db.query(ApiUsageLog).filter(ApiUsageLog.source_id == old_newark.id).delete()
             db.delete(old_newark)
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")

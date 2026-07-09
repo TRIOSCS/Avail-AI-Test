@@ -105,6 +105,34 @@ class TestAIDetectColumns:
         assert result == {0: "mpn", 1: "manufacturer", 2: "qty"}
 
     @pytest.mark.asyncio
+    async def test_ai_detect_calls_claude_structured_with_real_signature(self):
+        """The call must match claude_structured's real signature and pass a BARE JSON
+        Schema.
+
+        Regression: a stale ``tool_schema=`` kwarg plus a tool-definition wrapper
+        ({"name"/"input_schema"}) raised TypeError on every call — swallowed by the
+        except block, silently disabling AI column detection. A spec-bound mock
+        rejects any drift from the real signature.
+        """
+        from app.utils import claude_client
+
+        mock = AsyncMock(spec=claude_client.claude_structured, return_value={"mappings": []})
+        with patch("app.utils.claude_client.claude_structured", mock):
+            from app.services.attachment_parser import _ai_detect_columns
+
+            result = await _ai_detect_columns(
+                headers=["A"],
+                sample_rows=[["x"]],
+                vendor_domain="vendor.com",
+            )
+
+        assert result == {}
+        schema = mock.await_args.kwargs["schema"]
+        assert schema["type"] == "object"
+        assert "mappings" in schema["properties"]
+        assert "input_schema" not in schema  # bare schema, not a tool definition
+
+    @pytest.mark.asyncio
     async def test_ai_detect_failure(self):
         """AI failure (exception) returns empty mapping."""
         with patch(

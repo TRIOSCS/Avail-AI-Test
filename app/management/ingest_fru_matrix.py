@@ -228,7 +228,7 @@ def _context_limits() -> dict[str, int]:
     from app.models.fru_link import FruLink
 
     return {
-        name: FruLink.__table__.columns[name].type.length
+        name: FruLink.__table__.columns[name].type.length  # type: ignore[attr-defined, unused-ignore]  # String columns expose .length
         for name in ("manufacturer", "series", "machine", "qual_status")
     }
 

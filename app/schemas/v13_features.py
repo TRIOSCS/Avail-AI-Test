@@ -92,7 +92,7 @@ class StrategicToggle(BaseModel):
 # ── Webhook & Email Schemas ─────────────────────────────────────────
 
 
-class GraphWebhookPayload(BaseModel, extra="allow"):
+class GraphWebhookPayload(BaseModel, extra="allow"):  # type: ignore[call-arg, unused-ignore]  # pydantic class kwargs; dep-less pre-commit env can't see them
     """Microsoft Graph webhook notification payload."""
 
     value: list[dict] = []
