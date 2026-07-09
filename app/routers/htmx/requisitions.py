@@ -824,8 +824,8 @@ async def customers_typeahead_dropdown(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """P5.2: server-rendered debounced dropdown for the unified requisition
-    modal's customer picker (unified_modal.html, customerPicker() in htmx_app.js).
+    """P5.2: server-rendered debounced dropdown for the unified requisition modal's
+    customer picker (unified_modal.html, customerPicker() in htmx_app.js).
 
     Reuses the same active-Company + site query that backs the JSON
     /api/companies/typeahead endpoint (crm.companies.companies_typeahead) — that

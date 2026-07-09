@@ -2135,9 +2135,9 @@ class TestComposerVendor:
 
 
 class TestVendorSearchDropdown:
-    """P5.2: GET /v2/partials/sightings/vendor-search — the server-rendered
-    HTML sibling of /api/autocomplete/names (vendors-only, that JSON endpoint
-    is untouched) backing the composer's "Find any vendor" dropdown."""
+    """P5.2: GET /v2/partials/sightings/vendor-search — the server-rendered HTML sibling
+    of /api/autocomplete/names (vendors-only, that JSON endpoint is untouched) backing
+    the composer's "Find any vendor" dropdown."""
 
     URL = "/v2/partials/sightings/vendor-search"
 

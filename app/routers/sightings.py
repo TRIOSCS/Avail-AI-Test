@@ -2228,14 +2228,14 @@ async def sightings_vendor_search(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """P5.2: server-rendered debounced dropdown for the composer's "Find any
-    vendor" picker (sightings/vendor_modal.html, rfqVendorModal.searchVendors()).
+    """P5.2: server-rendered debounced dropdown for the composer's "Find any vendor"
+    picker (sightings/vendor_modal.html, rfqVendorModal.searchVendors()).
 
     Reuses the SAME VendorCard name/alternate-names match that backs
-    /api/autocomplete/names (vendors_crud.autocomplete_names) — that JSON
-    endpoint mixes vendors + customers for a different caller and is left
-    intact; this is a vendors-only HTML sibling so the picker's dropdown is a
-    real hx-get swap instead of a client-side fetch + filter.
+    /api/autocomplete/names (vendors_crud.autocomplete_names) — that JSON endpoint mixes
+    vendors + customers for a different caller and is left intact; this is a vendors-
+    only HTML sibling so the picker's dropdown is a real hx-get swap instead of a
+    client-side fetch + filter.
     """
     from ..utils.search_builder import SearchBuilder
 

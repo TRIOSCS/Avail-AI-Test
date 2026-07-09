@@ -35,7 +35,8 @@ DIRECT_ACCESS_PAGES = [
 
 def _get_current_view(page: Page) -> str:
     """Read the bottom nav's reactive `activeNav` off its public data-current-view
-    attribute (mobile_nav.html — the Alpine component that actually owns and
+    attribute (mobile_nav.html — the Alpine component that actually owns and.
+
     updates current-view state across HTMX navigation, via
     @htmx:pushed-into-history and each nav link's @click). Avoids reaching into
     Alpine's private `_x_dataStack` internals (P5.5) — and reads real state:
