@@ -3,7 +3,7 @@
 Covers: ApiUsageLog model, health_monitor service (ping/deep/run),
 credential-based status fix, system alerts endpoint, dashboard endpoint.
 
-Depends on: conftest.py (db_session, TestSessionLocal, engine)
+Depends on: conftest.py (db_session)
 """
 
 from datetime import UTC, datetime
@@ -14,18 +14,6 @@ from fastapi.testclient import TestClient
 
 from app.models import User
 from app.models.config import ApiSource, ApiUsageLog
-
-
-def _mock_session_returning(active_sources):
-    """Build a mock DB session whose active-source query returns ``active_sources``.
-
-    Returns ``(mock_session, mock_session_cls)`` matching the query chain
-    ``query(...).filter(...).filter(...).all()`` used by run_health_checks.
-    """
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = active_sources
-    return mock_session, MagicMock(return_value=mock_session)
-
 
 # ── Model Tests ──────────────────────────────────────────────────────
 
@@ -307,7 +295,21 @@ def test_get_connector_returns_none_on_exception(db_session):
 
 @pytest.mark.asyncio
 async def test_run_health_checks_ping(db_session):
-    """run_health_checks with ping runs ping_source on all active sources."""
+    """run_health_checks with ping runs ping_source on all active sources.
+
+    P6.3: patches ``app.database.SessionLocal`` to return the SAME real ``db_session``
+    (rather than a whole-session MagicMock) — the previous mock's
+    ``query().filter().filter().all()`` chain returned whatever list it was told to,
+    regardless of the REAL ``is_active`` filter run_health_checks applies. An inactive
+    source is seeded alongside the two active ones to prove that filter is genuinely
+    exercised, not just stubbed out by the mock. (A brand-new ``TestSessionLocal()``
+    session was tried first but doesn't share the same in-memory DB as the autouse
+    ``db_session`` fixture — pytest's own conftest auto-import and this file's
+    ``from tests.conftest import ...`` resolve to two different ``sys.modules`` entries
+    for "conftest" vs "tests.conftest", each running conftest.py's module-level
+    ``create_engine(...)`` once — so returning ``db_session`` itself is both simpler
+    and correct.)
+    """
     src1 = ApiSource(
         name="src_ping_a",
         display_name="Source A",
@@ -324,26 +326,32 @@ async def test_run_health_checks_ping(db_session):
         status="live",
         is_active=True,
     )
-    db_session.add_all([src1, src2])
+    inactive = ApiSource(
+        name="src_ping_inactive",
+        display_name="Inactive Source",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=False,
+    )
+    db_session.add_all([src1, src2, inactive])
     db_session.commit()
 
-    mock_session, mock_session_cls = _mock_session_returning([src1, src2])
     ping_mock = AsyncMock(return_value={"success": True, "elapsed_ms": 42, "error": None})
 
     with (
-        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.database.SessionLocal", lambda: db_session),
         patch("app.services.health_monitor.ping_source", ping_mock),
     ):
         from app.services.health_monitor import run_health_checks
 
         result = await run_health_checks("ping")
 
-    assert result["total"] == 2
+    assert result["total"] == 2  # inactive source excluded by the real is_active filter
     assert result["passed"] == 2
     assert result["failed"] == 0
     assert ping_mock.call_count == 2
-    assert mock_session.commit.call_count == 2  # one commit per source
-    mock_session.close.assert_called_once()
+    assert set(result["sources"].keys()) == {"src_ping_a", "src_ping_b"}
 
 
 @pytest.mark.asyncio
@@ -360,7 +368,6 @@ async def test_run_health_checks_deep(db_session):
     db_session.add(src)
     db_session.commit()
 
-    mock_session, mock_session_cls = _mock_session_returning([src])
     deep_mock = AsyncMock(
         return_value={
             "success": True,
@@ -371,7 +378,7 @@ async def test_run_health_checks_deep(db_session):
     )
 
     with (
-        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.database.SessionLocal", lambda: db_session),
         patch("app.services.health_monitor.deep_test_source", deep_mock),
     ):
         from app.services.health_monitor import run_health_checks
@@ -381,8 +388,7 @@ async def test_run_health_checks_deep(db_session):
     assert result["total"] == 1
     assert result["passed"] == 1
     assert deep_mock.call_count == 1
-    mock_session.commit.assert_called_once()
-    mock_session.close.assert_called_once()
+    assert result["sources"]["src_deep"]["results_count"] == 5
 
 
 @pytest.mark.asyncio
@@ -397,7 +403,6 @@ async def test_run_health_checks_mixed_results(db_session):
     db_session.add_all([src_ok, src_bad])
     db_session.commit()
 
-    mock_session, mock_session_cls = _mock_session_returning([src_ok, src_bad])
     ping_mock = AsyncMock(
         side_effect=[
             {"success": True, "elapsed_ms": 50, "error": None},
@@ -406,7 +411,7 @@ async def test_run_health_checks_mixed_results(db_session):
     )
 
     with (
-        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.database.SessionLocal", lambda: db_session),
         patch("app.services.health_monitor.ping_source", ping_mock),
     ):
         from app.services.health_monitor import run_health_checks
@@ -416,8 +421,6 @@ async def test_run_health_checks_mixed_results(db_session):
     assert result["total"] == 2
     assert result["passed"] == 1
     assert result["failed"] == 1
-    assert mock_session.commit.call_count == 2  # one commit per source (failure is non-exception)
-    mock_session.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -429,11 +432,10 @@ async def test_run_health_checks_source_crash(db_session):
     db_session.add(src)
     db_session.commit()
 
-    mock_session, mock_session_cls = _mock_session_returning([src])
     ping_mock = AsyncMock(side_effect=RuntimeError("unexpected crash"))
 
     with (
-        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.database.SessionLocal", lambda: db_session),
         patch("app.services.health_monitor.ping_source", ping_mock),
     ):
         from app.services.health_monitor import run_health_checks
@@ -444,14 +446,18 @@ async def test_run_health_checks_source_crash(db_session):
     assert result["passed"] == 0
     assert result["failed"] == 1
     assert "unexpected crash" in result["sources"]["hc_crash"]["error"]
-    mock_session.commit.assert_not_called()  # exception → rollback, not commit
-    mock_session.rollback.assert_called_once()
-    mock_session.close.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_run_health_checks_db_error_rollback():
-    """When the DB query itself fails, the session is rolled back and closed."""
+    """When the DB query itself fails, the session is rolled back and closed.
+
+    P6.3 disposition: KEPT as a whole-session MagicMock — this is the hard-failure
+    branch (the query itself raises), which a real SQLite session can't be coerced into
+    cleanly; the mock's commit/rollback/close call-count assertions are exactly what's
+    being verified here (session lifecycle on the exception path), not query filtering,
+    so the mock does not hide any real behavior.
+    """
     mock_session = MagicMock()
     mock_session.query.side_effect = RuntimeError("DB connection lost")
     mock_session_cls = MagicMock(return_value=mock_session)
@@ -469,11 +475,9 @@ async def test_run_health_checks_db_error_rollback():
 
 
 @pytest.mark.asyncio
-async def test_run_health_checks_no_active_sources():
+async def test_run_health_checks_no_active_sources(db_session):
     """run_health_checks with no active sources returns zeroes."""
-    mock_session, mock_session_cls = _mock_session_returning([])
-
-    with patch("app.database.SessionLocal", mock_session_cls):
+    with patch("app.database.SessionLocal", lambda: db_session):
         from app.services.health_monitor import run_health_checks
 
         result = await run_health_checks("ping")
@@ -481,8 +485,7 @@ async def test_run_health_checks_no_active_sources():
     assert result["total"] == 0
     assert result["passed"] == 0
     assert result["failed"] == 0
-    mock_session.commit.assert_not_called()  # no sources → loop never runs
-    mock_session.close.assert_called_once()
+    assert result["sources"] == {}
 
 
 # ── Fixtures for Endpoint Tests ──────────────────────────────────────

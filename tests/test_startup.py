@@ -451,28 +451,37 @@ class TestBackfillProactiveOfferQty:
 
 
 class TestCreateDefaultUserDefaultRole:
-    """Additional _create_default_user_if_env_set coverage."""
+    """Additional _create_default_user_if_env_set coverage.
 
-    def test_default_role_is_buyer(self):
+    P6.3: converted from a whole-session MagicMock (``query().filter_by().first()``
+    stubbed to always return None, so the REAL "does this email already exist" query
+    was never exercised) to the real ``db_session`` fixture — the same
+    ``patch("app.startup.SessionLocal") ... mock_sl.return_value = db_session`` pattern
+    ``TestCreateDefaultUser`` already uses. This is functionally the same scenario as
+    ``TestCreateDefaultUser.test_default_role_is_buyer_when_role_unset`` (kept
+    separately per this class's own historical grouping), now asserting against the
+    real persisted User row instead of introspecting ``mock_session.add.call_args``.
+    """
+
+    @patch("app.startup.SessionLocal")
+    def test_default_role_is_buyer(self, mock_sl, db_session):
         """Without DEFAULT_USER_ROLE, role defaults to least-privilege 'buyer', never
         'admin' (CRIT-SEC-2)."""
+        from app.models.auth import User
         from app.startup import _create_default_user_if_env_set
 
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+        mock_sl.return_value = db_session
 
         env = {
             "DEFAULT_USER_EMAIL": "default@example.com",
             "DEFAULT_USER_PASSWORD": "secret",
         }
-        with (
-            patch.dict(os.environ, env, clear=False),
-            patch("app.startup.SessionLocal", return_value=mock_session),
-        ):
+        with patch.dict(os.environ, env, clear=False):
             os.environ.pop("DEFAULT_USER_ROLE", None)
             _create_default_user_if_env_set()
 
-        created_user = mock_session.add.call_args[0][0]
+        created_user = db_session.query(User).filter_by(email="default@example.com").first()
+        assert created_user is not None
         assert created_user.role == "buyer"
 
 

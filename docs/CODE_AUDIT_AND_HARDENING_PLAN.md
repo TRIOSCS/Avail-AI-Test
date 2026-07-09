@@ -900,21 +900,141 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
   files; suite-wide 971/18,709). Seed matching + non-matching rows, assert rendered
   content. Start with `test_coverage_nightly_2026_06_30.py:211-277` (sourcing filters)
   and the `test_htmx_views_nightly{1..30}.py` series. Gate recurrence via P2.4.
+  **Partial (2026-07-09) — explicitly a targeted start, not the full backfill:**
+  `TestSourcingResultsFilters`/`TestSourcingWorkspaceFilters`
+  (`tests/test_coverage_nightly_2026_06_30.py`) fully retrofitted — every one of the 13
+  tests now seeds one matching `SourcingLead` + one non-matching lead per filter
+  (safety band, buyer status, contactability has_phone/has_email, corroborated yes/no,
+  source, plus a 3-way combined-filters case) and asserts the rendered
+  `lead.vendor_name` set reflects the filter (present for the match, absent for the
+  non-match), instead of a bare `status_code == 200`. Did **not** attempt the "2
+  highest-density files" stretch goal (`test_htmx_views.py` — 125 violations;
+  `test_htmx_views_nightly30.py` — 50) — surveyed both and confirmed the counts, but
+  strengthening every entry requires tracing each endpoint's template output
+  individually (seed data + rendered-content assertions per test, ~175 tests total),
+  which is multi-PR-sized work, not a same-session addition on top of P6.2–P6.5.
+  Deferred, not band-aided: baseline still carries those 175 as known offenders.
+  Baseline delta this pass: 1130 → 1117 (−13, all from the two classes above; verified
+  via `git diff` on the baseline file that ONLY those 13 keys were removed and nothing
+  new was added).
 
-- [ ] **P6.2 — Close the Postgres blind spot.** 59 modules use
+- [x] **P6.2 — Close the Postgres blind spot.** 59 modules use
   ILIKE/JSONB/tsvector/pg_trgm; only 3 test files use `requires_postgres`. Priority:
   `vendor_duplicates.py` (pg_trgm ranking — currently "tested" via a full ORM-chain
   mock at `test_vendor_duplicates.py:159-188`) and `faceted_search_service.py:430-608`
   (FTS ranking — zero real coverage). Track the checklist in `docs/APP_MAP_DATABASE.md`.
+  **Fixed (2026-07-09):** Re-ran the grep fresh against the current tree — 39 distinct
+  files match `ILIKE|JSONB|tsvector|pg_trgm|plainto_tsquery|similarity(` (not 59; the
+  audit's count was approximate/from an earlier tree state), tracked as a checklist in
+  `docs/APP_MAP_DATABASE.md`'s new "PostgreSQL-Only Code Path Coverage" section.
+  (a) `test_vendor_duplicates.py::TestFuzzyMatchPgTrgmDirect` rewritten as
+  `@requires_postgres` tests against a real Postgres 16 (`pg_session`) with real
+  `VendorCard` rows — ranking order (closer matches rank first), the 0.3 similarity
+  threshold cutoff (dissimilar names never appear regardless of count), the
+  anchor-vs-candidate dict shape, and the 5-result cap. The `OperationalError`/
+  `ProgrammingError` fallback tests (`TestCheckVendorDuplicatePgTrgmFallback`) KEEP
+  their whole-session mock — forcing a missing-extension error against a real Postgres
+  would need to drop/recreate the extension per test, not worth it for a branch that
+  never touches ranking.
+  (b) `test_faceted_search_service.py::TestFacetedSearchFtsRealPostgres` (new) —
+  `@requires_postgres` tests exercising `plainto_tsquery` AND-of-lexemes matching,
+  real `ts_rank` ordering (weight-A field beats weight-C field, verified empirically
+  against a real Postgres before writing the assertion), the ILIKE-on-mpn OR clause
+  (isolated via a deliberately stale `search_vector`, since the normal
+  trigger-computed vector would tokenize the same words and mask whether the OR
+  clause contributes anything), and the single-term-only exclusion case. Since
+  `pg_session`'s schema is `Base.metadata.create_all`-only (no
+  `startup._create_fts_triggers`/`_backfill_fts`), each test populates
+  `search_vector` with the identical weighted-field UPDATE `_backfill_fts` runs in
+  production, scoped to the seeded ids.
+  Verified locally against a REAL PostgreSQL 16 (not just SQLite-skip): the sandboxed
+  `postgresql-16` package was already installed with a running `pg_ctlcluster`
+  instance; `pg_hba.conf` temporarily set to `trust` for local root access (backed up
+  first), a dedicated `availai`/`availai_pgtest` role+db created (mirroring CI's
+  `postgres-paths` job exactly), `pg_trgm` extension created, and both new test
+  classes run with `PG_TEST_DSN=postgresql://availai:availai@127.0.0.1:5432/availai_pgtest
+  -n 0` — all pass. Also verified the `PG_TEST_DSN`-unset path: both files' new classes
+  SKIP cleanly (not error) on the in-memory SQLite default.
 
-- [ ] **P6.3 — Replace whole-session `MagicMock()` tests** (11 files) with real
+- [x] **P6.3 — Replace whole-session `MagicMock()` tests** (11 files) with real
   `db_session` SQLite fixtures where expressible; keep mocks only for PG-only branches.
+  **Fixed (2026-07-09) — per-file dispositions** (re-grepped
+  `mock_session = MagicMock()\|db=MagicMock()`, 13 files matched):
+  - `test_vendor_duplicates.py` — see P6.2a (converted).
+  - `test_api_health.py` — CONVERTED: `run_health_checks`'s 4 success-path tests + the
+    empty-sources test now patch `app.database.SessionLocal` to return the SAME real
+    `db_session` (not a fresh `TestSessionLocal()` — that was tried first but doesn't
+    share the in-memory DB with the autouse `db_session` fixture, because pytest's own
+    conftest auto-import and this file's explicit `from tests.conftest import ...`
+    resolve to two different `sys.modules` entries, each running conftest.py's
+    `create_engine(...)` once — discovered and documented inline). An inactive
+    `ApiSource` row is now seeded alongside the active ones in
+    `test_run_health_checks_ping` to prove the real `is_active` filter is honored
+    (the old mock ignored it entirely). `test_run_health_checks_db_error_rollback`
+    KEPT mocked (forces the query itself to raise — a hard-failure path).
+  - `test_startup.py` — CONVERTED: `TestCreateDefaultUserDefaultRole.test_default_role_is_buyer`
+    was a near-exact duplicate of the already-real-session
+    `TestCreateDefaultUser.test_default_role_is_buyer_when_role_unset`; repointed to the
+    same `patch("app.startup.SessionLocal") + mock_sl.return_value = db_session` pattern
+    already used by every sibling test in the file.
+  - `test_knowledge_jobs_coverage.py` / `test_knowledge_jobs_coverage2.py` —
+    CONVERTED: the req/vendor/company/MPN "id-fetching" tests (both success-path and
+    generator-raises-continues) now seed real `Requisition`/`Offer`/`VendorCard`/
+    `Company`/`CustomerSite` rows instead of a rotating whole-session mock that handed
+    back canned `(id,)` tuples regardless of the real `updated_at`/`created_at`
+    filter, join, or group-by. `TestJobExpireStale` converted to real `KnowledgeEntry`
+    rows, asserting the REAL total/expired counts via a `loguru_info` sink fixture
+    (loguru isn't bridged to `caplog` in this codebase). KEPT mocked: the DB-query-
+    itself-raises tests in both files (`test_expire_stale_db_error_raises`,
+    `test_refresh_insights_db_error_logs_and_continues`,
+    `test_outer_exception_reraises_and_rollbacks`, `test_vendor_section_db_error_caught`)
+    — all force a specific query call to raise mid-sequence, which a real SQLite
+    session can't be coerced into cleanly.
+  - `test_database_coverage.py` — KEPT (genuinely-unit test): `get_db()`'s own
+    generator-lifecycle mechanics (close/rollback call verification) — `get_db` does
+    no querying itself, so the mock hides no real behavior.
+  - `test_main.py` — KEPT (hard-failure path): `/health`'s DB-error-returns-degraded
+    test forces `session.execute` to raise; same rationale as the DB-error tests above.
+  - `test_ics_worker.py`, `test_nc_worker_full.py` — NO CHANGE NEEDED (false positive):
+    `mock_session` in both files names a mocked BROWSER session (`IcsSessionManager`/
+    the nc worker's Selenium-ish session), not a DB session — the DB layer in both
+    already goes through the real `db_session` fixture (`nc_worker`'s
+    `_make_mock_db(db_session)` even uses `MagicMock(wraps=db_session)`, a spy that
+    delegates to the real session while only suppressing `.close()`).
+  - `test_routers_sources.py` — NO CHANGE NEEDED: `db=MagicMock()` is an inert
+    placeholder arg to `_get_connector_for_source`; `credential_service.get_credential`
+    (the only thing that would touch `db`) is patched out separately in every one of
+    these tests, so the mock hides nothing.
+  - `test_connectors.py` — NO CHANGE NEEDED: `db=MagicMock()` is a constructor
+    placeholder for `EmailMiner` in tests of pure string-parsing helper methods
+    (`_extract_vendor_info`) that never touch `db`.
+  - `test_routers_vendors_crud.py` — NO CHANGE NEEDED (genuinely-unit test):
+    `_background_enrich_vendor`'s tests mock `enrich_entity`/`apply_enrichment_to_vendor`
+    (the real business logic) separately; the session mock only stands in for a
+    trivial `db.get(VendorCard, id)` PK lookup + commit/close, not a filter chain.
 
-- [ ] **P6.4 — De-flake `test_circuit_breaker.py:78-82`** (50ms margin under xdist);
+- [x] **P6.4 — De-flake `test_circuit_breaker.py:78-82`** (50ms margin under xdist);
   inject a fake monotonic clock.
+  **Fixed (2026-07-09):** `test_breaker_half_open_after_timeout` now monkeypatches
+  `app.connectors.sources.time.monotonic` with a controllable fake clock advanced
+  explicitly (`fake_now += 0.05` / `+= 0.06`) instead of a real `sleep(0.15)` — zero
+  real sleep, fully deterministic under any xdist scheduling jitter. Strengthened
+  while de-flaking: added a just-under-the-timeout boundary assertion (still `"open"`
+  at +0.05s against a 0.1s `reset_timeout`) before the over-the-timeout transition to
+  `"half_open"`, so the test now pins the exact boundary rather than merely
+  "eventually transitions."
 
-- [ ] **P6.5 — Direct unit tests for `can_review_qp_sales_section` /
+- [x] **P6.5 — Direct unit tests for `can_review_qp_sales_section` /
   `can_review_qp_purchasing_section`** (`dependencies.py:382-400`, zero direct tests).
+  **Fixed (2026-07-09):** added `TestCanReviewQpSections` to
+  `tests/test_auth_deps_unit.py` (mirrors the file's existing `TestGetUser`/
+  `TestRequireAdmin`/etc. class-per-function pattern) — 9 tests covering both
+  functions' full grant matrix: grant-set → True, grant-unset → False, an
+  admin/buyer role WITHOUT the explicit per-user column still denied (the right is a
+  per-user grant, not role-derived), the `None` user edge case for both functions, and
+  cross-independence (holding the sales grant doesn't imply the purchasing grant and
+  vice versa, including the both-set case). `_create_user` test helper extended with
+  `**extra` kwargs to set arbitrary columns without a bespoke per-test helper.
 
 ---
 

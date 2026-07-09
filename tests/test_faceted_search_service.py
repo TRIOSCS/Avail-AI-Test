@@ -7,6 +7,7 @@ Depends on: conftest.py, faceted search models, commodity_registry
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
@@ -22,6 +23,7 @@ from app.services.faceted_search_service import (
 from tests.conftest import (
     engine,  # noqa: F401
     force_card_category,
+    requires_postgres,
 )
 
 
@@ -1201,3 +1203,147 @@ def test_has_crosses_predicate_shared_by_list_and_count(db_session: Session):
     results, total = search_materials_faceted(db_session, commodity="hdd", has_crosses=True)
     assert total == len(results) == 1
     assert results[0].id == fru_card.id
+
+
+# ── Real-Postgres FTS ranking (P6.2b) ─────────────────────────────────
+# search_materials_faceted's ``use_fts`` branch (plainto_tsquery @@ search_vector,
+# ordered by ts_rank) only ever runs on the PostgreSQL dialect and SILENTLY FALLS BACK
+# to the ILIKE branch on SQLite (`is_pg = db.get_bind().dialect.name == "postgresql"`),
+# so the main suite has zero real coverage of it. ``pg_session``'s schema comes from
+# ``Base.metadata.create_all`` only -- it does NOT run startup.py's
+# ``_create_fts_triggers``/``_backfill_fts``, so ``search_vector`` stays NULL on insert;
+# each test populates it with the identical UPDATE `_backfill_fts` runs in production,
+# scoped to just the seeded ids.
+
+
+def _populate_search_vector(db: Session, *card_ids: int) -> None:
+    """Populate MaterialCard.search_vector for *card_ids*, mirroring startup.py's
+    ``_backfill_fts`` UPDATE (same weighted-field formula the ``trg_mc_fts`` trigger
+    uses on every INSERT/UPDATE in a real boot) so PG-only tests don't need the trigger
+    machinery installed."""
+    db.execute(
+        text("""
+            UPDATE material_cards SET search_vector =
+                setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(description, '')), 'C') ||
+                setweight(to_tsvector('english', COALESCE(category, '')), 'C')
+            WHERE id = ANY(:ids)
+        """),
+        {"ids": list(card_ids)},
+    )
+    db.commit()
+
+
+@requires_postgres
+class TestFacetedSearchFtsRealPostgres:
+    def test_plainto_tsquery_matches_multiword_query_and_excludes_non_matching(self, pg_session: Session):
+        """A multi-word ``q`` triggers the FTS branch (real Postgres + a space in q);
+        only the card whose search_vector contains ALL query lexemes matches."""
+        match = MaterialCard(
+            normalized_mpn="lm317t",
+            display_mpn="LM317T",
+            manufacturer="Texas Instruments",
+            description="adjustable positive voltage regulator",
+            created_at=datetime.now(UTC),
+        )
+        non_match = MaterialCard(
+            normalized_mpn="ne555",
+            display_mpn="NE555",
+            manufacturer="Texas Instruments",
+            description="precision timing circuit",
+            created_at=datetime.now(UTC),
+        )
+        pg_session.add_all([match, non_match])
+        pg_session.flush()
+        _populate_search_vector(pg_session, match.id, non_match.id)
+
+        results, total = search_materials_faceted(pg_session, q="voltage regulator")
+
+        assert total == 1
+        assert [c.display_mpn for c in results] == ["LM317T"]
+
+    def test_ts_rank_orders_stronger_match_first(self, pg_session: Session):
+        """Both cards match the tsquery (both lexemes present somewhere), but the card
+        carrying the terms in a higher-weighted field (display_mpn, weight A) ranks.
+
+        above the one carrying them only in the lower-weighted description (weight C)
+        -- verified against real Postgres ts_rank, not assumed.
+        """
+        weight_a_card = MaterialCard(
+            normalized_mpn="cardhigh001",
+            display_mpn="Voltage Regulator Special",
+            manufacturer="Some Co",
+            description="misc description",
+            created_at=datetime.now(UTC),
+        )
+        weight_c_card = MaterialCard(
+            normalized_mpn="cardlow002",
+            display_mpn="Unrelated Part X",
+            manufacturer="Some Co",
+            description="A voltage regulator description explaining voltage regulator function",
+            created_at=datetime.now(UTC),
+        )
+        pg_session.add_all([weight_a_card, weight_c_card])
+        pg_session.flush()
+        _populate_search_vector(pg_session, weight_a_card.id, weight_c_card.id)
+
+        results, total = search_materials_faceted(pg_session, q="voltage regulator")
+
+        assert total == 2
+        assert [c.display_mpn for c in results] == ["Voltage Regulator Special", "Unrelated Part X"]
+
+    def test_fts_combines_with_ilike_for_partial_mpn_match(self, pg_session: Session):
+        """The FTS branch ORs in an ILIKE against display_mpn/normalized_mpn, so a row
+        whose ``search_vector`` is stale/out-of-sync with its current MPN (e.g. a legacy
+        row backfilled before a rename, or before FTS existed at all) still matches on
+        the raw MPN substring even though the ``@@`` lexeme match alone would miss it
+        entirely.
+
+        The ``search_vector`` here is deliberately populated with UNRELATED content
+        (not run through the normal weighted formula) so this test isolates the
+        ILIKE-on-mpn OR clause's own contribution rather than the trigger-computed
+        vector, which would otherwise also contain the MPN's own words and mask
+        whether the OR clause is doing anything.
+        """
+        card = MaterialCard(
+            normalized_mpn="lm317t special",
+            display_mpn="LM317T SPECIAL",
+            manufacturer="Some Co",
+            description="unrelated description",
+            created_at=datetime.now(UTC),
+        )
+        pg_session.add(card)
+        pg_session.flush()
+        pg_session.execute(
+            text("UPDATE material_cards SET search_vector = to_tsvector('english', 'zzz nomatch') WHERE id = :id"),
+            {"id": card.id},
+        )
+        pg_session.commit()
+
+        # Multi-word query — the FTS lexeme match ('lm317t special' not present in the
+        # stale vector) fails; the ILIKE-on-mpn OR clause is what recovers this match.
+        results, total = search_materials_faceted(pg_session, q="LM317T SPECIAL")
+
+        assert total == 1
+        assert results[0].display_mpn == "LM317T SPECIAL"
+
+    def test_fts_excludes_card_matching_only_one_term(self, pg_session: Session):
+        """plainto_tsquery ANDs every term -- a card containing only ONE of the two
+        query words must not match."""
+        partial = MaterialCard(
+            normalized_mpn="partialmatch1",
+            display_mpn="Partial Match Part",
+            manufacturer="Some Co",
+            description="this card mentions voltage but not the other word",
+            created_at=datetime.now(UTC),
+        )
+        pg_session.add(partial)
+        pg_session.flush()
+        _populate_search_vector(pg_session, partial.id)
+
+        results, total = search_materials_faceted(pg_session, q="voltage regulator")
+
+        assert total == 0
+        assert results == []
