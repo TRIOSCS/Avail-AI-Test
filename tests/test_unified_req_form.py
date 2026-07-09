@@ -9,6 +9,9 @@ Depends on: tests/conftest.py (client, db_session, test_user fixtures)
 
 import pytest
 
+from app.models import Company
+from app.models.crm import CustomerSite
+
 
 @pytest.mark.parametrize(
     "endpoint",
@@ -93,6 +96,68 @@ def test_import_parse_html_path_returns_unified_modal(client, monkeypatch):
     )
     assert resp.status_code == 200
     assert "unifiedReqModal" in resp.text
+
+
+class TestCustomerTypeaheadDropdown:
+    """P5.2: GET /v2/partials/requisitions/customer-typeahead — the server-rendered
+    hx-get dropdown that replaced customerPicker()'s client-side fetch-all +
+    JS filter against /api/companies/typeahead (that JSON endpoint is untouched)."""
+
+    def _company_with_site(self, db_session, name="Acme Electronics", site_name="HQ"):
+        co = Company(name=name, is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name=site_name)
+        db_session.add(site)
+        db_session.flush()
+        return co, site
+
+    def test_empty_query_returns_top_companies(self, client, db_session, test_user):
+        self._company_with_site(db_session)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions/customer-typeahead")
+        assert resp.status_code == 200
+        assert "Acme Electronics" in resp.text
+        assert "+ New Customer" in resp.text
+
+    def test_filters_by_q_case_insensitively(self, client, db_session, test_user):
+        self._company_with_site(db_session, name="Widget Supply Co")
+        self._company_with_site(db_session, name="Other Corp")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions/customer-typeahead?q=widget")
+        assert resp.status_code == 200
+        assert "Widget Supply Co" in resp.text
+        assert "Other Corp" not in resp.text
+
+    def test_single_site_company_click_selects_directly(self, client, db_session, test_user):
+        co, site = self._company_with_site(db_session, site_name="Main Office")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions/customer-typeahead?q=acme")
+        assert resp.status_code == 200
+        # tojson-quoted select(company, site) call — no double-quote-in-double-quote break.
+        assert "@click='select(" in resp.text
+        assert f'"id": {co.id}' in resp.text
+        assert "Main Office" in resp.text
+
+    def test_multi_site_company_lists_each_site(self, client, db_session, test_user):
+        co = Company(name="Multi Site Inc", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        db_session.add(CustomerSite(company_id=co.id, site_name="Dallas"))
+        db_session.add(CustomerSite(company_id=co.id, site_name="Austin"))
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions/customer-typeahead?q=multi")
+        assert resp.status_code == 200
+        assert "Dallas" in resp.text
+        assert "Austin" in resp.text
+
+    def test_inactive_company_excluded(self, client, db_session, test_user):
+        co = Company(name="Defunct Corp", is_active=False)
+        db_session.add(co)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions/customer-typeahead?q=defunct")
+        assert resp.status_code == 200
+        assert "Defunct Corp" not in resp.text
 
 
 def test_import_save_multiple_parts(client, db_session, test_user):

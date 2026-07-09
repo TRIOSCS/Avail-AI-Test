@@ -234,25 +234,18 @@ window.submitTroubleReport = function submitTroubleReport(data) {
     const desc = descEl ? descEl.value.trim() : '';
     if (!desc) return;
     data.submitting = true;
-    const csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
-    fetch('/api/trouble-tickets/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-        body: JSON.stringify({
-            description: desc,
-            ticket_type: window._ttKind || 'bug',
-            screenshot: window._ttScreenshot || null,
-            page_url: window.location.href,
-            user_agent: navigator.userAgent,
-            viewport: window.innerWidth + 'x' + window.innerHeight,
-            error_log: JSON.stringify(Alpine.store('errorLog').entries),
-            network_log: JSON.stringify(Alpine.store('networkLog').entries),
-            auto_captured_context: window._ttContext ? JSON.stringify(window._ttContext) : null,
-        }),
-    }).then(function(r) {
-        return r.text();
-    }).then(function(html) {
-        htmx.swap('#modal-content', html, { swapStyle: 'innerHTML' });
+    window.postJSON('/api/trouble-tickets/submit', {
+        description: desc,
+        ticket_type: window._ttKind || 'bug',
+        screenshot: window._ttScreenshot || null,
+        page_url: window.location.href,
+        user_agent: navigator.userAgent,
+        viewport: window.innerWidth + 'x' + window.innerHeight,
+        error_log: JSON.stringify(Alpine.store('errorLog').entries),
+        network_log: JSON.stringify(Alpine.store('networkLog').entries),
+        auto_captured_context: window._ttContext ? JSON.stringify(window._ttContext) : null,
+    }).then(function(resp) {
+        htmx.swap('#modal-content', resp.text, { swapStyle: 'innerHTML' });
         data.submitting = false;
     }).catch(function() {
         htmx.swap('#modal-content', '<div class="p-6 text-sm text-rose-600">Something went wrong. Please try again.</div>', { swapStyle: 'innerHTML' });
@@ -264,14 +257,9 @@ window.submitTroubleReport = function submitTroubleReport(data) {
 // the ids, toasts the outcome, and fires 'ticketsUpdated' so the list refreshes.
 window.ticketBulkAction = function ticketBulkAction(kind, ids, status) {
     if (!ids || !ids.length) return Promise.resolve();
-    const csrf = document.cookie.match(/csrftoken=([^;]+)/) ? RegExp.$1 : '';
     const payload = { ticket_ids: ids };
     if (status) payload.status = status;
-    return fetch('/api/trouble-tickets/' + kind, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-        body: JSON.stringify(payload),
-    }).then(function(r) {
+    return window.postJSON('/api/trouble-tickets/' + kind, payload).then(function(r) {
         const t = Alpine.store('toast');
         if (r.ok) {
             t.message = (kind === 'diagnose-bulk') ? 'Diagnosis started' : 'Tickets updated';
@@ -309,14 +297,7 @@ Alpine.store('callOutcome', {
         const note = this.note.trim() || null;
         this.dismiss();
         if (!outcome) return;
-        const headers = { 'Content-Type': 'application/json' };
-        const csrf = csrfToken();
-        if (csrf) headers['x-csrftoken'] = csrf;
-        fetch('/api/activity/' + id + '/call-outcome', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({ outcome: outcome, note: note }),
-        }).then((resp) => {
+        window.postJSON('/api/activity/' + id + '/call-outcome', { outcome: outcome, note: note }).then((resp) => {
             if (resp.ok) {
                 showToast('Call outcome logged', 'success');
             } else {
@@ -383,6 +364,87 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
     }
 });
 
+// ── postJSON: canonical helper for fire-and-forget JSON POSTs ───────
+// Purpose: single wrapper over htmx.ajax for the small set of JSON-POST call
+// sites that need a response status/body but aren't swapping HTML into a
+// visible target (trouble-ticket submit/bulk actions, call-outcome log,
+// quote-builder save). Replaces hand-rolled fetch() + manual CSRF header +
+// JSON.stringify at each site — CSRF is already injected for every htmx
+// request by the htmx:configRequest listener above.
+//
+// htmx's own ajax() helper returns a Promise that carries no response data
+// (htmx resolves it with no value once the request settles — see htmx.org's
+// issueAjaxRequest),
+// so this creates a throwaway, unattached-to-any-feature <div> as the request's
+// source/target (swap: 'none' — nothing is ever painted from it), listens once
+// for the htmx:afterRequest event htmx fires ON THAT ELEMENT (never on
+// document.body, since each call gets its own element — safe under
+// concurrent in-flight calls), and resolves a fetch-Response-shaped object
+// read off the real XMLHttpRequest.
+//
+// JSON encoding is done via the bundled json-enc extension (hx-ext="json-enc"),
+// activated only on the throwaway element so it doesn't affect any other HTMX
+// request on the page. The payload is passed through hx-vals (JSON.parse'd by
+// htmx) rather than context.values (which htmx flattens to FormData strings)
+// so numbers/null/booleans keep their real types in the JSON body — see
+// htmx-ext-json-enc's encodeParameters, which restores hx-vals/hx-vars values
+// verbatim over the stringified FormData ones.
+function postJSON(url, body) {
+    return new Promise((resolve, reject) => {
+        const src = document.createElement('div');
+        src.setAttribute('hx-ext', 'json-enc');
+        src.setAttribute('hx-vals', JSON.stringify(body || {}));
+        src.style.display = 'none';
+        document.body.appendChild(src);
+        const onAfterRequest = (evt) => {
+            src.removeEventListener('htmx:afterRequest', onAfterRequest);
+            src.remove();
+            const xhr = evt.detail.xhr;
+            // status 0 = the request never reached the server (network down, DNS
+            // failure, aborted) — reject, matching fetch()'s reject-on-network-error
+            // semantics, so existing .catch() blocks (network-error toast/fallback)
+            // keep firing. Real HTTP error statuses (4xx/5xx) still resolve with
+            // ok:false, exactly like fetch().
+            if (xhr.status === 0) { reject(new Error('Network error')); return; }
+            resolve({
+                ok: xhr.status >= 200 && xhr.status < 300,
+                status: xhr.status,
+                json: () => JSON.parse(xhr.responseText || 'null'),
+                text: xhr.responseText,
+            });
+        };
+        src.addEventListener('htmx:afterRequest', onAfterRequest);
+        htmx.ajax('POST', url, { source: src, target: src, swap: 'none', indicator: null });
+    });
+}
+window.postJSON = postJSON;
+
+// ── postForm: postJSON's form-urlencoded sibling ────────────────────
+// Same fire-and-forget htmx.ajax + htmx:afterRequest wiring as postJSON, but
+// WITHOUT the json-enc extension: a couple of endpoints (e.g. the timezone
+// auto-detect below) take a FastAPI Form(...) parameter, not a JSON body —
+// forcing json-enc there would send application/json and the server would
+// never see the field (Form() only parses url-encoded/multipart). htmx.ajax's
+// own default encoding for non-GET requests is already
+// application/x-www-form-urlencoded, so this only needs to skip json-enc.
+function postForm(url, values) {
+    return new Promise((resolve, reject) => {
+        const src = document.createElement('div');
+        src.style.display = 'none';
+        document.body.appendChild(src);
+        const onAfterRequest = (evt) => {
+            src.removeEventListener('htmx:afterRequest', onAfterRequest);
+            src.remove();
+            const xhr = evt.detail.xhr;
+            if (xhr.status === 0) { reject(new Error('Network error')); return; }
+            resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, text: xhr.responseText });
+        };
+        src.addEventListener('htmx:afterRequest', onAfterRequest);
+        htmx.ajax('POST', url, { source: src, target: src, swap: 'none', indicator: null, values: values || {} });
+    });
+}
+window.postForm = postForm;
+
 // ── Per-user display timezone auto-detect ───────────────────
 // Once per page load, read the browser's IANA zone and, ONLY if it differs from the
 // zone already stored on the user (rendered onto <body data-user-tz>), post it so
@@ -398,14 +460,7 @@ function syncDisplayTimezone() {
     if (!browserTz) return;
     const storedTz = document.body.dataset.userTz || '';
     if (browserTz === storedTz) return;
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
-    const csrf = csrfToken();
-    if (csrf) headers['x-csrftoken'] = csrf;
-    fetch('/v2/profile/timezone', {
-        method: 'POST',
-        headers: headers,
-        body: 'timezone=' + encodeURIComponent(browserTz),
-    }).then((resp) => {
+    window.postForm('/v2/profile/timezone', { timezone: browserTz }).then((resp) => {
         // Reflect locally so a second navigation in this session doesn't re-post.
         if (resp.ok) document.body.dataset.userTz = browserTz;
     }).catch(() => { /* fire-and-forget — a failed detect just retries next load */ });
@@ -418,6 +473,13 @@ document.addEventListener('DOMContentLoaded', syncDisplayTimezone);
 // /api/activity/outreach-initiated when clicked, logging the touch and
 // bumping company/site last_activity_at. The default link navigation is NOT
 // prevented — the native handler (dialer, mail client, Teams) still opens.
+// P5.2 NOTE: this site intentionally stays on raw fetch() rather than the
+// postJSON helper — it needs `keepalive: true` so the log POST survives the
+// browser navigating away for the tel:/mailto:/Teams handler that fires in
+// the same click, and XMLHttpRequest (which htmx.ajax wraps) has no keepalive
+// equivalent; converting it would silently drop outreach logs on click. It
+// also branches on the parsed response body (dropped_links, activity id for
+// the call-outcome prompt), which fetch's r.json() gives directly.
 document.body.addEventListener('click', (evt) => {
     const el = evt.target.closest('[data-outreach-log]');
     if (!el) return;
@@ -1600,14 +1662,20 @@ Alpine.data('materialsFilter', () => ({
  * Supports searching existing customers, selecting a site, and quick-creating
  * a new customer via the company lookup endpoint.
  *
+ * P5.2: the dropdown itself is a server-rendered hx-get (GET
+ * /v2/partials/customers/typeahead, swapped into #customer-typeahead-results by
+ * unified_modal.html's search input) — there is no more client-side
+ * companies/filtered array or fetchCompanies() preload; select()/selectById()/
+ * clear() are unchanged (called from the swapped-in results' @click, or from the
+ * customer-created listener below).
+ *
  * Usage: x-data="customerPicker()" on a container div.
  * The container must include a <div data-lookup-result></div> for lookup results.
  *
  * Called by: requisitions/unified_modal.html
- * Depends on: /api/companies/typeahead, /v2/partials/customers/lookup
+ * Depends on: /v2/partials/customers/typeahead, /v2/partials/customers/lookup
  */
 Alpine.data('customerPicker', () => ({
-    companies: [],
     query: '',
     open: false,
     selectedSiteId: '',
@@ -1618,11 +1686,9 @@ Alpine.data('customerPicker', () => ({
     lookingUp: false,
     _onCustomerCreated: null,
     init() {
-        this.fetchCompanies();
         // Listen for customer-created event from quick-create
         this._onCustomerCreated = (e) => {
             this.selectById(e.detail.siteId, e.detail.displayName);
-            this.fetchCompanies();
         };
         document.addEventListener('customer-created', this._onCustomerCreated);
     },
@@ -1630,25 +1696,6 @@ Alpine.data('customerPicker', () => ({
         if (this._onCustomerCreated) {
             document.removeEventListener('customer-created', this._onCustomerCreated);
         }
-    },
-    loadError: '',
-    fetchCompanies() {
-        this.loadError = '';
-        fetch('/api/companies/typeahead')
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then(data => { this.companies = data; })
-            .catch(e => {
-                console.error('Failed to load customer list:', e);
-                this.loadError = 'Could not load customers.';
-            });
-    },
-    get filtered() {
-        if (!this.query.trim()) return this.companies.slice(0, 20);
-        const q = this.query.toLowerCase();
-        return this.companies.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
     },
     select(company, site) {
         this.selectedSiteId = site.id || '';
@@ -2141,18 +2188,11 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       const url = this.multiReqIds
         ? `/v2/partials/quote-builder/multi/save?requisition_ids=${this.multiReqIds}`
         : `/v2/partials/quote-builder/${this.reqId}/save`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken(),
-        },
-        body: JSON.stringify({
-          lines: linePayload,
-          quote_id: this.quoteId,
-        }),
+      const resp = await window.postJSON(url, {
+        lines: linePayload,
+        quote_id: this.quoteId,
       });
-      const data = await resp.json();
+      const data = resp.json();
       if (resp.ok && data.ok) {
         this.quoteId = data.quote_id;
         this.quoteNumber = data.quote_number;
@@ -2342,9 +2382,11 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   sending: false,
 
   // ── Any-vendor picker + inline create (bulk composer spec Part 2 §3/§4) ──
+  // P5.2: the dropdown itself is a server-rendered hx-get (see vendor_modal.html
+  // + sightings.sightings_vendor_search) — vendorQuery only drives the input's
+  // x-model + the local vsOpen visibility flag now; there is no client-side
+  // vendorResults array or searchVendors() fetch anymore.
   vendorQuery: '',
-  vendorResults: [],
-  searchOpen: false,
   addingVendor: false,
   addingVendorBusy: false,
   newVendorName: '',
@@ -2374,41 +2416,8 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     else this.selectedDatasheetIds.push(id);
   },
 
-  // Debounced (template-side @input.debounce.300ms) lookup against the existing
-  // /api/autocomplete/names endpoint. It mixes vendors + customers — filter to
-  // vendors client-side; never fork the endpoint. A failure is VISIBLE (toast),
-  // but only once per failure streak — debounced keystrokes would otherwise
-  // stack identical toasts; a success resets the flag.
-  _searchErrorToasted: false,
-  async searchVendors() {
-    const q = this.vendorQuery.trim();
-    if (q.length < 2) {
-      this.vendorResults = [];
-      this.searchOpen = false;
-      return;
-    }
-    try {
-      const resp = await fetch('/api/autocomplete/names?q=' + encodeURIComponent(q));
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const items = await resp.json();
-      this.vendorResults = (items || []).filter((it) => it.type === 'vendor');
-      this.searchOpen = true;
-      this._searchErrorToasted = false;
-    } catch (err) {
-      console.error('[rfqVendorModal] vendor search failed', err);
-      this.vendorResults = [];
-      this.searchOpen = false;
-      if (!this._searchErrorToasted) {
-        this._searchErrorToasted = true;
-        this._toast('Vendor search failed — please try again', 'error');
-      }
-    }
-  },
-
   async pickVendor(name) {
-    this.searchOpen = false;
     this.vendorQuery = '';
-    this.vendorResults = [];
     await this._addComposerVendor({ vendor_name: name });
   },
 
@@ -3197,6 +3206,10 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
     }
     const form = new FormData();
     form.append('file', new File([blob], 'avatar.' + ext, { type }));
+    // P5.2 NOTE: intentionally stays on raw fetch() (not postJSON/htmx.ajax) — the
+    // body is a binary Blob wrapped in FormData (multipart file upload), not JSON;
+    // htmx's values/json-enc pipeline (formDataFromObject + JSON.stringify) is built
+    // for JSON-shaped payloads and isn't a clean fit for carrying a File/Blob through.
     // Raw fetch (not htmx), so the CSRF double-submit header must be added by hand —
     // starlette_csrf 403s any session POST without it, before the route ever runs.
     fetch(this.postUrl, {

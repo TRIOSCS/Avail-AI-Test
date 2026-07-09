@@ -41,7 +41,7 @@
         <h3 class="text-sm font-semibold text-gray-900">Select Vendors ({{ vendors|length }} available)</h3>
         <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
           <input type="checkbox"
-                 @change="selectedVendors = $event.target.checked ? {{ vendors|map(attribute='id')|list|tojson }} : []"
+                 @change='selectedVendors = $event.target.checked ? {{ vendors|map(attribute="id")|list|tojson }} : []'
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           Select All
         </label>
@@ -90,10 +90,15 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="p-6 sm:p-8 text-center">
-        <p class="text-sm text-gray-600">No vendors found with sightings for this requisition.</p>
-        <p class="text-secondary mt-1">Search for parts first to find vendors.</p>
-      </div>
+      {% with
+        message="No vendors found with sightings for this requisition.",
+        message_class="text-sm text-gray-600",
+        description="Search for parts first to find vendors.",
+        wrapper_class="p-6 sm:p-8 text-center",
+        show_icon=false
+      %}
+      {% include "htmx/partials/shared/empty_state.html" %}
+      {% endwith %}
       {% endif %}
     </div>
 

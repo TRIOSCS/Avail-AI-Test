@@ -7,7 +7,7 @@
 {%- import "htmx/partials/quote_builder/_macros.html" as qb %}
 
 <div class="flex flex-col h-full"
-     x-data="quoteBuilder([], {{ req.id }}, {{ has_customer_site | tojson }}, '{{ requirement_ids }}', '{{ multi_req_ids | default("", true) }}')"
+     x-data='quoteBuilder([], {{ req.id }}, {{ has_customer_site | tojson }}, "{{ requirement_ids }}", "{{ multi_req_ids | default("", true) }}")'
      x-init="loadData()">
 
   {# ── Top Bar ──────────────────────────────────────────────── #}

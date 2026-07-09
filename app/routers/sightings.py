@@ -2221,6 +2221,39 @@ def _parse_website_domain(website: str) -> str:
     return host
 
 
+@router.get("/v2/partials/sightings/vendor-search", response_class=HTMLResponse)
+async def sightings_vendor_search(
+    request: Request,
+    q: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """P5.2: server-rendered debounced dropdown for the composer's "Find any
+    vendor" picker (sightings/vendor_modal.html, rfqVendorModal.searchVendors()).
+
+    Reuses the SAME VendorCard name/alternate-names match that backs
+    /api/autocomplete/names (vendors_crud.autocomplete_names) — that JSON
+    endpoint mixes vendors + customers for a different caller and is left
+    intact; this is a vendors-only HTML sibling so the picker's dropdown is a
+    real hx-get swap instead of a client-side fetch + filter.
+    """
+    from ..utils.search_builder import SearchBuilder
+
+    query = q.strip().lower()
+    vendors: list[VendorCard] = []
+    if len(query) >= 2:
+        sb = SearchBuilder(query)
+        vendors = (
+            db.query(VendorCard)
+            .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%", escape="\\"))
+            .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
+            .limit(8)
+            .all()
+        )
+    ctx = {"request": request, "vendors": vendors}
+    return template_response("htmx/partials/sightings/_vendor_search_results.html", ctx)
+
+
 @router.post("/v2/partials/sightings/composer-vendor", response_class=HTMLResponse)
 async def sightings_composer_vendor(
     request: Request,

@@ -49,14 +49,19 @@
 
   {% if results.total_count == 0 %}
   {# ── Empty state ── #}
-  <div class="bg-white border border-brand-200 rounded-xl shadow-card p-6 sm:p-8 text-center">
-    <svg class="mx-auto w-16 h-16 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <path stroke-linecap="round" stroke-linejoin="round"
-            d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
-    </svg>
-    <p class="mt-4 text-lg text-gray-600">No results found for "<span class="font-semibold">{{ query }}</span>"</p>
-    <p class="text-sm text-gray-400 mt-2">Try a different search term, check spelling, or use fewer keywords.</p>
-  </div>
+  {% set _no_results_message %}No results found for "<span class="font-semibold">{{ query }}</span>"{% endset %}
+  {% with
+    message=_no_results_message,
+    message_safe=true,
+    message_class="mt-4 text-lg text-gray-600",
+    description="Try a different search term, check spelling, or use fewer keywords.",
+    description_class="text-sm text-gray-400 mt-2",
+    wrapper_class="bg-white border border-brand-200 rounded-xl shadow-card p-6 sm:p-8 text-center",
+    icon_class="mx-auto w-16 h-16 text-gray-300",
+    icon_path="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+  %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
 
   {% else %}
 

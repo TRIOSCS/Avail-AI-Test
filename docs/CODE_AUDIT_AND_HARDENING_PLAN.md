@@ -870,27 +870,114 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
 
 ## Phase 5 — Frontend consolidation (~1 week)
 
-- [ ] **P5.1 — `lazy_body(id, url)` macro** so the `hx-target` guard (P0.3's root
+- [x] **P5.1 — `lazy_body(id, url)` macro** so the `hx-target` guard (P0.3's root
   cause) is enforced structurally, not by "LANDMINE" comments. Migrate
   `approvals_hub.html`, `buy_plans/hub.html`, `settings/index.html`, `sightings/list.html`,
   `quotes/detail.html`, `resell/detail.html`, `resell/workspace.html`.
+  **Fixed:** added `lazy_body(id=None, url, target=None, trigger='load', swap='innerHTML',
+  class_=None, indicator=None, extra_attrs='')` to `shared/_macros.html` — a `{% call %}`
+  macro (not a plain include) so every site keeps its own exact spinner/skeleton markup
+  via `caller()` while the wrapper div's `hx-get`/`hx-trigger`/`hx-target`/`hx-swap`
+  become structurally guaranteed (macro always emits `hx-target`, defaulting to `'#'+id`
+  or `'this'`). All 7 listed templates migrated (approvals_hub.html, buy_plans/hub.html,
+  settings/index.html, sightings/list.html, quotes/detail.html `trigger='revealed'`,
+  resell/detail.html ×4 tab bodies `trigger='intersect once'`, resell/workspace.html).
+  Per-site `LANDMINE` comments deleted; the rationale now lives once at the macro
+  definition. Verified via `tests/test_approvals_hub_tabs.py`,
+  `tests/test_buyplan_hub_routes.py`, `tests/test_sightings_router.py`,
+  `tests/test_sprint5_quote_workflow.py`, `tests/test_proactive_prepare.py`,
+  resell route tests (961 tests, all pass) — these assert `id="..."` / `hx-target="#..."`
+  substrings only, not full markup, so the macro's harmless attribute-order/whitespace
+  changes don't affect them.
 
-- [ ] **P5.2 — Kill the `fetch()` violations in `htmx_app.js`** (~16 sites).
+- [x] **P5.2 — Kill the `fetch()` violations in `htmx_app.js`** (~16 sites).
   Convert `fetchCompanies()` (:1637) and `searchVendors()` (:2391) to server-rendered
   `hx-get` debounced dropdowns (pattern: `materials/workspace.html`); wrap the 5
   JSON-POST sites (trouble tickets, call-outcome, outreach, quote-builder save) in one
   `postJSON()` helper over `htmx.ajax`.
+  **Fixed:**
+  (a) `fetchCompanies()`/`customerPicker.filtered` → `GET /v2/partials/requisitions/customer-typeahead`
+  (new HTML-partial endpoint in `app/routers/htmx/requisitions.py`, reusing the same
+  active-Company+sites query as the untouched JSON `/api/companies/typeahead`), rendered
+  by new `requisitions/_customer_typeahead_results.html`, wired via `hx-trigger="input
+  changed delay:300ms, focus"` on the search input in `unified_modal.html`.
+  `searchVendors()` → `GET /v2/partials/sightings/vendor-search` (new endpoint in
+  `app/routers/sightings.py`, vendors-only sibling of the untouched JSON
+  `/api/autocomplete/names`), rendered by new `sightings/_vendor_search_results.html`,
+  wired the same way in `sightings/vendor_modal.html`. Both use single-quoted `@click`
+  attributes with `|tojson` payloads per the CLAUDE.md landmine rule.
+  (b)/(c) Added `postJSON(url, body)` (JSON body via the bundled `json-enc` extension,
+  activated per-call via a throwaway source element so it never leaks to other htmx
+  requests) and `postForm(url, values)` (form-urlencoded sibling, for the one Form()-based
+  endpoint) to `htmx_app.js` — both resolve `{ok, status, json(), text}` off the real XHR
+  by listening once for `htmx:afterRequest` on that throwaway element (rejects only on
+  `status===0`, i.e. genuine network failure, matching `fetch()`'s reject semantics).
+  Replaced fetch() at: trouble-ticket submit (`submitTroubleReport`, now swaps the
+  response HTML via `htmx.swap` instead of a second manual step), bulk ticket action
+  (`ticketBulkAction`), call-outcome log (`callOutcome.submit`), timezone auto-detect
+  (`syncDisplayTimezone`, via `postForm` — its endpoint takes `Form(...)`, not JSON),
+  quote-builder save (`saveQuote`). CSRF no longer set manually at these sites — it's
+  already injected app-wide by the existing `htmx:configRequest` listener.
+  **Exceptions kept on raw `fetch()` (documented in-code):** outreach log
+  (`data-outreach-log` click handler) — needs `keepalive: true` (XHR/htmx.ajax has no
+  equivalent) since the log POST must survive the browser navigating away for the
+  tel:/mailto:/Teams handler firing in the same click, and branches on the parsed JSON
+  body (`dropped_links`, activity id) that a `fetch()` `.json()` gives directly. Avatar
+  upload — binary Blob/FormData multipart upload, not a JSON-shaped payload the
+  `postJSON` pipeline fits. Endpoints reused/added: `/api/companies/typeahead` and
+  `/api/autocomplete/names` (JSON, untouched, note for cleanup if ever unused) vs. new
+  `/v2/partials/requisitions/customer-typeahead` and
+  `/v2/partials/sightings/vendor-search` (HTML). Verified: `tests/frontend/*.test.ts`
+  (168/168 — `rfq-vendor-modal.test.ts`'s `searchVendors` suite replaced with a
+  `pickVendor` test since that state moved server-side; `trouble-screenshot.test.ts`
+  updated to spy `window.postJSON`), `tests/test_unified_req_form.py`,
+  `tests/test_sightings_router.py`, `tests/test_frontend_hardening.py`, `npm run build`
+  + `npm run lint` clean.
 
-- [ ] **P5.3 — Empty-state dedup.** 11 templates hand-roll the markup that
+- [x] **P5.3 — Empty-state dedup.** 11 templates hand-roll the markup that
   `shared/empty_state.html` already provides (vendors/list, requisitions/list,
   emails/*, follow_ups, offers/review_queue, proactive, prospecting, rfq_compose,
   search/full_results, vendors/contacts_list).
+  **Fixed:** extended `shared/empty_state.html` with optional params (`message_class`,
+  `message_safe`, `description_class`, `show_icon`, `icon_path`, `icon_class`,
+  `icon_stroke_width`, `wrapper_class`, `action_open_modal`, `action_class`) — all
+  default to the partial's pre-existing hard-coded look, so its 8 existing `{% include
+  %}` callers are byte-identical. Each of the 11 sites now passes its exact prior
+  classes/icon path through these params (pixel-equivalent — verified by diffing
+  rendered output shape, not just `message` text). `proactive/_macros.html` had its own
+  parallel `empty_state(icon_path, title, subtitle)` macro (already de-duped locally,
+  supporting a `{% call %}` block for the "Check again" button) — added a matching
+  call-block-friendly `macro empty_state(...)` to `shared/empty_state.html` itself (its
+  defaults matched to proactive's prior look) and re-exported it from
+  `proactive/_macros.html` via `{% import ... as _empty_state_shared %}{% set
+  empty_state = _empty_state_shared.empty_state %}` (Jinja `{% from %}` does not chain
+  re-exports) so `proactive/list.html`'s two call sites are untouched. `search/
+  full_results.html`'s message embeds a bolded query term — built via `{% set %}...{%
+  endset %}` capture (not `~` string concat, which re-escapes already-escaped pieces
+  under autoescape) and passed with `message_safe=true`. Verified via
+  `tests/test_empty_states_fixes.py` (asserts the shared partial's contract directly)
+  plus the full route test sweep for all 11 owning surfaces (1026 tests, all pass).
 
-- [ ] **P5.4 — Single-quote the `tojson` attributes** in `quote_builder/modal.html:10`
+- [x] **P5.4 — Single-quote the `tojson` attributes** in `quote_builder/modal.html:10`
   and `requisitions/rfq_compose.html:44` (latent Alpine-breakage per CLAUDE.md).
+  **Fixed:** both `x-data`/`@change` attributes switched from double- to single-quoted
+  delimiters; the JS string literals that were single-quoted inside `quote_builder/
+  modal.html`'s `x-data` (`'{{ requirement_ids }}'`) flipped to double-quoted so they no
+  longer collide with the new outer delimiter. Verified via a standalone Jinja render
+  (correct output) plus the existing route test sweep for both templates (404 tests).
 
-- [ ] **P5.5 — Replace `_x_dataStack` in `tests/e2e/test_navigation_smoke.py:38`**
+- [x] **P5.5 — Replace `_x_dataStack` in `tests/e2e/test_navigation_smoke.py:38`**
   with an `Alpine.store('nav')` read or `data-current-view` attribute.
+  **Fixed:** `document.body`'s `currentView` (base.html) turned out to be dead state —
+  set once at first paint and never updated by client-side HTMX navigation, so reading
+  it would never have reflected real post-navigation state anyway. The Alpine component
+  that actually owns and reactively updates current-view (`activeNav`, via
+  `@htmx:pushed-into-history` and each nav link's `@click`) is `mobile_nav.html`'s own
+  `<nav>` `x-data`. Added `:data-current-view="activeNav"` to that `<nav>` element (a
+  public, non-visual attribute) and updated the test helper to read
+  `document.querySelector('nav[aria-label="Main navigation"]').dataset.currentView`
+  instead of `document.body._x_dataStack?.[0]?.currentView`. Playwright e2e is excluded
+  from CI (per task) — verified with `python3 -m py_compile` only.
 
 ---
 

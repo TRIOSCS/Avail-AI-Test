@@ -5,6 +5,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import tab_button %}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 {# Initial lazy-load URL per tab. Most tabs live at /v2/partials/settings/<slug>,
    but the slug differs from the Alpine tab id for some (data_ops→data-ops,
    ops_group→ops-group) and the Tickets tab's content is the trouble-tickets
@@ -45,17 +46,14 @@
     {{ tab_button('profile', '/v2/partials/settings/profile', 'Profile', ['M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']) }}
   </div>
 
-  {# Tab content area — lazy-loaded on initial render #}
-  <div id="settings-content"
-       hx-get="{{ content_url }}"
-       hx-trigger="load"
-       hx-target="#settings-content"
-       hx-indicator="#settings-load-spinner">
+  {# Tab content area — lazy-loaded on initial render. lazy_body macro
+     structurally enforces the explicit hx-target guard (see shared/_macros.html). #}
+  {% call lazy_body('settings-content', content_url, indicator='#settings-load-spinner') %}
     <div id="settings-load-spinner" class="htmx-indicator flex items-center justify-center py-6 sm:py-8">
       <svg class="h-6 w-6 text-accent-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
     </div>
-  </div>
+  {% endcall %}
 </div>

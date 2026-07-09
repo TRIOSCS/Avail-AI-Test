@@ -162,27 +162,29 @@
         </svg>
       </span>
 
-      {# Find any vendor: debounced autocomplete against /api/autocomplete/names —
-         vendors only, filtered client-side in searchVendors() (endpoint not forked).
-         Picking a result POSTs to composer-vendor and appends the returned row. #}
-      <div class="mt-2 relative">
+      {# Find any vendor: P5.2 server-rendered debounced dropdown against
+         GET /v2/partials/sightings/vendor-search (a vendors-only HTML sibling of
+         /api/autocomplete/names — that JSON endpoint mixes vendors + customers for
+         other callers and is left intact). Picking a result POSTs to composer-vendor
+         and appends the returned row (pickVendor(), unchanged). The event filter
+         gates the request to 2+ chars — hugging the event name so it isn't a
+         trailing-modifier syntax error (htmx:syntax:error landmine). #}
+      <div class="mt-2 relative" x-data="{ vsOpen: false }">
         <input type="text" x-model="vendorQuery"
-               @input.debounce.300ms="searchVendors()"
-               @focus="searchOpen = vendorResults.length > 0"
-               @click.away="searchOpen = false"
+               hx-get="/v2/partials/sightings/vendor-search"
+               hx-trigger="input[target.value.trim().length >= 2] changed delay:300ms, focus[target.value.trim().length >= 2]"
+               hx-target="#vendor-search-results"
+               hx-swap="innerHTML"
+               @input="vsOpen = vendorQuery.trim().length >= 2"
+               @focus="vsOpen = vendorQuery.trim().length >= 2"
+               @click.away="vsOpen = false"
                placeholder="Find any vendor..."
                autocomplete="off"
                aria-label="Find any vendor"
                class="input">
-        <div x-show="searchOpen" x-cloak
+        <div x-show="vsOpen" x-cloak
              class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-line-base rounded-lg shadow-float">
-          <template x-for="v in vendorResults" :key="v.id">
-            <button type="button" @click="pickVendor(v.name)"
-                    class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-accent-50 hover:text-accent-700 truncate"
-                    x-text="v.name"></button>
-          </template>
-          <div x-show="vendorResults.length === 0" x-cloak
-               class="px-3 py-1.5 text-xs text-gray-400 italic">No vendors found</div>
+          <div id="vendor-search-results"></div>
         </div>
       </div>
 

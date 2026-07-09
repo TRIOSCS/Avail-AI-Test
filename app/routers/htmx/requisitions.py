@@ -817,6 +817,34 @@ async def requisition_import_save(
     return resp
 
 
+@router.get("/v2/partials/requisitions/customer-typeahead", response_class=HTMLResponse)
+async def customers_typeahead_dropdown(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """P5.2: server-rendered debounced dropdown for the unified requisition
+    modal's customer picker (unified_modal.html, customerPicker() in htmx_app.js).
+
+    Reuses the same active-Company + site query that backs the JSON
+    /api/companies/typeahead endpoint (crm.companies.companies_typeahead) — that
+    endpoint preloads the FULL list once for a different, still-live caller and
+    is left intact; this is an HTML sibling filtered server-side by `q` so the
+    picker is a real hx-get swap instead of a client-side fetch-all + filter.
+    """
+    query = q.strip()
+    companies_q = db.query(Company).filter(Company.is_active.is_(True)).options(selectinload(Company.sites))
+    if query:
+        companies_q = companies_q.filter(Company.name.ilike(f"%{escape_like(query)}%", escape="\\"))
+    companies = companies_q.order_by(Company.name).limit(20).all()
+    ctx = {
+        "request": request,
+        "companies": [{"id": c.id, "name": c.name, "sites": [s for s in c.sites if s.is_active]} for c in companies],
+    }
+    return template_response("htmx/partials/requisitions/_customer_typeahead_results.html", ctx)
+
+
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
 async def customer_lookup(
     request: Request,

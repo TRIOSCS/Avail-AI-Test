@@ -34,8 +34,18 @@ DIRECT_ACCESS_PAGES = [
 
 
 def _get_current_view(page: Page) -> str:
-    """Read Alpine currentView from body x-data."""
-    return page.evaluate("() => document.body._x_dataStack?.[0]?.currentView || ''")
+    """Read the bottom nav's reactive `activeNav` off its public data-current-view
+    attribute (mobile_nav.html — the Alpine component that actually owns and
+    updates current-view state across HTMX navigation, via
+    @htmx:pushed-into-history and each nav link's @click). Avoids reaching into
+    Alpine's private `_x_dataStack` internals (P5.5) — and reads real state:
+    base.html's body-level `currentView` is set once at first paint and never
+    updated by client-side HTMX navigation, so it would always report the
+    ORIGINAL page's view, not the current one.
+    """
+    return page.evaluate(
+        "() => document.querySelector('nav[aria-label=\"Main navigation\"]')?.dataset.currentView || ''"
+    )
 
 
 def _wait_for_nav(page: Page):

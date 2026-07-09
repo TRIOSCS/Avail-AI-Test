@@ -141,12 +141,16 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-    </svg>
-    <p class="mt-3 text-sm font-medium text-gray-600">No follow-ups needed!</p>
-    <p class="text-xs text-gray-400 mt-1">All RFQ contacts have responded or are within the follow-up window.</p>
-  </div>
+  {% with
+    message="No follow-ups needed!",
+    message_class="mt-3 text-sm font-medium text-gray-600",
+    description="All RFQ contacts have responded or are within the follow-up window.",
+    description_class="text-xs text-gray-400 mt-1",
+    wrapper_class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center",
+    icon_class="mx-auto h-12 w-12 text-emerald-300",
+    icon_path="M5 13l4 4L19 7"
+  %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
   {% endif %}
 </div>
