@@ -248,6 +248,10 @@ class TestSeedAdminUser:
 
         u = db_session.query(User).filter_by(email="ops@example.com").first()
         assert u is not None
+        # Seeded through the PASSED session with the admin role the env seed
+        # promises — visible here without the helper committing its own session.
+        assert u.role == "admin"
+        assert u.is_active is True
 
     @patch("app.startup.SessionLocal")
     def test_env_unset_seeds_nothing_and_opens_no_session(self, mock_sl):
