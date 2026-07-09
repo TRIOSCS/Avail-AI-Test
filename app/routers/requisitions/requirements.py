@@ -459,7 +459,7 @@ async def add_requirements(
         from ...services.datasheet_capture import capture_datasheet
 
         for _mpn in {r.primary_mpn for r in created if r.primary_mpn}:
-            _ = await safe_background_task(
+            await safe_background_task(
                 capture_datasheet(_mpn, user.id), task_name="datasheet_capture", suppress_in_testing=True
             )
     except Exception:

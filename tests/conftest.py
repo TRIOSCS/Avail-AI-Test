@@ -331,6 +331,10 @@ def sqlite_fk_disabled(db: Session):
     (a no-op), leaves FK enforcement off for every later test in the process. This
     manager issues both flips outside any transaction and restores in ``finally``.
     Pending work in *db* is committed on success and rolled back on error.
+
+    WARNING: entering this context rolls back any uncommitted work already staged
+    on *db* before the ``with`` block (the entry pragma flip requires no open
+    transaction) — callers must ``db.commit()`` their own pending changes first.
     """
     db.rollback()  # close any open tx so the OFF pragma takes effect
     db.execute(text("PRAGMA foreign_keys=OFF"))

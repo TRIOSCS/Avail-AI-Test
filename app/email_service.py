@@ -37,13 +37,8 @@ from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
 from .shared_constants import RFQ_SUBJECT_TAG_RE
+from .utils.async_helpers import hold_bg_task
 from .vendor_utils import normalize_vendor_name
-
-# Fire-and-forget SSE publish tasks (e.g. sighting-updated) must be held in a strong
-# reference until they complete — asyncio only holds a weak reference to a task once
-# created, so without this the event loop can garbage-collect an in-flight publish
-# before it runs, silently dropping the SSE event.
-_bg_tasks: set[asyncio.Task] = set()
 
 
 def _build_html_body(plain_text: str) -> str:
@@ -1615,8 +1610,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                         json.dumps({"requirement_id": rid}),
                     )
                 )
-                _bg_tasks.add(task)
-                task.add_done_callback(_bg_tasks.discard)
+                hold_bg_task(task)
         except Exception:
             logger.debug("SSE publish from auto-create offers skipped (no event loop)")
 

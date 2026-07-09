@@ -2401,7 +2401,7 @@ async def sightings_composer_vendor(
                     from ..utils.async_helpers import safe_background_task
                     from ..utils.vendor_helpers import _background_enrich_vendor
 
-                    _ = await safe_background_task(
+                    await safe_background_task(
                         _background_enrich_vendor(card.id, card.domain, card.display_name),
                         task_name="enrich_vendor_from_composer",
                     )

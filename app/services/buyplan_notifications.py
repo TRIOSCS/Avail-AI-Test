@@ -50,7 +50,7 @@ async def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
         finally:
             bg_db.close()
 
-    _ = await safe_background_task(_run(), task_name="buyplan_notification")
+    await safe_background_task(_run(), task_name="buyplan_notification")
 
 
 # Backward-compatible alias

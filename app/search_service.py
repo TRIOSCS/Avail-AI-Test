@@ -2484,7 +2484,7 @@ async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> No
         finally:
             session.close()
 
-    _ = await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
+    await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
 
 
 def sighting_to_dict(s: Sighting) -> dict:

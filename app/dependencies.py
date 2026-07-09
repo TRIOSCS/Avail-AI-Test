@@ -18,7 +18,7 @@ Depends on: models, database, config
 
 import hmac
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
@@ -477,7 +477,7 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
 
         m = db.query(VerificationGroupMember).filter_by(user_id=user.id).first()
         return bool(m and m.is_active)
-    overrides: dict = dict(user.access_overrides or {})
+    overrides = cast(dict, user.access_overrides or {})
     if key_str in overrides:
         return bool(overrides[key_str])
     try:

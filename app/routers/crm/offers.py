@@ -542,7 +542,7 @@ async def create_offer(
     if _enrich_new_card:
         from ...utils.vendor_helpers import _background_enrich_vendor
 
-        _ = await safe_background_task(
+        await safe_background_task(
             _background_enrich_vendor(*_enrich_new_card), task_name="enrich_vendor_from_offer"
         )
 

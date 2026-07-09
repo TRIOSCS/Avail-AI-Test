@@ -59,16 +59,10 @@ from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipi
 from ..models.quality_plan import Prepayment
 from ..services.admin_service import get_config_values
 from ..services.teams_notifications import post_teams_channel_card
-from ..utils.async_helpers import safe_background_task
+from ..utils.async_helpers import hold_bg_task, safe_background_task
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localtime
 
 _CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_webhook"]
-
-# Fire-and-forget tasks scheduled by schedule_prepayment_notify() must be held in a
-# strong reference until they complete — asyncio only weakly references a bare task,
-# so without this the event loop can garbage-collect the notify task mid-flight,
-# silently dropping the accounting/AP notification.
-_bg_tasks: set[asyncio.Task] = set()
 
 _HEADINGS = {
     "requested": "PENDING APPROVAL — DO NOT PAY YET",
@@ -108,7 +102,7 @@ async def run_prepayment_notify_bg(coro_fn, prepayment_id: int) -> None:
         finally:
             bg_db.close()
 
-    _ = await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
+    await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
 
 
 def schedule_prepayment_notify(coro) -> None:
@@ -124,9 +118,7 @@ def schedule_prepayment_notify(coro) -> None:
     except RuntimeError:
         coro.close()
     else:
-        task = loop.create_task(coro)
-        _bg_tasks.add(task)
-        task.add_done_callback(_bg_tasks.discard)
+        hold_bg_task(loop.create_task(coro))
 
 
 # ── Public notify functions ──────────────────────────────────────────

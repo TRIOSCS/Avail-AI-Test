@@ -583,7 +583,7 @@ async def add_email_to_card(
         if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
             "anthropic_ai", "ANTHROPIC_API_KEY"
         ):
-            _ = await safe_background_task(
+            await safe_background_task(
                 _background_enrich_vendor(card.id, domain_extracted, card.display_name),
                 task_name="enrich_vendor_from_contact",
             )

@@ -1037,7 +1037,7 @@ async def search_run(
 
     from ..search_service import stream_search_mpn
 
-    _ = await _safe_bg(stream_search_mpn(search_id, search_mpn), task_name="stream_search_mpn")
+    await _safe_bg(stream_search_mpn(search_id, search_mpn), task_name="stream_search_mpn")
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
@@ -1640,11 +1640,13 @@ async def requisition_insights_refresh(
     """Generate fresh AI insights for a requisition and return panel."""
     from ..services.knowledge_service import generate_insights, get_cached_insights
 
+    entries = []
     try:
-        await generate_insights(db, req_id)
+        entries = await generate_insights(db, req_id)
     except Exception as e:
+        db.rollback()
         logger.warning(f"Insight generation failed for req {req_id}: {e}")
-    insights = get_cached_insights(db, req_id)
+    insights = entries or get_cached_insights(db, req_id)
     return _render_insights(request, user, insights, "requisitions", req_id)
 
 
@@ -1672,11 +1674,13 @@ async def vendor_insights_refresh(
     """Generate fresh AI insights for a vendor and return panel."""
     from ..services.knowledge_service import generate_vendor_insights, get_cached_vendor_insights
 
+    entries = []
     try:
-        await generate_vendor_insights(db, vendor_id)
+        entries = await generate_vendor_insights(db, vendor_id)
     except Exception as e:
+        db.rollback()
         logger.warning(f"Insight generation failed for vendor {vendor_id}: {e}")
-    insights = get_cached_vendor_insights(db, vendor_id)
+    insights = entries or get_cached_vendor_insights(db, vendor_id)
     return _render_insights(request, user, insights, "vendors", vendor_id)
 
 
@@ -1704,11 +1708,13 @@ async def company_insights_refresh(
     """Generate fresh AI insights for a company and return panel."""
     from ..services.knowledge_service import generate_company_insights, get_cached_company_insights
 
+    entries = []
     try:
-        await generate_company_insights(db, company_id)
+        entries = await generate_company_insights(db, company_id)
     except Exception as e:
+        db.rollback()
         logger.warning(f"Insight generation failed for company {company_id}: {e}")
-    insights = get_cached_company_insights(db, company_id)
+    insights = entries or get_cached_company_insights(db, company_id)
     return _render_insights(request, user, insights, "customers", company_id)
 
 
@@ -1734,11 +1740,13 @@ async def pipeline_insights_refresh(
     """Generate fresh pipeline insights and return panel."""
     from ..services.knowledge_service import generate_pipeline_insights, get_cached_pipeline_insights
 
+    entries = []
     try:
-        await generate_pipeline_insights(db)
+        entries = await generate_pipeline_insights(db)
     except Exception as e:
+        db.rollback()
         logger.warning(f"Pipeline insight generation failed: {e}")
-    insights = get_cached_pipeline_insights(db)
+    insights = entries or get_cached_pipeline_insights(db)
     return _render_insights(request, user, insights, "dashboard", 0)
 
 
