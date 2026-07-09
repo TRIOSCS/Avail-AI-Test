@@ -367,8 +367,12 @@
           <div class="px-4 py-2 bg-gray-50 text-secondary font-medium uppercase">
             {{ line.mpn }}
           </div>
+          {# LANDMINE: hx-trigger="revealed" MUST carry the explicit hx-target="this".
+             Without it the element inherits #main-content's hx-target="this" (base.html)
+             and the reveal wipes the whole page (known cards-vanish regression). #}
           <div hx-get="/v2/partials/pricing-history/{{ line.mpn }}"
                hx-trigger="revealed"
+               hx-target="this"
                hx-swap="innerHTML"
                class="px-4 py-3 text-sm text-gray-600">
             <span class="htmx-indicator">Loading pricing history...</span>

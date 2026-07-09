@@ -454,6 +454,11 @@ class TestReviseClonesLines:
         assert float(rev_lines[0].sell_price) == 0.55
         # The revision detail must render the line (not "No line items yet").
         assert "LM317T" in resp.text
+        # P0.3: the pricing-history lazy-load div MUST carry an explicit hx-target="this"
+        # — under #main-content's hx-target="this" (base.html), omitting it swaps the
+        # whole page in on "revealed" instead of just this row.
+        assert 'hx-trigger="revealed"' in resp.text
+        assert 'hx-target="this"' in resp.text
 
 
 class TestPricingHistoryUrl:

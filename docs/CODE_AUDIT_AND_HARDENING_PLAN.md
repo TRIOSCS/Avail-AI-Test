@@ -28,7 +28,7 @@ These are confirmed defects shipping today, not style issues.
   DB this raises `DuplicateColumn`. Fix: add the same `_column_exists` guard (or delete
   the redundant ops). Verify with upgrade → downgrade → upgrade on a throwaway Postgres.
 
-- [ ] **P0.3 — Whole-page wipe on quote detail scroll.**
+- [x] **P0.3 — Whole-page wipe on quote detail scroll.**
   `app/templates/htmx/partials/quotes/detail.html:370` — pricing-history lazy-load
   `div` has `hx-trigger="revealed"` but no `hx-target`, so it inherits
   `hx-target="this"` from `#main-content` (`htmx/base.html:50`) and replaces the whole
