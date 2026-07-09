@@ -88,6 +88,18 @@ _GRANDFATHERED_REMOVE_INDEXES = {
     "ix_mc_has_datasheet",
     "ix_mc_order_live",
     "ix_vendor_cards_domain_lower",
+    # 3. Startup-backfill partial indexes (migration 187, P2.7) — operational
+    #    existence-check indexes on the deferred backfills' IS NULL predicates,
+    #    same shape/rationale as ix_mc_has_datasheet above. Migration-only by
+    #    design (dropped when a backfill's predicate set goes permanently empty).
+    "ix_requirements_backfill_norm_mpn",
+    "ix_material_cards_backfill_norm_mpn",
+    "ix_sightings_backfill_norm_mpn",
+    "ix_offers_backfill_norm_mpn",
+    "ix_sightings_backfill_vendor_norm",
+    "ix_offers_backfill_vendor_norm",
+    "ix_trouble_tickets_backfill_defaults",
+    "ix_prospect_accounts_backfill_cooldown",
 }
 
 # Index the model declares but the DB's baseline never created (autogenerate wants to
