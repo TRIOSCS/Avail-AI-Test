@@ -130,7 +130,7 @@ async def lifespan(app):
                         if k.lower() in _SENSITIVE_HEADERS:
                             hdrs[k] = "[Filtered]"
                 qs = req.get("query_string", "")
-                if isinstance(qs, str) and "key" in qs.lower():
+                if isinstance(qs, str) and any(v in qs.lower() for v in _SENSITIVE_VARS):
                     req["query_string"] = "[Filtered]"
                 data = req.get("data")
                 if data is not None:
@@ -187,9 +187,16 @@ async def lifespan(app):
         # post-yield background task instead of running them inline before /health
         # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
         # above already ran the FAST, order-critical ops synchronously.
+        from .services.prepayment_notifications import set_main_event_loop
         from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
         from .utils.async_helpers import safe_background_task
 
+        # run_deferred_startup_backfills executes on an asyncio.to_thread worker
+        # thread with no running loop of its own; register the main loop so
+        # schedule_prepayment_notify can still deliver a DO-NOT-WIRE stand-down
+        # notification if that sweep auto-completes a buy plan with a pending
+        # prepayment (see prepayment_notifications.py's cross-thread fallback).
+        set_main_event_loop(asyncio.get_running_loop())
         mark_deferred_backfills_pending()
         await safe_background_task(
             asyncio.to_thread(run_deferred_startup_backfills),
@@ -766,13 +773,19 @@ async def health_ready() -> JSONResponse:
     deploy.sh instead curls this endpoint once, after liveness passes, purely to
     log the readiness state.
 
+    ``ready`` is True only when the phase reports COMPLETED — a crashed deferred
+    phase (state FAILED) must never be reported as ready. ``state`` carries the raw
+    tri-state (running/completed/failed) for diagnostics; ``ready`` is kept for
+    backward compatibility with deploy.sh's informational curl.
+
     Called by: deploy.sh (post-deploy, informational only), ops/monitoring
-    Depends on: app/startup.py (is_deferred_backfills_ready)
+    Depends on: app/startup.py (is_deferred_backfills_ready, get_deferred_backfills_state)
     """
-    from .startup import is_deferred_backfills_ready
+    from .startup import get_deferred_backfills_state, is_deferred_backfills_ready
 
     ready = is_deferred_backfills_ready()
-    return JSONResponse(content={"ready": ready}, status_code=200 if ready else 503)
+    state = get_deferred_backfills_state()
+    return JSONResponse(content={"ready": ready, "state": state}, status_code=200 if ready else 503)
 
 
 # ── Router Registration ──────────────────────────────────────────────────

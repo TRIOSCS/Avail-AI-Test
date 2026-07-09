@@ -350,6 +350,38 @@ class TestParseOfferFormRows:
         render 'No offers to save' without calling the save function."""
         assert parse_offer_form_rows({}, vendor_name="Acme Distribution") == []
 
+    def test_zero_string_qty_and_price_parse_to_zero_not_none(self):
+        """Regression: qty_available/moq/unit_price now go through the shared
+        app.utils.safe_int/safe_float instead of a private falsy-pre-check helper.
+        A literal "0" string (a real, if unusual, form value — e.g. an explicit
+        zero-stock row) must still parse to 0, not None — form values are always
+        `str | None`, so the string "0" is truthy and takes the int()/float() branch
+        under both the old and new implementation."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "0",
+            "offers[0].unit_price": "0",
+            "offers[0].moq": "0",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert rows[0]["qty_available"] == 0
+        assert rows[0]["unit_price"] == 0.0
+        assert rows[0]["moq"] == 0
+
+    def test_blank_qty_and_price_parse_to_none(self):
+        """An empty-string form field (left blank by the user) still parses to None, not
+        0 — unchanged from the pre-dedup private helper."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "",
+            "offers[0].unit_price": "",
+            "offers[0].moq": "",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert rows[0]["qty_available"] is None
+        assert rows[0]["unit_price"] is None
+        assert rows[0]["moq"] is None
+
 
 # -- TestSaveFormParsedOffers -------------------------------------------------
 # P4.2: MPN matching, VendorCard resolution, Offer construction extracted from

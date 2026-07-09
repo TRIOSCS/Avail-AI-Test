@@ -293,13 +293,6 @@ class TestCompanies:
         data = resp.json()
         assert data["ok"] is True
 
-    def test_typeahead(self, client, db_session, test_company):
-        resp = client.get("/api/companies/typeahead")
-        assert resp.status_code == 200
-        data = resp.json()
-        names = [c["name"] for c in data]
-        assert "Acme Electronics" in names
-
 
 class TestCompanyDetail:
     def test_get_company_basic(self, client, db_session, test_company, test_customer_site):

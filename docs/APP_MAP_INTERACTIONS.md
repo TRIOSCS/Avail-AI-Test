@@ -2829,8 +2829,8 @@ ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
 `release_prospect`):
 - `POST .../{company_id}/disposition` (`set_company_disposition`) — `_VALID_DISPOSITIONS`
   allowlist (`active`/`bucket`, invalid → 400), writes `disposition`/`disposition_reason`/
-  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')` +
-  `('companies_typeahead')`, re-renders `_disposition_control.html`. Reversible.
+  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')`,
+  re-renders `_disposition_control.html`. Reversible.
 - `POST .../{company_id}/send-to-prospecting` (`send_company_to_prospecting_htmx`) →
   `prospect_claim.send_company_to_prospecting` (FOR-UPDATE lock, clears
   `account_owner_id` + sets `ownership_cleared_at`, find-or-create
@@ -3038,7 +3038,7 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   `company_utils.suggest_clean_company_name` (display-cased suffix-strip) as "Suggested
   name: X" with an Apply button → `POST .../{company_id}/apply-name`
   (`company_apply_name`; sets `Company.name`, `@validates` resyncs `normalized_name`,
-  `invalidate_prefix('company_list','companies_typeahead')`). Empty 200 when already
+  `invalidate_prefix('company_list')`). Empty 200 when already
   clean. **create_company no longer silently stores the AI-typo-corrected name** — it
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
@@ -5643,9 +5643,12 @@ safe_background_task`). `GET /health` is liveness-only and answers as soon as th
 FAST phase completes — it no longer blocks behind a prod-sized full-table scan, so
 `docker-compose.yml`'s healthcheck and `deploy.sh`'s Step 4 wait loop (which poll
 `/health`) can no longer false-fail a deploy on a large DB. `GET /health/ready`
-reports whether the deferred phase has finished (module flag
-`app.startup.deferred_backfills_ready`); `deploy.sh` Step 4b curls it once, purely
-to log the state — it never gates the deploy on it. `_maybe_analyze_hot_tables`
+reports a tri-state (module variable `app.startup.deferred_backfills_state`:
+`running` / `completed` / `failed`, `app.constants.DeferredBackfillState`) as both
+`{"ready": bool, "state": str}` — `ready` is only `true` when the phase reports
+`completed`, so a deferred phase that crashes (`failed`) is never misreported as
+ready. `deploy.sh` Step 4b curls it once, purely to log the state — it never gates
+the deploy on it. `_maybe_analyze_hot_tables`
 additionally gates the `ANALYZE` call behind a `system_config` marker keyed to
 `BUILD_COMMIT`, so a same-image container restart skips it and only a genuine new
 deploy re-runs it. Migration `187_startup_backfill_partial_idx` adds 8 PostgreSQL

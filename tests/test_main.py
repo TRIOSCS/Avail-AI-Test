@@ -672,32 +672,35 @@ class TestHealthReadyEndpoint:
 
     def test_ready_by_default_under_testing(self, client):
         """Under TESTING=1 the deferred phase never launches (main.py gates it behind
-        `not _is_testing`), so the flag defaults ready=True and this must never hang a
-        test suite waiting on a phase that will never run."""
+        `not _is_testing`), so the state defaults to completed/ready=True and this must
+        never hang a test suite waiting on a phase that will never run."""
         resp = client.get("/health/ready")
         assert resp.status_code == 200
-        assert resp.json() == {"ready": True}
+        assert resp.json() == {"ready": True, "state": "completed"}
 
     def test_not_ready_returns_503(self, client):
-        """While the deferred phase is pending, /health/ready reports 503 + ready:false
-        — but /health (liveness) must stay unaffected."""
+        """While the deferred phase is pending, /health/ready reports 503 +
+        ready:false/state:running — but /health (liveness) must stay unaffected."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
 
-        startup_mod.deferred_backfills_ready = False
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
         try:
             ready_resp = client.get("/health/ready")
             assert ready_resp.status_code == 503
-            assert ready_resp.json() == {"ready": False}
+            assert ready_resp.json() == {"ready": False, "state": "running"}
 
             live_resp = client.get("/health")
             assert live_resp.status_code == 200
         finally:
-            startup_mod.deferred_backfills_ready = True
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
 
     def test_ready_flips_true_after_deferred_phase_completes(self, client):
         """Simulates the deferred phase: /health/ready is false while "running", then
-        true once run_deferred_startup_backfills's finally: block flips it back."""
+        true once run_deferred_startup_backfills completes successfully (state ->
+        completed)."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
 
         try:
@@ -726,9 +729,33 @@ class TestHealthReadyEndpoint:
 
                 resp = client.get("/health/ready")
                 assert resp.status_code == 200
-                assert resp.json() == {"ready": True}
+                assert resp.json() == {"ready": True, "state": "completed"}
         finally:
-            startup_mod.deferred_backfills_ready = True
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
+
+    def test_crashed_deferred_phase_reports_not_ready_failed(self, client):
+        """The bug this tri-state fixes: if the deferred phase crashes, /health/ready
+        must report ready=False + state=failed — never silently ready=True."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
+
+        try:
+            with no_testing_env():
+                mark_deferred_backfills_pending()
+
+                with (
+                    patch("app.startup.engine"),
+                    patch("app.startup._backfill_fts", side_effect=RuntimeError("boom")),
+                ):
+                    with pytest.raises(RuntimeError, match="boom"):
+                        run_deferred_startup_backfills()
+
+                resp = client.get("/health/ready")
+                assert resp.status_code == 503
+                assert resp.json() == {"ready": False, "state": "failed"}
+        finally:
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
 
 
 class TestLifespanDeferredBackfillLaunch:
@@ -768,21 +795,63 @@ class TestLifespanDeferredBackfillLaunch:
             mock_mark.assert_called_once()
             mock_deferred.assert_called_once()
 
+    def test_lifespan_registers_main_loop_for_prepayment_cross_thread_fallback(self):
+        """Immediately before dispatching run_deferred_startup_backfills via
+        asyncio.to_thread, the lifespan must register the main loop so
+        schedule_prepayment_notify's cross-thread fallback (finding #3) has a live loop
+        to hand off to."""
+        from app.services import prepayment_notifications as pn
+
+        mock_app = MagicMock()
+        with (
+            no_testing_env(),
+            patch("app.main.settings") as mock_settings,
+            patch("app.startup.run_startup_migrations"),
+            patch("app.startup.ensure_screenshot_storage"),
+            patch("app.startup.ensure_avatar_storage"),
+            patch("app.startup.seed_api_sources"),
+            patch("app.startup.mark_deferred_backfills_pending"),
+            patch("app.startup.run_deferred_startup_backfills"),
+            patch("app.connector_status.log_connector_status", return_value={}),
+            patch("app.scheduler.configure_scheduler"),
+            patch("app.scheduler.scheduler"),
+            patch("app.http_client.close_clients", new_callable=AsyncMock),
+            patch(
+                "app.services.prepayment_notifications.set_main_event_loop",
+                wraps=pn.set_main_event_loop,
+            ) as mock_set_loop,
+        ):
+            mock_settings.secret_key = "a-real-secret-key"
+            mock_settings.sentry_dsn = ""
+            mock_settings.azure_client_id = "cid"
+            mock_settings.azure_client_secret = "csecret"
+            mock_settings.azure_tenant_id = "tid"
+            mock_settings.acs_connection_string = ""
+            mock_settings.acs_webhook_secret = ""
+
+            run_lifespan(mock_app)
+
+            mock_set_loop.assert_called_once()
+            registered_loop = mock_set_loop.call_args.args[0]
+            assert isinstance(registered_loop, asyncio.AbstractEventLoop)
+        pn._main_event_loop = None  # reset — the loop registered above is now closed
+
     def test_testing_mode_never_schedules_deferred_backfills(self, client):
         """Under TESTING=1 (the `client` fixture's app), the deferred phase must never
         be scheduled — mirrors how the scheduler/seed_api_sources are also skipped."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
 
-        # If it had ever run under TESTING, the flag would already be True (its
+        # If it had ever run under TESTING, the state would already be COMPLETED (its
         # default) regardless — so assert the stronger claim: the function is never
-        # even reachable by checking main.py's gate directly via a fresh flag flip.
-        startup_mod.deferred_backfills_ready = False
+        # even reachable by checking main.py's gate directly via a fresh state flip.
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
         # No boot happens on a `client.get(...)` — the app is already up. This just
-        # confirms nothing in request handling flips the flag, i.e. only the lifespan
+        # confirms nothing in request handling flips the state, i.e. only the lifespan
         # (never entered here beyond app startup already done by the fixture) could.
         client.get("/health")
-        assert startup_mod.deferred_backfills_ready is False
-        startup_mod.deferred_backfills_ready = True
+        assert startup_mod.deferred_backfills_state == DeferredBackfillState.RUNNING
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
 
 
 # ── _seed_api_sources: existing source update (lines 767-773) ────────

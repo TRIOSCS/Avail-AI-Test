@@ -827,11 +827,11 @@ async def customers_typeahead_dropdown(
     """P5.2: server-rendered debounced dropdown for the unified requisition modal's
     customer picker (unified_modal.html, customerPicker() in htmx_app.js).
 
-    Reuses the same active-Company + site query that backs the JSON
-    /api/companies/typeahead endpoint (crm.companies.companies_typeahead) — that
-    endpoint preloads the FULL list once for a different, still-live caller and
-    is left intact; this is an HTML sibling filtered server-side by `q` so the
-    picker is a real hx-get swap instead of a client-side fetch-all + filter.
+    Runs the same active-Company + site query the retired JSON
+    `/api/companies/typeahead` endpoint (crm.companies.companies_typeahead, removed —
+    it had no remaining consumers once this HTML sibling replaced its only caller)
+    used to serve, filtered server-side by `q` so the picker is a real hx-get swap
+    instead of a client-side fetch-all + filter.
     """
     query = q.strip()
     companies_q = db.query(Company).filter(Company.is_active.is_(True)).options(selectinload(Company.sites))
@@ -1023,7 +1023,6 @@ async def customer_quick_create(
     db.add(site)
     db.commit()
 
-    invalidate_prefix("companies_typeahead")
     invalidate_prefix("company_list")
 
     display = html_mod.escape(f"{company.name} — {site.site_name}")

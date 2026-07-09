@@ -45,11 +45,13 @@
       </div>
 
       {# Search state — P5.2: server-rendered debounced dropdown against
-         GET /v2/partials/requisitions/customer-typeahead (an HTML sibling of
-         /api/companies/typeahead — that JSON endpoint preloads the full list for
-         another still-live caller and is left intact). The event filter gates the
-         request to non-empty/any-length query changes, hugging the event name so
-         it isn't a trailing-modifier syntax error (htmx:syntax:error landmine). #}
+         GET /v2/partials/requisitions/customer-typeahead (replaced the retired JSON
+         /api/companies/typeahead endpoint's client-side fetch-all + filter — that
+         endpoint had no remaining consumers once this route took over and was
+         removed). hx-trigger uses "changed delay:300ms" (debounce on every actual
+         value change) plus a bare "focus" to re-show the dropdown — no [filter]
+         is used here, so there's no trailing-modifier htmx:syntax:error risk to
+         guard against. #}
       <div x-show="!selectedSiteId" x-cloak>
         <input aria-label="Search customers" type="text" x-model="query"
                hx-get="/v2/partials/requisitions/customer-typeahead"

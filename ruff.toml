@@ -79,11 +79,6 @@ ignore = [
 "app/routers/htmx/companies/core.py" = ["BLE001"]  # P4.3 split of app/routers/htmx/companies.py — code moved verbatim
 "app/routers/htmx/companies/contacts.py" = ["BLE001"]  # P4.3 split of app/routers/htmx/companies.py — code moved verbatim
 "app/routers/htmx/insights_views.py" = ["BLE001"]  # P4.3 split of app/routers/htmx_views.py — code moved verbatim
-# Old pre-split paths: keep frozen until each split commit deletes the file —
-# per-file-ignores for nonexistent paths are inert, so these can be dropped
-# whenever the corresponding split lands.
-"app/routers/htmx_views.py" = ["BLE001"]
-"app/routers/htmx/companies.py" = ["BLE001"]
 "app/routers/htmx/materials.py" = ["BLE001"]
 "app/routers/htmx/offers/crud.py" = ["BLE001"]
 "app/routers/htmx/offers/follow_ups.py" = ["BLE001"]

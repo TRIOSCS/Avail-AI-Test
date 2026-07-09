@@ -15,6 +15,7 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
     parse_substitute_mpns,
+    parse_website_domain,
 )
 
 # ── normalize_quantity ────────────────────────────────────────────────
@@ -493,3 +494,71 @@ class TestFuzzyMpnMatchBoundary:
     def test_three_char_suffix_rejected_both_orders(self):
         assert fuzzy_mpn_match("LM317TABC", "LM317T") is False
         assert fuzzy_mpn_match("LM317T", "LM317TABC") is False
+
+
+class TestParseWebsiteDomain:
+    """parse_website_domain — validated urlsplit-based domain extractor (F12),
+    consolidated out of app.routers.sightings._parse_website_domain (removed) so
+    app.services.company_import_service._company_domain can share it instead of a
+    narrower ad-hoc regex."""
+
+    def test_bare_domain(self):
+        assert parse_website_domain("acme.com") == "acme.com"
+
+    def test_strips_scheme_and_www(self):
+        assert parse_website_domain("https://www.acme.com/contact") == "acme.com"
+        assert parse_website_domain("http://www.acme.com") == "acme.com"
+
+    def test_strips_only_one_leading_www(self):
+        """Never a blanket str.replace that would mangle 'wwwacme.com' or eat
+        'www.www.acme.com' entirely."""
+        assert parse_website_domain("www.wwwacme.com") == "wwwacme.com"
+
+    def test_lowercases(self):
+        assert parse_website_domain("ACME.COM") == "acme.com"
+
+    def test_subdomain_preserved(self):
+        assert parse_website_domain("shop.acme.com") == "shop.acme.com"
+
+    def test_rejects_host_with_no_dot(self):
+        assert parse_website_domain("localhost") == ""
+
+    def test_rejects_user_at_host_port_junk(self):
+        """A pasted "user@host:8080" credential/port string must NOT naively parse into
+        a bogus host — this is exactly the validation gap the naive str.replace-based
+        extractors elsewhere in the codebase don't guard."""
+        assert parse_website_domain("user@host:8080") == ""
+
+    def test_rejects_empty_string(self):
+        assert parse_website_domain("") == ""
+
+    def test_rejects_whitespace_only(self):
+        assert parse_website_domain("   ") == ""
+
+
+class TestCompanyDomainDelegatesToSharedValidator:
+    """app.services.company_import_service._company_domain wraps the shared
+    parse_website_domain instead of duplicating a narrower regex."""
+
+    def test_valid_website_extracts_domain(self):
+        from app.services.company_import_service import _company_domain
+
+        assert _company_domain("https://www.acme.com/about") == "acme.com"
+
+    def test_none_website_returns_none(self):
+        from app.services.company_import_service import _company_domain
+
+        assert _company_domain(None) is None
+
+    def test_empty_website_returns_none(self):
+        from app.services.company_import_service import _company_domain
+
+        assert _company_domain("") is None
+
+    def test_junk_user_at_host_rejected_like_sightings(self):
+        """Regression: the consolidated extractor must reject junk the same way the
+        validated sightings.py extractor always did — not silently accept a bogus
+        domain the way the old narrower regex-based _company_domain might have."""
+        from app.services.company_import_service import _company_domain
+
+        assert _company_domain("user@host:8080") is None

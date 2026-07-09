@@ -925,8 +925,10 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
   body (`dropped_links`, activity id) that a `fetch()` `.json()` gives directly. Avatar
   upload — binary Blob/FormData multipart upload, not a JSON-shaped payload the
   `postJSON` pipeline fits. Endpoints reused/added: `/api/companies/typeahead` and
-  `/api/autocomplete/names` (JSON, untouched, note for cleanup if ever unused) vs. new
-  `/v2/partials/requisitions/customer-typeahead` and
+  `/api/autocomplete/names` (JSON, untouched at the time, note for cleanup if ever
+  unused — **later removed** in a final-review pass once confirmed its only caller had
+  fully moved to `/v2/partials/requisitions/customer-typeahead`; `/api/autocomplete/names`
+  remains live) vs. new `/v2/partials/requisitions/customer-typeahead` and
   `/v2/partials/sightings/vendor-search` (HTML). Verified: `tests/frontend/*.test.ts`
   (168/168 — `rfq-vendor-modal.test.ts`'s `searchVendors` suite replaced with a
   `pickVendor` test since that state moved server-side; `trouble-screenshot.test.ts`
@@ -1146,3 +1148,177 @@ Week 3:  P2.3, P2.5-P2.7  +  Phase 3
 Weeks 4-6: Phase 4 (one god-file split per PR)  ∥  Phase 5
 Ongoing: Phase 6 (fold P6.1 retrofits into every PR touching those areas)
 ```
+
+---
+
+## Final review batch (2026-07-09) — 13 verified findings, all fixed
+
+Closing pass over the P2.7/P5.x work above; each item below was independently
+verified against current code before fixing (not taken on memory/spec alone).
+
+**Security**
+1. **Sentry query-string scrub only matched `key`.** `app/main.py`'s
+   `_sentry_before_send` now checks the query string against the full
+   `_SENSITIVE_VARS` name set (already includes `secret`), so `?secret=...` (the ACS
+   webhook param) is masked, not just `?...key=...`. Tests: `tests/test_main.py`
+   (existing Sentry scrub tests cover the qs-masking branch).
+
+**Correctness**
+2. **`/health/ready` reported `ready=true` even after a crashed deferred phase.**
+   `app/startup.py` now tracks a tri-state (`app.constants.DeferredBackfillState`:
+   RUNNING/COMPLETED/FAILED, module var `deferred_backfills_state`) instead of a
+   bool — `run_deferred_startup_backfills` sets FAILED in an `except` branch
+   (re-logged, re-raised) rather than always flipping ready in a bare `finally`.
+   `GET /health/ready` (`app/main.py`) now returns `{"ready": bool, "state": str}` —
+   `ready` stays backward-compatible (deploy.sh's informational curl still works),
+   `state` is new. Tests: `tests/test_startup.py`, `tests/test_main.py`
+   (crashed-phase → `ready=False`/`state=failed`).
+3. **THE MONEY ONE — the deferred sweep silently dropped prepayment stand-down
+   notifies.** `run_deferred_startup_backfills` runs via `asyncio.to_thread` (a
+   worker thread with no running loop), so when it auto-completes a buy plan
+   (`_complete_reverted_active_plans` → `check_completion` → `_complete_plan` →
+   `_cancel_open_prepayment_requests_for_plan`), `schedule_prepayment_notify`
+   (`app/services/prepayment_notifications.py`) hit `RuntimeError` on
+   `get_running_loop()` and `coro.close()`'d the DO-NOT-WIRE stand-down
+   notification. **Root fix (loop-handoff design):** `app/main.py`'s lifespan
+   captures `asyncio.get_running_loop()` via a new
+   `prepayment_notifications.set_main_event_loop()` immediately before dispatching
+   the `asyncio.to_thread` task, storing it in a module-level `_main_event_loop`
+   holder in `prepayment_notifications.py`. `schedule_prepayment_notify`'s
+   no-running-loop branch now falls back to
+   `asyncio.run_coroutine_threadsafe(wrapped_coro, main_loop)` instead of always
+   closing the coroutine; `wrapped_coro` calls `hold_bg_task(asyncio.current_task())`
+   from *inside* the coroutine once it actually starts running on the main loop
+   (necessary because `run_coroutine_threadsafe` only returns a
+   `concurrent.futures.Future`, not the underlying `asyncio.Task`, so retention
+   can't be applied from the calling thread). No registered main loop (or a
+   stopped one) still safely closes the coroutine — preserves the pre-fix
+   behavior for bare CLI/test callers and TESTING=1 boots (which never reach the
+   registration point). Tests: `tests/test_prepayment_notifications.py` (loop
+   registered + called from a worker thread → notify executes and is retained via
+   `hold_bg_task`; no loop registered → safe-close preserved; registered-but-
+   stopped loop → safe-close), `tests/test_main.py` (lifespan registers the loop
+   before dispatching the deferred task).
+4. **CSV-upload `.read()` extracted outside its try, so a non-file `file` form
+   field 500'd instead of rendering the friendly partial.**
+   `app/routers/htmx/companies/core.py` and `contacts.py`'s import-preview routes
+   now wrap the `.read()`/`.file.read()` extraction in the same `try` that already
+   handled `parse_csv_rows`'s `None` return, catching `AttributeError` (a bare
+   string form value has no `.read()`/`.file`) and rendering the same "Could not
+   parse CSV" partial. Tests: `tests/test_crm_bulk_import.py` (non-file `file`
+   field on both the company and contact import-preview routes → 200 + friendly
+   partial, not 500).
+5. **Offer condition `<select>` missing canonical values, comparing against
+   retired legacy strings.** `edit_offer_form.html`'s condition select now lists
+   all four `OfferCondition` values (new/new_no_pkg/pulls/refurb) with the same
+   human labels used elsewhere (`offers/_qualification_fields.html`), comparing
+   `selected` against the stored canonical value instead of legacy
+   `used`/`refurbished`. Tests: `tests/test_sprint2_offer_mgmt.py` (`pulls` and
+   `new_no_pkg` both render selected).
+
+**Infra**
+6. **`avail-backup-verify.service` had no failure alerting.** Added
+   `OnFailure=avail-backup-verify-alert.service` wiring a new oneshot unit
+   (`scripts/systemd/avail-backup-verify-alert.service`) running
+   `scripts/backup-verify-alert.sh` — self-contained (no host mail/SMTP
+   convention exists elsewhere): `systemd-cat -p err` + a `wall` broadcast + a
+   durable `/root/backups/VERIFY_FAILED` marker file that `deploy.sh`'s final
+   step checks and re-surfaces on every deploy until cleared. Documented in both
+   unit files, `verify-backup.sh`'s header, and
+   `docs/APP_MAP_ARCHITECTURE.md`'s backup-scripts note. Verified with `bash -n`
+   and `systemd-analyze verify` (unit syntax parses; the "not executable" error
+   is only because `/root/availai` doesn't exist in this sandbox).
+7. **`187_startup_backfill_partial_idx.py` history excision undocumented.**
+   Extended the migration's header docstring: merge revision
+   `1223a56cbbbb_merge_p2_7_partial_indexes_and_p3_1_.py` was excised pre-merge
+   (branch-only, no persistent environment ever ran `alembic upgrade` against
+   it) in favor of chaining directly onto `71d3fef96529`; documents the
+   `alembic stamp 187_startup_backfill_partial_idx` recovery path for a stray DB
+   stamped at the excised revision (after verifying
+   `ix_requirements_assigned_buyer` exists, else run `71d3fef96529`'s DDL by
+   hand). Also fixed the stale `Revises:` header comment (said `a431c202afa4`,
+   didn't match the real `down_revision = "71d3fef96529"`). Comment-only —
+   `revision`/`down_revision` values unchanged, single Alembic head unaffected.
+
+**Cleanup**
+8. **`ruff.toml` inert old-path freeze entries.** Removed the
+   `app/routers/htmx_views.py` (BLE001-clean today) and
+   `app/routers/htmx/companies.py` (deleted, split into the `companies/` package)
+   per-file-ignore entries and their explanatory comment block. Verified
+   `ruff check app/` stays clean with them gone.
+9. **Dead endpoint `GET /api/companies/typeahead`.** Zero remaining consumers
+   (its only caller moved fully onto
+   `GET /v2/partials/requisitions/customer-typeahead` in P5.2). Removed the
+   endpoint (`app/routers/crm/companies.py`), its `@cached_endpoint` use, and all
+   8 `invalidate_prefix("companies_typeahead")` call sites (`crm/companies.py`,
+   `htmx/companies/core.py` ×4, `htmx/requisitions.py`,
+   `services/prospect_claim.py`). Fixed the false "still-live caller" docstrings
+   in `htmx/requisitions.py` and `unified_modal.html` (the latter also had a
+   phantom hx-trigger `[filter]` description that doesn't exist on that
+   trigger — fixed in the same edit). Updated the two `.claude/skills/redis`
+   example snippets and two `docs/APP_MAP_INTERACTIONS.md` route descriptions
+   that cited the now-removed prefix. Removed/updated the tests that only
+   covered the dead endpoint (`test_load_test_fixes.py`'s
+   `TestCompaniesTypeaheadCache`, `test_routers_crm.py::test_typeahead`,
+   `test_prospect_claim.py`'s `invalidate_prefix("companies_typeahead")`
+   assertion); left `/api/autocomplete/names` untouched (confirmed still live).
+   `docs/CODE_AUDIT_AND_HARDENING_PLAN.md`'s original P5.2 entry annotated
+   in-place noting the later removal, rather than rewritten.
+10. **`ai_offer_service.py`'s private `_safe_int`/`_safe_float` duplicated
+    `app.utils.safe_int`/`safe_float`.** **Honesty call:** the review flagged a
+    real behavioral difference (`safe_int(0) == 0` vs the private
+    `_safe_int(0) is None`, since the private version pre-checked falsiness
+    rather than `is None`) — but every call site in `parse_offer_form_rows`
+    feeds these functions Starlette `FormData.get()` values, which are always
+    `str | None`. The string `"0"` is truthy (non-empty), so both
+    implementations take the `int(val)`/`float(val)` branch and return `0`
+    either way; `""` is falsy in both AND fails conversion regardless, landing
+    on `None` either way. Confirmed behavior-identical for these specific form
+    paths (verified with new tests, not assumed) — deleted the duplicate in
+    favor of importing the shared `app.utils.safe_int`/`safe_float`, with a
+    comment on `parse_offer_form_rows` explaining exactly why the dedup is safe
+    here (and would NOT be, unexamined, for a caller that passes real numeric
+    zeros). Tests: `tests/test_ai_offer_service.py` (`"0"` parses to `0`, not
+    `None`; blank still parses to `None`).
+11. **Stale route in two JS/template comments.** `app/static/htmx_app.js`'s
+    `customerPicker` docblock cited `/v2/partials/customers/typeahead` (wrong —
+    the real route is `/v2/partials/requisitions/customer-typeahead`); fixed
+    both the prose mention and the `Depends on:` line. `unified_modal.html`'s
+    search-input comment described an hx-trigger `[filter]` that isn't present
+    on that trigger (`hx-trigger="input changed delay:300ms, focus"` has no
+    `[...]` at all) — rewritten to describe what the trigger actually does
+    (debounce + refocus-reopen, no filter, so no trailing-modifier
+    `htmx:syntax:error` risk to guard against in the first place).
+12. **Domain-extraction duplication.** Moved the validated, urlsplit-based
+    `_parse_website_domain` (previously private to `app/routers/sightings.py`)
+    into `app.utils.normalization.parse_website_domain` (public, shared).
+    `sightings.py` now imports it (removed its now-unused `urlsplit`/`re`
+    imports). `app/services/company_import_service.py`'s narrower
+    regex-based `_company_domain` now delegates to the shared helper instead of
+    duplicating a naive pattern that would accept junk like `"user@host:8080"`
+    as a bogus domain. Left the other two legacy sites — `app.enrichment_
+    service._clean_domain` and `app.utils.vendor_helpers.scrape_website_
+    contacts`'s inline cache-key extractor — with `TODO` comments referencing
+    the shared helper and explaining why each needs its own follow-up
+    verification before migrating (different behavior/risk profile: one feeds
+    AI-enrichment-normalized input, not raw user-typed website; the other
+    derives a cache key only, never a persisted/user-facing domain). Tests:
+    `tests/test_normalization.py` (`TestParseWebsiteDomain`,
+    `TestCompanyDomainDelegatesToSharedValidator` — junk `"user@host:8080"`
+    rejected, matching sightings' original behavior).
+13. **`intelligence_dashboard.html` empty state lost its pre-migration icon
+    spacing.** The P5.3 `empty_state.html` dedup's default `icon_class`
+    (`"mx-auto mb-4 h-12 w-12 text-gray-300"`) added a `mb-4` this dashboard's
+    hand-rolled markup never had (`"mx-auto h-12 w-12 text-gray-300"`). Passed
+    the original `icon_class` explicitly through the `{% with %}` block so the
+    rendered icon stays pixel-identical to pre-dedup. Tests:
+    `tests/test_sprint7_email_integration.py` (`test_dashboard_empty_state`
+    asserts the exact `mx-auto h-12 w-12 text-gray-300` class string, not the
+    shared default with `mb-4`).
+
+Verified: `ruff check`/`ruff format --check`/`docformatter --check` clean on
+every touched file; CI-mypy and the hook-env replica (mypy 2.1.0,
+`--ignore-missing-imports --no-strict-optional --config-file=pyproject.toml`)
+both exit 0 (560 source files, no issues); assertion-theater lint reports no
+new violations on touched tests; `npm run build` succeeds (htmx_app.js/template
+changes); full suite: 22969 passed, 29 skipped, 0 failed.

@@ -345,8 +345,14 @@ async def import_companies_preview(
     if not file:
         raise HTTPException(400, "A CSV file is required")
 
-    content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
-    raw_rows = parse_csv_rows(content_bytes)
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        raw_rows = parse_csv_rows(content_bytes)
+    except AttributeError:
+        # "file" submitted as a plain form field (e.g. a bare string) rather than an
+        # actual upload — no .read()/.file to pull bytes from. Same graceful partial
+        # as a malformed CSV, not a 500.
+        raw_rows = None
     if raw_rows is None:
         return HTMLResponse(
             '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
@@ -628,7 +634,6 @@ async def set_company_disposition(
     db.refresh(company)
 
     invalidate_prefix("company_list")
-    invalidate_prefix("companies_typeahead")
 
     logger.info("Company {} disposition set to {} by {}", company_id, company.disposition, user.email)
     return template_response(
@@ -669,7 +674,6 @@ async def deactivate_company(
     db.refresh(company)
 
     invalidate_prefix("company_list")
-    invalidate_prefix("companies_typeahead")
 
     logger.info("Company {} archived (DNC) by {}, reason={!r}", company_id, user.email, disposition_reason)
     return await _pkg._render_company_detail(request, company_id, user, db)
@@ -770,7 +774,6 @@ async def send_company_to_prospecting_htmx(
         raise HTTPException(403, str(e)) from e
 
     invalidate_prefix("company_list")
-    invalidate_prefix("companies_typeahead")
 
     msg = f"Parked {result['company_name']} in prospecting"
     if not result["pooled"]:
@@ -888,7 +891,6 @@ async def company_apply_name(
     db.commit()
 
     invalidate_prefix("company_list")
-    invalidate_prefix("companies_typeahead")
     logger.info("Company {} renamed to '{}' (suggested) by {}", company_id, new_name, user.email)
     return HTMLResponse("")
 

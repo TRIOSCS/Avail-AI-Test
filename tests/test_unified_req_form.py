@@ -106,7 +106,8 @@ def test_import_parse_html_path_returns_unified_modal(client, monkeypatch):
 class TestCustomerTypeaheadDropdown:
     """P5.2: GET /v2/partials/requisitions/customer-typeahead — the server-rendered hx-
     get dropdown that replaced customerPicker()'s client-side fetch-all + JS filter
-    against /api/companies/typeahead (that JSON endpoint is untouched)."""
+    against the JSON /api/companies/typeahead endpoint (later removed as dead code once
+    this route became its only caller's sole path)."""
 
     def _company_with_site(self, db_session, name="Acme Electronics", site_name="HQ"):
         co = Company(name=name, is_active=True)

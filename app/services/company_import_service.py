@@ -22,7 +22,6 @@ Depends on: app.models (Company, CustomerSite, SiteContact),
 
 import csv
 import io
-import re
 from datetime import UTC, datetime
 
 from loguru import logger
@@ -31,6 +30,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import is_manager_or_admin, manageable_company_ids
 from ..models import Company, User
 from ..models.crm import CustomerSite, SiteContact
+from ..utils.normalization import parse_website_domain
 from ..utils.phone import normalize_e164
 from ..vendor_utils import normalize_vendor_name
 
@@ -38,12 +38,16 @@ IMPORT_MAX_ROWS = 1000
 
 
 def _company_domain(website: str | None) -> str | None:
-    """Extract a bare domain (no scheme/www/path) from a company website, or None."""
+    """Extract a bare domain (no scheme/www/path) from a company website, or None.
+
+    Delegates to the shared, validated app.utils.normalization.parse_website_domain
+    (urlsplit-based; rejects junk like "user@host:8080" instead of naively regexing it
+    into a bogus "host:8080" domain) rather than duplicating a narrower ad-hoc regex —
+    see that function's docstring for the extraction history.
+    """
     if not website:
         return None
-    domain = re.sub(r"^https?://", "", website.strip().lower())
-    domain = re.sub(r"^www\.", "", domain).split("/")[0].strip()
-    return domain or None
+    return parse_website_domain(website) or None
 
 
 def parse_csv_rows(content_bytes: bytes) -> list[dict] | None:

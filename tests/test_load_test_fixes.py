@@ -116,39 +116,13 @@ class TestPerformanceIndexes:
         assert callable(mod.downgrade)
 
 
-# ── Fix 2: Companies typeahead caching ──────────────────────────────────
-
-
-class TestCompaniesTypeaheadCache:
-    def test_typeahead_returns_companies(self, client, db_session):
-        co, site = _make_company_and_site(db_session)
-        db_session.commit()
-
-        resp = client.get("/api/companies/typeahead")
-        assert resp.status_code == 200
-        data = resp.json()
-        names = [c["name"] for c in data]
-        assert "Test Co" in names
-
-    def test_typeahead_includes_sites(self, client, db_session):
-        co, site = _make_company_and_site(db_session)
-        db_session.commit()
-
-        resp = client.get("/api/companies/typeahead")
-        data = resp.json()
-        test_co = next(c for c in data if c["name"] == "Test Co")
-        assert len(test_co["sites"]) == 1
-        assert test_co["sites"][0]["site_name"] == "HQ"
-
-    def test_typeahead_excludes_inactive_companies(self, client, db_session):
-        co = Company(name="Inactive Co", is_active=False, created_at=datetime.now(UTC))
-        db_session.add(co)
-        db_session.commit()
-
-        resp = client.get("/api/companies/typeahead")
-        data = resp.json()
-        names = [c["name"] for c in data]
-        assert "Inactive Co" not in names
+# NOTE: the "Fix 2: Companies typeahead caching" class formerly here tested
+# GET /api/companies/typeahead, which was removed as dead code (its only caller,
+# unified_modal.html's customerPicker(), moved to the server-rendered
+# GET /v2/partials/requisitions/customer-typeahead in P5.2 — see
+# TestCustomerTypeaheadDropdown-style coverage in tests/test_unified_req_form.py and
+# tests/test_htmx_views.py for the equivalent active/site-filtering assertions on the
+# live route). /api/autocomplete/names remains live and untouched.
 
 
 # ── Offer status stays "active" through quoting ─────────────────────────

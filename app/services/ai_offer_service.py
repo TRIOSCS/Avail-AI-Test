@@ -29,6 +29,7 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
+from ..utils import safe_float, safe_int
 from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 from .activity_service import log_activity
@@ -352,24 +353,17 @@ def save_freeform_offers(
 # on "no rows at all" (parse_offer_form_rows) before doing any DB work.
 
 
-def _safe_int(val) -> int | None:
-    """Safely convert a form value to int, or None."""
-    if not val:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(val) -> float | None:
-    """Safely convert a form value to float, or None."""
-    if not val:
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
+# parse_offer_form_rows below used to have its own private _safe_int/_safe_float
+# (falsy pre-check: `if not val: return None`) instead of importing app.utils'
+# safe_int/safe_float (None-pre-check: `if v is None: return None`). Those two only
+# actually disagree on a literal falsy-but-convertible input — int 0, float 0.0,
+# or "" — and every call site below feeds these functions Starlette FormData values,
+# which are ALWAYS `str | None` (never a real int/float): the string "0" is
+# TRUTHY (non-empty), so both versions take the try/int(val) branch and return 0
+# either way; "" is falsy in both AND fails int()/float() regardless, landing on
+# None either way. Confirmed behavior-identical for these form paths, so the
+# duplicate was deleted in favor of the shared app.utils helpers (imported above)
+# rather than keeping a redundant private copy.
 
 
 def parse_offer_form_rows(form, vendor_name: str) -> list[dict]:
@@ -395,12 +389,12 @@ def parse_offer_form_rows(form, vendor_name: str) -> list[dict]:
                 "vendor_name": form.get(f"offers[{idx}].vendor_name", vendor_name),
                 "mpn": form.get(f"offers[{idx}].mpn", ""),
                 "manufacturer": form.get(f"offers[{idx}].manufacturer"),
-                "qty_available": _safe_int(form.get(f"offers[{idx}].qty_available")),
-                "unit_price": _safe_float(form.get(f"offers[{idx}].unit_price")),
+                "qty_available": safe_int(form.get(f"offers[{idx}].qty_available")),
+                "unit_price": safe_float(form.get(f"offers[{idx}].unit_price")),
                 "lead_time": form.get(f"offers[{idx}].lead_time"),
                 "date_code": form.get(f"offers[{idx}].date_code"),
                 "condition": form.get(f"offers[{idx}].condition", OfferCondition.NEW),
-                "moq": _safe_int(form.get(f"offers[{idx}].moq")),
+                "moq": safe_int(form.get(f"offers[{idx}].moq")),
                 "notes": form.get(f"offers[{idx}].notes"),
             }
         )

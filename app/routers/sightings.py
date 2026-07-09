@@ -13,12 +13,10 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 
 import asyncio
 import json
-import re
 import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -84,7 +82,7 @@ from ..services.vendor_unavailability import (
 from ..template_env import template_response
 from ..utils import safe_float, safe_int
 from ..utils.csv_export import stream_csv
-from ..utils.normalization import normalize_condition
+from ..utils.normalization import normalize_condition, parse_website_domain
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -2198,29 +2196,6 @@ async def sightings_vendor_affinity(
     return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
 
 
-def _parse_website_domain(website: str) -> str:
-    """Extract a usable domain from user-typed website input (F12).
-
-    urlsplit-based (scheme optional), lowercased host, strips ONE leading
-    "www." — never a blanket str.replace that mangles hosts containing the
-    substring. Returns "" when no plausible domain can be extracted; the caller
-    turns that into a visible 400 instead of silently saving a junk domain.
-
-    Called by: sightings_composer_vendor.
-    """
-    raw = website.strip()
-    try:
-        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
-        host = (parsed.hostname or "").strip().lower()
-    except ValueError:
-        return ""
-    if host.startswith("www."):
-        host = host[4:]
-    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
-        return ""
-    return host
-
-
 @router.get("/v2/partials/sightings/vendor-search", response_class=HTMLResponse)
 async def sightings_vendor_search(
     request: Request,
@@ -2312,7 +2287,7 @@ async def sightings_composer_vendor(
         raise HTTPException(status_code=400, detail="invalid contact email")
     domain = ""
     if website:
-        domain = _parse_website_domain(website)
+        domain = parse_website_domain(website)
         if not domain:
             raise HTTPException(status_code=400, detail="invalid website — could not extract a domain")
     req_id_list = [int(x) for x in form.getlist("requirement_ids") if str(x).strip().isdigit()]

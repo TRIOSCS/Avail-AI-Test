@@ -1663,8 +1663,8 @@ Alpine.data('materialsFilter', () => ({
  * a new customer via the company lookup endpoint.
  *
  * P5.2: the dropdown itself is a server-rendered hx-get (GET
- * /v2/partials/customers/typeahead, swapped into #customer-typeahead-results by
- * unified_modal.html's search input) — there is no more client-side
+ * /v2/partials/requisitions/customer-typeahead, swapped into #customer-typeahead-results
+ * by unified_modal.html's search input) — there is no more client-side
  * companies/filtered array or fetchCompanies() preload; select()/selectById()/
  * clear() are unchanged (called from the swapped-in results' @click, or from the
  * customer-created listener below).
@@ -1673,7 +1673,7 @@ Alpine.data('materialsFilter', () => ({
  * The container must include a <div data-lookup-result></div> for lookup results.
  *
  * Called by: requisitions/unified_modal.html
- * Depends on: /v2/partials/customers/typeahead, /v2/partials/customers/lookup
+ * Depends on: /v2/partials/requisitions/customer-typeahead, /v2/partials/customers/lookup
  */
 Alpine.data('customerPicker', () => ({
     query: '',

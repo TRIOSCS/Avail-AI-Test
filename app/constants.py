@@ -1233,3 +1233,18 @@ class QPOrderType(StrEnum):
     """
 
     NEW = "new"
+
+
+class DeferredBackfillState(StrEnum):
+    """In-memory readiness state of the P2.7 deferred startup-backfill phase.
+
+    Not persisted — tracked as a process-local module variable in app/startup.py and
+    surfaced via GET /health/ready. RUNNING is set right before the background task is
+    scheduled; COMPLETED/FAILED are set when it finishes. Defaults to COMPLETED so a
+    boot that never schedules the deferred phase (TESTING=1) doesn't need special-
+    casing in readers.
+    """
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"

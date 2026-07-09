@@ -189,13 +189,11 @@ class TestActiveAccountCount:
 class TestClaimProspect:
     def test_path_b_creates_company_and_site(self, db_session: Session, test_user: User):
         prospect = _make_prospect(db_session, domain="newdisco.com", hq_location="Dallas, TX")
-        with patch("app.cache.decorators.invalidate_prefix") as mock_inv:
-            result = claim_prospect(prospect.id, test_user.id, db_session)
+        result = claim_prospect(prospect.id, test_user.id, db_session)
 
         assert result["status"] == "claimed"
         assert result["path"] == "new_company"
         assert result["enrichment_status"] == "pending"
-        mock_inv.assert_called_once_with("companies_typeahead")
 
         db_session.expire_all()
         company = db_session.query(Company).filter(Company.domain == "newdisco.com").first()

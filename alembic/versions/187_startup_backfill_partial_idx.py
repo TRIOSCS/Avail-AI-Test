@@ -22,8 +22,24 @@ One index per backfill helper's WHERE clause:
 All are PostgreSQL partial indexes (postgresql_where) — no-ops on the SQLite test
 DB, guarded by dialect like sibling migrations (e.g. 098_materials_perf_idx).
 
+History note (excised merge revision): this migration was originally developed
+concurrently with `71d3fef96529_index_requirements_assigned_buyer_id`, and a merge
+revision `1223a56cbbbb_merge_p2_7_partial_indexes_and_p3_1_.py` was generated to
+reconcile the two branch heads (see docs/CODE_AUDIT_AND_HARDENING_PLAN.md P3.1).
+That merge revision was excised before landing on main — it was branch-local and no
+persistent environment (dev/staging/prod) ever ran `alembic upgrade` against it, so
+it carries no real migration history and was dropped in favor of this migration
+chaining directly onto `71d3fef96529` (see `down_revision` below), keeping history
+linear. If a stray local/dev database was ever stamped at `1223a56cbbbb` (e.g. from
+a branch checkout that ran `alembic upgrade head` before the excision), it is NOT a
+real member of this chain: first verify `ix_requirements_assigned_buyer` exists on
+that database (run `71d3fef96529`'s DDL by hand if it doesn't — that index is this
+migration's true prerequisite), then run
+`alembic stamp 187_startup_backfill_partial_idx` to reconcile it onto the real head
+without re-running either migration's DDL.
+
 Revision ID: 187_startup_backfill_partial_idx
-Revises: a431c202afa4
+Revises: 71d3fef96529
 Create Date: 2026-07-09
 """
 

@@ -109,8 +109,8 @@ Enrichment uses 14-day TTL because provider API credits are metered monthly. The
 # app/routers/htmx_views.py — after company update
 from app.cache.decorators import invalidate_prefix
 
-invalidate_prefix("companies_typeahead")
 invalidate_prefix("company_list")
+invalidate_prefix("company_detail")
 ```
 
 `invalidate_prefix("company_list")` deletes all keys matching `intel:company_list:*` in Redis and `company_list:%` in PostgreSQL. Always invalidate **all prefixes** that could show stale data after a mutation.
@@ -190,7 +190,6 @@ company.name = data.name
 db.commit()
 
 invalidate_prefix("company_list")
-invalidate_prefix("companies_typeahead")
 invalidate(f"company_detail:{company_id}")
 ```
 

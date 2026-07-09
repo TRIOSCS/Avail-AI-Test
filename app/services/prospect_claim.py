@@ -128,9 +128,6 @@ def _link_or_create_company(prospect: ProspectAccount, owner_id: int, db: Sessio
     default_site = CustomerSite(company_id=company.id, site_name="HQ")
     db.add(default_site)
     db.flush()
-    from app.cache.decorators import invalidate_prefix
-
-    invalidate_prefix("companies_typeahead")
     prospect.company_id = company.id
     return "new_company", None
 

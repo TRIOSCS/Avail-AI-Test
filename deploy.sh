@@ -253,5 +253,19 @@ if [ -n "${HOST_WORKER_WARN}" ]; then
     echo "==>     then 'sudo systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker'."
 fi
 
+# Step 8: Surface a stale weekly backup-verification failure, if any. The
+# avail-backup-verify-alert.service OnFailure= hook (scripts/systemd/
+# avail-backup-verify-alert.service) writes this marker when the Sun 04:00
+# verify-backup.sh timer finds a corrupt/missing newest backup — it stays until
+# manually cleared, so a deploy loudly re-surfaces it instead of it quietly
+# expiring off the top of `journalctl`. Informational only — never fails the deploy.
+BACKUP_ALERT_MARKER="${BACKUP_ALERT_MARKER:-/root/backups/VERIFY_FAILED}"
+if [ -f "${BACKUP_ALERT_MARKER}" ]; then
+    echo ""
+    echo "==> ⚠️  UNRESOLVED backup-verify failure marker found: ${BACKUP_ALERT_MARKER}"
+    cat "${BACKUP_ALERT_MARKER}"
+    echo "==>     Investigate, then clear with: rm -f ${BACKUP_ALERT_MARKER}"
+fi
+
 echo ""
 echo "==> Deploy complete."

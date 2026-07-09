@@ -470,6 +470,30 @@ def test_import_preview_bad_csv_returns_graceful_error(db_session: Session, sale
         assert resp.status_code != 500
 
 
+def test_import_preview_non_file_field_returns_friendly_partial(db_session: Session, sales_rep: User):
+    """A 'file' form field submitted as a plain string (not an actual upload) has no
+    .read()/.file to pull bytes from — must render the friendly "Could not parse CSV"
+    partial, not a 500."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/preview",
+            data={"file": "not-a-real-upload"},
+        )
+        assert resp.status_code == 200
+        assert "Could not parse CSV" in resp.text
+
+
+def test_import_contacts_preview_non_file_field_returns_friendly_partial(db_session: Session, sales_rep: User):
+    """Same non-file-field guard on the contacts-import preview route."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/preview",
+            data={"file": "not-a-real-upload"},
+        )
+        assert resp.status_code == 200
+        assert "Could not parse CSV" in resp.text
+
+
 # ---------------------------------------------------------------------------
 # CSV Import — confirm
 # ---------------------------------------------------------------------------

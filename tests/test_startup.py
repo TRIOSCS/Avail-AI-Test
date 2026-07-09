@@ -780,26 +780,28 @@ class TestRunDeferredStartupBackfills:
     """run_deferred_startup_backfills — the P2.7 SLOW-op phase moved off the pre-yield
     critical path."""
 
-    def test_testing_mode_skips_and_marks_ready(self):
-        """TESTING=1 -> no-op, but the readiness flag still flips True (there is nothing
+    def test_testing_mode_skips_and_marks_completed(self):
+        """TESTING=1 -> no-op, but the state still flips to COMPLETED (there is nothing
         to wait for under TESTING)."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import run_deferred_startup_backfills
 
         assert os.environ.get("TESTING") == "1"
-        startup_mod.deferred_backfills_ready = False
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
         run_deferred_startup_backfills()
-        assert startup_mod.deferred_backfills_ready is True
+        assert startup_mod.deferred_backfills_state == DeferredBackfillState.COMPLETED
 
-    def test_non_testing_runs_all_slow_ops_and_marks_ready(self):
-        """With TESTING unset, every SLOW op runs exactly once and the readiness flag
-        flips back to True when the phase completes."""
+    def test_non_testing_runs_all_slow_ops_and_marks_completed(self):
+        """With TESTING unset, every SLOW op runs exactly once and the state flips to
+        COMPLETED when the phase finishes successfully."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import run_deferred_startup_backfills
 
         eng = _make_sqlite_engine()
         original = os.environ.pop("TESTING", None)
-        startup_mod.deferred_backfills_ready = False
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
         try:
             with (
                 patch("app.startup.engine", eng),
@@ -836,24 +838,25 @@ class TestRunDeferredStartupBackfills:
                     m_warn,
                 ):
                     mock.assert_called_once()
-            assert startup_mod.deferred_backfills_ready is True
+            assert startup_mod.deferred_backfills_state == DeferredBackfillState.COMPLETED
         finally:
             if original is not None:
                 os.environ["TESTING"] = original
             else:
                 os.environ["TESTING"] = "1"
-            startup_mod.deferred_backfills_ready = True
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
 
-    def test_marks_ready_even_on_unexpected_exception(self):
-        """A bug that lets an exception escape one deferred op must not permanently
-        wedge /health/ready in the not-ready state — the finally: block always flips the
-        flag back."""
+    def test_marks_failed_on_unexpected_exception(self):
+        """A bug that lets an exception escape one deferred op must flip the state to
+        FAILED (never silently report COMPLETED/ready) — the except: branch always re-
+        logs and sets FAILED before re-raising."""
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import run_deferred_startup_backfills
 
         eng = _make_sqlite_engine()
         original = os.environ.pop("TESTING", None)
-        startup_mod.deferred_backfills_ready = False
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
         try:
             with (
                 patch("app.startup.engine", eng),
@@ -861,34 +864,49 @@ class TestRunDeferredStartupBackfills:
             ):
                 with pytest.raises(RuntimeError, match="boom"):
                     run_deferred_startup_backfills()
-            assert startup_mod.deferred_backfills_ready is True
+            assert startup_mod.deferred_backfills_state == DeferredBackfillState.FAILED
         finally:
             if original is not None:
                 os.environ["TESTING"] = original
             else:
                 os.environ["TESTING"] = "1"
-            startup_mod.deferred_backfills_ready = True
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
 
 
 class TestDeferredBackfillsReadyFlag:
-    """mark_deferred_backfills_pending / is_deferred_backfills_ready — the P2.7
-    readiness seam GET /health/ready reads."""
+    """mark_deferred_backfills_pending / is_deferred_backfills_ready /
+    get_deferred_backfills_state — the P2.7 readiness seam GET /health/ready reads."""
 
     def test_default_is_ready(self):
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import is_deferred_backfills_ready
 
-        startup_mod.deferred_backfills_ready = True
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
         assert is_deferred_backfills_ready() is True
 
-    def test_mark_pending_flips_false(self):
+    def test_mark_pending_flips_not_ready(self):
         import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
         from app.startup import is_deferred_backfills_ready, mark_deferred_backfills_pending
 
-        startup_mod.deferred_backfills_ready = True
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
         mark_deferred_backfills_pending()
         assert is_deferred_backfills_ready() is False
-        startup_mod.deferred_backfills_ready = True  # reset for other tests
+        assert startup_mod.deferred_backfills_state == DeferredBackfillState.RUNNING
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED  # reset
+
+    def test_failed_state_is_not_ready(self):
+        """The bug this tri-state fixes: a crashed deferred phase must report
+        ready=False, not silently ready=True."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import get_deferred_backfills_state, is_deferred_backfills_ready
+
+        startup_mod.deferred_backfills_state = DeferredBackfillState.FAILED
+        assert is_deferred_backfills_ready() is False
+        assert get_deferred_backfills_state() == DeferredBackfillState.FAILED
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED  # reset
 
 
 class TestMaybeAnalyzeHotTables:

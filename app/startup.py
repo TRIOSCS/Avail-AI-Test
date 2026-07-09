@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy import text as sqltext
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
+from .constants import DeferredBackfillState
 from .database import SessionLocal, engine
 from .utils.normalization import normalize_mpn_key as _norm_key
 
@@ -146,32 +147,45 @@ def run_startup_migrations() -> None:
     logger.info("Fast startup migrations complete")
 
 
-# Readiness flag for the P2.7 deferred backfill/ANALYZE phase. Defaults True so a
-# boot that never schedules the deferred phase (TESTING=1) doesn't need special-
-# casing in readers; main.py flips it False via mark_deferred_backfills_pending()
-# right before scheduling run_deferred_startup_backfills as a background task, and
-# the task flips it back True (in a finally:) when it's done or gives up.
-deferred_backfills_ready: bool = True
+# Tri-state readiness tracker for the P2.7 deferred backfill/ANALYZE phase. Defaults
+# COMPLETED so a boot that never schedules the deferred phase (TESTING=1) doesn't need
+# special-casing in readers; main.py flips it to RUNNING via
+# mark_deferred_backfills_pending() right before scheduling run_deferred_startup_
+# backfills as a background task, and the task flips it to COMPLETED or FAILED when
+# it finishes (never leaves it stuck RUNNING on a crash).
+deferred_backfills_state: str = DeferredBackfillState.COMPLETED
 
 
 def mark_deferred_backfills_pending() -> None:
-    """Flip the P2.7 readiness flag false before scheduling the deferred phase.
+    """Flip the P2.7 readiness state to RUNNING before scheduling the deferred phase.
 
     Called by: main.py lifespan (real boots only, immediately before scheduling
     run_deferred_startup_backfills as a background task)
     Depends on: nothing
     """
-    global deferred_backfills_ready
-    deferred_backfills_ready = False
+    global deferred_backfills_state
+    deferred_backfills_state = DeferredBackfillState.RUNNING
 
 
 def is_deferred_backfills_ready() -> bool:
-    """Live read of the P2.7 deferred-backfill readiness flag.
+    """Live read of whether the P2.7 deferred-backfill phase completed successfully.
+
+    Only True when the state is COMPLETED — a FAILED phase (crashed backfill) must
+    never be reported as ready.
 
     Called by: GET /health/ready (app/main.py)
     Depends on: nothing
     """
-    return deferred_backfills_ready
+    return deferred_backfills_state == DeferredBackfillState.COMPLETED
+
+
+def get_deferred_backfills_state() -> str:
+    """Live read of the P2.7 deferred-backfill tri-state (running/completed/failed).
+
+    Called by: GET /health/ready (app/main.py)
+    Depends on: nothing
+    """
+    return deferred_backfills_state
 
 
 def run_deferred_startup_backfills() -> None:
@@ -191,9 +205,9 @@ def run_deferred_startup_backfills() -> None:
     Depends on: database.py (engine), the _backfill_*/_seed_site_contacts/
         _maybe_analyze_hot_tables helpers below
     """
-    global deferred_backfills_ready
+    global deferred_backfills_state
     if os.environ.get("TESTING"):
-        deferred_backfills_ready = True
+        deferred_backfills_state = DeferredBackfillState.COMPLETED
         return
 
     try:
@@ -220,9 +234,13 @@ def run_deferred_startup_backfills() -> None:
         _backfill_sweep_cooldown()
         _complete_reverted_active_plans()
         _warn_non_canonical_categories()
+    except Exception:
+        deferred_backfills_state = DeferredBackfillState.FAILED
+        logger.exception("Deferred startup backfills failed")
+        raise
+    else:
+        deferred_backfills_state = DeferredBackfillState.COMPLETED
         logger.info("Deferred startup backfills complete")
-    finally:
-        deferred_backfills_ready = True
 
 
 def _seed_verification_group_from_admin_emails() -> None:

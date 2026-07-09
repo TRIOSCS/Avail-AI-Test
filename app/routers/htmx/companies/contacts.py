@@ -209,8 +209,14 @@ async def import_contacts_preview(
     if not file:
         raise HTTPException(400, "A CSV file is required")
 
-    content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
-    raw_rows = parse_csv_rows(content_bytes)
+    try:
+        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+        raw_rows = parse_csv_rows(content_bytes)
+    except AttributeError:
+        # "file" submitted as a plain form field (e.g. a bare string) rather than an
+        # actual upload — no .read()/.file to pull bytes from. Same graceful partial
+        # as a malformed CSV, not a 500.
+        raw_rows = None
     if raw_rows is None:
         return HTMLResponse(
             '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
