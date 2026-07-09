@@ -220,22 +220,68 @@ These are confirmed defects shipping today, not style issues.
   `BLE001` (with per-file-ignores for the supplier fan-out orchestrators where broad
   catch is deliberate), then `UP` after a one-time `--fix` (733 `UP017`, 38 `UP032`).
 
-- [ ] **P2.2 — Build the Docker image in CI.**
+- [x] **P2.2 — Build the Docker image in CI.**
   `.github/workflows/ci.yml` never runs `docker build`; the first-ever build of a
   release image is the production deploy (`deploy.yml:96`). Add
   `docker compose build app` as a required PR gate.
+  **Fixed:** added a `docker-build` job to `.github/workflows/ci.yml` (same
+  workflow, so a failed build fails the run) that builds both prod
+  Dockerfiles with `docker/build-push-action@v6` over `docker/setup-buildx-action@v3`:
+  the main `Dockerfile` (app/enrichment-worker) with `--build-arg
+  BUILD_COMMIT=<short-sha>-<unix-ts>` mirroring `deploy.sh`'s own cache-bust
+  arg, and `Dockerfile.tooling` (P1.4's split-out gh+Chromium image, which
+  has no docker-compose consumer and would otherwise silently rot). Both use
+  GHA-hosted layer caching (`cache-from`/`cache-to: type=gha`, scoped
+  per-Dockerfile so one build's cache can't evict the other's) to keep the
+  job fast on repeat runs; neither build pushes/tags anywhere.
 
-- [ ] **P2.3 — Shard the CI `test` job.**
+- [x] **P2.3 — Shard the CI `test` job.**
   The 22.7k-test suite needs ~24 min on a 2-vCPU runner; the timeout has been
   re-tuned three times as the suite grew (15 → 25 → 40, `ci.yml:32`) and will be
   outgrown again. Split into a 2-3 way matrix (`pytest-split` or directory
   buckets) so wall-clock drops to ~10 min and the timeout stops being a moving
   target. Pairs with P6.1 — retiring assertion-theater tests shrinks the
   runtime this sharding has to carry.
+  **Fixed:** converted `test` into a `strategy.matrix.shard: [0, 1]` job
+  (`timeout-minutes` cut 40 → 25 per shard). Added `scripts/ci_shard.py`
+  (stdlib-only, no new dependency): lists `tests/test_*.py` sorted, excludes
+  the same paths `pytest.ini`'s `addopts` ignores (`e2e/`,
+  `test_browser_e2e.py`, `.claude`), and emits `sorted(files)[shard::total]`
+  — a fully deterministic round-robin, verified balanced to 520/520 files
+  (diff 0) with `union(shard0, shard1) == full set` and empty intersection.
+  `pytest.ini`'s `-n auto` xdist still applies within each shard's file
+  subset. One-time gates (pre-commit, ruff, assertion-theater lint, raw-DDL
+  grep, all three Alembic steps, frontend build/tests, the Redis integration
+  test) run only on `matrix.shard == 0` so they aren't paid for twice.
+  Coverage: each shard writes a shard-scoped data file
+  (`COVERAGE_FILE=.coverage.${{ matrix.shard }}`, `--cov-report=` — no
+  report, since a partial shard's line coverage is meaningless in isolation)
+  and uploads it as `coverage-data-${{ matrix.shard }}`; junit XML is
+  likewise `test-results-${{ matrix.shard }}.xml` under an
+  `test-results-${{ matrix.shard }}` artifact — none of these clobber. A new
+  `coverage-report` job (`needs: test`) downloads both data files, `coverage
+  combine`s them, and enforces the original `--cov-fail-under=85` gate once
+  against the merged, whole-suite result. `postgres-paths` and
+  `migration-full-cycle` are unchanged. Validated: `python -c "yaml.safe_load"`
+  on `ci.yml`, `bash -n` on every `run:` block, and a standalone assertion
+  script confirming the shard split (see above).
 
-- [ ] **P2.4 — CI lint against assertion-theater tests.**
+- [x] **P2.4 — CI lint against assertion-theater tests.**
   Simple AST check flagging any test whose only assertion is a bare
   `status_code == 200` / `is not None`. (See P5.1 for the backfill.)
+  **Fixed:** added `scripts/lint_assertion_theater.py` (stdlib `ast` only —
+  no new dependency). Flags any `test_*` function (module-level or a class
+  method, sync or async) whose ONLY `assert` is `<expr>.status_code == 200`
+  (either operand order) or `<expr> is not None`; supports a
+  `# assertion-theater: allow` escape hatch as a trailing comment on the
+  `def` line or anywhere in the docstring. Wired into `.github/workflows/ci.yml`
+  as an `if: matrix.shard == 0` step scoped to test files CHANGED vs the PR
+  base — the same `git merge-base`/`$GITHUB_BASE_REF` pattern the pre-commit
+  step already uses — so the ~542 pre-existing offenders never block an
+  unrelated PR; only a newly touched test file must pass. Verified: run
+  against `tests/test_coverage_nightly_2026_06_30.py` → flags 18 violations,
+  exit 1; run against `tests/test_spec_tiers.py` → 0 violations, exit 0.
+  `ruff check` passes on the new script.
 
 - [ ] **P2.5 — StrEnum enforcement.**
   - Add `SearchQueueStatus` (`queued/searching/completed/gated_out/pending` written raw
