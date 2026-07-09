@@ -269,9 +269,15 @@ class TestAcsWebhook:
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
-        with patch("app.services.acs_service.handle_call_completed", return_value=None):
+        with (
+            patch("app.services.acs_service.handle_call_completed", return_value=None),
+            patch("app.services.activity_service.log_call_activity") as mock_log,
+        ):
             resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
+        assert resp.json() == {"status": "accepted"}
+        # The whole point of this branch: no call_data means no activity is logged.
+        mock_log.assert_not_called()
 
     def test_non_call_event_accepted(self, client, monkeypatch):
         """Non-call events are accepted without processing."""
@@ -279,8 +285,12 @@ class TestAcsWebhook:
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "SomethingElse", "data": {}}]
-        resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
+        with patch("app.services.activity_service.log_call_activity") as mock_log:
+            resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
+        assert resp.json() == {"status": "accepted"}
+        # A non-call event type must never trigger call-activity logging.
+        mock_log.assert_not_called()
 
 
 # ── Initiate Call ────────────────────────────────────────────────────
@@ -322,6 +332,7 @@ class TestInitiateCall:
         with patch("app.services.acs_service.initiate_call", new=AsyncMock(return_value=mock_result)):
             resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
         assert resp.status_code == 200
+        assert resp.json() == mock_result
 
     def test_initiate_call_default_callback_includes_secret(self, client, monkeypatch):
         """When ACS_CALLBACK_URL isn't set, the auto-built default carries ?secret=."""
@@ -581,6 +592,10 @@ class TestUnmatchedActivities:
         """Accepts limit/offset query params."""
         resp = client.get("/api/activities/unmatched?limit=10&offset=0")
         assert resp.status_code == 200
+        data = resp.json()
+        # Pagination params must be echoed back, not silently ignored/clamped.
+        assert data["limit"] == 10
+        assert data["offset"] == 0
 
     def test_attribute_activity_company_not_found(self, client):
         """Attribute to non-existent company returns 404."""

@@ -151,8 +151,12 @@ class TestResolveMaterialCard:
         # normalize_mpn_key returns the raw key regardless of length.
         # resolve_material_card returns None only if normalize_mpn_key returns empty.
         card = resolve_material_card("ab", db_session)
-        # "ab" normalizes to "ab" (non-empty), so a card is created
+        # "ab" normalizes to "ab" (non-empty), so a card is created — but since
+        # normalize_mpn("ab") returns None (<3 chars), display_mpn must fall back to
+        # the raw stripped input rather than the uppercased/noise-stripped display form.
         assert card is not None
+        assert card.normalized_mpn == "ab"
+        assert card.display_mpn == "ab"
 
     def test_deduplicates_variants(self, db_session):
         card1 = resolve_material_card("LM317T", db_session)
@@ -869,10 +873,18 @@ class TestSoftDelete:
     def test_soft_delete_sets_timestamp(self, db_session):
         """Setting deleted_at marks card as soft-deleted."""
         card = _make_card(db_session)
-        card.deleted_at = datetime.now(timezone.utc)
+        ts = datetime.now(timezone.utc)
+        card.deleted_at = ts
         db_session.commit()
         db_session.refresh(card)
         assert card.deleted_at is not None
+        # Round-trip through the DB (not just the in-memory ORM instance) and confirm
+        # the persisted value matches what was assigned, within a small tolerance.
+        reloaded = db_session.get(MaterialCard, card.id)
+        stored = reloaded.deleted_at
+        if stored.tzinfo is None:
+            stored = stored.replace(tzinfo=timezone.utc)
+        assert abs((stored - ts).total_seconds()) < 5
 
     def test_resolve_skips_soft_deleted_card(self, db_session):
         """resolve_material_card skips soft-deleted cards and creates a new one."""

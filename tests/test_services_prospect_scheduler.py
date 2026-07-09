@@ -92,14 +92,23 @@ class TestPersistScoresAtCreation:
 
     def test_bare_prospect_persists_without_crash(self, db_session):
         from app.schemas.prospect_account import ProspectAccountCreate
+        from app.services.prospect_scoring import calculate_fit_score
 
         batch = _make_batch(db_session, batch_id="score-bare")
         pc = ProspectAccountCreate(name="x.com", domain="x.com", discovery_source="email_history")
-        _persist_discovery_results(db_session, batch, [pc])
+        n = _persist_discovery_results(db_session, batch, [pc])
         db_session.commit()
+        assert n == 1
         saved = db_session.query(ProspectAccount).filter_by(domain="x.com").first()
-        # Bare prospect still gets a (low) score, not left at the column default unscored.
-        assert saved.fit_reasoning is not None
+        # Bare prospect still gets a (low) score, computed the same way as any other
+        # prospect -- not left at the unscored column default. Derive the expected
+        # value from the same scoring function rather than hardcoding a magic number.
+        expected_score, expected_reasoning = calculate_fit_score(
+            {"name": "x.com", "industry": None, "naics_code": None, "employee_count_range": None, "region": None}
+        )
+        assert saved.fit_score == expected_score
+        assert saved.fit_reasoning == expected_reasoning
+        assert saved.discovery_batch_id == batch.id
 
 
 # ── Rotation Logic ──────────────────────────────────────────────────
