@@ -331,6 +331,12 @@ class Settings(BaseSettings):
     acs_connection_string: str = ""
     acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)
     acs_callback_url: str = ""
+    # Shared secret minted into the ACS/Event Grid webhook subscription URL as a
+    # `?secret=` query param (Event Grid has no clientState-style body field like
+    # Graph, so the secret travels in the URL instead). Required for the webhook
+    # to accept events — unset/empty means POST /api/webhooks/acs fails closed
+    # (403) even if ACS is otherwise configured. See app/routers/v13_features/activity.py.
+    acs_webhook_secret: str = ""
 
     # --- MVP Mode ---
     # Now gates ONLY the Teams chat integration: the POST /api/webhooks/teams endpoint

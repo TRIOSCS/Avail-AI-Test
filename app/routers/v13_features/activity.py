@@ -7,6 +7,8 @@ Called by: v13_features package __init__.py
 Depends on: services/activity_service, services/webhook_service
 """
 
+import hmac
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from loguru import logger
@@ -144,10 +146,26 @@ async def acs_webhook(
 ):
     """Azure Communication Services webhook — logs completed calls.
 
-    Validates that ACS is configured and checks for EventGrid validation events.
+    Validates that ACS is configured, authenticates the request via a shared
+    secret carried in the ``?secret=`` query param (Event Grid has no
+    clientState-style body field like Graph, so the secret travels in the
+    URL baked into the subscription's webhook endpoint — see
+    ``settings.acs_webhook_secret``), then checks for EventGrid validation
+    events.
     """
     if not settings.acs_connection_string:
         raise HTTPException(503, "ACS not configured")
+
+    # Fail closed: an unconfigured secret means we can never trust a caller,
+    # including the Event Grid subscription-validation handshake itself.
+    if not settings.acs_webhook_secret:
+        logger.warning("ACS webhook secret not configured; rejecting event")
+        raise HTTPException(403, "Webhook not authorized")
+
+    provided_secret = request.query_params.get("secret", "")
+    if not hmac.compare_digest(provided_secret, settings.acs_webhook_secret):
+        logger.warning("ACS webhook secret mismatch; rejecting event")
+        raise HTTPException(403, "Webhook not authorized")
 
     try:
         events = await request.json()
@@ -205,10 +223,17 @@ async def initiate_call_endpoint(
 
     from app.services.acs_service import initiate_call
 
+    # When ACS_CALLBACK_URL isn't explicitly set, we build the default ourselves —
+    # so it must carry the same ?secret= the webhook now requires, or every
+    # ACS-delivered call event on an initiated call would be rejected with 403.
+    default_callback_url = f"{settings.app_url}/api/webhooks/acs"
+    if settings.acs_webhook_secret:
+        default_callback_url += f"?secret={settings.acs_webhook_secret}"
+
     result = await initiate_call(
         to_phone=to_phone,
         from_phone=settings.acs_from_phone,
-        callback_url=settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs",
+        callback_url=settings.acs_callback_url or default_callback_url,
         connection_string=settings.acs_connection_string,
     )
 

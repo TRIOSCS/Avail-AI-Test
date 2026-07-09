@@ -106,27 +106,56 @@ These are confirmed defects shipping today, not style issues.
 
 ## Phase 1 — Security & data-safety hardening (~1 week)
 
-- [ ] **P1.1 — Authenticate the ACS webhook.**
+- [x] **P1.1 — Authenticate the ACS webhook.**
   `app/routers/v13_features/activity.py:139-185` accepts unauthenticated
   `CallCompleted`/`CallDisconnected` events (Graph/Teams webhooks validate HMAC
   `clientState`; ACS doesn't). Forged events pollute CRM call-activity timelines.
   Fix: shared-secret query param minted at Event Grid subscription time, compared with
   `hmac.compare_digest`, mirroring `webhook_service.validate_notifications`.
+  **Fixed:** added `settings.acs_webhook_secret` (`app/config.py`, `.env.example`);
+  `POST /api/webhooks/acs` now requires `?secret=` to match it via
+  `hmac.compare_digest` before doing anything else — including the Event Grid
+  `SubscriptionValidationEvent` handshake, so a forged handshake can't slip through
+  either. Unset/empty secret fails closed (403 on every event, even if
+  `ACS_CONNECTION_STRING` is set) with a startup warning in `app/main.py` lifespan
+  if that misconfiguration is detected. The auto-built default callback URL used by
+  `POST /api/calls/initiate` (`activity.py:224-234`) now also carries `?secret=` so
+  ACS's mid-call event delivery isn't broken by the new check. Tests:
+  `tests/test_activity_router_coverage2.py` (`TestAcsWebhook`,
+  `TestAcsWebhookDirect`, `TestInitiateCall`), `tests/test_main.py`
+  (`TestLifespanAcsWebhookSecretWarning`).
 
-- [ ] **P1.2 — Scrub request bodies in Sentry `before_send`.**
+- [x] **P1.2 — Scrub request bodies in Sentry `before_send`.**
   `app/main.py:72-106` scrubs headers/query-string/locals but never
   `event["request"]["data"]`. An unhandled exception in
   `PUT /api/sources/{name}/credentials` (`sources.py:753`) or `POST /auth/login`
   (plaintext `password` form field) ships raw secrets to Sentry SaaS. Fix: recursively
   mask keys matching `_SENSITIVE_VARS` in `request.data`, or set
   `max_request_body_size="never"`.
+  **Fixed:** added `_scrub_nested_body()` (`app/main.py`), called from
+  `_sentry_before_send` — recursively redacts any dict key matching the existing
+  `_SENSITIVE_VARS` substring/case-insensitive match through nested dicts/lists;
+  a raw (unparsed) string body is wholesale-filtered only when the request URL
+  matches a known-sensitive path (`/auth/login`, `/credentials`), otherwise left
+  as-is for debugging value (did not set `max_request_body_size="never"` — no case
+  found that scrubbing couldn't cover). Tests extended in `tests/test_main.py`
+  (`TestLifespanSentry`): nested dict, list-of-dicts, string body on/off a
+  sensitive path, and no-`data`-key passthrough.
 
-- [ ] **P1.3 — Rollback safety in deploy workflow.**
+- [x] **P1.3 — Rollback safety in deploy workflow.**
   `.github/workflows/deploy.yml:124-132` — on failed health check it unconditionally
   restores the pre-deploy dump, silently discarding all writes made during the deploy
   window, and recreates *all* services. Fix: take a pre-rollback safety dump first
   (pattern already exists in `scripts/restore.sh:174-214`); scope
   `docker compose up -d` to `app enrichment-worker`.
+  **Fixed:** added a `pg_dump`-based pre-rollback safety dump
+  (`avail_prerollback_<ts>.sql`, mirroring `restore.sh`'s dump-before-destructive-op
+  pattern) before the restore runs, scoped the rollback's `docker compose up -d` to
+  `app enrichment-worker` (was unscoped — risked recreating db/redis/caddy if the
+  bad commit's `git reset --hard` touched their compose config), and echo a loud
+  NOTICE naming the safety-dump path after restore. The restore itself stays
+  unconditional (whether migrations ran during the failed deploy isn't observable
+  from this script) — the safety dump is what makes that acceptable.
 
 - [ ] **P1.4 — Container hardening.**
   - Add `USER appuser` as final `Dockerfile` directive (currently root-by-default for

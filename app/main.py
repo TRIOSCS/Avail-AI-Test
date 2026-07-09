@@ -32,6 +32,30 @@ register_audit_listeners()
 # To generate: alembic revision --autogenerate -m "description"
 # Existing DB: alembic stamp head  (mark as current without running DDL)
 
+# Sensitive-body path substrings (case-insensitive, matched against the request
+# URL) — POST/PUT bodies on these routes are wholesale-filtered when Sentry
+# ships them as a raw string rather than a parsed dict, since an opaque string
+# can't be recursed into to redact individual keys.
+_SENTRY_SENSITIVE_BODY_PATHS = ("/auth/login", "/credentials")
+
+
+def _scrub_nested_body(data, sensitive_vars: set[str]):
+    """Recursively replace sensitive-named dict keys within a request body.
+
+    Mirrors the substring, case-insensitive key match `_sentry_before_send`
+    already uses for stack-frame local scrubbing. Used to redact secrets
+    (e.g. login passwords, source API credentials) from Sentry request
+    bodies before shipping, without discarding the rest of the payload.
+    """
+    if isinstance(data, dict):
+        return {
+            k: "[Filtered]" if any(s in k.lower() for s in sensitive_vars) else _scrub_nested_body(v, sensitive_vars)
+            for k, v in data.items()
+        }
+    if isinstance(data, list):
+        return [_scrub_nested_body(item, sensitive_vars) for item in data]
+    return data
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -60,6 +84,15 @@ async def lifespan(app):
             missing.append("AZURE_TENANT_ID")
         if missing:
             logger.warning("Missing env vars (some features disabled): {}", ", ".join(missing))
+
+        # S2b: ACS is configured but its webhook secret isn't — the webhook fails
+        # closed (403) on every event until ACS_WEBHOOK_SECRET is set, so surface
+        # that misconfiguration loudly instead of silently dropping call events.
+        if settings.acs_connection_string and not settings.acs_webhook_secret:
+            logger.warning(
+                "ACS_CONNECTION_STRING is set but ACS_WEBHOOK_SECRET is missing — "
+                "the ACS webhook will reject all events until it's configured."
+            )
 
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
@@ -98,6 +131,14 @@ async def lifespan(app):
                 qs = req.get("query_string", "")
                 if isinstance(qs, str) and "key" in qs.lower():
                     req["query_string"] = "[Filtered]"
+                data = req.get("data")
+                if data is not None:
+                    if isinstance(data, str):
+                        url = str(req.get("url", "")).lower()
+                        if any(p in url for p in _SENTRY_SENSITIVE_BODY_PATHS):
+                            req["data"] = "[Filtered]"
+                    else:
+                        req["data"] = _scrub_nested_body(data, _SENSITIVE_VARS)
             for frame in (event.get("exception", {}) or {}).get("values", []) or []:
                 for sf in (frame.get("stacktrace", {}) or {}).get("frames", []) or []:
                     for k in list((sf.get("vars") or {})):

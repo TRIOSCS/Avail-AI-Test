@@ -158,12 +158,37 @@ class TestAcsWebhook:
         resp = client.post("/api/webhooks/acs", json=[])
         assert resp.status_code == 503
 
+    def test_missing_secret_config_fails_closed(self, client, monkeypatch):
+        """ACS configured but acs_webhook_secret unset -> 403, fail closed."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "")
+        resp = client.post("/api/webhooks/acs?secret=anything", json=[])
+        assert resp.status_code == 403
+
+    def test_wrong_secret_returns_403(self, client, monkeypatch):
+        """Wrong ?secret= query param returns 403."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        resp = client.post("/api/webhooks/acs?secret=wrong-secret", json=[])
+        assert resp.status_code == 403
+
+    def test_missing_secret_query_param_returns_403(self, client, monkeypatch):
+        """No ?secret= query param at all returns 403."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        resp = client.post("/api/webhooks/acs", json=[])
+        assert resp.status_code == 403
+
     def test_invalid_json_returns_400(self, client, monkeypatch):
         """Malformed JSON returns 400."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         resp = client.post(
-            "/api/webhooks/acs",
+            "/api/webhooks/acs?secret=correct-secret",
             content=b"not-json",
             headers={"Content-Type": "application/json"},
         )
@@ -173,15 +198,31 @@ class TestAcsWebhook:
         """EventGrid subscription validation handshake returns validation code."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [
             {
                 "eventType": "Microsoft.EventGrid.SubscriptionValidationEvent",
                 "data": {"validationCode": "validation-code-123"},
             }
         ]
-        resp = client.post("/api/webhooks/acs", json=payload)
+        resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
         assert resp.json()["validationResponse"] == "validation-code-123"
+
+    def test_eventgrid_validation_handshake_wrong_secret_returns_403(self, client, monkeypatch):
+        """Handshake payload with a wrong secret is still rejected — secret gates
+        everything."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        payload = [
+            {
+                "eventType": "Microsoft.EventGrid.SubscriptionValidationEvent",
+                "data": {"validationCode": "validation-code-123"},
+            }
+        ]
+        resp = client.post("/api/webhooks/acs?secret=wrong-secret", json=payload)
+        assert resp.status_code == 403
 
     @pytest.mark.parametrize(
         ("event_type", "event_data", "call_data", "activity_id"),
@@ -214,10 +255,11 @@ class TestAcsWebhook:
     def test_call_event_handled(self, client, monkeypatch, db_session, event_type, event_data, call_data, activity_id):
         """CallCompleted / CallDisconnected events trigger log_call_activity."""
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": event_type, "data": event_data}]
         with patch("app.services.acs_service.handle_call_completed", return_value=call_data):
             with patch("app.services.activity_service.log_call_activity", return_value=MagicMock(id=activity_id)):
-                resp = client.post("/api/webhooks/acs", json=payload)
+                resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
         assert resp.json()["status"] == "accepted"
 
@@ -225,17 +267,19 @@ class TestAcsWebhook:
         """If handle_call_completed returns None, skip logging."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
         with patch("app.services.acs_service.handle_call_completed", return_value=None):
-            resp = client.post("/api/webhooks/acs", json=payload)
+            resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
 
     def test_non_call_event_accepted(self, client, monkeypatch):
         """Non-call events are accepted without processing."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "SomethingElse", "data": {}}]
-        resp = client.post("/api/webhooks/acs", json=payload)
+        resp = client.post("/api/webhooks/acs?secret=correct-secret", json=payload)
         assert resp.status_code == 200
 
 
@@ -278,6 +322,19 @@ class TestInitiateCall:
         with patch("app.services.acs_service.initiate_call", new=AsyncMock(return_value=mock_result)):
             resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
         assert resp.status_code == 200
+
+    def test_initiate_call_default_callback_includes_secret(self, client, monkeypatch):
+        """When ACS_CALLBACK_URL isn't set, the auto-built default carries ?secret=."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
+        monkeypatch.setattr(settings, "acs_callback_url", "")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        mock_initiate = AsyncMock(return_value={"call_id": "abc123", "status": "initiated"})
+        with patch("app.services.acs_service.initiate_call", new=mock_initiate):
+            resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
+        assert resp.status_code == 200
+        assert mock_initiate.call_args.kwargs["callback_url"].endswith("/api/webhooks/acs?secret=correct-secret")
         assert resp.json()["call_id"] == "abc123"
 
     def test_initiate_call_failure_returns_500(self, client, monkeypatch):
@@ -855,17 +912,38 @@ class TestAcsWebhookDirect:
             await mod.acs_webhook(request, db_session)
         assert exc_info.value.status_code == 503
 
-    async def test_eventgrid_validation_handshake(self, db_session, monkeypatch):
-        """EventGrid handshake returns validationResponse."""
+    async def test_missing_secret_config_fails_closed(self, db_session, monkeypatch):
+        """ACS configured but acs_webhook_secret unset -> 403."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "")
+        request = _make_request(body=b"[]", query_string=b"secret=anything")
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.acs_webhook(request, db_session)
+        assert exc_info.value.status_code == 403
+
+    async def test_wrong_secret_raises_403(self, db_session, monkeypatch):
+        """Wrong ?secret= query param -> 403."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        request = _make_request(body=b"[]", query_string=b"secret=wrong-secret")
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.acs_webhook(request, db_session)
+        assert exc_info.value.status_code == 403
+
+    async def test_eventgrid_validation_handshake(self, db_session, monkeypatch):
+        """EventGrid handshake returns validationResponse when the secret matches."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [
             {
                 "eventType": "Microsoft.EventGrid.SubscriptionValidationEvent",
                 "data": {"validationCode": "abc123"},
             }
         ]
-        request = _make_request(body=json.dumps(payload).encode())
+        request = _make_request(body=json.dumps(payload).encode(), query_string=b"secret=correct-secret")
         result = await mod.acs_webhook(request, db_session)
         assert result == {"validationResponse": "abc123"}
 
@@ -873,8 +951,9 @@ class TestAcsWebhookDirect:
         """CallCompleted event logs the call."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {"foo": "bar"}}]
-        request = _make_request(body=json.dumps(payload).encode())
+        request = _make_request(body=json.dumps(payload).encode(), query_string=b"secret=correct-secret")
 
         call_data = {
             "direction": "inbound",
@@ -891,8 +970,9 @@ class TestAcsWebhookDirect:
         """CallCompleted with no call_data skips logging."""
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
-        request = _make_request(body=json.dumps(payload).encode())
+        request = _make_request(body=json.dumps(payload).encode(), query_string=b"secret=correct-secret")
 
         with patch("app.services.acs_service.handle_call_completed", return_value=None):
             result = await mod.acs_webhook(request, db_session)

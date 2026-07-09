@@ -1415,6 +1415,19 @@ per-subscription `clientState` (`secrets.token_hex(16)`) on `graph_subscriptions
   `MVP_MODE` (returns 404); the mail/graph endpoint runs in MVP mode (mail subscriptions
   are created regardless of `MVP_MODE`).
 
+**ACS (Azure Communication Services) webhook — sibling endpoint, different auth
+shape.** `POST /api/webhooks/acs` (`app/routers/v13_features/activity.py`) logs
+`CallCompleted`/`CallDisconnected` events and handles the Event Grid
+`SubscriptionValidationEvent` handshake. Event Grid has no per-subscription
+`clientState` body field like Graph, so the shared secret instead travels as a
+`?secret=` query param baked into the webhook URL at Event Grid subscription time
+(and into the default call-callback URL built by `POST /api/calls/initiate`),
+compared with `hmac.compare_digest` against `settings.acs_webhook_secret`
+(`app/config.py`). Fails closed: an unset secret rejects (403) every event —
+including the validation handshake — even when `ACS_CONNECTION_STRING` is
+configured; the app lifespan (`app/main.py`) logs a startup warning for that
+misconfiguration.
+
 ## 5. Quote Building
 
 **Where quotes are surfaced.** The standalone Quotes nav tab was retired
