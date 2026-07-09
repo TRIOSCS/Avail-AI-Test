@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import SearchQueueStatus
 from app.utils.normalization import normalize_mpn_key
 
 # Cooldown after API failure to avoid hammering a broken endpoint
@@ -177,7 +178,7 @@ class AIGate:
 
         model = self.queue_model
         order_by = self._order_by if self._order_by is not None else [model.created_at.asc()]
-        pending = db.query(model).filter(model.status == "pending").order_by(*order_by).limit(30).all()
+        pending = db.query(model).filter(model.status == SearchQueueStatus.PENDING).order_by(*order_by).limit(30).all()
 
         if not pending:
             return
@@ -192,7 +193,7 @@ class AIGate:
                 item.commodity_class = commodity
                 item.gate_decision = decision
                 item.gate_reason = f"[cached] {reason}"
-                item.status = "queued" if decision == "search" else "gated_out"
+                item.status = SearchQueueStatus.QUEUED if decision == "search" else SearchQueueStatus.GATED_OUT
                 item.updated_at = datetime.now(timezone.utc)
                 logger.debug("AI gate cache hit: {} -> {}", item.mpn, decision)
             else:
@@ -218,7 +219,7 @@ class AIGate:
                         item.commodity_class = "unknown"
                         item.gate_decision = "search"
                         item.gate_reason = "AI gate unavailable — defaulting to search"
-                        item.status = "queued"
+                        item.status = SearchQueueStatus.QUEUED
                         item.updated_at = datetime.now(timezone.utc)
                     break  # Stop processing further batches during this cycle
 
@@ -241,7 +242,7 @@ class AIGate:
                         item.commodity_class = "unknown"
                         item.gate_decision = "search"
                         item.gate_reason = "AI gate: no classification returned — defaulting to search"
-                        item.status = "queued"
+                        item.status = SearchQueueStatus.QUEUED
                         item.updated_at = datetime.now(timezone.utc)
                         continue
 
@@ -252,7 +253,7 @@ class AIGate:
                     item.commodity_class = commodity
                     item.gate_decision = decision
                     item.gate_reason = reason
-                    item.status = "queued" if decision == "search" else "gated_out"
+                    item.status = SearchQueueStatus.QUEUED if decision == "search" else SearchQueueStatus.GATED_OUT
                     item.updated_at = datetime.now(timezone.utc)
 
                     # Cache the classification

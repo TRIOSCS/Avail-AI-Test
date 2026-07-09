@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import SearchQueueStatus
+
 EASTERN = ZoneInfo("America/New_York")
 
 # Private module-level alias for the pacing primitive. The main loop awaits
@@ -256,7 +258,7 @@ async def main():
                     # Ensure session is valid
                     if not await session.ensure_session():
                         logger.error("ICS worker: session re-auth failed, sleeping 5 min")
-                        mark_status(db, item, "failed", error="Session authentication failed")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Session authentication failed")
                         db.close()
                         await _async_sleep(5 * 60)
                         continue
@@ -276,18 +278,18 @@ async def main():
                             config.ICS_SEARCH_TIMEOUT_SECONDS,
                             item.id,
                         )
-                        mark_status(db, item, "failed", error="Search timeout")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Search timeout")
                         db.close()
                         continue
 
                     # Check page health
                     health = await breaker.check_page_health(session.page)
                     if health == "SESSION_EXPIRED":
-                        mark_status(db, item, "queued")  # re-queue for next attempt
+                        mark_status(db, item, SearchQueueStatus.QUEUED)  # re-queue for next attempt
                         db.close()
                         continue
                     if breaker.should_stop():
-                        mark_status(db, item, "failed", error=f"Circuit breaker: {breaker.trip_reason}")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error=f"Circuit breaker: {breaker.trip_reason}")
                         db.close()
                         continue
 
@@ -342,7 +344,7 @@ async def main():
                     logger.error("ICS worker: search iteration error: {}", e)
                     try:
                         if item:
-                            mark_status(db, item, "failed", error=str(e)[:500])
+                            mark_status(db, item, SearchQueueStatus.FAILED, error=str(e)[:500])
                     except Exception as mark_err:
                         logger.debug("ICS worker: failed to mark item as failed: {}", mark_err)
                 finally:

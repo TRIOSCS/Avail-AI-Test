@@ -284,6 +284,11 @@ class TestSaveFreeformOffers:
         db_session.commit()
 
         offer = db_session.get(Offer, result["offer_ids"][0])
+        # P2.5: default now comes from OfferCondition.NEW (value-identical to the
+        # old raw "new" literal).
+        from app.constants import OfferCondition
+
+        assert offer.condition == OfferCondition.NEW
         assert offer.condition == "new"
         assert offer.currency == "USD"
 

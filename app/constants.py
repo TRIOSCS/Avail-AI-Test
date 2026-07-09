@@ -614,6 +614,29 @@ class DiscoveryBatchStatus(StrEnum):
     FAILED = "failed"
 
 
+class SearchQueueStatus(StrEnum):
+    """Status lifecycle for the browser-driven search queue tables (NcSearchQueue,
+    IcsSearchQueue, TbfSearchQueue — see
+    app/services/search_worker_base/{queue_manager,ai_gate}.py and the
+    nc_worker/ics_worker/tbf_worker wrappers, which are the sole readers/writers).
+
+    Lifecycle: PENDING (enqueued, awaiting AI-gate classification) -> QUEUED
+    (gate approved for search, or reclaimed after a stale/failed attempt) ->
+    SEARCHING (claimed by a worker) -> COMPLETED (results recorded) or
+    GATED_OUT (AI gate decided not worth searching) or FAILED (worker gave up
+    after retries/circuit-breaker trip). Values are DB-persisted (SQLAlchemy
+    ``String`` columns, not native DB enums) — they must equal the pre-enum
+    string literals exactly; no data migration is needed.
+    """
+
+    PENDING = "pending"
+    QUEUED = "queued"
+    SEARCHING = "searching"
+    COMPLETED = "completed"
+    GATED_OUT = "gated_out"
+    FAILED = "failed"
+
+
 class ApiSourceStatus(StrEnum):
     """ApiSource.status — managed by health_monitor.ping_source.
 

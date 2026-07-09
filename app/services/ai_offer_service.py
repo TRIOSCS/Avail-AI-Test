@@ -14,7 +14,7 @@ Depends on: models (Offer, Requirement, Requisition, VendorCard, VendorContact,
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, OfferStatus
+from ..constants import ActivityType, OfferCondition, OfferStatus
 from ..models import (
     CustomerSite,
     Offer,
@@ -317,7 +317,7 @@ def save_freeform_offers(
             currency=o.currency or "USD",
             lead_time=o.lead_time,
             date_code=o.date_code,
-            condition=o.condition or "new",
+            condition=o.condition or OfferCondition.NEW,
             packaging=o.packaging,
             moq=o.moq,
             source="freeform_parsed",

@@ -352,6 +352,16 @@ def build_context(db: Session, *, requisition_id: int) -> str:
     return "\n\n".join(sections)
 
 
+# Interactive (HTTP-request-scoped) callers — the four "Refresh AI insights"
+# HTMX endpoints in routers/htmx_views.py — tighten the Claude call budget so a
+# slow/overloaded API can't hold the request open for the full
+# timeout × retries worst case (P2.8). Non-interactive callers (the
+# `knowledge_jobs._job_refresh_insights` background job) get the original
+# claude_structured defaults (30s timeout, 3 attempts = up to ~96s per call).
+_INTERACTIVE_TIMEOUT_SECONDS = 25
+_INTERACTIVE_MAX_ATTEMPTS = 1
+
+
 async def _regenerate_insights(
     db: Session,
     *,
@@ -366,6 +376,7 @@ async def _regenerate_insights(
     no_results_log: str,
     generated_log: str,
     generated_args: tuple = (),
+    interactive: bool = False,
 ) -> list[KnowledgeEntry]:
     """Shared insight pipeline: replace cached insights for one scope.
 
@@ -374,6 +385,12 @@ async def _regenerate_insights(
     The single-arg ``*_log`` strings are pre-formatted (logged verbatim) so each
     caller keeps its exact wording; ``generated_log``/``failed_log`` are loguru
     templates whose runtime values (count, scope id, error) are passed as args.
+
+    ``interactive=True`` (set by the HTMX "Refresh" endpoints) tightens the
+    Claude call to a ~25s timeout with a single attempt (no retries) so the
+    request can't block for the full default 30s × 3-retry worst case. On
+    timeout/failure this returns ``[]``, and callers fall back to serving the
+    existing cached insights (``entries or get_cached_*_insights(...)``).
     """
     from app.utils.claude_client import claude_structured
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
@@ -387,6 +404,11 @@ async def _regenerate_insights(
     # rows intact rather than wiping the cache with nothing to show for it.
     old_insights = db.query(KnowledgeEntry).filter(*delete_filters).all()
 
+    claude_kwargs: dict = {}
+    if interactive:
+        claude_kwargs["timeout"] = _INTERACTIVE_TIMEOUT_SECONDS
+        claude_kwargs["max_attempts"] = _INTERACTIVE_MAX_ATTEMPTS
+
     try:
         result = await claude_structured(
             prompt=prompt,
@@ -395,6 +417,7 @@ async def _regenerate_insights(
             model_tier="smart",
             max_tokens=2048,
             thinking_budget=5000,
+            **claude_kwargs,
         )
     except ClaudeUnavailableError:
         logger.info(unavailable_log)
@@ -431,8 +454,12 @@ async def _regenerate_insights(
     return entries
 
 
-async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a requisition using the context engine."""
+async def generate_insights(db: Session, requisition_id: int, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for a requisition using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_context(db, requisition_id=requisition_id)
     return await _regenerate_insights(
         db,
@@ -450,6 +477,7 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
         no_results_log="AI insight generation returned no results for req {}".format(requisition_id),
         generated_log="Generated {} insights for req {}",
         generated_args=(requisition_id,),
+        interactive=interactive,
     )
 
 
@@ -850,8 +878,14 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
     )
 
 
-async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a vendor using the context engine."""
+async def generate_vendor_insights(
+    db: Session, vendor_card_id: int, *, interactive: bool = False
+) -> list[KnowledgeEntry]:
+    """Generate AI insights for a vendor using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_vendor_context(db, vendor_card_id=vendor_card_id)
     return await _regenerate_insights(
         db,
@@ -869,11 +903,16 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
         no_results_log="AI insight generation returned no results for vendor {}".format(vendor_card_id),
         generated_log="Generated {} insights for vendor {}",
         generated_args=(vendor_card_id,),
+        interactive=interactive,
     )
 
 
-async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
-    """Generate AI insights for the overall pipeline health."""
+async def generate_pipeline_insights(db: Session, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for the overall pipeline health.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_pipeline_context(db)
     return await _regenerate_insights(
         db,
@@ -891,11 +930,16 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
         failed_log="Claude AI failed for pipeline insight generation: {}",
         no_results_log="AI insight generation returned no results for pipeline",
         generated_log="Generated {} pipeline insights",
+        interactive=interactive,
     )
 
 
-async def generate_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a company using the context engine."""
+async def generate_company_insights(db: Session, company_id: int, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for a company using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_company_context(db, company_id=company_id)
     return await _regenerate_insights(
         db,
@@ -913,6 +957,7 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
         no_results_log="AI insight generation returned no results for company {}".format(company_id),
         generated_log="Generated {} insights for company {}",
         generated_args=(company_id,),
+        interactive=interactive,
     )
 
 

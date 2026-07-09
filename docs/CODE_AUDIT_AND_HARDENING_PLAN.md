@@ -325,12 +325,64 @@ These are confirmed defects shipping today, not style issues.
   - `htmx/requisitions.py:554` — run `openpyxl.load_workbook` in
     `anyio.to_thread.run_sync`; add an upload size cap.
 
-- [ ] **P2.7 — Startup/health-check decoupling.**
+- [x] **P2.7 — Startup/health-check decoupling.**
   `app/main.py:124` runs ~20 sequential backfills/`ANALYZE` before `/health` can
   answer; on a prod-sized DB this can exceed both the compose healthcheck (~80s) and
   `deploy.sh`'s ~60s loop → false-failed deploys. Fix: split liveness (immediate) from
   readiness; add partial indexes on backfill `IS NULL` predicates; gate
   `_analyze_hot_tables` (`startup.py:1002-1005`) behind a since-last-deploy marker.
+
+  **Fixed:** `run_startup_migrations()` (`app/startup.py`) now runs ONLY the FAST,
+  order-critical ops synchronously pre-yield; the SLOW ops moved to a new
+  `run_deferred_startup_backfills()`, launched by `app/main.py`'s lifespan as a
+  post-yield background task via `asyncio.to_thread` + `safe_background_task` (never
+  awaited inline). Per-op classification (full table in `run_startup_migrations`'s
+  docstring):
+  - **FAST (pre-yield, unchanged timing):** `_create_fts_triggers`,
+    `_seed_system_config`, `_reconcile_system_config`, `_seed_manufacturers`,
+    `_create_count_triggers`, `_reconcile_connector_active` (no-op),
+    `_verify_encryption_canary`, `_create_default_user_if_env_set`,
+    `_seed_admin_user_if_env_set`, `_seed_agent_user`,
+    `_seed_verification_group_from_admin_emails`, `_seed_commodity_schemas` — all
+    either DDL-only (CREATE OR REPLACE FUNCTION/TRIGGER, no data scan), single-row
+    checks, or bounded by a small fixed catalog/env list.
+  - **SLOW (deferred, post-yield background task):** `_backfill_fts`,
+    `_seed_site_contacts`, `_backfill_company_counts`, the legacy `site_type`/
+    `trouble_tickets` normalize UPDATEs, `_analyze_hot_tables` (now gated by
+    `_maybe_analyze_hot_tables`), `_backfill_normalized_mpn`,
+    `_backfill_sighting_offer_normalized_mpn`, `_backfill_sighting_vendor_normalized`,
+    `_backfill_offer_vendor_normalized`, `_backfill_proactive_offer_qty`,
+    `_backfill_ticket_defaults`, `_backfill_material_cards`,
+    `_backfill_sweep_cooldown`, `_complete_reverted_active_plans`,
+    `_warn_non_canonical_categories` — all full-table-shaped scans, chunked
+    backfills, ANALYZE, or per-row business-logic sweeps.
+
+  Added `GET /health/ready` (module flag `app.startup.deferred_backfills_ready`,
+  read via `is_deferred_backfills_ready()`) reporting whether the deferred phase has
+  finished; `/health` itself is unchanged (liveness only) and now answers immediately
+  since it no longer waits on the deferred phase. `docker-compose.yml`'s healthcheck
+  and `deploy.sh`'s wait loop deliberately stay pointed at `/health` (liveness) —
+  `deploy.sh` additionally curls `/health/ready` once, post-liveness, purely to log
+  readiness (never gates on it), documented inline in both files.
+
+  New Alembic migration `187_startup_backfill_partial_idx` (merged with a concurrent
+  `71d3fef96529` via `1223a56cbbbb`) adds 8 PostgreSQL partial indexes on the exact
+  `IS NULL` predicates the deferred backfills scan (`requirements`/`material_cards`/
+  `sightings`/`offers.normalized_mpn`, `sightings`/`offers.vendor_name_normalized`,
+  `trouble_tickets` risk_tier+category, `prospect_accounts` sweep-cooldown) so
+  repeat-boot scans are O(remaining rows), not O(table); no-op on SQLite
+  (dialect-guarded). `_maybe_analyze_hot_tables` gates ANALYZE behind a
+  `system_config` marker keyed to `BUILD_COMMIT` (same tag `/health` reports and
+  `deploy.sh` verifies) — reruns once per genuine deploy, skips on a same-image
+  restart, reruns if the marker row is cleared. Round-tripped
+  upgrade→downgrade→upgrade on a throwaway local PostgreSQL 16 DB. `TESTING=1`
+  behavior is unchanged: `run_startup_migrations` and
+  `run_deferred_startup_backfills` both short-circuit under `TESTING=1`, and
+  `main.py` only ever schedules the deferred task when `not _is_testing` (mirroring
+  the existing scheduler/seed_api_sources gating). Tests:
+  `tests/test_startup.py` (fast/deferred split, readiness flag, ANALYZE marker
+  gating), `tests/test_main.py` (`/health/ready` endpoint, lifespan wiring, TESTING
+  behavior unchanged).
 
 - [x] **P2.8 — Insight-refresh latency hazard (P0.1 follow-up; needs a design
   decision).** Now that the four "Refresh AI insights" endpoints actually `await`

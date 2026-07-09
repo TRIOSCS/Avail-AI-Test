@@ -23,6 +23,8 @@ from zoneinfo import ZoneInfo
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import SearchQueueStatus
+
 EASTERN = ZoneInfo("America/New_York")
 
 # Private module-level alias for the pacing primitive. The main loop calls ``_sleep``
@@ -256,7 +258,7 @@ def main():
                     # Ensure session is valid
                     if not session.ensure_session():
                         logger.error("NC worker: session re-auth failed")
-                        mark_status(db, item, "failed", error="Session authentication failed")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Session authentication failed")
                         db.close()
                         _sleep(5 * 60)
                         continue
@@ -273,11 +275,11 @@ def main():
                         search_result.get("url", ""),
                     )
                     if health == "SESSION_EXPIRED":
-                        mark_status(db, item, "queued")
+                        mark_status(db, item, SearchQueueStatus.QUEUED)
                         db.close()
                         continue
                     if breaker.should_stop():
-                        mark_status(db, item, "failed", error=f"Circuit breaker: {breaker.trip_reason}")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error=f"Circuit breaker: {breaker.trip_reason}")
                         db.close()
                         continue
 
@@ -332,7 +334,7 @@ def main():
                     logger.error("NC worker: search iteration error: {}", e)
                     try:
                         if item:
-                            mark_status(db, item, "failed", error=str(e)[:500])
+                            mark_status(db, item, SearchQueueStatus.FAILED, error=str(e)[:500])
                     except Exception as mark_err:
                         logger.error("NC worker: double fault marking item failed: {}", mark_err)
                 finally:

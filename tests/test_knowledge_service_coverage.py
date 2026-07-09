@@ -11,7 +11,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -49,6 +49,8 @@ class TestCreateEntry:
         assert entry.source == "manual"
 
     def test_creation_no_commit(self, db_session: Session, test_user: User):
+        from app.models import KnowledgeEntry
+
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -56,7 +58,10 @@ class TestCreateEntry:
             content="Fact",
             commit=False,
         )
-        assert entry.id is not None
+        assert entry.id is not None  # flushed (id assigned) ...
+        db_session.rollback()
+        # ... but NOT committed: rollback discards it, proving commit=False held.
+        assert db_session.get(KnowledgeEntry, entry.id) is None
 
     def test_creation_with_all_fields(self, db_session: Session, test_user: User, requisition: Requisition):
         expiry = datetime.now(timezone.utc) + timedelta(days=90)
@@ -283,6 +288,56 @@ class TestGenerateInsights:
             result = await knowledge_service.generate_insights(db_session, requisition.id)
         assert len(result) == 1
         assert result[0].entry_type == "ai_insight"
+
+    async def test_generate_insights_interactive_tightens_claude_call(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        """P2.8: interactive=True must forward timeout=25 / max_attempts=1 to
+        claude_structured so the HTMX request can't block for the full default 30s x
+        3-retry worst case."""
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T at $0.50",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        mock_claude = AsyncMock(return_value={"insights": [{"content": "x", "confidence": 0.9}]})
+        with patch("app.utils.claude_client.claude_structured", new=mock_claude):
+            await knowledge_service.generate_insights(db_session, requisition.id, interactive=True)
+
+        mock_claude.assert_awaited_once()
+        kwargs = mock_claude.await_args.kwargs
+        assert kwargs["timeout"] == 25
+        assert kwargs["max_attempts"] == 1
+
+    async def test_generate_insights_non_interactive_default_unchanged(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        """The background job (knowledge_jobs) calls with the default interactive=False
+        — claude_structured must NOT receive timeout/max_attempts overrides (preserves
+        the original 30s/3-attempt behavior)."""
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T at $0.50",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        mock_claude = AsyncMock(return_value={"insights": [{"content": "x", "confidence": 0.9}]})
+        with patch("app.utils.claude_client.claude_structured", new=mock_claude):
+            await knowledge_service.generate_insights(db_session, requisition.id)
+
+        mock_claude.assert_awaited_once()
+        kwargs = mock_claude.await_args.kwargs
+        assert "timeout" not in kwargs
+        assert "max_attempts" not in kwargs
 
     async def test_generate_insights_claude_unavailable(
         self, db_session: Session, test_user: User, requisition: Requisition

@@ -1642,7 +1642,7 @@ async def requisition_insights_refresh(
 
     entries = []
     try:
-        entries = await generate_insights(db, req_id)
+        entries = await generate_insights(db, req_id, interactive=True)
     except Exception as e:
         db.rollback()
         logger.warning(f"Insight generation failed for req {req_id}: {e}")
@@ -1676,7 +1676,7 @@ async def vendor_insights_refresh(
 
     entries = []
     try:
-        entries = await generate_vendor_insights(db, vendor_id)
+        entries = await generate_vendor_insights(db, vendor_id, interactive=True)
     except Exception as e:
         db.rollback()
         logger.warning(f"Insight generation failed for vendor {vendor_id}: {e}")
@@ -1710,7 +1710,7 @@ async def company_insights_refresh(
 
     entries = []
     try:
-        entries = await generate_company_insights(db, company_id)
+        entries = await generate_company_insights(db, company_id, interactive=True)
     except Exception as e:
         db.rollback()
         logger.warning(f"Insight generation failed for company {company_id}: {e}")
@@ -1742,7 +1742,7 @@ async def pipeline_insights_refresh(
 
     entries = []
     try:
-        entries = await generate_pipeline_insights(db)
+        entries = await generate_pipeline_insights(db, interactive=True)
     except Exception as e:
         db.rollback()
         logger.warning(f"Pipeline insight generation failed: {e}")
