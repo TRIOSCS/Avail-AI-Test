@@ -322,7 +322,10 @@ jobs:
     # is a no-op (skipped download -> combine fails loudly) if a shard never
     # produced its data file.
     needs: test
-    if: always() && github.event_name != 'schedule'
+    # Skip (not fail) when the shards were cancelled — a superseding push
+    # cancels in-progress shards via the concurrency group, and a combine
+    # against artifacts that were never uploaded is pure noise, not signal.
+    if: always() && needs.test.result != 'cancelled' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
