@@ -46,6 +46,23 @@ repos:
         pass_filenames: false
         verbose: true
 
+  # P2.5: mechanically enforces the StrEnum-status rule (CLAUDE.md Non-Negotiables +
+  # app/constants.py) — `.status = "raw string"` bypasses the enum and lets a raw
+  # literal silently diverge from it. Use the matching StrEnum member instead (e.g.
+  # `req.status = RequisitionStatus.OPEN`). app/constants.py itself is excluded (it
+  # IS the enum source); app/services/requisition_state.py is excluded because its
+  # only match is a module docstring line documenting the anti-pattern it replaces
+  # (`` `req.status = "..."` ``), not a live assignment — verified via
+  # `grep -rnP '\.status\s*=\s*"' app/` before adding this hook (2026-07-09).
+  - repo: local
+    hooks:
+      - id: no-raw-status-assignment
+        name: reject raw string `.status = "..."` (use a StrEnum from app/constants.py)
+        entry: '\.status\s*=\s*"'
+        language: pygrep
+        files: ^app/.*\.py$
+        exclude: ^app/constants\.py$|^app/services/requisition_state\.py$
+
   # Pre-push gate: runs the commit-stage hooks against ONLY the files this
   # branch changed since it forked from origin/main. This mirrors CI exactly
   # and — unlike the old --all-files sweep — never flags pre-existing drift in

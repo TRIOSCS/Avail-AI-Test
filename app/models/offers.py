@@ -139,13 +139,32 @@ class Offer(Base):
 
     @validates("condition")
     def _validate_condition(self, _key, value):
+        """Normalize condition onto the live OfferCondition vocabulary.
+
+        Case-insensitively maps documented legacy spellings ("Used", "pulled",
+        "Refurbished", "recertified", "new no pkg", etc. — see
+        ``app.services.offer_qualification._LEGACY_CONDITION``) onto the canonical
+        ``OfferCondition`` member via ``normalize_offer_condition()``, so raw strings
+        can't silently diverge from the enum going forward. Data-safety: a value that
+        matches no known/legacy spelling is passed through UNCHANGED with a logged
+        warning rather than raised — an offer write must never crash over vocabulary
+        drift (P2.5).
+        """
+        if not value:
+            return value
+
+        from app.services.offer_qualification import normalize_offer_condition
+
+        normalized = normalize_offer_condition(value)
+        if normalized is not None:
+            return normalized
+
+        from loguru import logger
+
         from ..constants import OfferCondition
 
         valid = {e.value for e in OfferCondition}
-        if value and value not in valid:
-            from loguru import logger
-
-            logger.warning("Unexpected offer condition: {}. Expected one of {}", value, valid)
+        logger.warning("Unexpected offer condition: {}. Expected one of {}", value, valid)
         return value
 
     @property

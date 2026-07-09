@@ -307,23 +307,85 @@ These are confirmed defects shipping today, not style issues.
   still serialize `"new"`, not an enum repr). Deliberately did NOT touch
   `freeform_parser_service.py:166`'s `"new"` literal — that's the separate broad
   new/refurb/used vocab (`normalize_condition`), not `OfferCondition`; conflating the
-  two is exactly what `MaterialCondition`'s docstring warns against. **Not done:** the
-  validator preventing raw strings from slipping past `OfferCondition`, and the
-  pre-commit grep hook — out of scope for this pass (not part of the assigned P2.5
-  sub-items); `sightings.py`/`htmx/requisitions.py` OfferCondition sites are the
-  parallel P3 agent's responsibility this wave. Tests:
+  two is exactly what `MaterialCondition`'s docstring warns against.
+  **Leftovers closed (2026-07-09, follow-up pass):** `Offer._validate_condition`
+  (`app/models/offers.py`) now normalizes via the existing
+  `app.services.offer_qualification.normalize_offer_condition()` — case-insensitive,
+  maps documented legacy spellings (`used`→`pulls`, `pull`/`pulled`→`pulls`,
+  `refurbished`/`recertified`→`refurb`, `new no pkg`→`new_no_pkg`, etc. — the same
+  `_LEGACY_CONDITION` table `normalize_offer_condition` already used elsewhere) onto
+  the live `OfferCondition` members, so raw strings can't silently diverge from the
+  enum again. Data-safety preserved: a value matching no known/legacy spelling is
+  passed through UNCHANGED with a logged warning rather than raised — verified against
+  every `Offer(condition=...)` test fixture in the suite (244 call sites audited via
+  grep; the handful of title-case/off-vocab literals found all belonged to
+  `ExcessLineItem`/`MaterialCard`/`Sighting`/`VendorPartUnavailability`, not `Offer`).
+  Pre-commit hook added: `.pre-commit-config.yaml`'s new local `no-raw-status-assignment`
+  (`language: pygrep`) rejects `\.status\s*=\s*"` under `app/` excluding
+  `app/constants.py`. Ran the regex over `app/` first (per the assignment): exactly one
+  hit, `app/services/requisition_state.py:4`'s module docstring documenting the very
+  anti-pattern the hook replaces (`` `req.status = "..."` ``) — not a live assignment,
+  so that file is excluded too (comment in the YAML explains why + how it was
+  verified) rather than migrated. Verified the hook both passes clean on current `app/`
+  and fails on a probe file with a real `req.status = "open"` line. `sightings.py`/
+  `htmx/requisitions.py:673` OfferCondition sites remain the parallel P3 agent's
+  responsibility (unrelated to this pass). Tests:
   `tests/test_search_queue_status_enum.py` (new — full queue lifecycle + AI-gate
   transitions assert against the enum), `tests/test_offer_qualification.py`
   (`TestOfferConditionEnumSites`), `tests/test_schemas_crm.py`,
-  `tests/test_ai_offer_service.py`, `tests/test_save_parsed_offers_normalize_qual.py`.
+  `tests/test_ai_offer_service.py`, `tests/test_save_parsed_offers_normalize_qual.py`,
+  `tests/test_offer_condition_validator.py` (new — canonical/case-variant/legacy
+  normalization + unknown-value pass-through-with-warning).
 
-- [ ] **P2.6 — Event-loop protection.**
+- [x] **P2.6 — Event-loop protection.**
   - Move the 14 blocking file-I/O sites in `async def` to `anyio` (worst:
     `tagging_ai_batch.py:128-458`, `tagging_ai_triage.py:233-246` — large JSONL files;
     also fixes the 2 unclosed file handles at `tagging_ai_batch.py:437`,
     `tagging_ai_triage.py:228`).
   - `htmx/requisitions.py:554` — run `openpyxl.load_workbook` in
     `anyio.to_thread.run_sync`; add an upload size cap.
+
+  **Fixed (2026-07-09):** Used `asyncio.to_thread` rather than `anyio.to_thread.run_sync`
+  — `anyio` is importable (FastAPI/Starlette transitive dep) but every existing
+  event-loop-offload site in this codebase (`app/main.py`, `app/search_service.py`,
+  `app/jobs/tagging_jobs.py`, `app/routers/sightings.py`, etc.) already uses
+  `asyncio.to_thread`; introducing `anyio` in just these files would mix two patterns
+  for the same job (CLAUDE.md: "follow existing codebase patterns").
+  - `app/services/tagging_ai_batch.py`: extracted `_write_batch_meta`/`_read_batch_meta`
+    (JSON meta persistence, `submit_batch_backfill`/`check_and_apply_batch_results`) and
+    `_process_batch_results_file` (the full JSONL parse + `_apply_chunked_batch` DB pass
+    in `apply_batch_results_chunked`, previously inline) into sync helpers, each
+    dispatched via `asyncio.to_thread`; the streamed-download chunk write now goes
+    through `asyncio.to_thread(f.write, chunk)` per chunk instead of blocking inline.
+    The `tempfile.NamedTemporaryFile(...).close()` unclosed-handle pattern (line 437)
+    is now a `with` block.
+  - `app/services/tagging_ai_triage.py`: same treatment for `apply_triage_results` —
+    extracted `_process_triage_results_file`, per-chunk `asyncio.to_thread(f.write, ...)`
+    download, `with`-block temp file (line 228). Preserved the function's original
+    no-reraise-on-exception behavior (unlike `tagging_ai_batch.py`, which re-raises).
+  - `app/routers/avatars.py:126` (avatar write) and
+    `app/routers/error_reports.py`'s `_save_screenshot` call site (the plan's
+    `error_reports.py:342-344` line ref had drifted post-refactor to the actual
+    blocking-write call at the time of this pass — `os.path.isfile`/`os.path.realpath`
+    at the now-current 342-344 are cheap stat/string ops already followed by
+    Starlette's own async-safe `FileResponse`, not the flagged large-file pattern):
+    both now dispatch their synchronous disk write via `asyncio.to_thread`.
+  - `app/routers/htmx/requisitions.py`'s `requisition_import_parse`: `openpyxl` parse
+    extracted to a sync `_parse_xlsx_rows` helper run via `asyncio.to_thread`; added
+    `MAX_IMPORT_UPLOAD_BYTES` (10MB, matching `resell.py`'s `MAX_UPLOAD_BYTES` /
+    `requisitions/requirements.py`'s inline 10MB checks) with the standard
+    `{"error", "status_code", "request_id"}` JSON shape in `format=json` mode and a
+    matching HTML fragment (413) otherwise.
+  Tests: `tests/test_tagging_ai_batch_event_loop.py` (new — direct coverage for the two
+  previously `# pragma: no cover` functions plus the meta helpers),
+  `tests/test_tagging_ai_batch.py` / `_coverage.py` / `tests/test_tagging_ai_triage.py`
+  (all still green, unchanged behavior), `tests/test_avatar_upload_route.py` (added the
+  OSError-on-worker-thread propagation case), `tests/test_error_reports_submit.py`
+  (added the screenshot-write-failure case; strengthened 3 pre-existing
+  assertion-theater-flagged tests in the same file per the lint gate),
+  `tests/test_req_import_xlsx_upload.py` (new — `_parse_xlsx_rows` unit tests, xlsx
+  upload end-to-end, oversized-upload rejection in both JSON/HTML modes, normal-size
+  upload unaffected).
 
 - [x] **P2.7 — Startup/health-check decoupling.**
   `app/main.py:124` runs ~20 sequential backfills/`ANALYZE` before `/health` can

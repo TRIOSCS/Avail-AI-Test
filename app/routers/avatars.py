@@ -18,6 +18,7 @@ Called by: main.py (app.include_router), settings/profile.html (uploader),
 Depends on: models/auth.py (User.avatar_path), startup.py (ensure_avatar_storage)
 """
 
+import asyncio
 import json
 import os
 import uuid
@@ -81,6 +82,13 @@ def _ensure_avatar_dir() -> None:
         _avatar_dir_ready = True
 
 
+def _write_avatar_file(path: str, data: bytes) -> None:
+    """Sync file write — always dispatched via ``asyncio.to_thread`` (P2.6) so a
+    slow/contended disk doesn't block the event loop for other requests."""
+    with open(path, "wb") as f:
+        f.write(data)
+
+
 def _json_error(request: Request, status_code: int, message: str) -> JSONResponse:
     req_id = getattr(request.state, "request_id", "unknown")
     return JSONResponse(
@@ -123,8 +131,7 @@ async def upload_avatar(
     filename = f"user_{user.id}_{uuid.uuid4().hex[:8]}.{ext}"
     path = os.path.join(AVATARS_DIR, filename)
     try:
-        with open(path, "wb") as f:
-            f.write(data)
+        await asyncio.to_thread(_write_avatar_file, path, data)
     except OSError as e:
         logger.error("Avatar write failed for user {}: {}", user.id, e)
         return _json_error(request, 500, "Avatar storage is not writable. Contact support.")

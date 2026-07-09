@@ -12,6 +12,7 @@ Depends on: app.models, app.dependencies, app.database, app.search_service,
     app.services.freeform_parser_service, ._shared
 """
 
+import asyncio
 import html as html_mod
 import json
 from datetime import datetime
@@ -55,6 +56,10 @@ router = APIRouter(tags=["htmx-views"])
 # (won > lost > sent > revised > everything else).
 _QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
 
+# Import-parse upload cap (P2.6) — same 10MB convention as resell.py's
+# MAX_UPLOAD_BYTES / requisitions/requirements.py's inline 10_000_000 check.
+MAX_IMPORT_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 def _best_quote_status(quotes) -> str | None:
     """The most significant quote status across a requisition's quotes, or None if it
@@ -62,6 +67,27 @@ def _best_quote_status(quotes) -> str | None:
     if not quotes:
         return None
     return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
+
+
+def _parse_xlsx_rows(content: bytes) -> str:
+    """Parse an uploaded XLSX/XLS workbook into tab-separated text.
+
+    Sync (openpyxl has no async API) — always dispatched via ``asyncio.to_thread``
+    from ``requisition_import_parse`` (P2.6), since ``load_workbook`` + full-sheet
+    iteration can block the event loop for a large workbook.
+    """
+    from io import BytesIO
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+    rows = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c) if c is not None else "" for c in row]
+            if any(cells):
+                rows.append("\t".join(cells))
+    return "\n".join(rows)
 
 
 def build_requisition_list_query(
@@ -541,30 +567,37 @@ async def requisition_import_parse(
     user: User = Depends(require_user),
 ):
     """Parse pasted text or uploaded file with AI, return editable preview."""
+    json_mode = request.query_params.get("format") == "json"
+
     # Extract text from file if uploaded
     text = raw_text.strip()
     if file and file.filename:
         content = await file.read()
+        if len(content) > MAX_IMPORT_UPLOAD_BYTES:
+            req_id = getattr(request.state, "request_id", "unknown")
+            message = "File too large — 10MB maximum."
+            if json_mode:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": message, "status_code": 413, "request_id": req_id},
+                )
+            return HTMLResponse(
+                f'<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+                f"{message}"
+                "</div>",
+                status_code=413,
+            )
         fname = file.filename.lower()
         if fname.endswith((".xlsx", ".xls")):
-            from io import BytesIO
-
-            import openpyxl
-
-            wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
-            rows = []
-            for ws in wb.worksheets:
-                for row in ws.iter_rows(values_only=True):
-                    cells = [str(c) if c is not None else "" for c in row]
-                    if any(cells):
-                        rows.append("\t".join(cells))
-            text = "\n".join(rows)
+            # openpyxl has no async API and full-sheet iteration can block the event
+            # loop for a large workbook — parse on a worker thread (P2.6).
+            text = await asyncio.to_thread(_parse_xlsx_rows, content)
         elif fname.endswith(".csv"):
             text = content.decode("utf-8", errors="replace")
         else:
             text = content.decode("utf-8", errors="replace")
-
-    json_mode = request.query_params.get("format") == "json"
 
     if not text:
         if json_mode:

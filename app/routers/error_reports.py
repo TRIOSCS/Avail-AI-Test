@@ -7,6 +7,7 @@ Called by: main.py (app.include_router), htmx/base.html (HTMX button)
 Depends on: models/trouble_ticket.py
 """
 
+import asyncio
 import base64
 import json
 import os
@@ -297,7 +298,9 @@ async def submit_trouble_ticket(
     # we must surface clearly rather than swallow (TT-0002).
     if screenshot_b64:
         try:
-            path = _save_screenshot(ticket.id, screenshot_b64)
+            # P2.6: _save_screenshot does a blocking disk write; dispatch it via
+            # asyncio.to_thread so a slow/contended disk doesn't stall the event loop.
+            path = await asyncio.to_thread(_save_screenshot, ticket.id, screenshot_b64)
             if path:
                 ticket.screenshot_path = path
                 db.commit()

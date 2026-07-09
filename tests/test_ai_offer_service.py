@@ -301,6 +301,13 @@ class TestSaveFreeformOffers:
         maybe_release_on_offer.
 
         RED before Task-7 adds offer_condition=offer.condition to the call site.
+
+        P2.5 follow-up: ``Offer._validate_condition`` now normalizes the legacy
+        "refurbished" spelling to the canonical ``OfferCondition.REFURB`` ("refurb")
+        the moment it's assigned to the ORM attribute, so what's actually forwarded
+        here is the normalized value -- `release_on_offer`'s own broad
+        `normalize_condition()` maps both "refurbished" and "refurb" to the same
+        "refurb" bucket, so this is a same-vocabulary rename, not a behavior change.
         """
         offer_in = _make_offer_input(condition="refurbished")
         save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
@@ -308,8 +315,8 @@ class TestSaveFreeformOffers:
         assert mock_release.called, "maybe_release_on_offer was not called at all"
         _args, kwargs = mock_release.call_args
         forwarded_condition = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
-        assert forwarded_condition == "refurbished", (
-            f"Expected offer_condition='refurbished' forwarded to maybe_release_on_offer "
-            f"but got: {forwarded_condition!r}. "
+        assert forwarded_condition == "refurb", (
+            f"Expected offer_condition='refurb' (OfferCondition-normalized from 'refurbished') "
+            f"forwarded to maybe_release_on_offer but got: {forwarded_condition!r}. "
             "Task-7: add offer_condition=offer.condition to the call site."
         )
