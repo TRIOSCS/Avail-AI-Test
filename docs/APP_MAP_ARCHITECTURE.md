@@ -192,8 +192,10 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 The HTMX/Alpine frontend partials are served by `app/routers/htmx_views.py` (the
 historical monolith) plus a growing **per-domain package `app/routers/htmx/`** that it
 is being split into one cohesive slice at a time. All sub-routers keep the same `/v2/...`
-URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
-`htmx_views_router` (so URLs are unchanged):
+URL space and the `htmx-views` tag. Most are mounted by `main.py` alongside
+`htmx_views_router` (so URLs are unchanged); the final 5 (`my_day.py`, `email_views.py`,
+`insights_views.py`, `search_views.py`, `requisitions_edit.py` — see below) are instead
+aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mount lines:
 
 - `app/routers/htmx/_shared.py` — shared module-level helpers/state used by both the
   monolith and the sub-routers: the Vite manifest loader (`_vite_manifest`/`_vite_assets`),
@@ -250,7 +252,7 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   from `requisitions` (every offer route re-renders the requisition offers/responses tab) and
   `_safe_int`/`_safe_float` from `_shared`. **Trap:** the interleaved requisition-management
   routes (bulk action, inline edit/win-prob/opp-value/row-action, delete/update requirement,
-  poll-inbox) are NOT offers and stay in `htmx_views.py`.
+  poll-inbox) are NOT offers — they live in `app/routers/htmx/requisitions_edit.py` (see below).
 - `app/routers/htmx/sourcing.py` — **deal/sourcing-cluster split (sourcing-engine slice)**:
   the self-contained sourcing surface (`/v2/sourcing/*` pages + `/v2/partials/sourcing/*`) —
   results page/stream, manual search trigger, lead detail/status/feedback, and the split-panel
@@ -272,8 +274,8 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
   vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health +
   data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
-  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (re-imported back into `htmx_views.py`
-  because the staying poll-inbox route calls it).
+  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (imported by
+  `app/routers/htmx/requisitions_edit.py` because its poll-inbox route calls it).
 - `app/routers/htmx/materials.py` — **tail split (materials-partials slice; distinct from the
   domain router `app/routers/materials.py`)**: the faceted list + filter sidebars
   (manufacturers/global/tree/sub), manufacturer search/add, AI interpret, faceted results,
@@ -295,19 +297,63 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   complete/delete/edit/snooze, and the account/contact + vendor activity add-note forms. Imports
   `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs); `htmx_views.py`
   re-imports `_build_ticket_list_context` for `error_reports.analyze_tickets`.
+- `app/routers/htmx/my_day.py` — **P4.3 final split (My Day / Tasks slice)**: the Tasks
+  page (`GET /v2/partials/my-day` + filter-bar re-render) plus create/snooze/reopen
+  mutations. Owns `_my_day_filtered_tasks`/`_my_day_results_response`; imports
+  `_coerce_task_priority` from `requisitions.py`.
+- `app/routers/htmx/email_views.py` — **P4.3 final split (email integration slice)**:
+  the Sprint 7 email thread viewer + AI summary, reply send (with the DNC hard-block),
+  and the email-intelligence dashboard partial.
+- `app/routers/htmx/insights_views.py` — **P4.3 final split (AI insights/knowledge/
+  dashboard slice)**: the Phase 6 AI-insights panels (requisitions/vendors/customers/
+  dashboard) + their refresh actions, the AI activity-digest cards
+  (requisition + customer), the top-level dashboard stats partial, and the Sprint 9
+  knowledge-base list/create routes. Moved verbatim — this is the surface P0.1/P2.8
+  most recently touched, so behavior must stay byte-for-byte identical.
+- `app/routers/htmx/search_views.py` — **P4.3 final split (search slice)**: global
+  type-ahead + AI search + full results page, the Part Dossier search-form entry point
+  + "what we know" history panel, the streaming MPN search (`search/run` + SSE
+  `search/stream` + `search/filter` + `search/lead-detail`), and the requisition-picker
+  "add shortlisted results to a requisition" flow. Owns `_get_enabled_sources` /
+  `_get_cached_search_results` (Redis-backed search-result cache reads).
+- `app/routers/htmx/requisitions_edit.py` — **P4.3 final split (requisition bulk +
+  inline-edit slice)**: the requisitions-list bulk action (owner reassign), inline
+  cell edit + save (name/status/urgency/deadline/owner), win-probability +
+  opportunity-value inline edits, row-level actions (claim/unclaim/won/lost/clone),
+  the inbox-poll trigger, and the requirement delete/update endpoints. Imports
+  `_best_quote_status`/`requisitions_list_partial` from `requisitions.py` and
+  `_run_inbox_scan_now` from `settings.py`.
 
-After this tail split, `htmx_views.py` retains only the cross-cutting surface: the full-page
-entry points (`v2_page` + `/v2/quotes` redirect), global search + the search/sourcing partials,
-the parts-workspace shell, AI digests, the requisitions inline-edit/bulk/row-action +
-requirement CRUD + poll-inbox routes, email integration, the dashboard + AI-insights panels,
-knowledge, the vendor stock-list import (`/v2/partials/vendors/import-stock`), My Day, and the
-shared helpers.
+After this final split, `htmx_views.py` retains only the cross-cutting surface: the
+full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace shell
+(`GET /v2/partials/parts/workspace`), the vendor stock-list import
+(`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
+(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). It no longer defines any
+`/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,
+or requisition bulk/inline-edit — those now live in the 5 modules above.
+
+**Registration pattern for this final split** differs from every prior domain above:
+instead of `main.py` importing and mounting each new sub-router individually (which
+would require touching `main.py`), `htmx_views.py` imports the 5 new routers and
+aggregates them into its own exported `router` via `router.include_router(...)` at
+module load time. `main.py` keeps its single, unchanged
+`app.include_router(htmx_views_router)` line — route registration is identical, only
+internally re-composed. `htmx_views.py` also re-imports every name tests
+patch/import directly at `app.routers.htmx_views.X` (`_get_cached_search_results`,
+`_get_enabled_sources`, `add_to_requisition`, `requisition_picker`, `search_filter`,
+`search_run`, `send_email_reply`, `update_requirement`) so those call sites keep
+resolving; a few `unittest.mock.patch("app.routers.htmx_views.X")` targets that
+actually intercept a collaborator called *from inside* the moved function (not just
+imported for re-export) were repointed to `app.routers.htmx.search_views.X` /
+`app.routers.htmx.requisitions_edit.X` so the patch still takes effect post-split.
 
 When extracting a domain: move the cohesive route block verbatim into a new
 `app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any
 genuinely cross-cutting helpers into `_shared.py` (re-imported back into the monolith), and
-register the sub-router in `main.py`. Verify route parity (dump `app.routes` method+path,
-sort, diff — must be empty) before and after.
+register the sub-router in `main.py` (or, if `main.py` must stay untouched, aggregate it
+into the parent module's `router` via `include_router()` as `htmx_views.py` does above).
+Verify route parity (dump `app.routes` method+path, sort, diff — must be empty) before and
+after.
 
 ### HTMX Conventions
 

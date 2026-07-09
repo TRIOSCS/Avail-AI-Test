@@ -259,7 +259,7 @@ class TestUpdateRequirementDirect:
             path=f"/v2/partials/requisitions/{req.id}/requirements/{item.id}",
             fields={"sub_mpn": ["LM741"], "sub_manufacturer": ["TI"]},
         )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.requisitions_edit.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("row OK")
             result = await update_requirement(
                 request=mock_req,
@@ -358,7 +358,7 @@ class TestUpdateRequirementDirect:
         req = _make_req(db_session, test_user)
         item = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).first()
         mock_req = _mock_form_request(fields={"sub_mpn": [], "sub_manufacturer": []})
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.requisitions_edit.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("row OK")
             result = await update_requirement(
                 request=mock_req,

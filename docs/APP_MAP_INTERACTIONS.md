@@ -166,7 +166,7 @@ results_shell.html (right column)
     +---> hx-get /v2/partials/search/history?mpn=<searched mpn>   (hx-trigger=load)
               |
               v
-          htmx_views.search_history_panel
+          htmx.search_views.search_history_panel
               |
               +---> normalize_mpn_key(mpn)        # same key MaterialCard stores
               +---> part_history_service.get_part_history(db, key)   # READ-ONLY
@@ -331,7 +331,7 @@ identity/specs/history instantly from the DB, with the live market streaming in 
 GET /v2/search?mpn=<PN>  (v2_page → base_page.html fires hx-get partial_url)
     |  v2_page search branch: partial_url = /v2/partials/search?mpn=<quote(PN)>
     v
-htmx_views.py: search_form_partial(mpn)
+htmx/search_views.py: search_form_partial(mpn)
     |  mpn present  → dossier_shell.html      (the Bench)
     |  no mpn       → form.html landing + lazy /v2/partials/search/recent
     v
@@ -457,7 +457,7 @@ fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
 Browser POST /v2/partials/search/run  (manual MPN entry)
     |
     v
-htmx_views.py: search_run()
+htmx/search_views.py: search_run()
     |
     +---> Returns HTML shell + spinner immediately (200 OK)
     |
@@ -1038,7 +1038,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    stamping). A RE-SENT attachment that hits the dedup key refreshes the
    existing row's qty/price from the new parse and joins the apply batch, so
    the O3 release still fires — never a silent skip.
-5. `app/routers/htmx_views.py` — add-to-requisition picker (deliberately stamped;
+5. `app/routers/htmx/search_views.py` — add-to-requisition picker (deliberately stamped;
    the user can Mark available to override).
 6. `app/jobs/inventory_jobs.py` — excess-list sighting creation (rows grouped
    per requirement before calling).
@@ -2266,7 +2266,7 @@ Browser (Activity tab loads) — lazy HTMX placeholder fires GET
     |     GET /v2/partials/customers/{company_id}/activity-digest?force=0
     |
     v
-htmx_views.py: requisition_activity_digest() / customer_activity_digest()
+htmx/insights_views.py: requisition_activity_digest() / customer_activity_digest()
     |
     v
 activity_digest_service.get_or_build_digest(entity_type, entity_id, db, force)
@@ -4998,7 +4998,7 @@ Search coverage:
 ### Universal Top-Search (global search bar)
 
 The header search input (templates/htmx/partials/shared/topbar.html, name="q") debounces
-into `GET /v2/partials/search/global` → `htmx_views.global_search` →
+into `GET /v2/partials/search/global` → `htmx.search_views.global_search` →
 `global_search_service.fast_search(q, db, user)` → renders the grouped dropdown
 `partials/shared/search_results.html`. Pressing Enter posts `/v2/partials/search/ai` →
 `ai_search(q, db, user)` (Claude Haiku intent parse, falls back to fast_search). "View all"

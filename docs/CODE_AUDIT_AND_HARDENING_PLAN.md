@@ -739,7 +739,39 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
     `ruff.toml`'s BLE001 legacy-freeze entry updated to the 2 new file paths
     that still carry a broad `except Exception`.
   - `routers/htmx_views.py` (2,063) → `htmx/my_day.py, email_views.py,
-    insights_views.py, search_views.py`.
+    insights_views.py, search_views.py`. **Done:** split into 5 sibling
+    modules under `routers/htmx/` — `my_day.py` (Tasks worklist + create/
+    snooze/reopen), `email_views.py` (thread viewer, AI summary, reply send,
+    intelligence dashboard), `insights_views.py` (AI insights panels for
+    requisitions/vendors/customers/dashboard, activity digests, dashboard
+    stats, knowledge-base list/create — moved verbatim, P0.1/P2.8 behavior
+    untouched), `search_views.py` (global/AI search, search form + history
+    panel, streaming search/run + SSE stream + filter + lead-detail,
+    requisition-picker "add to requisition"), and `requisitions_edit.py`
+    (bulk owner-reassign, inline cell edit/save, win-probability +
+    opportunity-value, row actions, inbox-poll, requirement delete/update).
+    `routers/htmx_views.py` itself shrank to the core full-page shell
+    dispatcher (`v2_page`), the parts-workspace entry point, and the vendor
+    stock-list upload; it imports the 5 new modules' routers and aggregates
+    them via `router.include_router(...)` internally, so `app/main.py`'s
+    registration (`app.include_router(htmx_views_router)`) is byte-for-byte
+    unchanged — no new `main.py` mount lines. It also re-imports every name
+    tests patch/import directly at `app.routers.htmx_views.X`
+    (`_get_cached_search_results`, `_get_enabled_sources`, `add_to_requisition`,
+    `requisition_picker`, `search_filter`, `search_run`, `send_email_reply`,
+    `update_requirement`, plus `_safe_int`/`templates` re-exported from
+    `_shared`). A handful of `unittest.mock.patch("app.routers.htmx_views.X")`
+    targets that patched an internal collaborator actually called from
+    within the moved function (`_get_cached_search_results`,
+    `_get_enabled_sources`, `template_response`) were repointed to
+    `app.routers.htmx.search_views.X` / `app.routers.htmx.requisitions_edit.X`
+    so the mock still intercepts the call post-split
+    (`tests/test_search_streaming.py`, `tests/test_htmx_views_nightly25.py`,
+    `tests/test_htmx_views_nightly24.py`); patches on `get_user` (stays in
+    core `v2_page`) were left untouched. `ruff.toml`'s BLE001 legacy-freeze
+    entry updated: dropped `routers/htmx_views.py` (no broad catches remain
+    there) and added `routers/htmx/insights_views.py` +
+    `routers/htmx/search_views.py`.
   - `routers/htmx/offers.py` (1,905) → `offers_crud / rfq_compose / follow_ups /
     reply_handling`. **Done:** split into `routers/htmx/offers/` package —
     `crud.py` (AI offer parsing, offer CRUD/review/promote/reject/changelog,
