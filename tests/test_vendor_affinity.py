@@ -5,7 +5,7 @@ Called by: pytest
 Depends on: app.services.vendor_affinity_service, SQLAlchemy test fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ def _make_material_card(db: Session, mpn: str, manufacturer: str | None) -> Mate
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -50,7 +50,7 @@ def _make_user(db: Session) -> User:
         name="Affinity Tester",
         role="buyer",
         azure_id="affinity-az-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -63,7 +63,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -76,7 +76,7 @@ def _make_requirement(db: Session, requisition_id: int, mpn: str) -> Requirement
         primary_mpn=mpn,
         normalized_mpn=mpn.lower(),
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -100,7 +100,7 @@ def test_l1_finds_vendors_by_manufacturer(db_session: Session):
             material_card_id=other_card.id,
             vendor_name=vname,
             vendor_name_normalized=vname.lower(),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mvh)
 
@@ -142,7 +142,7 @@ def test_l2_finds_vendors_by_commodity(db_session: Session):
         normalized_name="arrow electronics",
         display_name="Arrow Electronics",
         sighting_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vc_source)
     db_session.flush()
@@ -160,7 +160,7 @@ def test_l2_finds_vendors_by_commodity(db_session: Session):
         mpn_matched="LM317T",
         qty_available=1000,
         source_type="api",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.flush()
@@ -169,7 +169,7 @@ def test_l2_finds_vendors_by_commodity(db_session: Session):
     tag = Tag(
         name="Voltage Regulators",
         tag_type="commodity",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(tag)
     db_session.flush()
@@ -190,7 +190,7 @@ def test_l2_finds_vendors_by_commodity(db_session: Session):
         normalized_name="newark electronics",
         display_name="Newark Electronics",
         sighting_count=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vc_other)
     db_session.flush()
@@ -275,7 +275,7 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
         normalized_name="arrow electronics",
         display_name="Arrow Electronics",
         sighting_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vc)
     db_session.flush()
@@ -287,7 +287,7 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
         material_card_id=other_card.id,
         vendor_name="Arrow Electronics",
         vendor_name_normalized="arrow electronics",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mvh)
 
@@ -304,7 +304,7 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
         mpn_matched="LM317T",
         qty_available=500,
         source_type="api",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.flush()
@@ -312,7 +312,7 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
     tag = Tag(
         name="Power ICs",
         tag_type="commodity",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(tag)
     db_session.flush()
@@ -353,7 +353,7 @@ def test_find_vendor_affinity_limits_to_10(db_session: Session):
             material_card_id=other_card.id,
             vendor_name=vname,
             vendor_name_normalized=vname.lower(),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mvh)
 

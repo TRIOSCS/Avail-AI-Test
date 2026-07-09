@@ -5,7 +5,7 @@ results in EmailSignatureExtract table to avoid re-parsing.
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -320,7 +320,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
 
     if existing:
         existing.seen_count = (existing.seen_count or 0) + 1
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = datetime.now(UTC)
         # Only overwrite if new extract has higher confidence
         if extract.get("confidence", 0) > (existing.confidence or 0):
             for field in _AI_FIELDS:
@@ -399,7 +399,7 @@ async def batch_parse_signatures(db) -> str | None:
 
     Returns the batch_id or None if no records to process or submit failed.
     """
-    from ..models import EmailSignatureExtract  # noqa: F811
+    from ..models import EmailSignatureExtract
 
     # ── Inflight guard ──────────────────────────────────────────────
     r = _get_redis()
@@ -471,7 +471,7 @@ async def process_signature_batch_results(db) -> dict | None:
     On commit failure, returns stats WITHOUT clearing the Redis key so the batch can be
     retried.
     """
-    from ..models import EmailSignatureExtract  # noqa: F811
+    from ..models import EmailSignatureExtract
 
     r = _get_redis()
     if not r:
@@ -525,7 +525,7 @@ async def process_signature_batch_results(db) -> dict | None:
             fields_found = sum(1 for f in _AI_FIELDS if getattr(record, f, None))
             record.confidence = _ai_confidence(fields_found)
             record.extraction_method = "batch_api"
-            record.updated_at = datetime.now(timezone.utc)
+            record.updated_at = datetime.now(UTC)
             stats["applied"] += 1
         except Exception as e:
             logger.warning("Failed to apply batch signature for record {}: {}", record_id, e)

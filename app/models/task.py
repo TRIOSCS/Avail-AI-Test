@@ -11,7 +11,7 @@ Called by: services/task_service.py, routers/htmx/* task endpoints
 Depends on: models/base.py, models/auth.py, models/sourcing.py, models/vendors.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     CheckConstraint,
@@ -62,11 +62,11 @@ class RequisitionTask(Base):
     # Dates
     due_at = Column(UTCDateTime, nullable=True)
     completed_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships

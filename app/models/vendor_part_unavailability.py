@@ -23,7 +23,7 @@ Depends on: app/constants.UnavailabilityReason (reason vocabulary), Base, users 
             requirements table
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import relationship, validates
@@ -57,7 +57,7 @@ class VendorPartUnavailability(Base):
     created_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
 
@@ -127,8 +127,8 @@ class VendorPartUnavailability(Base):
         (O3 and the offer hook both route through here)."""
         from ..constants import ReleaseTrigger
 
-        self.release_trigger = ReleaseTrigger(trigger).value  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
-        self.released_at = now  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
+        self.release_trigger = ReleaseTrigger(trigger).value  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.released_at = now  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
 
     def re_arm(self) -> None:
         """Re-mark transition: NULL the release pair together so the record

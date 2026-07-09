@@ -35,7 +35,7 @@ async def test_auth_401_reraise_is_redacted():
     raised = None
     try:
         await conn._search_with_retry("LM317")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raised = e
     assert raised is not None
     assert "SUPER_SECRET_KEY_123" not in str(raised)
@@ -47,7 +47,7 @@ async def test_exhausted_5xx_reraise_is_redacted():
     raised = None
     try:
         await conn._search_with_retry("LM317")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raised = e
     assert raised is not None
     assert "SUPER_SECRET_KEY_123" not in str(raised)

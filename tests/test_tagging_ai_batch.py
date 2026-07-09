@@ -7,7 +7,7 @@ Depends on: conftest.py (db_session, test SQLite engine)
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,7 +28,7 @@ def _make_card(db: Session, mpn: str, manufacturer: str | None = None) -> Materi
         display_mpn=mpn,
         manufacturer=manufacturer,
         search_count=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -37,7 +37,7 @@ def _make_card(db: Session, mpn: str, manufacturer: str | None = None) -> Materi
 
 def _make_brand_tag(db: Session, name: str) -> Tag:
     """Create a brand Tag."""
-    tag = Tag(name=name, tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name=name, tag_type="brand", created_at=datetime.now(UTC))
     db.add(tag)
     db.flush()
     return tag
@@ -45,7 +45,7 @@ def _make_brand_tag(db: Session, name: str) -> Tag:
 
 def _make_commodity_tag(db: Session, name: str) -> Tag:
     """Create a commodity Tag."""
-    tag = Tag(name=name, tag_type="commodity", created_at=datetime.now(timezone.utc))
+    tag = Tag(name=name, tag_type="commodity", created_at=datetime.now(UTC))
     db.add(tag)
     db.flush()
     return tag

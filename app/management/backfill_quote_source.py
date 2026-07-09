@@ -27,7 +27,7 @@ def backfill(db: Session) -> int:
     )
     updated = db.query(Quote).filter(Quote.id.in_(proactive_quote_ids), Quote.source.is_(None)).all()
     for quote in updated:
-        quote.source = "proactive"  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
+        quote.source = "proactive"  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
     db.commit()
     logger.info("QUOTE_SOURCE backfill: updated {} quotes to source='proactive'", len(updated))
     return len(updated)

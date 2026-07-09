@@ -21,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -54,7 +54,7 @@ from app.search_service import (
     sighting_to_dict,
 )
 from app.vendor_utils import normalize_vendor_name
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ def _make_user(db: Session) -> User:
         name="Search Test",
         role="buyer",
         azure_id="search-test-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -78,7 +78,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -96,7 +96,7 @@ def _make_requirement(
         primary_mpn=mpn,
         target_qty=100,
         substitutes=substitutes,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.commit()
@@ -294,7 +294,7 @@ class TestSightingToDict:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         s = Sighting(
             requirement_id=req.id,
             vendor_name="Arrow",
@@ -389,7 +389,7 @@ class TestSightingToDict:
             mpn_matched="LM317T",
             condition=None,
             raw_data={"condition": "refurbished"},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -406,7 +406,7 @@ class TestSightingToDict:
             requirement_id=req.id,
             vendor_name="Arrow",
             mpn_matched="LM317T",
-            created_at=datetime.now(timezone.utc) - timedelta(days=10),
+            created_at=datetime.now(UTC) - timedelta(days=10),
         )
         db_session.add(s)
         db_session.commit()
@@ -423,7 +423,7 @@ class TestSightingToDict:
             requirement_id=req.id,
             vendor_name="Arrow",
             mpn_matched="LM317T",
-            created_at=datetime.now(timezone.utc) - timedelta(days=91),
+            created_at=datetime.now(UTC) - timedelta(days=91),
         )
         db_session.add(s)
         db_session.commit()
@@ -454,7 +454,7 @@ class TestSightingToDict:
 
 class TestHistoryToResult:
     def _make_history(self, last_seen_delta_days=0, times_seen=1):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_seen = now - timedelta(days=last_seen_delta_days)
         return {
             "vendor_name": "Arrow",
@@ -505,7 +505,7 @@ class TestHistoryToResult:
         assert result["score"] > 65
 
     def test_none_last_seen(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         h = {
             "vendor_name": "Arrow",
             "mpn_matched": "LM317T",
@@ -569,8 +569,8 @@ class TestGetMaterialHistory:
             vendor_name="Arrow",
             source_type="nexar",
             is_authorized=True,
-            first_seen=datetime.now(timezone.utc) - timedelta(days=30),
-            last_seen=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC) - timedelta(days=30),
+            last_seen=datetime.now(UTC),
             times_seen=5,
             last_qty=1000,
             last_price=0.50,
@@ -598,8 +598,8 @@ class TestGetMaterialHistory:
             material_card_id=card.id,
             vendor_name="Arrow",
             source_type="nexar",
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_seen=datetime.now(UTC),
             times_seen=1,
         )
         db_session.add(vh)
@@ -630,8 +630,8 @@ class TestGetMaterialHistory:
                 material_card_id=card.id,
                 vendor_name="Arrow",
                 source_type="nexar",
-                first_seen=datetime.now(timezone.utc),
-                last_seen=datetime.now(timezone.utc),
+                first_seen=datetime.now(UTC),
+                last_seen=datetime.now(UTC),
                 times_seen=1,
             )
             db_session.add(vh)
@@ -651,8 +651,8 @@ class TestGetMaterialHistory:
             vendor_name="Arrow",
             source_type="nexar",
             times_seen=None,
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_seen=datetime.now(UTC),
         )
         db_session.add(vh)
         db_session.commit()
@@ -670,8 +670,8 @@ class TestGetMaterialHistory:
             vendor_name="Arrow",
             source_type="nexar",
             is_authorized=None,
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
+            first_seen=datetime.now(UTC),
+            last_seen=datetime.now(UTC),
             times_seen=2,
         )
         db_session.add(vh)
@@ -689,7 +689,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         s = Sighting(
             requirement_id=req.id,
@@ -725,7 +725,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Pre-create card
         card = MaterialCard(
@@ -783,7 +783,7 @@ class TestUpsertMaterialCard:
 
     def test_empty_pn_key(self, db_session):
         """If pn normalizes to empty key, do nothing."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _upsert_material_card("", [], db_session, now)
         count = db_session.query(MaterialCard).count()
         assert count == 0
@@ -793,7 +793,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, mpn="LM317T")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         s = Sighting(
             requirement_id=req.id,
@@ -812,7 +812,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         s = Sighting(
             requirement_id=req.id,
@@ -833,7 +833,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=0)
         db_session.add(card)
@@ -881,7 +881,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=None)
         db_session.add(card)
@@ -905,7 +905,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=0)
         db_session.add(card)
@@ -958,7 +958,7 @@ class TestUpsertMaterialCard:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=0)
         db_session.add(card)
@@ -1446,7 +1446,7 @@ class TestPropagateVendorEmails:
         db_session.add(vc)
         db_session.flush()
 
-        old_time = datetime.now(timezone.utc) - timedelta(days=30)
+        old_time = datetime.now(UTC) - timedelta(days=30)
         existing = VendorContact(
             vendor_card_id=vc.id,
             email="sales@arrow.com",
@@ -2036,7 +2036,7 @@ class TestFetchFresh:
         the queried MPN, and asserts the call returns successfully and the
         sighting is found via the normalized_mpn index.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         # Pre-seed a sighting whose normalized_mpn matches what
         # normalize_mpn_key("LM317T") produces ("lm317t").
@@ -2046,7 +2046,7 @@ class TestFetchFresh:
             requisition_id=rq.id,
             primary_mpn="LM317T",
             target_qty=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -2060,7 +2060,7 @@ class TestFetchFresh:
             source_type="historical",
             confidence=0.5,
             score=50.0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing)
         db_session.commit()
@@ -2311,8 +2311,8 @@ class TestSearchRequirement:
             material_card_id=card.id,
             vendor_name="Historic Vendor",
             source_type="brokerbin",
-            first_seen=datetime.now(timezone.utc) - timedelta(days=30),
-            last_seen=datetime.now(timezone.utc) - timedelta(days=5),
+            first_seen=datetime.now(UTC) - timedelta(days=30),
+            last_seen=datetime.now(UTC) - timedelta(days=5),
             times_seen=3,
             last_qty=500,
             last_price=0.40,
@@ -2849,7 +2849,7 @@ class TestSaveSightingsTagPropagation:
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         db_session.add(card)
         db_session.flush()
-        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(timezone.utc))
+        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(UTC))
         db_session.add(tag)
         db_session.flush()
         db_session.add(
@@ -2858,7 +2858,7 @@ class TestSaveSightingsTagPropagation:
                 tag_id=tag.id,
                 confidence=0.95,
                 source="ai_classified",
-                classified_at=datetime.now(timezone.utc),
+                classified_at=datetime.now(UTC),
             )
         )
         # A VendorCard whose normalized name matches the sighting vendor.
@@ -2896,7 +2896,7 @@ class TestSaveSightingsTagPropagation:
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         db_session.add(card)
         db_session.flush()
-        tag = Tag(name="Murata", tag_type="brand", created_at=datetime.now(timezone.utc))
+        tag = Tag(name="Murata", tag_type="brand", created_at=datetime.now(UTC))
         db_session.add(tag)
         db_session.flush()
         db_session.add(
@@ -2905,7 +2905,7 @@ class TestSaveSightingsTagPropagation:
                 tag_id=tag.id,
                 confidence=0.95,
                 source="ai_classified",
-                classified_at=datetime.now(timezone.utc),
+                classified_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -2961,11 +2961,11 @@ class TestUpsertMaterialCardTagClassification:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Commodity tags are pre-seeded (get_or_create_commodity_tag never
         # creates them) — seed the one the canonical "dram" category maps to.
-        db_session.add(Tag(name="Memory ICs", tag_type="commodity", created_at=datetime.now(timezone.utc)))
+        db_session.add(Tag(name="Memory ICs", tag_type="commodity", created_at=datetime.now(UTC)))
         # Pre-create the card with a manufacturer AND a canonical category (the @validates
         # guard rejects off-vocab) so the commodity branch (result["commodity"]) is exercised.
         card = MaterialCard(
@@ -3007,7 +3007,7 @@ class TestUpsertMaterialCardTagClassification:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         card = MaterialCard(
             normalized_mpn="ne555p",
@@ -3079,7 +3079,7 @@ class TestSaveSightingsVendorCardBatching:
         card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         db.add(card)
         db.flush()
-        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(timezone.utc))
+        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(UTC))
         db.add(tag)
         db.flush()
         db.add(
@@ -3088,7 +3088,7 @@ class TestSaveSightingsVendorCardBatching:
                 tag_id=tag.id,
                 confidence=0.95,
                 source="ai_classified",
-                classified_at=datetime.now(timezone.utc),
+                classified_at=datetime.now(UTC),
             )
         )
         db.commit()

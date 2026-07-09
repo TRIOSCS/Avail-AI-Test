@@ -11,7 +11,7 @@ Called by: pytest
 Depends on: app.utils.timezones, app.template_env, app.request_context, the settings router.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -58,7 +58,7 @@ class TestIsValidTimezone:
 
 class TestConversion:
     # 23:30 UTC on Jul 4 → Eastern (UTC-4 summer) still Jul 4 19:30; Tokyo (UTC+9) Jul 5 08:30.
-    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
 
     def test_format_localtime_two_zones(self):
         assert format_localtime(self.UTC_DT, "%b %d, %H:%M", tz="America/New_York") == "Jul 04, 19:30"
@@ -103,7 +103,7 @@ class TestJinjaFilters:
 
         current_user_display_tz_var.set("Asia/Tokyo")
         rendered = templates.env.from_string("{{ dt|localtime('%b %d, %H:%M') }}").render(
-            dt=datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+            dt=datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
         )
         assert rendered == "Jul 05, 08:30"
 
@@ -124,9 +124,9 @@ class _FakeTask:
 
 class TestTaskDueStatePerUserTz:
     # now = Jul 4 22:00 UTC → Tokyo (UTC+9) is Jul 5 07:00; Eastern (UTC-4) is Jul 4 18:00.
-    NOW_UTC = datetime(2026, 7, 4, 22, 0, tzinfo=timezone.utc)
+    NOW_UTC = datetime(2026, 7, 4, 22, 0, tzinfo=UTC)
     # Task due date sentinel = Jul 5 (UTC midnight), the calendar day the user picked.
-    DUE_JUL5 = datetime(2026, 7, 5, 0, 0, tzinfo=timezone.utc)
+    DUE_JUL5 = datetime(2026, 7, 5, 0, 0, tzinfo=UTC)
 
     def test_tokyo_user_sees_due_today(self, _reset_tz_contextvar):
         from app.template_env import _task_due_state

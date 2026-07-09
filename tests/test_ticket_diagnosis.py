@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: conftest.py fixtures (db_session, test_user, admin_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -72,7 +72,7 @@ def _make_ticket(db: Session, *, num: str = "TT-0001", **kw) -> TroubleTicket:
         description=kw.pop("description", "The submit button did nothing"),
         status=kw.pop("status", "submitted"),
         source=kw.pop("source", "report_button"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(t)

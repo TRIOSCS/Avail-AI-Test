@@ -11,7 +11,7 @@ Covers app/services/enrichment_worker/partsurfer_negative_cache.py:
 Depends on: conftest.py (db_session), app.models.PartsurferDescNegative.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from app.services.enrichment_worker.partsurfer_negative_cache import (
 
 
 def _now() -> datetime:
-    return datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
 
 
 def test_record_no_result_uses_long_window(db_session: Session):

@@ -77,8 +77,8 @@ async def graph_webhook(
 
     try:
         raw = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON payload")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON payload") from e
 
     payload = GraphWebhookPayload.model_validate(raw)
 
@@ -91,9 +91,9 @@ async def graph_webhook(
 
     try:
         await handle_notification(payload_dict, db, validated=validated)
-    except Exception:
+    except Exception as e:
         logger.exception("Webhook notification processing failed")
-        raise HTTPException(500, "Processing failed")
+        raise HTTPException(500, "Processing failed") from e
     return {"status": "accepted"}
 
 
@@ -116,8 +116,8 @@ async def teams_webhook(
 
     try:
         raw = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON payload")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON payload") from e
 
     from app.services.webhook_service import handle_teams_notification, validate_notifications
 
@@ -127,9 +127,9 @@ async def teams_webhook(
 
     try:
         await handle_teams_notification(raw, db, validated=validated)
-    except Exception:
+    except Exception as e:
         logger.exception("Teams webhook notification processing failed")
-        raise HTTPException(500, "Processing failed")
+        raise HTTPException(500, "Processing failed") from e
     return {"status": "accepted"}
 
 
@@ -169,8 +169,8 @@ async def acs_webhook(
 
     try:
         events = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON") from e
 
     # Handle EventGrid subscription validation handshake
     if isinstance(events, list) and len(events) == 1:
@@ -215,8 +215,8 @@ async def initiate_call_endpoint(
 
     try:
         body = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON") from e
     to_phone = body.get("to_phone")
     if not to_phone:
         raise HTTPException(422, "to_phone required")

@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest fixtures, sourcing lead models, vendor card models
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -40,7 +40,7 @@ def _make_requisition(db: Session) -> Requisition:
         name="REQ-SL-001",
         customer_name="Test Co",
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -53,7 +53,7 @@ def _make_requirement(db: Session, requisition_id: int, mpn: str = "LM317T") -> 
         primary_mpn=mpn,
         target_qty=1000,
         target_price=0.50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -84,7 +84,7 @@ def _make_sighting(
         vendor_email=vendor_email,
         vendor_phone=vendor_phone,
         score=72.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.flush()
@@ -101,7 +101,7 @@ def _make_vendor_card(db: Session, name: str = "arrow electronics") -> VendorCar
         domain="arrow.com",
         sighting_count=42,
         vendor_score=75.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vc)
     db.flush()
@@ -194,7 +194,7 @@ class TestFreshnessScore:
         ids=["recent", "week_old", "old"],
     )
     def test_freshness_score(self, days_ago, expected):
-        when = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        when = datetime.now(UTC) - timedelta(days=days_ago)
         assert _freshness_score(when) == expected
 
     def test_none_date(self):
@@ -277,7 +277,7 @@ class TestUpsertLead:
             vendor_name="",
             mpn_matched="LM317T",
             source_type="brokerbin",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.flush()
@@ -543,7 +543,7 @@ class TestUpdateLeadStatus:
         _make_vendor_card(db_session)
         # Stale sighting → lower freshness contribution.
         stale = _make_sighting(db_session, req.id, requirement.id)
-        stale.created_at = datetime.now(timezone.utc) - timedelta(days=20)
+        stale.created_at = datetime.now(UTC) - timedelta(days=20)
         db_session.flush()
         lead = upsert_lead_from_sighting(db_session, requirement, stale)
         db_session.flush()

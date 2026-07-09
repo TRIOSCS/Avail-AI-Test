@@ -16,7 +16,7 @@ Depends on: app.routers.htmx.offers, conftest fixtures
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -36,7 +36,7 @@ def _stale_contact(db, user, name: str, days: int = 5) -> None:
             vendor_name=name,
             vendor_contact=f"{name.lower()}@example.com",
             status="sent",
-            created_at=datetime.now(timezone.utc) - timedelta(days=days),
+            created_at=datetime.now(UTC) - timedelta(days=days),
         )
     )
     db.commit()

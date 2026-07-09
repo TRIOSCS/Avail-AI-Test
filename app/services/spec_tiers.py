@@ -35,7 +35,7 @@ confidence; exact (tier, confidence) tie → newer updated_at; full tie → exis
 (no churn). A ``None`` existing always loses (incoming wins).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -250,7 +250,7 @@ def count_ladder_rejection(winner_source: str, loser_source: str, *, contradicti
         from app.cache import intel_cache
 
         kind = "contradiction" if contradiction else "corroboration"
-        date = datetime.now(timezone.utc).date().isoformat()
+        date = datetime.now(UTC).date().isoformat()
         intel_cache.incr_hash_count(
             f"ladder:rejections:{date}",
             f"{winner_source or 'unknown'}|{loser_source or 'unknown'}|{kind}",
@@ -314,7 +314,7 @@ def record_validation_conflict(
             "tier": int(incoming_tier),
             "confidence": incoming_prov.get("confidence"),
             "value": incoming_value,
-            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "observed_at": datetime.now(UTC).isoformat(),
         },
     }
     _replace_conflict(card, key, incoming_source, entry)
@@ -400,7 +400,7 @@ def record_evidence_dissent(
             "tier": int(incoming_tier),
             "confidence": incoming_prov.get("confidence"),
             "value": incoming_value,
-            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "observed_at": datetime.now(UTC).isoformat(),
         },
     }
     _replace_conflict(card, key, incoming_source, entry)
@@ -552,7 +552,7 @@ def _set_provenanced_column(
     provenanced columns (category, brand, manufacturer) are decided.
     """
     confidence = min(max(float(confidence or 0.0), 0.0), 1.0)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     incoming = {"tier": tier_for(source), "confidence": confidence, "updated_at": now.isoformat()}
 
     current = getattr(card, attr)

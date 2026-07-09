@@ -18,7 +18,7 @@ Depends on: app/services/webhook_service.py
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -122,7 +122,7 @@ def _make_subscription(
         subscription_id=sub_id,
         resource="/me/messages",
         change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=expires_in_hours),
+        expiration_dt=datetime.now(UTC) + timedelta(hours=expires_in_hours),
         client_state=client_state,
     )
     db.add(sub)
@@ -139,7 +139,7 @@ def _make_user(db: Session, email: str, role: str, azure_id: str, m365_connected
         role=role,
         azure_id=azure_id,
         m365_connected=m365_connected,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.commit()

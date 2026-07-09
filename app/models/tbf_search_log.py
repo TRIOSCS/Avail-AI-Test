@@ -7,7 +7,7 @@ Called by: tbf_worker worker loop, sighting_writer
 Depends on: tbf_search_queue table
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, ForeignKey, Integer, String, Text
 
@@ -20,7 +20,7 @@ class TbfSearchLog(Base):
 
     id = Column(Integer, primary_key=True)
     queue_id = Column(Integer, ForeignKey("tbf_search_queue.id", ondelete="CASCADE"), nullable=False, index=True)
-    searched_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    searched_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     duration_ms = Column(Integer)
     results_found = Column(Integer)
     sightings_created = Column(Integer)

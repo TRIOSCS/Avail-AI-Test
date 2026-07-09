@@ -12,7 +12,7 @@ Depends on: app.routers.htmx.requisitions (import-save + list), app.services.pro
     tests/conftest.py fixtures.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.constants import RequisitionStatus
@@ -24,11 +24,11 @@ def _make_site(db, *, owner: bool = True) -> CustomerSite:
     account_owner_id = None
     if owner:
         u = User(
-            email=f"owner-{datetime.now(timezone.utc).timestamp()}@trioscs.com",
+            email=f"owner-{datetime.now(UTC).timestamp()}@trioscs.com",
             name="Account Owner",
             role="sales",
-            azure_id=f"azure-owner-{datetime.now(timezone.utc).timestamp()}",
-            created_at=datetime.now(timezone.utc),
+            azure_id=f"azure-owner-{datetime.now(UTC).timestamp()}",
+            created_at=datetime.now(UTC),
         )
         db.add(u)
         db.flush()

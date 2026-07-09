@@ -10,7 +10,6 @@ worker module (they're not module-level attributes in worker.py).
 Called by: pytest (nightly coverage run) Depends on: conftest (db_session)
 """
 
-import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -474,7 +473,7 @@ class TestTbfWorkerMain:
             return mock_item
 
         async def _timed_out(*args, **kwargs):
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
         wmod._shutdown_requested = False
         try:

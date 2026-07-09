@@ -13,7 +13,7 @@ Covers:
   - list.html sort dropdown contains outbound_asc and reply_asc options
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,7 +32,7 @@ from app.services.crm_service import (
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _ago(days: float) -> datetime:

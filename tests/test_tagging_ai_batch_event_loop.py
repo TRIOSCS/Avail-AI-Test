@@ -14,6 +14,7 @@ Depends on: app/services/tagging_ai_batch.py, tests/conftest.py
 import asyncio
 import json
 import os
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,11 +31,9 @@ from tests.conftest import engine  # noqa: F401
 
 
 def _make_card(db: Session, mpn: str) -> MaterialCard:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    card = MaterialCard(
-        normalized_mpn=mpn.lower(), display_mpn=mpn, search_count=1, created_at=datetime.now(timezone.utc)
-    )
+    card = MaterialCard(normalized_mpn=mpn.lower(), display_mpn=mpn, search_count=1, created_at=datetime.now(UTC))
     db.add(card)
     db.flush()
     return card

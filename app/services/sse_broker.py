@@ -10,7 +10,7 @@ Depends on: asyncio
 
 import asyncio
 from collections import defaultdict
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from loguru import logger
 
@@ -50,7 +50,7 @@ class SSEBroker:
             except asyncio.QueueFull:
                 logger.warning("SSE: dropped event — queue full")
 
-    async def listen(self, channel: str) -> AsyncGenerator[dict, None]:
+    async def listen(self, channel: str) -> AsyncGenerator[dict]:
         """Yield events from the channel as they arrive."""
         q = self.subscribe(channel)
         try:

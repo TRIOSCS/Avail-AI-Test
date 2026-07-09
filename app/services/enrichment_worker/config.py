@@ -36,7 +36,7 @@ class EnrichmentWorkerConfig:
     oem_resolve_daily_cap: int = 40
 
     @classmethod
-    def from_env(cls) -> "EnrichmentWorkerConfig":
+    def from_env(cls) -> EnrichmentWorkerConfig:
         """Build config from environment variables, falling back to defaults."""
 
         def env_int(key: str, default: int) -> int:

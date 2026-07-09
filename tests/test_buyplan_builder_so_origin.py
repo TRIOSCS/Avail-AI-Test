@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: conftest db_session fixture, app/services/buyplan_builder.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,12 +31,12 @@ def so_origin_fixture(db_session):
         name="SO Origin Buyer",
         role="buyer",
         azure_id="az-so-origin",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.flush()
 
-    company = Company(name="SO Origin Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    company = Company(name="SO Origin Corp", is_active=True, created_at=datetime.now(UTC))
     db_session.add(company)
     db_session.flush()
 
@@ -44,7 +44,7 @@ def so_origin_fixture(db_session):
         company_id=company.id,
         site_name="HQ",
         country="US",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.flush()
@@ -54,7 +54,7 @@ def so_origin_fixture(db_session):
         status="open",
         created_by=user.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -64,7 +64,7 @@ def so_origin_fixture(db_session):
         primary_mpn="SO-MPN-1",
         target_qty=100,
         target_price=1.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(requirement)
     db_session.flush()
@@ -72,7 +72,7 @@ def so_origin_fixture(db_session):
     vendor = VendorCard(
         normalized_name="so vendor",
         display_name="SO Vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vendor)
     db_session.flush()
@@ -87,7 +87,7 @@ def so_origin_fixture(db_session):
         unit_price=0.50,
         status="active",
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.flush()

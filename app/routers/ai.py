@@ -320,7 +320,7 @@ async def promote_prospect_contact(
         result = _promote(db, contact_id, user.id)
     except ValueError as e:
         status = 404 if "not found" in str(e) else 400
-        raise HTTPException(status, str(e))
+        raise HTTPException(status, str(e)) from e
     db.commit()
     return result
 
@@ -785,7 +785,7 @@ async def ai_apply_freeform_rfq(
             user_id=user.id,
         )
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     db.commit()
     invalidate_prefix("req_list")
     return result

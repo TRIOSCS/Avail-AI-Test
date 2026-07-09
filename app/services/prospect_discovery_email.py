@@ -4,7 +4,7 @@ Scans Trio's inbox for domains that emailed the team but are not existing custom
 vendors, or already-discovered prospects. Catches companies that Explorium might miss.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -97,7 +97,7 @@ async def mine_unknown_domains(
     exclude_domains = customer_domains | vendor_domains | prospect_domains | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
 
     # Scan inbox via Graph API
-    since = datetime.now(timezone.utc) - timedelta(days=days_back)
+    since = datetime.now(UTC) - timedelta(days=days_back)
     domain_counts: dict[str, dict] = {}
 
     try:

@@ -13,7 +13,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,10 +33,10 @@ class TestUtc:
     def test_naive_datetime(self):
         dt = datetime(2026, 1, 1, 12, 0, 0)
         result = _utc(dt)
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_aware_datetime(self):
-        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         result = _utc(dt)
         assert result is dt  # unchanged
 
@@ -46,7 +46,7 @@ class TestGetValidToken:
     async def test_valid_token_returns_immediately(self):
         user = MagicMock()
         user.access_token = "valid-token"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
         db = MagicMock()
 
         result = await get_valid_token(user, db)
@@ -57,7 +57,7 @@ class TestGetValidToken:
     async def test_near_expiry_triggers_refresh(self):
         user = MagicMock()
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=2)
+        user.token_expires_at = datetime.now(UTC) + timedelta(minutes=2)
         user.refresh_token = "refresh-tok"
         user.email = "test@test.com"
         db = MagicMock()
@@ -76,7 +76,7 @@ class TestGetValidToken:
     async def test_refresh_failure_returns_none(self):
         user = MagicMock()
         user.access_token = "expired"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
         user.refresh_token = "refresh-tok"
         user.email = "test@test.com"
         db = MagicMock()

@@ -4,7 +4,7 @@ Covers: rotation logic, kill switch, expire/resurface logic,
         score refresh, health report, and job isolation.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -55,7 +55,7 @@ def _make_batch(db: Session, **overrides) -> DiscoveryBatch:
         "batch_id": f"batch-{id(overrides)}",
         "source": "explorium",
         "status": DiscoveryBatchStatus.COMPLETED,
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     b = DiscoveryBatch(**defaults)
@@ -190,14 +190,14 @@ class TestDiscoveryRotation:
             batch_id="old",
             segment="Aerospace & Defense",
             regions=["US"],
-            created_at=datetime.now(timezone.utc) - timedelta(days=60),
+            created_at=datetime.now(UTC) - timedelta(days=60),
         )
         _make_batch(
             db_session,
             batch_id="new",
             segment="Service Supply Chain",
             regions=["EU", "Asia"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         result = get_next_discovery_slice(db_session)
         assert result["segment"] == "EMS / Electronics Mfg"
@@ -288,8 +288,8 @@ class TestExpireLogic:
                     "name": "Old Low",
                     "domain": "oldlow.com",
                     "readiness_score": 30,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                    "created_at": datetime.now(UTC) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=70),
                 },
                 "expired",
                 id="expires_old_low_readiness",
@@ -299,8 +299,8 @@ class TestExpireLogic:
                     "name": "Old High",
                     "domain": "oldhigh.com",
                     "readiness_score": 70,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                    "created_at": datetime.now(UTC) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=70),
                 },
                 "suggested",
                 id="does_not_expire_high_readiness",
@@ -310,8 +310,8 @@ class TestExpireLogic:
                     "name": "Recent",
                     "domain": "recent.com",
                     "readiness_score": 30,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=10),
+                    "created_at": datetime.now(UTC) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=10),
                 },
                 "suggested",
                 id="does_not_expire_recently_enriched",
@@ -322,8 +322,8 @@ class TestExpireLogic:
                     "domain": "intent.com",
                     "readiness_score": 30,
                     "readiness_signals": {"intent": {"strength": "strong"}},
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                    "created_at": datetime.now(UTC) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=70),
                 },
                 "suggested",
                 id="does_not_expire_strong_intent",
@@ -333,7 +333,7 @@ class TestExpireLogic:
                     "name": "Young",
                     "domain": "young.com",
                     "readiness_score": 20,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                    "created_at": datetime.now(UTC) - timedelta(days=30),
                 },
                 "suggested",
                 id="does_not_expire_young_prospect",
@@ -343,8 +343,8 @@ class TestExpireLogic:
                     "name": "Boundary",
                     "domain": "boundary.com",
                     "readiness_score": 20,
-                    "created_at": datetime.now(timezone.utc) - timedelta(days=89),
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                    "created_at": datetime.now(UTC) - timedelta(days=89),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=70),
                 },
                 "suggested",
                 id="within_90_day_boundary",
@@ -374,8 +374,8 @@ class TestResurfaceLogic:
             status="dismissed",
             readiness_score=50,
             readiness_signals={"intent": {"strength": "strong"}},
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
-            dismissed_at=datetime.now(timezone.utc) - timedelta(days=60),
+            last_enriched_at=datetime.now(UTC) - timedelta(days=5),
+            dismissed_at=datetime.now(UTC) - timedelta(days=60),
         )
         with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
@@ -395,7 +395,7 @@ class TestResurfaceLogic:
                     "status": "expired",
                     "readiness_score": 45,
                     "readiness_signals": {"hiring": {"type": "procurement"}},
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=10),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=10),
                 },
                 "suggested",
                 id="resurfaces_expired_with_hiring_signals",
@@ -407,7 +407,7 @@ class TestResurfaceLogic:
                     "status": "dismissed",
                     "readiness_score": 50,
                     "readiness_signals": {},
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=5),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=5),
                 },
                 "dismissed",
                 id="does_not_resurface_without_signals",
@@ -419,7 +419,7 @@ class TestResurfaceLogic:
                     "status": "dismissed",
                     "readiness_score": 20,
                     "readiness_signals": {"intent": {"strength": "strong"}},
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=5),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=5),
                 },
                 "dismissed",
                 id="does_not_resurface_low_readiness",
@@ -431,7 +431,7 @@ class TestResurfaceLogic:
                     "status": "dismissed",
                     "readiness_score": 60,
                     "readiness_signals": {"intent": {"strength": "strong"}},
-                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=45),
+                    "last_enriched_at": datetime.now(UTC) - timedelta(days=45),
                 },
                 "suggested",
                 id="resurfaces_regardless_of_enrichment_age",
@@ -518,14 +518,14 @@ class TestHealthReport:
             name="C1",
             domain="c1.com",
             status="claimed",
-            claimed_at=datetime.now(timezone.utc),
+            claimed_at=datetime.now(UTC),
         )
         _make_prospect(
             db_session,
             name="D1",
             domain="d1.com",
             status="dismissed",
-            dismissed_at=datetime.now(timezone.utc),
+            dismissed_at=datetime.now(UTC),
         )
         _make_batch(db_session, batch_id="b-report", credits_used=42)
 
@@ -811,7 +811,7 @@ class TestSchedulerCoverageGaps:
         """Line 35: _ensure_utc returns dt unchanged when it already has tzinfo."""
         from app.services.prospect_scheduler import _ensure_utc
 
-        dt = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 1, tzinfo=UTC)
         result = _ensure_utc(dt)
         assert result is dt  # same object, unchanged
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.connector_status import log_connector_status
 from app.constants import ApiSourceStatus
 from app.models import ApiSource
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _mk(db, name, *, env_vars=None, status="pending", credentials=None):

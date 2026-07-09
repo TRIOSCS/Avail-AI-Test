@@ -16,7 +16,7 @@ Depends on: app/constants.py, app/services/search_worker_base/{queue_manager,ai_
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +57,7 @@ def requisition(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(r)
     db_session.flush()
@@ -70,7 +70,7 @@ def requirement(db_session, requisition):
         requisition_id=requisition.id,
         primary_mpn="LM317",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -94,8 +94,8 @@ class TestQueueManagerLifecycle:
             normalized_mpn="LM317",
             status=SearchQueueStatus.QUEUED,
             priority=3,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         db_session.add(row)
         db_session.commit()
@@ -112,8 +112,8 @@ class TestQueueManagerLifecycle:
             normalized_mpn="LM317",
             status=SearchQueueStatus.SEARCHING,
             priority=3,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         db_session.add(row)
         db_session.commit()
@@ -130,8 +130,8 @@ class TestQueueManagerLifecycle:
             normalized_mpn="LM317",
             status=SearchQueueStatus.SEARCHING,
             priority=3,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         db_session.add(row)
         db_session.commit()
@@ -149,8 +149,8 @@ class TestQueueManagerLifecycle:
             normalized_mpn="LM317",
             status=SearchQueueStatus.SEARCHING,
             priority=3,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC) - timedelta(hours=1),
         )
         db_session.add(row)
         db_session.commit()

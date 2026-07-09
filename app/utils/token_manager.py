@@ -9,7 +9,7 @@ Called by: dependencies.py, routers (admin, enrichment, proactive, sources),
 Depends on: config.py, http_client.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
@@ -20,7 +20,7 @@ def _utc(dt):
     """Make a naive datetime UTC-aware (no-op if already aware)."""
     if dt is None:
         return None
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 async def get_valid_token(user, db) -> str | None:
@@ -31,13 +31,13 @@ async def get_valid_token(user, db) -> str | None:
     """
     # Check if current token is still valid (with 5-min buffer)
     if user.access_token and user.token_expires_at:
-        if datetime.now(timezone.utc) < _utc(user.token_expires_at) - timedelta(minutes=5):
+        if datetime.now(UTC) < _utc(user.token_expires_at) - timedelta(minutes=5):
             return user.access_token
 
     # Token expired or near-expiry — refresh it
     token = await refresh_user_token(user, db)
     if token:
-        user.m365_last_healthy = datetime.now(timezone.utc)
+        user.m365_last_healthy = datetime.now(UTC)
         user.m365_error_reason = None
         db.commit()
     else:
@@ -74,7 +74,7 @@ async def refresh_user_token(user, db) -> str | None:
 
     access_token, new_refresh = result
     user.access_token = access_token
-    user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
     user.m365_connected = True
     if new_refresh:
         user.refresh_token = new_refresh

@@ -4,7 +4,7 @@
 # Depends on: conftest fixtures (client, db_session, test_user, test_vendor_card,
 #             unauthenticated_client), ActivityLog, VendorCard
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -23,7 +23,7 @@ def vendor_with_note(db_session, test_vendor_card, test_user):
         channel="manual",
         vendor_card_id=test_vendor_card.id,
         notes="Pre-existing vendor note",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(log)
     db_session.commit()
@@ -141,7 +141,7 @@ def _vendor_log(db_session, vendor_card, user, activity_type, notes):
         channel="manual",
         vendor_card_id=vendor_card.id,
         notes=notes,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(log)
     db_session.commit()

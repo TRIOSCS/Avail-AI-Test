@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.routers.crm, conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,8 +58,8 @@ def _make_quote(**overrides):
     q.result_notes = overrides.get("result_notes", None)
     q.result_at = overrides.get("result_at", None)
     q.won_revenue = overrides.get("won_revenue", None)
-    q.created_at = overrides.get("created_at", datetime(2026, 2, 1, tzinfo=timezone.utc))
-    q.updated_at = overrides.get("updated_at", datetime(2026, 2, 1, tzinfo=timezone.utc))
+    q.created_at = overrides.get("created_at", datetime(2026, 2, 1, tzinfo=UTC))
+    q.updated_at = overrides.get("updated_at", datetime(2026, 2, 1, tzinfo=UTC))
 
     # Relationships
     created_by = MagicMock()
@@ -139,7 +139,7 @@ def test_quote_to_dict_nulls():
 
 
 def test_quote_to_dict_sent():
-    sent = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
+    sent = datetime(2026, 2, 10, 12, 0, tzinfo=UTC)
     q = _make_quote(sent_at=sent, status="sent")
     d = quote_to_dict(q)
     assert d["sent_at"] == sent.isoformat()
@@ -506,7 +506,7 @@ class TestQuotes:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -613,7 +613,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             status="won",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -622,7 +622,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             quote_number="WON-Q-001",
             subtotal=5000.00,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -648,7 +648,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             status=RequisitionStatus.WON,
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -657,7 +657,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             quote_number="WON-ENUM-001",
             subtotal=4200.00,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -686,7 +686,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             status="won",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc) - timedelta(days=180),
+            created_at=datetime.now(UTC) - timedelta(days=180),
         )
         db_session.add(req)
         db_session.flush()
@@ -695,7 +695,7 @@ class TestCompaniesAdditional:
             customer_site_id=test_customer_site.id,
             quote_number="OLD-Q-001",
             subtotal=9999.00,
-            created_at=datetime.now(timezone.utc) - timedelta(days=100),
+            created_at=datetime.now(UTC) - timedelta(days=100),
         )
         db_session.add(q)
         db_session.commit()
@@ -739,7 +739,7 @@ class TestCompaniesAdditional:
 
     def test_check_duplicate_empty_company_name(self, client, db_session):
         """Company with empty normalized name is skipped."""
-        co = Company(name="LLC", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="LLC", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
 
@@ -752,7 +752,7 @@ class TestCompaniesAdditional:
 
     def test_check_duplicate_prefix_match(self, client, db_session, test_company):
         """Companies matching by first 6 chars are flagged as similar."""
-        co2 = Company(name="Acme Elec Parts", is_active=True, created_at=datetime.now(timezone.utc))
+        co2 = Company(name="Acme Elec Parts", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co2)
         db_session.commit()
 
@@ -1181,8 +1181,8 @@ class TestSyncLogs:
         log = SyncLog(
             source="email_mining",
             status="completed",
-            started_at=datetime.now(timezone.utc),
-            finished_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
             duration_seconds=5.2,
         )
         db_session.add(log)
@@ -1195,8 +1195,8 @@ class TestSyncLogs:
         assert data[0]["source"] == "email_mining"
 
     def test_sync_logs_filter_source(self, admin_client, db_session):
-        log1 = SyncLog(source="email_mining", status="completed", started_at=datetime.now(timezone.utc))
-        log2 = SyncLog(source="contacts", status="completed", started_at=datetime.now(timezone.utc))
+        log1 = SyncLog(source="email_mining", status="completed", started_at=datetime.now(UTC))
+        log2 = SyncLog(source="contacts", status="completed", started_at=datetime.now(UTC))
         db_session.add_all([log1, log2])
         db_session.commit()
 
@@ -1374,7 +1374,7 @@ class TestOffersAdditional:
             customer_name="Other Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -1387,7 +1387,7 @@ class TestOffersAdditional:
             unit_price=0.60,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_offer)
 
@@ -1503,7 +1503,7 @@ class TestQuotesAdditional:
             total_cost=300.0,
             total_margin_pct=40.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1526,7 +1526,7 @@ class TestQuotesAdditional:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1576,7 +1576,7 @@ class TestQuotesAdditional:
             total_cost=300.0,
             total_margin_pct=40.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1599,7 +1599,7 @@ class TestQuotesAdditional:
             total_margin_pct=0,
             notes="Special pricing note",
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1646,7 +1646,7 @@ class TestQuotesAdditional:
             total_cost=300.0,
             total_margin_pct=40.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1688,7 +1688,7 @@ class TestQuotesAdditional:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1724,7 +1724,7 @@ class TestQuotesAdditional:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1760,7 +1760,7 @@ class TestQuotesAdditional:
     def test_reopen_quote_without_revise(self, client, db_session, test_quote):
         """Reopen without revise restores status to 'sent'."""
         test_quote.result = "lost"
-        test_quote.result_at = datetime.now(timezone.utc)
+        test_quote.result_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.post(
@@ -1774,7 +1774,7 @@ class TestQuotesAdditional:
     def test_reopen_quote_with_revise(self, client, db_session, test_quote):
         """Reopen with revise creates a new revision."""
         test_quote.result = "lost"
-        test_quote.result_at = datetime.now(timezone.utc)
+        test_quote.result_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.post(
@@ -1827,9 +1827,9 @@ class TestPricingHistoryAdditional:
             subtotal=200.0,
             total_cost=150.0,
             total_margin_pct=25.0,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1911,7 +1911,7 @@ class TestBuildQuoteEmailHtml:
             notes="Rush order",
             validity_days=14,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1950,7 +1950,7 @@ class TestBuildQuoteEmailHtml:
             total_cost=50.0,
             total_margin_pct=50.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1983,7 +1983,7 @@ class TestBuildQuoteEmailHtml:
             total_cost=0.0,
             total_margin_pct=0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -2220,7 +2220,7 @@ class TestOffersWithRatings:
             vendor_card_id=test_vendor_card.id,
             rating=4,
             user_id=db_session.query(User).first().id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(review)
         db_session.commit()
@@ -2413,7 +2413,7 @@ class TestQuoteEmailEdgeCases:
             total_cost=500.0,
             total_margin_pct=50.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -2446,7 +2446,7 @@ class TestQuoteEmailEdgeCases:
             total_cost=30.0,
             total_margin_pct=40.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -2474,7 +2474,7 @@ class TestHistoricalOffersSubstitutes:
             customer_name="Sub Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -2487,7 +2487,7 @@ class TestHistoricalOffersSubstitutes:
             unit_price=0.40,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sub_offer)
         db_session.commit()

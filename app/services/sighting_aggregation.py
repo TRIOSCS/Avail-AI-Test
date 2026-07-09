@@ -10,7 +10,7 @@ Depends on: VendorSightingSummary model, Sighting model, VendorCard model
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -186,7 +186,7 @@ def rebuild_vendor_summaries(
             "source_types": sources,
             "score": round(max_score, 1) if max_score else None,
             "tier": _score_to_tier(max_score),
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
             "vendor_card_id": vendor_card_ids.get(vn),
             "newest_sighting_at": newest,
             "best_lead_time_days": min(lead_times) if lead_times else None,

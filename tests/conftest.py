@@ -36,7 +36,7 @@ os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests
 os.environ["CACHE_BACKEND"] = "none"  # Disable cache backend in tests
 os.environ.setdefault("AGENT_API_KEY", "test-agent-key-secret")  # Agent session tests
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -456,7 +456,7 @@ def pg_client(pg_session: Session) -> TestClient:
         role="buyer",
         azure_id="pg-azure-id-001",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     pg_session.add(user)
     pg_session.commit()
@@ -491,7 +491,7 @@ def test_user(db_session: Session) -> User:
         role="buyer",
         azure_id="test-azure-id-001",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -507,7 +507,7 @@ def sales_user(db_session: Session) -> User:
         name="Test Sales",
         role="sales",
         azure_id="test-azure-id-002",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -523,7 +523,7 @@ def test_company(db_session: Session) -> Company:
         website="https://acme-electronics.com",
         industry="Electronic Components",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -539,7 +539,7 @@ def test_requisition(db_session: Session, test_user: User) -> Requisition:
         customer_name="Acme Electronics",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -549,7 +549,7 @@ def test_requisition(db_session: Session, test_user: User) -> Requisition:
         primary_mpn="LM317T",
         target_qty=1000,
         target_price=0.50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -567,7 +567,7 @@ def test_vendor_card(db_session: Session) -> VendorCard:
         phones=["+1-555-0100"],
         sighting_count=42,
         website="https://arrow.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -674,7 +674,7 @@ def admin_user(db_session: Session) -> User:
         name="Test Admin",
         role="admin",
         azure_id="test-azure-id-admin",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -694,7 +694,7 @@ def test_activity(db_session: Session, test_user: User, test_company: Company) -
         contact_name="John Doe",
         subject="RFQ for LM317T",
         external_id="graph-msg-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(activity)
     db_session.commit()
@@ -710,7 +710,7 @@ def manager_user(db_session: Session) -> User:
         name="Test Manager",
         role="manager",
         azure_id="test-azure-id-manager",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -726,7 +726,7 @@ def trader_user(db_session: Session) -> User:
         name="Test Trader",
         role="trader",
         azure_id="test-azure-id-trader",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -767,7 +767,7 @@ def test_quote(
         total_cost=500.00,
         total_margin_pct=50.00,
         created_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(q)
     db_session.commit()
@@ -811,7 +811,7 @@ def test_offer(
         unit_price=0.50,
         entered_by_id=test_user.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(o)
     db_session.commit()
@@ -847,7 +847,7 @@ def test_material_card(db_session: Session) -> MaterialCard:
         manufacturer="Texas Instruments",
         description="Adjustable Voltage Regulator",
         search_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.commit()
@@ -879,7 +879,7 @@ def test_proactive_offer(
         status="sent",
         total_sell=750.00,
         total_cost=500.00,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
     )
     db_session.add(po)
     db_session.commit()

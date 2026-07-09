@@ -5,7 +5,7 @@ Called by: pytest
 Depends on: app.services.tagging, app.services.prefix_lookup, app.models.tags
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -23,7 +23,7 @@ from app.services.tagging import (
 
 
 def _make_tag(db, name="Texas Instruments", tag_type="brand"):
-    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(timezone.utc))
+    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(UTC))
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -230,7 +230,7 @@ def test_tag_material_card_upsert_lower_confidence_ignored(db_session, test_mate
 def test_tag_material_card_conflict_does_not_rollback_session(db_session, test_material_card):
     """Insert conflicts should not rollback unrelated pending session work."""
     tag = _make_tag(db_session)
-    unrelated = Tag(name="Unrelated", tag_type="brand", created_at=datetime.now(timezone.utc))
+    unrelated = Tag(name="Unrelated", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(unrelated)
 
     result = tag_material_card(

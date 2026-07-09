@@ -16,12 +16,12 @@ These tests:
 Depends on: app.template_env.templates (canonical Jinja env with custom filters).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.template_env import templates
 
-UTC_NOW = datetime.now(timezone.utc)
+UTC_NOW = datetime.now(UTC)
 
 
 def _render_row(a) -> str:

@@ -23,7 +23,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -80,11 +80,11 @@ def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement
         customer_name="AcmeCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(timezone.utc))
+    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
     db.add(rq)
     db.flush()
     q = Quote(
@@ -93,7 +93,7 @@ def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -111,7 +111,7 @@ def _plan(db: Session, req: Requisition, q: Quote, *, status: str = BuyPlanStatu
         total_cost=1000.0,
         total_revenue=2000.0,
         total_margin_pct=50.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -138,7 +138,7 @@ def _resolved_prepay(db: Session, bp: BuyPlan, user: User, *, beneficiary: str =
     )
     db.add(pp)
     db.flush()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ar = ApprovalRequest(
         gate_type=ApprovalGateType.PREPAYMENT,
         status=ApprovalRequestStatus.APPROVED.value,
@@ -176,8 +176,8 @@ def _po_history(db: Session, bp: BuyPlan, user: User) -> ActivityLog:
         buy_plan_id=bp.id,
         subject="PO-EXPORT verified",
         notes="PO-EXPORT verified by buyer",
-        occurred_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db.add(log)
     db.flush()
@@ -190,7 +190,7 @@ def _other_user(db: Session) -> User:
         name="Other Owner",
         role="buyer",
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -366,7 +366,7 @@ def trader_user(db_session: Session) -> User:
         role="trader",
         azure_id=f"x-az-{uuid.uuid4().hex[:8]}",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -383,7 +383,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -528,7 +528,7 @@ def test_outreach_export_is_csv_attachment_with_rows(
             submitted_by=trader_user.id,
             channel="phone",
             status=ExcessOutreachStatus.BID,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
     )
     db_session.commit()

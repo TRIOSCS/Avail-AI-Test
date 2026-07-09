@@ -1,6 +1,6 @@
 """Email pipeline models — message dedup, sync state, column mapping, batches."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -24,7 +24,7 @@ class ProcessedMessage(Base):
     __tablename__ = "processed_messages"
     message_id = Column(Text, primary_key=True)
     processing_type = Column(Text, primary_key=True)
-    processed_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
 
 class SyncState(Base):
@@ -49,7 +49,7 @@ class ColumnMappingCache(Base):
     file_fingerprint = Column(Text, nullable=False)
     mapping = Column(JSON, nullable=False)
     confidence = Column(Float, nullable=False)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (Index("ix_colmap_domain_fp", "vendor_domain", "file_fingerprint", unique=True),)
 
@@ -63,7 +63,7 @@ class PendingBatch(Base):
     batch_type = Column(String(50), default="inbox_parse")
     request_map = Column(JSONB)
     status = Column(String(20), default="processing")
-    submitted_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    submitted_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     completed_at = Column(UTCDateTime)
     result_count = Column(Integer)
     error_message = Column(Text)

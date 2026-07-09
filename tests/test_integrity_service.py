@@ -16,7 +16,7 @@ Covers:
 - Soft-delete for material cards (Phase 3)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -485,7 +485,7 @@ class TestVendorNameNormalization:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, mpn="LM317T")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         s = Sighting(
             requirement_id=req.id,
@@ -510,7 +510,7 @@ class TestVendorNameNormalization:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, mpn="LM317T")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # First sighting: "Arrow"
         s1 = Sighting(
@@ -643,8 +643,8 @@ class TestMaterialCardMerge:
             vendor_name="arrow",
             source_type="nexar",
             times_seen=3,
-            first_seen=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            last_seen=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            first_seen=datetime(2025, 1, 1, tzinfo=UTC),
+            last_seen=datetime(2026, 2, 1, tzinfo=UTC),
             last_qty=500,
         )
         vh_target = MaterialVendorHistory(
@@ -652,8 +652,8 @@ class TestMaterialCardMerge:
             vendor_name="arrow",
             source_type="nexar",
             times_seen=5,
-            first_seen=datetime(2025, 6, 1, tzinfo=timezone.utc),
-            last_seen=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            first_seen=datetime(2025, 6, 1, tzinfo=UTC),
+            last_seen=datetime(2026, 1, 1, tzinfo=UTC),
             last_qty=200,
         )
         db_session.add_all([vh_source, vh_target])
@@ -760,7 +760,7 @@ class TestNormalizedMpnOnSightingsOffers:
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, mpn="LM317T")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         s = Sighting(
             requirement_id=req.id,
@@ -873,7 +873,7 @@ class TestSoftDelete:
     def test_soft_delete_sets_timestamp(self, db_session):
         """Setting deleted_at marks card as soft-deleted."""
         card = _make_card(db_session)
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         card.deleted_at = ts
         db_session.commit()
         db_session.refresh(card)
@@ -883,13 +883,13 @@ class TestSoftDelete:
         reloaded = db_session.get(MaterialCard, card.id)
         stored = reloaded.deleted_at
         if stored.tzinfo is None:
-            stored = stored.replace(tzinfo=timezone.utc)
+            stored = stored.replace(tzinfo=UTC)
         assert abs((stored - ts).total_seconds()) < 5
 
     def test_resolve_skips_soft_deleted_card(self, db_session):
         """resolve_material_card skips soft-deleted cards and creates a new one."""
         card = _make_card(db_session)
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
 
         # resolve should not find the soft-deleted card; it should create a new one
@@ -904,7 +904,7 @@ class TestSoftDelete:
         """Soft-deleted cards are excluded from standard queries."""
         card1 = _make_card(db_session, norm="lm317t", display="LM317T")
         card2 = _make_card(db_session, norm="lm7805", display="LM7805")
-        card1.deleted_at = datetime.now(timezone.utc)
+        card1.deleted_at = datetime.now(UTC)
         db_session.commit()
 
         active_cards = db_session.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).all()
@@ -914,7 +914,7 @@ class TestSoftDelete:
     def test_restore_clears_deleted_at(self, db_session):
         """Restoring a card clears deleted_at."""
         card = _make_card(db_session)
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
 
         card.deleted_at = None
@@ -926,7 +926,7 @@ class TestSoftDelete:
         """material_cards_total in integrity report counts only active cards."""
         _make_card(db_session, norm="lm317t")
         deleted = _make_card(db_session, norm="lm7805")
-        deleted.deleted_at = datetime.now(timezone.utc)
+        deleted.deleted_at = datetime.now(UTC)
         db_session.commit()
 
         report = run_integrity_check(db_session)

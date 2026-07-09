@@ -6,7 +6,7 @@ credential-based status fix, system alerts endpoint, dashboard endpoint.
 Depends on: conftest.py (db_session, TestSessionLocal, engine)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,7 +44,7 @@ def test_api_usage_log_creation(db_session):
 
     log = ApiUsageLog(
         source_id=src.id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         endpoint="search",
         status_code=200,
         response_ms=150,
@@ -496,7 +496,7 @@ def admin_user(db_session):
         name="Test Admin",
         role="admin",
         azure_id="test-azure-health",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -691,7 +691,7 @@ def test_api_health_dashboard_usage_log(admin_client, db_session):
     for i in range(3):
         log = ApiUsageLog(
             source_id=src.id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             success=(i != 1),
             response_ms=100 + i * 50,
             check_type="ping",

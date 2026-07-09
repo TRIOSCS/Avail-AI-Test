@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.services.buyplan_service
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -77,7 +77,7 @@ def _make_offer(db, req_id, requirement_id, **overrides) -> Offer:
         "qty_available": 1000,
         "unit_price": 0.50,
         "status": "active",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     offer = Offer(**defaults)
@@ -473,7 +473,7 @@ class TestAIFlags:
             unit_price=0.50,
             entered_by_id=test_user.id,
             vendor_name="Flag Test",
-            created_at=datetime.now(timezone.utc) - timedelta(days=offer_age_days),
+            created_at=datetime.now(UTC) - timedelta(days=offer_age_days),
         )
         plan = BuyPlan(
             quote_id=test_quote.id,
@@ -990,7 +990,7 @@ class TestConfirmPO:
         plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
-        ship_date = datetime(2026, 3, 15, tzinfo=timezone.utc)
+        ship_date = datetime(2026, 3, 15, tzinfo=UTC)
         result = confirm_po(
             plan.id,
             line.id,
@@ -1013,7 +1013,7 @@ class TestConfirmPO:
                 plan.id,
                 line.id,
                 "PO-001",
-                datetime(2026, 3, 15, tzinfo=timezone.utc),
+                datetime(2026, 3, 15, tzinfo=UTC),
                 test_user,
                 db_session,
             )
@@ -1030,7 +1030,7 @@ class TestConfirmPO:
                 plan.id,
                 line.id,
                 "PO-001",
-                datetime(2026, 3, 15, tzinfo=timezone.utc),
+                datetime(2026, 3, 15, tzinfo=UTC),
                 test_user,
                 db_session,
             )
@@ -1071,8 +1071,8 @@ class TestVerifyPO:
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
-        line.estimated_ship_date = datetime(2026, 3, 15, tzinfo=timezone.utc)
-        line.po_confirmed_at = datetime.now(timezone.utc)
+        line.estimated_ship_date = datetime(2026, 3, 15, tzinfo=UTC)
+        line.po_confirmed_at = datetime.now(UTC)
         _grant_po_approver(db_session, admin_user)
         db_session.flush()
 
@@ -1347,7 +1347,7 @@ class TestBuyPlanCoverageGaps:
     def test_confirm_po_plan_not_found(self, db_session, test_user):
         """Line 808: confirm_po raises when plan not found."""
         with pytest.raises(ValueError, match="not found"):
-            confirm_po(99999, 1, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(99999, 1, "PO-X", datetime.now(UTC), test_user, db_session)
 
     def test_confirm_po_line_not_found(self, db_session, test_quote, test_user):
         """Line 814: confirm_po raises when line not found."""
@@ -1356,7 +1356,7 @@ class TestBuyPlanCoverageGaps:
         db_session.flush()
 
         with pytest.raises(ValueError, match="Line.*not found"):
-            confirm_po(plan.id, 99999, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(plan.id, 99999, "PO-X", datetime.now(UTC), test_user, db_session)
 
     def test_verify_po_plan_not_found(self, db_session, test_user):
         """Line 844: verify_po raises when plan not found."""
@@ -1487,7 +1487,7 @@ class TestCaseReport:
 
     def test_case_report_with_timeline(self, db_session, test_quote, test_user):
         """Lines 1249-1290: generate_case_report with full timeline."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
@@ -1550,7 +1550,7 @@ class TestIsStockSale:
             vendor_name="internal stock",
             mpn="INT-PART",
             unit_price=1.0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -2111,7 +2111,7 @@ class TestCoverageGaps2:
             vendor_name="ghost",
             mpn="GHOST",
             unit_price=1.0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -2208,7 +2208,7 @@ def _make_simple_offer(**kw):
         "vendor_card": None,
         "vendor_name": "Acme",
         "requirement_id": 1,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(kw)
     return SimpleNamespace(**defaults)

@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app.services.response_analytics, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -38,12 +38,12 @@ def _make_vendor_card(
         domain=domain,
         emails=[f"sales@{domain}"] if domain else [],
         total_outreach=total_outreach,
-        last_contact_at=last_contact_at or datetime.now(timezone.utc),
+        last_contact_at=last_contact_at or datetime.now(UTC),
         email_health_score=email_health_score,
         avg_response_hours=avg_response_hours,
         response_rate=response_rate,
         quote_quality_rate=quote_quality_rate,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -58,7 +58,7 @@ def _make_activity_log(db, user_id, vendor_card_id, activity_type="rfq_sent", da
         vendor_card_id=vendor_card_id,
         activity_type=activity_type,
         channel="email",
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(log)
     db.commit()
@@ -75,7 +75,7 @@ def _make_vendor_response(
     days_ago=0,
 ):
     """Create a VendorResponse entry."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     resp = VendorResponse(
         vendor_email=vendor_email,
         vendor_name=vendor_name,
@@ -162,7 +162,7 @@ class TestComputeVendorResponseMetrics:
         """Computes correct avg and median response hours."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Response with 2-hour delay
         _make_vendor_response(
@@ -189,7 +189,7 @@ class TestComputeVendorResponseMetrics:
         """Median with odd number of responses picks middle value."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for hours in [2, 4, 8]:
             _make_vendor_response(
@@ -208,7 +208,7 @@ class TestComputeVendorResponseMetrics:
         """Filters response times > RESPONSE_MAX_HOURS * 2."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Normal response
         _make_vendor_response(
@@ -302,7 +302,7 @@ class TestComputeEmailHealthScore:
         """Response time <= 4h scores 100; >= 168h scores 0."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _make_vendor_response(
             db_session,
             vendor_email="sales@testvendor.com",
@@ -429,7 +429,7 @@ class TestUpdateVendorEmailHealth:
         """Persists computed health score to VendorCard."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _make_vendor_response(
             db_session,
             vendor_email="sales@testvendor.com",
@@ -481,7 +481,7 @@ class TestBatchUpdateEmailHealth:
         """Updates health scores for vendors with recent activity."""
         card = _make_vendor_card(
             db_session,
-            last_contact_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_contact_at=datetime.now(UTC) - timedelta(days=5),
         )
 
         from app.services.response_analytics import batch_update_email_health
@@ -495,7 +495,7 @@ class TestBatchUpdateEmailHealth:
             db_session,
             display_name="Vendor A",
             domain="a.com",
-            last_contact_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_contact_at=datetime.now(UTC) - timedelta(days=5),
         )
 
         with patch(
@@ -512,7 +512,7 @@ class TestBatchUpdateEmailHealth:
         """Commit failure is caught and rolled back."""
         _make_vendor_card(
             db_session,
-            last_contact_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_contact_at=datetime.now(UTC) - timedelta(days=5),
         )
 
         with patch.object(db_session, "commit", side_effect=Exception("commit failed")):
@@ -552,7 +552,7 @@ class TestGetEmailIntelligenceDashboard:
             sender_domain="y.com",
             classification="general",
             confidence=0.8,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(ei)
         db_session.commit()
@@ -564,7 +564,7 @@ class TestGetEmailIntelligenceDashboard:
 
     def test_counts_offers_and_stock_lists(self, db_session, test_user):
         """Counts offer/quote_reply and stock_list classifications separately."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = [
             EmailIntelligence(
                 message_id="offer-1",
@@ -639,7 +639,7 @@ class TestGetEmailIntelligenceDashboard:
 
     def test_recent_offers_list(self, db_session, test_user):
         """Returns recent offer EmailIntelligence records."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ei = EmailIntelligence(
             message_id="recent-offer-1",
             user_id=test_user.id,
@@ -672,7 +672,7 @@ class TestGetEmailIntelligenceDashboard:
             classification="offer",
             confidence=0.6,
             needs_review=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(ei)
         db_session.commit()

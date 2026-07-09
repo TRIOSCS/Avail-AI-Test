@@ -23,7 +23,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,7 +45,7 @@ def _make_requisition(db: Session, user: User, name: str = "REQ-N7-001") -> Requ
         customer_name="Test Customer",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -53,7 +53,7 @@ def _make_requisition(db: Session, user: User, name: str = "REQ-N7-001") -> Requ
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()
@@ -77,7 +77,7 @@ def _make_offer(
         unit_price=0.75,
         entered_by_id=user.id,
         status=OfferStatus.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()
@@ -95,7 +95,7 @@ def _make_rfq_contact(db: Session, req: Requisition, user: User) -> RfqContact:
         vendor_contact="sales@arrow.com",
         subject="RFQ for LM317T",
         status=ContactStatus.SENT,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(contact)
     db.commit()
@@ -119,7 +119,7 @@ def _make_sourcing_lead(db: Session, req: Requisition, user: User) -> SourcingLe
         confidence_band="high",
         buyer_status="new",
         reason_summary="Confident match",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(lead)
     db.commit()
@@ -134,7 +134,7 @@ def _make_quote(db: Session, req: Requisition, user: User) -> Quote:
         status="draft",
         line_items=[],
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.commit()
@@ -148,7 +148,7 @@ def _make_buy_plan(db: Session, req: Requisition, quote: Quote) -> BuyPlan:
         requisition_id=req.id,
         status=BuyPlanStatus.DRAFT,
         ai_flags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.commit()
@@ -164,7 +164,7 @@ def _make_buy_plan_line(db: Session, plan: BuyPlan, req: Requisition) -> BuyPlan
         unit_cost=0.50,
         unit_sell=0.75,
         status="awaiting_po",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(line)
     db.commit()
@@ -175,7 +175,7 @@ def _make_buy_plan_line(db: Session, plan: BuyPlan, req: Requisition) -> BuyPlan
 def _make_proactive_match(db: Session, offer: Offer, user: User, company_name: str):
     from app.models import ProactiveMatch
 
-    co = Company(name=company_name, is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name=company_name, is_active=True, created_at=datetime.now(UTC))
     db.add(co)
     db.flush()
     site = CustomerSite(company_id=co.id, site_name="HQ")
@@ -189,7 +189,7 @@ def _make_proactive_match(db: Session, offer: Offer, user: User, company_name: s
         mpn="LM317T",
         match_score=80,
         status="new",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(pm)
     db.commit()
@@ -430,7 +430,7 @@ class TestCreateCompany:
 
     def test_duplicate_name_returns_409(self, client, db_session, test_user):
         # Create existing company
-        co = Company(name="Existing Corp", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="Existing Corp", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
 

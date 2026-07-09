@@ -9,14 +9,12 @@ Revises: b7e2a1f3c4d5
 Create Date: 2026-03-21
 """
 
-from typing import Union
-
 from alembic import op
 
 revision: str = "9c7e1ed1db3e"
-down_revision: Union[str, None] = "b7e2a1f3c4d5"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "b7e2a1f3c4d5"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def upgrade() -> None:

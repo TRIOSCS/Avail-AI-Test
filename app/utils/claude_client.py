@@ -18,7 +18,7 @@ Usage:
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -133,7 +133,7 @@ def _meter_usage(bucket: str, model_tier: str, usage: dict) -> None:
     try:
         from app.cache import intel_cache
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         prefix = f"claude_usage:{bucket}:{model_tier}"
         server_tool = usage.get("server_tool_use") or {}
         counters = {

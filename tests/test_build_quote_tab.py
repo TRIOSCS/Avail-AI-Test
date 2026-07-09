@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +40,7 @@ def quoteable_req(db_session: Session, test_user: User, test_customer_site) -> R
         status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -51,7 +51,7 @@ def quoteable_req(db_session: Session, test_user: User, test_customer_site) -> R
         manufacturer="TI",
         target_qty=100,
         condition="new",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()
@@ -68,7 +68,7 @@ def quoteable_req(db_session: Session, test_user: User, test_customer_site) -> R
                 unit_price=price,
                 qty_available=500,
                 entered_by_id=test_user.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
     db_session.commit()
@@ -99,7 +99,7 @@ class TestBuildQuoteTabRender:
             status="open",
             customer_site_id=test_customer_site.id,
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -279,11 +279,11 @@ class TestBuildQuoteAssemble:
             name="QB-TAB-NOSITE",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
-        item = Requirement(requisition_id=req.id, primary_mpn="X", target_qty=1, created_at=datetime.now(timezone.utc))
+        item = Requirement(requisition_id=req.id, primary_mpn="X", target_qty=1, created_at=datetime.now(UTC))
         db_session.add(item)
         db_session.commit()
         resp = client.post(

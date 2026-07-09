@@ -4,7 +4,7 @@ Deterministic scoring: same input = same output. No external API calls.
 Missing data = neutral (mid-range) scores, never zero.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -561,7 +561,7 @@ def apply_historical_bonus(fit: int, readiness: int, historical_context: dict) -
             year = int(str(last_activity)[:4])
             # "Recent" = activity within the last ~2 years, computed relative to
             # now so the window slides instead of pinning to a fixed year.
-            if year >= datetime.now(timezone.utc).year - 2:
+            if year >= datetime.now(UTC).year - 2:
                 readiness_bonus += 10
         except (ValueError, TypeError):
             pass

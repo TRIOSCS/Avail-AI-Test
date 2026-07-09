@@ -18,7 +18,7 @@ Depends on: app.models.quality_plan (Prepayment), app.models.buy_plan (BuyPlanLi
 """
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -278,7 +278,7 @@ def mark_prepayment_paid(
         raise ValueError("Only an approved prepayment can be marked paid.")
 
     prepayment.status = PrepaymentStatus.PAID.value
-    prepayment.paid_at = datetime.now(timezone.utc)
+    prepayment.paid_at = datetime.now(UTC)
     prepayment.wire_reference = wire_reference
     prepayment.paid_amount = paid_amount
     prepayment.paid_via = paid_via

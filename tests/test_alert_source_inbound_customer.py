@@ -5,7 +5,7 @@ recency), seen-exclusion draining the count, and the COALESCE(occurred_at, creat
 recency fallback for poll-logged rows.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,7 +21,7 @@ def source() -> InboundCustomerSource:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _make_inbound(db, company, *, user=None, **overrides) -> ActivityLog:

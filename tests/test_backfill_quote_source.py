@@ -6,7 +6,7 @@ Covers:
 - Manual quote (not linked) stays NULL
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,7 @@ def _make_quote(db: Session, user: User, site: CustomerSite, req: Requisition, s
         created_by_id=user.id,
         status="won",
         result="won",
-        result_at=datetime.now(timezone.utc),
+        result_at=datetime.now(UTC),
         won_revenue=100,
         source=source,
     )

@@ -12,7 +12,7 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -163,8 +163,8 @@ class TestGetAccessToken:
 class TestGetCdrs:
     async def test_returns_empty_on_http_error(self):
         factory = _mock_async_client(get=httpx.HTTPError("connection refused"))
-        since = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        until = datetime(2026, 3, 2, tzinfo=timezone.utc)
+        since = datetime(2026, 3, 1, tzinfo=UTC)
+        until = datetime(2026, 3, 2, tzinfo=UTC)
         with patch("app.services.eight_by_eight_service.http", factory):
             result = await get_cdrs("token", FAKE_SETTINGS, since, until)
         assert result == []
@@ -178,8 +178,8 @@ class TestGetCdrs:
             "data": [{"callId": "1"}, {"callId": "2"}],
         }
         factory = _mock_async_client(get=mock_resp)
-        since = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        until = datetime(2026, 3, 2, tzinfo=timezone.utc)
+        since = datetime(2026, 3, 1, tzinfo=UTC)
+        until = datetime(2026, 3, 2, tzinfo=UTC)
         with patch("app.services.eight_by_eight_service.http", factory):
             result = await get_cdrs("token", FAKE_SETTINGS, since, until)
         # Should stop after first page since all records fetched
@@ -486,7 +486,7 @@ class TestFindOptimisticRow:
         row.direction = direction
         row.contact_phone = contact_phone
         row.occurred_at = occurred_at
-        row.created_at = created_at or datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
+        row.created_at = created_at or datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC)
         row.user_id = user_id
         return row
 
@@ -501,9 +501,7 @@ class TestFindOptimisticRow:
         from app.jobs.eight_by_eight_jobs import _find_optimistic_row
 
         db = self._make_db()
-        result = _find_optimistic_row(
-            db, None, "outbound", "+15551234567", datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
-        )
+        result = _find_optimistic_row(db, None, "outbound", "+15551234567", datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC))
         assert result is None
         db.query.assert_not_called()
 
@@ -512,14 +510,14 @@ class TestFindOptimisticRow:
 
         db = self._make_db()
         # Empty string won't normalize to E.164
-        result = _find_optimistic_row(db, 1, "outbound", "", datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc))
+        result = _find_optimistic_row(db, 1, "outbound", "", datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC))
         assert result is None
 
     def test_matches_row_within_window(self):
         from app.jobs.eight_by_eight_jobs import _find_optimistic_row
 
-        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
-        row_time = datetime(2026, 3, 5, 13, 55, 0, tzinfo=timezone.utc)  # 5 min before
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC)
+        row_time = datetime(2026, 3, 5, 13, 55, 0, tzinfo=UTC)  # 5 min before
         row = self._make_row(occurred_at=row_time, contact_phone="+15551234567")
 
         db = self._make_db(candidates=[row])
@@ -530,8 +528,8 @@ class TestFindOptimisticRow:
     def test_no_match_when_outside_window(self):
         from app.jobs.eight_by_eight_jobs import _find_optimistic_row
 
-        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
-        row_time = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)  # 2h before, outside 10min window
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC)
+        row_time = datetime(2026, 3, 5, 12, 0, 0, tzinfo=UTC)  # 2h before, outside 10min window
         row = self._make_row(occurred_at=row_time, contact_phone="+15551234567")
 
         db = self._make_db(candidates=[row])
@@ -542,8 +540,8 @@ class TestFindOptimisticRow:
     def test_falls_back_to_created_at_when_occurred_at_none(self):
         from app.jobs.eight_by_eight_jobs import _find_optimistic_row
 
-        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=timezone.utc)
-        created = datetime(2026, 3, 5, 14, 3, 0, tzinfo=timezone.utc)  # 3 min after
+        cdr_time = datetime(2026, 3, 5, 14, 0, 0, tzinfo=UTC)
+        created = datetime(2026, 3, 5, 14, 3, 0, tzinfo=UTC)  # 3 min after
         row = self._make_row(occurred_at=None, created_at=created, contact_phone="+15551234567")
 
         db = self._make_db(candidates=[row])
@@ -561,7 +559,7 @@ class TestUpdateWatermark:
 
         db = MagicMock()
         wm_row = MagicMock()
-        until = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
+        until = datetime(2026, 3, 5, 12, 0, 0, tzinfo=UTC)
 
         _update_watermark(db, wm_row, until)
         assert wm_row.value == until.isoformat()
@@ -571,7 +569,7 @@ class TestUpdateWatermark:
         from app.jobs.eight_by_eight_jobs import _update_watermark
 
         db = MagicMock()
-        until = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
+        until = datetime(2026, 3, 5, 12, 0, 0, tzinfo=UTC)
 
         _update_watermark(db, None, until)
         db.add.assert_called_once()

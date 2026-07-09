@@ -18,7 +18,7 @@ Depends on: models, database, config
 
 import hmac
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from fastapi import Depends, HTTPException, Request
@@ -100,7 +100,7 @@ def is_manager_or_admin(user: User) -> bool:
     return user.role in (UserRole.MANAGER, UserRole.ADMIN)
 
 
-def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # noqa: F821
+def can_manage_account(user: User, company: Company, db: "Session") -> bool:
     """True if *user* may act on *company* as an account manager.
 
     Allowed when ANY of the following holds:
@@ -461,8 +461,8 @@ def require_approval_gatekeeper(
 
     try:
         request_id = int(request_id_str)
-    except (ValueError, TypeError):
-        raise HTTPException(403, "Invalid request id")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(403, "Invalid request id") from e
 
     # Direct PENDING recipient
     recipient = db.execute(
@@ -522,7 +522,7 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
         ak = AccessKey(key_str)
     except ValueError:
         return False
-    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())  # type: ignore[call-overload, unused-ignore]  # user.role is a plain str at instance level; StrEnum-keyed lookup by str works
+    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())  # type: ignore[call-overload]  # user.role is a plain str at instance level; StrEnum-keyed lookup by str works
 
 
 def require_access(key):
@@ -622,13 +622,9 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     # 15-min buffer, so the only failure case to handle inline is a truly-expired token
     # (background job missed it or no refresh token) — everything else uses the DB token.
     if user.token_expires_at:
-        expiry = (
-            user.token_expires_at
-            if user.token_expires_at.tzinfo
-            else user.token_expires_at.replace(tzinfo=timezone.utc)
-        )
-        if datetime.now(timezone.utc) > expiry:
-            user.m365_connected = False  # type: ignore[assignment, unused-ignore]  # ORM Column[bool] instance write
+        expiry = user.token_expires_at if user.token_expires_at.tzinfo else user.token_expires_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) > expiry:
+            user.m365_connected = False  # type: ignore[assignment]  # ORM Column[bool] instance write
             db.commit()
             raise HTTPException(401, "Session expired — please log in again")
 

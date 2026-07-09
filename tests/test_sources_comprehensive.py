@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: app/routers/sources.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -103,7 +103,7 @@ def _errored_source(db_session: Session) -> ApiSource:
         description="A broken source",
         env_vars=["ERR_KEY"],
         last_error="Connection timeout",
-        last_error_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        last_error_at=datetime(2026, 3, 1, tzinfo=UTC),
     )
     db_session.add(src)
     db_session.commit()
@@ -143,7 +143,7 @@ def _email_mining_source(db_session: Session) -> ApiSource:
         total_searches=5,
         total_results=20,
         avg_response_ms=0,
-        last_success=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        last_success=datetime(2026, 2, 1, tzinfo=UTC),
     )
     db_session.add(src)
     db_session.commit()
@@ -168,7 +168,7 @@ def _make_m365_vendor_response(db_session, test_user, *, req_name, message_id):
         customer_name="Test",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -180,8 +180,8 @@ def _make_m365_vendor_response(db_session, test_user, *, req_name, message_id):
         subject="RE: Test",
         message_id=message_id,
         status="new",
-        received_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()

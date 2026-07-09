@@ -13,7 +13,7 @@ Depends on: models/performance.py (AvailScoreSnapshot, MultiplierScoreSnapshot),
             utils/claude_client.py (claude_structured for blurbs)
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -221,7 +221,7 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
         snap.avail_score_sales = r["avail_score_sales"]
         snap.multiplier_points_buyer = r["multiplier_points_buyer"]
         snap.multiplier_points_sales = r["multiplier_points_sales"]
-        snap.updated_at = datetime.now(timezone.utc)
+        snap.updated_at = datetime.now(UTC)
         saved += 1
 
     db.commit()
@@ -235,7 +235,7 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
 
 def _refresh_blurbs(db: Session, month: date, results: list[dict]) -> None:
     """Generate AI blurbs for entries where blurb is stale or missing."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    cutoff = datetime.now(UTC) - timedelta(hours=2)
     total = len(results)
 
     for r in results:
@@ -259,7 +259,7 @@ def _refresh_blurbs(db: Session, month: date, results: list[dict]) -> None:
             if blurb:
                 snap.ai_blurb_strength = blurb.get("strength", "")
                 snap.ai_blurb_improvement = blurb.get("improvement", "")
-                snap.ai_blurb_generated_at = datetime.now(timezone.utc)
+                snap.ai_blurb_generated_at = datetime.now(UTC)
         except Exception as e:
             logger.warning(f"Blurb generation failed for user {r['user_id']}: {e}")
 

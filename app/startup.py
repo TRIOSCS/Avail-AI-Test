@@ -381,7 +381,7 @@ def _seed_agent_user() -> None:
         db.close()
 
 
-def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
+def _exec(conn, stmt: str, params: dict | None = None) -> None:
     """Execute a single SQL statement (data fix / runtime operation) with rollback on
     failure."""
     try:
@@ -1325,7 +1325,7 @@ def _backfill_material_cards() -> None:
             if card:
                 r.material_card_id = card.id
                 linked += 1
-            for sub in r.substitutes or []:  # type: ignore[union-attr, unused-ignore]  # JSON column is a list at instance level
+            for sub in r.substitutes or []:  # type: ignore[union-attr]  # JSON column is a list at instance level
                 sub_mpn = sub.get("mpn") if isinstance(sub, dict) else sub
                 if sub_mpn:
                     resolve_material_card(sub_mpn, db)
@@ -1547,7 +1547,7 @@ def seed_api_sources() -> None:
 
         # Remove legacy "newark" source (renamed to "element14")
         if "newark" in existing_map and "element14" in existing_map:
-            old_newark = existing_map["newark"]  # type: ignore[index, unused-ignore]  # dict is keyed by instance-level str values
+            old_newark = existing_map["newark"]  # type: ignore[index]  # dict is keyed by instance-level str values
             db.query(ApiUsageLog).filter(ApiUsageLog.source_id == old_newark.id).delete()
             db.delete(old_newark)
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")

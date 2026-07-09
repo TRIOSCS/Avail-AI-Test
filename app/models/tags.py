@@ -8,7 +8,7 @@ Called by: app.services.tagging, app.routers.tags, app.routers.tagging_admin
 Depends on: app.models.base (Base), app.models.intelligence (MaterialCard)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -34,7 +34,7 @@ class Tag(Base):
     name = Column(String(255), nullable=False)
     tag_type = Column(String(20), nullable=False)  # 'brand' or 'commodity'
     parent_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     parent = relationship("Tag", remote_side=[id], foreign_keys=[parent_id])
     material_tags = relationship("MaterialTag", back_populates="tag", cascade="all, delete-orphan")

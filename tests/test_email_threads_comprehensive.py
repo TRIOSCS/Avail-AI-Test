@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -451,7 +451,7 @@ class TestFetchThreadsTier4VendorCard:
             vendor_name="Arrow Electronics",
             mpn_matched="LM317T",
             source_type="broker",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -492,7 +492,7 @@ class TestFetchThreadsTier4VendorCard:
             vendor_email="sales@badvendor.com",
             mpn_matched="LM317T",
             source_type="broker",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -519,7 +519,7 @@ class TestFetchThreadsTier4VendorCard:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -527,7 +527,7 @@ class TestFetchThreadsTier4VendorCard:
             requisition_id=req.id,
             primary_mpn="AB",  # Too short for tier 3
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -599,7 +599,7 @@ class TestTier1ContactError:
             vendor_name="Arrow",
             vendor_contact="sales@arrow.com",
             graph_conversation_id="conv-err-contact",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()

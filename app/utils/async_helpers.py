@@ -9,7 +9,8 @@ Depends on: loguru
 
 import asyncio
 import os
-from typing import Any, Coroutine
+from collections.abc import Coroutine
+from typing import Any
 
 from loguru import logger
 

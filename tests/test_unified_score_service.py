@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/unified_score_service.py, app/models/unified_score.py
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -702,7 +702,7 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         # UTCDateTime columns read back UTC-aware; keep seeded values aware too
-        stale_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        stale_time = datetime.now(UTC) - timedelta(hours=3)
         snap = UnifiedScoreSnapshot(
             user_id=test_user.id,
             month=month,
@@ -720,7 +720,7 @@ class TestRefreshBlurbs:
 
         blurb_return = {"strength": "New strength!", "improvement": "New improvement!"}
         # Patch datetime.now in the service so cutoff is aware UTC
-        fake_now = datetime.now(timezone.utc)
+        fake_now = datetime.now(UTC)
         with (
             patch("app.services.unified_score_service.datetime") as mock_dt,
             patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return),
@@ -739,7 +739,7 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         # UTCDateTime columns read back UTC-aware; keep seeded values aware too
-        fresh_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+        fresh_time = datetime.now(UTC) - timedelta(minutes=30)
         snap = UnifiedScoreSnapshot(
             user_id=test_user.id,
             month=month,
@@ -756,7 +756,7 @@ class TestRefreshBlurbs:
         results = _blurb_results(test_user.id)
 
         # Patch datetime.now in the service so cutoff is aware UTC
-        fake_now = datetime.now(timezone.utc)
+        fake_now = datetime.now(UTC)
         with (
             patch("app.services.unified_score_service.datetime") as mock_dt,
             patch("app.services.unified_score_service._generate_blurb") as mock_gen,

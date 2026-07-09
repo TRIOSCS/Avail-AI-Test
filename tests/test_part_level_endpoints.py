@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: routers/requisitions/requirements.py, routers/crm/quotes.py, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -46,7 +46,7 @@ def test_list_requirement_offers_with_data(client, test_requisition, db_session)
         qty_available=500,
         unit_price=0.85,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -78,7 +78,7 @@ def test_list_requirement_offers_includes_extended_fields(client, test_requisiti
         country_of_origin="CN",
         firmware="v2.1",
         source="email",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -127,7 +127,7 @@ def test_list_requirement_sightings_with_data(client, test_requisition, db_sessi
         qty_available=1200,
         unit_price=1.25,
         source_type="stock_list",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()
@@ -196,7 +196,7 @@ def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_se
         mpn="LM317T",
         notes="Good price, ships fast",
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -353,7 +353,7 @@ def test_comms_tab_renders_overdue_task_via_shared_helper(client, test_requisiti
         status="todo",
         source="manual",
         created_by=test_user.id,
-        due_at=datetime(2020, 1, 15, tzinfo=timezone.utc),
+        due_at=datetime(2020, 1, 15, tzinfo=UTC),
     )
     db_session.add(task)
     db_session.commit()
@@ -448,7 +448,7 @@ class TestQuoteExpiration:
             quote_number="Q-EXP-001",
             status="sent",
             validity_days=7,
-            sent_at=datetime.now(timezone.utc) - timedelta(days=30),
+            sent_at=datetime.now(UTC) - timedelta(days=30),
             created_by_id=test_user.id,
         )
         db_session.add(q)
@@ -474,7 +474,7 @@ class TestQuoteExpiration:
             quote_number="Q-VAL-001",
             status="sent",
             validity_days=30,
-            sent_at=datetime.now(timezone.utc) - timedelta(days=1),
+            sent_at=datetime.now(UTC) - timedelta(days=1),
             created_by_id=test_user.id,
         )
         db_session.add(q)
@@ -525,7 +525,7 @@ class TestQuoteExpiration:
             quote_number="Q-SGL-001",
             status="sent",
             validity_days=7,
-            sent_at=datetime.now(timezone.utc) - timedelta(days=30),
+            sent_at=datetime.now(UTC) - timedelta(days=30),
             created_by_id=test_user.id,
         )
         db_session.add(q)

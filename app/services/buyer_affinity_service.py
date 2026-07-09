@@ -36,7 +36,7 @@ Depends on: models (ExcessOffer/Line, ExcessOutreach, ExcessList/LineItem, Buyer
             VendorCard, MaterialCard, User), routers.sightings reachability/DNC gates
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -495,7 +495,7 @@ def overlap_warning(
     ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions the
     overlapping teammate touches), or None when there is no recent teammate overlap.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+    cutoff = datetime.now(UTC) - timedelta(days=within_days)
     touches = (
         db.query(ExcessOutreach)
         .filter(
@@ -551,7 +551,7 @@ def overlap_warnings_for(
     """
     if not target_vendor_card_ids:
         return {}
-    cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+    cutoff = datetime.now(UTC) - timedelta(days=within_days)
     touches = (
         db.query(ExcessOutreach)
         .filter(
@@ -630,7 +630,7 @@ def not_yet_offered_strip(
 
 def _aware(dt: datetime) -> datetime:
     """Coerce a naive timestamp (SQLite returns naive) to UTC-aware for comparison."""
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 def _median(values: list[float]) -> float:

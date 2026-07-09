@@ -8,7 +8,7 @@ Depends on: models, config, utils/graph_client
 """
 
 import html
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from loguru import logger
@@ -386,7 +386,7 @@ async def send_proactive_offer(
 
     # Upsert throttle entries only if the email was actually sent
     if send_succeeded:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Batch-load existing throttles for these MPNs (one query instead of N).
         mpns = {m.mpn for m in matches}
         throttle_by_mpn = {
@@ -433,7 +433,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
 
     site = db.get(CustomerSite, po.customer_site_id)
     company_name = site.company.name if site and site.company else "Customer"
-    date_str = datetime.now(timezone.utc).strftime("%b %Y")
+    date_str = datetime.now(UTC).strftime("%b %Y")
 
     # Create requisition
     req = Requisition(
@@ -533,7 +533,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         source="proactive",
         status=QuoteStatus.WON,
         result="won",
-        result_at=datetime.now(timezone.utc),
+        result_at=datetime.now(UTC),
         won_revenue=total_sell,
     )
     db.add(quote)
@@ -547,7 +547,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         quote_id=quote.id,
         status=BuyPlanStatus.PENDING.value,
         submitted_by_id=user.id,
-        submitted_at=datetime.now(timezone.utc),
+        submitted_at=datetime.now(UTC),
     )
     db.add(buy_plan)
     db.flush()
@@ -566,7 +566,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     po.status = ProactiveOfferStatus.CONVERTED
     po.converted_requisition_id = req.id
     po.converted_quote_id = quote.id
-    po.converted_at = datetime.now(timezone.utc)
+    po.converted_at = datetime.now(UTC)
 
     # Update matches
     for item in po.line_items or []:

@@ -8,7 +8,7 @@ Called by: nc_worker queue_manager, ai_gate, admin endpoints
 Depends on: requirements, requisitions tables
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, ForeignKey, Index, Integer, SmallInteger, String, Text, UniqueConstraint
 
@@ -42,8 +42,8 @@ class NcSearchQueue(Base):
     # Spec-code resolver lineage — populated when this queue row was created
     # for an AVL MPN resolved from an OEM spec code (see SpecCodeResolver).
     resolved_via_spec_code = Column(String(64), nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         # DB-level backing for the (requirement_id, normalized_mpn) dedup that

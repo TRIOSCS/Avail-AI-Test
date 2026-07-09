@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ def _create_contact(
     sent_at: set only for status="sent" — records the true send moment so the
     outbound clock advances immediately without waiting for scan_sent_folder.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     contact = Contact(
         requisition_id=requisition_id,
         user_id=user_id,
@@ -313,7 +313,7 @@ async def send_batch_rfq(
             continue
 
         per_req_parts = _per_req_parts(group)
-        send_time = datetime.now(timezone.utc)
+        send_time = datetime.now(UTC)
         try:
             with db.begin_nested():
                 contacts = [
@@ -567,7 +567,7 @@ def log_phone_contact(
         vendor_contact=vendor_phone,
         parts_included=parts,
         subject=f"Call to {vendor_name}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(contact)
     db.commit()
@@ -638,13 +638,13 @@ async def poll_inbox(
             if new_delta:
                 if sync:
                     sync.delta_token = new_delta
-                    sync.last_sync_at = datetime.now(timezone.utc)
+                    sync.last_sync_at = datetime.now(UTC)
                 else:
                     sync = SyncState(
                         user_id=scanned_by_user_id,
                         folder="inbox",
                         delta_token=new_delta,
-                        last_sync_at=datetime.now(timezone.utc),
+                        last_sync_at=datetime.now(UTC),
                     )
                     db.add(sync)
                 db.flush()
@@ -695,7 +695,7 @@ async def poll_inbox(
     # Pre-load outbound email contacts for matching (last 6 months). Ordered by
     # id (= creation order) so the fan-out lists below are deterministic and the
     # last-writer-wins maps genuinely keep the MOST RECENT contact.
-    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+    cutoff = datetime.now(UTC) - timedelta(days=180)
     all_contacts = (
         db.query(Contact)
         .filter(
@@ -722,7 +722,7 @@ async def poll_inbox(
     req_email_map: dict[tuple[int, str], Contact] = {}
     for c in all_contacts:
         if c.graph_conversation_id:
-            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)  # type: ignore[call-overload, unused-ignore]  # Column[str] key is str at instance level
+            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)  # type: ignore[call-overload]  # Column[str] key is str at instance level
         # Build req+email map for Tier 2 (all contacts, not just this user's)
         if c.requisition_id and c.vendor_contact:
             req_email_map.setdefault((c.requisition_id, c.vendor_contact.lower()), c)
@@ -842,7 +842,7 @@ async def poll_inbox(
                 scanned_by_user_id=scanned_by_user_id,
                 received_at=msg.get("receivedDateTime"),
                 status="matched" if (matched_contacts or matched_resell_rows) else VendorResponseStatus.NEW,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db.add(vr)
             db.flush()
@@ -865,7 +865,7 @@ async def poll_inbox(
                 ProcessedMessage(
                     message_id=msg_id,
                     processing_type="inbox_poll",
-                    processed_at=datetime.now(timezone.utc),
+                    processed_at=datetime.now(UTC),
                 )
             )
 
@@ -1146,7 +1146,7 @@ def _repair_contact_status_for_ooo_bounce(vr: VendorResponse, db: Session) -> No
 
     text = f"{vr.subject or ''} {vr.body or ''}".lower()
     new_status = ContactStatus.BOUNCED if any(s in text for s in _BOUNCE_SIGNALS) else ContactStatus.OOO
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for contact in contacts:
         if contact.status in (ContactStatus.QUOTED, ContactStatus.DECLINED):
             continue  # never regress a terminal state on a late auto-reply
@@ -1156,7 +1156,7 @@ def _repair_contact_status_for_ooo_bounce(vr: VendorResponse, db: Session) -> No
 
 def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
     """Update the outbound Contact status based on the vendor's reply."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Already in a terminal state? Don't regress
     if contact.status in (ContactStatus.QUOTED, ContactStatus.DECLINED):
@@ -1231,7 +1231,7 @@ async def parse_response_ai(body: str, subject: str) -> dict | None:
 def _mining_submit_key() -> str:
     """Redis key for today's count of dispatched email-mining Claude requests (UTC
     date)."""
-    return "email_mining:batch:submitted:" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return "email_mining:batch:submitted:" + datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _email_mining_calls_today() -> int:
@@ -1249,7 +1249,7 @@ def _email_mining_calls_today() -> int:
     from app.cache import intel_cache
 
     try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         metered = sum(
             intel_cache.get_count(f"claude_usage:email_mining:{tier}:calls:{today}")
             for tier in ("fast", "smart", "opus")
@@ -1351,7 +1351,7 @@ async def _submit_parse_batch(
         batch_type="inbox_parse",
         request_map=request_map,
         status=PendingBatchStatus.PROCESSING,
-        submitted_at=datetime.now(timezone.utc),
+        submitted_at=datetime.now(UTC),
     )
     db.add(pb)
     logger.info(f"Submitted batch {batch_id} with {len(requests)} email parse requests")
@@ -1580,7 +1580,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                     existing_notif.subject = (
                         f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}"
                     )
-                    existing_notif.created_at = datetime.now(timezone.utc)
+                    existing_notif.created_at = datetime.now(UTC)
                 else:
                     db.add(
                         ActivityLog(
@@ -1637,8 +1637,8 @@ async def process_batch_results(db: Session) -> int:
             logger.warning(f"Batch results check failed for {pb.batch_id}: {e}")
             # Mark as failed if submitted >24h ago
             if pb.submitted_at:
-                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - sa > timedelta(hours=24):
+                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=UTC)
+                if datetime.now(UTC) - sa > timedelta(hours=24):
                     pb.status = PendingBatchStatus.FAILED
                     pb.error_message = f"Timed out after 24h: {e}"
                     db.commit()
@@ -1647,8 +1647,8 @@ async def process_batch_results(db: Session) -> int:
         if results is None:
             # Still processing -- check for timeout
             if pb.submitted_at:
-                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - sa > timedelta(hours=24):
+                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=UTC)
+                if datetime.now(UTC) - sa > timedelta(hours=24):
                     pb.status = PendingBatchStatus.FAILED
                     pb.error_message = "Batch did not complete within 24h"
                     db.commit()
@@ -1695,7 +1695,7 @@ async def process_batch_results(db: Session) -> int:
                 applied += 1
 
         pb.status = PendingBatchStatus.COMPLETED
-        pb.completed_at = datetime.now(timezone.utc)
+        pb.completed_at = datetime.now(UTC)
         pb.result_count = applied
         total_applied += applied
 

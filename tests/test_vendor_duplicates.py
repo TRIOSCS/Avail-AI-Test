@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.exc import OperationalError
@@ -31,7 +31,7 @@ def _make_vendor(db: Session, normalized: str, display: str) -> VendorCard:
         display_name=display,
         emails=[],
         phones=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()

@@ -21,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -66,7 +66,7 @@ def _make_req(db: Session, user: User) -> Requisition:
         customer_name="TestCo",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -74,7 +74,7 @@ def _make_req(db: Session, user: User) -> Requisition:
         requisition_id=req.id,
         primary_mpn="BC547",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()

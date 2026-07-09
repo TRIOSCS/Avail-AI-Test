@@ -21,7 +21,7 @@ Depends on: app.services.bid_back_service, app.services.excess_service,
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -83,7 +83,7 @@ def priced_list(db_session: Session, owner: User, seller_company: Company) -> Ex
         owner_id=owner.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()

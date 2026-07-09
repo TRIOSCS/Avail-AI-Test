@@ -34,7 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -88,7 +88,7 @@ def _parse_ts(raw: str | None) -> datetime | None:
     value = raw.strip()
     for fmt in _TS_FORMATS:
         try:
-            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
     return None

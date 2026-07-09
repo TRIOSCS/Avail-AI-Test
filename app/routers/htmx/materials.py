@@ -1242,9 +1242,9 @@ async def _run_card_enrichment(material_id: int) -> None:
             from ...services.spec_enrichment_service import enrich_card_specs
 
             await enrich_card_specs([material_id], db, force=True)
-        except Exception as e:  # noqa: BLE001 — card-level enrichment may still have succeeded
+        except Exception as e:
             logger.warning("Spec enrichment failed for material {}: {}", material_id, e)
-    except Exception:  # noqa: BLE001 — a background task must not crash the worker
+    except Exception:
         logger.exception("Card enrichment task crashed for material {}", material_id)
         blocked = True
     finally:
@@ -1352,7 +1352,7 @@ async def _run_card_crosses(material_id: int) -> None:
 
         mc.cross_references = crosses
         db.commit()
-    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
+    except Exception as exc:
         logger.warning("Cross-reference search failed for material {}: {}", material_id, exc)
         db.rollback()
         blocked = True

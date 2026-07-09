@@ -10,7 +10,7 @@ Depends on: models, dependencies, database, search_service
 
 import html as html_mod
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -447,8 +447,8 @@ async def requisitions_bulk_action(
 
     try:
         ids = [int(x.strip()) for x in ids_str.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(400, "Invalid ID format")
+    except ValueError as e:
+        raise HTTPException(400, "Invalid ID format") from e
 
     if len(ids) > 200:
         raise HTTPException(400, "Maximum 200 requisitions per bulk action")
@@ -570,7 +570,7 @@ async def requisition_inline_save(
             req.created_by = int(value)
             msg = "Owner reassigned"
 
-    req.updated_at = datetime.now(timezone.utc)
+    req.updated_at = datetime.now(UTC)
     req.updated_by_id = user.id
     db.commit()
     db.refresh(req)
@@ -660,7 +660,7 @@ async def requisition_win_probability_save(
         if not (0 <= prob <= 100):
             raise HTTPException(400, "win_probability must be between 0 and 100")
     req.win_probability = prob
-    req.updated_at = datetime.now(timezone.utc)
+    req.updated_at = datetime.now(UTC)
     req.updated_by_id = user.id
     db.commit()
     db.refresh(req)
@@ -703,7 +703,7 @@ async def requisition_opportunity_value_save(
         if value < 0:
             raise HTTPException(400, "opportunity_value must be >= 0")
     req.opportunity_value = value
-    req.updated_at = datetime.now(timezone.utc)
+    req.updated_at = datetime.now(UTC)
     req.updated_by_id = user.id
     db.commit()
     db.refresh(req)
@@ -1915,7 +1915,7 @@ def _my_day_results_response(request, user, db, *, status="", priority="", due="
     so the changed task re-buckets (snooze) or leaves the Done view (reopen)
     immediately.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tasks = _my_day_filtered_tasks(db, user.id, status=status, priority=priority, due=due, now=now)
     ctx = _base_ctx(request, user, "my-day")
     ctx["tasks"] = tasks
@@ -1945,7 +1945,7 @@ async def my_day_partial(
     Called by: /v2/my-day full-page shell and nav hx-get, plus the filter-bar selects.
     Depends on: _my_day_filtered_tasks → task_service.get_my_tasks.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     status = request.query_params.get("status", "").strip()
     priority = request.query_params.get("priority", "").strip()
     due = request.query_params.get("due", "").strip()

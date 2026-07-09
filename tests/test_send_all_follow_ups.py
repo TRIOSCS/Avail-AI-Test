@@ -14,7 +14,7 @@ Depends on: app.routers.htmx.offers send_batch_follow_up + _deliver_follow_up.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import ContactStatus
 from app.models.offers import Contact as RfqContact
@@ -33,7 +33,7 @@ def _stale_contact(db, user, *, vendor_contact, days=5) -> RfqContact:
         vendor_contact=vendor_contact,
         subject="RFQ",
         status="sent",
-        created_at=datetime.now(timezone.utc) - timedelta(days=days),
+        created_at=datetime.now(UTC) - timedelta(days=days),
     )
     db.add(c)
     db.commit()

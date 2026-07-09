@@ -13,7 +13,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ def _make_card(db_session, mpn="lm317t", display="LM317T", manufacturer="Texas I
         normalized_mpn=mpn,
         display_mpn=display,
         manufacturer=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -89,7 +89,7 @@ class TestListMaterials:
 
     def test_list_excludes_deleted_cards(self, client, db_session):
         card = _make_card(db_session, mpn="deletedpart", display="DELETEDPART")
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
         resp = client.get("/api/materials?q=deletedpart")
         assert resp.status_code == 200
@@ -114,7 +114,7 @@ class TestGetMaterial:
 
     def test_get_deleted_card_returns_404(self, client, db_session):
         card = _make_card(db_session, mpn="gone", display="GONE")
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
         resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 404
@@ -125,7 +125,7 @@ class TestGetMaterial:
             normalized_mpn="lm358dr",
             display_mpn="LM358DR",
             manufacturer=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -154,7 +154,7 @@ class TestGetMaterialByMpn:
             normalized_mpn="ne555",
             display_mpn="NE555",
             manufacturer=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -220,7 +220,7 @@ class TestUpdateMaterial:
 
     def test_update_deleted_card_returns_404(self, client, db_session):
         card = _make_card(db_session, mpn="updatedeleted", display="UPDATEDELETED")
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
         resp = client.put(f"/api/materials/{card.id}", json={"manufacturer": "TI"})
         assert resp.status_code == 404
@@ -301,7 +301,7 @@ class TestEnrichMaterial:
         card.category_source = "ai_guess"
         card.category_confidence = 0.5
         card.category_tier = 40
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.post(
@@ -322,7 +322,7 @@ class TestEnrichMaterial:
         card.category_source = "mpn_decode"
         card.category_confidence = 0.95
         card.category_tier = 85
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.commit()
         resp = client.post(
             f"/api/materials/{card.id}/enrich",
@@ -361,7 +361,7 @@ class TestEnrichMaterial:
         card.category_source = "manual"
         card.category_confidence = 1.0
         card.category_tier = 100
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.post(
@@ -432,7 +432,7 @@ class TestDeleteMaterial:
 
     def test_delete_already_deleted_returns_400(self, client, db_session):
         card = _make_card(db_session, mpn="already_deleted", display="ALREADY_DELETED")
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
         resp = client.delete(f"/api/materials/{card.id}")
         assert resp.status_code == 400
@@ -445,7 +445,7 @@ class TestDeleteMaterial:
 class TestRestoreMaterial:
     def test_restore_success(self, client, db_session):
         card = _make_card(db_session, mpn="restore_me", display="RESTORE_ME")
-        card.deleted_at = datetime.now(timezone.utc)
+        card.deleted_at = datetime.now(UTC)
         db_session.commit()
         resp = client.post(f"/api/materials/{card.id}/restore")
         assert resp.status_code == 200
@@ -631,7 +631,7 @@ class TestImportStock:
             display_name="Existing Vendor",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor)
         db_session.commit()
@@ -673,7 +673,7 @@ class TestImportStock:
             normalized_mpn="updatepart",
             display_mpn="UPDATEPART",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -737,7 +737,7 @@ class TestDirectHandlerCoverage:
             normalized_mpn="direct001",
             display_mpn="DIRECT001",
             manufacturer=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -767,7 +767,7 @@ class TestDirectHandlerCoverage:
         card = MaterialCard(
             normalized_mpn="direct002",
             display_mpn="DIRECT002",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -815,7 +815,7 @@ class TestDirectHandlerCoverage:
         card = MaterialCard(
             normalized_mpn="direct003",
             display_mpn="DIRECT003",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -849,12 +849,12 @@ class TestDirectHandlerCoverage:
         source = MaterialCard(
             normalized_mpn="msrc001",
             display_mpn="MSRC001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         target = MaterialCard(
             normalized_mpn="mtgt001",
             display_mpn="MTGT001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([source, target])
         db_session.commit()
@@ -910,7 +910,7 @@ class TestDirectHandlerCoverage:
             normalized_mpn="brandtest001",
             display_mpn="BRANDTEST001",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -1078,7 +1078,7 @@ class TestDirectHandlerCoverage:
             display_name="Mvh Test Vendor",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor)
         db_session.flush()
@@ -1087,7 +1087,7 @@ class TestDirectHandlerCoverage:
             normalized_mpn="mvhtest001",
             display_mpn="MVHTEST001",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -1240,7 +1240,7 @@ class TestDirectHandlerCoverage:
             display_name="Mfr Update Vendor",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor)
         db_session.flush()
@@ -1249,7 +1249,7 @@ class TestDirectHandlerCoverage:
             normalized_mpn="mfrupd001",
             display_mpn="MFRUPD001",
             manufacturer="",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -1301,7 +1301,7 @@ class TestDirectHandlerCoverage:
             normalized_mpn="offertest001",
             display_mpn="OFFERTEST001",
             manufacturer="NXP",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -1314,7 +1314,7 @@ class TestDirectHandlerCoverage:
             qty_available=100,
             unit_price=1.50,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -1342,7 +1342,7 @@ class TestStampManualProvenanceEmptyFields:
         card = MaterialCard(
             normalized_mpn="provtest001",
             display_mpn="PROVTEST001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -1394,7 +1394,7 @@ class TestAddMaterialEndpoint:
             card = MaterialCard(
                 normalized_mpn="lm317t",
                 display_mpn="LM317T",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(card)
             db_session.commit()
@@ -1436,7 +1436,7 @@ class TestAddMaterialEndpoint:
             card = MaterialCard(
                 normalized_mpn="ne5532",
                 display_mpn="NE5532",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(card)
             db_session.commit()
@@ -1459,7 +1459,7 @@ class TestAddMaterialEndpoint:
             card = MaterialCard(
                 normalized_mpn="atmega328p",
                 display_mpn="ATMEGA328P",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(card)
             db_session.commit()
@@ -1487,7 +1487,7 @@ class TestAddMaterialEndpoint:
         existing_card = MaterialCard(
             normalized_mpn="lm741",
             display_mpn="LM741",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing_card)
         db_session.commit()
@@ -1611,7 +1611,7 @@ class TestEnrichManufacturerRejection:
         card.category_source = "manual"
         card.category_confidence = 1.0
         card.category_tier = 100
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.post(
@@ -1703,7 +1703,7 @@ class TestImportPartNumbers:
         card = MaterialCard(
             normalized_mpn="importpn001",
             display_mpn="IMPORTPN001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -1762,7 +1762,7 @@ class TestImportPartNumbers:
             normalized_mpn="existingpn001",
             display_mpn="EXISTINGPN001",
             search_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -1804,7 +1804,7 @@ class TestImportStockIntegrityErrors:
             display_name=vendor_name,
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing)
         db_session.commit()
@@ -1852,7 +1852,7 @@ class TestImportStockIntegrityErrors:
         existing_card = MaterialCard(
             normalized_mpn="dupecard001",
             display_mpn="DUPECARD001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing_card)
         db_session.commit()
@@ -1919,7 +1919,7 @@ class TestAddMaterialDirect:
         card = MaterialCard(
             normalized_mpn="directadd001",
             display_mpn="DIRECTADD001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -1991,7 +1991,7 @@ class TestAddMaterialDirect:
             normalized_mpn="directadd002",
             display_mpn="DIRECTADD002",
             manufacturer=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -2016,7 +2016,7 @@ class TestAddMaterialDirect:
         card = MaterialCard(
             normalized_mpn="directadd003",
             display_mpn="DIRECTADD003",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -2041,7 +2041,7 @@ class TestAddMaterialDirect:
         card = MaterialCard(
             normalized_mpn="directadd004",
             display_mpn="DIRECTADD004",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -2171,7 +2171,7 @@ class TestImportPartNumbersDirect:
             normalized_mpn="newpn001",
             display_mpn="NEWPN001",
             search_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -2198,7 +2198,7 @@ class TestImportPartNumbersDirect:
             normalized_mpn="existpn001",
             display_mpn="EXISTPN001",
             search_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -2265,7 +2265,7 @@ class TestEnrichMaterialDirectSourceBranches:
         card.category_source = "manual"
         card.category_confidence = 1.0
         card.category_tier = 100
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.commit()
 
         req = _make_mock_request({"category": "gpu", "source": "claude_agent", "confidence": 0.5})
@@ -2307,7 +2307,7 @@ class TestImportStockDirectIntegrityErrors:
             display_name=vendor_name,
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing)
         db_session.commit()
@@ -2412,7 +2412,7 @@ class TestImportStockDirectIntegrityErrors:
         existing_card = MaterialCard(
             normalized_mpn="iecard001",
             display_mpn="IECARD001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing_card)
         db_session.commit()

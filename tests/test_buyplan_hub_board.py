@@ -18,7 +18,7 @@ Depends on: app/services/buyplan_hub.deals_board + completed_archive,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -404,7 +404,7 @@ def test_deals_board_needs_my_action_draft(db_session, test_user, manager_user, 
 
 def _ts(days_ago: int) -> datetime:
     """A tz-aware UTC timestamp ``days_ago`` days in the past."""
-    return datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return datetime.now(UTC) - timedelta(days=days_ago)
 
 
 def test_completed_archive_only_completed_plans(db_session, test_user, test_quote, test_requisition):

@@ -16,7 +16,7 @@ for the dead-code cleanup that removed the orchestrator.
 Depends on: app.models.base.Base
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -39,7 +39,7 @@ class EnrichmentRun(Base):
     error_message = Column(Text)
     started_at = Column(UTCDateTime)
     completed_at = Column(UTCDateTime)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index("ix_enrichment_runs_phase", "phase"),

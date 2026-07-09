@@ -1,6 +1,6 @@
 """Discovery batch model — tracks every enrichment/discovery run."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -36,7 +36,7 @@ class DiscoveryBatch(Base):
 
     started_at = Column(UTCDateTime, nullable=False)
     completed_at = Column(UTCDateTime)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index("ix_discovery_batches_status", "status"),

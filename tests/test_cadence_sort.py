@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models.crm import Company
 from app.services.crm_service import order_by_clock
 
-NOW = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
 
 
 def test_null_clock_sorts_first_then_oldest(db_session):

@@ -20,7 +20,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,7 +44,7 @@ def _user(db: Session, email: str | None = None, *, role: str = "buyer", is_acti
         role=role,
         is_active=is_active,
         azure_id=_uid(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -57,7 +57,7 @@ def _company(db: Session, *, owner_id: int | None = None, domain: str | None = N
         domain=domain or f"co-{_uid()}.com",
         is_active=True,
         account_owner_id=owner_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     db.flush()
@@ -83,7 +83,7 @@ def _prospect(
         company_id=company_id,
         swept_from_owner_id=swept_from_owner_id,
         reclaim_blocked_until=reclaim_blocked_until,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(pa)
     db.flush()
@@ -243,7 +243,7 @@ class TestJobAccountSweepWithDb:
         owner = _user(db_session)
         co = _company(db_session, owner_id=owner.id)
         pa = _prospect(db_session, company_id=co.id)
-        pa.swept_at = datetime.now(timezone.utc)
+        pa.swept_at = datetime.now(UTC)
         db_session.commit()
 
         mock_notify = AsyncMock()
@@ -262,7 +262,7 @@ class TestJobAccountSweepWithDb:
         _company(db_session, owner_id=owner.id)
         db_session.commit()
 
-        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        recent = datetime.now(UTC) - timedelta(days=5)
         mock_send = MagicMock()
         with (
             patch("app.services.activity_service.get_last_activity_at", return_value=recent),
@@ -405,7 +405,7 @@ class TestJobAutoSurfaceWithDb:
             name=f"REQ-{_uid()}",
             company_id=co.id,
             status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         pa = _prospect(db_session, company_id=co.id, status="suggested", domain=domain)
@@ -423,7 +423,7 @@ class TestJobAutoSurfaceWithDb:
             name=f"No Domain {_uid()}",
             is_active=True,
             account_owner_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(co)
         db_session.flush()
@@ -431,7 +431,7 @@ class TestJobAutoSurfaceWithDb:
             name=f"REQ-{_uid()}",
             company_id=co.id,
             status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -449,7 +449,7 @@ class TestJobAutoSurfaceWithDb:
             name=f"REQ-{_uid()}",
             company_id=co.id,
             status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -470,7 +470,7 @@ class TestJobAutoSurfaceWithDb:
             name=f"REQ-{_uid()}",
             company_id=co.id,
             status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         pa_existing = ProspectAccount(
@@ -480,7 +480,7 @@ class TestJobAutoSurfaceWithDb:
             discovery_source="clay",
             fit_score=0,
             readiness_score=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(pa_existing)
         db_session.commit()
@@ -506,7 +506,7 @@ class TestJobAutoSurfaceWithDb:
         site = CustomerSite(company_id=co.id, site_name="HQ")
         db_session.add(site)
         db_session.flush()
-        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(timezone.utc))
+        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(UTC))
         db_session.add(req)
         db_session.flush()
         q = Quote(
@@ -516,7 +516,7 @@ class TestJobAutoSurfaceWithDb:
             status="won",
             result="won",
             won_revenue=5000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -541,7 +541,7 @@ class TestJobAutoSurfaceWithDb:
 
         domain = f"reqonly-{_uid()}.com"
         co = _company(db_session, owner_id=None, domain=domain)
-        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(timezone.utc))
+        req = Requisition(name=f"REQ-{_uid()}", company_id=co.id, status="open", created_at=datetime.now(UTC))
         db_session.add(req)
         db_session.commit()
 
@@ -571,7 +571,7 @@ class TestReclaimCooldown:
 
         owner = _user(db_session)
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
         db_session.commit()
 
@@ -592,7 +592,7 @@ class TestReclaimCooldown:
 
         owner = _user(db_session)
         co = _company(db_session, owner_id=None)
-        past = datetime.now(timezone.utc) - timedelta(days=1)
+        past = datetime.now(UTC) - timedelta(days=1)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=past)
         db_session.commit()
 
@@ -623,7 +623,7 @@ class TestReclaimCooldown:
         owner = _user(db_session)
         manager = _user(db_session, role="manager")
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
         db_session.commit()
 
@@ -643,7 +643,7 @@ class TestReclaimCooldown:
         owner = _user(db_session)
         admin = _user(db_session, role="admin")
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
         db_session.commit()
 
@@ -699,7 +699,7 @@ class TestReassignAccount:
         manager = _user(db_session, role="manager")
         target = _user(db_session)
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=target.id, reclaim_blocked_until=future)
         db_session.commit()
 
@@ -884,7 +884,7 @@ def _activity(db: Session, *, company_id: int, site_id: int, days_ago: int):
         channel=Channel.MANUAL,
         company_id=company_id,
         customer_site_id=site_id,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(a)
     db.flush()
@@ -1005,7 +1005,7 @@ class TestCooldownPoolAvailability:
         owner = _user(db_session, role="sales")
         other = _user(db_session, role="sales")
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
         db_session.commit()
 
@@ -1021,7 +1021,7 @@ class TestCooldownPoolAvailability:
 
         owner = _user(db_session, role="sales")
         co = _company(db_session, owner_id=None)
-        future = datetime.now(timezone.utc) + timedelta(days=15)
+        future = datetime.now(UTC) + timedelta(days=15)
         pa = _prospect(db_session, company_id=co.id, swept_from_owner_id=owner.id, reclaim_blocked_until=future)
         db_session.commit()
 

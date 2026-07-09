@@ -9,7 +9,7 @@ Called by: routers/resell.py
 Depends on: models (ExcessList, ExcessLineItem, ExcessOffer, Company), database
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
@@ -448,7 +448,7 @@ def notify_owner_of_offer(
     )
     if existing is not None:
         existing.subject = subject
-        existing.created_at = datetime.now(timezone.utc)
+        existing.created_at = datetime.now(UTC)
         return
     db.add(
         ActivityLog(
@@ -928,7 +928,7 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
         raise HTTPException(409, "Only an open or collecting list can be closed")
 
     excess_list.status = ExcessListStatus.BID_OUT
-    excess_list.close_at = datetime.now(timezone.utc)
+    excess_list.close_at = datetime.now(UTC)
     db.flush()
 
     # Retire the live-mirror: a closed posting window must stop advertising its supply
@@ -961,7 +961,7 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
     """
     from . import excess_mirror
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     overdue = (
         db.query(ExcessList)
         .filter(

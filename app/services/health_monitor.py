@@ -18,7 +18,7 @@ Called by: app.scheduler (health_check_ping, health_check_deep jobs)
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -207,7 +207,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
     Updates source status, last_ping_at, last_error fields. Returns dict with success,
     elapsed_ms, error keys.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_status = source.status
     connector = _get_connector(source, db)
 
@@ -267,7 +267,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
     Writes an ApiUsageLog entry for every test. Updates source timing fields. Returns
     dict with success, results_count, elapsed_ms, error keys.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_status = source.status
     connector = _get_connector(source, db)
 

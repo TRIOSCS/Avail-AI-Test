@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -44,7 +44,7 @@ def _make_requisition(db: Session, user: User, **kw) -> Requisition:
         status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     req = Requisition(**defaults)
@@ -59,7 +59,7 @@ def _make_requirement(db: Session, req: Requisition, **kw) -> Requirement:
         primary_mpn="LM317T",
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requirement(**defaults)
@@ -74,7 +74,7 @@ def _make_vendor_card(db: Session, **kw) -> VendorCard:
         display_name="Test Vendor",
         emails=[],
         phones=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vc = VendorCard(**defaults)
@@ -87,7 +87,7 @@ def _make_company(db: Session, **kw) -> Company:
     defaults = dict(
         name="TestCo Coverage",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     co = Company(**defaults)
@@ -105,7 +105,7 @@ def _make_offer(db: Session, req: Requisition, user: User, **kw) -> Offer:
         unit_price=0.50,
         entered_by_id=user.id,
         status=OfferStatus.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     o = Offer(**defaults)
@@ -120,7 +120,7 @@ def _make_quote(db: Session, req: Requisition, user: User, **kw) -> Quote:
         quote_number=f"Q-{req.id}-cov",
         status=QuoteStatus.DRAFT,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     q = Quote(**defaults)
@@ -136,7 +136,7 @@ def _make_buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
         status=BuyPlanStatus.PENDING,
         submitted_by_id=user.id,
         total_cost=200.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     bp = BuyPlan(**defaults)
@@ -430,7 +430,7 @@ class TestFollowUpSend:
             vendor_contact="sales@arrow.com",
             status="sent",
             parts_included=["LM317T"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(ct)
         db_session.commit()
@@ -769,7 +769,7 @@ class TestReviewResponse:
             vendor_name="Arrow",
             body="Quote: LM317T $0.50",
             status="unread",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.commit()
@@ -789,7 +789,7 @@ class TestReviewResponse:
             vendor_name="Arrow",
             body="Quote: LM317T $0.50",
             status="unread",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.commit()
@@ -816,7 +816,7 @@ class TestReviewResponse:
             vendor_name="Arrow",
             body="Quote: LM317T $0.50",
             status="unread",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.commit()
@@ -874,7 +874,7 @@ class TestRequisitionListEdgeCases:
             primary_mpn="LM317T",
             customer_pn="CPN-001",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
         db_session.commit()

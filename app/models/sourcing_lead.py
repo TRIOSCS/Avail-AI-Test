@@ -20,7 +20,7 @@ Depends on:
 - app.models.vendors (VendorCard)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -95,11 +95,11 @@ class SourcingLead(Base):
     last_buyer_action_at = Column(UTCDateTime)
     buyer_feedback_summary = Column(Text)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
@@ -147,7 +147,7 @@ class LeadEvidence(Base):
     source_reliability_band = Column(String(16))
     verification_state = Column(String(32), default="raw")
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     lead = relationship("SourcingLead", back_populates="evidence")
 
@@ -170,7 +170,7 @@ class LeadFeedbackEvent(Base):
     contact_attempt_count = Column(Integer, default=0)
 
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     lead = relationship("SourcingLead", back_populates="feedback_events")
 

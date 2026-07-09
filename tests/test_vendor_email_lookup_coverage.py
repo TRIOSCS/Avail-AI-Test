@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -33,7 +33,7 @@ def requisition_with_req(db_session: Session, test_user: User) -> tuple:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -41,7 +41,7 @@ def requisition_with_req(db_session: Session, test_user: User) -> tuple:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -60,7 +60,7 @@ def vendor_card(db_session: Session) -> VendorCard:
         website="https://arrow.com",
         is_broadcast=False,
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -82,7 +82,7 @@ def sighting_for_lm317t(db_session: Session, requisition_with_req: tuple) -> Sig
         qty_available=1000,
         unit_price=0.50,
         currency="USD",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -99,7 +99,7 @@ def broadcast_vendor(db_session: Session) -> VendorCard:
         phones=["+1-888-0200"],
         is_broadcast=True,
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -142,7 +142,7 @@ class TestQueryDbForPart:
             emails=["bad@blacklisted.com"],
             is_broadcast=True,
             is_blacklisted=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -178,7 +178,7 @@ class TestQueryDbForPart:
             source_type="api",
             qty_available=500,
             unit_price=1.00,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         s2 = Sighting(
             requirement_id=req_item.id,
@@ -187,7 +187,7 @@ class TestQueryDbForPart:
             source_type="api",
             qty_available=2000,  # higher qty
             unit_price=0.80,  # lower price
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([s1, s2])
         db_session.commit()
@@ -231,7 +231,7 @@ class TestFindVendorsForParts:
             normalized_mpn="noemail_part",
             vendor_name="No Email Vendor",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()

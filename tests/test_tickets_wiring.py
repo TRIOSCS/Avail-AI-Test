@@ -17,7 +17,7 @@ Depends on: conftest.py fixtures (client = admin-capable, db_session, test_user)
             app.routers.error_reports, app.routers.htmx_views.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -47,7 +47,7 @@ def _seed_ticket(
         source="report_button",
         risk_tier="low",
         category="other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(t)
     db.commit()

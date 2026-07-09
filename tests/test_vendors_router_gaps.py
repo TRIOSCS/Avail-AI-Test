@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/routers/htmx/vendors.py, conftest.py fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ def admin_user(db_session: Session) -> User:
         name="Gaps Admin",
         role="admin",
         azure_id="test-azure-gaps-admin",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -159,7 +159,7 @@ class TestVendorTabActivityOther:
             channel="email",  # NOT NULL in schema
             vendor_card_id=test_vendor_card.id,
             user_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()

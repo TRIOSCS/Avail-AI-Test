@@ -261,7 +261,7 @@ async def send_proactive(
         )
         return result
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/api/proactive/offers")
@@ -287,7 +287,7 @@ async def convert_to_win(
 
         return convert_proactive_to_win(db, offer_id, user)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/api/proactive/scorecard")

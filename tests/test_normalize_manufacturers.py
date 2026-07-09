@@ -12,14 +12,14 @@ Depends on: conftest.py (db_session), app.models.Manufacturer/MaterialCard
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.management.normalize_manufacturers import run
 from app.models import Manufacturer, MaterialCard
 
-_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+_TS = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def _seed_manufacturers(db: Session) -> None:
@@ -143,7 +143,7 @@ def test_soft_deleted_cards_are_cleaned_too(db_session: Session):
     # Representation fix (migration 100 contract): restoring a card must surface a
     # canonical value, so deleted_at is NOT filtered.
     _seed_manufacturers(db_session)
-    card = _card(db_session, "TLP781C", manufacturer="F)", deleted_at=datetime.now(timezone.utc))
+    card = _card(db_session, "TLP781C", manufacturer="F)", deleted_at=datetime.now(UTC))
 
     run(db_session, apply=True)
 

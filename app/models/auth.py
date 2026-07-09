@@ -1,6 +1,6 @@
 """Auth & user models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import relationship, validates
@@ -105,7 +105,7 @@ class User(Base):
     can_approve_purchase_orders = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     purchase_order_approval_limit = Column(Numeric(12, 2), nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")
@@ -149,4 +149,4 @@ class UserAdminAudit(Base):
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     action = Column(String(32), nullable=False)
     detail = Column(JSON, default=dict)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), index=True)

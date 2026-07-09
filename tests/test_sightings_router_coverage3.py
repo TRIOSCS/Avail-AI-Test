@@ -24,7 +24,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -44,7 +44,7 @@ def req_item(db_session: Session, test_user: User):
         customer_name="Cov Corp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -53,7 +53,7 @@ def req_item(db_session: Session, test_user: User):
         primary_mpn="AT89C51",
         target_qty=500,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -70,7 +70,7 @@ def two_items(db_session: Session, test_user: User):
         customer_name="Multi Corp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -81,7 +81,7 @@ def two_items(db_session: Session, test_user: User):
             primary_mpn=mpn,
             target_qty=100,
             sourcing_status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         items.append(item)
@@ -122,7 +122,7 @@ class TestBatchRefreshCoverage:
         """Both requirements are scheduled (per-MPN cooldown is enforced in the
         background search now, not pre-filtered here)."""
         _, items = two_items
-        items[0].last_searched_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        items[0].last_searched_at = datetime.now(UTC) - timedelta(seconds=5)
         db_session.commit()
         with patch(
             "app.search_service.search_requirement",
@@ -474,7 +474,7 @@ class TestPreviewInquiryCoverage:
             display_name="Preview Vendor",
             emails=[],
             sighting_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -500,7 +500,7 @@ class TestPreviewInquiryCoverage:
             display_name="Contact Vendor Preview",
             emails=[],
             sighting_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -547,7 +547,7 @@ class TestPreviewInquiryCoverage:
             customer_name="Orphan Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -555,7 +555,7 @@ class TestPreviewInquiryCoverage:
             requisition_id=req.id,
             primary_mpn="ORPHAN1",
             target_qty=10,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -586,7 +586,7 @@ class TestSendInquiryCoverage:
             display_name="Send Vendor",
             emails=[],
             sighting_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()

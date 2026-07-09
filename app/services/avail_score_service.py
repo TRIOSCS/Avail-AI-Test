@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
 """
 
-from datetime import date, timedelta, timezone
+from datetime import UTC, date, timedelta
 
 from loguru import logger
 from sqlalchemy import and_, or_
@@ -76,7 +76,7 @@ def _tier(value, thresholds):
 def _as_utc(dt):
     """Treat a naive datetime as UTC; pass tz-aware datetimes through unchanged."""
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 

@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from fastapi.responses import StreamingResponse
@@ -45,7 +45,7 @@ def _make_company(db: Session, name: str = "TestCo", owner_id: int | None = None
         name=name,
         is_active=True,
         account_owner_id=owner_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.commit()
@@ -67,7 +67,7 @@ def _make_site(db: Session, company_id: int) -> CustomerSite:
         company_id=company_id,
         site_name="HQ",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.commit()
@@ -81,7 +81,7 @@ def _make_contact(db: Session, site_id: int) -> SiteContact:
         full_name="Jane Buyer",
         email="jane@example.com",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(contact)
     db.commit()
@@ -94,7 +94,7 @@ def _make_material_card(db: Session) -> MaterialCard:
         normalized_mpn="lm317t",
         display_mpn="LM317T",
         manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -117,7 +117,7 @@ def _make_company_attachment(
         content_type="application/pdf",
         size_bytes=2048,
         uploaded_by_id=user_id,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
     )
     db.add(att)
     db.commit()
@@ -135,7 +135,7 @@ def _make_contact_attachment(db: Session, contact_id: int, user_id: int) -> Site
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         size_bytes=512,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(att)
     db.commit()
@@ -153,7 +153,7 @@ def _make_material_attachment(db: Session, card_id: int, user_id: int) -> Materi
         content_type="application/pdf",
         size_bytes=4096,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(att)
     db.commit()
@@ -179,7 +179,7 @@ class TestCompanyAttachments:
         assert resp.json() == []
 
     def test_list_returns_attachments_newest_first(self, client, db_session, test_user):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         co = _make_company(db_session, owner_id=test_user.id)
         att_older = _make_company_attachment(db_session, co.id, test_user.id, created_at=now - timedelta(hours=1))
         att_newer = _make_company_attachment(db_session, co.id, test_user.id, created_at=now)

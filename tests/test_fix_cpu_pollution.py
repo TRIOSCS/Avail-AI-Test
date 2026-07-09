@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ def _make_cpu_card(db: Session, mpn: str) -> MaterialCard:
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer="Generic",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -83,7 +83,7 @@ class TestReclassifyCpuPollutionDryRun:
             normalized_mpn="cap1234",
             display_mpn="CAP1234",
             manufacturer="Generic",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -102,7 +102,7 @@ class TestReclassifyCpuPollutionDryRun:
         from sqlalchemy import update as _sa_update
 
         db_session.execute(
-            _sa_update(MaterialCard).where(MaterialCard.id == card.id).values(deleted_at=datetime.now(timezone.utc))
+            _sa_update(MaterialCard).where(MaterialCard.id == card.id).values(deleted_at=datetime.now(UTC))
         )
         db_session.commit()
 

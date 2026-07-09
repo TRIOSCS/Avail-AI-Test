@@ -18,7 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -64,7 +64,7 @@ def _make_card_with_requirement(db: Session, mpn: str) -> MaterialCard:
         customer_name="Test Corp",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -83,7 +83,7 @@ def _make_card_with_requirement(db: Session, mpn: str) -> MaterialCard:
         primary_mpn=mpn,
         target_qty=100,
         material_card_id=card.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()
@@ -145,7 +145,7 @@ async def test_enrich_material_cards_skips_deleted_cards(db: Session):
     from app.services.material_enrichment_service import enrich_material_cards
 
     card = _make_card(db, "DELETED-PART")
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     db.commit()
 
     with patch("app.services.material_enrichment_service._enrich_batch", new_callable=AsyncMock) as mock_batch:
@@ -314,7 +314,7 @@ async def test_enrich_pending_cards_returns_early_when_no_pending(db: Session):
     """Line 215-216: no unenriched cards → returns zero stats with pending key."""
     from app.services.material_enrichment_service import enrich_pending_cards
 
-    _make_card(db, "ALREADY-DONE", enriched_at=datetime.now(timezone.utc))
+    _make_card(db, "ALREADY-DONE", enriched_at=datetime.now(UTC))
 
     result = await enrich_pending_cards(db)
     assert result == {"enriched": 0, "skipped": 0, "errors": 0, "pending": 0}

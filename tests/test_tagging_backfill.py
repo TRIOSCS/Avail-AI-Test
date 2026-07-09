@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.services.tagging_backfill, app.routers.tagging_admin, app.models
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
@@ -15,10 +15,9 @@ from app.services.tagging_backfill import run_prefix_backfill, seed_from_existin
 
 def _seed_commodity_tags(db):
     """Seed commodity taxonomy tags for tests that need them."""
-    from datetime import timezone as tz
 
     for name in ["Power Management ICs", "Capacitors", "Microcontrollers (MCU)", "Miscellaneous"]:
-        db.add(Tag(name=name, tag_type="commodity", created_at=datetime.now(tz.utc)))
+        db.add(Tag(name=name, tag_type="commodity", created_at=datetime.now(UTC)))
     db.commit()
 
 
@@ -28,7 +27,7 @@ def _make_card(db, mpn, manufacturer=None, category=None):
         display_mpn=mpn,
         manufacturer=manufacturer,
         category=category,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -120,7 +119,7 @@ def test_prefix_backfill_skips_already_tagged(db_session):
     card = _make_card(db_session, "TPS65217")
 
     # Tag manually
-    tag = Tag(name="TI", tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name="TI", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(tag)
     db_session.flush()
     mt = MaterialTag(material_card_id=card.id, tag_id=tag.id, confidence=0.9, source="manual")
@@ -168,7 +167,7 @@ def test_purge_unknown_tags_removes_low_confidence(db_session):
     from app.services.tagging_backfill import purge_unknown_tags
 
     card = _make_card(db_session, "INTERNAL001")
-    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(unknown_tag)
     db_session.flush()
     mt = MaterialTag(material_card_id=card.id, tag_id=unknown_tag.id, confidence=0.30, source="ai_classified")
@@ -188,7 +187,7 @@ def test_purge_unknown_tags_keeps_higher_confidence(db_session):
     from app.services.tagging_backfill import purge_unknown_tags
 
     card = _make_card(db_session, "REALPART001")
-    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(unknown_tag)
     db_session.flush()
     mt = MaterialTag(material_card_id=card.id, tag_id=unknown_tag.id, confidence=0.50, source="manual")
@@ -216,7 +215,7 @@ def test_purge_unknown_tags_batch_processing(db_session):
     """Purge processes in batches correctly."""
     from app.services.tagging_backfill import purge_unknown_tags
 
-    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(unknown_tag)
     db_session.flush()
 
@@ -413,7 +412,7 @@ def test_repair_visibility_processes_entities(db_session):
     from app.models.tags import EntityTag
     from app.services.tagging_backfill import repair_entity_tag_visibility
 
-    tag = Tag(name="RepairBrand", tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name="RepairBrand", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(tag)
     db_session.flush()
 
@@ -450,7 +449,7 @@ def test_repair_visibility_counts_visible_hidden(db_session):
     from app.models.tags import EntityTag
     from app.services.tagging_backfill import repair_entity_tag_visibility
 
-    tag = Tag(name="CountBrand", tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name="CountBrand", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(tag)
     db_session.flush()
 

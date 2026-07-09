@@ -11,7 +11,7 @@ Depends on: app.routers.htmx_views (deactivate_company, reactivate_company),
             app.dependencies.can_manage_account_team
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +27,7 @@ def owned_company(db_session: Session, sales_user: User) -> Company:
         name="Owned Corp",
         is_active=True,
         account_owner_id=None,  # will be set after sales_user is created
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.flush()
@@ -43,7 +43,7 @@ def unowned_company(db_session: Session) -> Company:
     co = Company(
         name="Unowned Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()

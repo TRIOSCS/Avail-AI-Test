@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -39,7 +39,7 @@ def call_log(db_session, test_user):
         subject="Call to Test",
         is_meaningful=True,
         auto_logged=True,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
     )
     db_session.add(record)
     db_session.commit()
@@ -122,7 +122,7 @@ class TestCallOutcomeEndpoint:
             activity_type=ActivityType.EMAIL_SENT,
             channel="email",
             subject="Email to Test",
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
         db_session.add(record)
         db_session.commit()
@@ -140,7 +140,7 @@ class TestCallOutcomeEndpoint:
             activity_type=ActivityType.CALL_LOGGED,
             channel="phone",
             subject="Call",
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
         db_session.add(record)
         db_session.commit()

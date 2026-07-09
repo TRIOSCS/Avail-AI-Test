@@ -7,8 +7,7 @@ app.services.firmo_tiers. apply_enrichment_to_* functions are provenance-aware.
 """
 
 import re
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import httpx
 from loguru import logger
@@ -301,7 +300,7 @@ COMPANY_SEARCH_SYSTEM = (
 )
 
 
-async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
+async def _ai_find_company(domain: str, name: str = "") -> dict | None:
     """Look up a company using Claude + web search.
 
     Returns normalized company data.
@@ -529,7 +528,7 @@ def _apply_enrichment(obj, data: dict) -> list[str]:
         updated.append(field)
     if updated:
         obj.enrichment_provenance = store
-        obj.last_enriched_at = datetime.now(timezone.utc)
+        obj.last_enriched_at = datetime.now(UTC)
         obj.enrichment_source = data.get("source", "unknown")
     return updated
 

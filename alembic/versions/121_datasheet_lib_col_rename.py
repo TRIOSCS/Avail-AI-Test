@@ -17,14 +17,14 @@ Re-numbered 120->121: feat/crm-aiorg (120_company_name_matching) merged to main 
 keep a single head.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision = "121_datasheet_lib_col_rename"
 down_revision = "120_company_name_matching"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

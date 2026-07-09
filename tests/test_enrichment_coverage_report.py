@@ -13,7 +13,7 @@ Depends on: app/management/enrichment_coverage_report.py, conftest db_session
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -87,7 +87,7 @@ def seeded(db_session):
         "MPN-E",
         category="dram",
         enrichment_status="verified",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
         specs_structured={"ddr_type": {"value": "DDR4", "source": "mpn_decode"}},
     )
     _card(

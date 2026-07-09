@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: routers/requisitions, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -125,7 +125,7 @@ def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_use
         name="Other User Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

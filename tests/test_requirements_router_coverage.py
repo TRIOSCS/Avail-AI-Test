@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def _make_requirement(db: Session, req: Requisition, **kw) -> Requirement:
         normalized_mpn="lm317t",
         target_qty=100,
         target_price=0.50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requirement(**defaults)
@@ -60,7 +60,7 @@ def _make_sighting(db: Session, req_item: Requirement, **kw) -> Sighting:
         unit_price=0.45,
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     s = Sighting(**defaults)
@@ -82,7 +82,7 @@ def _make_offer(db: Session, req: Requisition, req_item: Requirement, user: User
         unit_price=0.50,
         entered_by_id=user.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     o = Offer(**defaults)
@@ -99,7 +99,7 @@ def _make_material_card(db: Session, mpn: str = "LM317T") -> MaterialCard:
         display_mpn=mpn,
         normalized_mpn=normalize_mpn_key(mpn),
         manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.commit()
@@ -127,8 +127,8 @@ def _make_sourcing_lead(db: Session, req: Requisition, user: User, **kw):
         vendor_safety_band="medium",
         buyer_status="open",
         buyer_owner_user_id=user.id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     defaults.update(kw)
     lead = SourcingLead(**defaults)
@@ -201,7 +201,7 @@ class TestAddRequirementsWithMaterialCard:
     def test_add_with_customer_site_and_material_card(self, client, db_session, test_user, test_requisition):
         from app.models import Company, CustomerSite
 
-        co = Company(name="Site Corp", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="Site Corp", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="HQ")
@@ -365,7 +365,7 @@ class TestGetSavedSightingsWithData:
             name="EMPTY-REQ",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -421,7 +421,7 @@ class TestListRequirementOffersHistorical:
             name="OTHER-REQ",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_req)
         db_session.flush()
@@ -430,7 +430,7 @@ class TestListRequirementOffersHistorical:
             primary_mpn="LM317T",
             target_qty=50,
             material_card_id=mc.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_item)
         db_session.flush()
@@ -444,7 +444,7 @@ class TestListRequirementOffersHistorical:
             material_card_id=mc.id,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(hist_offer)
         db_session.commit()
@@ -608,7 +608,7 @@ class TestRequirementHistoryOfferChanges:
             field_name="unit_price",
             old_value="0.50",
             new_value="0.45",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(cl)
         db_session.commit()
@@ -771,7 +771,7 @@ class TestAddRequirementsDuplicateDetection:
         customer_site_id."""
         from app.models import Company, CustomerSite
 
-        co = Company(name="DupCo", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="DupCo", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="HQ")

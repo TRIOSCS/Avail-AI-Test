@@ -8,7 +8,7 @@ Revises: a2a095f252db
 Create Date: 2026-03-29 23:37:54.516804
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from sqlalchemy import text
 
@@ -16,9 +16,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f2ee82c7b17d"
-down_revision: Union[str, None] = "a2a095f252db"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "a2a095f252db"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

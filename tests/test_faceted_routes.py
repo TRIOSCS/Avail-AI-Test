@@ -4,7 +4,7 @@ Covers: Faceted search routes in app/routers/htmx_views.py
 Depends on: conftest.py, faceted search models, commodity_registry
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ def test_subfilters_renders_for_commodity(client, db_session: Session):
         display_mpn="DDR4-001",
         manufacturer="MemCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.flush()
@@ -74,7 +74,7 @@ def test_faceted_results_returns_materials(client, db_session: Session):
         display_mpn="TEST-001",
         manufacturer="TestCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -110,14 +110,14 @@ def test_faceted_results_sub_filters_actually_filter(client, db_session: Session
         display_mpn="DDR4-CHIP",
         manufacturer="MemCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     card_ddr5 = MaterialCard(
         normalized_mpn="ddr5-chip",
         display_mpn="DDR5-CHIP",
         manufacturer="MemCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([card_ddr4, card_ddr5])
     db_session.flush()
@@ -157,7 +157,7 @@ def test_manufacturer_filter_partial_renders(client, db_session: Session):
             display_mpn="MFG-TEST-1",
             manufacturer="MemCo",
             category="dram",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -235,7 +235,7 @@ def test_global_filters_partial_renders(client, db_session: Session):
             lifecycle_status="active",
             rohs_status="compliant",
             datasheet_url="https://example.com/ds.pdf",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -258,14 +258,14 @@ def test_faceted_lifecycle_param_filters(client, db_session: Session):
                 display_mpn="LC-ACTIVE",
                 category="resistors",
                 lifecycle_status="active",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             MaterialCard(
                 normalized_mpn="lc-eol",
                 display_mpn="LC-EOL",
                 category="resistors",
                 lifecycle_status="eol",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
     )
@@ -286,7 +286,7 @@ def test_faceted_rohs_and_datasheet_params_filter(client, db_session: Session):
                 category="resistors",
                 rohs_status="compliant",
                 datasheet_url="https://example.com/a.pdf",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             MaterialCard(
                 normalized_mpn="r-ok-no-ds",
@@ -294,7 +294,7 @@ def test_faceted_rohs_and_datasheet_params_filter(client, db_session: Session):
                 category="resistors",
                 rohs_status="compliant",
                 datasheet_url=None,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             MaterialCard(
                 normalized_mpn="r-bad-ds",
@@ -302,7 +302,7 @@ def test_faceted_rohs_and_datasheet_params_filter(client, db_session: Session):
                 category="resistors",
                 rohs_status="non-compliant",
                 datasheet_url="https://example.com/b.pdf",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
     )
@@ -323,14 +323,14 @@ def test_faceted_statuses_param_still_filters(client, db_session: Session):
                 display_mpn="ST-VERIFIED",
                 category="resistors",
                 enrichment_status="verified",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             MaterialCard(
                 normalized_mpn="st-ai",
                 display_mpn="ST-AI",
                 category="resistors",
                 enrichment_status="ai_inferred",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
     )
@@ -408,7 +408,7 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
         display_mpn="EUR-TEST-001",
         manufacturer="EuroCo",
         category="capacitors",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card_eur)
     db_session.flush()
@@ -436,7 +436,7 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
         display_mpn="MIXED-TEST-001",
         manufacturer="MixedCo",
         category="capacitors",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card_mixed)
     db_session.flush()
@@ -486,7 +486,7 @@ def _op_card(db, mpn, **kw):
         normalized_mpn=mpn.lower(),
         display_mpn=mpn.upper(),
         category=kw.pop("category", "resistors"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(card)
@@ -542,7 +542,7 @@ def test_faceted_has_stock_and_price_params(client, db_session: Session):
 def test_faceted_searched_within_param(client, db_session: Session):
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _op_card(db_session, "sw-fresh", last_searched_at=now - timedelta(days=2))
     _op_card(db_session, "sw-stale", last_searched_at=now - timedelta(days=60))
     db_session.commit()
@@ -605,7 +605,7 @@ def _dram_with_facet(db, mpn):
         normalized_mpn=mpn.lower(),
         display_mpn=mpn.upper(),
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -914,7 +914,7 @@ def test_faceted_route_manufacturers_param_matches_brand_or_maker(client, db_ses
             brand="IBM",
             manufacturer="Seagate Technology",
             category="hdd",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.add(
@@ -923,7 +923,7 @@ def test_faceted_route_manufacturers_param_matches_brand_or_maker(client, db_ses
             display_mpn="OTHER-DRAM",
             manufacturer="Samsung",
             category="dram",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -959,7 +959,7 @@ def test_faceted_row_suppresses_tautological_alias_dual_display(client, db_sessi
             brand="Hewlett Packard Enterprise",  # B1 wrote the normalized OEM label
             manufacturer="HP",  # raw legacy alias, lossless by design
             category="hdd",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()

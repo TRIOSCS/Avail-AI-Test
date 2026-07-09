@@ -24,7 +24,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -35,17 +35,17 @@ from app.services.buyplan_builder import build_buy_plan
 
 
 def _make_user(db: Session, email="b2seed@trioscs.com") -> User:
-    u = User(email=email, name="B2 Tester", role="buyer", azure_id=f"az-{email}", created_at=datetime.now(timezone.utc))
+    u = User(email=email, name="B2 Tester", role="buyer", azure_id=f"az-{email}", created_at=datetime.now(UTC))
     db.add(u)
     db.flush()
     return u
 
 
 def _make_site(db: Session, country=None) -> CustomerSite:
-    company = Company(name="B2 Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    company = Company(name="B2 Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(company)
     db.flush()
-    s = CustomerSite(company_id=company.id, site_name="HQ", country=country, created_at=datetime.now(timezone.utc))
+    s = CustomerSite(company_id=company.id, site_name="HQ", country=country, created_at=datetime.now(UTC))
     db.add(s)
     db.flush()
     return s
@@ -53,7 +53,7 @@ def _make_site(db: Session, country=None) -> CustomerSite:
 
 def _make_requisition(db: Session, user: User, site: CustomerSite) -> Requisition:
     r = Requisition(
-        name="REQ-B2", status="won", created_by=user.id, customer_site_id=site.id, created_at=datetime.now(timezone.utc)
+        name="REQ-B2", status="won", created_by=user.id, customer_site_id=site.id, created_at=datetime.now(UTC)
     )
     db.add(r)
     db.flush()
@@ -66,7 +66,7 @@ def _make_requirement(db: Session, req: Requisition, mpn="B2-123", qty=100, pric
         primary_mpn=mpn,
         target_qty=qty,
         target_price=price,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -74,7 +74,7 @@ def _make_requirement(db: Session, req: Requisition, mpn="B2-123", qty=100, pric
 
 
 def _make_vendor(db: Session, name="B2 Vendor") -> VendorCard:
-    v = VendorCard(normalized_name=name.lower(), display_name=name, created_at=datetime.now(timezone.utc))
+    v = VendorCard(normalized_name=name.lower(), display_name=name, created_at=datetime.now(UTC))
     db.add(v)
     db.flush()
     return v
@@ -99,7 +99,7 @@ def _make_offer(
         qty_available=qty,
         unit_price=price,
         status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.flush()
@@ -113,7 +113,7 @@ def _make_quote(db: Session, req: Requisition, site: CustomerSite, user: User, s
         quote_number="Q-B2-001",
         status=status,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()

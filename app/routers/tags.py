@@ -67,7 +67,7 @@ async def get_tag_entities(
 
     return {
         "items": [
-            EntityTagResponse(  # type: ignore[call-arg, unused-ignore]  # extra="allow" model; entity_type/entity_id pass through
+            EntityTagResponse(  # type: ignore[call-arg]  # extra="allow" model; entity_type/entity_id pass through
                 tag=_tag_response(et.tag),
                 interaction_count=et.interaction_count,
                 total_entity_interactions=et.total_entity_interactions,

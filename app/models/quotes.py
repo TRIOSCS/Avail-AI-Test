@@ -3,7 +3,7 @@
 Buy Plan V1 model removed — use BuyPlan from models.buy_plan.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -62,11 +62,11 @@ class Quote(Base):
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     # Revenue attribution: "proactive" = originated from proactive selling; NULL = manual/unknown.
     source = Column(String(50))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     requisition = relationship("Requisition", back_populates="quotes")
@@ -142,7 +142,7 @@ class QuoteRequisition(Base):
     id = Column(Integer, primary_key=True)
     quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     quote = relationship("Quote", foreign_keys=[quote_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
@@ -172,10 +172,10 @@ def _quote_self_link(_mapper, connection, target) -> None:
     if target.requisition_id is None:
         return
     connection.execute(
-        QuoteRequisition.__table__.insert().values(  # type: ignore[attr-defined, unused-ignore]  # __table__ is a Table at runtime
+        QuoteRequisition.__table__.insert().values(  # type: ignore[attr-defined]  # __table__ is a Table at runtime
             quote_id=target.id,
             requisition_id=target.requisition_id,
-            created_at=target.created_at or datetime.now(timezone.utc),
+            created_at=target.created_at or datetime.now(UTC),
         )
     )
 

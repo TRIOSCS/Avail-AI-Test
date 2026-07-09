@@ -18,7 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -98,7 +98,7 @@ def _msg(from_addr, received="", hours_ago=None):
     verbatim.
     """
     if hours_ago is not None:
-        received = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+        received = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
     return {
         "from": {"emailAddress": {"address": from_addr}},
         "receivedDateTime": received,
@@ -251,7 +251,7 @@ class TestFetchThreadsForRequirement:
             vendor_name="Arrow",
             vendor_contact="sales@arrow.com",
             graph_conversation_id="conv-tier1-test",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -345,7 +345,7 @@ class TestFetchThreadsForRequirement:
             vendor_name="Internal",
             vendor_contact="other@trioscs.com",
             graph_conversation_id="conv-internal",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -676,7 +676,7 @@ class TestFetchThreadsForRequirementTiers:
             vendor_email="sales@arrow.com",
             mpn_matched="LM317T",
             source_type="broker",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -780,7 +780,7 @@ class TestDetectNeedsResponseEdgeCases:
 
     def test_date_with_z_suffix(self):
         """Date with Z suffix is correctly parsed (recent = no response needed)."""
-        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         assert _detect_needs_response([_msg("vendor@arrow.com", received=now_iso)]) is False
 
     def test_vendor_message_23h_ago_no_response_needed(self):

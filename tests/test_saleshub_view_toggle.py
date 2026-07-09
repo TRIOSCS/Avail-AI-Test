@@ -10,7 +10,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 
@@ -23,7 +23,7 @@ def _make_req(db_session, test_user):
         urgency="normal",
         customer_name="Acme",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

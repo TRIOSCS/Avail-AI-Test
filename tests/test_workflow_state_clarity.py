@@ -1,7 +1,7 @@
 """Tests for workflow state clarity features — RFQ failures, retry endpoint, buy plan
 resubmission."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -61,7 +61,7 @@ class TestPendingContactVisibility:
             vendor_email="ooo@vendor.com",
             classification="ooo",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -72,7 +72,7 @@ class TestPendingContactVisibility:
             parent = db_session.get(Contact, vr.contact_id)
             if parent:
                 parent.status = "ooo"
-                parent.status_updated_at = datetime.now(timezone.utc)
+                parent.status_updated_at = datetime.now(UTC)
 
         db_session.flush()
         db_session.refresh(contact)
@@ -99,7 +99,7 @@ class TestPendingContactVisibility:
             vendor_email="bounce@vendor.com",
             classification="bounce",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -109,7 +109,7 @@ class TestPendingContactVisibility:
             parent = db_session.get(Contact, vr.contact_id)
             if parent:
                 parent.status = "bounced"
-                parent.status_updated_at = datetime.now(timezone.utc)
+                parent.status_updated_at = datetime.now(UTC)
 
         db_session.flush()
         db_session.refresh(contact)
@@ -136,7 +136,7 @@ class TestPendingContactVisibility:
             vendor_email="normal@vendor.com",
             classification="quote",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -169,7 +169,7 @@ class TestWorkflowIntegration:
 
         # 2. Retry succeeds — old contact marked retried
         c.status = "retried"
-        c.status_updated_at = datetime.now(timezone.utc)
+        c.status_updated_at = datetime.now(UTC)
         db_session.flush()
 
         c2 = Contact(
@@ -193,12 +193,12 @@ class TestWorkflowIntegration:
             vendor_email="life@corp.com",
             classification="ooo",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
         c2.status = "ooo"
-        c2.status_updated_at = datetime.now(timezone.utc)
+        c2.status_updated_at = datetime.now(UTC)
         db_session.flush()
         assert c2.status == "ooo"
 

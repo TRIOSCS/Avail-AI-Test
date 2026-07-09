@@ -8,7 +8,7 @@ Called by: pytest.
 Depends on: app.services.proactive_matching, models, conftest db_session fixture.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.constants import ProactiveMatchStatus, RequisitionStatus
@@ -39,7 +39,7 @@ def _setup(db, *, mpn="ABC123"):
         name="Account Owner",
         role="sales",
         azure_id=f"owner-{mpn}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(owner)
     db.flush()
@@ -133,7 +133,7 @@ def test_hotlist_and_cph_dedup_one_match(db_session):
             mpn="GHI789",
             source="avail_offer",
             purchase_count=2,
-            last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
+            last_purchased_at=datetime.now(UTC) - timedelta(days=30),
             avg_unit_price=Decimal("20.00"),
             last_unit_price=Decimal("21.00"),
             total_quantity=100,

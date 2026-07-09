@@ -1,6 +1,7 @@
 """Tests for app.vendor_utils — vendor name normalization, merging, and fuzzy
 matching."""
 
+from datetime import UTC
 from unittest.mock import MagicMock
 
 import pytest
@@ -233,7 +234,7 @@ class TestFuzzyMatchVendor:
 
 class TestFindVendorDedupCandidates:
     def test_finds_similar_vendors(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -242,19 +243,19 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=100,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electronic",
                 display_name="Arrow Electronic",
                 sighting_count=5,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="mouser electronics",
                 display_name="Mouser Electronics",
                 sighting_count=50,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -272,7 +273,7 @@ class TestFindVendorDedupCandidates:
         assert "sightings" in pair["vendor_a"]
 
     def test_no_duplicates_when_all_distinct(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -281,13 +282,13 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="texas instruments",
                 display_name="Texas Instruments",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -297,7 +298,7 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_respects_limit(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -308,7 +309,7 @@ class TestFindVendorDedupCandidates:
                     normalized_name=f"test vendor {i}",
                     display_name=f"Test Vendor {i}",
                     sighting_count=10,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db_session.commit()
@@ -321,7 +322,7 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_results_sorted_by_score(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -330,19 +331,19 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electronic",
                 display_name="Arrow Electronic",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electro",
                 display_name="Arrow Electro",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -356,7 +357,7 @@ class TestFindVendorDedupCandidates:
         """Line 195: when a pair has already been seen, it is skipped."""
         # This tests the `continue` on line 195 — pairs are deduplicated
         # by checking (min_id, max_id) tuples
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -366,13 +367,13 @@ class TestFindVendorDedupCandidates:
                 normalized_name="test company alpha",
                 display_name="Test Company Alpha",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="test company alpha inc",
                 display_name="Test Company Alpha Inc",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)

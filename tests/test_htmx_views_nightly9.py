@@ -10,7 +10,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 os.environ["TESTING"] = "1"
 
-from app.constants import VendorResponseStatus  # noqa: E402
-from app.models import (  # noqa: E402
+from app.constants import VendorResponseStatus
+from app.models import (
     Company,
     CustomerSite,
     MaterialCard,
@@ -29,10 +29,10 @@ from app.models import (  # noqa: E402
     VendorCard,
     VendorContact,
 )
-from app.models.crm import SiteContact  # noqa: E402
-from app.models.enrichment import ProspectContact  # noqa: E402
-from app.models.offers import VendorResponse  # noqa: E402
-from app.models.vendors import VendorReview  # noqa: E402
+from app.models.crm import SiteContact
+from app.models.enrichment import ProspectContact
+from app.models.offers import VendorResponse
+from app.models.vendors import VendorReview
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ def _vendor_review(db: Session, vendor: VendorCard, user: User, **kw) -> VendorR
         user_id=user.id,
         rating=4,
         comment="Good supplier",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = VendorReview(**defaults)
@@ -61,7 +61,7 @@ def _prospect(db: Session, vendor: VendorCard, **kw) -> ProspectContact:
         email=f"prospect-{uuid.uuid4().hex[:6]}@vendor.com",
         source="web_search",
         confidence="medium",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectContact(**defaults)
@@ -94,7 +94,7 @@ def _vendor_response(db: Session, req: Requisition, **kw) -> VendorResponse:
         subject="Re: RFQ",
         body="We have stock.",
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vr = VendorResponse(**defaults)
@@ -110,7 +110,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="Acme",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requisition(**defaults)
@@ -189,7 +189,7 @@ class TestVendorReviews:
             name="Other User",
             role="buyer",
             azure_id="other-azure-99",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other)
         db_session.commit()

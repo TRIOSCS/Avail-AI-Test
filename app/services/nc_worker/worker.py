@@ -17,7 +17,7 @@ import hashlib
 import signal
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -75,7 +75,7 @@ def update_worker_status(db: Session, **kwargs):
     for key, value in kwargs.items():
         if hasattr(status, key):
             setattr(status, key, value)
-    status.updated_at = datetime.now(timezone.utc)
+    status.updated_at = datetime.now(UTC)
     db.commit()
 
 
@@ -86,7 +86,7 @@ def _record_heartbeat(db: Session):
     EVERY path (idle, cap-sleep, breaker-open, business-hours), not just after
     completing work. Returns early if the singleton row is absent.
     """
-    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
 
 async def run_ai_gate(db: Session):
@@ -128,7 +128,7 @@ def main():
     # Recover stale items from previous crash
     with _db_session() as db:
         recover_stale_searches(db)
-        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
     # Start HTTP session and login
     session = NcSessionManager(config)
@@ -314,10 +314,10 @@ def main():
 
                     update_worker_status(
                         db,
-                        last_search_at=datetime.now(timezone.utc),
+                        last_search_at=datetime.now(UTC),
                         searches_today=searches_today,
                         sightings_today=sightings_today,
-                        last_heartbeat=datetime.now(timezone.utc),
+                        last_heartbeat=datetime.now(UTC),
                     )
 
                     logger.info(

@@ -1,6 +1,6 @@
 """Sync models — sync log tracking."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Column, Float, Index, Integer, String
 
@@ -20,6 +20,6 @@ class SyncLog(Base):
     duration_seconds = Column(Float)
     row_counts = Column(JSON)
     errors = Column(JSON)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (Index("ix_sync_source_time", "source", "started_at"),)

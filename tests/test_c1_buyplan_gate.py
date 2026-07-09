@@ -22,7 +22,7 @@ Depends on: conftest (db_session), app.services.buyplan_workflow,
 
 import contextlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -61,7 +61,7 @@ def _make_approver(db: Session) -> User:
         role="admin",
         azure_id=f"azure-c1-appr-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -76,7 +76,7 @@ def _make_draft_plan(db: Session, user: User, *, total_cost: float = 10_000.0) -
         customer_name="C1Co",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -87,7 +87,7 @@ def _make_draft_plan(db: Session, user: User, *, total_cost: float = 10_000.0) -
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -281,7 +281,7 @@ def test_submit_with_no_approver_leaves_plan_pending(db_session: Session) -> Non
         role="buyer",
         azure_id=f"azure-c1-noappr-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(submitter)
     db_session.flush()
@@ -423,7 +423,7 @@ def _ops_member(db: Session, *, role: str = "buyer") -> User:
         role=role,
         azure_id=f"azure-c1-ops-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()

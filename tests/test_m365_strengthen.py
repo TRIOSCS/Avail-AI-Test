@@ -12,7 +12,7 @@ Depends on: conftest.py fixtures, app.jobs.email_jobs, app.services.email_thread
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -49,7 +49,7 @@ def test_scan_sent_folder(db_session, test_user):
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

@@ -13,7 +13,7 @@ Called by: pytest
 Depends on: conftest.py (db_session, test_user, test_company, test_requisition fixtures)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -39,7 +39,7 @@ def _make_customer_site(db: Session, company: Company) -> CustomerSite:
     site = CustomerSite(
         company_id=company.id,
         site_name="Main Site",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -51,7 +51,7 @@ def _make_site_contact(db: Session, site: CustomerSite) -> SiteContact:
         customer_site_id=site.id,
         full_name="Alice Buyer",
         email="alice@acme.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(contact)
     db.flush()
@@ -62,7 +62,7 @@ def _make_material_card(db: Session) -> MaterialCard:
     card = MaterialCard(
         normalized_mpn="lm317t",
         display_mpn="LM317T",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -83,7 +83,7 @@ def test_company_attachment_creates_and_back_ref(db_session: Session, test_compa
         content_type="application/pdf",
         size_bytes=204800,
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -103,13 +103,13 @@ def test_company_attachment_library_drive_id_nullable(db_session: Session, test_
         company_id=test_company.id,
         file_name="od_file.pdf",
         library_drive_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     library_att = CompanyAttachment(
         company_id=test_company.id,
         file_name="lib_file.pdf",
         library_drive_id="b!driveId-ABC-123",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([onedrive_att, library_att])
     db_session.commit()
@@ -138,7 +138,7 @@ def test_site_contact_attachment_creates_and_back_ref(db_session: Session, test_
         content_type="image/jpeg",
         size_bytes=51200,
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -161,7 +161,7 @@ def test_site_contact_attachment_library_drive_set(db_session: Session, test_com
         library_drive_id="b!SPDriveId-789",
         library_item_id="sp-item-789",
         library_web_url="https://company.sharepoint.com/contract.docx",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -186,7 +186,7 @@ def test_material_card_attachment_creates_and_back_ref(db_session: Session, test
         content_type="application/pdf",
         size_bytes=102400,
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -217,7 +217,7 @@ def test_material_card_attachment_library_drive_id_nullable(db_session: Session)
         material_card_id=card.id,
         file_name="drawing.png",
         library_drive_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -242,7 +242,7 @@ def test_offer_attachment_has_renamed_columns(db_session: Session, test_requisit
         vendor_name="TestVendor",
         mpn="LM317T",
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.flush()
@@ -254,7 +254,7 @@ def test_offer_attachment_has_renamed_columns(db_session: Session, test_requisit
         library_web_url="https://onedrive.example.com/offer_doc.pdf",
         library_drive_id=None,
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -280,7 +280,7 @@ def test_requisition_attachment_has_renamed_columns(
         library_web_url="https://onedrive.example.com/req_doc.pdf",
         library_drive_id=None,
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -307,7 +307,7 @@ def test_requirement_attachment_has_renamed_columns(
         library_web_url="https://onedrive.example.com/part_spec.pdf",
         library_drive_id="b!CompanyDrive",
         uploaded_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -329,7 +329,7 @@ def test_company_attachment_cascade_delete(db_session: Session, test_company: Co
         company_id=test_company.id,
         file_name="cascade_test.pdf",
         library_drive_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -349,7 +349,7 @@ def test_site_contact_attachment_cascade_delete(db_session: Session, test_compan
         site_contact_id=contact.id,
         file_name="cascade_contact.pdf",
         library_drive_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -368,7 +368,7 @@ def test_material_card_attachment_cascade_delete(db_session: Session):
         material_card_id=card.id,
         file_name="cascade_card.pdf",
         library_drive_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()

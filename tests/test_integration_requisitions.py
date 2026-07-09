@@ -7,6 +7,8 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
+from datetime import UTC
+
 import pytest
 
 pytestmark = pytest.mark.slow
@@ -195,9 +197,9 @@ def test_get_saved_sightings_returns_data(client, db_session):
     item_id = reqs[0]["id"]
 
     # Insert sightings directly in DB
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     s1 = Sighting(
         requirement_id=item_id,
         vendor_name="Acme Chips",

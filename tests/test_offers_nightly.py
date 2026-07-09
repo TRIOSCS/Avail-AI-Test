@@ -11,7 +11,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ def _make_requisition(db: Session, user_id: int, status: str = "open") -> Requis
         name="Test Req",
         status=status,
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -48,7 +48,7 @@ def _make_offer(
         entered_by_id=user_id,
         status=status,
         evidence_tier=evidence_tier,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()

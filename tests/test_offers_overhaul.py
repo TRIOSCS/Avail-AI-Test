@@ -6,7 +6,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -38,7 +38,7 @@ def _make_vendor_response(db, requisition_id, user_id, *, vendor_name, vendor_em
         subject=subject,
         body=body,
         scanned_by_user_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vr)
     db.flush()
@@ -151,7 +151,7 @@ class TestOfferApproval:
             status="pending_review",
             source="email_parse",
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.commit()
@@ -227,12 +227,12 @@ class TestQuotedOfferBadge:
             unit_price=0.50,
             status="active",
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
 
-        co = Company(name="Badge Test Co", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="Badge Test Co", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email="x@test.com")
@@ -249,7 +249,7 @@ class TestQuotedOfferBadge:
             total_cost=50,
             total_margin_pct=50,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -272,7 +272,7 @@ class TestQuotedOfferBadge:
             unit_price=0.50,
             status="active",
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -337,7 +337,7 @@ class TestBuyPlanQuoteLineItems:
         """V1 submit_buy_plan always returns 404 regardless of quote line_items."""
         from app.models import Company, CustomerSite
 
-        co = Company(name=company_name, is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name=company_name, is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email=contact_email)
@@ -359,7 +359,7 @@ class TestBuyPlanQuoteLineItems:
             total_cost=500.00,
             total_margin_pct=50.00,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -533,7 +533,7 @@ class TestOffersListFields:
             unit_price=0.50,
             status="active",
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -606,9 +606,9 @@ class TestOfferModelFields:
             mpn="TEST123",
             status="pending_review",
             approved_by_id=test_user.id,
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.commit()
@@ -623,10 +623,10 @@ class TestOfferModelFields:
             vendor_name="Test",
             mpn="TEST456",
             status="active",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
             updated_by_id=test_user.id,
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.commit()
@@ -648,9 +648,9 @@ class TestRequisitionUpdatedFields:
             name="REQ-UPD",
             status="open",
             created_by=test_user.id,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
             updated_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()

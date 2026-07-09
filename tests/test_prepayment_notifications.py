@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -57,7 +57,7 @@ def _seed_approver(db: Session) -> User:
         is_active=True,
         can_approve_prepayments=True,
         prepayment_approval_limit=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -81,11 +81,11 @@ def _make_prepayment(
         customer_name="AcmeCo",
         status="active",
         created_by=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(timezone.utc))
+    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
     db.add(rq)
     db.flush()
     q = Quote(
@@ -94,7 +94,7 @@ def _make_prepayment(
         line_items=[],
         status="sent",
         created_by_id=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -105,7 +105,7 @@ def _make_prepayment(
         so_status="approved",
         sales_order_number="SO-999",
         submitted_by_id=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -136,7 +136,7 @@ def _make_prepayment(
         buyer_id=requester.id,
         status="pending_verify",
         po_number="PO-2024",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -159,7 +159,7 @@ def _make_prepayment(
 def _set_config(db: Session, **kv: str) -> None:
     """Seed system_config rows directly (set_config_value 404s on unknown keys)."""
     for k, v in kv.items():
-        db.add(SystemConfig(key=k, value=v, updated_at=datetime.now(timezone.utc)))
+        db.add(SystemConfig(key=k, value=v, updated_at=datetime.now(UTC)))
     db.commit()
 
 
@@ -360,7 +360,7 @@ def _seed_person(db: Session, *, role: str, name: str) -> User:
         role=role,
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -378,7 +378,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         customer_name="AcmeCo",
         status="active",
         created_by=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -388,7 +388,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         line_items=[],
         status="sent",
         created_by_id=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -399,7 +399,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         so_status="approved",
         sales_order_number="SO-PAID",
         submitted_by_id=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -416,7 +416,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         unit_cost=10.0,
         status="pending_verify",
         po_number="PO-2024",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -433,7 +433,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         paid_via="in_app",
         paid_by_label="MK",
         wire_reference="WIRE-1",
-        paid_at=datetime.now(timezone.utc),
+        paid_at=datetime.now(UTC),
     )
     db.add(pp)
     db.commit()

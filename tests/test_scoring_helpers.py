@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/scoring_helpers.py, app/scoring.py
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -21,32 +21,32 @@ class TestMonthRange:
         [
             pytest.param(
                 date(2026, 3, 15),
-                datetime(2026, 3, 1, tzinfo=timezone.utc),
-                datetime(2026, 4, 1, tzinfo=timezone.utc),
+                datetime(2026, 3, 1, tzinfo=UTC),
+                datetime(2026, 4, 1, tzinfo=UTC),
                 id="normal_month",
             ),
             pytest.param(
                 date(2026, 12, 25),
-                datetime(2026, 12, 1, tzinfo=timezone.utc),
-                datetime(2027, 1, 1, tzinfo=timezone.utc),
+                datetime(2026, 12, 1, tzinfo=UTC),
+                datetime(2027, 1, 1, tzinfo=UTC),
                 id="december_rolls_to_january",
             ),
             pytest.param(
                 date(2026, 1, 10),
-                datetime(2026, 1, 1, tzinfo=timezone.utc),
-                datetime(2026, 2, 1, tzinfo=timezone.utc),
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 2, 1, tzinfo=UTC),
                 id="january",
             ),
             pytest.param(
                 date(2026, 2, 28),
-                datetime(2026, 2, 1, tzinfo=timezone.utc),
-                datetime(2026, 3, 1, tzinfo=timezone.utc),
+                datetime(2026, 2, 1, tzinfo=UTC),
+                datetime(2026, 3, 1, tzinfo=UTC),
                 id="february",
             ),
             pytest.param(
                 date(2026, 6, 1),
-                datetime(2026, 6, 1, tzinfo=timezone.utc),
-                datetime(2026, 7, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 1, tzinfo=UTC),
+                datetime(2026, 7, 1, tzinfo=UTC),
                 id="first_day_of_month",
             ),
         ],
@@ -60,8 +60,8 @@ class TestMonthRange:
     def test_returns_utc_aware(self):
         """Both datetimes are UTC-aware."""
         start, end = month_range(date(2026, 5, 15))
-        assert start.tzinfo == timezone.utc
-        assert end.tzinfo == timezone.utc
+        assert start.tzinfo == UTC
+        assert end.tzinfo == UTC
 
 
 class TestScoreSightingV2Range:

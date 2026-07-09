@@ -58,6 +58,15 @@ def _write_batch_meta(meta_path: str, meta: dict) -> None:
         json.dump(meta, f)
 
 
+def _latest_backfill_meta_path() -> str:
+    """Sync glob/stat scan for the newest ``ai_backfill_meta_*.json`` in tmp — always
+    dispatched via ``asyncio.to_thread`` (directory listing + one stat per candidate hit
+    the filesystem)."""
+    tmpdir = Path(tempfile.gettempdir())
+    candidates = sorted(tmpdir.glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(candidates[0]) if candidates else str(tmpdir / "ai_backfill_meta.json")
+
+
 def _read_batch_meta(meta_path: str) -> dict:
     """Sync JSON read — always dispatched via ``asyncio.to_thread`` (P2.6, same
     rationale as ``_write_batch_meta``).
@@ -174,9 +183,7 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     from app.utils.claude_errors import ClaudeError as _ClaudeErr
 
     if not meta_path:
-        _tmpdir = Path(tempfile.gettempdir())
-        candidates = sorted(_tmpdir.glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        meta_path = str(candidates[0]) if candidates else str(_tmpdir / "ai_backfill_meta.json")
+        meta_path = await asyncio.to_thread(_latest_backfill_meta_path)
     try:
         meta = await asyncio.to_thread(_read_batch_meta, meta_path)
     except FileNotFoundError:
@@ -458,10 +465,13 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False) as tmp_file:
         tmp_path = tmp_file.name
     try:
-        async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
-            with open(tmp_path, "wb") as f:
+        f = await asyncio.to_thread(open, tmp_path, "wb")
+        try:
+            async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
                 async for chunk in stream.aiter_bytes(chunk_size=65536):
                     await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         return {"error": f"Download failed: {e}"}
 

@@ -18,7 +18,7 @@ Depends on: conftest.py fixtures, app.company_utils, app.services.company_merge_
             app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,7 +34,7 @@ def _make_company(db: Session, name: str, *, sites: int = 0, normalized_name=...
         name=name,
         is_active=True,
         domain=domain,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     if normalized_name is not ...:
         kwargs["normalized_name"] = normalized_name
@@ -42,7 +42,7 @@ def _make_company(db: Session, name: str, *, sites: int = 0, normalized_name=...
     db.add(c)
     db.flush()
     for i in range(sites):
-        db.add(CustomerSite(company_id=c.id, site_name=f"Site {i + 1}", created_at=datetime.now(timezone.utc)))
+        db.add(CustomerSite(company_id=c.id, site_name=f"Site {i + 1}", created_at=datetime.now(UTC)))
     db.flush()
     return c
 

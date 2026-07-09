@@ -7,7 +7,7 @@ the HTTP-level behavior end-to-end (not just service functions).
 import hmac
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -63,7 +63,7 @@ def _make_sub(db_session: Session, user: User, subscription_id: str, client_stat
         subscription_id=subscription_id,
         resource="/me/messages",
         change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
+        expiration_dt=datetime.now(UTC) + timedelta(hours=48),
         client_state=client_state,
     )
     db_session.add(sub)

@@ -15,7 +15,7 @@ part of its baseline DDL, so replaying this revision on a fresh DB would
 otherwise hit DuplicateColumn / DuplicateObject.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -23,9 +23,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "5c6736d6381f"
-down_revision: Union[str, None] = "a4df7e282b71"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "a4df7e282b71"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _column_exists(table: str, column: str) -> bool:

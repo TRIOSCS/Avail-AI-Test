@@ -9,7 +9,7 @@ Called by: app/services/fru_matrix_service.py, app/management/ingest_fru_matrix.
 Depends on: app/constants.FruLinkKind (rel_kind vocabulary), Base
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, Date, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import validates
@@ -41,11 +41,11 @@ class FruLink(Base):
     note = Column(Text)  # free-text context (feature codes, comments, FW)
     source_sheet = Column(String(64), nullable=False)  # workbook sheet the row came from
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     @validates("rel_kind")

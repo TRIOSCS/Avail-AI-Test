@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -10,7 +10,7 @@ def _card(mpn: str) -> MaterialCard:
     return MaterialCard(
         normalized_mpn=mpn.lower(),
         display_mpn=mpn.upper(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

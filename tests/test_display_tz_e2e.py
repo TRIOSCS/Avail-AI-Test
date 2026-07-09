@@ -22,7 +22,7 @@ Depends on: app.main.app (middleware stack + routes), app.dependencies.require_u
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import itsdangerous
 import pytest
@@ -34,7 +34,7 @@ from starlette.responses import PlainTextResponse
 # A fixed UTC instant that straddles the day boundary for both zones we assert on:
 #   Eastern (UTC-4, summer) → Jul 04, 19:30  / date 2026-07-04
 #   Asia/Tokyo (UTC+9)      → Jul 05, 08:30  / date 2026-07-05
-_PROBE_UTC = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+_PROBE_UTC = datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
 _PROBE_PATH = "/v2/__display_tz_probe__"
 _EASTERN_EXPECTED = "Jul 04, 19:30|2026-07-04"
 _TOKYO_EXPECTED = "Jul 05, 08:30|2026-07-05"
@@ -101,7 +101,7 @@ def _authed_user(db_session, tz):
         azure_id="test-azure-tz-viewer",
         is_active=True,
         display_timezone=tz,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()

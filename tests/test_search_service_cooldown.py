@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.search_service._mpn_cooldown_partition, MaterialCard
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -56,7 +56,7 @@ def _mk_requirement(db: Session, test_user, *, req_name, primary_mpn, now, custo
 
 class TestMpnCooldownPartition:
     def test_partitions_stale_and_fresh_mpns(self, db_session: Session):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         fresh_dt = now - timedelta(hours=12)
         stale_dt = now - timedelta(hours=72)
         _mk_card(db_session, "FRESHMPN", fresh_dt)
@@ -73,7 +73,7 @@ class TestMpnCooldownPartition:
         assert cached_ids == [cached_card.id]
 
     def test_null_last_searched_at_is_treated_as_never_searched(self, db_session: Session):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _mk_card(db_session, "NULLMPN", None)
         db_session.commit()
 
@@ -83,7 +83,7 @@ class TestMpnCooldownPartition:
         assert cached_ids == []
 
     def test_exactly_48h_boundary_is_searched(self, db_session: Session):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # exactly 48h ago — should be searched (>= 48h)
         _mk_card(db_session, "BOUNDARYMPN", now - timedelta(hours=48))
         db_session.commit()
@@ -101,7 +101,7 @@ class TestSearchRequirementCooldown:
         # ([], []) return — if the resolver flag default ever flips, the
         # resolver block would call _fetch_fresh a second time on the AVL.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = _mk_requirement(
             db_session,
             test_user,
@@ -137,7 +137,7 @@ class TestSearchRequirementCooldown:
         # Defensive pin: keeps zero-hit behavior stable if the resolver flag
         # default ever flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = _mk_requirement(db_session, test_user, req_name="REQ-CD-2", primary_mpn="NEWMPN", now=now)
         db_session.commit()
 
@@ -152,14 +152,14 @@ class TestSearchRequirementCooldown:
         assert card.last_searched_at is not None
         last = card.last_searched_at
         if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
+            last = last.replace(tzinfo=UTC)
         assert (now - last).total_seconds() < 60
 
     async def test_all_cached_path_returns_affinity_matches(self, db_session: Session, test_user, monkeypatch):
         """When every MPN is within cooldown, affinity matches still surface."""
         # Defensive pin against future flag-default flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = _mk_requirement(db_session, test_user, req_name="REQ-CD-AFFINITY", primary_mpn="CACHEDMPN", now=now)
         _mk_card(db_session, "CACHEDMPN", now - timedelta(hours=1))
         db_session.commit()
@@ -190,7 +190,7 @@ class TestIcsNcEnqueueOnRefresh:
         # Defensive pin: enqueue-count assertion below would break if the
         # resolver default flips on (extra AVL enqueues).
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = _mk_requirement(
             db_session,
             test_user,
@@ -219,7 +219,7 @@ class TestIcsNcEnqueueOnRefresh:
     async def test_no_enqueue_on_all_cached_short_circuit(self, db_session: Session, test_user, monkeypatch):
         # Defensive pin against future flag-default flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = _mk_requirement(
             db_session, test_user, req_name="REQ-CD-CACHED", primary_mpn="CACHED1", now=now, customer_name="C"
         )

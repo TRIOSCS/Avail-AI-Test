@@ -251,7 +251,7 @@ class BaseConnector(ABC):
                     self._breaker.record_failure()
                     raise ConnectorRateLimitError(
                         f"{self.__class__.__name__} rate limited (persistent 429): {e.response.text[:200]}"
-                    )
+                    ) from e
 
                 # Auth/permission errors — fail fast (connector-specific
                 # _do_search can override to handle gracefully)

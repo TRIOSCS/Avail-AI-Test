@@ -21,7 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,7 +44,7 @@ def mgr_user(db_session: Session) -> User:
         name="Manager Assign",
         role="manager",
         azure_id="assign-test-mgr-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -60,7 +60,7 @@ def sales_rep(db_session: Session) -> User:
         name="Rep Assign",
         role="sales",
         azure_id="assign-test-rep-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -77,7 +77,7 @@ def inactive_user(db_session: Session) -> User:
         role="sales",
         azure_id="assign-test-ghost-001",
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -168,14 +168,14 @@ def test_include_users_sorted_by_name(db_session: Session, mgr_user: User):
                 name="Zach",
                 role="sales",
                 azure_id="assign-z",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             User(
                 email="a@trioscs.com",
                 name="Aaron",
                 role="sales",
                 azure_id="assign-a",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
     )

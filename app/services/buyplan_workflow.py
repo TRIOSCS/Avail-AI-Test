@@ -7,7 +7,7 @@ Called by: routers/htmx_views.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import select, update
@@ -58,7 +58,7 @@ def submit_buy_plan(
     plan.sales_order_number = sales_order_number
     plan.customer_po_number = customer_po_number
     plan.submitted_by_id = user.id
-    plan.submitted_at = datetime.now(timezone.utc)
+    plan.submitted_at = datetime.now(UTC)
     plan.salesperson_notes = salesperson_notes
     # Clear any prior approval decision (a previously-rejected plan re-enters the queue
     # clean — no stale approved_at/approval_notes carrying the old rejection forward).
@@ -152,7 +152,7 @@ def _run_approve_side_effects(
     """
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only approve a pending plan (current: {plan.status})")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if line_overrides:
         _apply_line_overrides(plan, line_overrides, db)
     plan.status = BuyPlanStatus.ACTIVE.value
@@ -187,7 +187,7 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
         raise ValueError(f"Can only reject a pending plan (current: {plan.status})")
     plan.status = BuyPlanStatus.DRAFT.value
     plan.approved_by_id = user.id
-    plan.approved_at = datetime.now(timezone.utc)
+    plan.approved_at = datetime.now(UTC)
     plan.approval_notes = reason
     logger.info("Buy plan {} rejected by {}: {}", plan.id, user.email, reason)
     _log_approval_activity(plan, "reject", user, reason, db)
@@ -291,7 +291,7 @@ def _cancel_open_prepayment_requests_for_plan(
         schedule_prepayment_notify,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # (1) Cancel every open (REQUESTED) prepayment approval request.
     stmt = (
@@ -451,7 +451,7 @@ def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = Non
     if plan.status not in HALTABLE_STATUSES:
         raise ValueError(f"Cannot halt a {plan.status} plan")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Close any open engine gate BEFORE the transition so no REQUESTED row is orphaned in the
     # approvals queue/badge — and so a stale request can't be pulled from the queue to
     # resurrect this plan. Covers the BUY_PLAN gate while PENDING (the helper is a no-op
@@ -503,7 +503,7 @@ def confirm_po(
 
     line.po_number = po_number
     line.estimated_ship_date = estimated_ship_date
-    line.po_confirmed_at = datetime.now(timezone.utc)
+    line.po_confirmed_at = datetime.now(UTC)
     line.status = BuyPlanLineStatus.PENDING_VERIFY.value
     logger.info("PO {} confirmed for line {} (plan {})", po_number, line_id, plan_id)
 
@@ -591,7 +591,7 @@ def verify_po(
             f"PO amount ${_line_amount(line):,.2f} exceeds your purchase-order approval limit (${limit:,.2f})"
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if action == "approve":
         line.status = BuyPlanLineStatus.VERIFIED.value
         line.po_verified_by_id = user.id
@@ -975,7 +975,7 @@ def _complete_plan(plan: BuyPlan, db: Session) -> None:
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan completed — pending prepayment voided")
 
     plan.status = BuyPlanStatus.COMPLETED.value
-    plan.completed_at = datetime.now(timezone.utc)
+    plan.completed_at = datetime.now(UTC)
     plan.case_report = generate_case_report(plan, db)
 
 
@@ -1010,7 +1010,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
             from app.services.purchase_history_service import record_buyplan_purchase_history
 
             record_buyplan_purchase_history(db, plan)
-        except Exception:  # noqa: BLE001 — CPH must never break completion
+        except Exception:
             logger.exception("BUYPLAN_CPH: failed to record purchase history for plan {}", plan_id)
         db.flush()
 
@@ -1043,7 +1043,7 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     plan.cancelled_at = None
     plan.cancelled_by_id = None
     plan.cancellation_reason = None
-    plan.updated_at = datetime.now(timezone.utc)
+    plan.updated_at = datetime.now(UTC)
 
     db.flush()
     logger.info("Buy plan {} reset to draft by user {}", plan_id, user.id)
@@ -1076,7 +1076,7 @@ def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan cancelled — prepayment voided")
 
     plan.status = BuyPlanStatus.CANCELLED.value
-    plan.cancelled_at = datetime.now(timezone.utc)
+    plan.cancelled_at = datetime.now(UTC)
     plan.cancelled_by_id = user.id
     plan.cancellation_reason = reason
 
@@ -1133,7 +1133,7 @@ def resubmit_buy_plan(
     plan.sales_order_number = sales_order_number
     plan.customer_po_number = customer_po_number
     plan.submitted_by_id = user.id
-    plan.submitted_at = datetime.now(timezone.utc)
+    plan.submitted_at = datetime.now(UTC)
     plan.salesperson_notes = salesperson_notes
 
     # Every plan goes to the one manager approval — no auto-approve (frozen scope).
@@ -1500,7 +1500,7 @@ def set_sales_order_number(plan_id: int, sales_order_number: str | None, user: U
         raise ValueError(f"Cannot edit the Sales Order number on a {plan.status} plan.")
 
     plan.sales_order_number = (sales_order_number or "").strip() or None
-    plan.updated_at = datetime.now(timezone.utc)
+    plan.updated_at = datetime.now(UTC)
     db.flush()
     logger.info("Buy plan {} SO number set to {!r} by {}", plan_id, plan.sales_order_number, user.email)
     return plan
@@ -1526,7 +1526,7 @@ def resume_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
         raise ValueError(f"Only a halted plan can be resumed (current: {plan.status}).")
 
     plan.status = BuyPlanStatus.ACTIVE.value
-    plan.updated_at = datetime.now(timezone.utc)
+    plan.updated_at = datetime.now(UTC)
     # halted_by_id / halted_at are intentionally LEFT in place as the halt→resume audit trail.
     db.flush()
     logger.info("Buy plan {} RESUMED to active by {} (halt audit preserved)", plan_id, user.email)
@@ -1628,7 +1628,7 @@ def generate_case_report(plan: BuyPlan, db: Session) -> str:
     Captures: deal metadata, margin analysis, vendor selection, timeline,
     issue tracking. Stored in plan.case_report for post-deal analysis.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lines = plan.lines or []
     quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
 
@@ -1668,7 +1668,7 @@ def generate_case_report(plan: BuyPlan, db: Session) -> str:
     def _tz_aware(dt):
         """Ensure datetime is UTC-aware for safe subtraction."""
         if dt and dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=UTC)
         return dt
 
     timeline = []

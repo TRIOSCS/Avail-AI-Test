@@ -23,7 +23,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,7 +45,7 @@ def sales_rep(db_session: Session) -> User:
         name="Sales Rep",
         role="sales",
         azure_id="bulk-test-sales-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -61,7 +61,7 @@ def mgr_user(db_session: Session) -> User:
         name="Manager Bulk",
         role="manager",
         azure_id="bulk-test-mgr-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -77,7 +77,7 @@ def other_user(db_session: Session) -> User:
         name="Other Sales",
         role="sales",
         azure_id="bulk-test-other-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -92,7 +92,7 @@ def owned_company(db_session: Session, sales_rep: User) -> Company:
         name="Owned Corp",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -107,7 +107,7 @@ def unowned_company(db_session: Session, other_user: User) -> Company:
         name="Unowned Corp",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -122,7 +122,7 @@ def mgr_owned_company(db_session: Session, mgr_user: User) -> Company:
         name="Manager Corp",
         is_active=True,
         account_owner_id=mgr_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -417,7 +417,7 @@ def test_import_preview_flags_duplicate_company(db_session: Session, sales_rep: 
     existing = Company(
         name="Existing Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -511,7 +511,7 @@ def test_import_confirm_deduplicates_by_normalized_name(db_session: Session, sal
     existing = Company(
         name="Dup Check Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -580,7 +580,7 @@ def test_import_contacts_preview_parses_rows(db_session: Session, sales_rep: Use
         name="Existing Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -602,7 +602,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
         name="Existing Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -612,7 +612,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
     site = CustomerSite(
         company_id=co.id,
         site_name="HQ",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.commit()
@@ -622,7 +622,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
         customer_site_id=site.id,
         full_name="Existing Person",
         email="john@existingco.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(contact)
     db_session.commit()
@@ -659,7 +659,7 @@ def test_bulk_assign_owner_inactive_user_400(db_session: Session, mgr_user: User
         role="sales",
         azure_id="bulk-test-inactive-owner-001",
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(inactive)
     db_session.commit()
@@ -724,7 +724,7 @@ def test_import_contacts_preview_escapes_script_tag(db_session: Session, sales_r
 # F3: confirm row-cap bypass
 # ---------------------------------------------------------------------------
 
-import json as _json  # noqa: E402
+import json as _json
 
 
 def test_import_confirm_row_cap_exceeded_400(db_session: Session, sales_rep: User):
@@ -749,7 +749,7 @@ def test_import_contacts_confirm_creates_contacts(db_session: Session, sales_rep
         name="Confirm Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -811,7 +811,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         name="Dedup Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -821,7 +821,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         company_id=co.id,
         site_name="HQ",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.commit()
@@ -831,7 +831,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         customer_site_id=site.id,
         full_name="Existing Person",
         email="dup@dedupco.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -888,7 +888,7 @@ def test_import_contacts_confirm_rep_cannot_import_into_unowned_company(
         name="Foreign Corp IDOR",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(foreign_co)
     db_session.commit()
@@ -929,7 +929,7 @@ def test_import_contacts_confirm_manager_can_import_into_any_company(
         name="Any Corp Manager Import",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(any_co)
     db_session.commit()
@@ -972,20 +972,16 @@ def test_import_contacts_confirm_multi_row_batched_lookups(db_session: Session, 
     - 1 row targets a company the rep does not manage → skipped_unauthorized.
     - 1 row targets no matching company → skipped_no_company.
     """
-    co_a = Company(
-        name="Batch Co A", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(timezone.utc)
-    )
-    co_b = Company(
-        name="Batch Co B", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(timezone.utc)
-    )
+    co_a = Company(name="Batch Co A", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(UTC))
+    co_b = Company(name="Batch Co B", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(UTC))
     foreign_co = Company(
-        name="Batch Foreign Co", is_active=True, account_owner_id=other_user.id, created_at=datetime.now(timezone.utc)
+        name="Batch Foreign Co", is_active=True, account_owner_id=other_user.id, created_at=datetime.now(UTC)
     )
     db_session.add_all([co_a, co_b, foreign_co])
     db_session.commit()
     db_session.refresh(co_a)
 
-    site_a = CustomerSite(company_id=co_a.id, site_name="HQ", is_active=True, created_at=datetime.now(timezone.utc))
+    site_a = CustomerSite(company_id=co_a.id, site_name="HQ", is_active=True, created_at=datetime.now(UTC))
     db_session.add(site_a)
     db_session.commit()
     db_session.refresh(site_a)
@@ -1070,7 +1066,7 @@ def test_import_contacts_preview_flags_unauthorized_for_rep(db_session: Session,
         name="Unmanageable Preview Corp",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(foreign_co)
     db_session.commit()
@@ -1105,7 +1101,7 @@ def test_import_contacts_preview_manager_sees_all_valid(db_session: Session, mgr
         name="Preview Any Corp Mgr",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(any_co)
     db_session.commit()

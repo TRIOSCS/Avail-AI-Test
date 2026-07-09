@@ -8,7 +8,7 @@ Depends on: app.services.activity_service.get_last_activity_at,
             app.constants.ActivityType
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ def company(db_session: Session) -> Company:
     co = Company(
         name="Dormancy Test Co",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -36,7 +36,7 @@ def _add_activity(db: Session, company: Company, activity_type: str, days_ago: i
         activity_type=activity_type,
         channel="email",  # NOT NULL in schema
         company_id=company.id,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(entry)
     db.commit()
@@ -69,7 +69,7 @@ class TestGetLastActivityAtNoteExclusion:
         result = get_last_activity_at(company.id, db_session)
         assert result is not None
         # Allow 1-second slop for test timing
-        assert abs((result - entry.created_at.replace(tzinfo=timezone.utc)).total_seconds()) < 2
+        assert abs((result - entry.created_at.replace(tzinfo=UTC)).total_seconds()) < 2
 
     def test_note_does_not_shadow_earlier_real_activity(self, db_session: Session, company: Company):
         """A recent note should not mask an older real-activity timestamp."""
@@ -77,7 +77,7 @@ class TestGetLastActivityAtNoteExclusion:
         _add_activity(db_session, company, ActivityType.NOTE, days_ago=2)  # newer but excluded
         result = get_last_activity_at(company.id, db_session)
         assert result is not None
-        assert abs((result - real.created_at.replace(tzinfo=timezone.utc)).total_seconds()) < 2
+        assert abs((result - real.created_at.replace(tzinfo=UTC)).total_seconds()) < 2
 
     def test_all_three_note_types_excluded(self, db_session: Session, company: Company):
         """All three note types are excluded simultaneously."""

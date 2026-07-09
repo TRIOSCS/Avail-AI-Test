@@ -1,6 +1,6 @@
 """PDF document generation using WeasyPrint."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ def _render_pdf(template_name: str, **context) -> bytes:
 
     template = _jinja_env.get_template(template_name)
     html = template.render(
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         **context,
     )
     return HTML(string=html).write_pdf()

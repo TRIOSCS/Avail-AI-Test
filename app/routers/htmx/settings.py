@@ -210,7 +210,7 @@ async def _run_inbox_scan_now(user: User, db: Session) -> None:
     try:
         # stay under the HTMX client timeout (app/static/htmx_app.js); scan is idempotent + scheduler-backed
         await asyncio.wait_for(_scan_user_inbox(user, db), timeout=12)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Manual inbox scan timed out for {}", user.email)
 
 
@@ -710,7 +710,7 @@ async def connectors_test_all(
         """
         try:
             return await asyncio.wait_for(_probe_source(src, db), timeout=_TEST_ALL_PROBE_TIMEOUT_S)
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             ms = int(_TEST_ALL_PROBE_TIMEOUT_S * 1000)
             return {"results": [], "elapsed_ms": ms, "error": f"Test exceeded {int(_TEST_ALL_PROBE_TIMEOUT_S)}s"}
 

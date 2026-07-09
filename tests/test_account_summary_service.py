@@ -5,7 +5,7 @@ Depends on: conftest.py (db_session, test SQLite engine)
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,7 +25,7 @@ def _run(coro):
 # ``now = datetime.now(timezone.utc)`` (aware), so the fixed ``now`` and every
 # seeded datetime below are tz-aware UTC to keep subtraction/comparison valid.
 
-_NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 
 
 class _FakeDatetime(datetime):

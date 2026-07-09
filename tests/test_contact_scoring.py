@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/contact_intelligence.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -22,7 +22,7 @@ from app.services.contact_intelligence import (
     split_name,
 )
 
-NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def score(

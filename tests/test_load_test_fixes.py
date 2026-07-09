@@ -11,7 +11,7 @@ Depends on: app/routers/crm/quotes.py, app/routers/crm/offers.py,
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
 
@@ -30,7 +30,7 @@ def _make_req(db, user, name="REQ-1", status="open"):
         name=name,
         status=status,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -46,7 +46,7 @@ def _make_offer(db, req, user, status="active", mpn="LM317T", days_ago=0):
         unit_price=1.50,
         entered_by_id=user.id,
         status=status,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(o)
     db.flush()
@@ -54,10 +54,10 @@ def _make_offer(db, req, user, status="active", mpn="LM317T", days_ago=0):
 
 
 def _make_company_and_site(db):
-    co = Company(name="Test Co", is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name="Test Co", is_active=True, created_at=datetime.now(UTC))
     db.add(co)
     db.flush()
-    site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc))
+    site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(UTC))
     db.add(site)
     db.flush()
     return co, site
@@ -76,7 +76,7 @@ def _make_quote(db, req, site, user, offer_ids, quote_number="Q-TEST-001"):
         total_cost=150.0,
         status="draft",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -141,7 +141,7 @@ class TestCompaniesTypeaheadCache:
         assert test_co["sites"][0]["site_name"] == "HQ"
 
     def test_typeahead_excludes_inactive_companies(self, client, db_session):
-        co = Company(name="Inactive Co", is_active=False, created_at=datetime.now(timezone.utc))
+        co = Company(name="Inactive Co", is_active=False, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
 
@@ -317,7 +317,7 @@ class TestStaleFlag:
         db_session.commit()
 
         # Run the same logic as the scheduler job
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cutoff = datetime.now(UTC) - timedelta(days=14)
         flagged = (
             db_session.query(Offer)
             .filter(
@@ -361,26 +361,26 @@ class TestProactiveOfferExpiry:
             salesperson_id=user.id,
             line_items=[],
             status="sent",
-            sent_at=datetime.now(timezone.utc) - timedelta(days=15),
+            sent_at=datetime.now(UTC) - timedelta(days=15),
         )
         recent = ProactiveOffer(
             customer_site_id=site.id,
             salesperson_id=user.id,
             line_items=[],
             status="sent",
-            sent_at=datetime.now(timezone.utc) - timedelta(days=2),
+            sent_at=datetime.now(UTC) - timedelta(days=2),
         )
         converted = ProactiveOffer(
             customer_site_id=site.id,
             salesperson_id=user.id,
             line_items=[],
             status="converted",
-            sent_at=datetime.now(timezone.utc) - timedelta(days=20),
+            sent_at=datetime.now(UTC) - timedelta(days=20),
         )
         db_session.add_all([old, recent, converted])
         db_session.commit()
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cutoff = datetime.now(UTC) - timedelta(days=14)
         expired_count = (
             db_session.query(ProactiveOffer)
             .filter(ProactiveOffer.status == "sent", ProactiveOffer.sent_at < cutoff)

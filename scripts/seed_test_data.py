@@ -17,7 +17,7 @@ Depends on: app.models, app.constants, app.database
 """
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -653,7 +653,7 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
 
 def main():
     logger.info("=== Seeding test data ===")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SessionLocal()
     try:
         user = get_or_create_user(db)

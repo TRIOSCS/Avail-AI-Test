@@ -10,7 +10,7 @@ Depends on: conftest.py (db_session, test_user), ProspectAccount, Company,
             CustomerSite, SiteContact, User models
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -955,7 +955,7 @@ def _make_swept_prospect(
         fit_score=0,
         readiness_score=0,
         swept_from_owner_id=former_owner_id,
-        swept_at=datetime.now(timezone.utc),
+        swept_at=datetime.now(UTC),
         reclaim_blocked_until=reclaim_blocked_until,
         enrichment_data={},
     )
@@ -969,7 +969,7 @@ class TestClaimCooldown:
     """Fix 1: former owner cannot claim their swept account during the 30-day cooldown."""
 
     def test_former_owner_claim_within_cooldown_denied(self, db_session: Session, test_user: User):
-        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        blocked_until = datetime.now(UTC) + timedelta(days=15)
         prospect = _make_swept_prospect(
             db_session,
             former_owner_id=test_user.id,
@@ -983,7 +983,7 @@ class TestClaimCooldown:
         assert prospect.status == ProspectAccountStatus.SUGGESTED
 
     def test_former_owner_claim_after_cooldown_allowed(self, db_session: Session, test_user: User):
-        past = datetime.now(timezone.utc) - timedelta(days=1)
+        past = datetime.now(UTC) - timedelta(days=1)
         prospect = _make_swept_prospect(
             db_session,
             former_owner_id=test_user.id,
@@ -996,7 +996,7 @@ class TestClaimCooldown:
 
     def test_different_rep_not_affected_by_cooldown(self, db_session: Session, test_user: User, admin_user: User):
         """A different rep claiming is unaffected by the former owner's cooldown."""
-        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        blocked_until = datetime.now(UTC) + timedelta(days=15)
         prospect = _make_swept_prospect(
             db_session,
             former_owner_id=admin_user.id,  # admin_user is the former owner
@@ -1025,7 +1025,7 @@ class TestClaimCooldown:
         db_session.commit()
         db_session.refresh(mgr)
 
-        blocked_until = datetime.now(timezone.utc) + timedelta(days=15)
+        blocked_until = datetime.now(UTC) + timedelta(days=15)
         prospect = _make_swept_prospect(
             db_session,
             former_owner_id=mgr.id,

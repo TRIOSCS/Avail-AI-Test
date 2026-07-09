@@ -6,7 +6,7 @@ cards, column-wise MAX on duplicate keys, IsDeleted/soft-delete/unparseable hand
 Depends on: conftest.py (db_session), a tmp_path fixture CSV.
 """
 
-from datetime import timezone
+from datetime import UTC
 
 from app.constants import MaterialEnrichmentStatus
 from app.management import import_demand_telemetry as cli
@@ -48,7 +48,7 @@ def test_parse_helpers():
     assert cli._parse_qty("8188453743.0") == cli._SOURCED_QTY_MAX
 
     ts = cli._parse_ts("2/5/2020 17:24")
-    assert ts is not None and ts.tzinfo == timezone.utc and ts.year == 2020
+    assert ts is not None and ts.tzinfo == UTC and ts.year == 2020
     assert cli._parse_ts("") is None
     assert cli._parse_ts("not-a-date") is None
 
@@ -122,7 +122,7 @@ def test_apply_skips_soft_deleted_cards(tmp_path, db_session):
     from datetime import datetime
 
     card = _mk(db_session, "LM2596S")
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     db_session.commit()
     path = _write_csv(tmp_path, ["LM2596S,42,2/2/2020 09:00,false,x"])
 

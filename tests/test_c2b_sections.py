@@ -17,7 +17,7 @@ Depends on: conftest (db_session), app.services.quality_plan_service,
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,7 +51,7 @@ def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_q
         is_active=True,
         can_approve_qp_sales=can_approve_qp_sales,
         can_approve_qp_purchasing=can_approve_qp_purchasing,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -64,7 +64,7 @@ def _make_qp(db: Session, owner: User, *, fill_sales: bool = False, fill_purchas
         customer_name="C2BCo",
         status="open",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -74,7 +74,7 @@ def _make_qp(db: Session, owner: User, *, fill_sales: bool = False, fill_purchas
         line_items=[],
         status="sent",
         created_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()

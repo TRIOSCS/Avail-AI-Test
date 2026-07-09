@@ -10,7 +10,7 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -96,7 +96,7 @@ class TestCdrLinksToCrm:
                 "callerName": "",
                 "calleeName": "8x8 Buyer",
                 "direction": "Incoming",
-                "startTimeUTC": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                "startTimeUTC": str(int(datetime.now(UTC).timestamp() * 1000)),
                 "talkTimeMS": 120000,
                 "missed": "Answered",
                 "answered": "Answered",
@@ -141,7 +141,7 @@ class TestCdrLinksToCrm:
                 "callerName": "8x8 Buyer B",
                 "calleeName": "Unknown Caller",
                 "direction": "Outgoing",
-                "startTimeUTC": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                "startTimeUTC": str(int(datetime.now(UTC).timestamp() * 1000)),
                 "talkTimeMS": 60000,
                 "missed": "Answered",
                 "answered": "Answered",
@@ -211,7 +211,7 @@ class TestCdrLinksToRequisition:
                 "callerName": "",
                 "calleeName": "8x8 Buyer Req",
                 "direction": "Incoming",
-                "startTimeUTC": str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                "startTimeUTC": str(int(datetime.now(UTC).timestamp() * 1000)),
                 "talkTimeMS": 90000,
                 "missed": "Answered",
                 "answered": "Answered",

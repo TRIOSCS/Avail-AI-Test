@@ -14,7 +14,7 @@ Depends on: conftest.py fixtures (db_session, test_user, client, unauthenticated
 
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -59,7 +59,7 @@ def _make_requisition(
         claimed_by_id=claimed_by_id,
         opportunity_value=opportunity_value,
         deadline=deadline,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -70,7 +70,7 @@ def _make_requisition(
                 primary_mpn=f"{name}-MPN-{i}",
                 manufacturer="Texas Instruments",
                 target_qty=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
     db.flush()
@@ -196,7 +196,7 @@ def _make_vendor(
         is_blacklisted=is_blacklisted,
         is_active=is_active,
         commodity_tags=commodity_tags or [],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

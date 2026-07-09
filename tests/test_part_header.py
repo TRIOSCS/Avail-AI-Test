@@ -8,7 +8,7 @@ Depends on: conftest fixtures (client, db_session, test_user)
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.models import Requirement, Requisition
@@ -22,7 +22,7 @@ def _make_requisition(db, user_id, name="REQ-HDR-001", customer_name="Acme Corp"
         customer_name=customer_name,
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -40,7 +40,7 @@ def _make_requirement(db, requisition_id, **kwargs):
         "target_price": Decimal("1.2500"),
         "condition": "New",
         "sourcing_status": "sourcing",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(kwargs)
     item = Requirement(**defaults)

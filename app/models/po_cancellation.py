@@ -18,7 +18,7 @@ Depends on: app/constants.POCancellationReason, Base, UTCDateTime, and the
             users tables.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import relationship, validates
@@ -51,7 +51,7 @@ class POCancellation(Base):
     cancelled_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     # (cancelled_at - po_cut_at).days, computed by the service; NULL if po_cut_at is NULL.
     days_to_cancel = Column(Integer)
@@ -63,7 +63,7 @@ class POCancellation(Base):
     created_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
 

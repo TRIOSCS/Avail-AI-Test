@@ -1,6 +1,6 @@
 """Tests for the proactive matching engine (Phase 2.2)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -39,7 +39,7 @@ def _setup_scenario(db):
         name="Sales Rep",
         role="sales",
         azure_id="sales-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(owner)
     db.flush()
@@ -90,7 +90,7 @@ def _setup_scenario(db):
         mpn="STM32F407",
         source="avail_offer",
         purchase_count=3,
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=60),
+        last_purchased_at=datetime.now(UTC) - timedelta(days=60),
         avg_unit_price=Decimal("12.50"),
         last_unit_price=Decimal("13.00"),
         total_quantity=500,
@@ -137,7 +137,7 @@ def _make_offer(db, data, **overrides):
 def test_score_recent_frequent_high_margin():
     """Recent purchase + high frequency + good margin = high score."""
     score, margin = compute_match_score(
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
+        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
         purchase_count=5,
         customer_avg_price=20.0,
         our_cost=10.0,
@@ -149,7 +149,7 @@ def test_score_recent_frequent_high_margin():
 def test_score_old_single_no_margin():
     """Old purchase + single buy + no margin info = low score."""
     score, margin = compute_match_score(
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=800),
+        last_purchased_at=datetime.now(UTC) - timedelta(days=800),
         purchase_count=1,
         customer_avg_price=None,
         our_cost=None,
@@ -173,7 +173,7 @@ def test_score_no_purchase_date():
 def test_score_negative_margin():
     """Negative margin scenario — score should be low."""
     score, margin = compute_match_score(
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
+        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
         purchase_count=3,
         customer_avg_price=5.0,
         our_cost=10.0,
@@ -265,7 +265,7 @@ def test_run_proactive_scan(db_session):
     """Batch scan picks up new offers and creates matches."""
     data = _setup_scenario(db_session)
 
-    _make_offer(db_session, data, created_at=datetime.now(timezone.utc))
+    _make_offer(db_session, data, created_at=datetime.now(UTC))
 
     # Set watermark so it picks up the offer
     from app.models.config import SystemConfig
@@ -273,7 +273,7 @@ def test_run_proactive_scan(db_session):
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.commit()
@@ -332,7 +332,7 @@ def test_expire_old_matches(db_session):
     assert len(matches) == 1
 
     # Backdate the match
-    matches[0].created_at = datetime.now(timezone.utc) - timedelta(days=60)
+    matches[0].created_at = datetime.now(UTC) - timedelta(days=60)
     db_session.commit()
 
     expired = expire_old_matches(db_session)
@@ -347,12 +347,12 @@ def test_expire_old_matches(db_session):
 
 def test_score_recency_365_days():
     """Purchase 200-365 days ago returns 80."""
-    assert _score_recency(datetime.now(timezone.utc) - timedelta(days=250)) == 80
+    assert _score_recency(datetime.now(UTC) - timedelta(days=250)) == 80
 
 
 def test_score_recency_730_days():
     """Purchase 366-730 days ago returns 60."""
-    assert _score_recency(datetime.now(timezone.utc) - timedelta(days=500)) == 60
+    assert _score_recency(datetime.now(UTC) - timedelta(days=500)) == 60
 
 
 def test_score_frequency_two_purchases():
@@ -450,7 +450,7 @@ def test_find_matches_throttled(db_session):
     throttle = ProactiveThrottle(
         mpn="STM32F407",
         customer_site_id=data["site"].id,
-        last_offered_at=datetime.now(timezone.utc) - timedelta(days=1),
+        last_offered_at=datetime.now(UTC) - timedelta(days=1),
     )
     db_session.add(throttle)
     db_session.commit()
@@ -498,7 +498,7 @@ def test_find_matches_no_requisition_history(db_session):
         name="Sales2",
         role="sales",
         azure_id="sales-002",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(owner)
     db_session.flush()
@@ -530,7 +530,7 @@ def test_find_matches_no_requisition_history(db_session):
         mpn="ATMEGA328P",
         source="avail_offer",
         purchase_count=3,
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
+        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
         avg_unit_price=Decimal("5.00"),
         last_unit_price=Decimal("5.50"),
         total_quantity=100,
@@ -637,7 +637,7 @@ def test_run_proactive_scan_dedup(db_session):
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.flush()
@@ -651,7 +651,7 @@ def test_run_proactive_scan_dedup(db_session):
         mpn="STM32F407",
         unit_price=Decimal("8.00"),
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     offer2 = Offer(
         requisition_id=data["requisition"].id,
@@ -661,7 +661,7 @@ def test_run_proactive_scan_dedup(db_session):
         mpn="STM32F407",
         unit_price=Decimal("9.00"),
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([offer1, offer2])
     db_session.commit()
@@ -682,11 +682,11 @@ def test_run_proactive_scan_commit_failure(db_session):
 
     data = _setup_scenario(db_session)
 
-    _make_offer(db_session, data, created_at=datetime.now(timezone.utc))
+    _make_offer(db_session, data, created_at=datetime.now(UTC))
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.commit()
@@ -724,7 +724,7 @@ def test_dismiss_match_wrong_user(db_session):
         name="Other",
         role="sales",
         azure_id="other-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other_user)
     db_session.commit()
@@ -758,7 +758,7 @@ def test_mark_match_sent_wrong_user(db_session):
         name="Other2",
         role="sales",
         azure_id="other-002",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other_user)
     db_session.commit()
@@ -811,22 +811,22 @@ class TestScoringBoundaries:
         assert margin is None
 
     def test_recency_exactly_180_days_scores_100(self):
-        dt = datetime.now(timezone.utc) - timedelta(days=180)
+        dt = datetime.now(UTC) - timedelta(days=180)
         score = _score_recency(dt)
         assert score == 100
 
     def test_recency_181_days_scores_80(self):
-        dt = datetime.now(timezone.utc) - timedelta(days=181)
+        dt = datetime.now(UTC) - timedelta(days=181)
         score = _score_recency(dt)
         assert score == 80
 
     def test_recency_730_days_scores_60(self):
-        dt = datetime.now(timezone.utc) - timedelta(days=730)
+        dt = datetime.now(UTC) - timedelta(days=730)
         score = _score_recency(dt)
         assert score == 60
 
     def test_recency_731_days_scores_40(self):
-        dt = datetime.now(timezone.utc) - timedelta(days=731)
+        dt = datetime.now(UTC) - timedelta(days=731)
         score = _score_recency(dt)
         assert score == 40
 
@@ -835,7 +835,7 @@ class TestScoringBoundaries:
         assert score == 20
 
     def test_recency_future_date_scores_100(self):
-        dt = datetime.now(timezone.utc) + timedelta(days=30)
+        dt = datetime.now(UTC) + timedelta(days=30)
         score = _score_recency(dt)
         assert score == 100  # negative days_ago → <=180
 
@@ -853,7 +853,7 @@ class TestScoringBoundaries:
 
     def test_composite_score_weights(self):
         """Verify composite = recency*0.4 + frequency*0.3 + margin*0.3."""
-        dt = datetime.now(timezone.utc) - timedelta(days=90)  # recency=100
+        dt = datetime.now(UTC) - timedelta(days=90)  # recency=100
         score, margin = compute_match_score(dt, 5, 100.0, 70.0)
         assert score == 100  # 100*0.4 + 100*0.3 + 100*0.3 = 100
 
@@ -870,7 +870,7 @@ def test_aggregates_cph_across_sources(db_session):
     """
     data = _setup_scenario(db_session)  # creates one CPH row (source="avail_offer")
     # add a second, newer buy_plan row for the same company+card
-    buy_plan_date = datetime.now(timezone.utc) - timedelta(days=5)
+    buy_plan_date = datetime.now(UTC) - timedelta(days=5)
     db_session.add(
         CustomerPartHistory(
             company_id=data["company"].id,
@@ -906,7 +906,7 @@ def test_scan_excludes_pending_review_offer(db_session):
         db_session,
         data,
         status="pending_review",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     from app.models.config import SystemConfig
@@ -914,7 +914,7 @@ def test_scan_excludes_pending_review_offer(db_session):
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.commit()
@@ -931,7 +931,7 @@ def test_scan_includes_active_offer(db_session):
         db_session,
         data,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     from app.models.config import SystemConfig
@@ -939,7 +939,7 @@ def test_scan_includes_active_offer(db_session):
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.commit()
@@ -956,7 +956,7 @@ def test_scan_excludes_expired_offer(db_session):
         db_session,
         data,
         status="expired",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     from app.models.config import SystemConfig
@@ -964,7 +964,7 @@ def test_scan_excludes_expired_offer(db_session):
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
-            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
         )
     )
     db_session.commit()

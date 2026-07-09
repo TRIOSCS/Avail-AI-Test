@@ -13,7 +13,7 @@ Design: Highly selective to avoid noise.
     deadline within 2 days, capped at 20 tasks per run.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
@@ -58,7 +58,7 @@ async def _job_bid_due_alerts():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         horizon = now + timedelta(days=2)
 
         reqs = (
@@ -80,7 +80,7 @@ async def _job_bid_due_alerts():
             try:
                 deadline_dt = datetime.fromisoformat(req.deadline)
                 if not deadline_dt.tzinfo:
-                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+                    deadline_dt = deadline_dt.replace(tzinfo=UTC)
             except (ValueError, TypeError):
                 continue  # Skip non-ISO deadlines
 

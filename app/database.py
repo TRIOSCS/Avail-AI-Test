@@ -4,7 +4,7 @@ All naive datetimes from PostgreSQL are auto-tagged as UTC via event listener to
 naive-vs-aware comparison errors.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, TypeDecorator, create_engine
 from sqlalchemy.orm import sessionmaker
@@ -43,12 +43,12 @@ class UTCDateTime(TypeDecorator[datetime]):
         if not isinstance(value, datetime):
             return value
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def process_result_value(self, value, dialect):
         if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
 

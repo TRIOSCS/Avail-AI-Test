@@ -12,7 +12,7 @@ Depends on: activity_service, claude_client, models
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -22,7 +22,7 @@ from ..models import ActivityLog
 
 def _as_utc(dt: datetime) -> datetime:
     """Make a naive datetime UTC-aware (no-op if already aware)."""
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def run_auto_attribution(db: Session) -> dict:
@@ -57,7 +57,7 @@ def run_auto_attribution(db: Session) -> dict:
         return stats
 
     logger.info("Processing {} unmatched activities", len(activities))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff_30d = now - timedelta(days=30)
     still_unmatched = []
 

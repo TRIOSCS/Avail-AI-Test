@@ -6,7 +6,7 @@ Called by: routers/htmx_views.py, routers/vendor_contacts.py, routers/vendors_cr
 Depends on: database.UTCDateTime, models.base.Base
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -120,11 +120,11 @@ class VendorCard(Base):
     # Full-text search (PostgreSQL tsvector, managed by trigger)
     search_vector = Column(TSVECTOR)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
@@ -157,10 +157,10 @@ class VendorCard(Base):
         from ..utils.phone import normalize_e164
 
         if not value:
-            self.normalized_phones = []  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
+            self.normalized_phones = []  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
             return value
         normalized = [normalize_e164(p) for p in value if p]
-        self.normalized_phones = [n for n in normalized if n is not None]  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
+        self.normalized_phones = [n for n in normalized if n is not None]  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")
@@ -231,8 +231,8 @@ class VendorContact(Base):
     confidence = Column(Integer, default=50)
     interaction_count = Column(Integer, default=0)
     last_interaction_at = Column(UTCDateTime)
-    first_seen_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    last_seen_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    first_seen_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    last_seen_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # Contact intelligence (computed nightly)
     relationship_score = Column(Float)  # 0-100
@@ -269,7 +269,7 @@ class VendorContact(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     __table_args__ = (
@@ -296,7 +296,7 @@ class VendorReview(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(String(500))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_card = relationship("VendorCard", back_populates="reviews")
     user = relationship("User")
@@ -337,7 +337,7 @@ class VendorCardAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_card = relationship("VendorCard", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -371,7 +371,7 @@ class VendorContactAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_contact = relationship("VendorContact", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])

@@ -16,7 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,7 +41,7 @@ def buy_plan(db_session, test_requisition, test_user):
     plan = BuyPlan(
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.DRAFT,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(plan)
     db_session.commit()

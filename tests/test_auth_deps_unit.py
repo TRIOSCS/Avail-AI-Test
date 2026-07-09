@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.dependencies, app.models.User, tests.conftest (db_session)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,7 +45,7 @@ def _create_user(db: Session, *, email: str = "unit@test.com", role: str = "buye
         role=role,
         azure_id=f"azure-{email}",
         is_active=is_active,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.commit()
@@ -301,7 +301,7 @@ class TestRequireFreshToken:
     async def test_valid_fresh_token_returned(self, db_session: Session):
         user = _create_user(db_session)
         user.access_token = "valid-token-abc"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
 
@@ -313,7 +313,7 @@ class TestRequireFreshToken:
     async def test_expired_token_no_refresh_raises_401(self, db_session: Session):
         user = _create_user(db_session)
         user.access_token = "expired-token"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.refresh_token = None
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
@@ -330,7 +330,7 @@ class TestRequireFreshToken:
         background-only)."""
         user = _create_user(db_session)
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         user.refresh_token = "refresh-token-xyz"
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
@@ -344,7 +344,7 @@ class TestRequireFreshToken:
         """If token is truly expired (past expiry), should raise 401."""
         user = _create_user(db_session)
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
         user.refresh_token = "refresh-token-xyz"
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})

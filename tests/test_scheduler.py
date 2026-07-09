@@ -15,7 +15,7 @@ Individual job function tests have been split into domain-specific files:
   - test_jobs_tagging.py (material enrichment, nexar validate, connector enrichment)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -71,7 +71,7 @@ def _mock_settings(**overrides):
 def test_utc_naive_becomes_utc():
     naive = datetime(2026, 1, 15, 12, 0, 0)
     result = _utc(naive)
-    assert result.tzinfo == timezone.utc
+    assert result.tzinfo == UTC
     assert result.year == 2026
 
 

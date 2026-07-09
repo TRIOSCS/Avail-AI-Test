@@ -15,7 +15,7 @@ import asyncio
 import json
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
 from urllib.parse import urlsplit
@@ -390,7 +390,7 @@ def build_board_requirement_query(db: Session, user: User, filters: SightingsLis
     if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    stale_threshold = datetime.now(UTC) - timedelta(days=settings.sighting_stale_days)
     deadline_48h = date.today() + timedelta(days=2)
 
     if filters.status:
@@ -460,7 +460,7 @@ async def _render_sightings_table(
 
     # Thresholds reused below by the dashboard-strip counters + heatmap (the builder applies
     # its own copies to the query). UTC-aware to line up with UTCDateTime columns.
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    stale_threshold = datetime.now(UTC) - timedelta(days=settings.sighting_stale_days)
     deadline_48h = date.today() + timedelta(days=2)
 
     total = query.count()
@@ -874,7 +874,7 @@ async def sightings_detail(
         # Intelligence fields
         age_days = None
         if s.newest_sighting_at:
-            age_days = (datetime.now(timezone.utc) - s.newest_sighting_at).days
+            age_days = (datetime.now(UTC) - s.newest_sighting_at).days
 
         lead_explanation = explain_lead(
             vendor_name=s.vendor_name,
@@ -948,7 +948,7 @@ async def sightings_detail(
             .scalar()
         )
         if last_rfq:
-            days_since = (datetime.now(timezone.utc) - last_rfq).days
+            days_since = (datetime.now(UTC) - last_rfq).days
             if days_since > 3:
                 suggested_action = f"RFQs pending for {days_since} days — follow up"
             else:
@@ -1150,8 +1150,8 @@ async def sightings_batch_refresh(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
@@ -1214,8 +1214,8 @@ async def sightings_batch_assign(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     buyer_id_str = form.get("buyer_id", "")
     buyer_id = int(buyer_id_str) if buyer_id_str else None
 
@@ -1261,8 +1261,8 @@ async def sightings_batch_status(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     new_status = form.get("status", "")
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -1273,8 +1273,8 @@ async def sightings_batch_status(
 
     try:
         SourcingStatus(new_status)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}") from e
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
@@ -1328,8 +1328,8 @@ async def sightings_batch_notes(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     notes = form.get("notes", "").strip()
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -3617,7 +3617,7 @@ async def sightings_offer_request(
     `.../offers/{offer_id}/request/{index}/send` (sightings_offer_request_send) — the
     buyer no longer has to copy the draft into the solicit modal by hand.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ..services.offer_qualification import REQUEST_KINDS, request_template
 
@@ -3636,7 +3636,7 @@ async def sightings_offer_request(
         {
             "kind": kind,
             "status": "pending",
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": datetime.now(UTC).isoformat(),
             "contact_id": None,
         }
     )
@@ -3676,7 +3676,7 @@ async def sightings_offer_request_send(
     entry; a single request is logged as an outreach activity but does NOT auto-progress
     the sourcing status (one clarification is not a full RFQ round).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ..email_service import send_batch_rfq
     from ..services.offer_qualification import request_template
@@ -3769,7 +3769,7 @@ async def sightings_offer_request_send(
     if r["status"] == "sent":
         entry["status"] = "sent"
         entry["contact_id"] = r.get("id")
-        entry["sent_at"] = datetime.now(timezone.utc).isoformat()
+        entry["sent_at"] = datetime.now(UTC).isoformat()
         toast_msg, toast_level = (f"Request sent to {offer.vendor_name}", "success")
         # Log the outreach (mirrors sightings_send_inquiry's rfq_sent), but deliberately
         # NO auto_progress: one clarification request is not a full RFQ round.

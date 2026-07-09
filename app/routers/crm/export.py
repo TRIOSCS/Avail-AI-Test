@@ -17,7 +17,7 @@ Depends on: app/services/crm_service (cdm_company_query, customer_contacts_query
             app/utils/csv_export.stream_csv (shared formula-injection-safe CSV streamer)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -122,7 +122,7 @@ def _contacts_rows(
     # database and the whole set streams via yield_per instead of materializing. (PERF-10)
     base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
     if cadence_state in CONTACT_CADENCE_DOTS:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         base = base.filter(contact_cadence_predicate(cadence_state, now))
 
     for contact in base.yield_per(200):

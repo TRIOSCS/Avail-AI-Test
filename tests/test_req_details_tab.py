@@ -5,7 +5,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _make_requisition_and_parts(db_session, test_user, num_parts=2, **part_kwargs):
@@ -18,7 +18,7 @@ def _make_requisition_and_parts(db_session, test_user, num_parts=2, **part_kwarg
         urgency="normal",
         customer_name="Acme Corp",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(reqn)
     db_session.commit()
@@ -54,7 +54,7 @@ def _make_req_with_part(db_session, test_user, *, req_name, **part_kwargs):
         urgency="normal",
         customer_name="TestCo",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(reqn)
     db_session.commit()

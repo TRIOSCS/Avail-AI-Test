@@ -15,7 +15,7 @@ os.environ["TESTING"] = "1"
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -44,7 +44,7 @@ def _make_user(db: Session, *, role: str = "buyer", name: str = "U") -> User:
         role=role,
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -58,7 +58,7 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
         customer_name="TestCo",
         status="active",
         created_by=buyer.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -68,7 +68,7 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
         line_items=[],
         status="sent",
         created_by_id=buyer.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -78,7 +78,7 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
         status="active",
         so_status="approved",
         submitted_by_id=buyer.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -95,7 +95,7 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
         unit_cost=5.0,
         status="pending_verify",
         po_number="PO-TEST",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -165,7 +165,8 @@ class TestResellJobsErrorPaths:
 
     @pytest.mark.asyncio
     async def test_zero_expired_logs_nothing(self, db_session: Session):
-        """When expire_overdue_lists returns 0 (falsy), the logger.info line is skipped."""
+        """When expire_overdue_lists returns 0 (falsy), the logger.info line is
+        skipped."""
         from app.jobs.resell_jobs import _job_expire_resell_lists
 
         mock_db = MagicMock()
@@ -191,7 +192,7 @@ def _make_ticket(db: Session, **kwargs) -> TroubleTicket:
         description=kwargs.pop("description", "desc"),
         status=kwargs.pop("status", "submitted"),
         source=kwargs.pop("source", "report_button"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kwargs,
     )
     db.add(t)
@@ -545,7 +546,8 @@ class TestSendGroupEmail:
 
     @pytest.mark.asyncio
     async def test_per_recipient_send_failure_continues(self, db_session: Session):
-        """When one recipient send fails, it continues to next; returns False if all fail."""
+        """When one recipient send fails, it continues to next; returns False if all
+        fail."""
         from app.services.prepayment_notifications import _send_group_email
 
         admin = _make_user(db_session, role="admin", name="AdminSend2")
@@ -676,7 +678,7 @@ class TestFactsPaidAndVoidedBranches:
 
         buyer = _make_user(db_session)
         pp = _make_prepayment_direct(db_session, buyer)
-        dt = datetime.now(timezone.utc)
+        dt = datetime.now(UTC)
 
         facts = dict(_facts(pp, "approved", approver="Bob Smith", decided_at=dt))
         assert facts.get("Approved by") == "Bob Smith"

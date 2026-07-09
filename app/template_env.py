@@ -4,7 +4,7 @@ Called by: all router files that render templates
 Depends on: Jinja2
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi.templating import Jinja2Templates
@@ -71,8 +71,8 @@ def _elapsed_seconds(dt) -> float | None:
         except (ValueError, TypeError):
             return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - dt).total_seconds()
+        dt = dt.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - dt).total_seconds()
 
 
 # ── Custom Jinja2 Filters ───────────────────────────────────────────
@@ -368,7 +368,7 @@ templates.env.filters["safe_url"] = _safe_url_filter
 def _now() -> datetime:
     """Current UTC time — for relative date grouping in templates (e.g. the requisition
     Activity tab's Today/Yesterday timeline headers)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 templates.env.globals["now"] = _now
@@ -396,7 +396,7 @@ def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
 
     if task.due_at is None:
         return (False, False)
-    due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=timezone.utc)
+    due = task.due_at if task.due_at.tzinfo is not None else task.due_at.replace(tzinfo=UTC)
     due_date = due.date()
     today = now_utc.astimezone(current_display_zoneinfo()).date()
     is_overdue = due_date < today

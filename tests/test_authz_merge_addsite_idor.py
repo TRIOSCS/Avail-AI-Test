@@ -22,7 +22,7 @@ Depends on: conftest.py fixtures (client, db_session, test_user, sales_user,
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -40,7 +40,7 @@ def keep_company(db_session: Session, test_user: User) -> Company:
         name="Keep Corp MAIDOR",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -56,7 +56,7 @@ def remove_company(db_session: Session, test_user: User) -> Company:
         name="Remove Corp MAIDOR",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()

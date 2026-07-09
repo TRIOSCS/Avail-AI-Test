@@ -5,7 +5,7 @@ Depends on: app.database, app.models, app.email_service, app.services.webhook_se
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import sqlalchemy.exc
@@ -58,7 +58,7 @@ async def _job_token_refresh():
     selector_db = SessionLocal()
     users_to_refresh: list[int] = []
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         users = selector_db.query(User).filter(User.refresh_token.isnot(None)).all()
         for user in users:
             needs_refresh = False
@@ -134,7 +134,7 @@ async def _job_inbox_scan():
     # Use a short-lived session just to identify users that need scanning
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         scan_interval = timedelta(
             minutes=get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
@@ -168,7 +168,7 @@ async def _job_inbox_scan():
                 if not user:
                     return
                 await asyncio.wait_for(_scan_user_inbox(user, scan_db), timeout=90)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error(f"Inbox scan TIMEOUT for user {user_id} (90s) — skipping")
                 scan_db.rollback()
                 try:
@@ -209,7 +209,7 @@ async def _job_batch_results():
         batch_applied = await asyncio.wait_for(process_batch_results(db), timeout=120)
         if batch_applied:
             logger.info(f"Batch processing: {batch_applied} results applied")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Batch results processing timed out (120s)")
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
@@ -237,7 +237,7 @@ async def _job_batch_parse_signatures():
         batch_id = await asyncio.wait_for(batch_parse_signatures(db), timeout=120)
         if batch_id:
             logger.info(f"Signature batch parse submitted: {batch_id}")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Signature batch parse timed out (120s)")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
@@ -260,7 +260,7 @@ async def _job_poll_signature_batch():
         result = await asyncio.wait_for(process_signature_batch_results(db), timeout=120)
         if result is not None:
             logger.info(f"Signature batch results: {result['applied']} applied, {result['errors']} errors")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Signature batch poll timed out (120s)")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture

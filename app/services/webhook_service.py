@@ -17,7 +17,7 @@ Usage:
 import hmac
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -96,7 +96,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         db.query(GraphSubscription)
         .filter(
             GraphSubscription.user_id == user.id,
-            GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+            GraphSubscription.expiration_dt > datetime.now(UTC),
         )
         .first()
     )
@@ -105,7 +105,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         return existing
 
     client_state = secrets.token_hex(16)
-    expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+    expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
 
     notification_url = f"{settings.app_url}/api/webhooks/graph"
 
@@ -158,7 +158,7 @@ async def create_teams_subscription(user: User, db: Session) -> GraphSubscriptio
         .filter(
             GraphSubscription.user_id == user.id,
             GraphSubscription.resource == "/me/chats/getAllMessages",
-            GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+            GraphSubscription.expiration_dt > datetime.now(UTC),
         )
         .first()
     )
@@ -172,7 +172,7 @@ async def create_teams_subscription(user: User, db: Session) -> GraphSubscriptio
         return None
 
     client_state = secrets.token_hex(16)
-    expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+    expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
 
     notification_url = f"{settings.app_url}/api/webhooks/teams"
 
@@ -223,7 +223,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
     if not token:
         return False
 
-    new_expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+    new_expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
 
     gc = GraphClient(token)
     try:
@@ -257,7 +257,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
 
     # SUCCESS: reset health counters, set last_renewed_at, clear user error
     sub.expiration_dt = new_expiration
-    sub.last_renewed_at = datetime.now(timezone.utc)
+    sub.last_renewed_at = datetime.now(UTC)
     sub.renew_fail_count = 0
     sub.last_error = None
     if user.m365_error_reason == _M365_SUB_ERROR_MSG:
@@ -280,7 +280,7 @@ def _record_renewal_failure(sub, user, error_detail: str, db) -> None:
 
 async def renew_expiring_subscriptions(db: Session):
     """Renew all subscriptions expiring within the buffer window."""
-    cutoff = datetime.now(timezone.utc) + timedelta(hours=RENEW_BUFFER_HOURS)
+    cutoff = datetime.now(UTC) + timedelta(hours=RENEW_BUFFER_HOURS)
     expiring = db.query(GraphSubscription).filter(GraphSubscription.expiration_dt <= cutoff).all()
 
     for sub in expiring:
@@ -305,7 +305,7 @@ async def ensure_all_users_subscribed(db: Session):
             .filter(
                 GraphSubscription.user_id == user.id,
                 GraphSubscription.resource == "/me/messages",
-                GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+                GraphSubscription.expiration_dt > datetime.now(UTC),
             )
             .first()
         )
@@ -319,7 +319,7 @@ async def ensure_all_users_subscribed(db: Session):
                 .filter(
                     GraphSubscription.user_id == user.id,
                     GraphSubscription.resource == "/me/chats/getAllMessages",
-                    GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+                    GraphSubscription.expiration_dt > datetime.now(UTC),
                 )
                 .first()
             )

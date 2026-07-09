@@ -11,7 +11,7 @@ Verifies:
 8. _preload_last_quoted_prices card_id keying
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -62,7 +62,7 @@ def _make_sent_quote(db_session, requisition, customer_site, user, quote_number,
         customer_site_id=customer_site.id,
         quote_number=quote_number,
         status="sent",
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         line_items=line_items,
         subtotal=subtotal,
         created_by_id=user.id,
@@ -95,8 +95,8 @@ def _mock_quote(line_items=None, **overrides):
     q.result_notes = overrides.get("result_notes", None)
     q.result_at = overrides.get("result_at", None)
     q.won_revenue = overrides.get("won_revenue", None)
-    q.created_at = overrides.get("created_at", datetime(2026, 2, 1, tzinfo=timezone.utc))
-    q.updated_at = overrides.get("updated_at", datetime(2026, 2, 1, tzinfo=timezone.utc))
+    q.created_at = overrides.get("created_at", datetime(2026, 2, 1, tzinfo=UTC))
+    q.updated_at = overrides.get("updated_at", datetime(2026, 2, 1, tzinfo=UTC))
     created_by = MagicMock()
     created_by.name = "Mike"
     q.created_by = created_by
@@ -269,7 +269,7 @@ class TestQuoteCreationMaterialCard:
             unit_price=1.20,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -468,8 +468,8 @@ def test_preload_includes_card_id_keys():
         {"mpn": "NE555P", "sell_price": 1.00, "margin_pct": 10.0},
     ]
     q.quote_number = "Q-2026-0099"
-    q.sent_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
-    q.created_at = datetime(2026, 1, 28, tzinfo=timezone.utc)
+    q.sent_at = datetime(2026, 2, 1, tzinfo=UTC)
+    q.created_at = datetime(2026, 1, 28, tzinfo=UTC)
     q.result = "won"
     db = MagicMock()
     db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
@@ -491,15 +491,15 @@ def test_preload_card_id_dedup():
     q1 = MagicMock()
     q1.line_items = [{"mpn": "LM317T/NOPB", "material_card_id": 42, "sell_price": 3.00, "margin_pct": 20.0}]
     q1.quote_number = "Q-2026-0010"
-    q1.sent_at = datetime(2026, 2, 10, tzinfo=timezone.utc)
-    q1.created_at = datetime(2026, 2, 9, tzinfo=timezone.utc)
+    q1.sent_at = datetime(2026, 2, 10, tzinfo=UTC)
+    q1.created_at = datetime(2026, 2, 9, tzinfo=UTC)
     q1.result = "sent"
 
     q2 = MagicMock()
     q2.line_items = [{"mpn": "LM317T", "material_card_id": 42, "sell_price": 2.00, "margin_pct": 10.0}]
     q2.quote_number = "Q-2026-0005"
-    q2.sent_at = datetime(2026, 1, 15, tzinfo=timezone.utc)
-    q2.created_at = datetime(2026, 1, 14, tzinfo=timezone.utc)
+    q2.sent_at = datetime(2026, 1, 15, tzinfo=UTC)
+    q2.created_at = datetime(2026, 1, 14, tzinfo=UTC)
     q2.result = "won"
 
     db = MagicMock()

@@ -10,7 +10,7 @@ Depends on: app/routers/error_reports.py, conftest.py
 
 import base64
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def _make_ticket(submitted_by, **overrides):
         "source": "report_button",
         "risk_tier": "low",
         "category": "other",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     fields.update(overrides)
     return TroubleTicket(**fields)

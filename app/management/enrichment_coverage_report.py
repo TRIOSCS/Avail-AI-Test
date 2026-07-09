@@ -24,7 +24,7 @@ import argparse
 import json
 from collections import Counter
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -257,7 +257,7 @@ def collect_metrics(db: Session) -> dict[str, Any]:
         fru_links = {"rows": int(fru_rows), "distinct_frus": int(fru_distinct)}
 
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "cards": {
             "total": int(total),
             "with_category": int(with_category),
@@ -425,9 +425,9 @@ def main(json_output: bool = False, log_file: str | None = None) -> dict[str, An
     if deltas is not None:
         output["deltas"] = deltas
     if json_output:
-        print(json.dumps(output, indent=2, default=str))  # noqa: T201 — CLI report output
+        print(json.dumps(output, indent=2, default=str))
     else:
-        print(format_report(metrics, deltas, prev_ts))  # noqa: T201 — CLI report output
+        print(format_report(metrics, deltas, prev_ts))
     return output
 
 

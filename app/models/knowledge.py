@@ -8,7 +8,7 @@ Called by: services/knowledge_service.py, routers/knowledge.py
 Depends on: models/base.py, models/auth.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -57,11 +57,11 @@ class KnowledgeEntry(Base):
     delivered_at = Column(UTCDateTime, nullable=True)
     answered_via = Column(String(10), nullable=True)  # 'web' or 'teams'
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships

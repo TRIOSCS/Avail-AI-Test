@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ def _make_quote_and_requisition(db: Session):
         name="BP Test",
         role="buyer",
         azure_id=f"bp-azure-{datetime.now().timestamp()}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -38,7 +38,7 @@ def _make_quote_and_requisition(db: Session):
     co = Company(
         name=f"BPCo {datetime.now().timestamp()}",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.flush()
@@ -55,7 +55,7 @@ def _make_quote_and_requisition(db: Session):
         customer_name="BPCo",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -70,7 +70,7 @@ def _make_quote_and_requisition(db: Session):
         total_cost=0,
         total_margin_pct=0,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -85,7 +85,7 @@ def _make_buy_plan(db: Session, status: str, purchase_history_recorded_at=None) 
         requisition_id=req_id,
         status=status,
         purchase_history_recorded_at=purchase_history_recorded_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.commit()
@@ -149,7 +149,7 @@ class TestBackfillSkipsAlreadyRecorded:
         _make_buy_plan(
             db_session,
             status=BuyPlanStatus.COMPLETED.value,
-            purchase_history_recorded_at=datetime.now(timezone.utc),
+            purchase_history_recorded_at=datetime.now(UTC),
         )
 
         with patch("app.management.backfill_buyplan_cph.record_buyplan_purchase_history") as mock_rec:
@@ -164,7 +164,7 @@ class TestBackfillSkipsAlreadyRecorded:
         _make_buy_plan(
             db_session,
             status=BuyPlanStatus.COMPLETED.value,
-            purchase_history_recorded_at=datetime.now(timezone.utc),
+            purchase_history_recorded_at=datetime.now(UTC),
         )
         unrecorded = _make_buy_plan(
             db_session,
@@ -186,7 +186,7 @@ class TestBackfillSkipsAlreadyRecorded:
         _make_buy_plan(
             db_session,
             status=BuyPlanStatus.COMPLETED.value,
-            purchase_history_recorded_at=datetime.now(timezone.utc),
+            purchase_history_recorded_at=datetime.now(UTC),
         )
 
         with patch("app.management.backfill_buyplan_cph.record_buyplan_purchase_history") as mock_rec:

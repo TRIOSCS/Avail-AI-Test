@@ -11,7 +11,7 @@ Note: User CRUD, CSV import, Teams config, vendor dedup, and company dedup
 test classes were removed — those endpoints were deleted in the CRM redesign.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -70,7 +70,7 @@ class TestAdminConfig:
         row = SystemConfig(
             key="test_setting",
             value="test_val",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         db_session.add(row)
         db_session.commit()
@@ -116,7 +116,7 @@ class TestAdminConfigUpdate:
         row = SystemConfig(
             key="upsert_test_key",
             value="old_val",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         db_session.add(row)
         db_session.commit()
@@ -470,7 +470,7 @@ class TestMaterialAudit:
             entity_type="material_card",
             entity_id=1,
             normalized_mpn="lm317t",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(audit)
         db_session.commit()

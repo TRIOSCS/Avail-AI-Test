@@ -57,7 +57,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -108,7 +108,7 @@ def pending_resolution(
     norms = [n for n in dict.fromkeys(spare_norms) if n]
     if not norms:
         return {}
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=NO_MATCH_RETRY_DAYS)
 
     rows_by_norm: dict[str, list[OemCrosswalk]] = {}
@@ -131,7 +131,7 @@ def pending_resolution(
 
 def _aware(dt: datetime) -> datetime:
     """Coerce a naive UTC timestamp (SQLite round-trip) to aware for comparison."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def apply_resolution(
@@ -177,7 +177,7 @@ def apply_resolution(
         row.source_url = None
         row.source_domain = ""  # NOT NULL sentinel — see the model docstring
     row.payload = result.payload
-    row.looked_up_at = now or datetime.now(timezone.utc)
+    row.looked_up_at = now or datetime.now(UTC)
     return row
 
 
@@ -243,7 +243,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
     if not rows_by_norm:
         return stats
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
 
     def get_schema_cache(commodity: str) -> dict:

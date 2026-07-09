@@ -23,7 +23,7 @@ Depends on: app.routers.htmx.sourcing (results/workspace partials),
             app.routers.htmx_views.add_to_requisition, conftest fixtures.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -41,7 +41,7 @@ def _requisition(db: Session, user: User) -> Requisition:
         status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()

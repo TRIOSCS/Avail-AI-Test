@@ -8,7 +8,7 @@ Called by: services/strategic_vendor_service.py, routers/strategic.py
 Depends on: models/base.py, models/auth.py, models/vendors.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Column,
@@ -33,7 +33,7 @@ class StrategicVendor(Base):
     claimed_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     last_offer_at = Column(UTCDateTime, nullable=True)
     expires_at = Column(UTCDateTime, nullable=False)

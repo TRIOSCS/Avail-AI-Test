@@ -12,7 +12,7 @@ Revision ID: 042_add_tagging_tables
 Revises: 041_add_notifications
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 
@@ -151,7 +151,7 @@ def upgrade() -> None:
     )
     op.bulk_insert(
         tags_table,
-        [{"name": name, "tag_type": "commodity", "created_at": datetime.now(timezone.utc)} for name in COMMODITY_TAGS],
+        [{"name": name, "tag_type": "commodity", "created_at": datetime.now(UTC)} for name in COMMODITY_TAGS],
     )
 
     # ── Seed threshold config ─────────────────────────────────────────

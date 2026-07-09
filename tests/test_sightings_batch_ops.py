@@ -13,7 +13,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def _make_user(db: Session, role: str = "buyer"):
         name="Test User",
         role=role,
         azure_id=f"{role}-azure-id",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()

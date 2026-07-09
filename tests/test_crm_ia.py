@@ -24,14 +24,14 @@ Depends on: app.models, app.routers.htmx_views (via the TestClient `client`
             fixture), the in-memory SQLite test engine.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, SiteContact, User
 from app.models.sourcing import Requisition
 
-NOW = datetime(2026, 6, 23, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 23, 12, 0, 0, tzinfo=UTC)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

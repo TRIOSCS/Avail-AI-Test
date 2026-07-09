@@ -7,7 +7,6 @@ Called by: pytest
 Depends on: app.utils.sql_helpers, app.services.enrichment
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,7 +78,7 @@ class TestEnrichmentErrorClassification:
         ):
             mock_module = MagicMock()
             mock_connector = MagicMock()
-            mock_connector.search = AsyncMock(side_effect=asyncio.TimeoutError())
+            mock_connector.search = AsyncMock(side_effect=TimeoutError())
             mock_module.FakeConnector.return_value = mock_connector
             mock_importlib.import_module.return_value = mock_module
 

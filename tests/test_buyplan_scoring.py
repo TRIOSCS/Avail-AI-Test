@@ -12,7 +12,7 @@ Called by: pytest
 Depends on: app/services/buyplan_scoring.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -268,7 +268,7 @@ class TestAssignBuyer:
             role="buyer",
             azure_id="az-buyer-1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(buyer)
         db_session.flush()
@@ -277,7 +277,7 @@ class TestAssignBuyer:
             name="Test",
             status="open",
             created_by=buyer.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -289,7 +289,7 @@ class TestAssignBuyer:
             unit_price=10.0,
             status="active",
             entered_by_id=buyer.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -306,7 +306,7 @@ class TestAssignBuyer:
             role="sales",
             azure_id="az-sales-1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -315,7 +315,7 @@ class TestAssignBuyer:
             name="Test",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -327,7 +327,7 @@ class TestAssignBuyer:
             unit_price=10.0,
             status="active",
             entered_by_id=None,  # No entered_by
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -344,7 +344,7 @@ class TestAssignBuyer:
             role="buyer",
             azure_id="az-buyer-wl-1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         buyer2 = User(
             email="buyer2@test.com",
@@ -352,7 +352,7 @@ class TestAssignBuyer:
             role="buyer",
             azure_id="az-buyer-wl-2",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([buyer1, buyer2])
         db_session.flush()
@@ -361,7 +361,7 @@ class TestAssignBuyer:
             name="Test",
             status="open",
             created_by=buyer1.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -373,7 +373,7 @@ class TestAssignBuyer:
             unit_price=10.0,
             status="active",
             entered_by_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -390,7 +390,7 @@ class TestAssignBuyer:
             role="buyer",
             azure_id="az-inactive-1",
             is_active=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         active_buyer = User(
             email="active@test.com",
@@ -398,7 +398,7 @@ class TestAssignBuyer:
             role="buyer",
             azure_id="az-active-1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([inactive_buyer, active_buyer])
         db_session.flush()
@@ -407,7 +407,7 @@ class TestAssignBuyer:
             name="Test",
             status="open",
             created_by=inactive_buyer.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -419,7 +419,7 @@ class TestAssignBuyer:
             unit_price=10.0,
             status="active",
             entered_by_id=inactive_buyer.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -436,7 +436,7 @@ class TestAssignBuyer:
             role="sales",
             azure_id="az-sales-2",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         buyer = User(
             email="buyer3@test.com",
@@ -444,7 +444,7 @@ class TestAssignBuyer:
             role="trader",
             azure_id="az-trader-1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([sales_user, buyer])
         db_session.flush()
@@ -453,7 +453,7 @@ class TestAssignBuyer:
             name="Test",
             status="open",
             created_by=sales_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -465,7 +465,7 @@ class TestAssignBuyer:
             unit_price=10.0,
             status="active",
             entered_by_id=sales_user.id,  # Sales, not buyer/trader
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()

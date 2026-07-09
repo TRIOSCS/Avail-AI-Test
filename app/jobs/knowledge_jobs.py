@@ -8,7 +8,7 @@ Called by: app/jobs/__init__.py via register_knowledge_jobs()
 Depends on: services/knowledge_service.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
@@ -66,7 +66,7 @@ async def _job_refresh_insights():
 
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
 
         # --- Requisition insights (top 50 recently active) ---
         try:
@@ -170,7 +170,7 @@ async def _job_expire_stale():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired_count = (
             db.query(KnowledgeEntry)
             .filter(KnowledgeEntry.expires_at.isnot(None), KnowledgeEntry.expires_at < now)

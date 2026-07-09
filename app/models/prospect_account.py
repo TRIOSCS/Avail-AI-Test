@@ -1,6 +1,6 @@
 """Prospect account model — unified pool for suggested accounts."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text, event
 from sqlalchemy.dialects.postgresql import JSONB
@@ -79,11 +79,11 @@ class ProspectAccount(Base):
     ai_writeup = Column(Text)
     last_enriched_at = Column(UTCDateTime)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # SP4 Park provenance

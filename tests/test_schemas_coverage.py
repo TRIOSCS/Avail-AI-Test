@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -127,19 +127,19 @@ class TestSOVerificationRequest:
 
 class TestPOConfirmation:
     def test_valid(self):
-        dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        dt = datetime(2026, 6, 1, tzinfo=UTC)
         s = POConfirmation(po_number="PO-12345", estimated_ship_date=dt)
         assert s.po_number == "PO-12345"
         assert s.estimated_ship_date == dt
 
     def test_po_number_stripped(self):
-        dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        dt = datetime(2026, 6, 1, tzinfo=UTC)
         s = POConfirmation(po_number="  PO-999  ", estimated_ship_date=dt)
         assert s.po_number == "PO-999"
 
     @pytest.mark.parametrize("po_number", ["   ", ""], ids=["blank", "empty"])
     def test_missing_po_number(self, po_number):
-        dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        dt = datetime(2026, 6, 1, tzinfo=UTC)
         with pytest.raises(ValidationError, match="PO number is required"):
             POConfirmation(po_number=po_number, estimated_ship_date=dt)
 
@@ -341,7 +341,7 @@ class TestKnowledgeEntryUpdate:
 
 class TestKnowledgeEntryResponse:
     def test_valid(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         s = KnowledgeEntryResponse(
             id=1,
             entry_type="fact",
@@ -358,7 +358,7 @@ class TestKnowledgeEntryResponse:
         assert s.assigned_to_ids == []
 
     def test_extra_fields_allowed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         s = KnowledgeEntryResponse(
             id=1,
             entry_type="fact",
@@ -371,7 +371,7 @@ class TestKnowledgeEntryResponse:
         assert s.custom_field == "extra"
 
     def test_nested_answers(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         answer = KnowledgeEntryResponse(
             id=2,
             entry_type="answer",

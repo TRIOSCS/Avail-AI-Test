@@ -4,7 +4,7 @@ Called by: scheduler.py (monthly), routers/performance.py (on-demand)
 Depends on: models, database
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
@@ -39,8 +39,8 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     else:
         month_end = month_start.replace(month=month_start.month + 1)
 
-    month_start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
+    month_start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=UTC)
+    month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=UTC)
 
     # Grace period: last 7 days of previous month
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
@@ -178,7 +178,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         for key, value in entry.items():
             if key != "user_id":
                 setattr(snap, key, value)
-        snap.updated_at = datetime.now(timezone.utc)
+        snap.updated_at = datetime.now(UTC)
 
     db.commit()
     return {"month": month_start.isoformat(), "entries": len(entries)}

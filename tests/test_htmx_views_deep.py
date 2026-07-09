@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,7 +43,7 @@ def _requisition(db: Session, user: User, **kw) -> Requisition:
         customer_name="Deep Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(r)
@@ -57,7 +57,7 @@ def _requirement(db: Session, req: Requisition, mpn: str = "LM317T", **kw) -> Re
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(r)
@@ -71,7 +71,7 @@ def _quote(db: Session, req: Requisition, user: User, **kw) -> Quote:
         quote_number=f"Q-DEEP-{req.id}",
         status=QuoteStatus.DRAFT,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(q)
@@ -86,7 +86,7 @@ def _buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
         status=BuyPlanStatus.PENDING,
         submitted_by_id=user.id,
         total_cost=100.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(bp)
@@ -100,7 +100,7 @@ def _vendor_card(db: Session, **kw) -> VendorCard:
         display_name="Deep Vendor",
         emails=[],
         phones=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(vc)
@@ -112,7 +112,7 @@ def _company(db: Session, **kw) -> Company:
     co = Company(
         name="Deep Co",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(co)

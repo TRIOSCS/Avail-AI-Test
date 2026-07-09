@@ -6,7 +6,7 @@ Called by: models/__init__.py (re-exported for DB schema)
 Depends on: models/base.py, models/auth.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 
@@ -24,4 +24,4 @@ class Notification(Base):
     title = Column(String(500), nullable=False)
     body = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False, nullable=False)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)

@@ -6,7 +6,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 
 import json
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from html.parser import HTMLParser
 
 import pytest
@@ -91,7 +91,7 @@ def _unav_record(
         normalized_mpn=key,
         reason=reason,
         note=note,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        created_at=datetime.now(UTC) - timedelta(days=age_days),
         qty_at_mark=qty_at_mark,
         requirement_id=requirement_id,
     )
@@ -2153,7 +2153,7 @@ class TestSendInquiryFailureContainment:
                     user_id=kwargs["user_id"],
                     contact_type="email",
                     vendor_name="Half Written",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
             inner_db.flush()
@@ -3176,7 +3176,7 @@ class TestUrgentStaleQuickFilters:
                 requirement_id=calm.id,
                 requisition_id=calm.requisition_id,
                 notes="touched",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -3332,7 +3332,7 @@ class TestOOODetection:
             email="test@good.com",
             source="email",
             is_ooo=True,
-            ooo_return_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ooo_return_date=datetime(2026, 4, 1, tzinfo=UTC),
         )
         db_session.add(contact)
         db_session.commit()

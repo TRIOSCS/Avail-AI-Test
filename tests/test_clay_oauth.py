@@ -1,6 +1,7 @@
 # tests/test_clay_oauth.py — unit tests for Clay OAuth token lifecycle service
 import base64
 import hashlib
+from datetime import UTC
 
 import pytest
 
@@ -77,24 +78,24 @@ async def test_exchange_code_persists_tokens(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_access_token_returns_fresh(monkeypatch):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = _seed_store(monkeypatch)
     store["CLAY_OAUTH_ACCESS_TOKEN"] = "AT"
     store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
-    store["CLAY_OAUTH_EXPIRES_AT"] = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    store["CLAY_OAUTH_EXPIRES_AT"] = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     assert await co.get_access_token() == "AT"
 
 
 @pytest.mark.asyncio
 async def test_get_access_token_refreshes_when_expired(monkeypatch):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = _seed_store(monkeypatch)
     store["CLAY_OAUTH_ACCESS_TOKEN"] = "OLD"
     store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
     store["CLAY_OAUTH_CLIENT_ID"] = "cid"
-    store["CLAY_OAUTH_EXPIRES_AT"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    store["CLAY_OAUTH_EXPIRES_AT"] = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
 
     async def fake_post(url, **k):
         return Resp(200, {"access_token": "NEW", "refresh_token": "RT2", "expires_in": 3600})

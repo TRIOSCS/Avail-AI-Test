@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def material_card(db_session: Session) -> MaterialCard:
         display_mpn="LM317T",
         manufacturer="Texas Instruments",
         category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -44,7 +44,7 @@ def vendor_card(db_session: Session) -> VendorCard:
         display_name="Arrow Electronics",
         emails=["sales@arrow.com"],
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vc)
     db_session.commit()
@@ -58,7 +58,7 @@ def vendor_history(db_session: Session, material_card: MaterialCard, vendor_card
         material_card_id=material_card.id,
         vendor_name="Arrow Electronics",
         vendor_name_normalized="arrow",
-        last_seen=datetime.now(timezone.utc),
+        last_seen=datetime.now(UTC),
         times_seen=5,
     )
     db_session.add(history)
@@ -74,7 +74,7 @@ def req_with_item(db_session: Session, test_user) -> tuple:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -82,7 +82,7 @@ def req_with_item(db_session: Session, test_user) -> tuple:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -101,7 +101,7 @@ def sighting_with_vendor(db_session: Session, req_with_item: tuple, vendor_card:
         vendor_name_normalized="arrow",
         source_type="api",
         qty_available=1000,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -123,7 +123,7 @@ class TestFindAffinityVendorsL1:
             normalized_mpn="nomfr",
             display_mpn="NOMFR",
             manufacturer=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -141,7 +141,7 @@ class TestFindAffinityVendorsL1:
             normalized_mpn="lm7805",
             display_mpn="LM7805",
             manufacturer="Texas Instruments",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_card)
         db_session.flush()
@@ -150,7 +150,7 @@ class TestFindAffinityVendorsL1:
             material_card_id=other_card.id,
             vendor_name="Arrow Electronics",
             vendor_name_normalized="arrow",
-            last_seen=datetime.now(timezone.utc),
+            last_seen=datetime.now(UTC),
             times_seen=3,
         )
         db_session.add(history2)
@@ -169,7 +169,7 @@ class TestFindAffinityVendorsL1:
             normalized_mpn="lm7805",
             display_mpn="LM7805",
             manufacturer="Texas Instruments",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_card)
         db_session.flush()
@@ -177,7 +177,7 @@ class TestFindAffinityVendorsL1:
             material_card_id=other_card.id,
             vendor_name="Arrow Electronics",
             vendor_name_normalized="arrow",
-            last_seen=datetime.now(timezone.utc),
+            last_seen=datetime.now(UTC),
         )
         db_session.add(h)
         db_session.commit()
@@ -223,7 +223,7 @@ class TestFindAffinityVendorsL2:
         tag = Tag(
             name="voltage-regulator",
             tag_type="commodity",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(tag)
         db_session.flush()
@@ -240,7 +240,7 @@ class TestFindAffinityVendorsL2:
             normalized_name="digikey",
             display_name="DigiKey",
             emails=["sales@digikey.com"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vc2)
         db_session.flush()
@@ -287,7 +287,7 @@ class TestFindAffinityVendorsL3:
             vendor_name_normalized="arrow",
             source_type="api",
             material_card_id=material_card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()

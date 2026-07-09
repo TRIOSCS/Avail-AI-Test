@@ -24,7 +24,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,7 +49,7 @@ def existing_task(db_session: Session, test_requisition: Requisition) -> Requisi
         status=TaskStatus.TODO,
         priority=2,
         source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(t)
     db_session.commit()
@@ -65,7 +65,7 @@ def other_requisition(db_session: Session, test_user: User) -> Requisition:
         customer_name="Beta Corp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

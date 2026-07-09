@@ -11,7 +11,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 os.environ["TESTING"] = "1"
 
-from app.constants import (  # noqa: E402
+from app.constants import (
     BuyPlanStatus,
     OfferStatus,
     QuoteStatus,
@@ -27,7 +27,7 @@ from app.constants import (  # noqa: E402
     SourcingStatus,
     UserRole,
 )
-from app.models import (  # noqa: E402
+from app.models import (
     BuyPlan,
     Offer,
     Quote,
@@ -49,7 +49,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requisition(**defaults)
@@ -86,7 +86,7 @@ def _offer(db: Session, req: Requisition, user: User, **kw) -> Offer:
         unit_price=0.50,
         status=OfferStatus.ACTIVE,
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     o = Offer(**defaults)
@@ -124,7 +124,7 @@ def _vendor_response(db: Session, req: Requisition, **kw) -> VendorResponse:
         subject="Re: RFQ",
         body="We have stock.",
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vr = VendorResponse(**defaults)

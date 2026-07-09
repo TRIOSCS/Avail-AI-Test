@@ -40,7 +40,7 @@ Depends on: VendorPartUnavailability, Sighting, ActivityLog models,
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Final, Literal
 
 from loguru import logger
@@ -114,7 +114,7 @@ class UnavailabilityIntel:
 def _as_utc(dt: datetime) -> datetime:
     """Tag naive datetimes (SQLite/legacy rows) as UTC so comparisons never mix naive
     and aware values."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def _window_days(reason: UnavailabilityReason) -> int | None:
@@ -143,7 +143,7 @@ def is_active(record: VendorPartUnavailability, now: datetime | None = None) -> 
         # defaults (Python + server), so a PERSISTED row can never carry NULL —
         # this branch covers the just-created, pre-flush window and nothing else.
         return True
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     return _as_utc(record.created_at) >= now - timedelta(days=window)
 
 
@@ -391,7 +391,7 @@ def record_unavailability(
             "(no primary-MPN key and no matched-sighting keys) — cannot record unavailability"
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     by_all, by_cond = _qty_snapshots(requirement, sightings)
     existing: dict[tuple[str, str | None], VendorPartUnavailability] = {
         (rec.normalized_mpn, rec.condition): rec
@@ -561,7 +561,7 @@ def unavailability_for_requirement(
         )
         .all()
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result: dict[str, UnavailabilityIntel] = {}
     for display, norm in norm_by_display.items():
         keys = keys_by_norm.get(norm, set())
@@ -631,7 +631,7 @@ def apply_to_fresh_sightings(
     if not records:
         return 0
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     for s, norm, cand_keys in candidates:
         stamp = False
@@ -717,7 +717,7 @@ def release_on_offer(
         )
         .all()
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     oc = normalize_condition(offer_condition)
     released = 0
     for rec in records:
@@ -811,6 +811,6 @@ def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> s
             )
     if not keys:
         return set()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = db.query(VendorPartUnavailability).filter(VendorPartUnavailability.normalized_mpn.in_(sorted(keys))).all()
     return {rec.vendor_name_normalized for rec in rows if is_active(rec, now) and rec.condition is None}

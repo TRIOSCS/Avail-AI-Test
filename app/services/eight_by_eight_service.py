@@ -15,7 +15,7 @@ Depends on: app/config.py, httpx
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from loguru import logger
@@ -172,7 +172,7 @@ def normalize_cdr(cdr: dict) -> dict:
     start_utc = cdr.get("startTimeUTC")
     if start_utc:
         try:
-            occurred_at = datetime.fromtimestamp(int(start_utc) / 1000, tz=timezone.utc)
+            occurred_at = datetime.fromtimestamp(int(start_utc) / 1000, tz=UTC)
         except (TypeError, ValueError, OSError):
             pass
 
@@ -184,12 +184,12 @@ def normalize_cdr(cdr: dict) -> dict:
                 try:
                     occurred_at = datetime.strptime(raw_time, fmt)
                     if occurred_at.tzinfo is None:
-                        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+                        occurred_at = occurred_at.replace(tzinfo=UTC)
                     break
                 except ValueError:
                     continue
     if occurred_at is None:
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at = datetime.now(UTC)
 
     # Duration: talkTimeMS (milliseconds) → seconds
     talk_ms = cdr.get("talkTimeMS", 0)

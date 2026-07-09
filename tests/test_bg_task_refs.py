@@ -20,7 +20,7 @@ drains once the event loop processes it).
 import asyncio
 import gc
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 os.environ["TESTING"] = "1"
@@ -43,7 +43,7 @@ def _make_vendor_response(db: Session, user: User, requisition: Requisition, con
         confidence=confidence,
         scanned_by_user_id=user.id,
         status=VendorResponseStatus.NEW,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         message_id=f"msg-bgtask-{id(requisition)}",
     )
     db.add(vr)

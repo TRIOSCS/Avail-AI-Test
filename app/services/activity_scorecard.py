@@ -20,7 +20,7 @@ Depends on: models (ActivityLog, Company, SiteContact, User), constants
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import case
 from sqlalchemy import func as sqlfunc
@@ -69,7 +69,7 @@ def range_start(time_range: str, *, now: datetime | None = None) -> datetime | N
     """
     if time_range == "all_time":
         return None
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     today = now.date()
     if time_range == "this_week":
         start_date = today - timedelta(days=today.weekday())
@@ -78,7 +78,7 @@ def range_start(time_range: str, *, now: datetime | None = None) -> datetime | N
         start_date = date(today.year, quarter_first_month, 1)
     else:  # this_month (default) — unknown keys fall back to month
         start_date = date(today.year, today.month, 1)
-    return datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+    return datetime(start_date.year, start_date.month, start_date.day, tzinfo=UTC)
 
 
 def _activity_metrics_by_user(db: Session, start: datetime | None) -> dict[int, dict[str, int]]:

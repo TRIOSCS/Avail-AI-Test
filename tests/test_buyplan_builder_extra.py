@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,21 +40,21 @@ from app.services.buyplan_builder import (
 
 
 def _make_user(db: Session, email="bbt@trioscs.com") -> User:
-    u = User(email=email, name="BB Tester", role="buyer", azure_id=f"az-{email}", created_at=datetime.now(timezone.utc))
+    u = User(email=email, name="BB Tester", role="buyer", azure_id=f"az-{email}", created_at=datetime.now(UTC))
     db.add(u)
     db.flush()
     return u
 
 
 def _make_company(db: Session) -> Company:
-    c = Company(name="BB Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    c = Company(name="BB Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(c)
     db.flush()
     return c
 
 
 def _make_site(db: Session, company: Company, country=None) -> CustomerSite:
-    s = CustomerSite(company_id=company.id, site_name="HQ", country=country, created_at=datetime.now(timezone.utc))
+    s = CustomerSite(company_id=company.id, site_name="HQ", country=country, created_at=datetime.now(UTC))
     db.add(s)
     db.flush()
     return s
@@ -62,7 +62,7 @@ def _make_site(db: Session, company: Company, country=None) -> CustomerSite:
 
 def _make_requisition(db: Session, user: User, site: CustomerSite) -> Requisition:
     r = Requisition(
-        name="REQ-BB", status="won", created_by=user.id, customer_site_id=site.id, created_at=datetime.now(timezone.utc)
+        name="REQ-BB", status="won", created_by=user.id, customer_site_id=site.id, created_at=datetime.now(UTC)
     )
     db.add(r)
     db.flush()
@@ -75,7 +75,7 @@ def _make_requirement(db: Session, req: Requisition, mpn="T123", qty=100, price=
         primary_mpn=mpn,
         target_qty=qty,
         target_price=price,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -83,9 +83,7 @@ def _make_requirement(db: Session, req: Requisition, mpn="T123", qty=100, price=
 
 
 def _make_vendor(db: Session, name="Test Vendor", country=None) -> VendorCard:
-    v = VendorCard(
-        normalized_name=name.lower(), display_name=name, hq_country=country, created_at=datetime.now(timezone.utc)
-    )
+    v = VendorCard(normalized_name=name.lower(), display_name=name, hq_country=country, created_at=datetime.now(UTC))
     db.add(v)
     db.flush()
     return v
@@ -102,7 +100,7 @@ def _make_offer(
     age_days=0,
     status="active",
 ) -> Offer:
-    created = datetime.now(timezone.utc) - timedelta(days=age_days)
+    created = datetime.now(UTC) - timedelta(days=age_days)
     o = Offer(
         requisition_id=req.id,
         requirement_id=requirement.id,
@@ -126,7 +124,7 @@ def _make_quote(db: Session, req: Requisition, site: CustomerSite, user: User, s
         quote_number="Q-BB-001",
         status=status,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -148,7 +146,7 @@ def _make_plan_with_line(
         quote_id=quote.id,
         requisition_id=req.id,
         status=BuyPlanStatus.DRAFT.value,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.flush()
@@ -382,7 +380,7 @@ class TestCheckQuantityGaps:
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()

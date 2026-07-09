@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/template_env.py, conftest.py
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -70,7 +70,7 @@ class TestElapsedSeconds:
         assert _elapsed_seconds("") is None
 
     def test_aware_datetime(self):
-        past = datetime.now(timezone.utc) - timedelta(seconds=120)
+        past = datetime.now(UTC) - timedelta(seconds=120)
         result = _elapsed_seconds(past)
         assert result is not None
         assert 119 <= result <= 122
@@ -82,7 +82,7 @@ class TestElapsedSeconds:
         assert 59 <= result <= 62
 
     def test_iso_string(self):
-        past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
         result = _elapsed_seconds(past)
         assert result is not None
         assert 298 <= result <= 302
@@ -101,32 +101,32 @@ class TestTimesinceFilter:
         assert _timesince_filter(None) == ""
 
     def test_just_now(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert _timesince_filter(now) == "just now"
 
     def test_minutes_ago(self):
-        past = datetime.now(timezone.utc) - timedelta(minutes=15)
+        past = datetime.now(UTC) - timedelta(minutes=15)
         result = _timesince_filter(past)
         assert "min ago" in result
         assert "15" in result
 
     def test_1_hour_ago(self):
-        past = datetime.now(timezone.utc) - timedelta(hours=1, minutes=10)
+        past = datetime.now(UTC) - timedelta(hours=1, minutes=10)
         result = _timesince_filter(past)
         assert "hour" in result
         assert "s" not in result.split("hour")[0]  # singular
 
     def test_hours_ago_plural(self):
-        past = datetime.now(timezone.utc) - timedelta(hours=5)
+        past = datetime.now(UTC) - timedelta(hours=5)
         result = _timesince_filter(past)
         assert "hours ago" in result
 
     def test_1_day_ago(self):
-        past = datetime.now(timezone.utc) - timedelta(days=1)
+        past = datetime.now(UTC) - timedelta(days=1)
         assert _timesince_filter(past) == "1 day ago"
 
     def test_days_ago(self):
-        past = datetime.now(timezone.utc) - timedelta(days=7)
+        past = datetime.now(UTC) - timedelta(days=7)
         result = _timesince_filter(past)
         assert "7 days ago" == result
 
@@ -141,31 +141,31 @@ class TestTimeagoFilter:
         assert _timeago_filter(None) == "--"
 
     def test_just_now(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert _timeago_filter(now) == "just now"
 
     def test_minutes(self):
-        past = datetime.now(timezone.utc) - timedelta(minutes=30)
+        past = datetime.now(UTC) - timedelta(minutes=30)
         result = _timeago_filter(past)
         assert "m ago" in result
 
     def test_hours(self):
-        past = datetime.now(timezone.utc) - timedelta(hours=3)
+        past = datetime.now(UTC) - timedelta(hours=3)
         result = _timeago_filter(past)
         assert "h ago" in result
 
     def test_days(self):
-        past = datetime.now(timezone.utc) - timedelta(days=4)
+        past = datetime.now(UTC) - timedelta(days=4)
         result = _timeago_filter(past)
         assert "d ago" in result
 
     def test_weeks(self):
-        past = datetime.now(timezone.utc) - timedelta(weeks=3)
+        past = datetime.now(UTC) - timedelta(weeks=3)
         result = _timeago_filter(past)
         assert "w ago" in result
 
     def test_months(self):
-        past = datetime.now(timezone.utc) - timedelta(days=60)
+        past = datetime.now(UTC) - timedelta(days=60)
         result = _timeago_filter(past)
         assert "mo ago" in result
 
@@ -216,25 +216,25 @@ class TestTaskDueState:
         return SimpleNamespace(due_at=due_at)
 
     def test_none_due_is_neither(self):
-        assert _task_due_state(self._task(None), datetime.now(timezone.utc)) == (False, False)
+        assert _task_due_state(self._task(None), datetime.now(UTC)) == (False, False)
 
     def test_earlier_today_is_due_today_not_overdue(self):
         """The core #4 regression: due at 00:00 with the clock already at 18:00 is still
         'due today', not 'overdue'."""
-        now = datetime(2026, 6, 25, 18, 0, tzinfo=timezone.utc)
-        assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc)), now) == (False, True)
+        now = datetime(2026, 6, 25, 18, 0, tzinfo=UTC)
+        assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0, tzinfo=UTC)), now) == (False, True)
 
     def test_prior_day_is_overdue(self):
-        now = datetime(2026, 6, 25, 6, 0, tzinfo=timezone.utc)
-        assert _task_due_state(self._task(datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)), now) == (True, False)
+        now = datetime(2026, 6, 25, 6, 0, tzinfo=UTC)
+        assert _task_due_state(self._task(datetime(2026, 6, 24, 0, 0, tzinfo=UTC)), now) == (True, False)
 
     def test_future_day_is_neither(self):
-        now = datetime(2026, 6, 25, 6, 0, tzinfo=timezone.utc)
-        assert _task_due_state(self._task(datetime(2026, 6, 27, 0, 0, tzinfo=timezone.utc)), now) == (False, False)
+        now = datetime(2026, 6, 25, 6, 0, tzinfo=UTC)
+        assert _task_due_state(self._task(datetime(2026, 6, 27, 0, 0, tzinfo=UTC)), now) == (False, False)
 
     def test_naive_due_at_coerced_to_utc(self):
         """A naive due_at (legacy row / SQLite) is treated as UTC — no TypeError."""
-        now = datetime(2026, 6, 25, 18, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 25, 18, 0, tzinfo=UTC)
         assert _task_due_state(self._task(datetime(2026, 6, 25, 0, 0)), now) == (False, True)
 
     def test_business_timezone_governs_today_near_utc_midnight(self):
@@ -244,8 +244,8 @@ class TestTaskDueState:
         Eastern day is 'due today', not 'overdue' — even though the UTC clock has
         already rolled to tomorrow.
         """
-        now = datetime(2026, 6, 26, 2, 0, tzinfo=timezone.utc)  # 2026-06-25 22:00 US/Eastern
-        task = self._task(datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc))  # due 2026-06-25
+        now = datetime(2026, 6, 26, 2, 0, tzinfo=UTC)  # 2026-06-25 22:00 US/Eastern
+        task = self._task(datetime(2026, 6, 25, 0, 0, tzinfo=UTC))  # due 2026-06-25
         assert _task_due_state(task, now) == (False, True)
 
 
@@ -260,7 +260,7 @@ class TestLocalDayFilter:
     viewer's local day rather than the UTC calendar day."""
 
     # 23:30 UTC Jul 4 → Eastern (UTC-4 summer) still Jul 4 19:30; Tokyo (UTC+9) Jul 5 08:30.
-    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
 
     def test_registered_as_filter(self):
         from app.template_env import templates
@@ -318,8 +318,8 @@ class TestActivityDayBucketing:
         return templates.env.from_string(self.TEMPLATE).render(now=now_dt, ts=ts_dt)
 
     # now = Jul 5 12:00 UTC (a stable "today" for both zones); ts = Jul 4 23:30 UTC.
-    NOW = datetime(2026, 7, 5, 12, 0, tzinfo=timezone.utc)
-    TS_NEAR_MIDNIGHT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+    NOW = datetime(2026, 7, 5, 12, 0, tzinfo=UTC)
+    TS_NEAR_MIDNIGHT = datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
 
     def test_boundary_instant_is_yesterday_for_eastern(self, _reset_tz_contextvar):
         # Eastern: ts → Jul 4 19:30 (yesterday relative to Jul 5).
@@ -333,7 +333,7 @@ class TestActivityDayBucketing:
 
     def test_date_header_reflects_viewer_local_day(self, _reset_tz_contextvar):
         # Far-past instant → the date branch; header date differs by viewer zone.
-        far_now = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+        far_now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
         current_user_display_tz_var.set("America/New_York")
         assert self._render(far_now, self.TS_NEAR_MIDNIGHT) == "Jul 04, 2026"
         current_user_display_tz_var.set("Asia/Tokyo")
@@ -395,7 +395,7 @@ class TestLocalTimeFilter:
         assert _localtime_filter("2024-01-01") == "2024-01-01"
 
     def test_datetime_returns_string(self):
-        dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         result = _localtime_filter(dt, "%Y-%m-%d")
         assert isinstance(result, str)
         assert len(result) > 0
@@ -412,7 +412,7 @@ class TestLocalDateFilter:
         assert _localdate_filter("2024-01-01") == "2024-01-01"
 
     def test_datetime_returns_string(self):
-        dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 12, 0, tzinfo=UTC)
         result = _localdate_filter(dt)
         assert isinstance(result, str)
         assert len(result) > 0
@@ -595,9 +595,9 @@ class TestNowGlobal:
     def test_approximately_current_time(self):
         from datetime import timedelta
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         result = _now()
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
         assert before <= result <= after + timedelta(seconds=1)
 
 

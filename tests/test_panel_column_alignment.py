@@ -18,7 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from bs4 import BeautifulSoup
@@ -38,7 +38,7 @@ def req_with_vendor_summary(db_session: Session, test_user: User) -> tuple:
         customer_name="Column Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -47,7 +47,7 @@ def req_with_vendor_summary(db_session: Session, test_user: User) -> tuple:
         primary_mpn="LM741CN",
         target_qty=500,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()

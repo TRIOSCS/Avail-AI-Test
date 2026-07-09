@@ -18,7 +18,7 @@ date-counters as the worker's web_calls/oem_resolves), app.utils.claude_client.M
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.cache import intel_cache
 
@@ -99,11 +99,7 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=1, help="sum over the last N days ending at --date (default: 1)")
     args = parser.parse_args()
 
-    end = (
-        datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        if args.date
-        else datetime.now(timezone.utc)
-    )
+    end = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=UTC) if args.date else datetime.now(UTC)
     dates = [(end - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(max(1, args.days))]
     print(render(args.bucket, dates, collect(args.bucket, dates)))
 

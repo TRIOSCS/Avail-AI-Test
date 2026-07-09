@@ -8,7 +8,7 @@ Depends on: app.models.sourcing (OemSpecCode, OemSpecCodePending, OemSpecCodeBla
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -37,7 +37,7 @@ def test_oem_spec_code_unique_constraint(db_session):
             spec_code="SPREJ",
             avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
             source="manual",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -48,7 +48,7 @@ def test_oem_spec_code_unique_constraint(db_session):
             spec_code="SPREJ",
             avl=[{"mpn": "Y", "manufacturer": "M", "rank": 1, "notes": None}],
             source="manual",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
     )
     with pytest.raises(IntegrityError):
@@ -245,7 +245,7 @@ def test_oem_spec_code_normalizes_oem_and_spec_code_case(db_session):
             spec_code="sprej ",
             avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
             source="manual",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -260,7 +260,7 @@ def test_oem_spec_code_normalizes_oem_and_spec_code_case(db_session):
             spec_code="SPREJ",
             avl=[{"mpn": "Y", "manufacturer": "M", "rank": 1, "notes": None}],
             source="manual",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
     )
     with pytest.raises(IntegrityError):
@@ -324,7 +324,7 @@ def test_oem_spec_code_source_accepts_valid_enum_values():
             spec_code="SPREJ",
             avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
             source=value.value,
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
         assert row.source == value.value
 
@@ -336,7 +336,7 @@ def test_oem_spec_code_source_rejects_unknown_value():
             spec_code="SPREJ",
             avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
             source="not_a_real_source",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
 
 

@@ -17,7 +17,7 @@ Called by: pytest
 Depends on: app.routers.htmx.sourcing._lead_sighting_data.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import event, update
@@ -129,7 +129,7 @@ def _force_null_created_at(db: Session, sighting: Sighting) -> None:
 def test_helper_query_count_independent_of_lead_count(db_session: Session):
     req, requisition = _req(db_session)
     _lead(db_session, req, requisition, "vendor-a")
-    _sighting(db_session, req, "vendor-a", qty=10, price=Decimal("1.00"), created_at=datetime.now(timezone.utc))
+    _sighting(db_session, req, "vendor-a", qty=10, price=Decimal("1.00"), created_at=datetime.now(UTC))
     db_session.commit()
 
     leads1 = db_session.query(SourcingLead).filter_by(requirement_id=req.id).all()
@@ -137,7 +137,7 @@ def test_helper_query_count_independent_of_lead_count(db_session: Session):
         _lead_sighting_data(db_session, req.id, leads1)
     one = c1.count
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i, name in enumerate(("vendor-b", "vendor-c", "vendor-d")):
         _lead(db_session, req, requisition, name)
         _sighting(db_session, req, name, qty=20 + i, price=Decimal("2.00"), created_at=now)
@@ -157,7 +157,7 @@ def test_helper_query_count_independent_of_lead_count(db_session: Session):
 # ── (b) behavioral equivalence across the multi-row edge cases ───────────────
 def test_helper_matches_old_loop_across_edge_cases(db_session: Session):
     req, requisition = _req(db_session)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # V1 — three sightings, distinct created_at → latest (qty=7, price=0.70) wins.
     v1 = _lead(db_session, req, requisition, "multi-vendor")
@@ -214,9 +214,7 @@ def test_helper_empty_leads_returns_empty(db_session: Session):
 def test_results_partial_renders_sighting_data(client, db_session: Session, test_user: User):
     req, requisition = _req(db_session)
     lead = _lead(db_session, req, requisition, "arrow-electronics")
-    _sighting(
-        db_session, req, "arrow-electronics", qty=1234, price=Decimal("0.42"), created_at=datetime.now(timezone.utc)
-    )
+    _sighting(db_session, req, "arrow-electronics", qty=1234, price=Decimal("0.42"), created_at=datetime.now(UTC))
     db_session.commit()
 
     resp = client.get(f"/v2/partials/sourcing/{req.id}")

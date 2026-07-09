@@ -35,7 +35,7 @@ from app.routers.sources import (
     run_source_test,
     source_has_test_path,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _mk_source(db, name, *, env_vars=None, status="pending"):

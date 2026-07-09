@@ -19,7 +19,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -409,7 +409,7 @@ def _seed_two_buyers_and_watermark(db: Session):
             role="buyer",
             azure_id=f"az-wm-{i}",
             m365_connected=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(u)
         users.append(u)

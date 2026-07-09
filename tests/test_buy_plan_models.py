@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.models.buy_plan
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -130,7 +130,7 @@ class TestBuyPlanModel:
             ai_summary="2 lines, 2 vendors, avg margin 50%",
             ai_flags=[{"type": "stale_offer", "severity": "warning", "message": "Offer >5 days old"}],
             submitted_by_id=test_user.id,
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
             salesperson_notes="Rush order",
         )
         db_session.add(plan)
@@ -279,8 +279,8 @@ class TestBuyPlanLineModel:
             quantity=1000,
             status=BuyPlanLineStatus.PENDING_VERIFY.value,
             po_number="PO-2026-0042",
-            estimated_ship_date=datetime(2026, 3, 15, tzinfo=timezone.utc),
-            po_confirmed_at=datetime.now(timezone.utc),
+            estimated_ship_date=datetime(2026, 3, 15, tzinfo=UTC),
+            po_confirmed_at=datetime.now(UTC),
         )
         db_session.add(line)
         db_session.commit()

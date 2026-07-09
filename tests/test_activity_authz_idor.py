@@ -16,7 +16,7 @@ Depends on: conftest fixtures — client is authenticated as test_user; sales_us
             DIFFERENT user used as the "other rep" who owns the foreign account.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import ActivityLog
 from app.models.crm import Company, CustomerSite
@@ -25,7 +25,7 @@ from app.models.enrichment import ProspectContact
 
 def _foreign_account(db_session, owner_id):
     """A company+site owned by *owner_id* (not the authenticated client)."""
-    stale = datetime.now(timezone.utc) - timedelta(days=40)
+    stale = datetime.now(UTC) - timedelta(days=40)
     co = Company(name="Other Rep Co", is_active=True, account_owner_id=owner_id, last_activity_at=stale)
     db_session.add(co)
     db_session.flush()
@@ -38,7 +38,7 @@ def _foreign_account(db_session, owner_id):
 def _not_recently_bumped(co):
     """True if last_activity_at was NOT advanced to ~now (i.e. the clock was
     untouched)."""
-    return co.last_activity_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc) - timedelta(days=1)
+    return co.last_activity_at.replace(tzinfo=UTC) < datetime.now(UTC) - timedelta(days=1)
 
 
 class TestActivityAuthzIDOR:

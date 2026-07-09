@@ -9,7 +9,7 @@ Covers the four endpoints that surface the unified drafting service:
 draft_email is mocked; the send path relies on the TESTING=1 bypass (no real Graph call).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -28,7 +28,7 @@ def _make_contact(db: Session, req_id: int, user_id: int) -> Contact:
         subject="RFQ - LM358N",
         parts_included=["LM358N"],
         status="sent",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     db.commit()
@@ -46,7 +46,7 @@ def _make_response(db: Session, req_id: int) -> VendorResponse:
         classification="quote_provided",
         parsed_data={"mpn": "LM358N", "qty": 5000, "price": 0.38},
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db.add(vr)
     db.commit()

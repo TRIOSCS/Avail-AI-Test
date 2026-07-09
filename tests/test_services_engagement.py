@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/engagement_scorer.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,7 +24,7 @@ from app.services.engagement_scorer import (
     compute_engagement_score,
 )
 
-NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # ── Cold start / minimum outreach ──────────────────────────────────
@@ -269,7 +269,7 @@ def _make_requisition(db: Session, user_id: int):
         customer_name="Test Customer",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -288,7 +288,7 @@ def _make_contact(db: Session, requisition_id: int, user_id: int, vendor_name: s
         vendor_name_normalized=normalize_vendor_name(vendor_name),
         contact_type="email",
         status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     db.flush()
@@ -303,7 +303,7 @@ def _make_vendor_response(db: Session, vendor_name: str, vendor_email: str, cont
         vendor_name=vendor_name,
         vendor_email=vendor_email,
         contact_id=contact_id,
-        received_at=received_at or datetime.now(timezone.utc),
+        received_at=received_at or datetime.now(UTC),
         status="new",
     )
     db.add(vr)
@@ -323,7 +323,7 @@ def _make_vendor_card(db: Session, normalized_name: str, display_name: str, doma
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -353,7 +353,7 @@ class TestComputeAllEngagementScores:
             _make_contact(db_session, req.id, test_user.id, "Acme Inc")
         # Create 3 responses from the acme.com domain
         for i in range(3):
-            _make_vendor_response(db_session, "John Doe", f"john{i}@acme.com", received_at=datetime.now(timezone.utc))
+            _make_vendor_response(db_session, "John Doe", f"john{i}@acme.com", received_at=datetime.now(UTC))
         db_session.commit()
 
         result = await compute_all_engagement_scores(db_session)
@@ -398,8 +398,8 @@ class TestComputeAllEngagementScores:
         card = _make_vendor_card(db_session, "speedy parts", "Speedy Parts", domain="speedyparts.com")
         req = _make_requisition(db_session, test_user.id)
 
-        sent_time = datetime(2026, 2, 10, 10, 0, 0, tzinfo=timezone.utc)
-        reply_time = datetime(2026, 2, 10, 14, 0, 0, tzinfo=timezone.utc)  # 4 hours later
+        sent_time = datetime(2026, 2, 10, 10, 0, 0, tzinfo=UTC)
+        reply_time = datetime(2026, 2, 10, 14, 0, 0, tzinfo=UTC)  # 4 hours later
 
         c = _make_contact(db_session, req.id, test_user.id, "Speedy Parts", status="sent")
         # Override created_at to a known time
@@ -581,7 +581,7 @@ class TestComputeAllEngagementErrorPaths:
         from datetime import timedelta
 
         card = _make_vendor_card(db_session, "relmonth", "Rel Months Vendor", domain="relmonth.com")
-        card.created_at = datetime.now(timezone.utc) - timedelta(days=120)
+        card.created_at = datetime.now(UTC) - timedelta(days=120)
         db_session.commit()
 
         result = await compute_all_engagement_scores(db_session)

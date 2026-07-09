@@ -9,7 +9,7 @@ Depends on: app.services.tagging_ai_triage, conftest fixtures
 
 import contextlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ def _make_material_card(db: Session, mpn: str, is_internal: bool = False) -> Mat
         description="Test part",
         search_count=1,
         is_internal_part=is_internal,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.flush()
@@ -44,7 +44,7 @@ def _make_material_card(db: Session, mpn: str, is_internal: bool = False) -> Mat
 
 def _make_tag(db: Session, name: str = "resistors", tag_type: str = "commodity") -> Tag:
     """Create a Tag for linking to material cards."""
-    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(timezone.utc))
+    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(UTC))
     db.add(t)
     db.flush()
     return t

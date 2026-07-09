@@ -11,21 +11,21 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class TagResponse(BaseModel, extra="allow"):  # type: ignore[call-arg, unused-ignore]  # pydantic class kwargs; dep-less pre-commit env can't see them
+class TagResponse(BaseModel, extra="allow"):
     id: int
     name: str
     tag_type: str
     parent_id: int | None = None
 
 
-class MaterialTagResponse(BaseModel, extra="allow"):  # type: ignore[call-arg, unused-ignore]  # pydantic class kwargs; dep-less pre-commit env can't see them
+class MaterialTagResponse(BaseModel, extra="allow"):
     tag: TagResponse
     confidence: float
     source: str
     classified_at: datetime | None = None
 
 
-class EntityTagResponse(BaseModel, extra="allow"):  # type: ignore[call-arg, unused-ignore]  # pydantic class kwargs; dep-less pre-commit env can't see them
+class EntityTagResponse(BaseModel, extra="allow"):
     tag: TagResponse
     interaction_count: float
     total_entity_interactions: float

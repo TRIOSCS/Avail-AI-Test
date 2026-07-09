@@ -1,6 +1,6 @@
 """Offer, attachment, contact, and vendor response models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -87,7 +87,7 @@ class Offer(Base):
     is_stale = Column(
         Boolean, nullable=False, default=False, server_default="false"
     )  # display-only: True if >14 days old
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # Audit trail
     updated_at = Column(UTCDateTime)
@@ -178,14 +178,14 @@ class Offer(Base):
             "packaging": self.packaging,
             "date_code": self.date_code,
             **{
-                k: (self.qualification or {}).get(k)  # type: ignore[call-overload, unused-ignore]  # JSON column is a dict at instance level
+                k: (self.qualification or {}).get(k)  # type: ignore[call-overload]  # JSON column is a dict at instance level
                 for k in ("usage", "refurbished_by", "refurb_process", "cert_doc", "part_condition")
             },
         }
         has_images = bool(self.attachments)
-        filled, total = meter(self.condition, data, has_images)  # type: ignore[arg-type, unused-ignore]  # Column[str] is str at instance level
+        filled, total = meter(self.condition, data, has_images)  # type: ignore[arg-type]  # Column[str] is str at instance level
         return {
-            "status": compute_status(self.condition, data, has_images),  # type: ignore[arg-type, unused-ignore]  # Column[str] is str at instance level
+            "status": compute_status(self.condition, data, has_images),  # type: ignore[arg-type]  # Column[str] is str at instance level
             "filled": filled,
             "total": total,
             "note": self.qualification_note,
@@ -246,7 +246,7 @@ class OfferAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     offer = relationship("Offer", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -275,7 +275,7 @@ class Contact(Base):
     parse_result_json = Column(JSON)
     parse_confidence = Column(Float)
     error_message = Column(String(500))  # Error detail when status="failed"
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requisition = relationship("Requisition", back_populates="contacts")
     user = relationship("User", back_populates="contacts")
@@ -310,7 +310,7 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     match_method = Column(String(50), nullable=True)
 
     __table_args__ = (

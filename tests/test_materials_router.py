@@ -17,7 +17,7 @@ Business rules tested:
 """
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +37,7 @@ def _make_deleted_card(db_session: Session, normalized_mpn: str, display_mpn: st
     card = MaterialCard(
         normalized_mpn=normalized_mpn,
         display_mpn=display_mpn,
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()

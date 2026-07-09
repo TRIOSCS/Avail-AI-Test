@@ -7,7 +7,7 @@ Called by: app/jobs/quality_jobs.py (batch scorer)
 Depends on: app/utils/claude_client.py (claude_structured), app/models/intelligence.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -109,7 +109,7 @@ def _mark_no_data(log: ActivityLog, db: Session) -> None:
     log.quality_classification = "no_data"
     log.is_meaningful = False
     log.summary = "No interaction details available"
-    log.quality_assessed_at = datetime.now(timezone.utc)
+    log.quality_assessed_at = datetime.now(UTC)
     db.flush()
 
 
@@ -190,7 +190,7 @@ async def score_activity(activity_id: int, db: Session) -> None:
         log.quality_classification = "scoring_failed"
         log.is_meaningful = None
         log.summary = None
-        log.quality_assessed_at = datetime.now(timezone.utc)
+        log.quality_assessed_at = datetime.now(UTC)
         db.flush()
         logger.error(f"AI scoring returned no result for activity {activity_id}, marked as assessed")
         return
@@ -201,7 +201,7 @@ async def score_activity(activity_id: int, db: Session) -> None:
         log.quality_classification = log.quality_classification[:30]
     log.is_meaningful = result.get("is_meaningful", False)
     log.summary = (result.get("clean_summary") or "")[:500] or None
-    log.quality_assessed_at = datetime.now(timezone.utc)
+    log.quality_assessed_at = datetime.now(UTC)
     db.flush()
 
     # Advance reply clock in real time if this is a meaningful inbound activity.
@@ -225,7 +225,7 @@ async def score_unscored_activities(db: Session, batch_size: int = 50) -> int:
         .filter(
             ActivityLog.quality_assessed_at.is_(None),
             ActivityLog.activity_type.in_(_AI_SCORED_TYPES),
-            ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=7),
+            ActivityLog.created_at >= datetime.now(UTC) - timedelta(days=7),
         )
         .order_by(ActivityLog.created_at.desc())
         .limit(batch_size)

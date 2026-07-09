@@ -1,6 +1,6 @@
 """Tests for proactive matching shared helpers."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -17,9 +17,7 @@ from tests.conftest import engine  # noqa: F401
 
 
 def _make_company_and_site(db):
-    owner = User(
-        email="test@trioscs.com", name="Test", role="sales", azure_id="t-001", created_at=datetime.now(timezone.utc)
-    )
+    owner = User(email="test@trioscs.com", name="Test", role="sales", azure_id="t-001", created_at=datetime.now(UTC))
     db.add(owner)
     db.flush()
     company = Company(name="Test Co", is_active=True, account_owner_id=owner.id)
@@ -69,7 +67,7 @@ def test_is_throttled_true(db_session):
         ProactiveThrottle(
             mpn="LM358N",
             customer_site_id=site.id,
-            last_offered_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_offered_at=datetime.now(UTC) - timedelta(days=5),
         )
     )
     db_session.commit()
@@ -82,7 +80,7 @@ def test_is_throttled_expired(db_session):
         ProactiveThrottle(
             mpn="LM358N",
             customer_site_id=site.id,
-            last_offered_at=datetime.now(timezone.utc) - timedelta(days=30),
+            last_offered_at=datetime.now(UTC) - timedelta(days=30),
         )
     )
     db_session.commit()
@@ -109,7 +107,7 @@ def test_build_batch_throttle_set(db_session):
         ProactiveThrottle(
             mpn="LM358N",
             customer_site_id=site.id,
-            last_offered_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_offered_at=datetime.now(UTC) - timedelta(days=5),
         )
     )
     db_session.commit()
@@ -142,7 +140,7 @@ class TestHelperEdgeCases:
         from unittest.mock import patch
 
         company, site = _make_company_and_site(db_session)
-        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        cutoff = datetime.now(UTC) - timedelta(days=90)
         throttle = ProactiveThrottle(
             customer_site_id=site.id,
             mpn="TEST-MPN",

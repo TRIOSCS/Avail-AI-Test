@@ -14,7 +14,7 @@ Depends on: app.models.approvals.ApprovalOutbox, app.models.auth.User,
             app.services.approvals.notifications
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import select
@@ -116,7 +116,7 @@ async def dispatch_pending(db: Session) -> int:
                 # so the dead-letter cap retires it, rather than silently marking it sent.
                 raise ValueError(f"unknown channel '{row.channel}'")
 
-            row.sent_at = datetime.now(timezone.utc)
+            row.sent_at = datetime.now(UTC)
             db.commit()
             dispatched += 1
 

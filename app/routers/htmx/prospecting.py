@@ -13,7 +13,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 
 import html as html_mod
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -72,8 +72,8 @@ def _enrich_is_stale(started_iso) -> bool:
     except (ValueError, TypeError):
         return False
     if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - started).total_seconds() > _ENRICH_STALE_SECONDS
+        started = started.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - started).total_seconds() > _ENRICH_STALE_SECONDS
 
 
 def _enrich_in_progress(enrichment_data) -> bool:
@@ -472,8 +472,8 @@ async def claim_prospect_htmx(
     result = None
     try:
         result = claim_prospect(prospect_id, user.id, db)
-    except LookupError:
-        raise HTTPException(404, "Prospect not found")
+    except LookupError as e:
+        raise HTTPException(404, "Prospect not found") from e
     except ValueError as e:
         error = str(e)
 
@@ -531,8 +531,8 @@ async def dismiss_prospect_htmx(
     error = None
     try:
         dismiss_prospect(prospect_id, user.id, db, reason=form.get("reason") or "other")
-    except LookupError:
-        raise HTTPException(404, "Prospect not found")
+    except LookupError as e:
+        raise HTTPException(404, "Prospect not found") from e
     except ValueError as e:
         error = str(e)
 
@@ -565,8 +565,8 @@ async def release_prospect_htmx(
     error = None
     try:
         release_prospect(prospect_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
-    except LookupError:
-        raise HTTPException(404, "Prospect not found")
+    except LookupError as e:
+        raise HTTPException(404, "Prospect not found") from e
     except ValueError as e:
         error = str(e)
 
@@ -618,7 +618,7 @@ async def enrich_prospect_htmx(
         from ...utils.async_helpers import safe_background_task
 
         ed["enrich_status"] = "running"
-        ed["enrich_started_at"] = datetime.now(timezone.utc).isoformat()
+        ed["enrich_started_at"] = datetime.now(UTC).isoformat()
         prospect.enrichment_data = ed
         db.commit()
         await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
@@ -728,8 +728,8 @@ async def assign_prospect_htmx(
 
     try:
         assign_prospect(prospect_id, to_user_id, user, db)
-    except PermissionError:
-        raise HTTPException(403, "Only a manager or admin can assign an account")
+    except PermissionError as e:
+        raise HTTPException(403, "Only a manager or admin can assign an account") from e
     except (LookupError, ValueError) as e:
         return _prospect_error_toast(str(e))
 

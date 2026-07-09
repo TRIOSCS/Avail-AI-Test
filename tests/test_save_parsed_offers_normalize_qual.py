@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ def _make_requisition(db: Session, user: User, primary_mpn: str) -> Requisition:
         customer_name="Test Customer",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -39,7 +39,7 @@ def _make_requisition(db: Session, user: User, primary_mpn: str) -> Requisition:
             requisition_id=req.id,
             primary_mpn=primary_mpn,
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db.commit()

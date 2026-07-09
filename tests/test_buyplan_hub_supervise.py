@@ -18,7 +18,7 @@ Depends on: app/services/buyplan_hub.supervise_overview,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -240,7 +240,7 @@ def test_supervise_overdue_po(db_session, test_user, test_quote, test_requisitio
     from app.services.buyplan_hub import supervise_overview
 
     # Back-date approved_at well past the 4h SLA; last_nudge_at = None (never nudged)
-    old_approved_at = datetime.now(timezone.utc) - timedelta(hours=24)
+    old_approved_at = datetime.now(UTC) - timedelta(hours=24)
     plan = _make_plan(
         db_session,
         quote_id=test_quote.id,
@@ -279,7 +279,7 @@ def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quo
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     line = _make_line(
         db_session,

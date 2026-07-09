@@ -7,7 +7,7 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
@@ -949,7 +949,7 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
     if not latest:
         return None
-    delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
+    delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)
     return delta.days
 
 
@@ -983,7 +983,7 @@ def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
     if not latest:
         return None
     if latest.tzinfo is None:
-        return latest.replace(tzinfo=timezone.utc)
+        return latest.replace(tzinfo=UTC)
     return latest
 
 
@@ -997,7 +997,7 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
 
     For companies: also updates site last_activity_at.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if match["type"] == "company":
         db.query(Company).filter(Company.id == match["id"]).update({"last_activity_at": now}, synchronize_session=False)
         # Also update the matched site's last_activity_at
@@ -1112,7 +1112,7 @@ OUTREACH_DEDUP_SECONDS = 120
 
 def bump_company_site_activity(db: Session, company_id: int | None, customer_site_id: int | None) -> None:
     """Set last_activity_at = now on a company and/or site (staleness sort feed)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if company_id:
         db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
     if customer_site_id:
@@ -1169,7 +1169,7 @@ def log_outreach_initiated(
     # subject wording can change without altering dedup semantics. WeChat has
     # no snapshot column; its subject embeds the handle and is deterministic
     # for an identical re-click, so it stands in as the value match.
-    dedup_cutoff = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
     value_match = (
         getattr(ActivityLog, snapshot_col) == contact_value if snapshot_col else ActivityLog.subject == subject
     )
@@ -1312,7 +1312,7 @@ def log_vendor_call(
 
     bump_clocks_from_activity(db, record)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
@@ -1357,7 +1357,7 @@ def log_vendor_note(
     bump_clocks_from_activity(db, record)
 
     if bump_last_activity:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
             {"last_activity_at": now}, synchronize_session=False
         )
@@ -1403,7 +1403,7 @@ def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | N
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
     if not latest:
         return None
-    delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
+    delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)
     return delta.days
 
 
@@ -1417,7 +1417,7 @@ def _update_vendor_contact_stats(match: dict, db: Session):
 
 def _increment_vendor_contact(vendor_contact_id: int, db: Session):
     """Increment a VendorContact's interaction stats."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.query(VendorContact).filter(VendorContact.id == vendor_contact_id).update(
         {
             "interaction_count": func.coalesce(VendorContact.interaction_count, 0) + 1,
@@ -1489,7 +1489,7 @@ def log_activity(
         buy_plan_id=buy_plan_id,
         notes=description,
         summary=summary,
-        occurred_at=occurred_at or datetime.now(timezone.utc),
+        occurred_at=occurred_at or datetime.now(UTC),
         details=details,
         is_meaningful=True if activity_type in _RULE_MEANINGFUL_TYPES else None,
     )
@@ -1609,7 +1609,7 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
     if not activity:
         return None
 
-    activity.dismissed_at = datetime.now(timezone.utc)
+    activity.dismissed_at = datetime.now(UTC)
     db.flush()
 
     logger.info(f"Activity {activity_id} dismissed")
@@ -1627,7 +1627,7 @@ def get_inbox_sync_status(db: Session, user) -> dict:
     from app.services.admin_service import get_effective_int
     from app.services.m365_status import action_for_reason
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     connected = bool(getattr(user, "m365_connected", False))
     last_scan = getattr(user, "last_inbox_scan", None)
 

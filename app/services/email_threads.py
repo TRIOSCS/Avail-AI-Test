@@ -17,7 +17,7 @@ Depends on: utils/graph_client.py, models.py, services/activity_service.py
 import asyncio
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -259,7 +259,7 @@ def _detect_needs_response(messages: list[dict]) -> bool:
 
     try:
         received_dt = datetime.fromisoformat(received_str.replace("Z", "+00:00"))
-        if datetime.now(timezone.utc) - received_dt > timedelta(hours=24):
+        if datetime.now(UTC) - received_dt > timedelta(hours=24):
             return True
     except (ValueError, TypeError):
         return True

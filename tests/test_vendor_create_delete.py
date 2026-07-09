@@ -16,7 +16,7 @@ Called by: pytest
 Depends on: conftest.py fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,7 +37,7 @@ def vendor(db_session: Session) -> VendorCard:
         phones=["+1-555-0199"],
         website="https://testvendor.com",
         sighting_count=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(v)
     db_session.commit()
@@ -183,7 +183,7 @@ def test_delete_vendor_partial_with_offers_returns_400(client: TestClient, vendo
     mc = MaterialCard(
         normalized_mpn="LM317T",
         display_mpn="LM317T",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.flush()
@@ -195,7 +195,7 @@ def test_delete_vendor_partial_with_offers_returns_400(client: TestClient, vendo
         mpn="LM317T",
         unit_price=1.23,
         qty_available=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -229,7 +229,7 @@ def test_vendor_detail_header_matches_account_header(client: TestClient, db_sess
         hq_city="Chicago",
         hq_country="US",
         industry="Electronic Components",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(v)
     db_session.commit()

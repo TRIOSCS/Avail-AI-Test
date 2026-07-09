@@ -6,7 +6,7 @@ Depends on: app.database, app.models, app.services.buyplan_workflow
 
 import asyncio
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
@@ -83,7 +83,7 @@ async def _job_stock_autocomplete():
 
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        cutoff = datetime.now(UTC) - timedelta(hours=1)
         stuck = (
             db.query(BuyPlan)
             .filter(
@@ -138,7 +138,7 @@ async def _job_buyplan_nudge():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         buyer_cutoff = now - timedelta(hours=settings.buyplan_nudge_buyer_hours)
         ops_cutoff = now - timedelta(hours=settings.buyplan_nudge_ops_hours)
 
@@ -380,7 +380,7 @@ async def _download_and_import_stock_list(
         price = row.get("unit_price") or row.get("price")
         mvh = mvh_map.get(card.id)
         if mvh:
-            mvh.last_seen = datetime.now(timezone.utc)
+            mvh.last_seen = datetime.now(UTC)
             mvh.times_seen = (mvh.times_seen or 0) + 1
             if row.get("qty"):
                 mvh.last_qty = row["qty"]
@@ -490,7 +490,7 @@ async def _download_and_import_stock_list(
 
             created_sightings = 0
             created_by_req: dict[int, list[Sighting]] = {}
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for item in imported_for_matching:
                 reqs = req_map.get(item["display_mpn"].upper(), [])
                 if not reqs:

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
@@ -71,7 +71,7 @@ def _upsert_inapp_notice(
     )
     if existing_notif:
         existing_notif.subject = subject
-        existing_notif.created_at = datetime.now(timezone.utc)
+        existing_notif.created_at = datetime.now(UTC)
     else:
         db.add(
             ActivityLog(
@@ -150,7 +150,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     has_new = bool(latest_offer_at and (not req.offers_viewed_at or latest_offer_at > req.offers_viewed_at))
     # Mark as viewed if the requisition owner is viewing
     if offers and user.id == req.created_by:
-        req.offers_viewed_at = datetime.now(timezone.utc)
+        req.offers_viewed_at = datetime.now(UTC)
         db.commit()
     # Batch-fetch vendor ratings for all vendor_card_ids
     card_ids = {o.vendor_card_id for o in offers if o.vendor_card_id}
@@ -632,7 +632,7 @@ async def update_offer(
         setattr(offer, field, value)
     new_dict = {f: getattr(offer, f) for f in trackable}
     record_changes(db, "offer", offer_id, user.id, old_dict, new_dict, trackable)
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
 
     from app.services.offer_qualification import apply_qualification
@@ -669,7 +669,7 @@ async def reconfirm_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    offer.reconfirmed_at = datetime.now(timezone.utc)
+    offer.reconfirmed_at = datetime.now(UTC)
     offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
     db.commit()
     return {
@@ -696,8 +696,8 @@ async def approve_offer(
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
-    offer.approved_at = datetime.now(timezone.utc)
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.approved_at = datetime.now(UTC)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "active"}, ["status"])
     # Offer hook: user approval of a pending offer is user-initiated proof of
@@ -725,7 +725,7 @@ async def reject_offer(
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
     if reason:
         offer.notes = f"{offer.notes or ''}\n[Rejected: {reason}]".strip()
@@ -756,7 +756,7 @@ async def mark_offer_sold(
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.SOLD)
     offer.status = OfferStatus.SOLD
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "sold"}, ["status"])
     _log_offer_status_change(db, offer, old_status, user)
@@ -997,7 +997,7 @@ async def promote_offer(
     old_status = offer.status
     offer.status = OfferStatus.ACTIVE
     offer.promoted_by_id = user.id
-    offer.promoted_at = datetime.now(timezone.utc)
+    offer.promoted_at = datetime.now(UTC)
     # Offer hook: user promotion of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
     maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
@@ -1030,7 +1030,7 @@ async def reject_offer_t4_review(
     old_status = offer.status
     offer.status = OfferStatus.REJECTED
     offer.updated_by_id = user.id
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     _log_offer_status_change(db, offer, old_status, user)
     db.commit()
 

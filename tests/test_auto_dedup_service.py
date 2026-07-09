@@ -8,7 +8,7 @@ Depends on: conftest fixtures, app.models, app.services.auto_dedup_service
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,7 +25,7 @@ def _make_user(db: Session, email: str = "dedup@test.com") -> User:
         name="Dedup Tester",
         role="buyer",
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -38,7 +38,7 @@ def _make_vendor(db: Session, display_name: str, normalized_name: str = None, **
         display_name=display_name,
         sighting_count=10,
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vc = VendorCard(**defaults)
@@ -53,7 +53,7 @@ def _make_company(db: Session, name: str, **kw) -> Company:
         website=f"https://{name.lower().replace(' ', '')}.com",
         industry="Electronics",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     co = Company(**defaults)

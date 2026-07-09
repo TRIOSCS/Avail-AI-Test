@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest fixtures, mocked claude_client
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from app.models.intelligence import MaterialCard
@@ -103,7 +103,7 @@ def _make_card(db, mpn, manufacturer=None):
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -116,7 +116,7 @@ class TestApplyAiResults:
 
     def test_matched_part_tags_card_and_sets_manufacturer(self, db_session):
         # Commodity tags are pre-seeded; get_or_create_commodity_tag won't create them.
-        db_session.add(Tag(name="Microcontrollers (MCU)", tag_type="commodity", created_at=datetime.now(timezone.utc)))
+        db_session.add(Tag(name="Microcontrollers (MCU)", tag_type="commodity", created_at=datetime.now(UTC)))
         db_session.commit()
         card = _make_card(db_session, "STM32F103")
         classified = [

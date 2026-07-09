@@ -19,7 +19,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -371,7 +371,7 @@ class TestCompanyActivities:
             channel="email",
             company_id=test_company.id,
             contact_email="test@example.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -442,7 +442,7 @@ class TestVendorActivities:
             channel="phone",
             vendor_card_id=test_vendor_card.id,
             contact_phone="+15551234567",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -507,7 +507,7 @@ class TestUserActivities:
             activity_type="email_sent",
             channel="email",
             contact_email="test@example.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -629,7 +629,7 @@ class TestUnmatchedActivities:
             activity_type="email_sent",
             channel="email",
             contact_email="test@test.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -647,7 +647,7 @@ class TestUnmatchedActivities:
         mock_activity.contact_name = None
         mock_activity.subject = None
         mock_activity.duration_seconds = None
-        mock_activity.created_at = datetime.now(timezone.utc)
+        mock_activity.created_at = datetime.now(UTC)
         mock_activity.dismissed_at = None
 
         with patch("app.services.activity_service.attribute_activity", return_value=mock_activity):
@@ -671,7 +671,7 @@ class TestUnmatchedActivities:
             activity_type="email_sent",
             channel="email",
             contact_email="test@test.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()

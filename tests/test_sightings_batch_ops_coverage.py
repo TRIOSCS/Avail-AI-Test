@@ -22,7 +22,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.responses import HTMLResponse as _HTMLResponse
@@ -50,7 +50,7 @@ def _make_user(db: Session, role: str = "buyer", suffix: str = ""):
         name=f"Cov User {suffix}",
         role=role,
         azure_id=f"{role}{suffix}-azure-cov",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -90,7 +90,7 @@ def _make_requirement_recently_searched(db: Session, user_id: int, mpn: str = "F
         normalized_mpn=mpn.upper(),
         target_qty=10,
         sourcing_status="open",
-        last_searched_at=datetime.now(timezone.utc),  # just searched
+        last_searched_at=datetime.now(UTC),  # just searched
     )
     db.add(requirement)
     db.flush()
@@ -115,7 +115,7 @@ def _make_vendor_card_with_contact(
         emails=[card_email],
         phones=[],
         sighting_count=sighting_count,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

@@ -13,7 +13,7 @@ test_requisition, test_customer_site), SQLite test engine.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def _draft_quote(db: Session, req, site, user, number="Q-2026-SEND") -> Quote:
         total_cost=300.0,
         total_margin_pct=40.0,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.commit()
@@ -60,7 +60,7 @@ def test_htmx_send_triggers_real_send_email(client, db_session, test_requisition
         from app.services.quote_send import SendQuoteResult
 
         q.status = QuoteStatus.SENT
-        q.sent_at = datetime.now(timezone.utc)
+        q.sent_at = datetime.now(UTC)
         db.commit()
         return SendQuoteResult(
             sent_to="jane@acme-electronics.com",

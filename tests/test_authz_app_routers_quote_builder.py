@@ -9,6 +9,8 @@ The `client` fixture overrides require_user to return `test_user`; flipping that
 user's role and re-pointing the requisition's created_by exercises the guard.
 """
 
+from datetime import UTC
+
 from app.constants import UserRole
 
 
@@ -100,7 +102,7 @@ def test_multi_save_blocks_sales_combining_unowned_req(
     Both reqs share one customer site (so a customer mismatch isn't what blocks it); the
     second req is owned by someone else, so the looped ownership guard must 404.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import Requisition
 
@@ -112,7 +114,7 @@ def test_multi_save_blocks_sales_combining_unowned_req(
         status="open",
         customer_site_id=test_customer_site.id,
         created_by=admin_user.id,  # someone else's req
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(unowned)
     db_session.commit()

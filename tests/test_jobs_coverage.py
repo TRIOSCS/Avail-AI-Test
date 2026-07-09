@@ -14,7 +14,7 @@ Depends on: conftest.py fixtures, app/jobs/*
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -141,7 +141,7 @@ class TestJobBidDueAlerts:
         """_job_bid_due_alerts creates tasks for requisitions with deadlines within 2
         days."""
         mock_db = MagicMock()
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-001")])
 
         mock_on_bid_due = MagicMock(return_value=MagicMock())
@@ -185,7 +185,7 @@ class TestJobBidDueAlerts:
     def test_skips_out_of_window_deadlines(self, days_offset, req_name):
         """_job_bid_due_alerts skips deadlines > 2 days out or > 1 day in the past."""
         mock_db = MagicMock()
-        deadline = (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%dT%H:%M:%S")
+        deadline = (datetime.now(UTC) + timedelta(days=days_offset)).strftime("%Y-%m-%dT%H:%M:%S")
         _db_returning_reqs(mock_db, [_make_req_mock(1, deadline, req_name)])
 
         mock_on_bid_due = MagicMock()
@@ -205,7 +205,7 @@ class TestJobBidDueAlerts:
         from app.jobs.task_jobs import _BID_DUE_CAP
 
         mock_db = MagicMock()
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(_BID_DUE_CAP + 5)]
         _db_returning_reqs(mock_db, mock_reqs)
 
@@ -243,7 +243,7 @@ class TestJobBidDueAlerts:
         """When on_bid_due_soon returns None (duplicate), it does not count toward
         cap."""
         mock_db = MagicMock()
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(3)]
         _db_returning_reqs(mock_db, mock_reqs)
 
@@ -276,7 +276,7 @@ class TestJobBidDueAlerts:
     def test_deadline_without_timezone_gets_utc(self):
         """Naive datetime deadlines are treated as UTC."""
         mock_db = MagicMock()
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
         _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-TZ")])
 
         mock_on_bid_due = MagicMock(return_value=MagicMock())

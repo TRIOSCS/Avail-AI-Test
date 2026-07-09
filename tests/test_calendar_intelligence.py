@@ -15,7 +15,7 @@ Depends on: app/services/activity_service.py, app/services/calendar_intelligence
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from app.constants import ActivityType, Channel, Direction, EventType
@@ -27,7 +27,7 @@ from app.services.activity_service import log_meeting_activity
 
 
 def _dt(offset_hours: int = 0) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=offset_hours)
+    return datetime.now(UTC) + timedelta(hours=offset_hours)
 
 
 def _make_company(db, name="Acme Electronics", domain="acme.com"):
@@ -259,8 +259,8 @@ class TestLogMeetingActivity:
         _make_site(db_session, co.id, email="a@duration-test.com")
         db_session.commit()
 
-        start = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 6, 1, 11, 30, tzinfo=timezone.utc)  # 90 min
+        start = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        end = datetime(2026, 6, 1, 11, 30, tzinfo=UTC)  # 90 min
 
         rows = log_meeting_activity(
             user_id=None,
@@ -283,8 +283,8 @@ class TestLogMeetingActivity:
         _make_site(db_session, co.id, email="x@timing-test.com")
         db_session.commit()
 
-        start = datetime(2026, 5, 15, 14, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 5, 15, 15, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 5, 15, 14, 0, tzinfo=UTC)
+        end = datetime(2026, 5, 15, 15, 0, tzinfo=UTC)
 
         rows = log_meeting_activity(
             user_id=None,

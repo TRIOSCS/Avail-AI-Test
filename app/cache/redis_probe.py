@@ -22,7 +22,7 @@ Depends on: time (monotonic clock), loguru, app.prometheus_metrics (lazy, option
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from loguru import logger
 

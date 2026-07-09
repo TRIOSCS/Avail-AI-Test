@@ -24,7 +24,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,7 +48,7 @@ from app.search_service import (
     resolve_material_card,
     search_requirement,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ def _make_user(db: Session) -> User:
         name="Nightly Test",
         role="buyer",
         azure_id="nightly-test-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -72,7 +72,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -84,7 +84,7 @@ def _make_requirement(db: Session, requisition: Requisition, mpn: str = "LM317T"
         requisition_id=requisition.id,
         primary_mpn=mpn,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.commit()

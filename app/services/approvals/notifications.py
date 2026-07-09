@@ -9,7 +9,7 @@ Depends on: app.models.notification, app.models.auth (User),
             app.utils.graph_client, app.utils.token_manager
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -20,8 +20,8 @@ from sqlalchemy.orm import Session
 
 # Make them patchable at this module level (mirrors buyplan_notifications pattern).
 try:
-    from app.utils.graph_client import GraphClient  # noqa: F401
-    from app.utils.token_manager import get_valid_token  # noqa: F401
+    from app.utils.graph_client import GraphClient
+    from app.utils.token_manager import get_valid_token
 except Exception:  # pragma: no cover
     logger.warning(
         "approvals.notifications: Graph imports unavailable — email dispatch disabled",
@@ -72,7 +72,7 @@ def write_in_app(
         title=title,
         body=body,
         is_read=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(notif)
 

@@ -12,7 +12,7 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 import redis
@@ -187,7 +187,7 @@ def get_all_pns(req: Requirement) -> list[str]:
         if key:
             pns.append(display)
             seen_keys.add(key)
-    for sub in req.substitutes or []:  # type: ignore[union-attr, unused-ignore]  # JSON column is a list at instance level
+    for sub in req.substitutes or []:  # type: ignore[union-attr]  # JSON column is a list at instance level
         if isinstance(sub, dict):
             s = (sub.get("mpn") or "").strip()
         else:
@@ -310,7 +310,7 @@ def _mpn_cooldown_partition(
     if not pns:
         return [], []
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(hours=MPN_COOLDOWN_HOURS)
 
     keys_in_order = []
@@ -336,7 +336,7 @@ def _mpn_cooldown_partition(
         # so SQLite roundtrips strip tzinfo. Coerce to UTC for comparison.
         last = card.last_searched_at
         if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
+            last = last.replace(tzinfo=UTC)
         # >= 48h old → search again (boundary is inclusive on the stale side)
         if last <= cutoff:
             to_search.append(key_to_display[key])
@@ -422,7 +422,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         pns = pns + [a["mpn"] for a in fru_aliases]
         logger.info("Req {} ({}): injected {} FRU crosswalk alias(es) into search", req.id, pns[0], len(fru_aliases))
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 48h per-normalized-MPN cooldown. Split into MPNs that need a connector
     # call vs. ones whose MaterialCard.last_searched_at is recent enough.
@@ -866,7 +866,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
         return {"sightings": [], "source_stats": [], "material_card": None}
 
     pns = [clean_mpn]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 1. Hit all supplier APIs
     fresh, source_stats = await _fetch_fresh(pns, db)
@@ -1356,7 +1356,7 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     e14_key = _c("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
-    return connectors, source_stats_map, disabled_sources  # type: ignore[return-value, unused-ignore]  # set holds instance-level str values
+    return connectors, source_stats_map, disabled_sources  # type: ignore[return-value]  # set holds instance-level str values
 
 
 # Canonical display names for the live-market connectors (used by the dossier
@@ -1576,14 +1576,14 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             src.total_searches = (src.total_searches or 0) + 1
             src.total_results = (src.total_results or 0) + hit_count
             if not error:
-                src.last_success = datetime.now(timezone.utc)
+                src.last_success = datetime.now(UTC)
                 prev = src.avg_response_ms or elapsed_ms
                 src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
                 src.status = ApiSourceStatus.LIVE.value
                 src.last_error = None
             else:
                 src.last_error = error
-                src.last_error_at = datetime.now(timezone.utc)
+                src.last_error_at = datetime.now(UTC)
                 src.error_count_24h = (src.error_count_24h or 0) + 1
         db.commit()
     except Exception as e:
@@ -1639,9 +1639,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         )
         if latest_sighting and latest_sighting.created_at:
             delta = (
-                datetime.now(timezone.utc) - latest_sighting.created_at.replace(tzinfo=timezone.utc)
+                datetime.now(UTC) - latest_sighting.created_at.replace(tzinfo=UTC)
                 if latest_sighting.created_at.tzinfo is None
-                else datetime.now(timezone.utc) - latest_sighting.created_at
+                else datetime.now(UTC) - latest_sighting.created_at
             )
             months_since_last_sighting = delta.days / 30.0
 
@@ -1821,7 +1821,7 @@ def _save_sightings(
             # OEM spec code.
             resolved_via_spec_code=r.get("resolved_via_spec_code"),
             source_mpn=r.get("source_mpn"),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         norm_name = normalize_vendor_name(clean_vendor)
         s.score = score_sighting(vendor_score_map.get(norm_name), s.is_authorized)
@@ -1946,7 +1946,7 @@ def _save_sightings(
 
     rebuild_vendor_summaries_from_sightings(db, req.id, sightings)
 
-    return sightings  # type: ignore[return-value, unused-ignore]  # mypy misinfers element type via ORM columns
+    return sightings  # type: ignore[return-value]  # mypy misinfers element type via ORM columns
 
 
 def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
@@ -2002,7 +2002,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
         for email in emails:
             existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email).first()
             if existing:
-                existing.last_seen_at = datetime.now(timezone.utc)
+                existing.last_seen_at = datetime.now(UTC)
                 continue
 
             contact = VendorContact(
@@ -2497,8 +2497,8 @@ def sighting_to_dict(s: Sighting) -> dict:
 
     age_days = None
     if s.created_at:
-        ca = s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at
-        age_days = (datetime.now(timezone.utc) - ca).days
+        ca = s.created_at.replace(tzinfo=UTC) if s.created_at.tzinfo is None else s.created_at
+        age_days = (datetime.now(UTC) - ca).days
 
     quality = classify_lead(
         score=score,
@@ -2937,14 +2937,14 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                     src.total_searches = (src.total_searches or 0) + 1
                     src.total_results = (src.total_results or 0) + hit_count
                     if not error:
-                        src.last_success = datetime.now(timezone.utc)
+                        src.last_success = datetime.now(UTC)
                         prev = src.avg_response_ms or elapsed_ms
                         src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
                         src.status = ApiSourceStatus.LIVE.value
                         src.last_error = None
                     else:
                         src.last_error = error
-                        src.last_error_at = datetime.now(timezone.utc)
+                        src.last_error_at = datetime.now(UTC)
                         src.error_count_24h = (src.error_count_24h or 0) + 1
                 db.commit()
             except Exception as e:

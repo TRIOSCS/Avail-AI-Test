@@ -8,7 +8,7 @@ Depends on: app.services.signature_parser, conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +19,7 @@ from app.services.signature_parser import (
     batch_parse_signatures,
     process_signature_batch_results,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _run(coro):
@@ -48,7 +48,7 @@ def low_confidence_extracts(db_session):
             phone=f"555-000-{i:04d}" if i == 1 else None,
             extraction_method="regex",
             confidence=0.4 + (i * 0.05),  # 0.4, 0.45, 0.5, 0.55, 0.6
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(record)
         records.append(record)
@@ -71,7 +71,7 @@ def high_confidence_extracts(db_session):
             company_name=f"GoodCo{i}",
             extraction_method="regex",
             confidence=0.8,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(record)
         records.append(record)
@@ -90,7 +90,7 @@ def batch_api_extracts(db_session):
             full_name=f"Batch User {i}",
             extraction_method="batch_api",
             confidence=0.5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(record)
         records.append(record)
@@ -106,7 +106,7 @@ def no_body_extracts(db_session):
         sender_name="No Body",
         extraction_method="regex",
         confidence=0.3,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(extract)
     db_session.commit()

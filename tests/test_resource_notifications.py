@@ -19,7 +19,7 @@ Depends on: conftest.py, app.services.buyplan_notifications, app.services.teams_
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -54,7 +54,7 @@ def _make_user(db, email, name, role="buyer", is_active=True, alert=True):
         notify_resource_alert_enabled=alert,
         azure_id=f"az-{email}",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()
@@ -74,7 +74,7 @@ def _make_plan_with_line(db, *, submitter_id, creator_id, vendor_card_id):
         customer_name="Acme Corp",
         status="open",
         created_by=creator_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -84,12 +84,12 @@ def _make_plan_with_line(db, *, submitter_id, creator_id, vendor_card_id):
         primary_mpn="LM317T",
         description="Adjustable voltage regulator",
         target_qty=1000,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
 
-    co = Company(name="Acme Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name="Acme Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(co)
     db.flush()
     site = CustomerSite(company_id=co.id, site_name="Acme HQ")
@@ -105,7 +105,7 @@ def _make_plan_with_line(db, *, submitter_id, creator_id, vendor_card_id):
         total_cost=500.0,
         total_margin_pct=50.0,
         created_by_id=creator_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -130,7 +130,7 @@ def _make_plan_with_line(db, *, submitter_id, creator_id, vendor_card_id):
         qty_available=1000,
         unit_price=1.50,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()

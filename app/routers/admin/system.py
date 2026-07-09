@@ -13,7 +13,7 @@ Depends on: app/services/admin_service.py, app/services/credential_service.py,
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -147,8 +147,8 @@ def _validate_typed_value(key: str, value: str) -> str:
     if meta["type"] == "int":
         try:
             n = int(raw)
-        except (ValueError, TypeError):
-            raise HTTPException(400, "Inbox scan interval must be a whole number.")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "Inbox scan interval must be a whole number.") from e
         if n < meta["min"]:
             raise HTTPException(400, "Inbox scan interval must be at least 5 minutes.")
         return str(n)
@@ -239,7 +239,7 @@ def api_health_dashboard(
 ):
     """Full API health dashboard data -- status, usage, recent check history."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
-    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff_24h = datetime.now(UTC) - timedelta(hours=24)
 
     # Aggregate usage log stats per source (SQLite-compatible)
     check_stats_raw = (
@@ -429,15 +429,15 @@ def api_material_audit(
     try:
         limit = min(int(request.query_params.get("limit", "100")), 500)
         offset = max(int(request.query_params.get("offset", "0")), 0)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "limit and offset must be integers")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "limit and offset must be integers") from e
 
     query = db.query(MaterialCardAudit)
     if card_id:
         try:
             card_id_int = int(card_id)
-        except (ValueError, TypeError):
-            raise HTTPException(400, "card_id must be an integer")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "card_id must be an integer") from e
         query = query.filter(MaterialCardAudit.material_card_id == card_id_int)
     if action:
         query = query.filter(MaterialCardAudit.action == action)
@@ -516,13 +516,13 @@ def get_workers_status(
     from ...services.nc_worker.queue_manager import get_queue_stats as nc_queue_stats
     from ...services.tbf_worker.queue_manager import get_queue_stats as tbf_queue_stats
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_secs = settings.worker_heartbeat_stale_minutes * 60
 
     def _age(dt):
         if dt is None:
             return None
-        d = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        d = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         return int((now - d).total_seconds())
 
     def _worker(name, row, queue=None):

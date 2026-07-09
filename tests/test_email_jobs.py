@@ -9,7 +9,7 @@ Depends on: conftest fixtures (db_session, test_user)
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def _make_user(db: Session, email="sync@trioscs.com", **kw) -> User:
         m365_connected=True,
         access_token="fake-token",
         refresh_token="fake-refresh",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(u)
@@ -182,7 +182,7 @@ class TestJobContactsSync:
         user.access_token = "tok"
         user.m365_connected = True
         user.refresh_token = "ref"
-        user.last_contacts_sync = datetime.now(timezone.utc) - timedelta(hours=1)  # recent
+        user.last_contacts_sync = datetime.now(UTC) - timedelta(hours=1)  # recent
 
         with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
@@ -344,7 +344,7 @@ class TestJobContactStatusCompute:
     async def test_status_compute(self, initial_status, created_days_ago, last_days_ago, expected_status):
         from app.jobs.email_jobs import _job_contact_status_compute
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         sc = MagicMock()
         sc.contact_status = initial_status
         sc.is_active = True
@@ -512,7 +512,7 @@ class TestScanUserInbox:
 
         user = MagicMock()
         user.email = "buyer@trioscs.com"
-        user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+        user.last_inbox_scan = datetime.now(UTC) - timedelta(hours=1)
         user.access_token = "tok"
         mock_db = MagicMock()
 
@@ -532,7 +532,7 @@ class TestScanUserInbox:
 
         user = MagicMock()
         user.email = "buyer@trioscs.com"
-        user.last_inbox_scan = datetime.now(timezone.utc)
+        user.last_inbox_scan = datetime.now(UTC)
         mock_db = MagicMock()
 
         with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None):
@@ -546,7 +546,7 @@ class TestScanUserInbox:
 
         user = MagicMock()
         user.email = "buyer@trioscs.com"
-        user.last_inbox_scan = datetime.now(timezone.utc)
+        user.last_inbox_scan = datetime.now(UTC)
         mock_db = MagicMock()
 
         with (
@@ -566,7 +566,7 @@ class TestScanUserInbox:
 
         user = MagicMock()
         user.email = "buyer@trioscs.com"
-        user.last_inbox_scan = datetime.now(timezone.utc)
+        user.last_inbox_scan = datetime.now(UTC)
         mock_db = MagicMock()
 
         with (

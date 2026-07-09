@@ -1,6 +1,6 @@
 """Enrichment models — jobs, queue, signatures, prospects, intel cache."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -36,7 +36,7 @@ class EnrichmentJob(Base):
     started_at = Column(UTCDateTime)
     completed_at = Column(UTCDateTime)
     error_log = Column(JSONB, default=list)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     started_by = relationship("User", foreign_keys=[started_by_id])
 
@@ -71,7 +71,7 @@ class EnrichmentQueue(Base):
 
     reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     reviewed_at = Column(UTCDateTime)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     company = relationship("Company", foreign_keys=[company_id])
@@ -111,11 +111,11 @@ class EmailSignatureExtract(Base):
     extraction_method = Column(String(20))
     confidence = Column(Float, default=0.5)
     seen_count = Column(Integer, default=1)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (Index("ix_ese_company", "company_name"),)
@@ -139,7 +139,7 @@ class ProspectContact(Base):
 
     source = Column(String(50), nullable=False)
     confidence = Column(String(10), nullable=False)
-    found_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    found_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     is_saved = Column(Boolean, default=False)
     saved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
@@ -147,11 +147,11 @@ class ProspectContact(Base):
     promoted_to_type = Column(String(20))
     promoted_to_id = Column(Integer)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (
@@ -170,5 +170,5 @@ class IntelCache(Base):
     cache_key = Column(String(500), nullable=False, unique=True, index=True)
     data = Column(JSON, nullable=False)
     ttl_days = Column(Integer, nullable=False, default=7)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     expires_at = Column(UTCDateTime, nullable=False)

@@ -9,6 +9,7 @@ Depends on: conftest db_session fixture; external paid APIs are always mocked.
 """
 
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -38,13 +39,13 @@ def _prospect(db, **kw) -> ProspectAccount:
 
 
 def _batch(db, **kw) -> DiscoveryBatch:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     defaults = {
         "batch_id": "audit-batch",
         "source": "explorium",
         "status": "running",
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
     }
     defaults.update(kw)
     b = DiscoveryBatch(**defaults)
@@ -135,7 +136,7 @@ class TestM15CreditsRecorded:
 class TestM8SharedScorers:
     @pytest.mark.asyncio
     async def test_refresh_applies_historical_bonus(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.services.prospect_scheduler import job_refresh_scores
 
@@ -147,7 +148,7 @@ class TestM8SharedScorers:
             historical_context={
                 "bought_before": True,
                 "quote_count": 25,
-                "last_activity": str(datetime.now(timezone.utc).year),
+                "last_activity": str(datetime.now(UTC).year),
             },
         )
         db_session.add(p)
@@ -423,7 +424,7 @@ class TestM9SimilarCustomersNoNPlus1:
 
 class TestM10ParkSingleTransaction:
     def test_send_to_prospecting_stamps_swept(self, db_session, test_user):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.models import Company
         from app.services.prospect_claim import send_company_to_prospecting
@@ -432,7 +433,7 @@ class TestM10ParkSingleTransaction:
         db_session.add(co)
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = send_company_to_prospecting(
             co.id,
             test_user.id,

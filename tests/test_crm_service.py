@@ -10,7 +10,7 @@ Called by: pytest
 Depends on: app.services.crm_service, app.models
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ from app.models import Company, CustomerSite, Quote, Requisition
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_company(db: Session, name: str = "Test Co") -> Company:
@@ -844,7 +844,7 @@ class TestCdmOverdueCountDncParity:
         db_session.add(site)
         db_session.commit()
 
-        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=UTC)
 
         count = cdm_overdue_count(db_session, user, now=now)
         list_ids = [
@@ -878,7 +878,7 @@ class TestCdmOverdueCountDncParity:
         db_session.add(CustomerSite(company_id=co.id, site_name="OK Site", is_active=True, do_not_contact=False))
         db_session.commit()
 
-        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=UTC)
 
         count = cdm_overdue_count(db_session, user, now=now)
         list_ids = [
@@ -909,7 +909,7 @@ class TestCdmOverdueCountDncParity:
         db_session.add(co)
         db_session.commit()
 
-        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 24, 12, 0, 0, tzinfo=UTC)
 
         count = cdm_overdue_count(db_session, user, now=now)
         list_ids = [

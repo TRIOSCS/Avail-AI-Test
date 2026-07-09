@@ -7,7 +7,7 @@ Called by: avail_score_service.py, multiplier_score_service.py
 Depends on: datetime (stdlib only)
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 
 def month_range(month: date) -> tuple[datetime, datetime]:
@@ -22,6 +22,6 @@ def month_range(month: date) -> tuple[datetime, datetime]:
     else:
         month_end = month_start.replace(month=month_start.month + 1)
     midnight = datetime.min.time()
-    start_dt = datetime.combine(month_start, midnight, tzinfo=timezone.utc)
-    end_dt = datetime.combine(month_end, midnight, tzinfo=timezone.utc)
+    start_dt = datetime.combine(month_start, midnight, tzinfo=UTC)
+    end_dt = datetime.combine(month_end, midnight, tzinfo=UTC)
     return start_dt, end_dt

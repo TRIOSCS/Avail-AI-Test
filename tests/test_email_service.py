@@ -21,7 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1084,7 +1084,7 @@ def _two_requisitions(db_session, test_user):
             customer_name="Acme Electronics",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -1093,7 +1093,7 @@ def _two_requisitions(db_session, test_user):
                 requisition_id=req.id,
                 primary_mpn=mpn,
                 target_qty=100 * (i + 1),
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         reqs.append(req)
@@ -1386,7 +1386,7 @@ class TestSendBatchRfqCrossRequisition:
             VendorCard(
                 normalized_name="vendor a",
                 display_name="Vendor A",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -1592,7 +1592,7 @@ class TestApplyParsedResult:
             body="We can offer LM317T at $0.50 each, 1000 pcs available.",
             scanned_by_user_id=test_user.id,
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -1646,7 +1646,7 @@ class TestApplyParsedResult:
             name="Scanner",
             role="buyer",
             azure_id="scanner-azure-id",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(scanner)
         db_session.flush()
@@ -1659,7 +1659,7 @@ class TestApplyParsedResult:
             body="We can offer LM317T at $0.75 each",
             scanned_by_user_id=scanner.id,
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -1684,7 +1684,7 @@ class TestApplyParsedResult:
             body="We have something for you. Is this what you need?",
             scanned_by_user_id=test_user.id,
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -1759,7 +1759,7 @@ class TestSubmitParseBatch:
             subject="RE: RFQ",
             body="Here is the quote",
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -1792,7 +1792,7 @@ class TestSubmitParseBatch:
             subject="RE: RFQ",
             body="Here is the quote",
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -2138,7 +2138,7 @@ class TestPollInbox:
             user_id=test_user.id,
             folder="inbox",
             delta_token="old-delta-token",
-            last_sync_at=datetime.now(timezone.utc),
+            last_sync_at=datetime.now(UTC),
         )
         db_session.add(sync)
         db_session.commit()
@@ -2197,7 +2197,7 @@ class TestPollInbox:
             user_id=test_user.id,
             folder="inbox",
             delta_token="existing-token",
-            last_sync_at=datetime.now(timezone.utc),
+            last_sync_at=datetime.now(UTC),
         )
         db_session.add(sync)
         db_session.commit()
@@ -2250,7 +2250,7 @@ class TestPollInbox:
             user_id=test_user.id,
             folder="inbox",
             delta_token="stale-token-from-410",
-            last_sync_at=datetime.now(timezone.utc),
+            last_sync_at=datetime.now(UTC),
         )
         db_session.add(sync)
         db_session.commit()
@@ -2298,7 +2298,7 @@ class TestPollInbox:
             vendor_name="Old Vendor",
             vendor_email="vendor@old.com",
             status="parsed",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing_vr)
         db_session.commit()
@@ -2331,7 +2331,7 @@ class TestPollInbox:
         pm = ProcessedMessage(
             message_id="msg-1",
             processing_type="inbox_poll",
-            processed_at=datetime.now(timezone.utc),
+            processed_at=datetime.now(UTC),
         )
         db_session.add(pm)
         db_session.commit()
@@ -2385,7 +2385,7 @@ class TestPollInbox:
             vendor_contact="vendor@parts.com",
             graph_conversation_id="conv-match-1",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2424,7 +2424,7 @@ class TestPollInbox:
             vendor_name="Vendor B",
             vendor_contact="vendor@parts.com",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2491,7 +2491,7 @@ class TestPollInbox:
             vendor_name="Vendor C",
             vendor_contact="vendor@parts.com",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2530,7 +2530,7 @@ class TestPollInbox:
             vendor_name="Vendor D",
             vendor_contact="sales@vendord.com",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2569,7 +2569,7 @@ class TestPollInbox:
             vendor_name="MS Sales",
             vendor_contact="sales@microsoft.com",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2655,7 +2655,7 @@ class TestPollInbox:
             vendor_contact="vendor@parts.com",
             graph_conversation_id="conv-progress",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2904,7 +2904,7 @@ class TestPollInbox:
             name="Other User",
             role="buyer",
             azure_id="other-azure",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_user)
         db_session.flush()
@@ -2917,7 +2917,7 @@ class TestPollInbox:
             vendor_name="Vendor Scoped",
             vendor_contact="vendor@scoped.com",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -2970,7 +2970,7 @@ class TestScopeThreadContactsToSender:
             vendor_name=vendor,
             vendor_contact=email,
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     def test_path1_exact_email_match(self):
@@ -3137,7 +3137,7 @@ class TestPollInboxCrossRequisitionFanout:
                 vendor_contact="vendor@parts.com",
                 graph_conversation_id=conv_id,
                 status="sent",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(c)
             contacts.append(c)
@@ -3318,7 +3318,7 @@ class TestPollInboxCrossRequisitionFanout:
                 vendor_contact=email,
                 graph_conversation_id="conv-collided",
                 status="sent",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(c)
             contacts.append(c)
@@ -3403,7 +3403,7 @@ class TestPollInboxCrossRequisitionFanout:
                 vendor_contact=email,
                 graph_conversation_id="conv-collided",
                 status="sent",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(c)
             contacts.append(c)
@@ -3454,7 +3454,7 @@ class TestPollInboxCrossRequisitionFanout:
             vendor_contact="a@vendora.com",
             graph_conversation_id="conv-collided",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         a2 = Contact(
             requisition_id=req_b.id,
@@ -3464,7 +3464,7 @@ class TestPollInboxCrossRequisitionFanout:
             vendor_contact="a@vendora.com",
             graph_conversation_id="conv-collided",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         b1 = Contact(
             requisition_id=req_a.id,
@@ -3474,7 +3474,7 @@ class TestPollInboxCrossRequisitionFanout:
             vendor_contact="b@vendorb.com",
             graph_conversation_id="conv-collided",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([a1, a2, b1])
         db_session.commit()
@@ -3583,7 +3583,7 @@ class TestOooBounceContactRepair:
                 vendor_contact="vendor@parts.com",
                 graph_conversation_id=conv_id,
                 status="sent",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(c)
             contacts.append(c)
@@ -3669,7 +3669,7 @@ class TestOooBounceContactRepair:
             message_id="msg-batch-ooo",
             graph_conversation_id="conv-batch-ooo",
             status="new",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -3678,7 +3678,7 @@ class TestOooBounceContactRepair:
             batch_type="inbox_parse",
             request_map={f"vr-{vr.id}": vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3728,7 +3728,7 @@ class TestProcessBatchResults:
             body="Quote: $1.50 for LM317T",
             status="new",
             message_id="msg-batch-1",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -3738,7 +3738,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3778,7 +3778,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3805,7 +3805,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={},
             status="processing",
-            submitted_at=datetime.now(timezone.utc) - timedelta(hours=25),
+            submitted_at=datetime.now(UTC) - timedelta(hours=25),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3833,7 +3833,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={},
             status="processing",
-            submitted_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            submitted_at=datetime.now(UTC) - timedelta(hours=1),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3860,7 +3860,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={},
             status="processing",
-            submitted_at=datetime.now(timezone.utc) - timedelta(hours=25),
+            submitted_at=datetime.now(UTC) - timedelta(hours=25),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3890,7 +3890,7 @@ class TestProcessBatchResults:
             body="test",
             status="parsed",
             message_id="msg-already-parsed",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -3900,7 +3900,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3928,7 +3928,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-999": 999},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3955,7 +3955,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-99999": 99999},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -3984,7 +3984,7 @@ class TestProcessBatchResults:
             body="Quote body",
             status="new",
             message_id="msg-json-str",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -3994,7 +3994,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -4031,7 +4031,7 @@ class TestProcessBatchResults:
             body="body",
             status="new",
             message_id="msg-bad-str",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -4041,7 +4041,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -4070,7 +4070,7 @@ class TestProcessBatchResults:
             body="body",
             status="new",
             message_id="msg-list",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -4080,7 +4080,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -4109,7 +4109,7 @@ class TestProcessBatchResults:
             body="body",
             status="new",
             message_id="msg-null",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -4119,7 +4119,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -4148,7 +4148,7 @@ class TestProcessBatchResults:
             body="body",
             status="new",
             message_id="msg-commit-fail",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -4158,7 +4158,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map={"vr-" + str(vr.id): vr.id},
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()
@@ -4206,7 +4206,7 @@ class TestProcessBatchResults:
             batch_type="inbox_parse",
             request_map=None,
             status="processing",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
         db_session.add(pb)
         db_session.commit()

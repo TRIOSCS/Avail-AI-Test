@@ -9,8 +9,9 @@ Depends on: queue model, sightings model, mpn_normalizer,
             vendor_unavailability (apply_to_fresh_sightings on dedup-cloned rows)
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import func
@@ -81,7 +82,7 @@ class QueueManager:
             confidence=s.confidence,
             date_code=s.date_code,
             raw_data=s.raw_data,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     def enqueue_search(
@@ -141,7 +142,7 @@ class QueueManager:
             return existing
 
         # Dedup: look for completed searches of same normalized MPN within window
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.dedup_window_days)
+        cutoff = datetime.now(UTC) - timedelta(days=self.dedup_window_days)
         recent = (
             db.query(model)
             .filter(
@@ -255,7 +256,7 @@ class QueueManager:
         for item in stale:
             item.status = SearchQueueStatus.QUEUED
             item.error_message = "Reset from stale 'searching' status on worker restart"
-            item.updated_at = datetime.now(timezone.utc)
+            item.updated_at = datetime.now(UTC)
             count += 1
         if count:
             db.commit()
@@ -289,12 +290,12 @@ class QueueManager:
         """
         model = self.queue_model
         timeout = max_age_minutes or self.STUCK_SEARCH_TIMEOUT_MINUTES
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout)
+        cutoff = datetime.now(UTC) - timedelta(minutes=timeout)
         stuck = db.query(model).filter(model.status == SearchQueueStatus.SEARCHING, model.updated_at < cutoff).all()
         for item in stuck:
             item.status = SearchQueueStatus.QUEUED
             item.error_message = f"Reclaimed from stale 'searching' after {timeout}m"
-            item.updated_at = datetime.now(timezone.utc)
+            item.updated_at = datetime.now(UTC)
         if stuck:
             db.commit()
             logger.warning("{} reclaimed {} stuck 'searching' item(s) -> 'queued'", self.log_prefix, len(stuck))
@@ -330,7 +331,7 @@ class QueueManager:
         if item is None:
             return None
         item.status = SearchQueueStatus.SEARCHING
-        item.updated_at = datetime.now(timezone.utc)
+        item.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(item)
         logger.debug("{} claimed queue item {} (mpn={})", self.log_prefix, item.id, item.normalized_mpn)
@@ -339,7 +340,7 @@ class QueueManager:
     def mark_status(self, db: Session, queue_item, new_status: str | SearchQueueStatus, error: str | None = None):
         """Update a queue item's status."""
         queue_item.status = new_status
-        queue_item.updated_at = datetime.now(timezone.utc)
+        queue_item.updated_at = datetime.now(UTC)
         if error:
             queue_item.error_message = error
         db.commit()
@@ -348,10 +349,10 @@ class QueueManager:
     def mark_completed(self, db: Session, queue_item, results_found: int, sightings_created: int):
         """Mark a queue item as completed with result counts."""
         queue_item.status = SearchQueueStatus.COMPLETED
-        queue_item.last_searched_at = datetime.now(timezone.utc)
+        queue_item.last_searched_at = datetime.now(UTC)
         queue_item.results_count = results_found
         queue_item.search_count = (queue_item.search_count or 0) + 1
-        queue_item.updated_at = datetime.now(timezone.utc)
+        queue_item.updated_at = datetime.now(UTC)
         db.commit()
         logger.info(
             "{} queue {} completed: {} results, {} sightings",
@@ -367,7 +368,7 @@ class QueueManager:
         rows = db.query(model.status, func.count()).group_by(model.status).all()
         counts = {status: count for status, count in rows}
 
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         total_today = (
             db.query(func.count())
             .filter(

@@ -11,7 +11,7 @@ Called by: scheduler.py (_job_integrity_check)
 Depends on: models (MaterialCard, Requirement, Sighting, Offer), search_service
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func
@@ -237,7 +237,7 @@ def run_integrity_check(db: Session) -> dict:
 
     Returns a report dict suitable for the /api/admin/integrity endpoint.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # --- Run checks ---
     orphaned_req = check_orphaned_requirements(db)

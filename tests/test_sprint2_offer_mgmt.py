@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +25,7 @@ def req_with_offer(db_session: Session, test_user: User):
         name="Sprint2 Test Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -44,7 +44,7 @@ def req_with_offer(db_session: Session, test_user: User):
         lead_time="2 weeks",
         status="active",
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -60,7 +60,7 @@ def pending_review_offer(db_session: Session, test_user: User):
         name="Review Queue Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -75,7 +75,7 @@ def pending_review_offer(db_session: Session, test_user: User):
         evidence_tier="T4",
         parse_confidence=0.65,
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()

@@ -17,7 +17,7 @@ import base64
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
@@ -559,7 +559,7 @@ def _persist_test_result(src: ApiSource, db: Session, *, results: list, elapsed_
     """
     if error is None:
         src.status = ApiSourceStatus.LIVE
-        src.last_success = datetime.now(timezone.utc)
+        src.last_success = datetime.now(UTC)
         src.last_error = None
         src.avg_response_ms = elapsed_ms
     else:
@@ -845,7 +845,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
 
     em_src = db.query(ApiSource).filter_by(name="email_mining").first()
     if em_src:
-        em_src.last_success = datetime.now(timezone.utc)
+        em_src.last_success = datetime.now(UTC)
         em_src.total_searches = (em_src.total_searches or 0) + 1
         em_src.total_results = (em_src.total_results or 0) + results.get("vendors_found", 0)
         em_src.status = ApiSourceStatus.LIVE
@@ -901,7 +901,7 @@ async def email_mining_scan_outbound(
             card = db.query(VendorCard).filter(VendorCard.normalized_name == prefix).first()
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
-            card.last_contact_at = datetime.now(timezone.utc)
+            card.last_contact_at = datetime.now(UTC)
             cards_updated += 1
 
     try:
@@ -1007,8 +1007,8 @@ async def parse_response_attachments(
 
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
-    except (ConnectionError, TimeoutError, OSError, RuntimeError):
-        raise HTTPException(502, "Graph API error. Please try again.")
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
+        raise HTTPException(502, "Graph API error. Please try again.") from e
 
     attachments = att_data.get("value", []) if att_data else []
     parseable_exts = {".xlsx", ".xls", ".csv", ".tsv"}
@@ -1052,9 +1052,9 @@ async def parse_response_attachments(
 
     try:
         db.commit()
-    except SQLAlchemyError:
+    except SQLAlchemyError as e:
         db.rollback()
-        raise HTTPException(500, "Save failed. Please try again.")
+        raise HTTPException(500, "Save failed. Please try again.") from e
 
     return {
         "attachments_found": len(attachments),

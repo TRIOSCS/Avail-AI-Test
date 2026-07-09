@@ -24,7 +24,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -45,7 +45,7 @@ def _make_vendor(db: Session, name: str = "TestVendor Inc") -> VendorCard:
     vendor = VendorCard(
         normalized_name=name.lower().replace(" ", "_"),
         display_name=name,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vendor)
     db.commit()
@@ -80,7 +80,7 @@ def _make_vendor_card_attachment(
         content_type="application/pdf",
         size_bytes=1024,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(att)
     db.commit()
@@ -102,7 +102,7 @@ def _make_vendor_contact_attachment(
         content_type="application/pdf",
         size_bytes=512,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(att)
     db.commit()
@@ -284,7 +284,7 @@ def nonadmin_client(db_session: Session) -> TestClient:
             name="Non Admin",
             role="user",
             azure_id="nonadmin-azure",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     def _override_admin():
@@ -323,7 +323,7 @@ class TestVendorCardAttachments:
     def test_list_returns_attachments_newest_first(self, client, db_session, test_user):
         from datetime import timedelta
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vendor = _make_vendor(db_session, "ListVendor")
         att_older = VendorCardAttachment(
             vendor_card_id=vendor.id,

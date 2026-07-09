@@ -16,7 +16,7 @@ All jobs:
 - Are idempotent (safe to re-run)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
@@ -38,7 +38,7 @@ from app.services.prospect_scoring import (
 def _ensure_utc(dt: datetime | None) -> datetime | None:
     """Ensure datetime is tz-aware UTC (SQLite returns naive datetimes)."""
     if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -186,7 +186,7 @@ async def job_discover_prospects() -> dict:
     db = SessionLocal()
     try:
         slice_info = get_next_discovery_slice(db)
-        batch_id = f"discovery_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}"
+        batch_id = f"discovery_{datetime.now(UTC).strftime('%Y%m%d_%H%M')}"
 
         batch = DiscoveryBatch(
             batch_id=batch_id,
@@ -194,7 +194,7 @@ async def job_discover_prospects() -> dict:
             segment=slice_info["segment"],
             regions=slice_info["regions"],
             status=DiscoveryBatchStatus.RUNNING,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         db.add(batch)
         db.commit()
@@ -260,7 +260,7 @@ async def job_discover_prospects() -> dict:
         batch.status = DiscoveryBatchStatus.COMPLETED
         batch.prospects_found = explorium_count + email_count
         batch.prospects_new = explorium_count + email_count
-        batch.completed_at = datetime.now(timezone.utc)
+        batch.completed_at = datetime.now(UTC)
         db.commit()
 
         summary = {
@@ -431,7 +431,7 @@ async def job_expire_and_resurface() -> dict:
     db = None
     try:
         db = SessionLocal()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expire_cutoff = now - timedelta(days=settings.prospecting_expire_days)
         enrich_cutoff = now - timedelta(days=60)
 
@@ -516,7 +516,7 @@ async def job_pool_health_report() -> dict:
     db = None
     try:
         db = SessionLocal()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         # Status breakdown

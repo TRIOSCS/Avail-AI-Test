@@ -18,7 +18,7 @@ Depends on: app/services/buyplan_hub.my_queue,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -184,7 +184,7 @@ def test_my_queue_plan_returned(db_session, test_user, test_quote, test_requisit
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.DRAFT,
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        approved_at=datetime.now(UTC) - timedelta(hours=2),
     )
     rows = my_queue(db_session, test_user)
     kinds = _kinds(rows)
@@ -334,7 +334,7 @@ def test_my_queue_cut_po_not_overdue(db_session, test_user, test_quote, test_req
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),  # just approved → within SLA
+        approved_at=datetime.now(UTC),  # just approved → within SLA
     )
     line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
 
@@ -356,7 +356,7 @@ def test_my_queue_cut_po_overdue(db_session, test_user, test_quote, test_requisi
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=48),
+        approved_at=datetime.now(UTC) - timedelta(hours=48),
     )
     line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
 
@@ -386,7 +386,7 @@ def test_my_queue_priority_ordering(db_session, test_user, test_quote, test_requ
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     _make_line(db_session, buy_plan_id=active.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
 
@@ -410,14 +410,14 @@ def test_my_queue_oldest_first_within_tier(db_session, test_user, test_quote, te
         buy_plan_id=plan.id,
         buyer_id=test_user.id,
         status=BuyPlanLineStatus.AWAITING_PO,
-        created_at=datetime.now(timezone.utc) - timedelta(hours=10),
+        created_at=datetime.now(UTC) - timedelta(hours=10),
     )
     newer = _make_line(
         db_session,
         buy_plan_id=plan.id,
         buyer_id=test_user.id,
         status=BuyPlanLineStatus.AWAITING_PO,
-        created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        created_at=datetime.now(UTC) - timedelta(hours=1),
     )
 
     cut_rows = [r for r in my_queue(db_session, test_user) if r.kind == "cut_po"]
@@ -516,7 +516,7 @@ def test_my_queue_cut_po_kicked_back_extra(db_session, test_user, test_quote, te
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
     line.po_rejection_note = "Wrong vendor — re-cut to Arrow"
@@ -534,7 +534,7 @@ def test_my_queue_cut_po_not_kicked_back_extra(db_session, test_user, test_quote
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
 

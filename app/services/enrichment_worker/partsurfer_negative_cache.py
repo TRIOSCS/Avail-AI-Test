@@ -29,7 +29,7 @@ Depends on: app.models.PartsurferDescNegative, app.utils.normalization.normalize
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -51,7 +51,7 @@ _RETRY_DAYS_BY_REASON: dict[str, int] = {
 
 def _aware(dt: datetime) -> datetime:
     """Coerce a naive UTC timestamp (SQLite round-trip) to aware for comparison."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def blocked_spare_norms(
@@ -69,7 +69,7 @@ def blocked_spare_norms(
     norms = [n for n in dict.fromkeys(spare_norms) if n]
     if not norms:
         return set()
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     rows = (
         db.query(PartsurferDescNegative.spare_norm, PartsurferDescNegative.retry_after)
         .filter(PartsurferDescNegative.spare_norm.in_(norms))
@@ -96,7 +96,7 @@ def record_negative(
     norm = (spare_norm or "").strip()
     if not norm:
         return None
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     retry_after = now + timedelta(days=_RETRY_DAYS_BY_REASON[reason])
 
     row = db.query(PartsurferDescNegative).filter_by(spare_norm=norm[:64]).one_or_none()

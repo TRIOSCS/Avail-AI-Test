@@ -9,7 +9,7 @@ Depends on: models, dependencies, vendor_helpers, cache, credential_service
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
@@ -320,7 +320,7 @@ async def log_contact_call(
         raise HTTPException(404, "Contact not found")
     card = db.get(VendorCard, card_id)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activity = ActivityLog(
         user_id=user.id,
         activity_type=ActivityType.CALL_LOGGED,
@@ -431,7 +431,7 @@ async def update_vendor_contact(
     if payload.phone is not None:
         vc.phone = format_phone_e164(payload.phone) or payload.phone
 
-    vc.last_seen_at = datetime.now(timezone.utc)
+    vc.last_seen_at = datetime.now(UTC)
 
     # Sync legacy emails[] array
     card = db.query(VendorCard).filter_by(id=card_id).first()

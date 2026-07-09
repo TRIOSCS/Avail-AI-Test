@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/dependencies.py, conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -82,7 +82,7 @@ class TestRequireFreshToken:
     async def test_returns_token_when_not_near_expiry(self, db_session, test_user):
         """Token far from expiry is returned directly."""
         test_user.access_token = "valid-token"
-        test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
         db_session.commit()
 
         request = _mock_request({"user_id": test_user.id})
@@ -94,7 +94,7 @@ class TestRequireFreshToken:
         refresh)."""
         test_user.access_token = "buffer-token"
         # 10 minutes from now — within buffer but not expired
-        test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=10)
         db_session.commit()
 
         request = _mock_request({"user_id": test_user.id})
@@ -104,7 +104,7 @@ class TestRequireFreshToken:
     async def test_raises_401_when_truly_expired(self, db_session, test_user):
         """Token past expiry → 401, m365_connected set to False."""
         test_user.access_token = "expired-token"
-        test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        test_user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         test_user.m365_connected = True
         db_session.commit()
 

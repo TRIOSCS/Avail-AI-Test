@@ -9,7 +9,7 @@ Called by: routers/htmx/* task endpoints, routers/htmx_views.py (My Day),
 Depends on: models/task.py, models/auth.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
@@ -29,7 +29,7 @@ _DONE_LIMIT = 200
 def _as_utc(dt: datetime | None) -> datetime | None:
     """Coerce a naive datetime to UTC-aware (SQLite can return naive values)."""
     if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -74,7 +74,7 @@ def create_task(
     """
     # Belt-and-suspenders 24h check for manual tasks with an explicit due date.
     if source == "manual" and due_at:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if _as_utc(due_at) < now + timedelta(hours=24):
             raise ValueError("Due date must be at least 24 hours from now")
     task = _persist_task(
@@ -170,7 +170,7 @@ def get_or_create_personal_requisition(db: Session, user_id: int):
         status="open",
         is_scratch=True,
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.commit()
@@ -241,7 +241,7 @@ def get_my_tasks(
         .filter(RequisitionTask.assigned_to_id == user_id)
     )
     if status == TaskStatus.DONE:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=_DONE_WINDOW_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=_DONE_WINDOW_DAYS)
         return (
             q.filter(
                 RequisitionTask.status == TaskStatus.DONE,
@@ -264,7 +264,7 @@ def get_my_tasks(
 
 def get_my_tasks_summary(db: Session, user_id: int) -> dict:
     """Get task counts for sidebar badge: assigned_to_me, waiting_on, overdue."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assigned_to_me = (
         db.query(func.count(RequisitionTask.id))
         .filter(
@@ -313,7 +313,7 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
     new_status = kwargs.get("status")
     if new_status == TaskStatus.DONE:
         if not task.completed_at:
-            task.completed_at = datetime.now(timezone.utc)
+            task.completed_at = datetime.now(UTC)
     elif new_status:
         task.completed_at = None
     db.commit()
@@ -338,7 +338,7 @@ def complete_task(
     if task.assigned_to_id != user_id:
         raise PermissionError("Only the assignee can complete this task")
     task.status = TaskStatus.DONE
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now(UTC)
     task.completion_note = completion_note
     db.commit()
     db.refresh(task)
@@ -570,7 +570,7 @@ def complete_crm_task(
     if not _is_crm_task_authorized(db, task, user_id, is_admin):
         raise PermissionError("Not authorized to complete this task")
     task.status = TaskStatus.DONE
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now(UTC)
     task.completion_note = completion_note
     db.commit()
     db.refresh(task)
@@ -730,7 +730,7 @@ def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: s
         task_type="sourcing",
         source_ref=f"bid_due:{requisition_id}",
         priority=3,
-        due_at=datetime.now(timezone.utc) + timedelta(days=1),
+        due_at=datetime.now(UTC) + timedelta(days=1),
     )
 
 
@@ -807,15 +807,11 @@ def snooze_task(db: Session, task_id: int, *, days: int | None = None) -> Requis
         if task.due_at:
             task.due_at = task.due_at + timedelta(weeks=1)
         else:
-            task.due_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            task.due_at = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     elif task.due_at:
         task.due_at = task.due_at + timedelta(days=days)
     else:
-        task.due_at = (datetime.now(timezone.utc) + timedelta(days=days)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        task.due_at = (datetime.now(UTC) + timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
     db.commit()
     db.refresh(task)
     return task

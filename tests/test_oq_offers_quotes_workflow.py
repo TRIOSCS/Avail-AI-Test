@@ -12,7 +12,7 @@ Depends on: tests/conftest.py fixtures (client, db_session, test_requisition,
 test_customer_site, test_user, test_offer), app.routers.htmx.quotes / .offers.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +36,7 @@ def draft_quote(
         status="draft",
         line_items=[],
         created_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(q)
     db_session.commit()

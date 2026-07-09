@@ -22,7 +22,7 @@ Depends on: services.part_history_service.get_part_history, services.fru_matrix_
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -90,7 +90,7 @@ async def dossier_hero(
     # search telemetry. Unknown PNs stay "New to us" — no card is created.
     if card is not None:
         card.search_count = (card.search_count or 0) + 1
-        card.last_searched_at = datetime.now(timezone.utc)
+        card.last_searched_at = datetime.now(UTC)
         db.commit()
 
     history_error = False

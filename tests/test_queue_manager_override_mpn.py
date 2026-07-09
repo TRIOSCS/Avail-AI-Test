@@ -9,7 +9,7 @@ Depends on: app/services/{ics,nc}_worker/queue_manager.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -27,7 +27,7 @@ def requisition(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -40,7 +40,7 @@ def requirement(db_session, requisition):
         requisition_id=requisition.id,
         primary_mpn="SPREJ",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

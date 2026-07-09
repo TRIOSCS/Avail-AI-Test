@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: routers/sources.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -214,7 +214,7 @@ def _email_mining_source(db_session: Session) -> ApiSource:
         total_searches=5,
         total_results=20,
         avg_response_ms=0,
-        last_success=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        last_success=datetime(2026, 2, 1, tzinfo=UTC),
     )
     db_session.add(src)
     db_session.commit()
@@ -564,12 +564,12 @@ def test_vendor_engagement_detail_with_data(
         total_responses=7,
         total_wins=3,
         response_velocity_hours=2.5,
-        last_contact_at=datetime.now(timezone.utc),
+        last_contact_at=datetime.now(UTC),
         engagement_score=82.5,
         vendor_score=82.5,
-        vendor_score_computed_at=datetime.now(timezone.utc),
-        engagement_computed_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        vendor_score_computed_at=datetime.now(UTC),
+        engagement_computed_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -598,7 +598,7 @@ def _vendor_response(db_session: Session, test_user: User) -> VendorResponse:
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -607,7 +607,7 @@ def _vendor_response(db_session: Session, test_user: User) -> VendorResponse:
         requisition_id=req.id,
         primary_mpn="LM358N",
         target_qty=500,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(requirement)
     db_session.flush()
@@ -619,8 +619,8 @@ def _vendor_response(db_session: Session, test_user: User) -> VendorResponse:
         subject="RE: RFQ LM358N",
         message_id="graph-msg-att-001",
         status="new",
-        received_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -1325,11 +1325,11 @@ def test_list_sources_with_last_success(sources_client: TestClient, db_session: 
         source_type="api",
         status="live",
         env_vars=[],
-        last_success=datetime(2026, 2, 10, 12, 0, 0, tzinfo=timezone.utc),
+        last_success=datetime(2026, 2, 10, 12, 0, 0, tzinfo=UTC),
         total_searches=10,
         total_results=50,
         avg_response_ms=150,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     db_session.add(src)
     db_session.commit()
@@ -1884,7 +1884,7 @@ def test_parse_response_attachments_no_message_id(
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -1896,8 +1896,8 @@ def test_parse_response_attachments_no_message_id(
         subject="RE: RFQ",
         message_id=None,  # no message ID
         status="new",
-        received_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -2018,8 +2018,8 @@ def test_parse_response_attachments_no_requisition_id(
         subject="Quote",
         message_id="graph-msg-noreq-001",
         status="new",
-        received_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -2122,7 +2122,7 @@ def test_parse_response_attachments_vendor_domain_extraction(
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -2134,8 +2134,8 @@ def test_parse_response_attachments_vendor_domain_extraction(
         subject="Quote",
         message_id="graph-msg-domain-001",
         status="new",
-        received_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TypedDict
 
 from loguru import logger
@@ -45,12 +45,12 @@ from app.search_service import _build_connectors
 
 # Imported as module symbols so the per-source dispatch can resolve them by name via
 # globals() at call time (honoring monkeypatched writers in the isolation tests).
-from app.services.vendor_spec_enrich import (  # noqa: F401 — DO NOT REMOVE
+from app.services.vendor_spec_enrich import (
     # Resolved BY NAME at call time via `globals()[config["writer"]]` in run() (so tests can
     # monkeypatch the module symbol). They look unused to static analysis, but removing them
     # turns the dispatch into a KeyError at runtime with no warning. Keep both imports.
-    enrich_card_from_element14,
-    enrich_card_from_mouser,
+    enrich_card_from_element14,  # noqa: F401
+    enrich_card_from_mouser,  # noqa: F401
 )
 
 
@@ -194,7 +194,7 @@ async def run(
             )
             return summary
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.now(UTC).strftime("%Y-%m-%d")
         calls_key = f"vendor_api:{source}:calls:{today_str}"
         calls = intel_cache.get_count(calls_key)
         since_commit = 0

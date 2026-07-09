@@ -7,7 +7,7 @@ resolve() is a pure function (no DB); set_category mutates a MaterialCard's cate
 category_source/confidence/tier through the ladder.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -282,7 +282,7 @@ def test_set_category_equal_tier_lower_confidence_loses(db_session: Session):
 def test_set_category_exact_tie_newer_updated_at_wins(db_session: Session):
     # Existing category written 2 days ago (category_updated_at — the category's OWN
     # timestamp, NOT the card-wide updated_at); equal tier + equal confidence → newer wins.
-    old = datetime.now(timezone.utc) - timedelta(days=2)
+    old = datetime.now(UTC) - timedelta(days=2)
     card = _card(
         db_session,
         normalized_mpn="tie-newer",
@@ -544,7 +544,7 @@ def test_set_brand_same_value_same_tier_refreshes_via_newer_timestamp(db_session
     # Exact (tier, confidence) tie → newer updated_at wins (same F1 rule as category).
     from app.services.spec_tiers import set_brand
 
-    old = datetime.now(timezone.utc) - timedelta(days=2)
+    old = datetime.now(UTC) - timedelta(days=2)
     card = _card(
         db_session,
         normalized_mpn="brand-tie-newer",

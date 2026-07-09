@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.services.signature_parser, app.models.EmailSignatureExtract, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +18,7 @@ from app.services.signature_parser import (
     parse_signature_regex,
     process_signature_batch_results,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _make_extract(db_session, sender_email, confidence, **kwargs):
@@ -28,7 +28,7 @@ def _make_extract(db_session, sender_email, confidence, **kwargs):
         sender_email=sender_email,
         extraction_method=kwargs.pop("extraction_method", "regex"),
         confidence=confidence,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kwargs,
     )
     db_session.add(extract)

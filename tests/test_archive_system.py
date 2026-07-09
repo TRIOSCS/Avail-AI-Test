@@ -10,7 +10,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user, test_requisition)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import Requirement, Requisition
 from tests.conftest import engine  # noqa: F401
@@ -23,7 +23,7 @@ def _make_requisition(db, user_id, name="REQ-ARCH-001", status="open"):
         customer_name="Test Co",
         status=status,
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -37,7 +37,7 @@ def _make_requirement(db, requisition_id, mpn="LM317T", sourcing_status="open"):
         primary_mpn=mpn,
         target_qty=1000,
         sourcing_status=sourcing_status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.flush()

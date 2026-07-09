@@ -8,7 +8,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -89,7 +89,7 @@ def test_proactive_matching_timeout(scheduler_db):
             coro.close()
         except Exception:
             pass
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with (
         patch("app.services.proactive_matching.run_proactive_scan"),
@@ -144,7 +144,7 @@ def test_proactive_offer_expiry_expires_old(scheduler_db, test_user, test_compan
         salesperson_id=test_user.id,
         line_items=[],
         status="sent",
-        sent_at=datetime.now(timezone.utc) - timedelta(days=20),
+        sent_at=datetime.now(UTC) - timedelta(days=20),
     )
     scheduler_db.add(old_offer)
     scheduler_db.commit()
@@ -185,7 +185,7 @@ def test_flag_stale_offers_flags_old(scheduler_db, test_user, test_requisition):
         mpn="LM317T",
         status="active",
         is_stale=False,
-        created_at=datetime.now(timezone.utc) - timedelta(days=20),
+        created_at=datetime.now(UTC) - timedelta(days=20),
     )
     scheduler_db.add(old_offer)
     scheduler_db.commit()

@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -29,12 +29,10 @@ from app.models import Requirement, Requisition, User
 
 
 def _make_req(db: Session, owner_id: int, name: str = "REQ-BULK") -> Requisition:
-    req = Requisition(name=name, status="open", created_by=owner_id, created_at=datetime.now(timezone.utc))
+    req = Requisition(name=name, status="open", created_by=owner_id, created_at=datetime.now(UTC))
     db.add(req)
     db.flush()
-    item = Requirement(
-        requisition_id=req.id, primary_mpn="LM317T", target_qty=10, created_at=datetime.now(timezone.utc)
-    )
+    item = Requirement(requisition_id=req.id, primary_mpn="LM317T", target_qty=10, created_at=datetime.now(UTC))
     db.add(item)
     db.commit()
     db.refresh(req)

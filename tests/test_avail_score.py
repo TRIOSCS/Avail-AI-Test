@@ -10,7 +10,7 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -46,7 +46,7 @@ from app.services.avail_score_service import (
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=UTC)
 MONTH = date(2026, 2, 1)
 
 
@@ -451,7 +451,7 @@ class TestSalesAvailScore:
                     activity_type="call_logged",
                     channel="phone",
                     direction="outbound",
-                    created_at=datetime(2026, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc),
+                    created_at=datetime(2026, 2, i + 1, 10, 0, 0, tzinfo=UTC),
                 )
             )
         db_session.commit()
@@ -782,9 +782,9 @@ class TestEdgeCases:
         """Data outside the target month is excluded."""
         buyer = _make_user(db_session, "Boundary Buyer", "buyer", "boundary")
         # Req in January (outside Feb)
-        _make_req(db_session, buyer.id, created_at=datetime(2026, 1, 15, tzinfo=timezone.utc))
+        _make_req(db_session, buyer.id, created_at=datetime(2026, 1, 15, tzinfo=UTC))
         # Req in February (inside)
-        _make_req(db_session, buyer.id, created_at=datetime(2026, 2, 15, tzinfo=timezone.utc))
+        _make_req(db_session, buyer.id, created_at=datetime(2026, 2, 15, tzinfo=UTC))
         db_session.commit()
 
         result = compute_buyer_avail_score(db_session, buyer.id, MONTH)

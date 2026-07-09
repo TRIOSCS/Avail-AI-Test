@@ -15,7 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -85,7 +85,7 @@ class TestStalenessHelper:
     def test_aware_timestamp_tier(self, days_ago, expected):
         from app.routers.htmx.companies import _staleness_tier
 
-        ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        ts = datetime.now(UTC) - timedelta(days=days_ago)
         assert _staleness_tier(ts) == expected
 
     def test_naive_datetime_treated_as_utc(self):

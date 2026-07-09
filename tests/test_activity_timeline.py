@@ -6,7 +6,7 @@ and the new /api/activity/account and /api/activity/contact endpoints.
 Depends on: tests/conftest.py fixtures (test_user, test_company, test_customer_site, client)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ def site_contact(db_session: Session, test_customer_site: CustomerSite) -> SiteC
 @pytest.fixture()
 def company_activities(db_session: Session, test_user: User, test_company: Company) -> list[ActivityLog]:
     """Create a mix of activities for a company."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activities = []
     for i, (atype, chan, dirn, etype) in enumerate(
         [
@@ -80,7 +80,7 @@ def contact_activities(
     site_contact: SiteContact,
 ) -> list[ActivityLog]:
     """Activities linked to a specific site contact."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activities = []
     for i, (atype, chan) in enumerate(
         [
@@ -135,7 +135,7 @@ class TestGetAccountTimeline:
         assert all(a.direction == "outbound" for a in items)
 
     def test_filters_by_date_range(self, db_session, test_company, company_activities):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         items, total = get_account_timeline(
             db_session,
             test_company.id,
@@ -198,7 +198,7 @@ class TestGetLastOutboundActivity:
             company_id=test_company.id,
             direction="inbound",
             event_type="email",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(a)
         db_session.commit()
@@ -215,7 +215,7 @@ class TestGetLastOutboundActivity:
             channel="phone",
             company_id=test_company.id,
             direction="outbound",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(a)
         db_session.commit()
@@ -233,7 +233,7 @@ class TestGetLastOutboundActivity:
             channel="phone",
             company_id=test_company.id,
             direction="inbound",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(a)
         db_session.commit()
@@ -326,7 +326,7 @@ class TestRequisitionActivityTabTimeline:
     def test_renders_unified_timeline(self, client, db_session, test_requisition, test_user):
         """The requisition Activity tab renders one date-grouped chronological timeline
         of ActivityLog rows — no legacy 'RFQ History' section."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_session.add(
             ActivityLog(
                 user_id=test_user.id,
@@ -377,7 +377,7 @@ class TestRequisitionActivityTabTimeline:
                 channel="manual",
                 requisition_id=test_requisition.id,
                 notes="Old note near the UTC midnight boundary",
-                occurred_at=datetime(2020, 1, 2, 2, 0, tzinfo=timezone.utc),
+                occurred_at=datetime(2020, 1, 2, 2, 0, tzinfo=UTC),
             )
         )
         db_session.commit()

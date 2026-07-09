@@ -20,7 +20,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
 import html as html_mod
 import json
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -304,8 +304,8 @@ async def customers_bulk_action(
     ids_str = form.get("ids", "") or ""
     try:
         ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
-    except ValueError:
-        raise HTTPException(400, "Invalid ID list")
+    except ValueError as e:
+        raise HTTPException(400, "Invalid ID list") from e
 
     if len(ids) > _BULK_MAX_IDS:
         raise HTTPException(400, f"Maximum {_BULK_MAX_IDS} companies per bulk action")
@@ -351,7 +351,7 @@ async def customers_bulk_action(
     elif action == "send-to-prospecting":
         for co in authorised:
             co.account_owner_id = None
-            co.ownership_cleared_at = datetime.now(timezone.utc)
+            co.ownership_cleared_at = datetime.now(UTC)
             applied += 1
     elif action == "assign-owner":
         owner_id_raw = form.get("owner_id")
@@ -359,8 +359,8 @@ async def customers_bulk_action(
             raise HTTPException(400, "owner_id is required for assign-owner")
         try:
             new_owner_id = int(owner_id_raw)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "owner_id must be an integer")
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "owner_id must be an integer") from e
         new_owner = db.get(User, new_owner_id)
         if not new_owner or not new_owner.is_active:
             raise HTTPException(400, "owner_id does not correspond to an active user")
@@ -477,7 +477,7 @@ async def saved_views_create(
     try:
         view = create_saved_view(db, user, list_key, name, raw_filters)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
 
     logger.info("Saved view {!r} ({}) created by {}", view.name, list_key, user.email)
     ctx = _saved_views_ctx(request, user, db, list_key)
@@ -734,8 +734,8 @@ async def import_companies_confirm(
         rows = _json.loads(rows_json_str)
         if not isinstance(rows, list):
             raise ValueError("Expected a list")
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array") from e
 
     if len(rows) > _IMPORT_MAX_ROWS:
         raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
@@ -748,7 +748,7 @@ async def import_companies_confirm(
     created = 0
     skipped_dup = 0
     skipped_invalid = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for row in rows:
         name = str(row.get("name", "")).strip()
@@ -962,8 +962,8 @@ async def import_contacts_confirm(
         rows = _json.loads(rows_json_str)
         if not isinstance(rows, list):
             raise ValueError("Expected a list")
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid rows_json — must be a JSON array")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "Invalid rows_json — must be a JSON array") from e
 
     if len(rows) > _IMPORT_MAX_ROWS:
         raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
@@ -988,7 +988,7 @@ async def import_contacts_confirm(
     is_mgr = is_manager_or_admin(user)
     manageable_ids = set() if is_mgr else _manageable_company_ids(user, all_companies, db)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     created = 0
     skipped_no_company = 0
     skipped_dup = 0
@@ -1359,8 +1359,8 @@ async def company_assign_segment_tag(
     elif tag_id_raw:
         try:
             tag_id = int(tag_id_raw)
-        except ValueError:
-            raise HTTPException(400, "tag_id must be an integer")
+        except ValueError as e:
+            raise HTTPException(400, "tag_id must be an integer") from e
         from ...models.tags import Tag as _Tag
 
         tag = db.query(_Tag).filter_by(id=tag_id).first()
@@ -1461,8 +1461,8 @@ async def contact_assign_tag(
     elif tag_id_raw:
         try:
             tag_id = int(tag_id_raw)
-        except ValueError:
-            raise HTTPException(400, "tag_id must be an integer")
+        except ValueError as e:
+            raise HTTPException(400, "tag_id must be an integer") from e
         tag = db.query(_Tag).filter_by(id=tag_id).first()
         if not tag:
             raise HTTPException(404, "Tag not found")
@@ -1723,7 +1723,7 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
             raise HTTPException(400, str(exc)) from exc
     else:
         setattr(company, field, v or None)
-    company.updated_at = datetime.now(timezone.utc)
+    company.updated_at = datetime.now(UTC)
 
 
 def _recompose_full_name(contact: SiteContact) -> None:
@@ -1783,7 +1783,7 @@ def apply_contact_field(
         contact.contact_role = _validate_role(v)
     else:
         setattr(contact, field, v or None)
-    contact.updated_at = datetime.now(timezone.utc)
+    contact.updated_at = datetime.now(UTC)
 
 
 def _validate_role(role_raw: str) -> str | None:
@@ -1811,7 +1811,7 @@ def _render_contacts_list(request: Request, user: User, company: Company, db: Se
         {
             "company": company,
             "contact_rows": _company_contact_rows(db, company.id, viewer=user),
-            "now_utc": datetime.now(timezone.utc),
+            "now_utc": datetime.now(UTC),
             "roles": CANONICAL_ROLES,
         }
     )
@@ -1991,7 +1991,7 @@ async def set_company_disposition(
     company.disposition = disp_raw
     company.disposition_reason = reason_raw or None
     company.disposition_set_by = user.id
-    company.disposition_set_at = datetime.now(timezone.utc)
+    company.disposition_set_at = datetime.now(UTC)
     db.commit()
     db.refresh(company)
 
@@ -2033,7 +2033,7 @@ async def deactivate_company(
     disposition_reason = form.get("disposition_reason", "").strip() or None
     company.is_active = False
     company.account_owner_id = None
-    company.ownership_cleared_at = datetime.now(timezone.utc)
+    company.ownership_cleared_at = datetime.now(UTC)
     company.disposition_reason = disposition_reason
     db.commit()
     db.refresh(company)
@@ -2140,10 +2140,10 @@ async def send_company_to_prospecting_htmx(
 
     try:
         result = park_company_in_prospecting(company_id, user.id, db, is_admin=is_manager_or_admin(user))
-    except LookupError:
-        raise HTTPException(404, "Company not found")
+    except LookupError as e:
+        raise HTTPException(404, "Company not found") from e
     except ValueError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
 
     from app.cache.decorators import invalidate_prefix
 
@@ -2459,7 +2459,6 @@ async def _render_company_detail(
     buy_plan_count = _bpq.count() if _bpq is not None else 0
 
     # Cadence card + commercial strip context
-    from datetime import timezone as _tz
 
     _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
     _cadence = _cadence_state(company.tier, company.last_outbound_at)
@@ -2508,7 +2507,7 @@ async def _render_company_detail(
             "revenue_90d": _stats.get("revenue_90d", 0.0),
             "last_req_date": _stats.get("last_req_date"),
             # Clock day calculations
-            "now_utc": datetime.now(_tz.utc),
+            "now_utc": datetime.now(UTC),
             # Segment tags
             "segment_tags": segment_tags,
             "all_segment_tags": all_segment_tags,
@@ -2584,7 +2583,7 @@ async def company_tab(
             {
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id, viewer=user),
-                "now_utc": datetime.now(timezone.utc),
+                "now_utc": datetime.now(UTC),
                 "active_sites": active_sites,
                 "roles": CANONICAL_ROLES,
                 "preselect_site_id": preselect_site_id,
@@ -2662,7 +2661,7 @@ async def company_tab(
                 "company": company,
                 "history": history,
                 "field_labels": FIELD_LABELS,
-                "now_utc": datetime.now(timezone.utc),
+                "now_utc": datetime.now(UTC),
             }
         )
         return template_response("htmx/partials/customers/tabs/history_tab.html", ctx)
@@ -2750,7 +2749,7 @@ async def company_tab(
         # Sort Emails section: RFQ dicts use raw.created_at; ActivityLog uses created_at
         import datetime as _dt_mod
 
-        _epoch = _dt_mod.datetime(1970, 1, 1, tzinfo=_dt_mod.timezone.utc)
+        _epoch = _dt_mod.datetime(1970, 1, 1, tzinfo=_dt_mod.UTC)
 
         def _email_ts(item):
             if isinstance(item, dict):
@@ -2895,8 +2894,8 @@ async def contacts_tab_create(
     elif site_id_raw:
         try:
             sid = int(site_id_raw)
-        except ValueError:
-            raise HTTPException(400, "Invalid site_id")
+        except ValueError as e:
+            raise HTTPException(400, "Invalid site_id") from e
         existing_site = (
             db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
         )
@@ -3022,7 +3021,7 @@ async def _run_contact_discovery(company_id: int, domain: str, name: str) -> Non
     errored: list[str] = []
     try:
         suggested, errored = await find_suggested_contacts_with_errors(domain, name)
-    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
+    except Exception as exc:
         import httpx
 
         if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
@@ -3186,8 +3185,8 @@ async def contacts_tab_add_suggested(
     if site_id_raw:
         try:
             sid = int(site_id_raw)
-        except ValueError:
-            raise HTTPException(400, "Invalid site_id")
+        except ValueError as e:
+            raise HTTPException(400, "Invalid site_id") from e
         site = db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
         if not site:
             raise HTTPException(404, "Site not found")
@@ -3619,7 +3618,7 @@ async def set_account_primary_contact(
         raise HTTPException(404, "Contact not found")
 
     company.primary_contact_id = contact_id
-    company.updated_at = datetime.now(timezone.utc)
+    company.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(company)
     logger.info("Company {} primary contact set to {} by {}", company_id, contact_id, user.email)
@@ -3654,7 +3653,7 @@ async def set_parent_company(
     raw = (form.get("parent_company_id") or "").strip()
 
     _set_parent_company(db, company, raw)
-    company.updated_at = datetime.now(timezone.utc)
+    company.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(company)
     logger.info("Company {} parent set to {} by {}", company_id, raw or "None", user.email)
@@ -3938,7 +3937,7 @@ async def edit_company(
         if raw is not None:  # field was submitted
             apply_company_field(company, f, raw)
     # updated_at set inside apply_company_field; ensure it's set for non-registry writes too
-    company.updated_at = datetime.now(timezone.utc)
+    company.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Company {} edited by {}", company_id, user.email)
 
@@ -4236,7 +4235,7 @@ async def company_add_custom_field(
     try:
         company.custom_fields = updated
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(company, "custom_fields")
@@ -4311,7 +4310,7 @@ async def contact_add_custom_field(
     try:
         contact.custom_fields = updated
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(contact, "custom_fields")
@@ -4950,7 +4949,7 @@ async def edit_site(
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
-    site.updated_at = datetime.now(timezone.utc)
+    site.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Site {} edited by {}", site_id, user.email)
 
@@ -5136,7 +5135,7 @@ async def contact_history_modal(
             "contact": contact,
             "history": history,
             "field_labels": FIELD_LABELS,
-            "now_utc": datetime.now(timezone.utc),
+            "now_utc": datetime.now(UTC),
         }
     )
     return template_response("htmx/partials/customers/_contact_history_modal.html", ctx)
@@ -5259,7 +5258,7 @@ async def edit_site_contact(
             if not mgr:
                 raise HTTPException(400, "reports_to must be a contact in the same company")
         contact.reports_to_id = new_reports_to_id
-    contact.updated_at = datetime.now(timezone.utc)
+    contact.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
 

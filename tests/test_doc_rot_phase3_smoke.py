@@ -8,10 +8,10 @@ import inspect
 
 
 def test_modules_import():
-    import app.jobs.knowledge_jobs  # noqa: F401
-    import app.main  # noqa: F401
-    import app.routers.htmx_views  # noqa: F401
-    import app.services.vendor_unavailability  # noqa: F401
+    import app.jobs.knowledge_jobs
+    import app.main
+    import app.routers.htmx_views
+    import app.services.vendor_unavailability
     import app.utils.file_validation  # noqa: F401
 
 

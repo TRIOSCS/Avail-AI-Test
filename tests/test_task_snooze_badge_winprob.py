@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -32,7 +32,7 @@ from app.services.task_service import create_company_task
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _task_due(offset_days: int, db: Session, company_id: int, user_id: int) -> RequisitionTask:
@@ -40,7 +40,7 @@ def _task_due(offset_days: int, db: Session, company_id: int, user_id: int) -> R
     return create_company_task(
         db,
         company_id=company_id,
-        title="Task due in {} days".format(offset_days),
+        title=f"Task due in {offset_days} days",
         due_at=due,
         created_by=user_id,
         assigned_to_id=user_id,
@@ -155,7 +155,7 @@ class TestTaskSnoozeService:
         from app.services.task_service import snooze_task
 
         snoozed = snooze_task(db_session, task.id)
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         assert snoozed is not None
         assert abs((snoozed.due_at - tomorrow).total_seconds()) < 2
 
@@ -254,7 +254,7 @@ class TestDueOverdueBadgeTemplate:
 
     def test_due_today_badge_shown(self, client, db_session: Session, owned_company: Company, test_user: User):
         """A task due today (midnight UTC) shows the 'Due today' badge."""
-        today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
+        today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=UTC)
         create_company_task(
             db_session,
             company_id=owned_company.id,

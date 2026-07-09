@@ -9,7 +9,7 @@ Depends on: app/utils/claude_client.py (claude_structured), app/services/activit
             app/cache/intel_cache.py (_get_redis), app/models/intelligence.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, TypedDict
 
@@ -146,7 +146,7 @@ async def get_or_build_digest(
 
     See module docstring for the algorithm.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     existing = (
         db.query(ActivityDigest)
         .filter(ActivityDigest.entity_type == entity_type, ActivityDigest.entity_id == entity_id)

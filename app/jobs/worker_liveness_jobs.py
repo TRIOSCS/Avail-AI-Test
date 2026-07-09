@@ -16,7 +16,7 @@ Depends on: worker_status models, services.teams_notifications, cache.intel_cach
             (debounce store — Redis-backed, no schema/column), search_worker_base.monitoring (Sentry).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -37,7 +37,7 @@ def _as_utc(dt):
     """Coerce a (possibly naive) datetime to UTC-aware — ICS stores naive, NC aware."""
     if dt is None:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 # ── Pure decision logic (no DB / scheduler / IO — unit-testable) ─────────
@@ -120,7 +120,7 @@ async def _job_monitor_worker_heartbeats():
     from ..database import SessionLocal
     from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_minutes = settings.worker_heartbeat_stale_minutes
     debounce = settings.worker_alert_debounce_minutes
 
@@ -136,8 +136,8 @@ async def _job_monitor_worker_heartbeats():
             row = db.get(model, 1)
             if row is None:
                 continue
-            is_running = bool(row.is_running)  # type: ignore[attr-defined, unused-ignore]  # dynamic per-worker status model
-            hb = row.last_heartbeat  # type: ignore[attr-defined, unused-ignore]  # dynamic per-worker status model
+            is_running = bool(row.is_running)  # type: ignore[attr-defined]  # dynamic per-worker status model
+            hb = row.last_heartbeat  # type: ignore[attr-defined]  # dynamic per-worker status model
 
             # Stale: claims to be running but the heartbeat went silent (or never landed).
             if should_alert_stale_heartbeat(

@@ -8,7 +8,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -24,7 +24,7 @@ def _make_card(db: Session, mpn: str = "TEST-001", category: str = "capacitors")
         display_mpn=mpn,
         manufacturer="TestCo",
         category=category,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

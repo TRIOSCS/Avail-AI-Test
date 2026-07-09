@@ -8,7 +8,7 @@ unavailable (e.g., during development without Docker).
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from loguru import logger
@@ -124,7 +124,7 @@ def set_cached(cache_key: str, data: dict | list, ttl_days: float = 7) -> None:
 
     # Fall back to PostgreSQL
     try:
-        expires = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+        expires = datetime.now(UTC) + timedelta(days=ttl_days)
         with SessionLocal() as db:
             db.execute(
                 text("""

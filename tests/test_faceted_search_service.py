@@ -4,7 +4,7 @@ Covers: app/services/faceted_search_service.py
 Depends on: conftest.py, faceted search models, commodity_registry
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -48,7 +48,7 @@ def _make_dram_card(db: Session, mpn: str, ddr: str, capacity: float, ecc: bool 
         display_mpn=mpn,
         manufacturer="TestCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -84,7 +84,7 @@ def test_get_commodity_counts(db_session: Session):
         display_mpn="CAP-001",
         manufacturer="TestCo",
         category="capacitors",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(cap)
     db_session.flush()
@@ -106,7 +106,7 @@ def test_get_commodity_counts_expression_equivalence(db_session: Session):
     - soft-deleted rows are excluded;
     - count(*) over those groups equals the row counts (id is the non-null PK).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = [
         (None, None),
         ("", None),
@@ -161,7 +161,7 @@ def test_search_materials_faceted_by_commodity(db_session: Session):
         display_mpn="CAP-001",
         manufacturer="TestCo",
         category="capacitors",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(cap)
     db_session.flush()
@@ -253,7 +253,7 @@ def test_get_subfilter_options_natural_sorts_enum_overflow(db_session: Session):
             display_mpn=f"CAP-PKG-{i}",
             manufacturer="TestCo",
             category="capacitors",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -296,7 +296,7 @@ def test_get_subfilter_options_mixed_overflow_does_not_crash(db_session: Session
             display_mpn=f"CAP-MIX-{i}",
             manufacturer="TestCo",
             category="capacitors",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -375,7 +375,7 @@ def test_subfilter_numeric_chips_empty_without_rows(db_session: Session):
         display_mpn="NO-CAP",
         manufacturer="TestCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.flush()
@@ -669,10 +669,10 @@ def test_manufacturer_options_commodity_scopes_both_union_branches(db_session: S
 
 
 def test_manufacturer_options_exclude_deleted_in_both_branches(db_session: Session):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     card = _dual_card(db_session, "gone1", brand="IBM", manufacturer="Seagate Technology")
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     db_session.flush()
 
     assert get_manufacturer_options(db_session) == []
@@ -699,7 +699,7 @@ def _mk_global(db, mpn, *, lifecycle=None, rohs=None, datasheet=None):
         lifecycle_status=lifecycle,
         rohs_status=rohs,
         datasheet_url=datasheet,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -909,7 +909,7 @@ def _mk_op(
         is_internal_part=internal,
         last_searched_at=last_searched,
         search_count=searches,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     if crosses != "unset":
         card.cross_references = crosses
@@ -998,7 +998,7 @@ def test_search_faceted_internal_tristate(db_session: Session):
 def test_search_faceted_searched_within_buckets(db_session: Session):
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _mk_op(db_session, "sw-1d", last_searched=now - timedelta(days=1))
     _mk_op(db_session, "sw-10d", last_searched=now - timedelta(days=10))
     _mk_op(db_session, "sw-45d", last_searched=now - timedelta(days=45))
@@ -1074,20 +1074,20 @@ def test_get_commodity_spec_coverage(db_session: Session):
         normalized_mpn="cov-002",
         display_mpn="COV-002",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     deleted = MaterialCard(
         normalized_mpn="cov-003",
         display_mpn="COV-003",
         category="dram",
-        deleted_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     other_cat = MaterialCard(
         normalized_mpn="cov-004",
         display_mpn="COV-004",
         category="capacitors",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([no_specs, deleted, other_cat])
     db_session.flush()
@@ -1108,7 +1108,7 @@ def _cross_card(db, mpn, **kw):
         normalized_mpn=mpn,
         display_mpn=mpn.upper(),
         category=kw.pop("category", "hdd"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(card)

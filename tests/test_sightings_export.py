@@ -11,7 +11,7 @@ Depends on: conftest.py fixtures (db_session, test_user, client, unauthenticated
 
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def _make_requirement(
         name=f"RFQ-{mpn}",
         status="open",
         customer_name=customer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -44,7 +44,7 @@ def _make_requirement(
         manufacturer=manufacturer,
         target_qty=100,
         sourcing_status=sourcing_status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -55,7 +55,7 @@ def _make_sighting(db: Session, requirement: Requirement, *, vendor: str, **kwar
     sighting = Sighting(
         requirement_id=requirement.id,
         vendor_name=vendor,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kwargs,
     )
     db.add(sighting)

@@ -13,7 +13,7 @@ Depends on: app.template_env.templates (Jinja2 env)
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.template_env import templates
@@ -58,7 +58,7 @@ def test_contacts_tab_renders_well_formed_empty_state():
         company=company,
         contact_rows=[],
         roles=("specifier", "buyer_po", "other"),
-        now_utc=datetime.now(timezone.utc),
+        now_utc=datetime.now(UTC),
         active_sites=[],
         can_find_contacts=False,
     )

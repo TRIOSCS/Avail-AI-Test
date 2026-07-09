@@ -10,7 +10,7 @@
 #
 # Called by: pytest. Depends on: conftest fixtures (db_session, admin_user) +
 # the data-ops route in app/routers/htmx_views.py.
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,7 +57,7 @@ def _vendor(db: Session, normalized: str, display: str, sightings: int) -> Vendo
         emails=[],
         phones=[],
         sighting_count=sightings,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

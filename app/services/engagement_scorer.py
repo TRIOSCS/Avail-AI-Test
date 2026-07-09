@@ -17,7 +17,7 @@ is surfaced in the UI as a color-coded ring (green ≥70, yellow 40-69, red <40)
 Integration: 20% weight in the master vendor ranking algorithm.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func
@@ -71,7 +71,7 @@ def compute_engagement_score(
         }
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     if total_outreach < MIN_OUTREACH_FOR_SCORE:
         return {
@@ -96,7 +96,7 @@ def compute_engagement_score(
     recency_score = 0.0
     if last_contact_at:
         if last_contact_at.tzinfo is None:
-            last_contact_at = last_contact_at.replace(tzinfo=timezone.utc)
+            last_contact_at = last_contact_at.replace(tzinfo=UTC)
         days_since = max((now - last_contact_at).total_seconds() / 86400, 0)
         recency_score = _decay_score(days_since, RECENCY_IDEAL_DAYS, RECENCY_MAX_DAYS)
 
@@ -142,7 +142,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
     from app.models import Contact, Offer, VendorCard, VendorResponse
     from app.vendor_utils import normalize_vendor_name
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # ── Gather outreach counts per vendor ──
     # Count outbound Contact records grouped by normalized vendor_name
@@ -222,9 +222,9 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         received = pair.received_at
         if sent and received:
             if sent.tzinfo is None:
-                sent = sent.replace(tzinfo=timezone.utc)
+                sent = sent.replace(tzinfo=UTC)
             if received.tzinfo is None:
-                received = received.replace(tzinfo=timezone.utc)
+                received = received.replace(tzinfo=UTC)
             hours = max((received - sent).total_seconds() / 3600, 0)
             if hours < 720:  # Ignore >30 days as outliers
                 vendor_velocities.setdefault(norm, []).append(hours)
@@ -287,7 +287,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
             if card.created_at:
                 created = card.created_at
                 if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
+                    created = created.replace(tzinfo=UTC)
                 card.relationship_months = max(int((now - created).days / 30), 0)
 
             updated += 1
@@ -317,7 +317,7 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
     from app.models import Contact, Offer, VendorResponse
 
     norm = card.normalized_name
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     outreach = (
         db.query(func.count(Contact.id))
@@ -387,7 +387,7 @@ def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
-            card.last_contact_at = datetime.now(timezone.utc)
+            card.last_contact_at = datetime.now(UTC)
             updated += 1
 
     if updated:

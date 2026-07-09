@@ -9,7 +9,7 @@ The old excess routes/tests are untouched.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,7 @@ def trader_user(db_session: Session) -> User:
         name="Tess Trader",
         role="trader",
         azure_id="test-azure-trader",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -46,7 +46,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -75,7 +75,7 @@ def single_line_list(db_session: Session, trader_user: User, test_company: Compa
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -191,7 +191,7 @@ def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, 
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -447,7 +447,7 @@ def empty_draft_list(db_session: Session, trader_user: User, test_company: Compa
         owner_id=trader_user.id,
         status="draft",
         total_line_items=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.commit()
@@ -888,7 +888,7 @@ def test_read_partials_require_resell_access(client, db_session, posted_list):
         role="buyer",
         azure_id="az-noresell",
         access_overrides={"resell": False},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(no_access)
     db_session.commit()
@@ -932,7 +932,7 @@ def test_write_routes_require_resell_access(client, db_session, posted_list):
         role="trader",
         azure_id="az-revoked",
         access_overrides={"resell": False},
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(revoked)
     db_session.commit()
@@ -1080,7 +1080,7 @@ def bare_list(db_session: Session, trader_user: User, test_company: Company) -> 
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.commit()

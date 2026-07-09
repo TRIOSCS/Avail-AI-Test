@@ -15,7 +15,7 @@ os.environ["TESTING"] = "1"
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -73,7 +73,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="N3 Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requisition(**defaults)
@@ -88,7 +88,7 @@ def _requirement(db: Session, req: Requisition, mpn: str = "LM317T", **kw) -> Re
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requirement(**defaults)
@@ -115,7 +115,7 @@ def _offer(
         status=status,
         unit_price=1.50,
         qty_available=500,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Offer(**defaults)
@@ -131,7 +131,7 @@ def _quote(db: Session, req: Requisition, user: User, status: str = "draft", **k
         quote_number=qnum,
         status=status,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Quote(**defaults)
@@ -161,7 +161,7 @@ def _buy_plan(db: Session, quote: Quote, req: Requisition, **kw) -> BuyPlan:
         quote_id=quote.id,
         requisition_id=req.id,
         status=BuyPlanStatus.DRAFT.value,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = BuyPlan(**defaults)
@@ -175,7 +175,7 @@ def _company_site(db: Session, company: Company, site_name: str = "HQ", **kw) ->
         company_id=company.id,
         site_name=site_name,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = CustomerSite(**defaults)
@@ -196,7 +196,7 @@ def _sourcing_lead(db: Session, req: Requisition, requirement: Requirement, **kw
         vendor_name_normalized="testvendor",
         primary_source_type="api",
         primary_source_name="test-source",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = SourcingLead(**defaults)
@@ -210,7 +210,7 @@ def _material_card(db: Session, mpn: str = "N3-MPN", **kw) -> MaterialCard:
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer="TestCo",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = MaterialCard(**defaults)

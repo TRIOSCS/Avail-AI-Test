@@ -5,6 +5,8 @@ resulting category). --apply categorizes through the ladder, fills facets, and l
 audit row per card. Fixtures use category=None — never hand-set an off-vocab category.
 """
 
+from datetime import UTC
+
 from sqlalchemy.orm import Session
 
 from app.management.categorize_from_desc import _alnum_norm, _has_real_own_desc, run
@@ -124,12 +126,12 @@ def test_limit_caps_examined_cards(db_session: Session):
 
 
 def test_soft_deleted_cards_excluded(db_session: Session):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     seed_commodity_schemas(db_session)
     live = _card(db_session, "LIVE1", 'HD, 450GB, 15KRPM, 3.5", Fibre Channel')
     dead = _card(db_session, "DEAD1", 'HD, 600GB, 10KRPM, 2.5", SAS')
-    dead.deleted_at = datetime.now(timezone.utc)
+    dead.deleted_at = datetime.now(UTC)
     db_session.commit()
 
     summary = run(db_session, apply=True)

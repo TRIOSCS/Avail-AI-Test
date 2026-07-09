@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/services/specialty_detector.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -96,7 +96,7 @@ def _make_vendor_card(db, name="test vendor"):
     card = VendorCard(
         normalized_name=name.lower(),
         display_name=name,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -109,7 +109,7 @@ def _make_user(db, email="specialty-user@test.com"):
         name="Specialty User",
         role="buyer",
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -122,7 +122,7 @@ def _make_requisition(db, user_id):
         customer_name="Test",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -157,7 +157,7 @@ class TestAnalyzeVendorSpecialties:
             requisition_id=req.id,
             primary_mpn="LM317T",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(requirement)
         db_session.flush()
@@ -168,7 +168,7 @@ class TestAnalyzeVendorSpecialties:
             mpn_matched="DDR4-SDRAM-MODULE",
             manufacturer="Texas Instruments",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -194,7 +194,7 @@ class TestAnalyzeVendorSpecialties:
             unit_price=0.10,
             entered_by_id=user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.commit()
@@ -238,7 +238,7 @@ class TestAnalyzeVendorSpecialties:
                 unit_price=1.00,
                 entered_by_id=user.id,
                 status="active",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(o)
         db_session.commit()
@@ -257,7 +257,7 @@ class TestAnalyzeVendorSpecialties:
             requisition_id=req.id,
             primary_mpn="TEST",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(requirement)
         db_session.flush()
@@ -268,7 +268,7 @@ class TestAnalyzeVendorSpecialties:
             mpn_matched=None,
             manufacturer=None,
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -294,7 +294,7 @@ class TestAnalyzeVendorSpecialties:
             unit_price=1.00,
             entered_by_id=user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.commit()

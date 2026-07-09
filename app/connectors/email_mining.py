@@ -16,7 +16,7 @@ Enriches VendorCards with verified contact info from real correspondence.
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -162,7 +162,7 @@ class EmailMiner:
                 ProcessedMessage(
                     message_id=message_id,
                     processing_type=processing_type,
-                    processed_at=datetime.now(timezone.utc),
+                    processed_at=datetime.now(UTC),
                 )
             )
             self.db.flush()
@@ -205,14 +205,14 @@ class EmailMiner:
         sync = self._get_sync_state(folder)
         if sync:
             sync.delta_token = token
-            sync.last_sync_at = datetime.now(timezone.utc)
+            sync.last_sync_at = datetime.now(UTC)
         else:
             self.db.add(
                 SyncState(
                     user_id=self.user_id,
                     folder=folder,
                     delta_token=token,
-                    last_sync_at=datetime.now(timezone.utc),
+                    last_sync_at=datetime.now(UTC),
                 )
             )
         self.db.flush()
@@ -274,7 +274,7 @@ class EmailMiner:
 
         # ── Fallback: Keyword search scan ──
         if not messages and not used_delta:
-            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             queries = [
                 f"received>={since} AND (subject:RFQ OR subject:quote OR subject:stock OR subject:inventory OR subject:availability)",
                 f"received>={since} AND (body:in stock OR body:lead time OR body:unit price)",
@@ -414,7 +414,7 @@ class EmailMiner:
 
         H2: Skips attachment messages already in processed_messages (type='attachment').
         """
-        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         query = f"received>={since} AND hasAttachments:true AND (subject:stock list OR subject:inventory OR subject:excess OR subject:line card)"
 
         results = []
@@ -511,7 +511,7 @@ class EmailMiner:
 
         # ── Fallback: Search SentItems ──
         if not messages and not used_delta:
-            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 results = await self.gc.get_all_pages(
                     "/me/mailFolders/sentItems/messages",

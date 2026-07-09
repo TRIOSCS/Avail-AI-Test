@@ -14,7 +14,7 @@ Depends on: app.services.prepayment_service, app.routers.prepayments,
             conftest fixtures (db_session, client, unauthenticated_client)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -49,7 +49,7 @@ def _make_approver(
         is_active=True,
         can_approve_prepayments=True,
         prepayment_approval_limit=limit,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -64,7 +64,7 @@ def _make_buy_plan(db: Session, requester: User):
     company = Company(
         name="Test Co",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(company)
     db.flush()
@@ -78,7 +78,7 @@ def _make_buy_plan(db: Session, requester: User):
         customer_name="Test Co",
         status="active",
         created_by=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -93,7 +93,7 @@ def _make_buy_plan(db: Session, requester: User):
         total_cost=Decimal("800.00"),
         total_margin_pct=Decimal("20.00"),
         created_by_id=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -121,7 +121,7 @@ def _make_po_line(db: Session, buy_plan):
         unit_cost=10.0,
         quantity=10,
         po_number="PO-PP-1",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()

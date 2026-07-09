@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -57,7 +57,7 @@ signal.signal(signal.SIGINT, _handle_shutdown)
 # ---------------------------------------------------------------------------
 
 
-def _record_heartbeat(db: Session, breaker: "EnrichmentCircuitBreaker") -> bool:
+def _record_heartbeat(db: Session, breaker: EnrichmentCircuitBreaker) -> bool:
     """Refresh the liveness heartbeat on the status singleton — EVERY loop tick.
 
     Called at the top of the main loop (before any branch returns/sleeps) so
@@ -79,7 +79,7 @@ def _record_heartbeat(db: Session, breaker: "EnrichmentCircuitBreaker") -> bool:
     update_enrichment_worker_status(
         db,
         is_running=True,
-        last_heartbeat=datetime.now(timezone.utc),
+        last_heartbeat=datetime.now(UTC),
         circuit_breaker_open=breaker_open,
         circuit_breaker_reason=(breaker.get_trip_info()["trip_reason"] if breaker_open else None),
     )
@@ -100,7 +100,7 @@ def _heartbeat_sleep_chunk_seconds() -> int:
     return max(60, (settings.worker_heartbeat_stale_minutes * 60) // 3)
 
 
-async def _sleep_with_heartbeat(total_seconds: int, breaker: "EnrichmentCircuitBreaker") -> None:
+async def _sleep_with_heartbeat(total_seconds: int, breaker: EnrichmentCircuitBreaker) -> None:
     """Sleep ``total_seconds`` in heartbeat-sized chunks, refreshing the heartbeat
     between.
 
@@ -169,7 +169,7 @@ def _load_today_counters(db: Session, today_date: date) -> dict:
     }
 
 
-def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
+def select_batch(db: Session, config: EnrichmentWorkerConfig) -> list:
     """Return the next batch of cards eligible for enrichment.
 
     Anti-spin query — prevents re-hammering recently-failed parts:
@@ -201,7 +201,7 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
 
     # NOTE: eligibility is read from material_cards.enrichment_status — NOT the (unused)
     # enrichment_queue table. material_cards is the single source of enrichment state.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     retry_cutoff = now - timedelta(hours=config.not_found_retry_hours)
 
     not_found_eligible = and_(
@@ -260,8 +260,8 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
 async def _oem_resolution_pass(
     db: Session,
     batch: list,
-    config: "EnrichmentWorkerConfig",
-    breaker: "EnrichmentCircuitBreaker",
+    config: EnrichmentWorkerConfig,
+    breaker: EnrichmentCircuitBreaker,
     web_state: dict[str, int],
     web_calls_today: int,
     web_cache_key: str,
@@ -561,9 +561,9 @@ async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
 
 async def run_one_batch(
     db: Session,
-    config: "EnrichmentWorkerConfig",
+    config: EnrichmentWorkerConfig,
     cooldown: dict[str, float],
-    breaker: "EnrichmentCircuitBreaker",
+    breaker: EnrichmentCircuitBreaker,
     disabled: set[str] | None = None,
     web_state: dict[str, int] | None = None,
 ) -> dict[str, int]:
@@ -646,7 +646,7 @@ async def run_one_batch(
     if web_state is None:
         web_state = {"web_calls": 0}
 
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = datetime.now(UTC).strftime("%Y-%m-%d")
     web_cache_key = f"enrichment_worker:web_calls:{today_str}"
     # Defense in depth: take the max of the (cross-restart, cross-process) cache value
     # and the in-process tally so the cap holds even when the cache is unavailable and
@@ -708,7 +708,7 @@ async def run_one_batch(
     # the ones eligible for a second-pass parametric spec extraction. not_found and
     # exception (poison-pill) cards are deliberately excluded.
     enriched_ids: list[int] = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for card in batch:
         # Per-card budget gate (exact — no batch_size overshoot). Once tripped, "web_search"
@@ -942,9 +942,9 @@ async def main() -> None:
         update_enrichment_worker_status(
             db,
             is_running=True,
-            last_heartbeat=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
         )
-        resumed = _load_today_counters(db, datetime.now(timezone.utc).date())
+        resumed = _load_today_counters(db, datetime.now(UTC).date())
     finally:
         db.close()
     enriched_today = resumed["enriched_today"]
@@ -978,7 +978,7 @@ async def main() -> None:
                 finally:
                     db.close()
 
-                now_utc = datetime.now(timezone.utc)
+                now_utc = datetime.now(UTC)
                 today_date = now_utc.date()
 
                 # Daily reset at UTC midnight (also the fresh-boot-on-a-new-day boundary).
@@ -1077,7 +1077,7 @@ async def main() -> None:
                         not_catalogued_today += batch_counts.get(MaterialEnrichmentStatus.NOT_CATALOGUED, 0)
 
                         # Heartbeat + counters
-                        now_ts = datetime.now(timezone.utc)
+                        now_ts = datetime.now(UTC)
                         update_enrichment_worker_status(
                             db,
                             last_heartbeat=now_ts,

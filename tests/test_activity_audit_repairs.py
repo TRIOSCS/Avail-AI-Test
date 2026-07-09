@@ -14,13 +14,13 @@ Depends on: tests/conftest.py fixtures (client, db_session, test_user, test_comp
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.constants import ActivityType, SourcingStatus
 from app.models import ActivityLog
 
-UTC_NOW = datetime.now(timezone.utc)
+UTC_NOW = datetime.now(UTC)
 
 
 # ── #1 — vendor display_name on the requisition activity tab ──────────────
@@ -94,7 +94,7 @@ def test_shared_timeline_does_not_render_raw_json_details():
         details={"phase": "rfq", "vendor": "Arrow"},
         activity_type="rfq_sent",
         contact_name=None,
-        created_at=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 1, 12, 0, tzinfo=UTC),
         channel="email",
     )
     html = tmpl.render(activities=[act])

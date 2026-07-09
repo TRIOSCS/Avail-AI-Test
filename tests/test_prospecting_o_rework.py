@@ -21,7 +21,7 @@ os.environ["TESTING"] = "1"
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -50,7 +50,7 @@ def make_prospect(db: Session, *, status: str = "suggested", **kw) -> ProspectAc
         fit_score=70,
         readiness_score=55,
         discovery_source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectAccount(**defaults)
@@ -84,10 +84,10 @@ def make_swept(db: Session, *, swept_from_owner_id: int, company: Company | None
         readiness_score=55,
         discovery_source="auto_sweep",
         swept_from_owner_id=swept_from_owner_id,
-        swept_at=datetime.now(timezone.utc),
+        swept_at=datetime.now(UTC),
         reclaim_blocked_until=blocked_until,
         company_id=company.id if company else None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(p)
     db.commit()
@@ -228,7 +228,7 @@ class TestManagerAssign:
     ):
         _act_as(manager_user)
         co = make_company(db_session)  # owner cleared by sweep
-        blocked = datetime.now(timezone.utc) + timedelta(days=30)
+        blocked = datetime.now(UTC) + timedelta(days=30)
         p = make_swept(db_session, swept_from_owner_id=test_user.id, company=co, blocked_until=blocked)
         with patch("app.services.prospect_claim.trigger_deep_enrichment_bg", new_callable=AsyncMock):
             resp = client.post(
@@ -287,7 +287,7 @@ class TestAssignErrors:
             name="Inactive Rep",
             role="sales",
             is_active=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(inactive)
         db_session.commit()

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,7 +29,7 @@ def vendor(db_session: Session):
         phones=["+1-555-0100"],
         website="https://arrow.com",
         sighting_count=42,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(v)
     db_session.commit()
@@ -48,7 +48,7 @@ def vendor_contact(db_session: Session, vendor: VendorCard):
         phone="+1-555-0101",
         source="manual",
         interaction_count=5,
-        last_interaction_at=datetime.now(timezone.utc) - timedelta(days=45),
+        last_interaction_at=datetime.now(UTC) - timedelta(days=45),
     )
     db_session.add(c)
     db_session.commit()

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import MaterialCard
 from app.services.faceted_search_service import search_materials_faceted
@@ -9,7 +9,7 @@ def _mk(db, mpn, status):
         normalized_mpn=mpn,
         display_mpn=mpn.upper(),
         enrichment_status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     return c

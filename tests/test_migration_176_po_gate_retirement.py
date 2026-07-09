@@ -62,7 +62,7 @@ class TestExecution:
 
         # The migration uses PG ``now()`` — register it as a SQLite scalar so upgrade() runs.
         @event.listens_for(engine, "connect")
-        def _register_now(dbapi_conn, _record):  # noqa: ANN001
+        def _register_now(dbapi_conn, _record):
             dbapi_conn.create_function("now", 0, lambda: "2026-07-03T00:00:00+00:00")
 
         md = MetaData()

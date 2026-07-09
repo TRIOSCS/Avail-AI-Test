@@ -35,13 +35,22 @@ repos:
       - id: docformatter
         args: [--wrap-summaries=88, --wrap-descriptions=88, --in-place]
 
+  # P2.9: the hook env must match the real gate (requirements-dev.txt mypy) —
+  # rev tracks the mypy pin in requirements-dev.txt, and additional_dependencies
+  # pins the key typed runtime deps (versions from requirements.txt) so the
+  # isolated hook venv sees the same types as a full-dep run. Bump these pins
+  # together with the requirements lockfiles.
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --no-strict-optional, --config-file=pyproject.toml, app/]
         additional_dependencies: [
           types-requests,
+          "sqlalchemy==2.0.51",
+          "pydantic==2.13.4",
+          "pydantic-settings==2.14.2",
+          "fastapi==0.138.1",
         ]
         pass_filenames: false
         verbose: true

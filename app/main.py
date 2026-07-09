@@ -142,7 +142,7 @@ async def lifespan(app):
                         req["data"] = _scrub_nested_body(data, _SENSITIVE_VARS)
             for frame in (event.get("exception", {}) or {}).get("values", []) or []:
                 for sf in (frame.get("stacktrace", {}) or {}).get("frames", []) or []:
-                    for k in list((sf.get("vars") or {})):
+                    for k in list(sf.get("vars") or {}):
                         if any(s in k.lower() for s in _SENSITIVE_VARS):
                             sf["vars"][k] = "[Filtered]"
             return event
@@ -244,7 +244,7 @@ if settings.rate_limit_enabled:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type, unused-ignore]  # slowapi handler is narrower than Starlette's protocol
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type, unused-ignore]  # slowapi handler is narrower than Starlette's protocol; slowapi absent from the hook env, so the ignore is unused there
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -329,10 +329,10 @@ class AuditUserMiddleware:
     audit columns stay NULL (correct behaviour).
     """
 
-    def __init__(self, app_inner):  # noqa: ANN001
+    def __init__(self, app_inner):
         self._app = app_inner
 
-    async def __call__(self, scope, receive, send):  # noqa: ANN001
+    async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             from .request_context import current_user_display_tz_var, current_user_id_var, resolve_display_tz
 
@@ -386,10 +386,10 @@ class ModuleAccessMiddleware:
     # so preflight/probe traffic never opens a DB session.
     _GUARDED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
-    def __init__(self, app_inner):  # noqa: ANN001
+    def __init__(self, app_inner):
         self._app = app_inner
 
-    async def __call__(self, scope, receive, send):  # noqa: ANN001
+    async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("method") not in self._GUARDED_METHODS:
             await self._app(scope, receive, send)
             return

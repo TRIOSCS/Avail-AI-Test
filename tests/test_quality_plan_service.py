@@ -13,7 +13,7 @@ requires a buy_plan_id. validate_complete is tested as a pure function by
 constructing an ORM object in memory (without flushing) to simulate the missing field.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,7 @@ def _make_requisition(db: Session, company_id: int, owner_id: int) -> Requisitio
         status="open",
         company_id=company_id,
         created_by=owner_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -47,7 +47,7 @@ def _make_quote(db: Session, requisition_id: int) -> Quote:
         requisition_id=requisition_id,
         quote_number="QT-TEST-001",
         status="draft",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -60,7 +60,7 @@ def _make_buy_plan(db: Session, requisition_id: int, quote_id: int) -> BuyPlan:
         requisition_id=requisition_id,
         quote_id=quote_id,
         status="draft",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()

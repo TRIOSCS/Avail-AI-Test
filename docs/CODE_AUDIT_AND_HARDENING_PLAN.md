@@ -86,9 +86,11 @@ These are confirmed defects shipping today, not style issues.
   under the CI flags; from the old `mypy.ini` wish-list — see the debt comment in
   `pyproject.toml`). Dangerous codes stay live everywhere: `unused-coroutine`,
   `unused-awaitable`, `call-arg`, `no-redef`, `name-defined`, `unused-ignore`, `return`.
-  Note: the pre-commit hook env (mypy 1.15.0, no project deps) and a full-deps run
-  (mypy 2.1.0) disagree on which errors exist; cross-env-sensitive suppressions use
-  `# type: ignore[code, unused-ignore]` so both stay green.
+  Note: since P2.9 the pre-commit hook env runs the same mypy 2.1.0 with the key typed
+  deps pinned in `additional_dependencies`, so the two envs agree almost everywhere;
+  the rare suppression that is still cross-env-sensitive (a dep NOT in the hook env,
+  e.g. slowapi in `app/main.py`) uses `# type: ignore[code, unused-ignore]` so both
+  stay green.
 
 - [x] **P0.6 — `"complete"` vs `"completed"` status-string landmine.**
   `app/services/prospect_scheduler.py:260` sets `batch.status = "complete"` while
@@ -212,13 +214,60 @@ These are confirmed defects shipping today, not style issues.
 
 ## Phase 2 — Guardrails so classes of bugs can't recur (~1 week)
 
-- [ ] **P2.1 — Extend ruff config** (`ruff.toml`, currently only E/F/W/I), in order:
+- [x] **P2.1 — Extend ruff config** (`ruff.toml`, currently only E/F/W/I), in order:
   `ASYNC` (48 real hits, 0 false positives), `RUF006` (dangling tasks → P0.4),
   `T20` (with `"app/management/*" = ["T201"]` per-file-ignore),
   `B904` (121 missing `raise … from` — mechanical sweep first),
   `RUF100` (113 dead `# noqa` — `--fix` sweep first),
   `BLE001` (with per-file-ignores for the supplier fan-out orchestrators where broad
   catch is deliberate), then `UP` after a one-time `--fix` (733 `UP017`, 38 `UP032`).
+  **Fixed (2026-07-09):** `select` is now
+  `["E","F","W","I","UP","ASYNC","B904","BLE001","T20","RUF006","RUF100"]`. Per family:
+  - `RUF100`: 276 unused-noqa removed. **Caveat for reruns:** RUF100 must be evaluated
+    under the FULL configured select — a bare `ruff check --select RUF100 --fix` treats
+    every noqa for an unselected rule (F401 re-exports, E712, E402…) as "unused" and
+    deletes it; recovery was `ruff check --add-noqa` under the real select, which also
+    upgraded the surviving directives to exactly-coded form (304 re-added).
+  - `UP`: 3,746 auto-fixed in app/tests/scripts (3,629 `UP017`, 40 `UP032`, 37 `UP041`,
+    13 `UP037`, 11 `UP045`, 8 `UP035`, 6 `UP012`, 1 `UP034`, 1 `UP043`) plus 390 more via
+    the all-files pre-commit pass (alembic/ migrations + e2e — semantically neutral
+    `timezone.utc → UTC` etc.). Follow-on cleanup the sweep exposed: 802 `F401` (dead
+    `timezone`/`asyncio` imports), 741 `I001` re-sorts, 32 `F811`. The 2 `UP047` sites
+    (`app/services/desc_extractor/_common.py`, `tests/test_buyplan_workflow.py`) keep
+    `TypeVar` under `# noqa: UP047` — PEP 695 syntax needs py3.12+ and dev/test envs
+    still run 3.11 (repo has zero PEP 695 usage today; drop the noqas when dev moves).
+  - `B904`: 121 fixed — all `raise … from e` (never `from None`; every site benefits
+    from the causal chain), adding `as e` bindings where the handler had none.
+  - `ASYNC`: 48 hits = 33 `ASYNC109` + 15 real blocking-I/O. `ASYNC109` is globally
+    ignored with a comment (ruff calls it "highly opinionated"; every hit forwards
+    `timeout=` to httpx/Graph — nobody hand-rolls timeout logic). The 8 app/ blockers
+    were fixed P2.6-style (`asyncio.to_thread`): `routers/avatars.py` +
+    `routers/error_reports.py` (new `_resolve_avatar_file`/`_resolve_screenshot_file`
+    sync helpers, one thread hop per request), `services/tagging_ai_batch.py`
+    (`_latest_backfill_meta_path` glob/stat helper + offloaded `open()` of the
+    streamed-download temp file), `services/tagging_ai_triage.py` (same `open()`
+    offload). tests/* and scripts/* get `ASYNC230` per-file-ignores (blocking I/O off
+    the server event loop is harmless).
+  - `RUF006`: 0 hits (clean post-P0.4), enabled.
+  - `T20`: 85 `T201`, all in `app/management/*` + `scripts/*` (both per-file-ignored —
+    stdout is a CLI's UX); 0 hits elsewhere.
+  - `BLE001`: 529 hits measured. Globs for the deliberate broad-catch layers
+    (`app/jobs/*`, `scripts/*`, `tests/*`) plus a **frozen per-file legacy list** of 158
+    app files in `ruff.toml` — per-file (not per-directory) so every NEW file gets full
+    enforcement; delete a file's line when its catches are narrowed. A worst-pattern
+    scan (`except Exception:` + bare `pass`) found exactly one site
+    (`app/cache/redis_probe.py` metrics guard) — deliberate and commented; no
+    genuinely-wrong catches to fix.
+  - `B` wholesale: **deferred** — with `lint.flake8-bugbear.extend-immutable-calls`
+    set to the FastAPI param factories, 149 violations remain (90 `B008` — mostly
+    `routers/resell.py` + `htmx/materials.py`; 23 `B905`, 21 `B007`, 8 `B017`, 7 misc),
+    over the ≤30-edit budget; `B904` is selected individually instead.
+  - **CI landing note:** the UP sweep content-touched ~530 test files, so the
+    changed-files assertion-theater gate (`ci.yml`, P2.4) will surface the
+    pre-existing P6.1 offenders in those files on this PR (violations are 100%
+    pre-existing; the hand-edited test files lint clean). Landing this needs either a
+    one-time gate accommodation or the P6.1 backfill — do NOT "fix" it by
+    allowlisting 1,000 tests.
 
 - [x] **P2.2 — Build the Docker image in CI.**
   `.github/workflows/ci.yml` never runs `docker build`; the first-ever build of a
@@ -480,7 +529,7 @@ These are confirmed defects shipping today, not style issues.
   both kwargs entirely), `tests/test_insights_refresh.py` (all four endpoints assert
   `interactive=True` was forwarded via `AsyncMock` introspection).
 
-- [ ] **P2.9 — Pre-commit mypy hook env diverges from the real gate.**
+- [x] **P2.9 — Pre-commit mypy hook env diverges from the real gate.**
   The pre-commit hook runs mypy 1.15.0 in an isolated env with NO project
   dependencies installed, while CI/dev runs full-deps mypy 2.1.0 — the two disagree
   on which errors exist, and 22 `# type: ignore[code, unused-ignore]` suffixes exist
@@ -490,6 +539,26 @@ These are confirmed defects shipping today, not style issues.
   hook to `language: system` so it uses the repo venv's mypy. Then sweep the 22
   `, unused-ignore` suffixes (they become genuinely unused and `warn_unused_ignores`
   will flag them).
+  **Fixed:** bumped the mirrors-mypy hook `rev` v1.15.0 → v2.1.0 (matches the
+  `mypy==2.1.0` pin in `requirements-dev.txt`; mirrors-mypy tags every PyPI mypy
+  release as `v<version>`) and pinned the key typed runtime deps into the hook's
+  `additional_dependencies` at the `requirements.txt` versions:
+  `sqlalchemy==2.0.51`, `pydantic==2.13.4`, `pydantic-settings==2.14.2`,
+  `fastapi==0.138.1` (plus the pre-existing `types-requests`). Bump these together
+  with the requirements lockfiles. Hook-env replica for local verification (build
+  fresh whenever `additional_dependencies` changes):
+  `python3 -m venv hookenv && hookenv/bin/pip install mypy==2.1.0 types-requests
+  sqlalchemy==2.0.51 pydantic==2.13.4 pydantic-settings==2.14.2 fastapi==0.138.1`,
+  then run the hook's exact command from the repo root:
+  `hookenv/bin/mypy --ignore-missing-imports --no-strict-optional
+  --config-file=pyproject.toml app/` — exit 0 verified, identical to the
+  full-deps run. Swept the (by-now 61) `, unused-ignore` suffixes: 60 removed —
+  5 of those ignores (`call-arg` on pydantic `extra="allow"` class kwargs in
+  `app/schemas/tags.py`, `app/schemas/knowledge.py`, `app/schemas/v13_features.py`)
+  were unused in BOTH envs under mypy 2.1.0 and were deleted outright; the other 55
+  kept their base `# type: ignore[code]` (still needed in both envs). Exactly 1
+  suffix remains (`app/main.py:247`) because slowapi is not in the hook env, so its
+  `arg-type` ignore is genuinely unused there but required in the full env.
 
 ---
 

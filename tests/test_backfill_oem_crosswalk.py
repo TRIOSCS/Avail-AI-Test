@@ -10,7 +10,7 @@ counter cache are mocked — no web call is ever made from this file.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ from app.services.enrichment_worker.oem_crosswalk_resolver import OemResolveResu
 from app.services.oem_crosswalk_enrich import NO_MATCH_RETRY_DAYS, pending_resolution
 from app.utils.claude_errors import ClaudeError
 
-NOW = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
 
 RESOLVED = OemResolveResult(
     status="resolved",
@@ -306,7 +306,7 @@ def test_run_recheck_skips_norm_cached_by_concurrent_worker(db_session: Session)
                     spare_norm="875940001",
                     vendor="hpe",
                     status=OemCrosswalkStatus.NO_MATCH,
-                    looked_up_at=datetime.now(timezone.utc),
+                    looked_up_at=datetime.now(UTC),
                 )
             )
             db_session.flush()

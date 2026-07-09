@@ -12,7 +12,7 @@ Depends on: app.models.crm (SiteContact, Company, CustomerSite).
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -114,7 +114,7 @@ def flag_stale_contacts(db: Session, stale_days: int = 180) -> int:
 
     Returns count flagged.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=stale_days)
+    cutoff = datetime.now(UTC) - timedelta(days=stale_days)
 
     stale = (
         db.query(SiteContact)

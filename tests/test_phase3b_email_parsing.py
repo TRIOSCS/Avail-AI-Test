@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,7 +28,7 @@ def req_with_parts(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Corp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -38,7 +38,7 @@ def req_with_parts(db_session: Session, test_user: User) -> Requisition:
             requisition_id=req.id,
             primary_mpn=mpn,
             target_qty=1000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
 

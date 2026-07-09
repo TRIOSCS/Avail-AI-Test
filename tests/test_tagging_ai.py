@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.services.tagging_ai, app.models
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,7 +21,7 @@ def _make_card(db, mpn, manufacturer=None):
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -108,7 +108,7 @@ async def test_ai_backfill_processes_remaining(db_session):
 @pytest.mark.asyncio
 async def test_ai_backfill_skips_already_tagged(db_session):
     card = _make_card(db_session, "AITAGGED")
-    tag = Tag(name="Existing", tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name="Existing", tag_type="brand", created_at=datetime.now(UTC))
     db_session.add(tag)
     db_session.flush()
     db_session.add(MaterialTag(material_card_id=card.id, tag_id=tag.id, confidence=0.9, source="existing_data"))

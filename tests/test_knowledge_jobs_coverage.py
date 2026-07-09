@@ -11,7 +11,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,8 +48,8 @@ def active_req(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

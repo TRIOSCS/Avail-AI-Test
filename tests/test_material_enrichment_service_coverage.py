@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -84,7 +84,7 @@ def test_apply_enrichment_sets_enrichment_source_and_time(db):
     from app.services.material_enrichment_service import _apply_enrichment_result
 
     card = _make_card(db, "LM7805")
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     _apply_enrichment_result(
         card, {"description": "5V regulator", "category": "power_ic", "lifecycle_status": "active"}
     )
@@ -189,7 +189,7 @@ async def test_batch_enrich_returns_none_when_no_cards(db):
     from app.services.material_enrichment_service import batch_enrich_materials
 
     # All cards are already enriched
-    _make_card(db, "ENRICHED", enriched_at=datetime.now(timezone.utc))
+    _make_card(db, "ENRICHED", enriched_at=datetime.now(UTC))
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None

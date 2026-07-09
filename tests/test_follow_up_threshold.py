@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: app.routers.htmx.offers, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -29,7 +29,7 @@ def _contact_aged_days(db, user, days: int) -> None:
             vendor_name="V Co",
             vendor_contact="v@example.com",
             status="sent",
-            created_at=datetime.now(timezone.utc) - timedelta(days=days),
+            created_at=datetime.now(UTC) - timedelta(days=days),
         )
     )
     db.commit()

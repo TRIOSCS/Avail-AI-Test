@@ -13,7 +13,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.approvals,
 
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -101,8 +101,8 @@ def _parse_optional_int(raw: str | None) -> int | None:
         return None
     try:
         return int(str(raw).strip())
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Expected a whole number.")
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "Expected a whole number.") from e
 
 
 def _parse_optional_float(raw: str | None) -> float | None:
@@ -111,8 +111,8 @@ def _parse_optional_float(raw: str | None) -> float | None:
         return None
     try:
         return float(str(raw).strip())
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Expected a number.")
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "Expected a number.") from e
 
 
 _APPROVALS_TABS = ("my_queue", "pipeline")
@@ -269,8 +269,8 @@ async def sales_order_create(
         raise HTTPException(400, "Requisition is required")
     try:
         req_id = int(raw_req_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Invalid requisition")
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "Invalid requisition") from e
 
     require_requisition_access(db, req_id, user)
 
@@ -307,10 +307,10 @@ async def sales_order_create(
         )
         resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{existing_id}"
         return resp
-    except ValueError:
+    except ValueError as e:
         # Any other origination failure (e.g. requisition has no requirements). Return a
         # curated client message rather than echoing the raw builder error.
-        raise HTTPException(400, "Could not build a buy plan from the selected offers.")
+        raise HTTPException(400, "Could not build a buy plan from the selected offers.") from e
 
     resp = await buy_plan_detail_partial(request, plan.id, user, db)
     resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan.id}"
@@ -359,9 +359,9 @@ async def prepay_request_decide(
         svc_decide(db, request_id, user, action, comment=comment or None)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     # Stamp the prepayment lifecycle + fan the accounting/AP notice. Fire-and-forget: the
     # runner isolates every error so a failed notice never breaks the decision that just
@@ -381,14 +381,14 @@ async def prepay_request_decide(
             if pp is not None:
                 pp.status = PrepaymentStatus.APPROVED.value
                 pp.approved_by_id = user.id
-                pp.approved_at = datetime.now(timezone.utc)
+                pp.approved_at = datetime.now(UTC)
                 pp.pay_token = secrets.token_urlsafe(32)
                 db.commit()
             await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
         elif pp is not None:  # reject
             pp.status = PrepaymentStatus.VOID.value
             pp.void_reason = "rejected by approver"
-            pp.voided_at = datetime.now(timezone.utc)
+            pp.voided_at = datetime.now(UTC)
             pp.voided_by_id = user.id
             db.commit()
             await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
@@ -658,7 +658,7 @@ async def buy_plan_submit_partial(
         else:
             await run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -732,9 +732,9 @@ async def buy_plan_approve_partial(
     except PermissionError as e:
         # The dependency already 403s unauthorized callers; this maps the service's
         # defense-in-depth approval-right check to 403 (not 400) if it is ever reached.
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
@@ -776,9 +776,9 @@ async def buy_plan_halt_partial(
         db.commit()
         await run_notify_bg(notify_so_rejected, plan.id, action="halt")
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
@@ -822,7 +822,7 @@ async def buy_plan_confirm_po_partial(
         db.commit()
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -860,7 +860,7 @@ async def _resource_lines_and_alert(
         # Log before re-raising so a real failure (e.g. an un-keyable requirement deep in
         # the service) leaves a server trace instead of a silent, mislabeled 400.
         logger.warning("Re-source failed for plan {} line {}: {}", plan_id, line_id, e)
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     # Broadcast one urgent alert PER pooled line (scope=plan re-sources siblings too, and
     # each pooled line needs its own claim).
@@ -946,7 +946,7 @@ async def buy_plan_claim_line_partial(
         db.commit()
     except ValueError as e:
         logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -982,7 +982,7 @@ async def buy_plan_verify_po_partial(
             db.commit()
             await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
@@ -1016,7 +1016,7 @@ async def buy_plan_flag_issue_partial(
         flag_line_issue(plan_id, line_id, issue_type, user, db, note=note)
         db.commit()
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1042,9 +1042,9 @@ async def buy_plan_resolve_issue_partial(
         resolve_line_issue(plan_id, line_id, user, db)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1080,7 +1080,7 @@ async def buy_plan_cancel_partial(
         db.commit()
         await run_notify_bg(notify_cancelled, plan.id)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1107,9 +1107,9 @@ async def buy_plan_resume_partial(
         resume_plan(plan_id, user, db)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1137,7 +1137,7 @@ async def buy_plan_set_so_partial(
         set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
         db.commit()
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1164,17 +1164,17 @@ async def buy_plan_add_line_partial(
         requirement_id = int(form.get("requirement_id") or 0)
         offer_id = int(form.get("offer_id") or 0)
         quantity = int(form.get("quantity") or 0)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Requirement, vendor offer and a whole-number quantity are required.")
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "Requirement, vendor offer and a whole-number quantity are required.") from e
     unit_sell = _parse_optional_float(form.get("unit_sell"))
 
     try:
         add_buy_plan_line(plan_id, requirement_id, offer_id, quantity, user, db, unit_sell=unit_sell)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1206,9 +1206,9 @@ async def buy_plan_edit_line_partial(
         edit_buy_plan_line(plan_id, line_id, user, db, quantity=quantity, unit_sell=unit_sell, offer_id=offer_id)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1235,9 +1235,9 @@ async def buy_plan_remove_line_partial(
         remove_buy_plan_line(plan_id, line_id, user, db)
         db.commit()
     except PermissionError as e:
-        raise HTTPException(403, str(e))
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1259,6 +1259,6 @@ async def buy_plan_reset_partial(
         reset_buy_plan_to_draft(plan_id, user, db)
         db.commit()
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     return await buy_plan_detail_partial(request, plan_id, user, db)

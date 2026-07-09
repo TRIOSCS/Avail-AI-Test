@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import signal
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -76,7 +76,7 @@ def update_worker_status(db: Session, **kwargs):
     for key, value in kwargs.items():
         if hasattr(status, key):
             setattr(status, key, value)
-    status.updated_at = datetime.now(timezone.utc)
+    status.updated_at = datetime.now(UTC)
     db.commit()
 
 
@@ -87,7 +87,7 @@ def _record_heartbeat(db: Session):
     path (idle, cap-sleep, breaker-open, off-hours) — not just after a completed search.
     Keeps liveness monitors from false-alarming "worker DOWN".
     """
-    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
 
 async def main():
@@ -123,7 +123,7 @@ async def main():
     # Recover stale items from previous crash
     with _db_session() as db:
         recover_stale_searches(db)
-        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
     # Start browser session
     session = IcsSessionManager(config)
@@ -272,7 +272,7 @@ async def main():
                             search_part(session.page, item.mpn),
                             timeout=config.ICS_SEARCH_TIMEOUT_SECONDS,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.error(
                             "ICS worker: search timed out after {}s (queue id={}) — failing item",
                             config.ICS_SEARCH_TIMEOUT_SECONDS,
@@ -325,10 +325,10 @@ async def main():
                     # Update worker status after each search
                     update_worker_status(
                         db,
-                        last_search_at=datetime.now(timezone.utc),
+                        last_search_at=datetime.now(UTC),
                         searches_today=searches_today,
                         sightings_today=sightings_today,
-                        last_heartbeat=datetime.now(timezone.utc),
+                        last_heartbeat=datetime.now(UTC),
                     )
 
                     logger.info(

@@ -1207,7 +1207,8 @@ def test_qp_order_type():
 
 
 def test_strenum_string_equality():
-    """StrEnum members compare equal to their string values — essential for DB queries."""
+    """StrEnum members compare equal to their string values — essential for DB
+    queries."""
     from app.constants import BuyPlanStatus, RequisitionStatus, UserRole
 
     assert RequisitionStatus.OPEN == "open"

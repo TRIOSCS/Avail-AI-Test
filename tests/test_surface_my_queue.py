@@ -19,7 +19,7 @@ Depends on: app/routers/htmx/buy_plans (my-queue lens dispatch),
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -352,7 +352,7 @@ def test_my_queue_surface_header_shows_avg_margin(
         status=BuyPlanStatus.ACTIVE,
         total_cost="5000.00",
         total_margin_pct=25,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
 
@@ -371,7 +371,7 @@ def test_my_queue_surface_kicked_back_surfacing(
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.AWAITING_PO)
     line.po_rejection_note = "Wrong vendor — re-cut to Arrow"

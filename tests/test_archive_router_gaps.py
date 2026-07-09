@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures, app.models, app.services.task_service
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -36,7 +36,7 @@ def _make_company(db: Session, owner_id: int | None = None) -> Company:
         name="Test Co Gap",
         website="https://testcogap.com",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         account_owner_id=owner_id,
     )
     db.add(co)
@@ -71,7 +71,7 @@ def _make_vendor_card(db: Session) -> VendorCard:
     card = VendorCard(
         normalized_name="gap vendor",
         display_name="Gap Vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -109,7 +109,7 @@ def _make_task(
         status=TaskStatus.TODO,
         created_by=user_id,
         assigned_to_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(task)
     db.flush()
@@ -129,7 +129,7 @@ def admin_user(db_session: Session) -> User:
         role="admin",
         azure_id="admin-gap-azure-001",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -273,7 +273,7 @@ def test_complete_task_vendor_contact_deleted(client, db_session, test_user):
             status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.flush()
@@ -309,7 +309,7 @@ def test_complete_task_fallback_empty_fragment(client, db_session, test_user):
         customer_name="Fallback Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -320,7 +320,7 @@ def test_complete_task_fallback_empty_fragment(client, db_session, test_user):
         status=TaskStatus.TODO,
         created_by=test_user.id,
         assigned_to_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(task)
     db_session.commit()
@@ -383,7 +383,7 @@ def test_delete_task_vendor_contact_deleted_fallback(admin_client, db_session, a
             status=TaskStatus.TODO,
             created_by=admin_user.id,
             assigned_to_id=admin_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.flush()
@@ -493,7 +493,7 @@ def test_snooze_task_not_crm_task(client, db_session, test_user):
         customer_name="Snooze Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -504,7 +504,7 @@ def test_snooze_task_not_crm_task(client, db_session, test_user):
         status=TaskStatus.TODO,
         created_by=test_user.id,
         assigned_to_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(task)
     db_session.commit()
@@ -769,7 +769,7 @@ def test_edit_task_vendor_contact_deleted_fallback(client, db_session, test_user
             status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.flush()
@@ -821,7 +821,7 @@ def test_snooze_task_vendor_contact_deleted_fallback(client, db_session, test_us
             status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.flush()

@@ -12,12 +12,12 @@ Sub-modules:
 from fastapi import APIRouter
 
 # Re-export helpers for backward compatibility (tests import from app.routers.crm)
-from ._helpers import (  # noqa: F401
-    _build_quote_email_html,
-    _preload_last_quoted_prices,
-    next_quote_number,
-    quote_to_dict,
-    record_changes,
+from ._helpers import (
+    _build_quote_email_html,  # noqa: F401
+    _preload_last_quoted_prices,  # noqa: F401
+    next_quote_number,  # noqa: F401
+    quote_to_dict,  # noqa: F401
+    record_changes,  # noqa: F401
 )
 from .clone import router as clone_router
 from .companies import router as companies_router

@@ -231,10 +231,13 @@ async def apply_triage_results(batch_id: str) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False) as tmp_fd:
         tmp_path = tmp_fd.name
     try:
-        async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
-            with open(tmp_path, "wb") as f:
+        f = await asyncio.to_thread(open, tmp_path, "wb")
+        try:
+            async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
                 async for chunk in stream.aiter_bytes(chunk_size=65536):
                     await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         return {"error": f"Download failed: {e}"}
 

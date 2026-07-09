@@ -18,7 +18,7 @@ Depends on: conftest.py, tbf_worker modules, tests/fixtures/tbf_results_*.html
 
 import inspect
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -403,7 +403,7 @@ class TestWorkerStatusSingleton:
 
         from app.services.tbf_worker.worker import _record_heartbeat
 
-        stale = datetime.now(timezone.utc) - timedelta(hours=1)
+        stale = datetime.now(UTC) - timedelta(hours=1)
         db_session.add(TbfWorkerStatus(id=1, is_running=False, last_heartbeat=stale))
         db_session.commit()
 

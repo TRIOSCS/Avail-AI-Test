@@ -14,7 +14,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -317,8 +317,8 @@ async def create_quote_from_offers(
     offer_ids_raw = form.getlist("offer_ids")
     try:
         offer_ids = [int(x) for x in offer_ids_raw if x]
-    except (ValueError, TypeError):
-        raise HTTPException(400, "offer_ids must be integers")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "offer_ids must be integers") from e
 
     if not offer_ids:
         raise HTTPException(400, "No offers selected")
@@ -433,7 +433,7 @@ async def review_offer(
         offer.status = OfferStatus.APPROVED
         offer.approved_by_id = user.id
 
-        offer.approved_at = datetime.now(timezone.utc)
+        offer.approved_at = datetime.now(UTC)
         # Offer hook: user approval of a pending offer is user-initiated proof of
         # availability — release the vendor's matching active unavailability records.
         maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
@@ -535,7 +535,7 @@ async def add_offer(
         source="manual",
         status=OfferStatus.ACTIVE,
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     _qkeys = (
         "usage",
@@ -588,7 +588,7 @@ async def reconfirm_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     offer.reconfirmed_at = now
     offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
     offer.expires_at = now + timedelta(days=14)
@@ -657,7 +657,7 @@ async def edit_offer(
         "country_of_origin",
         "valid_until",
     ]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for field in trackable:
         new_val = form.get(field, "").strip()
@@ -773,7 +773,7 @@ async def mark_offer_sold_htmx(
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.SOLD)
     offer.status = OfferStatus.SOLD
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
     db.add(
         ChangeLog(
@@ -845,8 +845,8 @@ async def promote_offer_htmx(
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
-    offer.approved_at = datetime.now(timezone.utc)
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.approved_at = datetime.now(UTC)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
 
     # Offer hook: user approval of a pending offer is user-initiated proof of
@@ -891,7 +891,7 @@ async def reject_offer_htmx(
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id
 
     _log_activity(
@@ -1211,7 +1211,7 @@ async def rfq_send(
                         parts_included=parts_text,
                         subject=subject,
                         status=ContactStatus.PENDING,
-                        status_updated_at=datetime.now(timezone.utc),
+                        status_updated_at=datetime.now(UTC),
                     )
                     db.add(contact)
                     sent.append({"vendor": name, "email": email, "status": "draft"})
@@ -1231,7 +1231,7 @@ async def rfq_send(
                 parts_included=parts_text,
                 subject=subject,
                 status=ContactStatus.SENT,
-                status_updated_at=datetime.now(timezone.utc),
+                status_updated_at=datetime.now(UTC),
             )
             db.add(contact)
             sent.append({"vendor": name, "email": email, "status": "sent"})
@@ -1259,7 +1259,7 @@ def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
     from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
+    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
 
     stale_q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
@@ -1281,7 +1281,7 @@ def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
         for r in db.query(Requisition.id, Requisition.name).filter(Requisition.id.in_(req_ids)).all():
             req_names[r.id] = r.name
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     follow_ups = []
     for c in stale:
         ca = c.created_at if c.created_at else now
@@ -1348,7 +1348,7 @@ async def _deliver_follow_up(
         return "dnc"
     if is_testing:
         contact.status = ContactStatus.SENT
-        contact.status_updated_at = datetime.now(timezone.utc)
+        contact.status_updated_at = datetime.now(UTC)
         return "sent"
     # Fetch the token OUTSIDE the try so a genuine session-expiry (require_fresh_token →
     # HTTPException 401) propagates to the global 401→login handler instead of being
@@ -1389,7 +1389,7 @@ async def _deliver_follow_up(
         )
         return "failed"
     contact.status = ContactStatus.SENT
-    contact.status_updated_at = datetime.now(timezone.utc)
+    contact.status_updated_at = datetime.now(UTC)
     return "sent"
 
 
@@ -1446,7 +1446,6 @@ async def ai_draft_follow_up(
     db: Session = Depends(get_db),
 ):
     """Draft a contextual follow-up body and fill the compose textarea."""
-    from datetime import timezone as tz
 
     from ...models.offers import Contact as RfqContact
 
@@ -1455,7 +1454,7 @@ async def ai_draft_follow_up(
         raise HTTPException(404, "Contact not found")
     require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
 
-    days_waiting = (datetime.now(tz.utc) - contact.created_at).days if contact.created_at else None
+    days_waiting = (datetime.now(UTC) - contact.created_at).days if contact.created_at else None
 
     from app.services.email_drafting import draft_email
 
@@ -1756,7 +1755,7 @@ async def send_batch_follow_up(
 
     # Was request.app.state.follow_up_days — a value nothing ever set, so this
     # silently used the getattr default (2) and diverged from the queue/badge.
-    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
+    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
 
     q = db.query(RfqContact).filter(
         RfqContact.contact_type == "email",
@@ -1835,7 +1834,7 @@ async def follow_up_badge(
     from ...config import settings
     from ...models.offers import Contact as RfqContact
 
-    threshold = datetime.now(timezone.utc) - timedelta(days=settings.follow_up_days)
+    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
         RfqContact.contact_type == "email",
         RfqContact.status.in_(["sent", "opened"]),

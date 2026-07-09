@@ -11,7 +11,7 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
     app/models/auth (User), app/utils/search_builder
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy import case as sa_case
@@ -34,7 +34,7 @@ def next_quote_number(db: Session) -> str:
 
     Uses SELECT FOR UPDATE to prevent race conditions.
     """
-    year = datetime.now(timezone.utc).year
+    year = datetime.now(UTC).year
     prefix = f"Q-{year}-"
     last = (
         db.query(Quote)
@@ -64,8 +64,8 @@ def staleness_tier(last_activity_at: datetime | None) -> str:
         return "new"
     ts = last_activity_at
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    days = (datetime.now(timezone.utc) - ts).days
+        ts = ts.replace(tzinfo=UTC)
+    days = (datetime.now(UTC) - ts).days
     if days >= STALENESS_OVERDUE_DAYS:
         return "overdue"
     if days >= STALENESS_DUE_SOON_DAYS:
@@ -105,8 +105,8 @@ def cadence_state(tier: str | None, last_outbound_at: datetime | None, now: date
     """
     if last_outbound_at is None:
         return "new"
-    now = now or datetime.now(timezone.utc)
-    ts = last_outbound_at if last_outbound_at.tzinfo else last_outbound_at.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(UTC)
+    ts = last_outbound_at if last_outbound_at.tzinfo else last_outbound_at.replace(tzinfo=UTC)
     days = (now - ts).days
     if days > CADENCE_RED_DAYS:
         return "overdue"
@@ -231,7 +231,7 @@ def cdm_company_query(
             # needs_call already carries _not_bucketed() via _needs_call_filter.
             query = query.filter(_not_bucketed())
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
     due_soon_cutoff = now - timedelta(days=STALENESS_DUE_SOON_DAYS)
     if staleness == "overdue":
@@ -337,7 +337,7 @@ def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> i
     """
     if user.role not in ("sales", "trader"):
         return 0
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     active_site_exists, non_dnc_site_exists = _dnc_site_subqueries()
     return (
         db.query(func.count(Company.id))
@@ -387,7 +387,7 @@ def cdm_list_ctx(
     """
     from .tagging import list_all_segment_tags
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     query = cdm_company_query(
         db,
         user,
@@ -513,7 +513,7 @@ def customer_contacts_list_ctx(
     company dropdown is built from the same visibility scope so a rep can only filter
     within accounts they can see.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base = customer_contacts_query(db, user, search=search, company_id=company_id, contact_role=contact_role)
 
     if cadence_state in CONTACT_CADENCE_DOTS:
@@ -650,7 +650,7 @@ def company_contact_rows(
             )
             .all()
         )
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     recent_notes = _latest_contact_notes(db, [c.id for c in contacts])
     rows = [
         {
@@ -747,7 +747,7 @@ def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, d
         result[row.company_id]["last_req_date"] = row.last_req_date.isoformat() if row.last_req_date else None
 
     # 90-day won revenue — CustomerSite → Requisition → Quote join
-    rev_cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    rev_cutoff = datetime.now(UTC) - timedelta(days=90)
     rev_rows = (
         db.query(
             CustomerSite.company_id,

@@ -12,7 +12,7 @@ Called by: pytest
 Depends on: conftest.py, app.services.buyplan_notifications
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,7 +32,7 @@ def _make_user(db, email="buyer@trioscs.com", name="Test Buyer", role="buyer"):
         role=role,
         azure_id=f"az-{email}",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()
@@ -48,12 +48,12 @@ def _make_plan(db, submitter_id, **overrides):
         name="REQ-T10",
         status="open",
         created_by=submitter_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
 
-    co = Company(name="Acme Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name="Acme Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(co)
     db.flush()
     site = CustomerSite(company_id=co.id, site_name="Acme HQ")
@@ -69,7 +69,7 @@ def _make_plan(db, submitter_id, **overrides):
         total_cost=500.0,
         total_margin_pct=50.0,
         created_by_id=submitter_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -100,7 +100,7 @@ def _add_line(db, plan, buyer_id=None, quantity=100, unit_cost=1.50, **overrides
             requisition_id=plan.requisition_id,
             primary_mpn="LM317T",
             target_qty=1000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(req)
         db.flush()
@@ -114,7 +114,7 @@ def _add_line(db, plan, buyer_id=None, quantity=100, unit_cost=1.50, **overrides
         entered_by_id=plan.submitted_by_id,
         status="active",
         lead_time="2 weeks",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()

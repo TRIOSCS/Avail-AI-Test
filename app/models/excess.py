@@ -25,7 +25,7 @@ Called by: routers/resell.py, services/excess_service.py
 Depends on: models/base, models with Company, User, VendorCard, CustomerSite
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -63,8 +63,8 @@ class ExcessList(Base):
     # a draft has neither; close_at drives the "closes in Xd" urgency chip (spec §Data-model).
     open_at = Column(UTCDateTime, nullable=True)
     close_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     company = relationship("Company", foreign_keys=[company_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
@@ -115,8 +115,8 @@ class ExcessLineItem(Base):
     demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
     notes = Column(Text, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="line_items")
 
@@ -156,8 +156,8 @@ class ExcessOffer(Base):
     valid_until = Column(UTCDateTime, nullable=True)
     status = Column(String(20), default="open")  # open, won, lost, expired, withdrawn, late
     notes = Column(Text, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="offers")
     submitted_by_user = relationship("User", foreign_keys=[submitted_by])
@@ -260,8 +260,8 @@ class CustomerBid(Base):
     responded_at = Column(UTCDateTime, nullable=True)
     responded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="customer_bids")
     owner = relationship("User", foreign_keys=[owner_id])
@@ -347,8 +347,8 @@ class ExcessOutreach(Base):
     graph_conversation_id = Column(String(255), nullable=True)
     parts_included = Column(JSON, nullable=True)
     sent_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     excess_list = relationship("ExcessList", foreign_keys=[excess_list_id])
     excess_line_item = relationship("ExcessLineItem", foreign_keys=[excess_line_item_id])
@@ -402,7 +402,7 @@ class BuyerScore(Base):
     median_response_hours = Column(Numeric(8, 2), nullable=True)
     last_offered_at = Column(UTCDateTime, nullable=True)
     commodity_affinity = Column(JSON, nullable=True)
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
 

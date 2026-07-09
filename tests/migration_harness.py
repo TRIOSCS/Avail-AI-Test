@@ -23,7 +23,7 @@ Depends on: alembic.migration.MigrationContext, alembic.operations.Operations.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations

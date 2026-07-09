@@ -11,7 +11,7 @@ Target fields extracted per row:
 
 import io
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -200,7 +200,7 @@ async def _get_or_detect_mapping(
                     file_fingerprint=file_fingerprint,
                     mapping=json_mapping,
                     confidence=confidence,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
                 .on_conflict_do_update(
                     index_elements=["vendor_domain", "file_fingerprint"],

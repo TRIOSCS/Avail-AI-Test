@@ -4,7 +4,7 @@ Called by: app/jobs/__init__.py via register_health_jobs()
 Depends on: app.database, app.models.config, app.services.health_monitor
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -52,7 +52,7 @@ async def _job_cleanup_usage_log():
 
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        cutoff = datetime.now(UTC) - timedelta(days=90)
         deleted = db.query(ApiUsageLog).filter(ApiUsageLog.timestamp < cutoff).delete()
         db.commit()
         if deleted:

@@ -11,6 +11,8 @@ Depends on: app/routers/admin/spec_codes.py, conftest.py (db_session, admin_user
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -346,7 +348,7 @@ def test_approve_concurrent_returns_409_not_500(
     """If two admins approve the same (oem, spec_code) mapping concurrently, the loser
     must get a clean 409 — not a 500 from the uq_oem_spec_code IntegrityError leaking up
     the stack."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     # Simulate "another admin already approved" by pre-inserting a
     # conflicting OemSpecCode row that will collide with the approve.
@@ -356,7 +358,7 @@ def test_approve_concurrent_returns_409_not_500(
             spec_code=pending_row.spec_code,
             avl=[{"mpn": "OTHER", "manufacturer": "X", "rank": 1, "notes": None}],
             source="manual",
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
     )
     db_session.commit()

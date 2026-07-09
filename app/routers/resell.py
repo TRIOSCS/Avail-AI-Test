@@ -23,7 +23,7 @@ Depends on: services.excess_service, services.excess_mirror, file_utils,
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
@@ -106,8 +106,8 @@ def _hours_until(close_at: datetime | None) -> float | None:
     if close_at is None:
         return None
     if close_at.tzinfo is None:
-        close_at = close_at.replace(tzinfo=timezone.utc)
-    return (close_at - datetime.now(timezone.utc)).total_seconds() / 3600.0
+        close_at = close_at.replace(tzinfo=UTC)
+    return (close_at - datetime.now(UTC)).total_seconds() / 3600.0
 
 
 def _offer_coverage(items: list[ExcessLineItem]) -> tuple[int, int]:
@@ -1508,7 +1508,7 @@ async def resell_not_yet_strip(
     buyers = buyer_affinity_service.not_yet_offered_strip(db, excess_list_id=el.id)
     # Persist the nudge as owner-assigned My-Day follow-up tasks (idempotent). Due today
     # so it lands under the Tasks page "Due soon" bucket.
-    due = datetime.now(timezone.utc)
+    due = datetime.now(UTC)
     for b in buyers:
         task_service.auto_create_resell_followup_task(
             db,

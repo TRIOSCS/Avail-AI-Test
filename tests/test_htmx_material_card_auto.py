@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import Requirement, Requisition
 from app.models.intelligence import MaterialCard
@@ -21,7 +21,7 @@ def _make_requisition(db, user_id, name="REQ-MC-001"):
         customer_name="Test Corp",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()

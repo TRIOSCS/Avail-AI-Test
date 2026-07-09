@@ -15,7 +15,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
 """
 
 import html as html_mod  # aliased: vendor_tab binds a local `html` string var that would shadow a plain `import html`
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -133,7 +133,7 @@ async def vendors_list_partial(
     total = query.count()
 
     # Sorting — outbound_asc uses the generalized order_by_clock (VendorCard clocks)
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     if sort == "outbound_asc":
         vendors = _order_by_clock(query, "outbound", model=VendorCard).offset(offset).limit(limit).all()
     else:
@@ -492,7 +492,7 @@ async def vendor_detail_partial(
         safety_summary = lead.vendor_safety_summary
         safety_flags = lead.vendor_safety_flags
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     vendor_cadence = _cadence_state(None, vendor.last_outbound_at, now_utc)
     vendor_nbt = _next_best_touch(None, vendor.last_outbound_at, now_utc)
 
@@ -662,15 +662,15 @@ async def vendor_tab(
         html = f"""<div class="space-y-6">
           <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{"{:.0f}%".format((vendor.overall_win_rate or 0) * 100)}</p>
+              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.overall_win_rate or 0) * 100:.0f}%"}</p>
               <p class="text-xs text-gray-500 mt-1">Win Rate</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{"{:.0f}%".format((vendor.response_rate or 0) * 100)}</p>
+              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.response_rate or 0) * 100:.0f}%"}</p>
               <p class="text-xs text-gray-500 mt-1">Response Rate</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{"{:.0f}".format(vendor.vendor_score or 0)}</p>
+              <p class="text-2xl font-bold text-brand-500">{f"{vendor.vendor_score or 0:.0f}"}</p>
               <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
@@ -678,11 +678,11 @@ async def vendor_tab(
               <p class="text-xs text-gray-500 mt-1">Sightings</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{"{:.0f}".format(vendor.avg_response_hours or 0)}</p>
+              <p class="text-2xl font-bold text-gray-900">{f"{vendor.avg_response_hours or 0:.0f}"}</p>
               <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{"{:.0f}".format(vendor.engagement_score or 0)}</p>
+              <p class="text-2xl font-bold text-gray-900">{f"{vendor.engagement_score or 0:.0f}"}</p>
               <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
             </div>
           </div>
@@ -857,7 +857,7 @@ async def edit_vendor(
     if phones_raw:
         vendor.phones = [p.strip() for p in phones_raw.split(",") if p.strip()]
 
-    vendor.updated_at = datetime.now(timezone.utc)
+    vendor.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Vendor {} edited by {}", vendor_id, user.email)
 
@@ -875,7 +875,7 @@ async def toggle_vendor_blacklist(
     vendor = get_vendor_card_or_404(db, vendor_id)
 
     vendor.is_blacklisted = not vendor.is_blacklisted
-    vendor.updated_at = datetime.now(timezone.utc)
+    vendor.updated_at = datetime.now(UTC)
     db.commit()
     status = "blacklisted" if vendor.is_blacklisted else "un-blacklisted"
     logger.info("Vendor {} {} by {}", vendor_id, status, user.email)
@@ -898,7 +898,7 @@ async def archive_vendor(
     """
     vendor = get_vendor_card_or_404(db, vendor_id)
     vendor.is_active = False
-    vendor.updated_at = datetime.now(timezone.utc)
+    vendor.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Vendor {} archived by {}", vendor_id, user.email)
     return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
@@ -917,7 +917,7 @@ async def unarchive_vendor(
     """
     vendor = get_vendor_card_or_404(db, vendor_id)
     vendor.is_active = True
-    vendor.updated_at = datetime.now(timezone.utc)
+    vendor.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Vendor {} unarchived by {}", vendor_id, user.email)
     return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
@@ -1203,7 +1203,7 @@ async def vendor_add_custom_field(
     try:
         vendor.custom_fields = updated
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     flag_modified(vendor, "custom_fields")
     db.commit()
@@ -1387,7 +1387,7 @@ async def _run_vendor_find_contacts(vendor_id: int, keywords: str | None) -> Non
 
         db.commit()
         outcome = VendorContactRunOutcome(new_count=new_count)
-    except Exception as exc:  # noqa: BLE001 — a background task must not crash the worker
+    except Exception as exc:
         logger.error("AI contact finder error for vendor {}: {}", vendor_id, exc)
         db.rollback()
         outcome = VendorContactRunOutcome(error=f"AI search failed: {exc}")

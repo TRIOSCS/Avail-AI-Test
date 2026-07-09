@@ -19,7 +19,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -36,7 +36,7 @@ def _make_req(db_session, created_by, *, name="Req", status=RequisitionStatus.OP
         customer_name="Test Co",
         status=status,
         created_by=created_by,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db_session.add(req)
@@ -89,7 +89,7 @@ class TestRequisitionCounts:
             name="Sales Counts",
             role="sales",
             azure_id="sc-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sales)
         db_session.commit()
@@ -276,7 +276,7 @@ class TestBatchAssign:
             name="Assign IDs Target",
             role="buyer",
             azure_id="assign-ids-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(target)
         db_session.flush()
@@ -323,7 +323,7 @@ class TestClaimRequisition:
             name="Sales No Claim",
             role="sales",
             azure_id="snc-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sales)
         db_session.flush()
@@ -376,7 +376,7 @@ class TestUnclaimRequisition:
             name="Other Claimer",
             role="buyer",
             azure_id="oc-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_user)
         db_session.flush()

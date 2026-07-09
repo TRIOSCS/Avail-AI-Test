@@ -18,7 +18,7 @@ Depends on: app/services/buyplan_hub.supervise_overview,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -188,7 +188,7 @@ def test_queue_risk_first_ordering(db_session, test_user, test_quote, test_requi
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=24),
+        approved_at=datetime.now(UTC) - timedelta(hours=24),
     )
     overdue_line = _make_line(
         db_session,
@@ -246,7 +246,7 @@ def test_queue_oldest_first_within_tier(db_session, test_user, test_quote, test_
     """Within one tier (halted), the older plan sorts before the newer one."""
     from app.services.buyplan_hub import supervise_overview
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     newer = _make_plan(
         db_session,
         quote_id=test_quote.id,
@@ -318,7 +318,7 @@ def test_queue_line_kind_uses_parent_plan_value_and_buyer_owner(
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=24),
+        approved_at=datetime.now(UTC) - timedelta(hours=24),
         sales_order_number="SO-9002",
         total_cost="7777.00",
         total_margin_pct="11.00",
