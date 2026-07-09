@@ -151,7 +151,7 @@ class Company(Base):
         """
         from ..vendor_utils import normalize_vendor_name
 
-        self.normalized_name = normalize_vendor_name(value) or None  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_name = normalize_vendor_name(value) or None  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("phone")
@@ -159,7 +159,7 @@ class Company(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")
@@ -273,7 +273,7 @@ class CustomerSite(Base):
         """Keep normalized_phone (E.164) in sync with contact_phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("contact_phone_2")
@@ -282,7 +282,7 @@ class CustomerSite(Base):
         write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone_2 = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phone_2 = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     __table_args__ = (
@@ -382,7 +382,7 @@ class SiteContact(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")

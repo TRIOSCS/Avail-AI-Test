@@ -157,10 +157,10 @@ class VendorCard(Base):
         from ..utils.phone import normalize_e164
 
         if not value:
-            self.normalized_phones = []  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+            self.normalized_phones = []  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
             return value
         normalized = [normalize_e164(p) for p in value if p]
-        self.normalized_phones = [n for n in normalized if n is not None]  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phones = [n for n in normalized if n is not None]  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")
@@ -269,7 +269,7 @@ class VendorContact(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment, unused-ignore]  # instrumented attr write (legacy Column model)
         return value
 
     __table_args__ = (
