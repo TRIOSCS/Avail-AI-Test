@@ -1627,7 +1627,9 @@ buyplan_builder.py
     +---> buyplan_scoring.py (ai_score per line)
     |
     v
-buyplan_workflow.py (state machine)
+buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/approve/reject/
+                    halt/resume/reset/cancel + completion; buyplan_lines.py owns the per-line
+                    claim/flag/resolve/resource ops; buyplan_po.py owns PO confirm/verify)
     |
     |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
     |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
@@ -1740,7 +1742,8 @@ buyplan_workflow.py (state machine)
 
 ### 6e. Re-source (fall-down → open claim pool → urgent buyer backfill)
 
-`buyplan_workflow.resource_line` is the **single** fall-down → re-source engine, fed by
+`buyplan_workflow.resource_line` (`app/services/buyplan_workflow/buyplan_lines.py`) is the
+**single** fall-down → re-source engine, fed by
 **two triggers** (never a parallel queue):
 
 - **Vendor-cancel (SP-3):** a buyer records a PO on a line in Acctivate; when a **vendor
@@ -1761,7 +1764,7 @@ buyplan_workflow.py (state machine)
 
 Both triggers are gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role and
 both funnel through the router helper `_resource_lines_and_alert` (pool + commit + alert
-fan-out). `buyplan_workflow.resource_line` (default one line; `scope=plan` escalates to the
+fan-out). `buyplan_workflow.resource_line` (`buyplan_lines.py`; default one line; `scope=plan` escalates to the
 plan's other cut/received lines) for each target, in one transaction:
 
 1. `po_cancellation_service.record_po_cancellation` — append the immutable `po_cancellations`
@@ -2098,12 +2101,12 @@ so it is short-TTL cached (`@cached_endpoint`) to stay off the aggregation queri
 CRM list refresh while the chip still re-renders.
 
 **Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
-(app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
+(app/services/buyplan_workflow/buyplan_approval.py) transitions a plan to COMPLETE, it calls
 `record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)
 inside a best-effort try/except so a CPH failure never rolls back the completion.
 
 ```
-check_completion (buyplan_workflow.py)
+check_completion (buyplan_workflow/buyplan_approval.py)
     |
     v  [plan transitions to COMPLETE]
 record_buyplan_purchase_history (purchase_history_service.py)
@@ -2298,6 +2301,23 @@ Rendered via shared/activity_digest_card.html (states: ready/insufficient/genera
 Self-invalidating: the service regens automatically when `basis_last_activity_at` or
 `basis_activity_count` changes on next view — no write-path hooks needed.
 `?force=1` bypasses both the cooldown and the basis freshness check.
+
+---
+
+### 8a. AI Insights refresh — interactive Claude budget (P2.8)
+
+The four "Refresh AI insights" HTMX endpoints in `app/routers/htmx/insights_views.py`
+(requisition/vendor/customer/pipeline panels) call `knowledge_service.generate_insights` /
+`generate_vendor_insights` / `generate_company_insights` / `generate_pipeline_insights` with
+`interactive=True`. That flag tightens the shared `_regenerate_insights` Claude call to a
+**~25s timeout, single attempt (no retries)** (`_INTERACTIVE_TIMEOUT_SECONDS = 25`,
+`_INTERACTIVE_MAX_ATTEMPTS = 1` in `knowledge_service.py`) so a slow/overloaded API can't hold
+the HTTP request open for the default `claude_structured` worst case (30s timeout × 3 attempts
+≈ 96s). On timeout/failure the call returns `[]` and the route falls back to serving the
+existing cached insights (`entries or get_cached_*_insights(...)`) rather than erroring. The
+**nightly background job** (`knowledge_jobs._job_refresh_insights`) calls the same generators
+with `interactive=False` (the default) and keeps the original uncapped budget — only the
+request-scoped HTMX refresh is tightened.
 
 ---
 
@@ -2792,14 +2812,15 @@ REUSING the helpers above (no new ad-hoc checks):
 Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
 
-**Read-IDOR closure — offers.py GET partials.** Five requisition-scoped GET partial handlers in
-`app/routers/htmx/offers.py` (`parse_email_form`, `paste_offer_form`, `add_offer_form`,
-`rfq_compose`, `rfq_prepare_panel` — the parse-email/paste-offer/add-offer forms and the
-rfq-compose/rfq-prepare panels) resolved the requisition via `get_requisition_or_404` but skipped
+**Read-IDOR closure — offers/ GET partials.** Five requisition-scoped GET partial handlers in
+`app/routers/htmx/offers/` (`parse_email_form`, `paste_offer_form`, `add_offer_form` in
+`crud.py`; `rfq_compose`, `rfq_prepare_panel` in `rfq.py` — the parse-email/paste-offer/
+add-offer forms and the rfq-compose/rfq-prepare panels) resolved the requisition via
+`get_requisition_or_404` but skipped
 `require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
 rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
 `require_requisition_access(db, req_id, user)` right after the 404 check (404-not-403 so existence
-isn't leaked), matching their mutating siblings in the same file. Regression coverage:
+isn't leaked), matching their mutating siblings in the same submodule. Regression coverage:
 `tests/test_authz_offers_partials_idor.py`.
 
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
@@ -3144,8 +3165,9 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
 These extend the audit trail above (migration 169 + reuse of existing primitives):
 
 1. **Field-history (old→new)** — `crm_field_history` table + `app/services/crm_field_history.py`.
-   The inline single-field POST handlers (`company_field_post` / `contact_field_post` in
-   `app/routers/htmx/companies.py`) capture the attribute value *before* and *after*
+   The inline single-field POST handlers (`company_field_post` in
+   `app/routers/htmx/companies/core.py` / `contact_field_post` in
+   `app/routers/htmx/companies/contacts.py`) capture the attribute value *before* and *after*
    `apply_company_field` / `apply_contact_field`, then call `record_field_change` (which
    writes a row only when the canonical value actually changed; None↔"" is a no-op) before
    the same `db.commit()` so the history row and the edit land atomically. `changed_by_id`
@@ -3354,8 +3376,9 @@ rows reuse the shared `partials/shared/_contact_row.html` macro (also used by th
 which makes that endpoint return a self-contained "✓ Added" `<li>` (`hx-swap=outerHTML`,
 `hx-target="closest li"`) instead of re-rendering the Contacts-tab list. The dead
 `enrich_customer_account` stub (returns `no_providers`) is no longer called from the enrich
-endpoint — it stays wired to `companies.py` bulk-create + the `customer_enrichment_batch`
-scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
+endpoint — it stays wired to the CSV bulk-import path
+(`app/routers/htmx/companies/core.py::import_companies_confirm` +
+`app/services/company_import_service.py`) + the `customer_enrichment_batch` scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
 "couldn't reach" banner, never a 500.
 
 **Connectors:**
@@ -5534,7 +5557,7 @@ The registries in use:
 |-----------------|--------------|------------------|
 | `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `_RunRegistry` singletons) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
 | `company_enrich_runs.py` | `company_enrich_runs` | Account (Company) "Enrich" (`routers/crm/enrichment.py`) |
-| `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies.py`) — deliberately separate from `company_enrich_runs` |
+| `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies/contacts.py`) — deliberately separate from `company_enrich_runs` |
 | `vendor_contact_runs.py` | `vendor_contact_runs` | Vendor "Find Contacts" (`routers/htmx/vendors.py`) |
 
 (The Prospects tab enrich flow — § Prospect Enrichment — uses the same
@@ -5899,7 +5922,7 @@ minimal and mirrors the accounts pattern; no rearrangement of existing controls.
   download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
   `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
 
-### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies.py`)
+### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies/contacts.py`)
 - Actions: `archive` (`SiteContact.is_archived=True`), `dnc` (`do_not_contact=True`) — both
   wire the existing single-row toggles (`set_contact_archive` / `set_contact_dnc`) to the
   selected set. Mirrors the accounts `customers_bulk_action` contract.
@@ -6179,7 +6202,7 @@ currency="USD")` is the single entry for spawning a routed approval:
 
 **On-resolve subject dispatch (QP Phase C1):** after the flush, a `subject_type=='buy_plan'`
 request drives the EXISTING buy-plan side effects in the SAME session — approve →
-`buyplan_workflow._run_approve_side_effects` (plan `ACTIVE` + `_generate_buyer_tasks` +
+`buyplan_workflow._run_approve_side_effects` (`buyplan_approval.py`; plan `ACTIVE` + `_generate_buyer_tasks` +
 approver stamp + audit `ActivityLog`); reject → `_run_reject_side_effects` (plan `DRAFT`).
 The dispatch runs inline with **no swallowing try/except**, so a side-effect failure
 propagates and the router's transaction rolls the whole decision back atomically — a request
@@ -6208,7 +6231,7 @@ dispatch and the legacy `approve_buy_plan`, so the two paths can never drift.
   savepoint, so each row owns its own commit.
 
 **Buy-plan submission → engine gate (QP Phase C1):** `buyplan_workflow.submit_buy_plan`
-(and `resubmit_buy_plan`), on the non-auto-approve path, call
+(`buyplan_approval.py`; and `resubmit_buy_plan`, same module), on the non-auto-approve path, call
 `_open_engine_request_for_plan(plan, user, db)` — which FIRST cancels every existing open
 (`REQUESTED`) `ApprovalRequest` for the plan via `events.cancel` (so a resubmit never leaves
 two live requests — RISK 2), THEN `create_request(gate_type=BUY_PLAN, subject=plan,
