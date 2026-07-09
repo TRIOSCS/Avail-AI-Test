@@ -90,13 +90,13 @@ def delete_known_bad_facets(db: Session, *, apply: bool = False) -> dict:
                     # a mismatch means drift (some other source owns the JSONB entry).
                     if entry is not None and entry.get("source") == facet.source:
                         specs.pop(facet.spec_key, None)
-                        card.specs_structured = specs
+                        card.specs_structured = specs  # type: ignore[assignment]  # legacy Column-model ORM noise
                         tally["mirrors_dropped"] += 1
                     log_audit(
                         db,
-                        material_card_id=card.id,
+                        material_card_id=card.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         action="facet_cleanup",
-                        normalized_mpn=card.normalized_mpn,
+                        normalized_mpn=card.normalized_mpn,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         details={
                             "spec_key": facet.spec_key,
                             "value_numeric": facet.value_numeric,
@@ -137,7 +137,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
     for card in cards:
         raw = card.category
         source_before = card.category_source
-        target = normalize_category(raw)
+        target = normalize_category(raw)  # type: ignore[arg-type]  # legacy Column-model ORM noise
         if source_before is None:
             if target is not None:
                 # Unprovenanced junk that resolves to a canonical key: through the
@@ -170,7 +170,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
                     for facet in stale:
                         db.delete(facet)
                         tally["stale_facets_purged"] += 1
-                    card.category = target
+                    card.category = target  # type: ignore[assignment]  # legacy Column-model ORM noise
             else:
                 # Provenanced junk that resolves nowhere: the provenance attests to a
                 # write of a value the vocabulary rejects — clear both.
@@ -182,9 +182,9 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
         if apply and mode != "skipped_ladder":
             log_audit(
                 db,
-                material_card_id=card.id,
+                material_card_id=card.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                 action="category_cleanup",
-                normalized_mpn=card.normalized_mpn,
+                normalized_mpn=card.normalized_mpn,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                 details={
                     "from": raw,
                     "to": target if mode.startswith("normalized") else None,

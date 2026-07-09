@@ -12,13 +12,9 @@ import hashlib
 import re
 from contextlib import contextmanager
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from loguru import logger
-
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

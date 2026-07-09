@@ -148,7 +148,7 @@ def _get_or_create_list(
     )
     # close_at is set if the column exists (additive-friendly).
     if close_in_days is not None and hasattr(el, "close_at"):
-        el.close_at = _now() + timedelta(days=close_in_days)
+        el.close_at = _now() + timedelta(days=close_in_days)  # type: ignore[assignment]  # legacy Column-model ORM noise
     db.add(el)
     db.flush()
     logger.info("seed-resell: created list {!r} (status={})", title, status)
@@ -190,7 +190,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
     if created:
         for mpn, mfr in _BULK_MPNS:
             _add_line(db, el, mpn=mpn, mfr=mfr, qty=50 + (hash(mpn) % 950))
-        el.total_line_items = len(_BULK_MPNS)
+        el.total_line_items = len(_BULK_MPNS)  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
         # Mirror so the Sighting live-mirror is exercised (and matchers see supply).
         excess_mirror.sync_list_mirror(db, el)
@@ -207,7 +207,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
     # rollup picks a clear best + the spread bar has range.
     excess_service.submit_offer(
         db,
-        list_id=el.id,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
         user=broker,
         scope=ExcessOfferScope.PER_LINE,
         notes="Bulk reseller — strong on FPGAs.",
@@ -232,7 +232,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
     )
     excess_service.submit_offer(
         db,
-        list_id=el.id,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
         user=broker,
         scope=ExcessOfferScope.PER_LINE,
         notes="Competing bid — cheaper on the lead FPGA.",
@@ -244,7 +244,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
     # A take-all bundle for the whole list (pins as the headline banner).
     excess_service.submit_offer(
         db,
-        list_id=el.id,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
         user=broker,
         scope=ExcessOfferScope.TAKE_ALL,
         notes="Will take the entire lot, sight-unseen.",
@@ -265,7 +265,7 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
     )
     if created:
         _add_line(db, el, mpn="DELL-412-AAVE", mfr="Dell", qty=24, condition="Refurbished")
-        el.total_line_items = 1
+        el.total_line_items = 1  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
         excess_mirror.sync_list_mirror(db, el)
         db.commit()
@@ -277,7 +277,7 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
         return
     excess_service.submit_offer(
         db,
-        list_id=el.id,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
         user=broker,
         scope=ExcessOfferScope.PER_LINE,
         notes="Standard price.",
@@ -285,7 +285,7 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
     )
     excess_service.submit_offer(
         db,
-        list_id=el.id,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
         user=broker,
         scope=ExcessOfferScope.PER_LINE,
         notes="Best price, longer lead.",
@@ -315,8 +315,8 @@ def _build_awarded(db: Session, company: Company, owner: User) -> None:
     if created:
         for mpn, mfr in _BULK_MPNS[:6]:
             item = _add_line(db, el, mpn=mpn, mfr=mfr, qty=200)
-            item.status = ExcessLineItemStatus.AWARDED
-        el.total_line_items = 6
+            item.status = ExcessLineItemStatus.AWARDED  # type: ignore[assignment]  # legacy Column-model ORM noise
+        el.total_line_items = 6  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
     logger.info("seed-resell: ensured awarded list {!r}", el.title)
 

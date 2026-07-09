@@ -18,7 +18,13 @@ skips = ["B101"]  # allow assert in non-test code (used in type narrowing)
 [tool.mypy]
 python_version = "3.13"
 ignore_missing_imports = true
+# no_strict_optional matches the old CI flag (mypy.ini era). Tracked debt: turning
+# strict Optional checking on is part of the P0.5 burn-down.
 no_strict_optional = true
+# warn_return_any was ON in the deleted mypy.ini. Re-enabling it today surfaces
+# ~98 no-any-return errors (measured 2026-07 under the CI flags above). Left OFF
+# as recorded debt — burn down under P0.5, then flip to true.
+warn_return_any = false
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -34,10 +40,22 @@ exclude = ["alembic/", "tests/"]
 # Each block suppresses ONLY the error codes that are systemic legacy noise
 # (untyped `Column(...)` declarative models make every attribute read/write a
 # Column[X] vs value mismatch: assignment/arg-type/union-attr/index/...).
-# Error counts at time of writing are noted per block. Do NOT add codes to
-# these lists — fix new errors instead. Fully re-enabled (no override needed):
-# app.schemas.*, app.connectors.*, app.cache.*, app.enrichment_service,
-# app.scoring, app.utils.llm_router, app.utils.claude_client.
+# Error counts at time of writing are noted per block.
+#
+# RULES for these overrides:
+# - Do NOT add codes to these lists — fix new errors instead.
+# - NEW modules must NOT be added to the disable lists (and must not silently
+#   inherit a glob): a new module under app/services/ or app/routers/ is
+#   expected to type-check clean; if it matches a glob below, add an explicit
+#   re-enable override for it (see the "verified clean" blocks after the
+#   globs — later sections win in mypy).
+# - app.models.* and app.management.* are FULLY checked (no override), same as
+#   the pre-pyproject CI path; keep them that way.
+#
+# Fully re-enabled (no override needed): app.models.*, app.schemas.*,
+# app.connectors.*, app.cache.*, app.enrichment_service, app.scoring,
+# app.utils.llm_router, app.utils.claude_client, and all of app.management.*
+# except the two seed/reconcile scripts listed at the bottom.
 
 [[tool.mypy.overrides]]
 # ~1380 ORM-noise errors (arg-type:638 assignment:377 union-attr:232 ...).
@@ -73,17 +91,6 @@ module = ["app.jobs.*"]
 disable_error_code = ["assignment", "arg-type"]
 
 [[tool.mypy.overrides]]
-# ~56 ORM-noise errors: Column(UTCDateTime) columns need Mapped[] annotations
-# (var-annotated:46) and Column[str] attribute writes (assignment:10).
-module = ["app.models.*"]
-disable_error_code = ["var-annotated", "assignment"]
-
-[[tool.mypy.overrides]]
-# One-off CLI scripts; ~92 ORM-noise errors (arg-type:67 assignment:18 ...).
-module = ["app.management.*"]
-disable_error_code = ["arg-type", "assignment", "index", "call-overload", "return-value"]
-
-[[tool.mypy.overrides]]
 # ~10 ORM-noise errors (assignment:5 arg-type:2 ...).
 module = ["app.startup"]
 disable_error_code = ["assignment", "arg-type"]
@@ -92,6 +99,42 @@ disable_error_code = ["assignment", "arg-type"]
 # ~7 ORM-noise errors (assignment:3 union-attr:3 arg-type:1).
 module = ["app.utils.vendor_helpers"]
 disable_error_code = ["assignment", "union-attr", "arg-type"]
+
+# --- Verified-clean carve-outs from the globs above -------------------------
+# These modules match the app.routers.* / app.services.* globs but were
+# empirically verified to type-check with NO suppressions. Later override
+# sections win in mypy, so listing them here with an empty disable list
+# restores full checking. When a globbed module reaches zero errors, move it
+# into this block.
+[[tool.mypy.overrides]]
+module = [
+    "app.routers.tags",
+    "app.routers.avatars",
+    "app.routers.error_reports",
+    "app.services.category_normalizer",
+    "app.services.buyplan_naming",
+    "app.services.enrichment_credit_guard",
+    "app.services.spec_tiers",
+]
+disable_error_code = []
+
+# --- Remaining app.management ORM noise (per-module, NOT a package glob) ----
+# app.management.* is otherwise FULLY checked; only these two scripts carry
+# systemic legacy-Column noise too large to line-ignore. Do not re-glob.
+[[tool.mypy.overrides]]
+# ~42 ORM-noise errors (arg-type:33 assignment:9): seed helpers pass Column[X]
+# attrs of freshly created legacy models into typed _mk_* factory params.
+module = ["app.management.seed_sample_data"]
+disable_error_code = ["arg-type", "assignment"]
+
+[[tool.mypy.overrides]]
+# ~27 ORM-noise errors (arg-type:17 index:2 call-overload:2 return-value:2
+# assignment:1 ...): facet reconciliation reads legacy Column[str] attrs into
+# typed decoder/spec-tier APIs.
+module = ["app.management.reconcile_decoded_facets"]
+disable_error_code = [
+    "arg-type", "assignment", "index", "call-overload", "return-value",
+]
 
 [tool.docformatter]
 wrap-summaries = 88

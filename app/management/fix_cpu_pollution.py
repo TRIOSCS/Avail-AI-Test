@@ -37,7 +37,7 @@ def reclassify_cpu_pollution(db: Session, *, apply: bool, limit: int | None = No
     by_commodity: dict[str, int] = {}
     for card in q.yield_per(500):
         scanned += 1
-        commodity = classify_polluted_mpn(card.display_mpn)
+        commodity = classify_polluted_mpn(card.display_mpn)  # type: ignore[arg-type]  # legacy Column[str] attr is str at runtime
         if not commodity:
             continue
         if apply:

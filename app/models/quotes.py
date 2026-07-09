@@ -52,7 +52,7 @@ class Quote(Base):
     # rows have no send, and Graph propagation can occasionally fail the Sent-Items lookup.
     graph_message_id = Column(String(255), nullable=True)
     graph_conversation_id = Column(String(255), nullable=True)
-    followup_alert_sent_at = Column(UTCDateTime(timezone=True), nullable=True)
+    followup_alert_sent_at = Column(UTCDateTime, nullable=True)
     result = Column(String(20))
     result_reason = Column(String(255))
     result_notes = Column(Text)

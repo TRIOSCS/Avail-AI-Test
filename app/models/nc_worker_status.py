@@ -26,13 +26,13 @@ class NcWorkerStatus(Base):
 
     id = Column(Integer, primary_key=True, default=1)
     is_running = Column(Boolean, default=False)
-    last_heartbeat = Column(UTCDateTime(timezone=True))
-    last_search_at = Column(UTCDateTime(timezone=True))
+    last_heartbeat = Column(UTCDateTime)
+    last_search_at = Column(UTCDateTime)
     searches_today = Column(Integer, default=0)
     sightings_today = Column(Integer, default=0)
     circuit_breaker_open = Column(Boolean, default=False)
     circuit_breaker_reason = Column(Text)
     daily_stats_json = Column(JSON)
-    updated_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (CheckConstraint("id = 1", name="ck_nc_worker_status_singleton"),)

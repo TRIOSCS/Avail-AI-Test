@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from .config import settings
 
 
-class UTCDateTime(TypeDecorator):
+class UTCDateTime(TypeDecorator[datetime]):
     """DateTime that stores and returns timezone-aware UTC values.
 
     Maps to ``TIMESTAMP WITH TIME ZONE`` on every dialect (via

@@ -262,7 +262,7 @@ class Sighting(Base):
     source_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # NC integration: when the source data was fetched
-    source_searched_at = Column(UTCDateTime(timezone=True))
+    source_searched_at = Column(UTCDateTime)
 
     # Evidence tier — provenance tag for data trust (T1–T7)
     evidence_tier = Column(String(4))

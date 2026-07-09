@@ -18,14 +18,10 @@ import signal
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy.orm import Session
-
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

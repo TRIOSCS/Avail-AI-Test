@@ -36,9 +36,10 @@ import csv
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
-from sqlalchemy import bindparam, select, update
+from sqlalchemy import Table, bindparam, select, update
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
@@ -159,7 +160,8 @@ def apply_telemetry(
     stats = {"distinct_keys": len(telemetry), "matched_cards": 0, "updated": 0}
     keys = list(telemetry.keys())
     stmt = (
-        update(MaterialCard.__table__)
+        # cast: declarative ``__table__`` is typed FromClause, but it is always a Table
+        update(cast(Table, MaterialCard.__table__))
         .where(
             MaterialCard.__table__.c.normalized_mpn == bindparam("b_mpn"),
             MaterialCard.__table__.c.deleted_at.is_(None),

@@ -23,6 +23,7 @@ Depends on: MaterialCard, MaterialSpecFacet, FruLink models; spec_tiers.SOURCE_T
 import argparse
 import json
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,7 @@ def _source_bucket(src: object) -> str:
 def _spec_source_counts(db: Session) -> dict[str, int]:
     """Count specs_structured entries per recorded source, descending."""
     dialect = db.get_bind().dialect.name
+    rows: Sequence[Any]  # Row[Any] pairs (SQL branches) or (str, int) tuples (fallback)
     if dialect == "postgresql":
         rows = db.execute(_PG_SOURCES_SQL).all()
     elif dialect == "sqlite":

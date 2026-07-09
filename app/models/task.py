@@ -60,11 +60,11 @@ class RequisitionTask(Base):
     completion_note = Column(Text, nullable=True)  # note from assignee on task resolution
 
     # Dates
-    due_at = Column(UTCDateTime(timezone=True), nullable=True)
-    completed_at = Column(UTCDateTime(timezone=True), nullable=True)
-    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    due_at = Column(UTCDateTime, nullable=True)
+    completed_at = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        UTCDateTime(timezone=True),
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

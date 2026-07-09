@@ -1068,7 +1068,16 @@ Key columns:
 re-screen with materially new grounding produces a different hash and bypasses the cached verdict.
 Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
 
-**`discovery_batches`** — Import batch tracking
+**`discovery_batches`** — Import batch tracking. Audit trail for every prospect
+discovery/enrichment run (`app/models/discovery_batch.py`); sole writer is
+`prospect_scheduler.job_discover_prospects`. `status` (String 20, indexed —
+`ix_discovery_batches_status`, `ix_discovery_batches_source_status`) uses the
+`DiscoveryBatchStatus` StrEnum (app/constants.py): `running` (default) \| `completed` \|
+`failed`. `failed` is reserved (not currently written — an unhandled exception leaves the
+row at `running`); the vocabulary follows the `PendingBatchStatus` run-lifecycle
+convention. Also carries `batch_id` (unique), `source`/`segment`/`regions`/
+`search_filters` provenance, `prospects_found/new/updated` + `credits_used` counters,
+`error_message`, and `started_at`/`completed_at` timestamps.
 
 **`enrichment_worker_status`** — Singleton (id=1, `ck_enrichment_worker_status_singleton`)
 heartbeat + daily-stats row for the paced material-enrichment worker

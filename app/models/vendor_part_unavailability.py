@@ -127,8 +127,8 @@ class VendorPartUnavailability(Base):
         (O3 and the offer hook both route through here)."""
         from ..constants import ReleaseTrigger
 
-        self.release_trigger = ReleaseTrigger(trigger).value
-        self.released_at = now
+        self.release_trigger = ReleaseTrigger(trigger).value  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.released_at = now  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
 
     def re_arm(self) -> None:
         """Re-mark transition: NULL the release pair together so the record

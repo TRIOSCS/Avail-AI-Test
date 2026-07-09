@@ -63,8 +63,8 @@ class PendingBatch(Base):
     batch_type = Column(String(50), default="inbox_parse")
     request_map = Column(JSONB)
     status = Column(String(20), default="processing")
-    submitted_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    completed_at = Column(UTCDateTime(timezone=True))
+    submitted_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(UTCDateTime)
     result_count = Column(Integer)
     error_message = Column(Text)
 

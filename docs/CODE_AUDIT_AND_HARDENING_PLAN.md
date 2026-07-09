@@ -21,12 +21,18 @@ These are confirmed defects shipping today, not style issues.
   cache. Fix: `await` all four. Add regression tests asserting the service is awaited
   (e.g. `AsyncMock` + `assert_awaited_once`).
 
-- [x] **P0.2 — Duplicate-column migration breaks fresh-DB `alembic upgrade head`.**
+- [x] **P0.2 — Duplicate-column migration diverges from sibling guard convention.**
   `alembic/versions/5c6736d6381f_add_screenshot_path_ai_summary_root_.py:34-42`
-  unconditionally re-adds `offers.excess_line_item_id` + FK already created by its
-  ancestor `d1a2b3c4e5f6_add_excess_phase4_columns.py` (which is guarded). On a fresh
-  DB this raises `DuplicateColumn`. Fix: add the same `_column_exists` guard (or delete
-  the redundant ops). Verify with upgrade → downgrade → upgrade on a throwaway Postgres.
+  re-adds `offers.excess_line_item_id` + FK already created by its ancestor
+  `d1a2b3c4e5f6_add_excess_phase4_columns.py` (which carries its own `_column_exists`
+  guard). **Honesty correction:** the originally claimed fresh-DB `DuplicateColumn`
+  crash could NOT actually fire — `alembic/env.py:26-52` wraps `add_column` /
+  `create_foreign_key` (and 8 other ops) in global idempotent no-op-when-present
+  wrappers, so a chain replay would have skipped the duplicate ops with a WARN log.
+  What the fix actually does: adds the same in-migration `_column_exists` guard the
+  sibling uses, so the migration is self-contained and correct on its own terms
+  instead of silently relying on the env.py safety net. Verified with
+  upgrade → downgrade → upgrade on a throwaway Postgres.
 
 - [x] **P0.3 — Whole-page wipe on quote detail scroll.**
   `app/templates/htmx/partials/quotes/detail.html:370` — pricing-history lazy-load
@@ -66,10 +72,19 @@ These are confirmed defects shipping today, not style issues.
   all rooted in untyped `Column(...)` declarative models — migrate to `Mapped[]` to burn
   down): `app.routers.*` ~1,380 (arg-type 638, assignment 377, union-attr 232, …);
   `app.services.*` ~1,370 (assignment 540, arg-type 482, attr-defined 101, …);
-  `app.search_service` ~100; `app.management.*` ~92; `app.models.*` ~56 (var-annotated 46);
-  `app.email_service` ~50; `app.jobs.*` ~24; `app.startup` ~10; `app.utils.vendor_helpers` ~7.
-  Also not yet enabled globally: `warn_return_any` (~273 `no-any-return` from the old
-  `mypy.ini` wish-list). Dangerous codes stay live everywhere: `unused-coroutine`,
+  `app.search_service` ~100; `app.email_service` ~50; `app.jobs.*` ~24; `app.startup` ~10;
+  `app.utils.vendor_helpers` ~7. `app.models.*` and `app.management.*` are FULLY checked
+  with no package override (matching the pre-pyproject CI gate): models were fixed at
+  the root (`UTCDateTime` is now `TypeDecorator[datetime]`; no-op `(timezone=True)` args
+  that defeated `Column[...]` inference were dropped) plus targeted line-level ignores
+  on instrumented-attribute writes; management keeps only two per-module overrides
+  (`seed_sample_data` ~42, `reconcile_decoded_facets` ~27). Modules under the router/
+  service globs that were verified clean (`tags`, `avatars`, `error_reports`,
+  `category_normalizer`, `buyplan_naming`, `enrichment_credit_guard`, `spec_tiers`) are
+  carved back out to full checking via trailing empty-disable overrides.
+  Also not yet enabled globally: `warn_return_any` (~98 `no-any-return` measured 2026-07
+  under the CI flags; from the old `mypy.ini` wish-list — see the debt comment in
+  `pyproject.toml`). Dangerous codes stay live everywhere: `unused-coroutine`,
   `unused-awaitable`, `call-arg`, `no-redef`, `name-defined`, `unused-ignore`, `return`.
   Note: the pre-commit hook env (mypy 1.15.0, no project deps) and a full-deps run
   (mypy 2.1.0) disagree on which errors exist; cross-env-sensitive suppressions use
@@ -187,6 +202,29 @@ These are confirmed defects shipping today, not style issues.
   readiness; add partial indexes on backfill `IS NULL` predicates; gate
   `_analyze_hot_tables` (`startup.py:1002-1005`) behind a since-last-deploy marker.
 
+- [ ] **P2.8 — Insight-refresh latency hazard (P0.1 follow-up; needs a design
+  decision).** Now that the four "Refresh AI insights" endpoints actually `await`
+  `generate_*_insights(...)`, the HTMX request blocks for the full generation time:
+  worst case ~96s (Claude call timeout 30s × 3 retries, plus extended-thinking
+  budget) with the browser spinner held open and the app worker occupied the whole
+  time. The root fix is background generation — kick the job off, return a polling
+  partial (`hx-trigger="every 2s"` against a status endpoint) that swaps in the
+  result when ready — or, as a cheaper stopgap, a tightened per-call timeout with a
+  visible "generation timed out, retry" state. Which of the two (and the acceptable
+  per-call budget) needs an explicit design decision before implementation; do not
+  band-aid it inline in the routers.
+
+- [ ] **P2.9 — Pre-commit mypy hook env diverges from the real gate.**
+  The pre-commit hook runs mypy 1.15.0 in an isolated env with NO project
+  dependencies installed, while CI/dev runs full-deps mypy 2.1.0 — the two disagree
+  on which errors exist, and 22 `# type: ignore[code, unused-ignore]` suffixes exist
+  in the tree *solely* to keep both environments green. Root fix: make the hook run
+  the same checker as CI — either pin `additional_dependencies` in
+  `.pre-commit-config.yaml` to the project's mypy + type-stub set, or convert the
+  hook to `language: system` so it uses the repo venv's mypy. Then sweep the 22
+  `, unused-ignore` suffixes (they become genuinely unused and `warn_unused_ignores`
+  will flag them).
+
 ---
 
 ## Phase 3 — Performance (~1 week)
@@ -256,7 +294,8 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
 
 - [ ] **P5.1 — `lazy_body(id, url)` macro** so the `hx-target` guard (P0.3's root
   cause) is enforced structurally, not by "LANDMINE" comments. Migrate
-  `approvals_hub.html`, `buy_plans/hub.html`, `settings/index.html`, `sightings/list.html`.
+  `approvals_hub.html`, `buy_plans/hub.html`, `settings/index.html`, `sightings/list.html`,
+  `quotes/detail.html`, `resell/detail.html`, `resell/workspace.html`.
 
 - [ ] **P5.2 — Kill the `fetch()` violations in `htmx_app.js`** (~16 sites).
   Convert `fetchCompanies()` (:1637) and `searchVendors()` (:2391) to server-rendered
