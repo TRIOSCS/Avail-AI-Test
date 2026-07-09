@@ -716,6 +716,64 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
   re-export from a package `__init__.py` so callers don't all change at once):
   - `routers/htmx/companies.py` (5,234 lines) → ~8 modules: import, saved views,
     contacts, tags/segments, merge, custom fields, sites, detail-tab render.
+    **Done:** split into `routers/htmx/companies/` package — `saved_views.py`
+    (filter presets), `tags.py` (company + contact segment tags), `custom_fields.py`
+    (WS3 label:value fields), `merge.py` (company + contact duplicate merge),
+    `sites.py` (CustomerSite + site-scoped SiteContact CRUD), `contacts.py`
+    (Contacts-tab CRUD, bulk actions, suggested-contacts discovery, notes/history/
+    files — largest module, ~1.5k lines, since "contacts CRUD + bulk actions" was
+    audited as one seam), `detail.py` (`company_detail_partial` /
+    `_render_company_detail` / the `company_tab` route-registration wrapper), and
+    `core.py` (list/create/typeahead/duplicate-check, tier/disposition/parent/
+    primary-contact setters, deactivate/reactivate/archived, send-to-prospecting,
+    AI dup/name suggestions, collaborators, edit forms + inline field editing —
+    the seams not named individually in the audit). New leaf module
+    `_registries.py` holds the shared field registries (`EDITABLE_ACCOUNT_FIELDS`/
+    `EDITABLE_CONTACT_FIELDS`/`KNOWN_ACCOUNT_FIELDS`/`FIELD_LABELS`/
+    `CANONICAL_ROLES`) and the pure field-apply helpers (`apply_company_field`/
+    `apply_contact_field`/`_validate_role`/`_recompose_full_name`) — mirrors the
+    existing `_shared.py`/`_shared_tabs.py` convention in `routers/htmx/`, letting
+    both `core.py` and `detail.py` depend on it without a cycle. `__init__.py`
+    defines the single shared `router` FIRST; every submodule does `from . import
+    router` and decorates it directly (not `include_router`), so route
+    registration is byte-for-byte the same mechanism as the pre-split file — this
+    matters because 6 of `core.py`'s GET routes (`account-list`, `create-form`,
+    `typeahead`, `check-duplicate`, `archived`) plus `saved_views.py`'s
+    `saved-views` are single literal path segments under `/v2/partials/customers/`
+    that MUST register before `.detail`'s `/v2/partials/customers/{company_id}`
+    catch-all (FastAPI validates path-typed params post-match, so a shadowed
+    catch-all returns 422, not a fall-through 404 — order is genuinely load-
+    bearing, not just defensive). `__init__.py`'s import order enforces this
+    (`.core` before `.detail`); `core.py` itself avoids a module-level `from
+    .detail import ...` (which would trigger `.detail`'s registration as an import
+    side-effect before `core.py`'s own routes) by resolving
+    `_render_company_detail`/`company_detail_partial` off the package attribute
+    (`_pkg._render_company_detail(...)`) at call time instead — the same
+    indirection already required for `.sites.edit_site`'s call to `company_tab`
+    and `.contacts.contacts_tab_suggested`'s scheduling of
+    `_run_contact_discovery`, both of which tests monkeypatch via the package
+    attribute (`app.routers.htmx.companies.company_tab` /
+    `..._run_contact_discovery`), not the defining submodule. `__init__.py`
+    re-exports every public + test-patched name (`company_detail_partial`,
+    `company_tab`, `create_company`, `edit_company`, `edit_site`,
+    `apply_company_field`, `apply_contact_field`, `CANONICAL_ROLES`,
+    `_VALID_ROLES`, `FIELD_LABELS`, `contacts_tab_suggested`,
+    `_run_contact_discovery`, `_manageable_company_ids`, `_company_quotes_query`,
+    `_company_buy_plans_query`, `_staleness_tier`), so `app/main.py`'s
+    registration and `_shared_tabs.py`'s lazy `from .companies import
+    (CANONICAL_ROLES, FIELD_LABELS, _company_buy_plans_query,
+    _company_quotes_query)` both keep working unchanged. P4.6 folded in: ~30
+    function-local imports hoisted to module scope across the 9 new files
+    (verified no cycles) — EXCEPT `contacts.py`'s
+    `find_suggested_contacts_with_errors`, kept function-local inside
+    `_run_contact_discovery` because 6 tests monkeypatch
+    `app.enrichment_service.find_suggested_contacts_with_errors` by that exact
+    module-attribute path, which only intercepts a fresh per-call lookup, not a
+    name bound at import time. `ruff.toml`'s BLE001 legacy-freeze entry updated
+    from the single `companies.py` path to the 2 new file paths
+    (`core.py`, `contacts.py`) that still carry a broad `except Exception`. Full
+    suite (22,916 tests) passes unmodified; the companies-surface subset (2,283
+    tests across 66 files) passes with zero patch-path changes needed.
   - `services/buyplan_workflow.py` (1,855) → `buyplan_approval / buyplan_lines /
     buyplan_po / buyplan_reports`. **Done:** split into
     `services/buyplan_workflow/` package — `buyplan_approval.py` (submit/
