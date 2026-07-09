@@ -283,7 +283,7 @@ These are confirmed defects shipping today, not style issues.
   exit 1; run against `tests/test_spec_tiers.py` → 0 violations, exit 0.
   `ruff check` passes on the new script.
 
-- [ ] **P2.5 — StrEnum enforcement.**
+- [ ] **P2.5 — StrEnum enforcement (partial).**
   - Add `SearchQueueStatus` (`queued/searching/completed/gated_out/pending` written raw
     in `search_worker_base/ai_gate.py:195-255`, `queue_manager.py:219-346`) and
     `DiscoveryBatchStatus` to `app/constants.py`; migrate call sites.
@@ -292,6 +292,30 @@ These are confirmed defects shipping today, not style issues.
     `ai_offer_service.py:320`, `offer_qualification.py:133,196,235`, `schemas/crm.py:201`).
     Add a validator so raw strings can't slip past.
   - Pre-commit grep hook rejecting `\.status\s*=\s*"` outside `app/constants.py`.
+  **Partially fixed (2026-07-09):** Added `SearchQueueStatus` StrEnum
+  (`app/constants.py`; `PENDING/QUEUED/SEARCHING/COMPLETED/GATED_OUT/FAILED`, values
+  unchanged from the raw literals — audited every write/compare site first via grep
+  across `search_worker_base/{ai_gate,queue_manager}.py` and the `nc_worker`/
+  `ics_worker`/`tbf_worker` `worker.py` consumers, including the `"failed"` writes in
+  the three `worker.py` main loops that the original audit line-range missed). Migrated
+  all of those call sites; `DiscoveryBatchStatus` already existed from P0.6. Enforced
+  `OfferCondition` at every listed site EXCEPT `htmx/requisitions.py:673` and
+  `sightings.py` (owned by the parallel P3 agent this wave): `htmx/offers.py:221,282`,
+  `ai_offer_service.py:320`, `offer_qualification.py:133,196,235` (comparisons — logic
+  unchanged, StrEnum compares equal to the raw string), `schemas/crm.py:201` (default
+  value only, field stays typed `str` — verified `model_dump()`/`model_dump_json()`
+  still serialize `"new"`, not an enum repr). Deliberately did NOT touch
+  `freeform_parser_service.py:166`'s `"new"` literal — that's the separate broad
+  new/refurb/used vocab (`normalize_condition`), not `OfferCondition`; conflating the
+  two is exactly what `MaterialCondition`'s docstring warns against. **Not done:** the
+  validator preventing raw strings from slipping past `OfferCondition`, and the
+  pre-commit grep hook — out of scope for this pass (not part of the assigned P2.5
+  sub-items); `sightings.py`/`htmx/requisitions.py` OfferCondition sites are the
+  parallel P3 agent's responsibility this wave. Tests:
+  `tests/test_search_queue_status_enum.py` (new — full queue lifecycle + AI-gate
+  transitions assert against the enum), `tests/test_offer_qualification.py`
+  (`TestOfferConditionEnumSites`), `tests/test_schemas_crm.py`,
+  `tests/test_ai_offer_service.py`, `tests/test_save_parsed_offers_normalize_qual.py`.
 
 - [ ] **P2.6 — Event-loop protection.**
   - Move the 14 blocking file-I/O sites in `async def` to `anyio` (worst:
@@ -308,7 +332,7 @@ These are confirmed defects shipping today, not style issues.
   readiness; add partial indexes on backfill `IS NULL` predicates; gate
   `_analyze_hot_tables` (`startup.py:1002-1005`) behind a since-last-deploy marker.
 
-- [ ] **P2.8 — Insight-refresh latency hazard (P0.1 follow-up; needs a design
+- [x] **P2.8 — Insight-refresh latency hazard (P0.1 follow-up; needs a design
   decision).** Now that the four "Refresh AI insights" endpoints actually `await`
   `generate_*_insights(...)`, the HTMX request blocks for the full generation time:
   worst case ~96s (Claude call timeout 30s × 3 retries, plus extended-thinking
@@ -319,6 +343,28 @@ These are confirmed defects shipping today, not style issues.
   visible "generation timed out, retry" state. Which of the two (and the acceptable
   per-call budget) needs an explicit design decision before implementation; do not
   band-aid it inline in the routers.
+  **Fixed (2026-07-09, stopgap — cheaper option chosen; no UI change):** rather than
+  full background generation (a UI-affecting design change out of bounds for this
+  pass), tightened the per-call Claude budget for the four interactive endpoints only.
+  Added optional `timeout_seconds`-equivalent params (`timeout` already existed;
+  added `max_attempts: int = 3`) all the way through
+  `claude_structured` → `claude_structured_with_usage` (`app/utils/claude_client.py`)
+  — defaults preserve the existing 30s/3-attempt behavior for every other caller.
+  `knowledge_service._regenerate_insights` gained `interactive: bool = False`; when
+  `True` it passes `timeout=25, max_attempts=1` to `claude_structured` (worst case
+  ~25s instead of ~96s). `generate_insights` / `generate_vendor_insights` /
+  `generate_company_insights` / `generate_pipeline_insights` forward the flag; the
+  four `htmx_views.py` refresh endpoints now call with `interactive=True`.
+  `generate_mpn_insights` (no HTMX caller) and the `knowledge_jobs._job_refresh_insights`
+  background job are untouched — still get the original 30s/3-attempt budget.
+  Verified the empty-list fallback path: on timeout/failure `_regenerate_insights`
+  returns `[]` (existing behavior, unchanged), and the router's
+  `entries or get_cached_*_insights(...)` serves the stale cached insights instead of
+  an error. Tests: `tests/test_claude_client.py` (`max_attempts` default-unchanged /
+  no-retry-at-1 / forwarded-to-`http.post`), `tests/test_knowledge_service_coverage.py`
+  (interactive path forwards `timeout=25`/`max_attempts=1`; non-interactive path omits
+  both kwargs entirely), `tests/test_insights_refresh.py` (all four endpoints assert
+  `interactive=True` was forwarded via `AsyncMock` introspection).
 
 - [ ] **P2.9 — Pre-commit mypy hook env diverges from the real gate.**
   The pre-commit hook runs mypy 1.15.0 in an isolated env with NO project
@@ -335,24 +381,68 @@ These are confirmed defects shipping today, not style issues.
 
 ## Phase 3 — Performance (~1 week)
 
-- [ ] **P3.1 — Index `requirements.assigned_buyer_id`** (`models/sourcing.py:163`, no
+- [x] **P3.1 — Index `requirements.assigned_buyer_id`** (`models/sourcing.py:163`, no
   index anywhere). Filtered on every buyer's default sightings board
   (`sightings.py:413,585`) and the offers alert source. One migration + `__table_args__`.
+  **Fixed:** added `Index("ix_requirements_assigned_buyer", "assigned_buyer_id")` to
+  `Requirement.__table_args__` (`models/sourcing.py`) and hand-wrote
+  `alembic/versions/71d3fef96529_index_requirements_assigned_buyer_id.py` (autogenerate
+  against the dev DB also picked up ~15 unrelated pre-existing drift ops — stripped so
+  the migration carries only the new index). Verified upgrade → downgrade → upgrade on a
+  throwaway Postgres 16 cluster; single head confirmed via `alembic heads` (a second
+  concurrent PR's P2.7 migration produced a merge revision
+  `1223a56cbbbb_merge_p2_7_partial_indexes_and_p3_1_.py` reconciling the two branch
+  heads). `tests/test_alembic.py` passes.
 
-- [ ] **P3.2 — Batch the CSV contact-import lookups.**
+- [x] **P3.2 — Batch the CSV contact-import lookups.**
   `htmx/companies.py:1025-1050` does up to ~2,000 sequential queries per 1,000-row
   import. Pre-fetch `CustomerSite` rows and `(site_id, email)` pairs in two queries,
   mirroring the batched pattern already used at `companies.py:837-840`.
+  **Fixed:** `import_contacts_confirm` (`htmx/companies.py`) now resolves each row's
+  matched company up front (same normalized-name/domain lookup, hoisted out of the
+  write loop), then pre-fetches every matched company's first ACTIVE site
+  (`company_id IN (...)`, ordered `company_id, id` — same ordering as the per-row
+  `.order_by(CustomerSite.id).first()` it replaces) and every existing
+  `(customer_site_id, email)` pair for those sites in one query each. Newly created
+  sites and newly created contacts are cached/added back into the same in-memory
+  dict/set as the loop runs, so within-batch site reuse and within-batch email dedup
+  (both real behaviors of the original per-row/autoflush code) are preserved exactly —
+  including the pre-existing case-sensitivity quirk (dedup compares the incoming
+  lowercased email against the stored value as-is, never lowering the stored side).
+  Extended `tests/test_crm_bulk_import.py` with
+  `test_import_contacts_confirm_multi_row_batched_lookups` (7-row, 3-company batch
+  covering site reuse, in-batch dup, unauthorized, and no-match skips — asserts exact
+  created/skipped counts and site assignment).
 
-- [ ] **P3.3 — Bulk `require_requisition_access`.**
+- [x] **P3.3 — Bulk `require_requisition_access`.**
   6 batch endpoints in `sightings.py` (1163, 1228, 1280, 1346, 2492, 2641) call it
   per-item in loops (up to 50 sequential `db.get()` for SALES/TRADER users). Add
   `require_requisition_access_bulk()` (single `IN (...)` select), reuse the documented
   `_manageable_company_ids` pattern.
+  **Fixed:** added `require_requisition_access_bulk(db, req_ids, user, *, label=...)` to
+  `app/dependencies.py` — one `Requisition.id IN (...)` select resolving every
+  `created_by` in a single round trip (no-op for unrestricted roles; raises the same
+  `HTTPException(404)` as the single-item version for any missing/non-owned id; dedups
+  `None`s and repeats). Swapped all 6 loop call sites in `app/routers/sightings.py`
+  (`sightings_batch_search`/`batch_assign`/`batch_status`/`batch_notes`/
+  `preview_inquiry`/`send_inquiry`, current lines 1164/1228/1279/1344/2489/2637) to one
+  bulk call each. New `tests/test_requisition_access_bulk.py`: unit tests for the
+  dependency (buyer no-op, sales owner passes, sales/trader non-owner 404s, missing id
+  404s, empty/`None`/duplicate-id inputs) plus router-level multi-row-basket tests for
+  all 6 endpoints (owner passes, non-owner 404s).
 
-- [ ] **P3.4 — (Opportunistic) batch phone-match `db.get()` chains** in
+- [x] **P3.4 — (Opportunistic) batch phone-match `db.get()` chains** in
   `activity_service.py:244-320` if ever used for bulk reconciliation; bounded and fine
   today.
+  **Fixed:** batched the 3 remaining per-row `db.get()` chains in
+  `match_phone_to_entity` (`app/services/activity_service.py`) — priority-1
+  (`SiteContact` → `CustomerSite` → `Company`), priority-3 (`CustomerSite` → `Company`),
+  and priority-4 (`VendorContact` → `VendorCard`) each now do one `IN (...)` select per
+  level instead of one `db.get()` per matched row, with plain dict lookups replacing the
+  `.get()` calls in the existing loops. Match-priority order and the `seen`-based
+  ambiguity/dedup logic are untouched. Extended `tests/test_unified_phone_matcher.py`
+  with 3 cases exercising the batched dicts across shared and distinct
+  companies/vendor-cards.
 
 ---
 

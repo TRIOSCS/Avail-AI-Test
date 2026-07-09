@@ -24,7 +24,7 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus, TaskStatus
+from ...constants import RESTRICTED_ROLES, OfferCondition, QuoteStatus, RequisitionStatus, SourcingStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
@@ -670,7 +670,7 @@ async def requisition_import_save(
                     "target_qty": int(form.get(f"reqs[{idx}].target_qty", "1") or "1"),
                     "brand": form.get(f"reqs[{idx}].brand", "").strip() or None,
                     "target_price": float(form.get(f"reqs[{idx}].target_price") or "0") or None,
-                    "condition": form.get(f"reqs[{idx}].condition", "new").strip(),
+                    "condition": form.get(f"reqs[{idx}].condition", OfferCondition.NEW).strip(),
                     "customer_pn": form.get(f"reqs[{idx}].customer_pn", "").strip() or None,
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,

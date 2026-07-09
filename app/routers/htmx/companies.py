@@ -994,24 +994,60 @@ async def import_contacts_confirm(
     skipped_dup = 0
     skipped_unauthorized = 0
 
+    # Resolve each row's matched company up front (same normalized-name / domain lookup
+    # used below, just hoisted out of the write loop) so the site + dedup lookups can be
+    # batched in two queries instead of up to ~2 per row (mirrors the batched authz
+    # precompute above and at :859-861).
+    row_companies: list[Company | None] = []
     for row in rows:
         company_name = str(row.get("company_name", "")).strip()
+        email = str(row.get("email", "")).strip().lower() or None
+        norm = normalize_vendor_name(company_name) if company_name else None
+        co = norm_to_company.get(norm) if norm else None
+        if co is None and email and "@" in email:
+            co = domain_to_company.get(email.split("@", 1)[1])
+        row_companies.append(co)
+
+    matched_company_ids = {co.id for co in row_companies if co is not None}
+
+    # Pre-fetch each matched company's first ACTIVE site (ordered by id — same ordering
+    # as the per-row ``.order_by(CustomerSite.id).first()`` this replaces) in one query.
+    first_site_by_company: dict[int, CustomerSite] = {}
+    if matched_company_ids:
+        for site in (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id.in_(matched_company_ids), CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.company_id, CustomerSite.id)
+            .all()
+        ):
+            first_site_by_company.setdefault(site.company_id, site)
+
+    # Pre-fetch existing (customer_site_id, email) pairs for those sites in one query.
+    # Case is preserved exactly as stored — the per-row dedup this replaces always
+    # compared the incoming (already-lowercased) email against the raw stored value, not
+    # lower(stored), so we do the same here rather than "fixing" that on the way past.
+    existing_site_emails: set[tuple[int, str]] = set()
+    _site_ids = [s.id for s in first_site_by_company.values()]
+    if _site_ids:
+        existing_site_emails = {
+            (cs_id, em)
+            for cs_id, em in db.query(SiteContact.customer_site_id, SiteContact.email)
+            .filter(SiteContact.customer_site_id.in_(_site_ids), SiteContact.email.isnot(None))
+            .all()
+        }
+
+    for idx, row in enumerate(rows):
         contact_name = str(row.get("contact_name", "")).strip()
         email = str(row.get("email", "")).strip().lower() or None
         phone = str(row.get("phone", "")).strip() or None
         role = str(row.get("role", "")).strip() or None
+        company_name = str(row.get("company_name", "")).strip()
 
         if not company_name or not contact_name:
             skipped_no_company += 1
             continue
 
-        # Match company by normalized name, then by domain
-        norm = normalize_vendor_name(company_name)
-        co = norm_to_company.get(norm) if norm else None
-        if co is None and email and "@" in email:
-            email_domain = email.split("@", 1)[1]
-            co = domain_to_company.get(email_domain)
-
+        co = row_companies[idx]
         if co is None:
             skipped_no_company += 1
             continue
@@ -1021,13 +1057,10 @@ async def import_contacts_confirm(
             skipped_unauthorized += 1
             continue
 
-        # Find or create the first ACTIVE site for this company
-        site = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == co.id, CustomerSite.is_active.is_(True))
-            .order_by(CustomerSite.id)
-            .first()
-        )
+        # Find or create the first ACTIVE site for this company — reuse the cached site
+        # (pre-fetched above, or created for an earlier row of the same company in this
+        # same batch) instead of re-querying.
+        site = first_site_by_company.get(co.id)
         if site is None:
             site = CustomerSite(
                 company_id=co.id,
@@ -1037,15 +1070,12 @@ async def import_contacts_confirm(
             )
             db.add(site)
             db.flush()  # get site.id
+            first_site_by_company[co.id] = site
 
-        # Deduplicate by email within the site
+        # Deduplicate by email within the site — check the pre-fetched set (updated
+        # in-loop as contacts are created) instead of querying per row.
         if email:
-            existing = (
-                db.query(SiteContact)
-                .filter(SiteContact.customer_site_id == site.id, SiteContact.email == email)
-                .first()
-            )
-            if existing:
+            if (site.id, email) in existing_site_emails:
                 skipped_dup += 1
                 continue
 
@@ -1060,6 +1090,8 @@ async def import_contacts_confirm(
         )
         db.add(contact)
         created += 1
+        if email:
+            existing_site_emails.add((site.id, email))
 
     if created:
         db.commit()

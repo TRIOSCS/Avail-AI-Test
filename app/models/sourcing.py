@@ -197,6 +197,10 @@ class Requirement(Base):
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
         Index("ix_requirements_sourcing_status", "sourcing_status"),
+        # Filtered on every buyer's default sightings board (routers/sightings.py:413,585)
+        # and the offers alert source (services/alerts/sources/offers.py:58-60) — no
+        # index anywhere before this (P3.1).
+        Index("ix_requirements_assigned_buyer", "assigned_buyer_id"),
         # Raw-DDL pg_trgm GIN indexes reconciled into the model so the drift gate sees them (#464).
         Index(
             "ix_requirements_normalized_mpn_trgm",

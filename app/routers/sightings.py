@@ -36,6 +36,8 @@ from ..constants import (
     RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
+    Channel,
+    OfferCondition,
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
@@ -51,6 +53,7 @@ from ..dependencies import (
     require_buyer,
     require_fresh_token,
     require_requisition_access,
+    require_requisition_access_bulk,
     require_user,
 )
 from ..models import User
@@ -1160,8 +1163,7 @@ async def sightings_batch_refresh(
         int_ids = [int(rid) for rid in requirement_ids]
         reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
         reqs_by_id = {r.id: r for r in reqs}
-        for r in reqs:
-            require_requisition_access(db, r.requisition_id, user, label="Requirement")
+        require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
         valid_ids = [rid for rid in int_ids if rid in reqs_by_id]
 
     is_sse = source == "sse"
@@ -1225,8 +1227,7 @@ async def sightings_batch_assign(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     buyer_name = "nobody"
     if buyer_id:
@@ -1277,8 +1278,7 @@ async def sightings_batch_status(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     updated = 0
     skipped = 0
@@ -1343,14 +1343,13 @@ async def sightings_batch_notes(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     for r in reqs:
         activity = ActivityLog(
             user_id=user.id,
-            activity_type="note",
-            channel="manual",
+            activity_type=ActivityType.NOTE,
+            channel=Channel.MANUAL,
             requirement_id=r.id,
             requisition_id=r.requisition_id,
             notes=notes,
@@ -2489,8 +2488,7 @@ async def sightings_preview_inquiry(
         raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
-    for r in requirements:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in requirements), user, label="Requirement")
 
     # Request-time re-validation against ACTIVE unavailability records (the modal
     # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
@@ -2636,10 +2634,9 @@ async def sightings_send_inquiry(
         raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
 
     # IDOR guard: a restricted (SALES/TRADER) user may only send RFQs for parts on
-    # requisitions they own. Enforce per distinct requisition_id in the basket — any
+    # requisitions they own. Enforce over the whole basket in one query — any
     # non-owned requisition 404s the whole send rather than emailing on its behalf.
-    for _req_id in {r.requisition_id for r in requirements}:
-        require_requisition_access(db, _req_id, user)
+    require_requisition_access_bulk(db, {r.requisition_id for r in requirements}, user)
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -2977,7 +2974,7 @@ async def sightings_create_offer(
     unit_price: str = Form(""),
     lead_time: str = Form(""),
     date_code: str = Form(""),
-    condition: str = Form("new"),
+    condition: str = Form(OfferCondition.NEW),
     packaging: str = Form(""),
     firmware: str = Form(""),
     hardware_code: str = Form(""),
@@ -3024,7 +3021,7 @@ async def sightings_create_offer(
             unit_price=safe_float(unit_price),
             lead_time=lead_time or None,
             date_code=date_code or None,
-            condition=condition or "new",
+            condition=condition or OfferCondition.NEW,
             packaging=packaging or None,
             firmware=firmware or None,
             hardware_code=hardware_code or None,
@@ -3054,7 +3051,7 @@ async def sightings_create_offer(
     # canonical builder (which no longer blocks). On a missing essential, re-render the
     # modal with inline errors and do not persist. Uses the schema-normalized condition.
     gate_errors = validate_essentials(
-        normalize_offer_condition(payload.condition) or "new",
+        normalize_offer_condition(payload.condition) or OfferCondition.NEW,
         essentials_data(
             manufacturer=manufacturer,
             packaging=packaging,

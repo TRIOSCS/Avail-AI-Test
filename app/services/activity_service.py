@@ -240,12 +240,25 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 
     # ── Priority 1: SiteContact ──────────────────────────────────────────
     contacts = db.query(SiteContact).filter(SiteContact.normalized_phone == e164, SiteContact.is_active.is_(True)).all()
+    # Batch the site + company lookups (was one db.get() pair per contact) — result sets
+    # are small (matches on a single phone number) but this keeps priority 1 at 2 queries
+    # total regardless of how many contacts matched.
+    _p1_site_ids = {c.customer_site_id for c in contacts if c.customer_site_id}
+    _p1_sites_by_id = (
+        {s.id: s for s in db.query(CustomerSite).filter(CustomerSite.id.in_(_p1_site_ids)).all()}
+        if _p1_site_ids
+        else {}
+    )
+    _p1_company_ids = {s.company_id for s in _p1_sites_by_id.values() if s.company_id}
+    _p1_companies_by_id = (
+        {co.id: co for co in db.query(Company).filter(Company.id.in_(_p1_company_ids)).all()} if _p1_company_ids else {}
+    )
     for contact in contacts:
-        site = db.get(CustomerSite, contact.customer_site_id)
+        site = _p1_sites_by_id.get(contact.customer_site_id)
         company_id = site.company_id if site else None
         if company_id is None:
             continue
-        company = db.get(Company, company_id)
+        company = _p1_companies_by_id.get(company_id)
         key = ("company", company_id)
         if key not in seen:
             seen.add(key)
@@ -294,11 +307,16 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         )
         .all()
     )
+    # Batch the per-site Company lookup (was one db.get() per matching site).
+    _p3_company_ids = {s.company_id for s in sites if s.company_id}
+    _p3_companies_by_id = (
+        {co.id: co for co in db.query(Company).filter(Company.id.in_(_p3_company_ids)).all()} if _p3_company_ids else {}
+    )
     for site in sites:
         key = ("company", site.company_id)
         if key not in seen:
             seen.add(key)
-            company = db.get(Company, site.company_id)
+            company = _p3_companies_by_id.get(site.company_id)
             candidates.append(
                 {
                     "type": "company",
@@ -316,8 +334,13 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 
     # ── Priority 4: VendorContact ────────────────────────────────────────
     vcs = db.query(VendorContact).filter(VendorContact.normalized_phone == e164).all()
+    # Batch the per-contact VendorCard lookup (was one db.get() per vendor contact).
+    _p4_card_ids = {vc.vendor_card_id for vc in vcs if vc.vendor_card_id}
+    _p4_cards_by_id = (
+        {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(_p4_card_ids)).all()} if _p4_card_ids else {}
+    )
     for vc in vcs:
-        card = db.get(VendorCard, vc.vendor_card_id) if vc.vendor_card_id else None
+        card = _p4_cards_by_id.get(vc.vendor_card_id) if vc.vendor_card_id else None
         if card is None:
             continue
         key = ("vendor", card.id)

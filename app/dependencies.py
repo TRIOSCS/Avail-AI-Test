@@ -17,6 +17,7 @@ Depends on: models, database, config
 """
 
 import hmac
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
 
@@ -237,6 +238,43 @@ def require_requisition_access(
     if owner_id is not None and owner_id == user.id:
         return
     raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
+def require_requisition_access_bulk(
+    db: Session,
+    req_ids: Iterable[int | None],
+    user: User,
+    *,
+    label: str = "Requisition",
+) -> None:
+    """Bulk equivalent of ``require_requisition_access`` — one query for many ids.
+
+    Batched equivalent of calling ``require_requisition_access`` once per id in a loop
+    (the 6 batch endpoints in ``routers/sightings.py`` used to do up to
+    ``MAX_BATCH_SIZE`` sequential ``db.get()`` calls for SALES/TRADER users): a single
+    ``id IN (...)`` select resolves every ``created_by`` in one round trip instead of one
+    per item — mirrors the batching rationale of ``_manageable_company_ids``
+    (routers/htmx/companies.py). No-op for unrestricted roles (buyer/manager/admin),
+    same fast path as the single-item version. For SALES/TRADER, every id in *req_ids*
+    must resolve to a requisition owned (``created_by``) by *user*; any missing or
+    non-owned id raises ``HTTPException(404)`` exactly like the single-item version (404
+    not 403 so existence isn't leaked). ``None`` entries and duplicates in *req_ids* are
+    ignored/deduplicated so callers can pass a set, or a list with repeats, directly.
+    Does not support the single-item version's ``owner_id`` fallback (unscoped/scratch
+    resources) — none of the current bulk call sites need it.
+    """
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return
+    ids = {rid for rid in req_ids if rid is not None}
+    if not ids:
+        return
+    owners: dict[int, int | None] = {
+        row.id: row.created_by
+        for row in db.execute(select(Requisition.id, Requisition.created_by).where(Requisition.id.in_(ids)))
+    }
+    for rid in ids:
+        if owners.get(rid) != user.id:
+            raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
 def has_buyer_role(user: User | None) -> bool:
