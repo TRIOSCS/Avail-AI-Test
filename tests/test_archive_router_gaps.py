@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.constants import TaskStatus
 from app.models import Company, CustomerSite, RequisitionTask, SiteContact, User, VendorCard
 from app.models.vendors import VendorContact
 from tests.conftest import engine, sqlite_fk_disabled  # noqa: F401
@@ -105,7 +106,7 @@ def _make_task(
         vendor_contact_id=vendor_contact_id,
         title=title,
         task_type="general",
-        status="todo",
+        status=TaskStatus.TODO,
         created_by=user_id,
         assigned_to_id=user_id,
         created_at=datetime.now(timezone.utc),
@@ -264,7 +265,7 @@ def test_complete_task_vendor_contact_deleted(client, db_session, test_user):
             vendor_contact_id=99999,
             title="Orphan VC Task",
             task_type="general",
-            status="todo",
+            status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
             created_at=datetime.now(timezone.utc),
@@ -311,7 +312,7 @@ def test_complete_task_fallback_empty_fragment(client, db_session, test_user):
         requisition_id=req.id,
         title="Req Only Task",
         task_type="general",
-        status="todo",
+        status=TaskStatus.TODO,
         created_by=test_user.id,
         assigned_to_id=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -364,7 +365,7 @@ def test_delete_task_vendor_contact_deleted_fallback(admin_client, db_session, a
             vendor_contact_id=99998,
             title="Orphan Delete Task",
             task_type="general",
-            status="todo",
+            status=TaskStatus.TODO,
             created_by=admin_user.id,
             assigned_to_id=admin_user.id,
             created_at=datetime.now(timezone.utc),
@@ -469,7 +470,7 @@ def test_snooze_task_not_crm_task(client, db_session, test_user):
         requisition_id=req.id,
         title="Req Snooze Task",
         task_type="general",
-        status="todo",
+        status=TaskStatus.TODO,
         created_by=test_user.id,
         assigned_to_id=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -695,7 +696,7 @@ def test_edit_task_vendor_contact_deleted_fallback(client, db_session, test_user
             vendor_contact_id=99997,
             title="Edit VC Orphan",
             task_type="general",
-            status="todo",
+            status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
             created_at=datetime.now(timezone.utc),
@@ -741,7 +742,7 @@ def test_snooze_task_vendor_contact_deleted_fallback(client, db_session, test_us
             vendor_contact_id=99996,
             title="Snooze VC Orphan",
             task_type="general",
-            status="todo",
+            status=TaskStatus.TODO,
             created_by=test_user.id,
             assigned_to_id=test_user.id,
             created_at=datetime.now(timezone.utc),

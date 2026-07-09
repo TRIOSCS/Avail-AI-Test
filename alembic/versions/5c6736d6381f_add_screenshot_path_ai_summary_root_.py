@@ -29,10 +29,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _column_exists(table: str, column: str) -> bool:
-    """Check whether a column already exists (PostgreSQL)."""
+    """Check whether a column already exists (PostgreSQL).
+
+    Scoped to ``table_schema = current_schema()`` so a same-named column on an
+    identically-named table in another schema (e.g. a search_path collision)
+    can't false-positive the guard and skip needed DDL.
+    """
     conn = op.get_bind()
     result = conn.execute(
-        sa.text("SELECT 1 FROM information_schema.columns WHERE table_name = :table AND column_name = :column"),
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column"
+        ),
         {"table": table, "column": column},
     )
     return result.scalar() is not None
@@ -57,7 +65,10 @@ def upgrade() -> None:
         op.add_column("offers", sa.Column("excess_line_item_id", sa.Integer(), nullable=True))
     conn = op.get_bind()
     fk_exists = conn.execute(
-        sa.text("SELECT 1 FROM pg_constraint WHERE conname = 'offers_excess_line_item_id_fkey'")
+        sa.text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'offers_excess_line_item_id_fkey' "
+            "AND conrelid = 'offers'::regclass"
+        )
     ).scalar()
     if not fk_exists:
         op.create_foreign_key(
@@ -78,7 +89,10 @@ def upgrade() -> None:
         op.add_column("trouble_tickets", sa.Column("root_cause_group_id", sa.Integer(), nullable=True))
     conn = op.get_bind()
     ticket_fk_exists = conn.execute(
-        sa.text("SELECT 1 FROM pg_constraint WHERE conname = 'trouble_tickets_root_cause_group_id_fkey'")
+        sa.text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'trouble_tickets_root_cause_group_id_fkey' "
+            "AND conrelid = 'trouble_tickets'::regclass"
+        )
     ).scalar()
     if not ticket_fk_exists:
         op.create_foreign_key(

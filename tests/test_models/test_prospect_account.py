@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.constants import DiscoveryBatchStatus
 from app.models import Company, CustomerSite, User
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
@@ -229,7 +230,7 @@ class TestDiscoveryBatchModel:
             segment="aerospace",
             regions=["US"],
             search_filters={"naics": ["336412"], "employee_min": 200},
-            status="completed",
+            status=DiscoveryBatchStatus.COMPLETED,
             prospects_found=150,
             prospects_new=42,
             prospects_updated=8,
