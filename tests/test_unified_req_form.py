@@ -25,6 +25,11 @@ def test_unified_modal_renders(client, db_session, test_user, endpoint):
     resp = client.get(endpoint)
     assert resp.status_code == 200
     assert "unifiedReqModal" in resp.text
+    # Regression: the customer typeahead input must wire its value to the `q` query
+    # param the endpoint reads (customers_typeahead_dropdown's `q: str = ""`) —
+    # without hx-vals, GET customer-typeahead always fires with q='' and the
+    # dropdown stays empty no matter what's typed.
+    assert 'hx-vals="js:{q: event.target.value}"' in resp.text
 
 
 def test_import_save_with_manufacturer(client, db_session, test_user):

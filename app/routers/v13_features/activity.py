@@ -8,6 +8,7 @@ Depends on: services/activity_service, services/webhook_service
 """
 
 import hmac
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -203,6 +204,22 @@ async def acs_webhook(
     return {"status": "accepted"}
 
 
+def _with_acs_secret(callback_url: str, secret: str) -> str:
+    """Append `?secret=<secret>` to an ACS callback URL, whether it's the built-in
+    default or an operator-configured ACS_CALLBACK_URL — robust to an existing query
+    string, and idempotent if the URL (or env value) already carries a matching `secret`
+    param, so it's never double-appended."""
+    if not secret:
+        return callback_url
+    parts = urlsplit(callback_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(k == "secret" and v == secret for k, v in query):
+        return callback_url
+    query = [(k, v) for k, v in query if k != "secret"]
+    query.append(("secret", secret))
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 @router.post("/api/calls/initiate")
 @limiter.limit("30/minute")
 async def initiate_call_endpoint(
@@ -223,17 +240,17 @@ async def initiate_call_endpoint(
 
     from app.services.acs_service import initiate_call
 
-    # When ACS_CALLBACK_URL isn't explicitly set, we build the default ourselves —
-    # so it must carry the same ?secret= the webhook now requires, or every
-    # ACS-delivered call event on an initiated call would be rejected with 403.
-    default_callback_url = f"{settings.app_url}/api/webhooks/acs"
-    if settings.acs_webhook_secret:
-        default_callback_url += f"?secret={settings.acs_webhook_secret}"
+    # The callback URL — whether the built-in default or an operator-configured
+    # ACS_CALLBACK_URL — must carry the ?secret= the webhook now requires, or every
+    # ACS-delivered call event on an initiated call is rejected with 403. Both paths
+    # go through the same helper so a configured URL isn't left un-augmented.
+    callback_url = settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs"
+    callback_url = _with_acs_secret(callback_url, settings.acs_webhook_secret)
 
     result = await initiate_call(
         to_phone=to_phone,
         from_phone=settings.acs_from_phone,
-        callback_url=settings.acs_callback_url or default_callback_url,
+        callback_url=callback_url,
         connection_string=settings.acs_connection_string,
     )
 

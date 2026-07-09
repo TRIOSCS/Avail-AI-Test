@@ -2237,19 +2237,38 @@ async def sightings_vendor_search(
     only HTML sibling so the picker's dropdown is a real hx-get swap instead of a
     client-side fetch + filter.
     """
+    from sqlalchemy import String, cast
+
     from ..utils.search_builder import SearchBuilder
 
     query = q.strip().lower()
     vendors: list[VendorCard] = []
+    limit = 8
     if len(query) >= 2:
         sb = SearchBuilder(query)
+        # Primary: match on normalized_name (mirrors autocomplete_names).
         vendors = (
             db.query(VendorCard)
             .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%", escape="\\"))
             .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
-            .limit(8)
+            .limit(limit)
             .all()
         )
+        # Secondary: match on alternate_names JSON (cast to text for ILIKE), deduped
+        # against the primary hits and appended after them — same order as
+        # autocomplete_names (vendors_crud.py).
+        seen_ids = {v.id for v in vendors}
+        vendors_by_alt = (
+            db.query(VendorCard)
+            .filter(
+                cast(VendorCard.alternate_names, String).ilike(f"%{sb.safe}%", escape="\\"),
+                VendorCard.id.notin_(seen_ids) if seen_ids else True,
+            )
+            .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
+            .limit(limit)
+            .all()
+        )
+        vendors = (vendors + vendors_by_alt)[:limit]
     ctx = {"request": request, "vendors": vendors}
     return template_response("htmx/partials/sightings/_vendor_search_results.html", ctx)
 

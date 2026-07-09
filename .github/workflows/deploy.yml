@@ -144,13 +144,15 @@ jobs:
 
             git reset --hard "$PREV"
             docker compose build --build-arg BUILD_COMMIT="rb-$(date +%s)" app enrichment-worker
-            # Scoped to app + enrichment-worker (matches the build above) — NOT a
-            # bare `docker compose up -d`. `git reset --hard` just rewound
-            # docker-compose.yml itself to $PREV, so an unscoped `up -d` here
-            # would recreate ANY service whose config differs from what's
-            # currently running (e.g. db/redis/caddy, if the failed deploy's
-            # commit touched them) — exactly the blast-radius P1.3 flagged.
-            docker compose up -d app enrichment-worker
+            # Scoped to app + enrichment-worker + caddy (matches the build above,
+            # plus caddy) — NOT a bare `docker compose up -d`. `git reset --hard`
+            # just rewound docker-compose.yml AND the Caddyfile to $PREV; caddy's
+            # config is part of deploys (Caddyfile mount, no build step of its own),
+            # so it must revert alongside the code or a deploy that changed caddy
+            # config but failed leaves caddy running the broken config. db/redis/
+            # db-backup stay excluded (stateful services, config rarely deploy-
+            # coupled) — exactly the blast-radius P1.3 flagged.
+            docker compose up -d app enrichment-worker caddy
             # NOTE: whether the failed deploy actually ran/committed a forward
             # migration isn't observable from this script (that decision lives
             # inside docker-entrypoint.sh, several process boundaries away), so

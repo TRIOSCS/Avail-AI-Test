@@ -174,6 +174,7 @@
                hx-get="/v2/partials/sightings/vendor-search"
                hx-trigger="input[target.value.trim().length >= 2] changed delay:300ms, focus[target.value.trim().length >= 2]"
                hx-target="#vendor-search-results"
+               hx-vals="js:{q: event.target.value}"
                hx-swap="innerHTML"
                @input="vsOpen = vendorQuery.trim().length >= 2"
                @focus="vsOpen = vendorQuery.trim().length >= 2"

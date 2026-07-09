@@ -55,6 +55,7 @@
                hx-get="/v2/partials/requisitions/customer-typeahead"
                hx-trigger="input changed delay:300ms, focus"
                hx-target="#customer-typeahead-results"
+               hx-vals="js:{q: event.target.value}"
                hx-swap="innerHTML"
                @focus="open = true" @input="open = true"
                @click.away="setTimeout(() => open = false, 200)"

@@ -358,6 +358,38 @@ class TestInitiateCall:
             resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
         assert resp.status_code == 500
 
+    def test_initiate_call_configured_url_gets_secret_appended(self, client, monkeypatch):
+        """Regression: an explicitly configured ACS_CALLBACK_URL must ALSO get the
+        secret appended, not just the auto-built default — otherwise every event on
+        outbound calls 403s for deployments with a configured callback URL."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
+        monkeypatch.setattr(settings, "acs_callback_url", "https://example.com/acs?foo=bar")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        mock_initiate = AsyncMock(return_value={"call_id": "abc123", "status": "initiated"})
+        with patch("app.services.acs_service.initiate_call", new=mock_initiate):
+            resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
+        assert resp.status_code == 200
+        callback = mock_initiate.call_args.kwargs["callback_url"]
+        assert "foo=bar" in callback  # existing query string preserved
+        assert "secret=correct-secret" in callback
+
+    def test_initiate_call_configured_url_with_secret_not_duplicated(self, client, monkeypatch):
+        """Regression: if the operator already baked ?secret= into the configured
+        ACS_CALLBACK_URL env value, augmentation must be idempotent (no dup param)."""
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
+        monkeypatch.setattr(settings, "acs_callback_url", "https://example.com/acs?secret=correct-secret")
+        monkeypatch.setattr(settings, "acs_webhook_secret", "correct-secret")
+        mock_initiate = AsyncMock(return_value={"call_id": "abc123", "status": "initiated"})
+        with patch("app.services.acs_service.initiate_call", new=mock_initiate):
+            resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
+        assert resp.status_code == 200
+        callback = mock_initiate.call_args.kwargs["callback_url"]
+        assert callback.count("secret=correct-secret") == 1
+
 
 # ── Company Activities ───────────────────────────────────────────────
 
@@ -992,6 +1024,34 @@ class TestAcsWebhookDirect:
         with patch("app.services.acs_service.handle_call_completed", return_value=None):
             result = await mod.acs_webhook(request, db_session)
         assert result == {"status": "accepted"}
+
+
+class TestWithAcsSecret:
+    """Direct unit tests for _with_acs_secret — the helper both the default and a
+    configured ACS_CALLBACK_URL route through so neither path is left un-augmented."""
+
+    def test_empty_secret_returns_url_unchanged(self):
+        assert mod._with_acs_secret("https://example.com/acs", "") == "https://example.com/acs"
+
+    def test_no_query_string_appends_secret(self):
+        result = mod._with_acs_secret("https://example.com/acs", "s3cr3t")
+        assert result == "https://example.com/acs?secret=s3cr3t"
+
+    def test_existing_query_string_preserved(self):
+        result = mod._with_acs_secret("https://example.com/acs?foo=bar", "s3cr3t")
+        assert "foo=bar" in result
+        assert "secret=s3cr3t" in result
+
+    def test_already_carries_matching_secret_no_dup(self):
+        url = "https://example.com/acs?secret=s3cr3t"
+        result = mod._with_acs_secret(url, "s3cr3t")
+        assert result.count("secret=s3cr3t") == 1
+
+    def test_mismatched_existing_secret_is_replaced(self):
+        url = "https://example.com/acs?secret=stale"
+        result = mod._with_acs_secret(url, "fresh")
+        assert "secret=fresh" in result
+        assert "secret=stale" not in result
 
 
 class TestInitiateCallDirect:

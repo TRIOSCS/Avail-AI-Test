@@ -2132,6 +2132,11 @@ class TestComposerVendor:
         # (GET /v2/partials/sightings/vendor-search) instead of a client-side fetch.
         assert 'hx-get="/v2/partials/sightings/vendor-search"' in resp.text
         assert "delay:300ms" in resp.text
+        # Regression: the input must actually wire the typed value to the `q` query
+        # param the endpoint reads (sightings_vendor_search's `q: str = ""`) — without
+        # hx-vals, GET vendor-search always fires with q='' and the dropdown stays
+        # empty no matter what's typed.
+        assert 'hx-vals="js:{q: event.target.value}"' in resp.text
 
 
 class TestVendorSearchDropdown:
@@ -2171,6 +2176,30 @@ class TestVendorSearchDropdown:
         resp = client.get(self.URL, params={"q": "zzznomatch"})
         assert resp.status_code == 200
         assert "No vendors found" in resp.text
+
+    def test_alternate_name_match_renders_pickable_button(self, client, db_session):
+        """Regression: alternate_names matches must surface here too (parity with
+        /api/autocomplete/names' second branch) — normalized_name alone misses a
+        vendor known only by a former/alias name."""
+        card = self._card(db_session, "Arrow Electronics Inc", normalized="arrow electronics inc")
+        card.alternate_names = ["Zenith Distribution"]
+        db_session.commit()
+        resp = client.get(self.URL, params={"q": "zenith"})
+        assert resp.status_code == 200
+        assert "Arrow Electronics Inc" in resp.text
+        assert "@click='vsOpen = false; pickVendor(" in resp.text
+
+    def test_primary_and_alternate_matches_are_deduped(self, client, db_session):
+        """A vendor matching BOTH normalized_name and alternate_names must not be
+        rendered twice."""
+        card = self._card(db_session, "Zenith Corp", normalized="zenith corp")
+        card.alternate_names = ["Zenith Distribution"]
+        db_session.commit()
+        resp = client.get(self.URL, params={"q": "zenith"})
+        assert resp.status_code == 200
+        # Count rendered buttons (text-content occurrence), not the JSON-quoted
+        # pickVendor(...) arg, which also contains the substring.
+        assert resp.text.count(">Zenith Corp<") == 1
 
 
 class TestSendInquiryFailureContainment:
