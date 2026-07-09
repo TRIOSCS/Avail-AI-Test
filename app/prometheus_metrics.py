@@ -80,6 +80,7 @@ REDIS_DOWNGRADE_TOTAL = Counter(
 _EXCLUDED_EXACT = {
     "/metrics",
     "/health",
+    "/health/ready",
     "/sw.js",
     "/favicon.ico",
     "/robots.txt",

@@ -5566,7 +5566,8 @@ deploy.sh
     +---> Step 1: Commit & push
     +---> Step 2: Build with --no-cache (build tag = git commit SHA)
     +---> Step 3: Start with --force-recreate
-    +---> Step 4: Health checks (wait for app to respond)
+    +---> Step 4: Health checks — GET /health (LIVENESS only; gates the deploy)
+    +---> Step 4b: GET /health/ready (READINESS, informational only — never gates)
     +---> Step 5: Verify deployed build tag matches built commit
     +---> Step 6: Verify CSS coverage
     |       +---> Scan templates for Tailwind color classes
@@ -5578,6 +5579,24 @@ deploy.sh
     |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
+
+**Liveness/readiness split (P2.7).** `app/startup.py`'s ~20 boot-time ops split into
+FAST (order-critical seeds/DDL-triggers/single-row checks, run synchronously in
+`run_startup_migrations()` before `main.py`'s lifespan yields) and SLOW (full-table
+backfills + `ANALYZE`, moved to `run_deferred_startup_backfills()`, launched as a
+post-yield background task via `asyncio.to_thread` + `app.utils.async_helpers.
+safe_background_task`). `GET /health` is liveness-only and answers as soon as the
+FAST phase completes — it no longer blocks behind a prod-sized full-table scan, so
+`docker-compose.yml`'s healthcheck and `deploy.sh`'s Step 4 wait loop (which poll
+`/health`) can no longer false-fail a deploy on a large DB. `GET /health/ready`
+reports whether the deferred phase has finished (module flag
+`app.startup.deferred_backfills_ready`); `deploy.sh` Step 4b curls it once, purely
+to log the state — it never gates the deploy on it. `_maybe_analyze_hot_tables`
+additionally gates the `ANALYZE` call behind a `system_config` marker keyed to
+`BUILD_COMMIT`, so a same-image container restart skips it and only a genuine new
+deploy re-runs it. Migration `187_startup_backfill_partial_idx` adds 8 PostgreSQL
+partial indexes on the exact `IS NULL` predicates the deferred backfills scan, so
+repeat-boot scans stay O(remaining rows) instead of O(table).
 
 **Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
 / `avail-ics-worker` / `avail-tbf-worker` systemd units run on the HOST (outside docker, from

@@ -116,6 +116,16 @@ if [ "$STATUS" != "healthy" ]; then
     exit 1
 fi
 
+# Step 4b: Log the P2.7 deferred-backfill readiness state. This is OBSERVABILITY
+# ONLY — the deploy is already gated on liveness (Step 4 above) and must NEVER be
+# failed by a still-running background backfill/ANALYZE phase on a prod-sized DB
+# (that false-failure was exactly what P2.7 fixed). /health/ready may legitimately
+# still report false here on a large DB; that's expected and not an error.
+echo ""
+echo "==> Checking deferred startup-backfill readiness (informational only)..."
+READY_BODY=$(docker compose exec -T app curl -sf http://localhost:8000/health/ready 2>/dev/null || echo '{"ready":"unknown"}')
+echo "==> /health/ready: ${READY_BODY}"
+
 # Step 5: Verify deployed build tag matches what we just built
 echo ""
 echo "==> Verifying deployed build tag..."

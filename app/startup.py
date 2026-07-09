@@ -71,7 +71,47 @@ def ensure_avatar_storage() -> None:
 
 
 def run_startup_migrations() -> None:
-    """Execute all idempotent startup operations.
+    """Execute the FAST, order-critical startup operations (pre-yield, main.py
+    lifespan).
+
+    P2.7 (docs/CODE_AUDIT_AND_HARDENING_PLAN.md) split the ~20 ops that used to run here
+    sequentially into FAST (kept here, blocking /health) and SLOW (moved to
+    ``run_deferred_startup_backfills``, launched as a post-yield background task so a
+    prod-sized DB can no longer make /health miss the compose healthcheck / deploy.sh
+    wait-loop budget). Classification below is by measured/reasoned cost, not just
+    order-criticality — every FAST op is either a fixed-size seed/reconcile or a
+    single-row check; every SLOW op is a full-table-shaped scan, chunked backfill, or
+    ANALYZE.
+
+    | Operation                                    | Class | Why                                                        |
+    |-----------------------------------------------|-------|-------------------------------------------------------------|
+    | _create_fts_triggers                          | FAST  | CREATE OR REPLACE FUNCTION/TRIGGER only — no data scan       |
+    | _seed_system_config                           | FAST  | 7-row INSERT ON CONFLICT DO NOTHING                          |
+    | _reconcile_system_config                      | FAST  | 4-row UPDATE by key                                          |
+    | _seed_manufacturers                           | FAST  | ~50-row INSERT ON CONFLICT DO NOTHING                        |
+    | _create_count_triggers                        | FAST  | CREATE OR REPLACE FUNCTION/TRIGGER only — no data scan       |
+    | _reconcile_connector_active                    | FAST  | no-op by design                                              |
+    | _verify_encryption_canary                     | FAST  | single-row decrypt; must fail fast before any encrypted read |
+    | _create_default_user_if_env_set               | FAST  | single-row query; order-critical for password login          |
+    | _seed_admin_user_if_env_set                    | FAST  | single-row query; order-critical for admin login              |
+    | _seed_agent_user                              | FAST  | single-row query/update                                      |
+    | _seed_verification_group_from_admin_emails     | FAST  | bounded by len(ADMIN_EMAILS)                                 |
+    | _seed_commodity_schemas                        | FAST  | bounded by the schema registry, not live-data size            |
+    | _backfill_fts                                  | SLOW → deferred | full-table UPDATE on vendor_cards/material_cards       |
+    | _seed_site_contacts                            | SLOW → deferred | one-time INSERT SELECT across customer_sites           |
+    | _backfill_company_counts                       | SLOW → deferred | full-table correlated-subquery UPDATE                  |
+    | legacy site_type / trouble_tickets UPDATEs     | SLOW → deferred | unindexed full-table predicate scans                   |
+    | _analyze_hot_tables (via _maybe_analyze_hot_tables) | SLOW → deferred | ANALYZE on 3 hot tables; also since-last-deploy gated (item 3) |
+    | _backfill_normalized_mpn                        | SLOW → deferred | chunked full-table backfill (requirements + material_cards) |
+    | _backfill_sighting_offer_normalized_mpn         | SLOW → deferred | chunked full-table backfill (sightings + offers)        |
+    | _backfill_sighting_vendor_normalized             | SLOW → deferred | chunked full-table backfill (sightings)                 |
+    | _backfill_offer_vendor_normalized                | SLOW → deferred | chunked full-table backfill (offers)                    |
+    | _backfill_proactive_offer_qty                    | SLOW → deferred | scans proactive_matches/requirements/proactive_offers   |
+    | _backfill_ticket_defaults                        | SLOW → deferred | unbatched per-row ORM update over trouble_tickets       |
+    | _backfill_material_cards                         | SLOW → deferred | per-row resolve_material_card() call over unlinked requirements |
+    | _backfill_sweep_cooldown                         | SLOW → deferred | unbounded ORM query over prospect_accounts              |
+    | _complete_reverted_active_plans                  | SLOW → deferred | per-candidate check_completion() business logic         |
+    | _warn_non_canonical_categories                    | SLOW → deferred | full-table GROUP BY scan; pure observability            |
 
     Safe to call on every app boot.
     """
@@ -90,41 +130,99 @@ def run_startup_migrations() -> None:
 
     with engine.connect() as conn:
         _create_fts_triggers(conn)
-        _backfill_fts(conn)
         _seed_system_config(conn)
         _reconcile_system_config(conn)
-        _seed_site_contacts(conn)
         _seed_manufacturers(conn)
         _create_count_triggers(conn)
-        _backfill_company_counts(conn)
         _reconcile_connector_active(conn)
-        # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
-        _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
-        _exec(
-            conn,
-            "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
-            "WHERE status = 'resolved' AND resolved_at IS NULL",
-        )
-        _analyze_hot_tables(conn)
 
     _verify_encryption_canary()
-    _backfill_normalized_mpn()
     if password_login_env_enabled():
         _create_default_user_if_env_set()
-    _backfill_sighting_offer_normalized_mpn()
-    _backfill_sighting_vendor_normalized()
-    _backfill_offer_vendor_normalized()
-    _backfill_proactive_offer_qty()
-    _backfill_ticket_defaults()
-    _backfill_material_cards()
-    _backfill_sweep_cooldown()
-    _complete_reverted_active_plans()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_verification_group_from_admin_emails()
     _seed_commodity_schemas()
-    _warn_non_canonical_categories()
-    logger.info("Startup migrations complete")
+    logger.info("Fast startup migrations complete")
+
+
+# Readiness flag for the P2.7 deferred backfill/ANALYZE phase. Defaults True so a
+# boot that never schedules the deferred phase (TESTING=1) doesn't need special-
+# casing in readers; main.py flips it False via mark_deferred_backfills_pending()
+# right before scheduling run_deferred_startup_backfills as a background task, and
+# the task flips it back True (in a finally:) when it's done or gives up.
+deferred_backfills_ready: bool = True
+
+
+def mark_deferred_backfills_pending() -> None:
+    """Flip the P2.7 readiness flag false before scheduling the deferred phase.
+
+    Called by: main.py lifespan (real boots only, immediately before scheduling
+    run_deferred_startup_backfills as a background task)
+    Depends on: nothing
+    """
+    global deferred_backfills_ready
+    deferred_backfills_ready = False
+
+
+def is_deferred_backfills_ready() -> bool:
+    """Live read of the P2.7 deferred-backfill readiness flag.
+
+    Called by: GET /health/ready (app/main.py)
+    Depends on: nothing
+    """
+    return deferred_backfills_ready
+
+
+def run_deferred_startup_backfills() -> None:
+    """Execute the SLOW, idempotent startup backfills + ANALYZE off the request path.
+
+    Runs inside a background asyncio task launched right after main.py's lifespan
+    yields (via ``asyncio.to_thread`` + ``safe_background_task``), so /health can
+    answer immediately while a prod-sized DB is still being backfilled. See the
+    classification table in ``run_startup_migrations``'s docstring for why each op
+    below is here rather than in the fast pre-yield path.
+
+    TESTING short-circuits identically to run_startup_migrations (main.py never
+    schedules this function under TESTING=1 anyway; the guard here is defense-in-
+    depth for tests that call it directly).
+
+    Called by: main.py lifespan (background task, real boots only), tests (directly)
+    Depends on: database.py (engine), the _backfill_*/_seed_site_contacts/
+        _maybe_analyze_hot_tables helpers below
+    """
+    global deferred_backfills_ready
+    if os.environ.get("TESTING"):
+        deferred_backfills_ready = True
+        return
+
+    try:
+        with engine.connect() as conn:
+            _backfill_fts(conn)
+            _seed_site_contacts(conn)
+            _backfill_company_counts(conn)
+            # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
+            _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
+            _exec(
+                conn,
+                "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
+                "WHERE status = 'resolved' AND resolved_at IS NULL",
+            )
+            _maybe_analyze_hot_tables(conn)
+
+        _backfill_normalized_mpn()
+        _backfill_sighting_offer_normalized_mpn()
+        _backfill_sighting_vendor_normalized()
+        _backfill_offer_vendor_normalized()
+        _backfill_proactive_offer_qty()
+        _backfill_ticket_defaults()
+        _backfill_material_cards()
+        _backfill_sweep_cooldown()
+        _complete_reverted_active_plans()
+        _warn_non_canonical_categories()
+        logger.info("Deferred startup backfills complete")
+    finally:
+        deferred_backfills_ready = True
 
 
 def _seed_verification_group_from_admin_emails() -> None:
@@ -1003,6 +1101,45 @@ def _analyze_hot_tables(conn) -> None:
     """Run ANALYZE on hot tables to keep pg_stat estimates fresh."""
     for tbl in ("companies", "customer_sites", "requisitions"):
         _exec(conn, "ANALYZE " + tbl)
+
+
+_ANALYZE_MARKER_KEY = "startup_last_analyze_build"
+
+
+def _maybe_analyze_hot_tables(conn) -> None:
+    """Gate _analyze_hot_tables behind a since-last-deploy marker in system_config (P2.7
+    item 3).
+
+    ANALYZE on prod-sized hot tables is exactly the kind of full-table-adjacent scan
+    a plain container restart on an UNCHANGED image shouldn't repeat every boot. The
+    marker is keyed to BUILD_COMMIT — the same tag GET /health reports and
+    deploy.sh verifies after a rebuild — so a genuinely new deploy (new BUILD_COMMIT)
+    re-runs it once, a same-image restart skips it, and an operator can force a
+    re-run by deleting the ``startup_last_analyze_build`` system_config row.
+    """
+    current_build = os.environ.get("BUILD_COMMIT", "unknown")
+    try:
+        row = conn.execute(
+            sqltext("SELECT value FROM system_config WHERE key = :k"),
+            {"k": _ANALYZE_MARKER_KEY},
+        ).fetchone()
+    except (SQLAlchemyError, DBAPIError) as e:
+        logger.warning("ANALYZE marker read failed: {}", e)
+        conn.rollback()
+        row = None
+
+    if row and row[0] == current_build:
+        logger.debug("Skipping ANALYZE hot tables — already run for build {}", current_build)
+        return
+
+    _analyze_hot_tables(conn)
+    _exec(
+        conn,
+        """INSERT INTO system_config (key, value, description)
+        VALUES (:k, :v, 'Last BUILD_COMMIT ANALYZE ran for (P2.7 since-last-deploy gate)')
+        ON CONFLICT (key) DO UPDATE SET value = :v""",
+        {"k": _ANALYZE_MARKER_KEY, "v": current_build},
+    )
 
 
 def _backfill_proactive_offer_qty() -> None:

@@ -110,6 +110,14 @@ services:
       - applogs:/var/log/avail
       - ./scripts:/app/scripts:ro
     healthcheck:
+      # Liveness only (P2.7 docs/CODE_AUDIT_AND_HARDENING_PLAN.md): /health answers as
+      # soon as the app can serve traffic. Startup's SLOW idempotent backfills/ANALYZE
+      # now run in a post-yield background task (see app/startup.py
+      # run_deferred_startup_backfills), so a prod-sized DB can no longer make this
+      # healthcheck (or deploy.sh's wait loop, which polls this same status) time out
+      # behind a full-table scan. Readiness for that background phase is reported
+      # separately at GET /health/ready — deliberately NOT wired here, so a slow
+      # deferred phase can never flip this container "unhealthy".
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s

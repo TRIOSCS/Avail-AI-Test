@@ -4,6 +4,7 @@ from .logging_config import setup_logging
 
 setup_logging()  # Must run before any other module logs
 
+import asyncio
 import hmac
 import logging
 import os
@@ -181,6 +182,19 @@ async def lifespan(app):
         configure_scheduler()
         scheduler.start()
         logger.info("APScheduler started")
+
+        # P2.7: launch the SLOW, idempotent startup backfills + ANALYZE as a
+        # post-yield background task instead of running them inline before /health
+        # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
+        # above already ran the FAST, order-critical ops synchronously.
+        from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
+        from .utils.async_helpers import safe_background_task
+
+        mark_deferred_backfills_pending()
+        await safe_background_task(
+            asyncio.to_thread(run_deferred_startup_backfills),
+            task_name="deferred_startup_backfills",
+        )
 
     yield
 
@@ -621,7 +635,7 @@ async def request_id_middleware(request: Request, call_next):
             response.headers["Pragma"] = "no-cache"
 
         # Skip noisy paths (static files, health checks)
-        if not (path.startswith("/static") or path == "/health"):
+        if not (path.startswith("/static") or path in ("/health", "/health/ready")):
             logger.info(
                 "{method} {path} → {status} ({dur}ms)",
                 method=request.method,
@@ -737,6 +751,28 @@ async def health(
         content=payload,
         status_code=200 if payload["status"] == "ok" else 503,
     )
+
+
+@app.get("/health/ready")
+async def health_ready() -> JSONResponse:
+    """Readiness probe for the P2.7 deferred startup-backfill phase.
+
+    /health (liveness) answers as soon as the app can serve traffic — it no longer
+    waits on the slow, idempotent backfills/ANALYZE that used to run inline before
+    the lifespan yielded. This endpoint reports whether that background phase has
+    finished. It is DELIBERATELY not wired into docker-compose's healthcheck or
+    deploy.sh's wait loop — those gate on liveness only (see docker-compose.yml /
+    deploy.sh comments) so a slow deferred phase can never false-fail a deploy;
+    deploy.sh instead curls this endpoint once, after liveness passes, purely to
+    log the readiness state.
+
+    Called by: deploy.sh (post-deploy, informational only), ops/monitoring
+    Depends on: app/startup.py (is_deferred_backfills_ready)
+    """
+    from .startup import is_deferred_backfills_ready
+
+    ready = is_deferred_backfills_ready()
+    return JSONResponse(content={"ready": ready}, status_code=200 if ready else 503)
 
 
 # ── Router Registration ──────────────────────────────────────────────────
