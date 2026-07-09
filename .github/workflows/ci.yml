@@ -309,6 +309,9 @@ jobs:
           name: coverage-data-${{ matrix.shard }}
           retention-days: 14
           path: .coverage.${{ matrix.shard }}
+          # Coverage data files are dotfiles; upload-artifact silently skips
+          # hidden files by default, which orphans the coverage-report job.
+          include-hidden-files: true
 
   coverage-report:
     # P2.3 follow-up: merges the per-shard coverage DATA files (uploaded as
