@@ -196,7 +196,7 @@ class TestTimezoneEndpoint:
 
 
 class TestTimezoneExtraCoverage:
-    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=UTC)
 
     def test_to_display_tz_with_zoneinfo_object(self):
         """Line 90: tz is a ZoneInfo object (not str, not None) — uses it directly."""
