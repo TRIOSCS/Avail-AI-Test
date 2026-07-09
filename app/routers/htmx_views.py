@@ -57,10 +57,10 @@ from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404
 from .auth import _password_login_enabled
 from .htmx._shared import _base_ctx, _parse_task_due_date, _safe_int, _vite_assets
+from .htmx._shared_tabs import requisition_tab
 from .htmx.requisitions import (
     _best_quote_status,
     _coerce_task_priority,
-    requisition_tab,
     requisitions_list_partial,
 )
 from .htmx.settings import _run_inbox_scan_now

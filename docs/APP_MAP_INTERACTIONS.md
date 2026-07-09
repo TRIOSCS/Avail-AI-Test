@@ -2496,9 +2496,13 @@ POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed card
 ```
 
 **Testability & Test-all concurrency.** A source is "testable" iff a real test path
-exists — `routers/sources.source_has_test_path` (= `_get_connector_for_source` can build
-a probe: credential present, or a keyless test hook such as `AIWebSearchConnector` for
-`ai_live_web`). Keyless sources with no hook (`sam_gov_enrichment`, `stock_list_import`)
+exists — `services.connector_registry.source_has_test_path` (= `get_connector_for_source`
+can build a probe: credential present, or a keyless test hook such as
+`AIWebSearchConnector` for `ai_live_web`; P4.1 moved connector lookup out of
+`routers/sources.py` into `app/services/connector_registry.py` so `health_monitor.py`
+stopped reaching into the router for it — `routers/sources.py` still imports it back
+under its original private name for its own Test-button call site). Keyless sources
+with no hook (`sam_gov_enrichment`, `stock_list_import`)
 are NOT testable and hide their Test button (previously they falsely reported OK). A
 keyless probe's ok/error result IS persisted (the old `has_env_vars` gate was dropped).
 `run_source_test` = `_probe_source` (network only, never raises) + `_persist_test_result`

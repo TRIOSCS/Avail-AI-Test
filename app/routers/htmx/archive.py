@@ -9,7 +9,7 @@ same `htmx-views` tag).
 Called by: app/main.py (router mount); htmx_views.py re-imports
     `_build_ticket_list_context` for error_reports.analyze_tickets.
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared,
-    .companies (company_tab), .vendors (vendor_tab)
+    ._shared_tabs (company_tab, vendor_tab)
 """
 
 from datetime import UTC, date, datetime
@@ -42,8 +42,7 @@ from ...models import (
 from ...template_env import template_response
 from .._lookup_helpers import get_vendor_card_or_404
 from ._shared import _base_ctx, _safe_int
-from .companies import company_tab
-from .vendors import vendor_tab
+from ._shared_tabs import company_tab, vendor_tab
 
 router = APIRouter(tags=["htmx-views"])
 

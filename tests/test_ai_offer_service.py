@@ -23,7 +23,9 @@ from app.models import (
 )
 from app.services.ai_offer_service import (
     apply_freeform_rfq,
+    parse_offer_form_rows,
     promote_prospect_contact,
+    save_form_parsed_offers,
     save_freeform_offers,
     save_parsed_offers,
 )
@@ -320,3 +322,63 @@ class TestSaveFreeformOffers:
             f"forwarded to maybe_release_on_offer but got: {forwarded_condition!r}. "
             "Task-7: add offer_condition=offer.condition to the call site."
         )
+
+
+# -- TestParseOfferFormRows ---------------------------------------------------
+# P4.2: form-array parsing extracted from routers/htmx/offers.py::save_parsed_offers.
+
+
+class TestParseOfferFormRows:
+    def test_parses_sequential_offer_rows(self):
+        """offers[0].* / offers[1].* fields collect into a row dict each, stopping at
+        the first gap."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "100",
+            "offers[0].unit_price": "0.42",
+            "offers[1].mpn": "NE555P",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert len(rows) == 2
+        assert rows[0]["mpn"] == "LM317T"
+        assert rows[0]["qty_available"] == 100
+        assert rows[0]["unit_price"] == 0.42
+        assert rows[1]["mpn"] == "NE555P"
+
+    def test_no_offer_rows_returns_empty_list(self):
+        """A form with no offers[i].* fields at all returns [] — the router's signal to
+        render 'No offers to save' without calling the save function."""
+        assert parse_offer_form_rows({}, vendor_name="Acme Distribution") == []
+
+
+# -- TestSaveFormParsedOffers -------------------------------------------------
+# P4.2: MPN matching, VendorCard resolution, Offer construction extracted from
+# routers/htmx/offers.py::save_parsed_offers (the HTMX form-review-then-save flow,
+# distinct from save_parsed_offers' AI PENDING_REVIEW path above — this one saves
+# straight to ACTIVE since the user already reviewed/edited the rows in the form).
+
+
+class TestSaveFormParsedOffers:
+    def test_creates_active_offer_with_exact_requirement_match(self, db_session: Session, test_requisition, test_user):
+        offers_data = parse_offer_form_rows(
+            {"offers[0].mpn": "LM317T", "offers[0].vendor_name": "Acme Distribution"}, vendor_name=""
+        )
+        saved_count = save_form_parsed_offers(db_session, test_requisition.id, "", offers_data, test_user)
+        db_session.commit()
+
+        assert saved_count == 1
+        offer = db_session.query(Offer).filter_by(requisition_id=test_requisition.id).first()
+        assert offer.status == "active"
+        assert offer.source == "ai_parsed"
+        assert offer.requirement_id is not None  # exact match on "LM317T"
+        card = db_session.get(VendorCard, offer.vendor_card_id)
+        assert card.display_name == "Acme Distribution"
+
+    def test_rows_with_no_mpn_are_skipped(self, db_session: Session, test_requisition, test_user):
+        """A row with a blank mpn is silently skipped — no Offer, no VendorCard."""
+        offers_data = parse_offer_form_rows({"offers[0].vendor_name": "Freeform Vendor"}, vendor_name="")
+        saved_count = save_form_parsed_offers(db_session, test_requisition.id, "", offers_data, test_user)
+        db_session.commit()
+
+        assert saved_count == 0
+        assert db_session.query(Offer).filter_by(requisition_id=test_requisition.id).count() == 0

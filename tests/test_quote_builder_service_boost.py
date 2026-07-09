@@ -365,7 +365,7 @@ class TestGetBuilderDataActiveOffer:
             }
         }
 
-        with patch("app.routers.crm._helpers._preload_last_quoted_prices", return_value=mock_prices):
+        with patch("app.services.quote_builder_service.preload_last_quoted_prices", return_value=mock_prices):
             result = get_builder_data(req.id, db_session)
 
         ph = result[0]["pricing_history"]

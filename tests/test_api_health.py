@@ -268,7 +268,7 @@ def test_get_connector_success(db_session):
 
     mock_connector = MagicMock()
     with patch(
-        "app.routers.sources._get_connector_for_source",
+        "app.services.health_monitor.get_connector_for_source",
         return_value=mock_connector,
     ):
         from app.services.health_monitor import _get_connector
@@ -292,7 +292,7 @@ def test_get_connector_returns_none_on_exception(db_session):
     db_session.flush()
 
     with patch(
-        "app.routers.sources._get_connector_for_source",
+        "app.services.health_monitor.get_connector_for_source",
         side_effect=ValueError("No credentials"),
     ):
         from app.services.health_monitor import _get_connector

@@ -633,17 +633,84 @@ These are confirmed defects shipping today, not style issues.
 
 Do these after Phases 0-2 so the new guardrails protect the refactor.
 
-- [ ] **P4.1 — Fix inverted layering (services importing router privates).**
+- [x] **P4.1 — Fix inverted layering (services importing router privates).**
   `buyer_affinity_service.py:153`, `quote_builder_service.py:216,276`,
   `health_monitor.py:150` lazily import `_private` helpers from routers. Move the
   helpers into services (`vendor_reachability.py`, `pricing_history.py`,
   `connector_registry.py`); both sides import the service. Also fixes the two
   cross-router imports (`htmx/offers.py:59`, `htmx/archive.py:45-46`).
+  **Fixed:** new `app/services/vendor_reachability.py` (`cards_with_resolvable_email`,
+  `dnc_emails_for_cards`, moved verbatim from `routers/sightings.py`) —
+  `buyer_affinity_service._reachable_card_ids` now imports them at module scope;
+  `sightings.py` re-imports both under their original private names (its own many
+  call sites + the existing test suite patch/import them off that module unmodified).
+  New `app/services/pricing_history.py` (`PRICED_STATUSES`, `quote_date_iso`,
+  `preload_last_quoted_prices`, moved from `routers/crm/_helpers.py`) —
+  `quote_builder_service.py` imports `preload_last_quoted_prices` at module scope
+  (dropped the two lazy `from app.routers.crm._helpers import` calls);
+  `routers/crm/_helpers.py` re-imports all three under their original private names
+  (`crm/quotes.py`, `crm/offers.py`, `crm/__init__.py` keep importing from `._helpers`
+  unmodified). New `app/services/connector_registry.py` (`get_connector_for_source`,
+  `source_has_test_path`, the 7 keyless Test-connector classes, moved from
+  `routers/sources.py`) — `health_monitor.py` imports `get_connector_for_source` at
+  module scope (dropped its lazy `from ..routers.sources import` call);
+  `routers/sources.py` re-imports `get_connector_for_source` under its original
+  private name for its own Test-button call site (the Test-connector classes and
+  `source_has_test_path` are NOT re-exported there — `htmx/settings.py`'s one lazy
+  import and the handful of test files that referenced them off `routers.sources`
+  now point at `services.connector_registry` directly). Cross-router fix: new
+  `app/routers/htmx/_shared_tabs.py` holds `requisition_tab` / `company_tab` /
+  `vendor_tab` (moved verbatim from `requisitions.py` / `companies.py` / `vendors.py`
+  — genuinely HTTP-shaped route handlers, not data-assembly helpers, so they stay in
+  `routers/htmx` rather than `app/services/` per the plan's own escape hatch); each
+  owning router now does `xxx_tab = router.get(path, ...)(imported_impl)` (same
+  route/URL/tag/importable name as before) instead of defining the body inline;
+  `offers.py`, `archive.py`, and `htmx_views.py` import all three from
+  `_shared_tabs` instead of reaching into the sibling router modules. `company_tab` /
+  `vendor_tab` lazily import the couple of names genuinely local to their owning
+  router (`companies.py`'s `FIELD_LABELS`/`CANONICAL_ROLES`/`_company_quotes_query`/
+  `_company_buy_plans_query`, `vendors.py`'s `vendor_reviews`) to avoid a load-time
+  import cycle — same established lazy service↔router reuse pattern used elsewhere.
+  Also promoted `companies.py`'s `_manageable_company_ids` to
+  `app.dependencies.manageable_company_ids` (batched sibling of the existing
+  `can_manage_account`/`is_manager_or_admin` there) so the new
+  `company_import_service.py` (P4.2) has a legitimate non-router import path;
+  `companies.py` re-imports it under its original private name. Updated ~15 test
+  files' patch targets/imports that referenced the old private names/router-internal
+  patch paths (`app.routers.sources._get_connector_for_source` internal callers, etc.)
+  to point at the new service modules; every test suite for the touched surfaces
+  (sightings, buyer affinity, sources/health, quotes/quote-builder, requisitions/
+  companies/vendors/offers/archive/htmx_views) passes unmodified in behavior.
+  `docs/APP_MAP_INTERACTIONS.md`'s one stale `routers/sources.source_has_test_path`
+  reference updated to `services.connector_registry.source_has_test_path`.
 
-- [ ] **P4.2 — Extract business logic from routers (quick, self-contained).**
+- [x] **P4.2 — Extract business logic from routers (quick, self-contained).**
   - CSV import (~450 lines): `companies.py:620-1089` → `services/company_import_service.py`.
   - Offer ingestion: `offers.py:190-301` → consolidate into existing
     `services/ai_offer_service.py`.
+  **Fixed:** new `app/services/company_import_service.py` — `parse_csv_rows`,
+  `preview_company_import`, `confirm_company_import`, `preview_contact_import`,
+  `confirm_contact_import` (CSV decode/parse, dedup queries, authz-scoped row
+  creation, moved verbatim including the P3.2 batched-lookup confirm path, which is
+  untouched). `routers/htmx/companies.py`'s four routes
+  (`import_companies_preview/confirm`, `import_contacts_preview/confirm`) are now
+  thin: `await request.form()` / file read, call the service, map a `ValueError` (row
+  cap) to `HTTPException(400)`, render the template / build the `HX-Trigger` toast.
+  `_manageable_company_ids` (needed by both preview functions) promoted to
+  `app.dependencies.manageable_company_ids` (see P4.1) since it's genuine
+  authz-scoping logic, not import-specific. `ai_offer_service.py` gained
+  `parse_offer_form_rows` + `save_form_parsed_offers` — the HTMX
+  form-review-then-save sibling of the existing JSON-API `save_parsed_offers`
+  (different behavior: EXACT mpn match not fuzzy, VendorCard resolve/create,
+  qualification scoring, straight to ACTIVE not PENDING_REVIEW — kept as a distinct
+  function per the plan's "two thin callers if the router flow differs", alongside
+  the pre-existing near-identical `save_freeform_offers`). `routers/htmx/offers.py`'s
+  `save_parsed_offers` route is now thin: parses the form, delegates, commits,
+  renders. `tests/test_crm_bulk_import.py` (39 tests) and the offers/AI test suites
+  (781 tests) pass UNCHANGED — the behavior-preservation proof. Added
+  `tests/test_company_import_service.py` (11 tests) and extended
+  `tests/test_ai_offer_service.py` (+4 tests) with direct service-level unit tests
+  (happy path + one edge each) for every extracted function.
 
 - [ ] **P4.3 — Split the god files along their audited seams** (one PR per split;
   re-export from a package `__init__.py` so callers don't all change at once):

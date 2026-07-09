@@ -8,13 +8,13 @@ promote/delete prospect contacts). Extracted verbatim from htmx_views.py (same
 ``/v2/partials/vendors`` + ``/v2/partials/vendor-contacts`` paths, same
 ``htmx-views`` tag) as part of the CRM-cluster domain split.
 
-Called by: app/main.py (router mount); htmx_views.py re-imports ``vendor_tab`` for
-    its vendor activity add-note route.
+Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services.crm_service,
-    app.services.strategic_vendor_service, app.services.tagging, ._shared
+    app.services.strategic_vendor_service, app.services.tagging, ._shared, ._shared_tabs
+    (vendor_tab — the tab body itself lives there now; registered on this router's
+    route table)
 """
 
-import html as html_mod  # aliased: vendor_tab binds a local `html` string var that would shadow a plain `import html`
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
@@ -24,7 +24,6 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import ActivityType
 from ...database import get_db
 from ...dependencies import require_admin, require_prospect_site_access, require_user
 from ...models import Offer, Sighting, SourcingLead, User, VendorCard
@@ -38,7 +37,8 @@ from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_vendor_card_or_404
-from ._shared import _DASH, _base_ctx, _sanitize_hx_params
+from ._shared import _base_ctx, _sanitize_hx_params
+from ._shared_tabs import vendor_tab as _vendor_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -416,7 +416,7 @@ async def delete_vendor_partial(
     db: Session = Depends(get_db),
 ):
     """Delete a vendor (admin-only) and return the refreshed vendor list."""
-    from ...models import Offer, VendorCard
+    from ...models import VendorCard
 
     card = db.get(VendorCard, vendor_id)
     if not card:
@@ -523,278 +523,11 @@ async def vendor_detail_partial(
     return template_response("htmx/partials/vendors/detail.html", ctx)
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/tab/{tab}", response_class=HTMLResponse)
-async def vendor_tab(
-    request: Request,
-    vendor_id: int,
-    tab: str,
-    mpn: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return a specific tab partial for vendor detail."""
-    vendor = get_vendor_card_or_404(db, vendor_id)
-
-    valid_tabs = {
-        "overview",
-        "contacts",
-        "find_contacts",
-        "emails",
-        "analytics",
-        "offers",
-        "reviews",
-        "activity",
-        "tasks",
-        "files",
-    }
-    if tab not in valid_tabs:
-        raise HTTPException(404, f"Unknown tab: {tab}")
-
-    ctx = _base_ctx(request, user, "vendors")
-    ctx["vendor"] = vendor
-
-    if tab == "overview":
-        sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-        if mpn.strip():
-            from app.utils.normalization import normalize_mpn
-
-            norm = normalize_mpn(mpn)
-            if norm:
-                sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
-
-        recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
-        # Safety data
-        safety_band = None
-        safety_summary = None
-        safety_flags = None
-        safety_score = None
-        safety_available = False
-        lead = (
-            db.query(SourcingLead)
-            .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-            .order_by(SourcingLead.created_at.desc())
-            .first()
-        )
-        if lead:
-            safety_band = lead.vendor_safety_band
-            safety_summary = lead.vendor_safety_summary
-            safety_flags = lead.vendor_safety_flags
-            safety_score = lead.vendor_safety_score
-            safety_available = True
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_id)
-            .order_by(VendorContact.interaction_count.desc().nullslast())
-            .limit(20)
-            .all()
-        )
-        ctx.update(
-            {
-                "recent_sightings": recent_sightings,
-                "contacts": contacts,
-                "safety_band": safety_band,
-                "safety_summary": safety_summary,
-                "safety_flags": safety_flags,
-                "safety_score": safety_score,
-                "safety_available": safety_available,
-                "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
-            }
-        )
-        # Re-use the inline overview from the detail template
-        # by rendering just the overview portion
-        return template_response("htmx/partials/vendors/overview_tab.html", ctx)
-
-    elif tab == "contacts":
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_id)
-            .order_by(VendorContact.interaction_count.desc().nullslast())
-            .limit(50)
-            .all()
-        )
-        ctx["contacts"] = contacts
-        ctx["vendor"] = vendor
-        return template_response("htmx/partials/vendors/tabs/contacts.html", ctx)
-
-    elif tab == "find_contacts":
-        prospects = (
-            db.query(ProspectContact)
-            .filter(ProspectContact.vendor_card_id == vendor_id)
-            .order_by(ProspectContact.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        ctx["prospects"] = prospects
-        return template_response("htmx/partials/vendors/find_contacts_tab.html", ctx)
-
-    elif tab == "emails":
-        from ...models.offers import Contact as RfqContact
-        from ...models.offers import VendorResponse
-
-        norm = (vendor.normalized_name or "").lower().strip()
-        contacts = (
-            (
-                db.query(RfqContact)
-                .filter(RfqContact.vendor_name_normalized == norm)
-                .order_by(RfqContact.created_at.desc())
-                .limit(100)
-                .all()
-            )
-            if norm
-            else []
-        )
-        responses = (
-            (
-                db.query(VendorResponse)
-                .filter(sqlfunc.lower(VendorResponse.vendor_name) == norm)
-                .order_by(VendorResponse.received_at.desc().nullslast())
-                .limit(100)
-                .all()
-            )
-            if norm
-            else []
-        )
-        ctx = _base_ctx(request, user, "vendors")
-        ctx.update({"vendor": vendor, "contacts": contacts, "responses": responses})
-        return template_response("htmx/partials/vendors/emails_tab.html", ctx)
-
-    elif tab == "analytics":
-        html = f"""<div class="space-y-6">
-          <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.overall_win_rate or 0) * 100:.0f}%"}</p>
-              <p class="text-xs text-gray-500 mt-1">Win Rate</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.response_rate or 0) * 100:.0f}%"}</p>
-              <p class="text-xs text-gray-500 mt-1">Response Rate</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{vendor.vendor_score or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{vendor.sighting_count or 0}</p>
-              <p class="text-xs text-gray-500 mt-1">Sightings</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{f"{vendor.avg_response_hours or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{f"{vendor.engagement_score or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
-            </div>
-          </div>
-          <p class="text-sm text-gray-500 text-center">Analytics data builds as you interact with this vendor.</p>
-        </div>"""
-        return HTMLResponse(html)
-
-    elif tab == "reviews":
-        return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
-
-    elif tab == "activity":
-        from ...models.intelligence import ActivityLog as _ActivityLog
-
-        activities = (
-            db.query(_ActivityLog)
-            .filter(_ActivityLog.vendor_card_id == vendor_id)
-            .order_by(_ActivityLog.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        activities_truncated = len(activities) >= 50
-
-        # Bucket activities into type-sections (the template renders by section), mirroring
-        # the account Activity tab. Vendors have no RFQ-contact merge (account-only), so
-        # this is a straight type bucketing of the vendor's ActivityLog rows.
-        _CALLS = frozenset({ActivityType.CALL_LOGGED})
-        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
-        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
-        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
-
-        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
-        for a in activities:
-            at = a.activity_type
-            if at in _CALLS:
-                sections["Calls"].append(a)
-            elif at in _EMAILS:
-                sections["Emails"].append(a)
-            elif at in _MEETINGS:
-                sections["Meetings"].append(a)
-            elif at in _NOTES:
-                sections["Notes"].append(a)
-            else:
-                sections["Other"].append(a)
-
-        # has_any_activity: drives empty-state vs. sections in the template
-        has_any_activity = bool(activities)
-
-        ctx = _base_ctx(request, user, "vendors")
-        ctx.update(
-            {
-                "vendor": vendor,
-                "activities": activities,
-                "sections": sections,
-                "activities_truncated": activities_truncated,
-                "has_any_activity": has_any_activity,
-            }
-        )
-        return template_response("htmx/partials/vendors/tabs/activity_tab.html", ctx)
-
-    elif tab == "tasks":
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_id)
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor"] = vendor
-        ctx["vendor_id"] = vendor_id
-        ctx["vendor_tasks"] = vendor_tasks
-        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-
-    elif tab == "files":
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor"] = vendor
-        return template_response("htmx/partials/vendors/tabs/files_tab.html", ctx)
-
-    else:  # offers
-        offers = (
-            db.query(Offer)
-            .filter(Offer.vendor_name_normalized == vendor.normalized_name)
-            .order_by(Offer.created_at.desc().nullslast())
-            .limit(50)
-            .all()
-        )
-        rows = []
-        for o in offers:
-            price_str = f"${o.unit_price:,.4f}" if o.unit_price else "RFQ"
-            date_str = o.created_at.strftime("%b %d, %Y") if o.created_at else _DASH
-            qty_str = f"{o.qty_available:,}" if o.qty_available else _DASH
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-mono text-gray-900">{html_mod.escape(o.mpn or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500 text-right">{qty_str}</td>
-              <td class="px-4 py-2 text-sm text-right">{price_str}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(o.lead_time or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
-        return HTMLResponse(html)
+# Implementation lives in ._shared_tabs (P4.1 — archive.py reused this tab render by
+# importing it straight off this sibling router module; it's now a shared home both
+# import from). Registered here, unchanged, so the route/URL/tag and the `vendor_tab`
+# name importable off this module are exactly as before.
+vendor_tab = router.get("/v2/partials/vendors/{vendor_id}/tab/{tab}", response_class=HTMLResponse)(_vendor_tab_impl)
 
 
 # ── Sprint 3: Vendor CRUD + Contact Management ────────────────────────

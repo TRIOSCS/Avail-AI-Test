@@ -20,9 +20,9 @@ from app.models import ApiSource, Requirement, Requisition, User, VendorCard, Ve
 from app.rate_limit import limiter
 from app.routers.sources import (
     _create_sightings_from_attachment,
-    _EmailMiningTestConnector,
     _get_connector_for_source,
 )
+from app.services.connector_registry import EmailMiningTestConnector as _EmailMiningTestConnector
 
 # ── _EmailMiningTestConnector ─────────────────────────────────────────
 
@@ -54,7 +54,7 @@ def test_get_connector_unknown_source():
 def test_get_connector_email_mining(monkeypatch, enabled, expect_connector):
     """Email mining returns the test connector only when enabled."""
     monkeypatch.setattr(
-        "app.routers.sources.settings",
+        "app.services.connector_registry.settings",
         SimpleNamespace(
             email_mining_enabled=enabled,
             nexar_client_id=None,
@@ -961,9 +961,9 @@ def test_get_connector_for_keyed_source(source, connector_path, creds):
 def test_get_connector_for_test_only_source(source, connector_attr):
     """Built-in test-only sources return their dedicated test connector (no env_vars
     needed)."""
-    import app.routers.sources as sources_module
+    import app.services.connector_registry as connector_registry_module
 
-    connector_cls = getattr(sources_module, connector_attr)
+    connector_cls = getattr(connector_registry_module, connector_attr.lstrip("_"))
     result = _get_connector_for_source(source)
     assert isinstance(result, connector_cls)
 
@@ -987,7 +987,7 @@ def test_get_connector_no_db_env_fallback(monkeypatch):
 async def test_clay_test_connector_search_success(monkeypatch):
     """_ClayTestConnector succeeds when Clay is connected and the credits check
     returns."""
-    from app.routers.sources import _ClayTestConnector
+    from app.services.connector_registry import ClayTestConnector as _ClayTestConnector
 
     monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
 
@@ -1003,7 +1003,7 @@ async def test_clay_test_connector_search_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_clay_test_connector_raises_when_not_connected(monkeypatch):
     """_ClayTestConnector raises (→ health 'error') when Clay OAuth isn't connected."""
-    from app.routers.sources import _ClayTestConnector
+    from app.services.connector_registry import ClayTestConnector as _ClayTestConnector
 
     monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: False)
     with pytest.raises(ValueError, match="not connected"):
@@ -1013,7 +1013,7 @@ async def test_clay_test_connector_raises_when_not_connected(monkeypatch):
 @pytest.mark.asyncio
 async def test_clay_test_connector_raises_when_mcp_unhealthy(monkeypatch):
     """_ClayTestConnector raises when the MCP session/credits call returns nothing."""
-    from app.routers.sources import _ClayTestConnector
+    from app.services.connector_registry import ClayTestConnector as _ClayTestConnector
 
     monkeypatch.setattr("app.services.clay_oauth.is_connected", lambda: True)
 
@@ -1028,7 +1028,7 @@ async def test_clay_test_connector_raises_when_mcp_unhealthy(monkeypatch):
 @pytest.mark.asyncio
 async def test_anthropic_test_connector_search_success():
     """_AnthropicTestConnector succeeds when claude_text returns a response."""
-    from app.routers.sources import _AnthropicTestConnector
+    from app.services.connector_registry import AnthropicTestConnector as _AnthropicTestConnector
 
     connector = _AnthropicTestConnector()
     with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value="OK"):
@@ -1042,7 +1042,7 @@ async def test_anthropic_test_connector_search_success():
 async def test_anthropic_test_connector_no_response(scenario):
     """_AnthropicTestConnector raises when claude_text returns None (no API key / API
     error)."""
-    from app.routers.sources import _AnthropicTestConnector
+    from app.services.connector_registry import AnthropicTestConnector as _AnthropicTestConnector
 
     connector = _AnthropicTestConnector()
     with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value=None):
@@ -1053,14 +1053,14 @@ async def test_anthropic_test_connector_no_response(scenario):
 @pytest.mark.asyncio
 async def test_teams_test_connector_success():
     """_TeamsTestConnector succeeds with 200 response."""
-    from app.routers.sources import _TeamsTestConnector
+    from app.services.connector_registry import TeamsTestConnector as _TeamsTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
 
     connector = _TeamsTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="https://webhook.example.com"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1071,10 +1071,10 @@ async def test_teams_test_connector_success():
 @pytest.mark.asyncio
 async def test_teams_test_connector_no_webhook():
     """_TeamsTestConnector raises if no webhook URL."""
-    from app.routers.sources import _TeamsTestConnector
+    from app.services.connector_registry import TeamsTestConnector as _TeamsTestConnector
 
     connector = _TeamsTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value=None):
+    with patch("app.services.connector_registry.get_credential_cached", return_value=None):
         with pytest.raises(ValueError, match="TEAMS_WEBHOOK_URL not configured"):
             await connector.search("LM358N")
 
@@ -1082,7 +1082,7 @@ async def test_teams_test_connector_no_webhook():
 @pytest.mark.asyncio
 async def test_teams_test_connector_api_error():
     """_TeamsTestConnector raises on non-200/202 response."""
-    from app.routers.sources import _TeamsTestConnector
+    from app.services.connector_registry import TeamsTestConnector as _TeamsTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 500
@@ -1090,7 +1090,7 @@ async def test_teams_test_connector_api_error():
 
     connector = _TeamsTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="https://webhook.example.com"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         with pytest.raises(ValueError, match="Teams webhook returned 500"):
@@ -1100,14 +1100,14 @@ async def test_teams_test_connector_api_error():
 @pytest.mark.asyncio
 async def test_teams_test_connector_202_accepted():
     """_TeamsTestConnector succeeds with 202 response (accepted)."""
-    from app.routers.sources import _TeamsTestConnector
+    from app.services.connector_registry import TeamsTestConnector as _TeamsTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 202
 
     connector = _TeamsTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="https://webhook.example.com"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1118,7 +1118,7 @@ async def test_teams_test_connector_202_accepted():
 @pytest.mark.asyncio
 async def test_explorium_test_connector_success():
     """_ExploriumTestConnector succeeds when API returns 200."""
-    from app.routers.sources import _ExploriumTestConnector
+    from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -1126,7 +1126,7 @@ async def test_explorium_test_connector_success():
 
     connector = _ExploriumTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="explorium_key"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1137,7 +1137,7 @@ async def test_explorium_test_connector_success():
 @pytest.mark.asyncio
 async def test_explorium_test_connector_fallback_name():
     """_ExploriumTestConnector falls back to 'name' when 'firmo_name' missing."""
-    from app.routers.sources import _ExploriumTestConnector
+    from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -1145,7 +1145,7 @@ async def test_explorium_test_connector_fallback_name():
 
     connector = _ExploriumTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="explorium_key"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1155,7 +1155,7 @@ async def test_explorium_test_connector_fallback_name():
 @pytest.mark.asyncio
 async def test_explorium_test_connector_no_name():
     """_ExploriumTestConnector falls back to 'matched' when both name keys missing."""
-    from app.routers.sources import _ExploriumTestConnector
+    from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -1163,7 +1163,7 @@ async def test_explorium_test_connector_no_name():
 
     connector = _ExploriumTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="explorium_key"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1173,10 +1173,10 @@ async def test_explorium_test_connector_no_name():
 @pytest.mark.asyncio
 async def test_explorium_test_connector_no_key():
     """_ExploriumTestConnector raises if no API key."""
-    from app.routers.sources import _ExploriumTestConnector
+    from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
     connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value=None):
+    with patch("app.services.connector_registry.get_credential_cached", return_value=None):
         with pytest.raises(ValueError, match="EXPLORIUM_API_KEY not configured"):
             await connector.search("LM358N")
 
@@ -1184,7 +1184,7 @@ async def test_explorium_test_connector_no_key():
 @pytest.mark.asyncio
 async def test_explorium_test_connector_api_error():
     """_ExploriumTestConnector raises on non-200 response."""
-    from app.routers.sources import _ExploriumTestConnector
+    from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 500
@@ -1192,7 +1192,7 @@ async def test_explorium_test_connector_api_error():
 
     connector = _ExploriumTestConnector()
     with (
-        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.services.connector_registry.get_credential_cached", return_value="explorium_key"),
         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
     ):
         with pytest.raises(ValueError, match="Explorium API returned 500"):
@@ -1202,7 +1202,7 @@ async def test_explorium_test_connector_api_error():
 @pytest.mark.asyncio
 async def test_azure_oauth_test_connector_success():
     """_AzureOAuthTestConnector succeeds with valid tenant."""
-    from app.routers.sources import _AzureOAuthTestConnector
+    from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -1211,7 +1211,7 @@ async def test_azure_oauth_test_connector_success():
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="test-tenant-id")
     with (
-        patch("app.routers.sources.settings", mock_settings),
+        patch("app.services.connector_registry.settings", mock_settings),
         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
     ):
         results = await connector.search("LM358N")
@@ -1222,11 +1222,11 @@ async def test_azure_oauth_test_connector_success():
 @pytest.mark.asyncio
 async def test_azure_oauth_test_connector_no_tenant():
     """_AzureOAuthTestConnector raises if no tenant ID configured."""
-    from app.routers.sources import _AzureOAuthTestConnector
+    from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id=None)
-    with patch("app.routers.sources.settings", mock_settings):
+    with patch("app.services.connector_registry.settings", mock_settings):
         with pytest.raises(ValueError, match="AZURE_TENANT_ID not configured"):
             await connector.search("LM358N")
 
@@ -1234,7 +1234,7 @@ async def test_azure_oauth_test_connector_no_tenant():
 @pytest.mark.asyncio
 async def test_azure_oauth_test_connector_api_error():
     """_AzureOAuthTestConnector raises on non-200 response."""
-    from app.routers.sources import _AzureOAuthTestConnector
+    from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 404
@@ -1242,7 +1242,7 @@ async def test_azure_oauth_test_connector_api_error():
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="bad-tenant")
     with (
-        patch("app.routers.sources.settings", mock_settings),
+        patch("app.services.connector_registry.settings", mock_settings),
         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
     ):
         with pytest.raises(ValueError, match="Azure OpenID discovery returned 404"):
@@ -1252,7 +1252,7 @@ async def test_azure_oauth_test_connector_api_error():
 @pytest.mark.asyncio
 async def test_azure_oauth_test_connector_tenant_mismatch():
     """_AzureOAuthTestConnector raises when issuer doesn't match tenant."""
-    from app.routers.sources import _AzureOAuthTestConnector
+    from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -1261,7 +1261,7 @@ async def test_azure_oauth_test_connector_tenant_mismatch():
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="my-tenant-id")
     with (
-        patch("app.routers.sources.settings", mock_settings),
+        patch("app.services.connector_registry.settings", mock_settings),
         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
     ):
         with pytest.raises(ValueError, match="Tenant mismatch"):

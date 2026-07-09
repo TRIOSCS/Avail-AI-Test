@@ -122,7 +122,7 @@ class TestGetBuilderData:
         req, item = req_with_item
 
         with patch(
-            "app.routers.crm._helpers._preload_last_quoted_prices",
+            "app.services.quote_builder_service.preload_last_quoted_prices",
             side_effect=Exception("db error"),
         ):
             result = get_builder_data(req.id, db_session)

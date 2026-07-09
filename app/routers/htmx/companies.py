@@ -10,16 +10,15 @@ notes/files. Extracted verbatim from htmx_views.py (same ``/v2/partials/customer
 + ``/v2/partials/companies`` + ``/v2/partials/contacts`` paths, same ``htmx-views``
 tag) as part of the CRM-cluster domain split.
 
-Called by: app/main.py (router mount); htmx_views.py re-imports ``company_tab`` for
-    its company activity add-note route; tests import ``_staleness_tier``.
+Called by: app/main.py (router mount); tests import ``_staleness_tier``.
 Depends on: app.models, app.dependencies, app.database, app.services.crm_service,
     app.services.tagging, app.services.company_merge_service,
-    app.services.contact_merge_service, ._shared
+    app.services.contact_merge_service, ._shared, ._shared_tabs (company_tab — the tab
+    body itself lives there now; registered on this router's route table)
 """
 
 import html as html_mod
 import json
-from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
@@ -29,9 +28,10 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import CRM_INDUSTRIES, ActivityType, ContactRole, RequisitionStatus, UserRole
+from ...constants import CRM_INDUSTRIES, ContactRole, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import can_manage_account, can_manage_account_team, is_manager_or_admin, require_user
+from ...dependencies import manageable_company_ids as _manageable_company_ids
 from ...models import (
     AccountCollaborator,
     BuyPlan,
@@ -41,6 +41,13 @@ from ...models import (
     Requisition,
     SiteContact,
     User,
+)
+from ...services.company_import_service import (
+    confirm_company_import,
+    confirm_contact_import,
+    parse_csv_rows,
+    preview_company_import,
+    preview_contact_import,
 )
 from ...services.crm_completeness import company_completeness as _company_completeness
 from ...services.crm_field_history import (
@@ -70,7 +77,8 @@ from ...template_env import template_response
 from ...utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
-from ._shared import _DASH, _base_ctx
+from ._shared import _base_ctx
+from ._shared_tabs import company_tab as _company_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -234,42 +242,6 @@ async def customer_contacts_partial(
 
 _VALID_BULK_COMPANY_ACTIONS = frozenset({"deactivate", "send-to-prospecting", "assign-owner"})
 _BULK_MAX_IDS = 200
-
-
-def _manageable_company_ids(user: User, companies: Iterable[Company], db: Session) -> set[int]:
-    """Return the subset of *companies*' ids that this rep may manage — batched.
-
-    Batched equivalent of calling ``can_manage_account`` once per company for a
-    non-manager: a company is manageable when the user is its ``account_owner``, owns
-    one of its sites, or is a named collaborator. Runs in at most two ownership queries
-    total regardless of how many companies are passed — the per-row alternative issues
-    up to 2*N DB round-trips (one site + one collaborator EXISTS per company). Managers
-    and admins manage everything, so callers must gate on ``is_manager_or_admin`` first
-    and skip this entirely.
-    """
-    company_list = list(companies)
-    ids = {c.id for c in company_list}
-    if not ids:
-        return set()
-    # account-owner: resolved from the already-loaded Company rows (no query).
-    manageable = {c.id for c in company_list if c.account_owner_id == user.id}
-    remaining = ids - manageable
-    if remaining:
-        manageable.update(
-            cid
-            for (cid,) in db.query(CustomerSite.company_id)
-            .filter(CustomerSite.company_id.in_(remaining), CustomerSite.owner_id == user.id)
-            .distinct()
-        )
-        remaining = ids - manageable
-    if remaining:
-        manageable.update(
-            cid
-            for (cid,) in db.query(AccountCollaborator.company_id)
-            .filter(AccountCollaborator.company_id.in_(remaining), AccountCollaborator.user_id == user.id)
-            .distinct()
-        )
-    return manageable
 
 
 @router.post("/v2/partials/customers/bulk/{action}", response_class=HTMLResponse)
@@ -612,8 +584,8 @@ async def contacts_bulk_action(
 # Confirm: create Company rows for non-duplicate valid rows; assign importer
 #          as account_owner_id.
 # Contact preview: parse CSV → flag emails that already exist in site_contacts.
-
-_IMPORT_MAX_ROWS = 1000
+# Business logic (CSV parse, dedup queries, row creation) lives in
+# app.services.company_import_service — these routes stay HTTP-only (P4.2).
 
 
 @router.post("/v2/partials/customers/import/preview", response_class=HTMLResponse)
@@ -627,85 +599,33 @@ async def import_companies_preview(
     Expected columns: name (required), website, account_type.
     Flags: duplicate (normalized_name collision), invalid (missing name).
     """
-    import csv
-    import io as _io
-
-    from ...vendor_utils import normalize_vendor_name
-
     form = await request.form()
     file = form.get("file")
     if not file:
         raise HTTPException(400, "A CSV file is required")
 
-    try:
-        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
-        text = content_bytes.decode("utf-8", errors="replace")
-        reader = csv.DictReader(_io.StringIO(text))
-        raw_rows = list(reader)
-    except Exception:
+    content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+    raw_rows = parse_csv_rows(content_bytes)
+    if raw_rows is None:
         return HTMLResponse(
             '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
             "Could not parse CSV — please check the file format.</div>"
         )
 
-    if len(raw_rows) > _IMPORT_MAX_ROWS:
-        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
-
-    # Build set of existing normalized names for dedup check
-    existing_norm_names = {
-        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
-    }
-
-    rows = []
-    for raw in raw_rows:
-        name = (raw.get("name") or raw.get("Name") or "").strip()
-        website = (raw.get("website") or raw.get("Website") or "").strip()
-        account_type = (raw.get("account_type") or raw.get("Account Type") or "").strip()
-        norm = normalize_vendor_name(name) if name else None
-
-        if not name:
-            status = "invalid"
-            status_label = "Missing name"
-        elif norm and norm in existing_norm_names:
-            status = "duplicate"
-            status_label = "Already exists"
-        else:
-            status = "valid"
-            status_label = "OK"
-
-        rows.append(
-            {
-                "name": name,
-                "website": website,
-                "account_type": account_type,
-                "status": status,
-                "status_label": status_label,
-            }
-        )
-
-    valid_count = sum(1 for r in rows if r["status"] == "valid")
-    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
-    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
-
-    import json as _json
-
-    rows_json = _json.dumps(
-        [
-            {"name": r["name"], "website": r["website"], "account_type": r["account_type"]}
-            for r in rows
-            if r["status"] == "valid"
-        ]
-    )
+    try:
+        preview = preview_company_import(db, raw_rows)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
     return template_response(
         "htmx/partials/customers/_import_preview.html",
         {
             "request": request,
-            "rows": rows,
-            "valid_count": valid_count,
-            "dup_count": dup_count,
-            "invalid_count": invalid_count,
-            "rows_json": rows_json,
+            "rows": preview["rows"],
+            "valid_count": preview["valid_count"],
+            "dup_count": preview["dup_count"],
+            "invalid_count": preview["invalid_count"],
+            "rows_json": json.dumps(preview["valid_rows"]),
         },
     )
 
@@ -721,75 +641,28 @@ async def import_companies_confirm(
     Each row: {name, website?, account_type?}. Deduplicates by normalized_name.
     Sets account_owner_id to the importing user.
     """
-    import json as _json
-
-    from ...vendor_utils import normalize_vendor_name
-
     form = await request.form()
     rows_json_str = form.get("rows_json", "")
     if not rows_json_str:
         raise HTTPException(400, "rows_json is required")
 
     try:
-        rows = _json.loads(rows_json_str)
+        rows = json.loads(rows_json_str)
         if not isinstance(rows, list):
             raise ValueError("Expected a list")
     except (ValueError, TypeError) as e:
         raise HTTPException(400, "Invalid rows_json — must be a JSON array") from e
 
-    if len(rows) > _IMPORT_MAX_ROWS:
-        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
-
-    # Re-fetch existing normalized names to guard against race conditions
-    existing_norm = {
-        row[0] for row in db.query(Company.normalized_name).filter(Company.normalized_name.isnot(None)).all()
-    }
-
-    created = 0
-    skipped_dup = 0
-    skipped_invalid = 0
-    now = datetime.now(UTC)
-
-    for row in rows:
-        name = str(row.get("name", "")).strip()
-        if not name:
-            skipped_invalid += 1
-            continue
-        norm = normalize_vendor_name(name)
-        if norm and norm in existing_norm:
-            skipped_dup += 1
-            continue
-
-        co = Company(
-            name=name,
-            website=str(row.get("website", "")).strip() or None,
-            account_type=str(row.get("account_type", "")).strip() or None,
-            account_owner_id=user.id,
-            is_active=True,
-            source="import",
-            created_at=now,
-        )
-        db.add(co)
-        if norm:
-            existing_norm.add(norm)  # prevent intra-batch duplicates
-        created += 1
-
-    if created:
-        db.commit()
-        logger.info("CSV import: {} companies created by {}", created, user.email)
-
-    parts = [f"Imported {created} compan{'y' if created == 1 else 'ies'}"]
-    if skipped_dup:
-        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
-    if skipped_invalid:
-        parts.append(f"{skipped_invalid} invalid row{'s' if skipped_invalid != 1 else ''} skipped")
-    summary = "; ".join(parts)
+    try:
+        result = confirm_company_import(db, rows, user)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
     resp = template_response(
         "htmx/partials/customers/_import_confirm_summary.html",
-        {"request": request, "summary": summary},
+        {"request": request, "summary": result["summary"]},
     )
-    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": result["summary"]}})
     return resp
 
 
@@ -809,127 +682,34 @@ async def import_contacts_preview(
     Expected columns: company_name (required), contact_name (required), email, phone, role.
     Flags: duplicate (email collision in site_contacts), invalid (missing required fields).
     """
-    import csv
-    import io as _io
-
-    from ...models.crm import SiteContact
-
     form = await request.form()
     file = form.get("file")
     if not file:
         raise HTTPException(400, "A CSV file is required")
 
-    try:
-        content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
-        text = content_bytes.decode("utf-8", errors="replace")
-        reader = csv.DictReader(_io.StringIO(text))
-        raw_rows = list(reader)
-    except Exception:
+    content_bytes = await file.read() if hasattr(file, "read") else file.file.read()
+    raw_rows = parse_csv_rows(content_bytes)
+    if raw_rows is None:
         return HTMLResponse(
             '<div class="text-rose-700 text-sm p-3 bg-rose-50 rounded border border-rose-200">'
             "Could not parse CSV — please check the file format.</div>"
         )
 
-    if len(raw_rows) > _IMPORT_MAX_ROWS:
-        raise HTTPException(400, f"CSV exceeds {_IMPORT_MAX_ROWS} row limit")
-
-    # Build set of existing contact emails for duplicate check
-    existing_emails = {
-        row[0].lower()
-        for row in db.query(SiteContact.email).filter(SiteContact.email.isnot(None), SiteContact.email != "").all()
-    }
-
-    # Build company lookup for authz check (same logic as confirm)
-    import re as _re
-
-    from ...vendor_utils import normalize_vendor_name as _normalize_vendor_name
-
-    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
-    _norm_to_company: dict[str, Company] = {}
-    _domain_to_company: dict[str, Company] = {}
-    for _co in all_companies:
-        if _co.normalized_name:
-            _norm_to_company[_co.normalized_name] = _co
-        if _co.website:
-            _dom = _re.sub(r"^https?://", "", _co.website.strip().lower())
-            _dom = _re.sub(r"^www\.", "", _dom).split("/")[0].strip()
-            if _dom:
-                _domain_to_company[_dom] = _co
-
-    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
-    _is_mgr = is_manager_or_admin(user)
-    _manageable_ids = set() if _is_mgr else _manageable_company_ids(user, all_companies, db)
-
-    rows = []
-    for raw in raw_rows:
-        company_name = (raw.get("company_name") or "").strip()
-        contact_name = (raw.get("contact_name") or "").strip()
-        email = (raw.get("email") or "").strip().lower()
-        phone = (raw.get("phone") or "").strip()
-        role = (raw.get("role") or "").strip()
-
-        if not company_name or not contact_name:
-            status = "invalid"
-            status_label = "Missing required field"
-        elif email and email in existing_emails:
-            status = "duplicate"
-            status_label = "Email already exists"
-        else:
-            # Check if the matched company is manageable by this user
-            _norm = _normalize_vendor_name(company_name)
-            _matched_co = _norm_to_company.get(_norm) if _norm else None
-            if _matched_co is None and email and "@" in email:
-                _matched_co = _domain_to_company.get(email.split("@", 1)[1])
-            if _matched_co is not None and not (_is_mgr or _matched_co.id in _manageable_ids):
-                status = "unauthorized"
-                status_label = "Company not yours"
-            else:
-                status = "valid"
-                status_label = "OK"
-
-        rows.append(
-            {
-                "company_name": company_name,
-                "contact_name": contact_name,
-                "email": email,
-                "phone": phone,
-                "role": role,
-                "status": status,
-                "status_label": status_label,
-            }
-        )
-
-    valid_count = sum(1 for r in rows if r["status"] == "valid")
-    dup_count = sum(1 for r in rows if r["status"] == "duplicate")
-    invalid_count = sum(1 for r in rows if r["status"] == "invalid")
-    unauthorized_count = sum(1 for r in rows if r["status"] == "unauthorized")
-
-    import json as _json
-
-    contacts_rows_json = _json.dumps(
-        [
-            {
-                "company_name": r["company_name"],
-                "contact_name": r["contact_name"],
-                "email": r["email"],
-                "phone": r["phone"],
-                "role": r["role"],
-            }
-            for r in rows
-            if r["status"] == "valid"
-        ]
-    )
+    try:
+        preview = preview_contact_import(db, raw_rows, user)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
     return template_response(
         "htmx/partials/customers/_import_contacts_preview.html",
         {
             "request": request,
-            "rows": rows,
-            "valid_count": valid_count,
-            "dup_count": dup_count,
-            "invalid_count": invalid_count,
-            "unauthorized_count": unauthorized_count,
-            "rows_json": contacts_rows_json,
+            "rows": preview["rows"],
+            "valid_count": preview["valid_count"],
+            "dup_count": preview["dup_count"],
+            "invalid_count": preview["invalid_count"],
+            "unauthorized_count": preview["unauthorized_count"],
+            "rows_json": json.dumps(preview["valid_rows"]),
         },
     )
 
@@ -947,170 +727,28 @@ async def import_contacts_confirm(
     deduplicates by email within the site; skips rows whose company isn't found.
     Reports created, skipped_no_company, and skipped_dup counts.
     """
-    import json as _json
-
-    from ...models.crm import CustomerSite, SiteContact
-    from ...utils.phone import normalize_e164
-    from ...vendor_utils import normalize_vendor_name
-
     form = await request.form()
     rows_json_str = form.get("rows_json", "")
     if not rows_json_str:
         raise HTTPException(400, "rows_json is required")
 
     try:
-        rows = _json.loads(rows_json_str)
+        rows = json.loads(rows_json_str)
         if not isinstance(rows, list):
             raise ValueError("Expected a list")
     except (ValueError, TypeError) as e:
         raise HTTPException(400, "Invalid rows_json — must be a JSON array") from e
 
-    if len(rows) > _IMPORT_MAX_ROWS:
-        raise HTTPException(400, f"rows_json exceeds {_IMPORT_MAX_ROWS} row limit")
-
-    # Build company lookup: normalized_name → Company (active preferred)
-    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
-    norm_to_company: dict[str, Company] = {}
-    domain_to_company: dict[str, Company] = {}
-    for co in all_companies:
-        if co.normalized_name:
-            norm_to_company[co.normalized_name] = co
-        if co.website:
-            # extract domain: strip scheme + www
-            import re as _re
-
-            domain = _re.sub(r"^https?://", "", co.website.strip().lower())
-            domain = _re.sub(r"^www\.", "", domain).split("/")[0].strip()
-            if domain:
-                domain_to_company[domain] = co
-
-    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
-    is_mgr = is_manager_or_admin(user)
-    manageable_ids = set() if is_mgr else _manageable_company_ids(user, all_companies, db)
-
-    now = datetime.now(UTC)
-    created = 0
-    skipped_no_company = 0
-    skipped_dup = 0
-    skipped_unauthorized = 0
-
-    # Resolve each row's matched company up front (same normalized-name / domain lookup
-    # used below, just hoisted out of the write loop) so the site + dedup lookups can be
-    # batched in two queries instead of up to ~2 per row (mirrors the batched authz
-    # precompute above and at :859-861).
-    row_companies: list[Company | None] = []
-    for row in rows:
-        company_name = str(row.get("company_name", "")).strip()
-        email = str(row.get("email", "")).strip().lower() or None
-        norm = normalize_vendor_name(company_name) if company_name else None
-        co = norm_to_company.get(norm) if norm else None
-        if co is None and email and "@" in email:
-            co = domain_to_company.get(email.split("@", 1)[1])
-        row_companies.append(co)
-
-    matched_company_ids = {co.id for co in row_companies if co is not None}
-
-    # Pre-fetch each matched company's first ACTIVE site (ordered by id — same ordering
-    # as the per-row ``.order_by(CustomerSite.id).first()`` this replaces) in one query.
-    first_site_by_company: dict[int, CustomerSite] = {}
-    if matched_company_ids:
-        for site in (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id.in_(matched_company_ids), CustomerSite.is_active.is_(True))
-            .order_by(CustomerSite.company_id, CustomerSite.id)
-            .all()
-        ):
-            first_site_by_company.setdefault(site.company_id, site)
-
-    # Pre-fetch existing (customer_site_id, email) pairs for those sites in one query.
-    # Case is preserved exactly as stored — the per-row dedup this replaces always
-    # compared the incoming (already-lowercased) email against the raw stored value, not
-    # lower(stored), so we do the same here rather than "fixing" that on the way past.
-    existing_site_emails: set[tuple[int, str]] = set()
-    _site_ids = [s.id for s in first_site_by_company.values()]
-    if _site_ids:
-        existing_site_emails = {
-            (cs_id, em)
-            for cs_id, em in db.query(SiteContact.customer_site_id, SiteContact.email)
-            .filter(SiteContact.customer_site_id.in_(_site_ids), SiteContact.email.isnot(None))
-            .all()
-        }
-
-    for idx, row in enumerate(rows):
-        contact_name = str(row.get("contact_name", "")).strip()
-        email = str(row.get("email", "")).strip().lower() or None
-        phone = str(row.get("phone", "")).strip() or None
-        role = str(row.get("role", "")).strip() or None
-        company_name = str(row.get("company_name", "")).strip()
-
-        if not company_name or not contact_name:
-            skipped_no_company += 1
-            continue
-
-        co = row_companies[idx]
-        if co is None:
-            skipped_no_company += 1
-            continue
-
-        # AUTHZ: rep may only attach contacts to companies they manage
-        if not (is_mgr or co.id in manageable_ids):
-            skipped_unauthorized += 1
-            continue
-
-        # Find or create the first ACTIVE site for this company — reuse the cached site
-        # (pre-fetched above, or created for an earlier row of the same company in this
-        # same batch) instead of re-querying.
-        site = first_site_by_company.get(co.id)
-        if site is None:
-            site = CustomerSite(
-                company_id=co.id,
-                site_name="HQ",
-                is_active=True,
-                created_at=now,
-            )
-            db.add(site)
-            db.flush()  # get site.id
-            first_site_by_company[co.id] = site
-
-        # Deduplicate by email within the site — check the pre-fetched set (updated
-        # in-loop as contacts are created) instead of querying per row.
-        if email:
-            if (site.id, email) in existing_site_emails:
-                skipped_dup += 1
-                continue
-
-        contact = SiteContact(
-            customer_site_id=site.id,
-            full_name=contact_name,
-            email=email,
-            phone=normalize_e164(phone) if phone else None,
-            contact_role=role,
-            is_active=True,
-            created_at=now,
-        )
-        db.add(contact)
-        created += 1
-        if email:
-            existing_site_emails.add((site.id, email))
-
-    if created:
-        db.commit()
-        logger.info("Contact CSV import: {} contacts created by {}", created, user.email)
-
-    parts = [f"Imported {created} contact{'s' if created != 1 else ''}"]
-    if skipped_no_company:
-        parts.append(f"{skipped_no_company} skipped (company not found)")
-    if skipped_dup:
-        parts.append(f"{skipped_dup} duplicate{'s' if skipped_dup != 1 else ''} skipped")
-    if skipped_unauthorized:
-        parts.append(f"{skipped_unauthorized} skipped — not your account{'s' if skipped_unauthorized != 1 else ''}")
-    summary = "; ".join(parts)
+    try:
+        result = confirm_contact_import(db, rows, user)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
     resp = template_response(
         "htmx/partials/customers/_import_confirm_summary.html",
-        {"request": request, "summary": summary},
+        {"request": request, "summary": result["summary"]},
     )
-    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": summary}})
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": result["summary"]}})
     return resp
 
 
@@ -2533,247 +2171,13 @@ async def _render_company_detail(
     return template_response("htmx/partials/customers/detail.html", ctx)
 
 
-@router.get("/v2/partials/customers/{company_id}/tab/{tab}", response_class=HTMLResponse)
-async def company_tab(
-    request: Request,
-    company_id: int,
-    tab: str,
-    site_id: int | None = Query(None),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return a specific tab partial for company detail."""
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not can_manage_account(user, company, db):
-        raise HTTPException(404, "Company not found")  # scope detail to match the contacts list
-
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
-    if tab not in valid_tabs:
-        raise HTTPException(404, f"Unknown tab: {tab}")
-
-    if tab == "sites":
-        from sqlalchemy.orm import joinedload
-
-        sites = (
-            db.query(CustomerSite)
-            .options(joinedload(CustomerSite.owner), joinedload(CustomerSite.site_contacts))
-            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-            .all()
-        )
-        users = db.query(User).order_by(User.name).all()
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company"] = company
-        ctx["sites"] = sites
-        ctx["users"] = users
-        return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
-
-    elif tab == "contacts":
-        active_sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-            .order_by(CustomerSite.site_name)
-            .all()
-        )
-        # IDOR-safe: only honor site_id when it belongs to this company's active sites.
-        preselect_site_id = site_id if site_id and any(s.id == site_id for s in active_sites) else None
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "contact_rows": _company_contact_rows(db, company_id, viewer=user),
-                "now_utc": datetime.now(UTC),
-                "active_sites": active_sites,
-                "roles": CANONICAL_ROLES,
-                "preselect_site_id": preselect_site_id,
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
-
-    elif tab == "requisitions":
-        from sqlalchemy import or_
-
-        reqs = (
-            db.query(Requisition)
-            .filter(
-                or_(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
-            .order_by(Requisition.created_at.desc().nullslast())
-            .limit(50)
-            .all()
-        )
-        rows = []
-        for r in reqs:
-            date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "\u2014"
-            rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
-                hx-get="/v2/partials/requisitions/{r.id}"
-                hx-target="#main-content"
-                hx-push-url="/v2/requisitions/{r.id}">
-              <td class="px-4 py-2 text-sm font-medium text-brand-500">{html_mod.escape(r.name or "")}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(r.status or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
-        return HTMLResponse(html)
-
-    elif tab == "quotes":
-        cq = _company_quotes_query(db, company)
-        quotes = cq.order_by(Quote.created_at.desc().nullslast()).all() if cq is not None else []
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update({"company": company, "quotes": quotes})
-        return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
-
-    elif tab == "buy_plans":
-        bpq = _company_buy_plans_query(db, company)
-        buy_plans = bpq.order_by(BuyPlan.created_at.desc().nullslast()).all() if bpq is not None else []
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update({"company": company, "buy_plans": buy_plans})
-        return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
-
-    elif tab == "files":
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company"] = company
-        return template_response("htmx/partials/customers/tabs/files_tab.html", ctx)
-
-    elif tab == "history":
-        history = _field_history_for(db, _ENTITY_COMPANY, company_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "history": history,
-                "field_labels": FIELD_LABELS,
-                "now_utc": datetime.now(UTC),
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/history_tab.html", ctx)
-
-    else:  # activity
-        from sqlalchemy import or_ as or_clause
-
-        from ...models.intelligence import ActivityLog
-        from ...models.offers import Contact as RfqContact
-
-        # Find all requisition IDs linked to this company (via FK or name match)
-        req_ids = [
-            r.id
-            for r in db.query(Requisition.id)
-            .filter(
-                or_clause(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
-            .all()
-        ]
-
-        # RFQ contacts across company's requisitions (canonical RFQ source)
-        rfq_contacts: list = []
-        req_map: dict = {}
-        if req_ids:
-            rfq_contacts = (
-                db.query(RfqContact)
-                .filter(RfqContact.requisition_id.in_(req_ids))
-                .order_by(RfqContact.created_at.desc())
-                .limit(30)
-                .all()
-            )
-            if rfq_contacts:
-                linked_req_ids = {c.requisition_id for c in rfq_contacts}
-                for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
-                    req_map[r.id] = r
-
-        # Direct activity logs on this company + its requisitions (newest-first).
-        # Exclude rfq_sent: RfqContact rows are the canonical source; showing both
-        # would double-show the same RFQ.
-        _RFQ_SENT = ActivityType.RFQ_SENT
-        activity_filters = [ActivityLog.company_id == company.id]
-        if req_ids:
-            activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
-        activities = (
-            db.query(ActivityLog)
-            .filter(or_clause(*activity_filters))
-            .filter(ActivityLog.activity_type != _RFQ_SENT)
-            .order_by(ActivityLog.created_at.desc())
-            .limit(50)
-            .all()
-        )
-
-        activities_truncated = len(activities) >= 50
-
-        # Bucket activities into type-sections (template renders by section).
-        # Emails section also carries RFQ contact items (tagged with _is_rfq=True);
-        # they are merged and sorted newest-first in the template.
-        _CALLS = frozenset({ActivityType.CALL_LOGGED})
-        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
-        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
-        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
-
-        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
-
-        # Wrap RFQ contacts as tagged dicts so the template can branch on _is_rfq
-        for c in rfq_contacts:
-            sections["Emails"].append({"_is_rfq": True, "raw": c, "req": req_map.get(c.requisition_id)})
-
-        for a in activities:
-            at = a.activity_type
-            if at in _CALLS:
-                sections["Calls"].append(a)
-            elif at in _EMAILS:
-                sections["Emails"].append(a)
-            elif at in _MEETINGS:
-                sections["Meetings"].append(a)
-            elif at in _NOTES:
-                sections["Notes"].append(a)
-            else:
-                sections["Other"].append(a)
-
-        # Sort Emails section: RFQ dicts use raw.created_at; ActivityLog uses created_at
-        import datetime as _dt_mod
-
-        _epoch = _dt_mod.datetime(1970, 1, 1, tzinfo=_dt_mod.UTC)
-
-        def _email_ts(item):
-            if isinstance(item, dict):
-                c = item["raw"]
-                return c.created_at or _epoch
-            return item.created_at or _epoch
-
-        sections["Emails"].sort(key=_email_ts, reverse=True)
-
-        # has_any_activity: drives empty-state vs. sections in the template
-        has_any_activity = bool(activities) or any(sections.values())
-
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "activities": activities,
-                "sections": sections,
-                "activities_truncated": activities_truncated,
-                "req_map": req_map,
-                "has_any_activity": has_any_activity,
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)
+# Implementation lives in ._shared_tabs (P4.1 \u2014 archive.py reused this tab render by
+# importing it straight off this sibling router module; it's now a shared home both
+# import from). Registered here, unchanged, so the route/URL/tag and the `company_tab`
+# name importable off this module are exactly as before.
+company_tab = router.get("/v2/partials/customers/{company_id}/tab/{tab}", response_class=HTMLResponse)(
+    _company_tab_impl
+)
 
 
 # ── Contacts-tab management (C2) ───────────────────────────────────────

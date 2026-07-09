@@ -139,6 +139,42 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:
     return bool(db.scalar(select(collab_exists)))
 
 
+def manageable_company_ids(user: User, companies: Iterable[Company], db: "Session") -> set[int]:
+    """Return the subset of *companies*' ids that this rep may manage — batched.
+
+    Batched equivalent of calling ``can_manage_account`` once per company for a
+    non-manager: a company is manageable when the user is its ``account_owner``, owns
+    one of its sites, or is a named collaborator. Runs in at most two ownership queries
+    total regardless of how many companies are passed — the per-row alternative issues
+    up to 2*N DB round-trips (one site + one collaborator EXISTS per company). Managers
+    and admins manage everything, so callers must gate on ``is_manager_or_admin`` first
+    and skip this entirely.
+    """
+    company_list = list(companies)
+    ids: set[int] = {int(c.id) for c in company_list}
+    if not ids:
+        return set()
+    # account-owner: resolved from the already-loaded Company rows (no query).
+    manageable: set[int] = {int(c.id) for c in company_list if c.account_owner_id == user.id}
+    remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            int(cid)
+            for (cid,) in db.query(CustomerSite.company_id)
+            .filter(CustomerSite.company_id.in_(remaining), CustomerSite.owner_id == user.id)
+            .distinct()
+        )
+        remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            int(cid)
+            for (cid,) in db.query(AccountCollaborator.company_id)
+            .filter(AccountCollaborator.company_id.in_(remaining), AccountCollaborator.user_id == user.id)
+            .distinct()
+        )
+    return manageable
+
+
 def require_prospect_site_access(db: Session, user: User, pc: "ProspectContact") -> None:
     """Gate a mutation on a site-linked prospect contact on account-management rights.
 

@@ -553,7 +553,7 @@ def _enrich_source(source, db) -> dict:
     if ct == "planned" or worker is not None:
         testable = False
     elif keyless:
-        from ..sources import source_has_test_path
+        from ...services.connector_registry import source_has_test_path
 
         testable = source_has_test_path(name, db)
     else:

@@ -33,7 +33,8 @@ adds no schema and changes no existing signatures.
 
 Called by: routers/resell.py (Chunk D wiring), the nightly scorecard batch
 Depends on: models (ExcessOffer/Line, ExcessOutreach, ExcessList/LineItem, BuyerScore,
-            VendorCard, MaterialCard, User), routers.sightings reachability/DNC gates
+            VendorCard, MaterialCard, User), services.vendor_reachability
+            (cards_with_resolvable_email / dnc_emails_for_cards gates)
 """
 
 from datetime import UTC, datetime, timedelta
@@ -54,6 +55,8 @@ from ..models.excess import (
     ExcessOutreach,
 )
 from ..models.intelligence import MaterialCard
+from ..models.vendors import VendorContact
+from ..services.vendor_reachability import cards_with_resolvable_email, dnc_emails_for_cards
 
 # Tier ranks (lower = stronger signal), mirroring the coverage-then-engagement bucket
 # ordering in _coverage_ranked_vendor_rows but keyed on the BUYER's affinity signal.
@@ -145,22 +148,18 @@ def _reachable_card_ids(db: Session, card_ids: list[int]) -> set[int]:
     Reuses the sightings gates verbatim (the SAME "can we reach this card" logic the RFQ
     suggestion applies) so a suggested buyer is always offerable: a card is kept iff it
     has a resolvable VendorContact email AND none of its emails is flagged
-    do_not_contact. Imported lazily from the router (the established service→router
-    reuse pattern, e.g. activity_service / rfq_attachments) to avoid reinventing it.
+    do_not_contact.
     """
     if not card_ids:
         return set()
-    from ..routers.sightings import _cards_with_resolvable_email, _dnc_emails_for_cards
 
-    reachable = _cards_with_resolvable_email(db, card_ids)
+    reachable = cards_with_resolvable_email(db, card_ids)
     if not reachable:
         return set()
-    dnc_emails = _dnc_emails_for_cards(db, list(reachable))
+    dnc_emails = dnc_emails_for_cards(db, list(reachable))
     if not dnc_emails:
         return reachable
     # Drop a card all of whose resolvable emails are DNC-flagged.
-    from ..models.vendors import VendorContact
-
     rows = (
         db.query(VendorContact.vendor_card_id, VendorContact.email)
         .filter(

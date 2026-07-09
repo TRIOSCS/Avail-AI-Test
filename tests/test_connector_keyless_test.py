@@ -33,8 +33,8 @@ from app.routers.sources import (
     _persist_test_result,
     _test_toast_header,
     run_source_test,
-    source_has_test_path,
 )
+from app.services.connector_registry import source_has_test_path
 from tests.conftest import engine  # noqa: F401
 
 

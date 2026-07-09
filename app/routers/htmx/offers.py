@@ -8,7 +8,7 @@ verbatim from htmx_views.py (same `/v2/partials` paths, same `htmx-views` tag).
 
 Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
-    (_safe_int/_safe_float), .requisitions (requisition_tab — every offer route
+    (_safe_int/_safe_float), ._shared_tabs (requisition_tab — every offer route
     re-renders the requisition offers tab).
 """
 
@@ -28,7 +28,6 @@ from ...constants import (
     ActivityType,
     AttributionStatus,
     ContactStatus,
-    OfferCondition,
     OfferStatus,
     QuoteStatus,
     UserRole,
@@ -52,12 +51,13 @@ from ...models import (
     VendorCard,
 )
 from ...services.activity_service import log_activity as _log_activity
+from ...services.ai_offer_service import parse_offer_form_rows, save_form_parsed_offers
 from ...services.status_machine import require_valid_transition
 from ...services.vendor_unavailability import maybe_release_on_offer
 from ...template_env import template_response
 from .._lookup_helpers import get_requisition_or_404
 from ._shared import _base_ctx, _parse_date_safe, _safe_float, _safe_int
-from .requisitions import requisition_tab
+from ._shared_tabs import requisition_tab
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -194,37 +194,19 @@ async def save_parsed_offers(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Save user-edited parsed offers to the requisition."""
+    """Save user-edited parsed offers to the requisition.
+
+    Business logic (form-array parsing, MPN→requirement matching, VendorCard
+    lookup/creation, Offer construction) lives in app.services.ai_offer_service
+    (parse_offer_form_rows / save_form_parsed_offers) — this route stays HTTP-only
+    (P4.2).
+    """
     req = get_requisition_or_404(db, req_id)
     require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "")
-
-    # Collect offers from form fields (offers[0].mpn, offers[0].qty_available, etc.)
-    offers_data: list[dict] = []
-    idx = 0
-    while True:
-        mpn = form.get(f"offers[{idx}].mpn")
-        if mpn is None:
-            # Also check vendor_name field for freeform offers
-            vn = form.get(f"offers[{idx}].vendor_name")
-            if vn is None:
-                break
-        offer = {
-            "vendor_name": form.get(f"offers[{idx}].vendor_name", vendor_name),
-            "mpn": form.get(f"offers[{idx}].mpn", ""),
-            "manufacturer": form.get(f"offers[{idx}].manufacturer"),
-            "qty_available": _safe_int(form.get(f"offers[{idx}].qty_available")),
-            "unit_price": _safe_float(form.get(f"offers[{idx}].unit_price")),
-            "lead_time": form.get(f"offers[{idx}].lead_time"),
-            "date_code": form.get(f"offers[{idx}].date_code"),
-            "condition": form.get(f"offers[{idx}].condition", OfferCondition.NEW),
-            "moq": _safe_int(form.get(f"offers[{idx}].moq")),
-            "notes": form.get(f"offers[{idx}].notes"),
-        }
-        offers_data.append(offer)
-        idx += 1
+    offers_data = parse_offer_form_rows(form, vendor_name)
 
     if not offers_data:
         return HTMLResponse(
@@ -232,68 +214,7 @@ async def save_parsed_offers(
             "No offers to save.</div>"
         )
 
-    # Match MPNs to requirements
-    reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
-    from app.services.offer_qualification import apply_qualification
-    from app.utils.normalization import normalize_mpn_key
-    from app.vendor_utils import normalize_vendor_name
-
-    saved_count = 0
-    for o in offers_data:
-        if not o["mpn"]:
-            continue
-
-        # Find matching requirement
-        req_match_id = None
-        mpn_lower = (o["mpn"] or "").strip().lower()
-        for r in reqs:
-            if r.primary_mpn and r.primary_mpn.strip().lower() == mpn_lower:
-                req_match_id = r.id
-                break
-
-        # Resolve vendor card
-        vn = o.get("vendor_name") or vendor_name or "Unknown"
-        norm_name = normalize_vendor_name(vn)
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
-        if not card:
-            card = VendorCard(
-                normalized_name=norm_name,
-                display_name=vn,
-                emails=[],
-                phones=[],
-            )
-            db.add(card)
-            db.flush()
-
-        offer = Offer(
-            requisition_id=req_id,
-            requirement_id=req_match_id,
-            vendor_card_id=card.id,
-            vendor_name=card.display_name,
-            vendor_name_normalized=card.normalized_name,
-            mpn=o["mpn"],
-            # Canonical dedup key (dash-stripped) so the part-centric offers query
-            # matches these AI-parsed offers, mirroring add_offer / create_offer.
-            normalized_mpn=normalize_mpn_key(o["mpn"]),
-            manufacturer=o.get("manufacturer"),
-            qty_available=o.get("qty_available"),
-            unit_price=o.get("unit_price"),
-            lead_time=o.get("lead_time"),
-            date_code=o.get("date_code"),
-            condition=o.get("condition") or OfferCondition.NEW,
-            moq=o.get("moq"),
-            notes=o.get("notes"),
-            source="ai_parsed",
-            entered_by_id=user.id,
-            status=OfferStatus.ACTIVE,
-        )
-        apply_qualification(offer)  # non-raising: composes note + sets qualification_status
-        db.add(offer)
-        # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
-        # proof of availability, release the vendor's matching active records.
-        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user, offer_condition=offer.condition)
-        saved_count += 1
-
+    saved_count = save_form_parsed_offers(db, req_id, vendor_name, offers_data, user)
     db.commit()
 
     ctx = _base_ctx(request, user, "requisitions")

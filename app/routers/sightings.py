@@ -71,6 +71,8 @@ from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..services.vendor_duplicates import check_vendor_duplicate
+from ..services.vendor_reachability import cards_with_resolvable_email as _cards_with_resolvable_email
+from ..services.vendor_reachability import dnc_emails_for_cards as _dnc_emails_for_cards
 from ..services.vendor_unavailability import (
     clear_unavailability,
     condition_matches,
@@ -1713,66 +1715,13 @@ class SuggestedVendor(NamedTuple):
     lead_time_days: int | None = None
 
 
-def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
-    """Card ids for which the send path would resolve a non-empty contact email.
-
-    MIRRORS the send-path contact resolution in sightings_send_inquiry /
-    sightings_preview_inquiry EXACTLY: a vendor is reachable iff a VendorContact for its
-    card has a non-empty ``email`` (the send path reads ``contact.email`` from
-    _best_contacts_by_card; it never consults ``card.emails``). One batched query over
-    all representative card ids — no N+1 over groups. Empty input → empty set.
-    """
-    if not card_ids:
-        return set()
-    rows = (
-        db.query(VendorContact.vendor_card_id)
-        .filter(
-            VendorContact.vendor_card_id.in_(card_ids),
-            VendorContact.email.isnot(None),
-            VendorContact.email != "",
-        )
-        .distinct()
-        .all()
-    )
-    return {cid for (cid,) in rows}
-
-
-def _dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
-    """Return the lowercased email addresses (from VendorContact) that will be DNC-
-    skipped by send_batch_rfq for the given vendor card ids.
-
-    Mirrors the send-time DNC check in email_service.send_batch_rfq (line ~181):
-    join VendorContact → SiteContact by func.lower(email), filtered on
-    SiteContact.do_not_contact.is_(True). Uses func.lower on BOTH sides so the
-    advisory set is consistent with the case-insensitive send-time check.
-
-    Returns a set of lowercased emails — the caller compares contact.email.lower()
-    against this set. Advisory only; the authoritative skip stays in send_batch_rfq
-    (TOCTOU guard — a SiteContact can be flagged after the modal opens).
-
-    Called by: sightings_vendor_modal, sightings_preview_inquiry.
-    """
-    if not card_ids:
-        return set()
-
-    from ..models.crm import SiteContact
-
-    rows = (
-        db.query(VendorContact.email)
-        .join(
-            SiteContact,
-            sqlfunc.lower(VendorContact.email) == sqlfunc.lower(SiteContact.email),
-        )
-        .filter(
-            VendorContact.vendor_card_id.in_(card_ids),
-            VendorContact.email.isnot(None),
-            VendorContact.email != "",
-            SiteContact.do_not_contact.is_(True),
-        )
-        .distinct()
-        .all()
-    )
-    return {email.lower() for (email,) in rows}
+# ``_cards_with_resolvable_email`` / ``_dnc_emails_for_cards`` live in
+# ``app.services.vendor_reachability`` now (P4.1 — buyer_affinity_service.py needed
+# them too and was reaching into this router's privates to get them; both routers and
+# services now import the same service module). Imported above and re-bound to these
+# original private names so this router's many call sites below, and the existing test
+# suite (which imports/patches them off ``app.routers.sightings``), keep working
+# unmodified.
 
 
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:

@@ -562,7 +562,7 @@ class TestGetConnector:
         mock_conn = MagicMock()
 
         with patch(
-            "app.routers.sources._get_connector_for_source",
+            "app.services.health_monitor.get_connector_for_source",
             return_value=mock_conn,
         ):
             result = _get_connector(source, db_session)
@@ -574,7 +574,7 @@ class TestGetConnector:
         source = _make_source(db_session)
 
         with patch(
-            "app.routers.sources._get_connector_for_source",
+            "app.services.health_monitor.get_connector_for_source",
             side_effect=ValueError("no config"),
         ):
             result = _get_connector(source, db_session)

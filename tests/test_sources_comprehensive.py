@@ -384,14 +384,14 @@ class TestTestApiSourceNoConnector:
 class TestLushaTestConnector:
     @pytest.mark.asyncio
     async def test_lusha_success_200(self):
-        from app.routers.sources import _LushaTestConnector
+        from app.services.connector_registry import LushaTestConnector as _LushaTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
 
         connector = _LushaTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="lusha_key_123"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="lusha_key_123"),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             results = await connector.search("LM358N")
@@ -401,14 +401,14 @@ class TestLushaTestConnector:
     @pytest.mark.asyncio
     async def test_lusha_success_404(self):
         """404 means API key is valid, just no person found."""
-        from app.routers.sources import _LushaTestConnector
+        from app.services.connector_registry import LushaTestConnector as _LushaTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
         connector = _LushaTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="lusha_key_123"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="lusha_key_123"),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             results = await connector.search("LM358N")
@@ -417,16 +417,16 @@ class TestLushaTestConnector:
 
     @pytest.mark.asyncio
     async def test_lusha_no_key(self):
-        from app.routers.sources import _LushaTestConnector
+        from app.services.connector_registry import LushaTestConnector as _LushaTestConnector
 
         connector = _LushaTestConnector()
-        with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with patch("app.services.connector_registry.get_credential_cached", return_value=None):
             with pytest.raises(ValueError, match="LUSHA_API_KEY not configured"):
                 await connector.search("LM358N")
 
     @pytest.mark.asyncio
     async def test_lusha_api_error(self):
-        from app.routers.sources import _LushaTestConnector
+        from app.services.connector_registry import LushaTestConnector as _LushaTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 401
@@ -434,7 +434,7 @@ class TestLushaTestConnector:
 
         connector = _LushaTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="bad_key"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="bad_key"),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             with pytest.raises(ValueError, match="Lusha API returned 401"):
@@ -449,7 +449,7 @@ class TestLushaTestConnector:
 class TestExploriumTestConnector:
     @pytest.mark.asyncio
     async def test_explorium_success(self):
-        from app.routers.sources import _ExploriumTestConnector
+        from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -457,7 +457,7 @@ class TestExploriumTestConnector:
 
         connector = _ExploriumTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="exp_key"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="exp_key"),
             patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
         ):
             results = await connector.search("LM358N")
@@ -466,16 +466,16 @@ class TestExploriumTestConnector:
 
     @pytest.mark.asyncio
     async def test_explorium_no_key(self):
-        from app.routers.sources import _ExploriumTestConnector
+        from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
         connector = _ExploriumTestConnector()
-        with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with patch("app.services.connector_registry.get_credential_cached", return_value=None):
             with pytest.raises(ValueError, match="EXPLORIUM_API_KEY not configured"):
                 await connector.search("LM358N")
 
     @pytest.mark.asyncio
     async def test_explorium_api_error(self):
-        from app.routers.sources import _ExploriumTestConnector
+        from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 500
@@ -483,7 +483,7 @@ class TestExploriumTestConnector:
 
         connector = _ExploriumTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="key"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="key"),
             patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
         ):
             with pytest.raises(ValueError, match="Explorium API returned 500"):
@@ -491,7 +491,7 @@ class TestExploriumTestConnector:
 
     @pytest.mark.asyncio
     async def test_explorium_fallback_name(self):
-        from app.routers.sources import _ExploriumTestConnector
+        from app.services.connector_registry import ExploriumTestConnector as _ExploriumTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -499,7 +499,7 @@ class TestExploriumTestConnector:
 
         connector = _ExploriumTestConnector()
         with (
-            patch("app.routers.sources.get_credential_cached", return_value="key"),
+            patch("app.services.connector_registry.get_credential_cached", return_value="key"),
             patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
         ):
             results = await connector.search("LM358N")
@@ -514,7 +514,7 @@ class TestExploriumTestConnector:
 class TestAzureOAuthTestConnector:
     @pytest.mark.asyncio
     async def test_azure_success(self):
-        from app.routers.sources import _AzureOAuthTestConnector
+        from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -522,7 +522,7 @@ class TestAzureOAuthTestConnector:
 
         connector = _AzureOAuthTestConnector()
         with (
-            patch("app.routers.sources.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
+            patch("app.services.connector_registry.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             results = await connector.search("LM358N")
@@ -531,23 +531,23 @@ class TestAzureOAuthTestConnector:
 
     @pytest.mark.asyncio
     async def test_azure_no_tenant(self):
-        from app.routers.sources import _AzureOAuthTestConnector
+        from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
         connector = _AzureOAuthTestConnector()
-        with patch("app.routers.sources.settings", SimpleNamespace(azure_tenant_id=None)):
+        with patch("app.services.connector_registry.settings", SimpleNamespace(azure_tenant_id=None)):
             with pytest.raises(ValueError, match="AZURE_TENANT_ID not configured"):
                 await connector.search("LM358N")
 
     @pytest.mark.asyncio
     async def test_azure_api_error(self):
-        from app.routers.sources import _AzureOAuthTestConnector
+        from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
         connector = _AzureOAuthTestConnector()
         with (
-            patch("app.routers.sources.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
+            patch("app.services.connector_registry.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             with pytest.raises(ValueError, match="Azure OpenID discovery returned 404"):
@@ -555,7 +555,7 @@ class TestAzureOAuthTestConnector:
 
     @pytest.mark.asyncio
     async def test_azure_tenant_mismatch(self):
-        from app.routers.sources import _AzureOAuthTestConnector
+        from app.services.connector_registry import AzureOAuthTestConnector as _AzureOAuthTestConnector
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -563,7 +563,7 @@ class TestAzureOAuthTestConnector:
 
         connector = _AzureOAuthTestConnector()
         with (
-            patch("app.routers.sources.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
+            patch("app.services.connector_registry.settings", SimpleNamespace(azure_tenant_id="test-tenant")),
             patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
         ):
             with pytest.raises(ValueError, match="Tenant mismatch"):
@@ -576,7 +576,7 @@ class TestAzureOAuthTestConnector:
 
 
 def test_get_connector_lusha_enrichment():
-    from app.routers.sources import _LushaTestConnector
+    from app.services.connector_registry import LushaTestConnector as _LushaTestConnector
 
     result = _get_connector_for_source("lusha_enrichment")
     assert isinstance(result, _LushaTestConnector)

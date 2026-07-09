@@ -9,12 +9,18 @@ from ...models import ChangeLog, Quote
 # Late import — re-exported for backward compatibility
 from ...services.crm_service import next_quote_number  # noqa: F401
 
+# _PRICED_STATUSES / _quote_date_iso / _preload_last_quoted_prices live in
+# app/services/pricing_history.py now (P4.1 — quote_builder_service.py needed the
+# preload and was reaching into this router's privates to get it). Re-exported here
+# under their original names for crm/quotes.py, crm/offers.py, crm/__init__.py, and the
+# existing test suite (which import/patch them off app.routers.crm[._helpers]).
+from ...services.pricing_history import PRICED_STATUSES as _PRICED_STATUSES  # noqa: F401
+from ...services.pricing_history import preload_last_quoted_prices as _preload_last_quoted_prices  # noqa: F401
+from ...services.pricing_history import quote_date_iso as _quote_date_iso  # noqa: F401
+
 # _build_quote_email_html lives in app/services/quote_send.py (single home, alongside the
 # send service). Re-exported here so the preview route and existing imports keep working.
 from ...services.quote_send import _build_quote_email_html  # noqa: F401
-
-# Statuses considered for pricing history lookups
-_PRICED_STATUSES = ["sent", "won", "lost"]
 
 
 def _iso(dt) -> str | None:
@@ -25,11 +31,6 @@ def _iso(dt) -> str | None:
 def _float(v) -> float | None:
     """Return a numeric value as a float, or None if falsy."""
     return float(v) if v else None
-
-
-def _quote_date_iso(q: Quote) -> str | None:
-    """Return the best available date for a quote as an ISO string."""
-    return _iso(q.sent_at or q.created_at)
 
 
 def record_changes(
@@ -50,42 +51,6 @@ def record_changes(
                     new_value=new_val,
                 )
             )
-
-
-def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
-    """Load recent quotes ONCE and build MPN/card_id to price lookup dict.
-
-    Keys by both MPN string (uppercase) and material_card_id so callers
-    can look up by either.  card_id keys are prefixed with ``card:`` to
-    avoid collisions with MPN strings.
-    """
-    quotes = (
-        db.query(Quote)
-        .filter(Quote.status.in_(_PRICED_STATUSES))
-        .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
-        .limit(100)
-        .all()
-    )
-    result: dict[str, dict] = {}
-    for q in quotes:
-        date_str = _quote_date_iso(q)
-        for item in q.line_items or []:
-            entry = {
-                "sell_price": item.get("sell_price"),
-                "margin_pct": item.get("margin_pct"),
-                "quote_number": q.quote_number,
-                "date": date_str,
-                "result": q.result,
-            }
-            mpn_key = (item.get("mpn") or "").upper().strip()
-            if mpn_key and mpn_key not in result:
-                result[mpn_key] = entry
-            card_id = item.get("material_card_id")
-            if card_id:
-                card_key = f"card:{card_id}"
-                if card_key not in result:
-                    result[card_key] = entry
-    return result
 
 
 def quote_to_dict(q: Quote, db=None) -> dict:
