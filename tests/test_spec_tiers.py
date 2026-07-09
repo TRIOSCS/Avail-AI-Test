@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard
-from app.services.spec_tiers import SOURCE_TIER, resolve, set_category, tier_for
+from app.models import MaterialCard, MaterialCardAudit
+from app.services.spec_tiers import SOURCE_TIER, recategorize, resolve, set_category, tier_for
 
 # --- tier_for ---------------------------------------------------------------
 
@@ -366,6 +366,116 @@ def test_set_category_flip_purges_stale_commodity_facets_and_specs(db_session: S
     # Old commodity's facet row AND its JSONB mirror are gone.
     assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 0
     assert "ddr_type" not in (card.specs_structured or {})
+
+
+# --- recategorize (P4.5: the single entry point for direct card.category writes) ---
+
+
+def _audits(db: Session, action: str) -> list[MaterialCardAudit]:
+    return db.query(MaterialCardAudit).filter_by(action=action).all()
+
+
+def test_recategorize_normal_mode_delegates_to_ladder(db_session: Session):
+    # force=False is a thin wrapper over set_category — a lower-tier source still loses.
+    card = _card(
+        db_session,
+        normalized_mpn="recat-normal",
+        category="dram",
+        category_source="digikey_api",
+        category_confidence=1.0,
+        category_tier=90,
+    )
+    wrote = recategorize(db_session, card, "flash", source="spec_extraction", confidence=0.99)
+    assert wrote is False
+    assert card.category == "dram"
+    assert card.category_source == "digikey_api"
+
+    wrote = recategorize(db_session, card, "flash", source="trio_source", confidence=1.0)
+    assert wrote is True
+    assert card.category == "flash"
+    assert card.category_source == "trio_source"
+    assert card.category_tier == 95
+
+
+def test_recategorize_normal_mode_writes_audit_row_only_on_win(db_session: Session):
+    card = _card(db_session, normalized_mpn="recat-normal-audit", category=None)
+    # Off-vocab -> set_category no-ops -> no audit row.
+    assert recategorize(db_session, card, "Nonsense Value", source="claude_opus_inferred", confidence=0.5) is False
+    assert _audits(db_session, "category_recategorize") == []
+
+    assert recategorize(db_session, card, "hdd", source="trio_source", confidence=1.0) is True
+    db_session.flush()
+    rows = _audits(db_session, "category_recategorize")
+    assert len(rows) == 1
+    assert rows[0].details["to"] == "hdd"
+    assert rows[0].details["force"] is False
+
+
+def test_recategorize_force_mode_bypasses_ladder_preserves_provenance(db_session: Session):
+    # force=True writes unconditionally — a tier-90 category can be "corrected" to a
+    # differently-spelled value even by a nominally lower-tier caller, and the ORIGINAL
+    # provenance columns are left completely untouched (only the string form changes).
+    card = _card(
+        db_session,
+        normalized_mpn="recat-force",
+        category="dram",
+        category_source="digikey_api",
+        category_confidence=0.9,
+        category_tier=90,
+    )
+    wrote = recategorize(db_session, card, "hdd", source="legacy_backfill", confidence=0.5, force=True)
+    assert wrote is True
+    assert card.category == "hdd"
+    # Provenance columns are untouched — force mode never restamps them.
+    assert card.category_source == "digikey_api"
+    assert card.category_confidence == 0.9
+    assert card.category_tier == 90
+
+
+def test_recategorize_force_mode_noop_when_category_unchanged(db_session: Session):
+    card = _card(db_session, normalized_mpn="recat-force-noop", category="hdd", category_source="digikey_api")
+    wrote = recategorize(db_session, card, "hdd", source="digikey_api", force=True)
+    assert wrote is False
+    assert _audits(db_session, "category_recategorize") == []
+
+
+def test_recategorize_force_mode_purges_stale_facets_and_audits(db_session: Session):
+    from app.models import MaterialSpecFacet
+    from app.services.commodity_registry import seed_commodity_schemas
+    from app.services.spec_write_service import record_spec
+
+    seed_commodity_schemas(db_session)
+    card = _card(
+        db_session,
+        normalized_mpn="recat-force-purge",
+        category="dram",
+        category_source="digikey_api",
+        category_confidence=0.9,
+        category_tier=90,
+    )
+    assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95) is True
+    assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 1
+
+    wrote = recategorize(db_session, card, "hdd", source="digikey_api", force=True, reason="re-spell in place")
+    db_session.flush()
+
+    assert wrote is True
+    assert card.category == "hdd"
+    assert card.category_source == "digikey_api"  # untouched — same evidence, just re-spelled
+    # The old commodity's facet row + JSONB mirror are purged, same guarantee set_category
+    # gives normal-mode callers on a real category flip.
+    assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 0
+    assert "ddr_type" not in (card.specs_structured or {})
+
+    rows = _audits(db_session, "category_recategorize")
+    assert len(rows) == 1
+    assert rows[0].details == {
+        "from": "dram",
+        "to": "hdd",
+        "source": "digikey_api",
+        "force": True,
+        "reason": "re-spell in place",
+    }
 
 
 def test_fru_desc_parse_tier_sits_between_desc_parse_and_partsurfer():

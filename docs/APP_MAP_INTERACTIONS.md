@@ -4092,6 +4092,29 @@ set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB
     +---> write=False = read-only twin (same verdict, zero mutation) — used by the
           SP-Ingest dry run so its report can't drift from --apply
 
+recategorize(db, card, new_category, *, source, confidence=1.0, force=False,
+             reason=None) -> bool   # (P4.5) the ONE sanctioned way to change
+    |   # card.category outside set_category itself — no caller may ever assign
+    |   # card.category directly (the @validates("category") guard only blocks
+    |   # off-vocab strings; it doesn't enforce the ladder or purge stale facets).
+    +---> force=False (default): thin wrapper over set_category — full ladder
+    |     arbitration, same semantics/return as above.
+    +---> force=True: writes new_category UNCONDITIONALLY (no tier comparison) and
+    |     — unlike every other path — leaves category_source/confidence/tier/
+    |     updated_at UNTOUCHED. For re-spelling an ALREADY-provenanced value (the
+    |     evidence hasn't changed, only its canonical string form); a fresh
+    |     provenance stamp here would be dishonest (nothing new observed) and would
+    |     wrongly reset the updated_at tie-break. Sole legitimate caller today:
+    |     management/cleanup_known_bad.py's cleanup_junk_categories
+    |     "normalized_in_place" branch (Pass 2).
+    +---> either mode, on a real category CHANGE: purges the old commodity's stale
+    |     MaterialSpecFacet rows + specs_structured mirror + orphaned
+    |     validation_conflicts entries via _purge_stale_commodity_data (same
+    |     helper set_category's on_change hook uses).
+    +---> every actual write (either mode) logs a MaterialCardAudit row
+          (action=category_recategorize, details: from/to/source/force/reason) —
+          in ADDITION to any audit row the caller writes for its own broader op.
+
 set_brand(card, value, source, confidence, write=True) -> bool        # dual-brand, mig 097
 set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-brand, mig 097
     +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
@@ -4627,13 +4650,17 @@ capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT
 row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
 normalize-or-null every non-canonical `material_cards.category` (the pre-#267
 bypass-writer residue) — resolvable values route through `set_category` at
-legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
-stale facets purged) when provenanced, unresolvable values are nulled with provenance
-cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
-card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
-`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
-One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
-dry-run rolls back, never commits.
+legacy_backfill when unprovenanced or, when provenanced, through
+`spec_tiers.recategorize(force=True)` (P4.5 — the ladder is deliberately NOT consulted,
+since the evidence hasn't changed, only its spelling; source/confidence/tier/updated_at
+are left byte-identical, and the stale facet purge still runs), unresolvable values are
+nulled with provenance cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf
+0.5, tier 50) on every card with a maker but NULL provenance (attribution of existing
+data, NOT a ladder write; `manufacturer_updated_at` stays NULL so it ranks at the
+runtime NULL-provenance floor). One `MaterialCardAudit` row per changed card (action
+`facet_cleanup` / `category_cleanup`), plus `recategorize`'s own audit row (action
+`category_recategorize`) for the normalized-in-place branch; dry-run rolls back, never
+commits.
 
 Brand/manufacturer canonicalization backfill (OPTIMIZATION_PLAN §1.5B, one-shot
 post-deploy of migration 106): `python -m app.management.normalize_manufacturers

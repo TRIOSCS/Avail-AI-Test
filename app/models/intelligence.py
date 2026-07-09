@@ -301,7 +301,8 @@ class MaterialCardAudit(Base):
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
     # created, linked, unlinked, deleted, merged, healed, restored,
-    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py)
+    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py),
+    # category_recategorize (app/services/spec_tiers.recategorize)
     action = Column(String(50), nullable=False)
     entity_type = Column(String(50))  # requirement, sighting, offer
     entity_id = Column(Integer)

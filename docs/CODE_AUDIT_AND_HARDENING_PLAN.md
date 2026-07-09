@@ -656,13 +656,25 @@ Do these after Phases 0-2 so the new guardrails protect the refactor.
   - `routers/htmx/offers.py` (1,905) → `offers_crud / rfq_compose / follow_ups /
     reply_handling`.
 
-- [ ] **P4.4 — Shared fuzzy-dedup helper.** `vendor_duplicates.py:51-75` and
+- [x] **P4.4 — Shared fuzzy-dedup helper.** `vendor_duplicates.py:51-75` and
   `company_utils.py:154-227` copy-paste the rapidfuzz fallback loop; extract
-  `fuzzy_dedup_scan(rows, normalize_fn, threshold, limit)`.
+  `fuzzy_dedup_scan(rows, normalize_fn, threshold, limit)`. Done: `fuzzy_dedup_scan()`
+  added to `app/vendor_utils.py` (pairwise + anchor modes, scan/filter only — sort and
+  truncation stay caller-side so scoring/tie-order is byte-for-byte identical);
+  `vendor_duplicates._fuzzy_match_python` and
+  `company_utils._find_company_dedup_candidates_rapidfuzz` converted to call it.
 
-- [ ] **P4.5 — `spec_tiers.recategorize()` entry point** so
+- [x] **P4.5 — `spec_tiers.recategorize()` entry point** so
   `management/cleanup_known_bad.py:173` (direct `card.category` write) can go through
-  the ladder like everything else.
+  the ladder like everything else. Done: `recategorize(db, card, new_category, *,
+  source, confidence, force=False, reason=None)` added to `app/services/spec_tiers.py`
+  — normal mode delegates to `set_category` (full ladder arbitration); `force=True`
+  (the cleanup script's sole legitimate use) bypasses the tier comparison but still
+  purges stale facet data via `_purge_stale_commodity_data` and never restamps
+  provenance columns. Every write is audited (`MaterialCardAudit`,
+  action=`category_recategorize`). `cleanup_known_bad.py`'s "normalized_in_place"
+  branch now calls `recategorize(force=True)` instead of assigning `card.category`
+  directly.
 
 - [ ] **P4.6 — Hoist needless function-local imports** (~180 across the big htmx
   routers; verified no real cycles). Fold into each P4.3 split rather than standalone.

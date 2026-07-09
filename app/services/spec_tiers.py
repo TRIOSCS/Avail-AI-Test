@@ -9,7 +9,13 @@ What: Defines the single authoritative rule for "which data source wins" so that
       ``set_category`` / ``set_brand`` / ``set_manufacturer`` apply that ladder to a
       MaterialCard's category / brand (OEM label) / manufacturer (actual maker) columns
       (the DB-touching helpers — all three delegate to the generic
-      ``_set_provenanced_column``).
+      ``_set_provenanced_column``). ``recategorize`` is the ONE public entry point for
+      changing ``card.category`` outside ``set_category`` itself — normal mode is a
+      thin ladder-compared wrapper, force mode (the sole legitimate use:
+      ``app/management/cleanup_known_bad.py``'s in-place re-spelling of an
+      already-provenanced value) bypasses the tier comparison but still purges stale
+      facet data and audits the change — so no caller may ever assign
+      ``card.category`` directly.
 Called by: app/services/spec_write_service.record_spec (spec conflict resolution),
       app/services/mpn_decoder/writer.py (decode category + maker writes) +
       app/services/fru_crosswalk_enrich.py (decode category writes),
@@ -39,6 +45,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
     from app.models import MaterialCard
@@ -720,6 +727,107 @@ def set_category(
         write=write,
         on_change=_purge_stale_commodity_data,
     )
+
+
+def recategorize(
+    db: Session,
+    card: "MaterialCard",
+    new_category: str,
+    *,
+    source: str,
+    confidence: float = 1.0,
+    force: bool = False,
+    reason: str | None = None,
+) -> bool:
+    """The ONLY sanctioned way to change ``card.category`` outside ``set_category``
+    itself — no caller may ever do ``card.category = ...`` directly. The
+    ``@validates("category")`` guard (models/intelligence.py) only blocks OFF-VOCAB
+    strings; it does not enforce the F1 ladder or purge stale facet data, so a direct
+    assignment (the one remaining bypass was ``app/management/cleanup_known_bad.py``'s
+    Pass 2 "normalized_in_place" branch) still silently corrupts the commodity's facet
+    rows. ``new_category`` must already be canonical (a CANONICAL_COMMODITY_KEYS member)
+    — this function does not normalize it; callers that hold a raw/uncanonicalized value
+    should normalize it themselves (e.g. via ``category_normalizer.normalize_category``)
+    or call ``set_category`` directly, which does.
+
+    Two modes:
+      - Normal (force=False, default): a thin wrapper over ``set_category`` — the
+        incoming ``(source, confidence)`` is ladder-compared against the card's
+        existing category provenance; a lower-tier source can never overwrite a
+        higher-tier category. Use this whenever ``new_category`` reflects NEW
+        evidence from ``source``.
+      - Force (force=True): writes ``new_category`` UNCONDITIONALLY, skipping the
+        tier comparison entirely, and — unlike normal mode / ``set_category`` — never
+        touches the existing ``category_source`` / ``category_confidence`` /
+        ``category_tier`` / ``category_updated_at`` columns. This is for re-spelling
+        an ALREADY-provenanced value (the evidence itself hasn't changed, only its
+        canonical string form, e.g. "Internal Hard Drives" -> "hdd"): stamping a
+        fresh provenance timestamp here would be dishonest (nothing new was
+        observed) and would incorrectly reset the ladder's updated_at tie-break. The
+        one legitimate caller today is
+        ``app.management.cleanup_known_bad.cleanup_junk_categories`` (Pass 2,
+        "normalized_in_place" branch) — do not add another ``force=True`` call site
+        without updating this docstring; a writer with NEW evidence should use
+        ``force=False`` (or ``set_category``) instead.
+
+    In both modes, when the category cell actually CHANGES, the old commodity's
+    stale ``MaterialSpecFacet`` rows + ``specs_structured`` mirror entries (and any
+    now-orphaned ``validation_conflicts`` entries) are purged via
+    ``_purge_stale_commodity_data`` — the same helper ``set_category``'s ``on_change``
+    hook uses, so force mode gets the identical purge guarantee normal mode has
+    always had. A no-op (``new_category == card.category``, or a ladder loss in
+    normal mode) purges nothing, logs nothing, and returns ``False``.
+
+    Every actual write (either mode) is logged at INFO and recorded as a
+    ``MaterialCardAudit`` row (action ``"category_recategorize"``, details carrying
+    from/to/source/force/reason) via ``db`` — this function's own audit trail,
+    independent of (and in addition to) any audit row a caller writes for its own
+    broader operation (e.g. cleanup_known_bad's per-pass "category_cleanup" row).
+
+    Returns ``True`` iff ``card.category`` was written.
+    """
+    current = card.category
+    if not force:
+        written = set_category(card, new_category, source, confidence, write=True)
+    else:
+        if current == new_category:
+            return False  # no-op: nothing changed, nothing to purge/log/audit
+        if current is not None:
+            _purge_stale_commodity_data(card, new_category, source)
+        # Validated by MaterialCard.@validates("category") — an off-vocab value
+        # raises here rather than silently persisting junk. Provenance columns
+        # (category_source/confidence/tier/updated_at) are deliberately left
+        # untouched (see docstring).
+        card.category = new_category
+        logger.info(
+            "recategorize (force): card={} category {!r} -> {!r} (triggered by source={}{}) — "
+            "ladder NOT consulted; existing category_source/confidence/tier/updated_at left untouched",
+            getattr(card, "id", None),
+            current,
+            new_category,
+            source,
+            f", reason={reason}" if reason else "",
+        )
+        written = True
+
+    if written:
+        from app.services.audit_service import log_audit  # lazy: avoid model<->service import cycle
+
+        log_audit(
+            db,
+            material_card_id=getattr(card, "id", None),
+            action="category_recategorize",
+            normalized_mpn=getattr(card, "normalized_mpn", None),
+            details={
+                "from": current,
+                "to": new_category,
+                "source": source,
+                "force": force,
+                "reason": reason,
+            },
+            created_by="spec_tiers.recategorize",
+        )
+    return written
 
 
 def _set_brand_or_maker(
