@@ -1,6 +1,6 @@
-"""tests/test_insights_refresh.py — Regression tests for P0.1: the four AI
-insights "Refresh" HTMX endpoints must await the async knowledge_service
-generator instead of firing-and-discarding the coroutine.
+"""tests/test_insights_refresh.py — Regression tests for P0.1: the four AI insights
+"Refresh" HTMX endpoints must await the async knowledge_service generator instead of
+firing-and-discarding the coroutine.
 
 Targets: app/routers/htmx_views.py::{requisition,vendor,company,pipeline}_insights_refresh
 Called by: pytest autodiscovery

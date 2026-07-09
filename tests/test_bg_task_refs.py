@@ -1,6 +1,6 @@
-"""tests/test_bg_task_refs.py — Regression tests for P0.4: fire-and-forget asyncio
-tasks must be held in a strong reference until completion, otherwise the event loop
-can garbage-collect them mid-flight and silently drop the work.
+"""tests/test_bg_task_refs.py — Regression tests for P0.4: fire-and-forget asyncio tasks
+must be held in a strong reference until completion, otherwise the event loop can
+garbage-collect them mid-flight and silently drop the work.
 
 Targets:
   - app/email_service.py::_auto_create_offers_from_parse (SSE "sighting-updated" publish)
@@ -48,8 +48,8 @@ class TestEmailServiceSSEPublishTaskRetained:
     async def test_sse_publish_task_survives_gc_and_completes(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """The SSE 'sighting-updated' publish task must run to completion even
-        under aggressive GC — it is held via app.email_service._bg_tasks."""
+        """The SSE 'sighting-updated' publish task must run to completion even under
+        aggressive GC — it is held via app.email_service._bg_tasks."""
         vr = _make_vendor_response(db_session, test_user, test_requisition)
         draft = {"mpn": "LM317T", "vendor_name": "TestVendor Inc"}
         parsed = {"confidence": 0.9}

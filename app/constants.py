@@ -601,11 +601,12 @@ class PendingBatchStatus(StrEnum):
 
 
 class DiscoveryBatchStatus(StrEnum):
-    """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run)
-    audit records — app.services.prospect_scheduler.job_discover_prospects is the
-    sole writer. FAILED is not currently written (an unhandled exception leaves the
-    row at RUNNING and is only surfaced via the job's log/return value) but is
-    reserved here to match the PendingBatchStatus run-lifecycle convention.
+    """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run) audit
+    records — app.services.prospect_scheduler.job_discover_prospects is the sole writer.
+
+    FAILED is not currently written (an unhandled exception leaves the row at RUNNING
+    and is only surfaced via the job's log/return value) but is reserved here to match
+    the PendingBatchStatus run-lifecycle convention.
     """
 
     RUNNING = "running"
