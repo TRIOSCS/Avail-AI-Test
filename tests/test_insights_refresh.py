@@ -38,9 +38,7 @@ class TestInsightsRefreshAwaited:
         mock_gen.assert_awaited_once()
         assert mock_gen.await_args.args[1] == test_vendor_card.id
 
-    def test_company_insights_refresh_awaits_generate_company_insights(
-        self, client: TestClient, test_company: Company
-    ):
+    def test_company_insights_refresh_awaits_generate_company_insights(self, client: TestClient, test_company: Company):
         with patch("app.services.knowledge_service.generate_company_insights", new_callable=AsyncMock) as mock_gen:
             resp = client.post(f"/v2/partials/customers/{test_company.id}/insights/refresh")
         assert resp.status_code == 200
@@ -66,9 +64,7 @@ class TestInsightsRefreshRollbackOnFailure:
             resp = client.post(f"/v2/partials/requisitions/{test_requisition.id}/insights/refresh")
         assert resp.status_code == 200
 
-    def test_vendor_refresh_rolls_back_and_falls_back_to_cache(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ):
+    def test_vendor_refresh_rolls_back_and_falls_back_to_cache(self, client: TestClient, test_vendor_card: VendorCard):
         with patch(
             "app.services.knowledge_service.generate_vendor_insights",
             new_callable=AsyncMock,
