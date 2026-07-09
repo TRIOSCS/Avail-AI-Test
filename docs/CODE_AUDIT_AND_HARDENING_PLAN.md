@@ -157,7 +157,7 @@ These are confirmed defects shipping today, not style issues.
   unconditional (whether migrations ran during the failed deploy isn't observable
   from this script) — the safety dump is what makes that acceptable.
 
-- [ ] **P1.4 — Container hardening.**
+- [x] **P1.4 — Container hardening.**
   - Add `USER appuser` as final `Dockerfile` directive (currently root-by-default for
     any `exec`/entrypoint override; `docker-entrypoint.sh` `runuser` stays for the
     migration step).
@@ -167,15 +167,46 @@ These are confirmed defects shipping today, not style issues.
     update `REDIS_URL`.
   - `stop_grace_period: 60s` for `enrichment-worker` (`docker-compose.yml:112-142`) —
     its graceful-shutdown handler (`worker.py:46`) is currently killed at 10s mid-batch.
+  **Fixed:** did NOT add a blanket `USER appuser` — verified against
+  `docker-entrypoint.sh` first: Docker's `USER` covers the whole ENTRYPOINT+CMD
+  process tree, and the entrypoint needs root for the TT-0002 uploads chown and
+  for `runuser -u appuser` (which escalates DOWN from root and cannot run from a
+  non-root PID 1) — adding it would break the migration step outright, which is
+  explicitly out of bounds. Documented the reconciliation at length in the
+  Dockerfile; the app process itself already runs as `appuser` via the existing
+  `exec runuser`, the one remaining gap (`docker compose exec` defaulting to root)
+  is flagged as a real follow-up (root-capable init container) rather than
+  band-aided. Extracted `gh` + Chromium into `Dockerfile.tooling` (verified via
+  grep: no runtime consumer in `app/` — the patchright workers run as host
+  systemd units against system Chrome, not in either container); `gh` is now
+  pinned to an exact release via its GitHub Releases `.deb` asset. Added
+  `${REDIS_PASSWORD:+--requirepass ...}` to the redis command + a
+  password-aware healthcheck, and composed `REDIS_URL` in `docker-compose.yml`
+  for `app`/`enrichment-worker` so it can never drift from the redis service's
+  own auth config; empty `REDIS_PASSWORD` = no auth (local dev unaffected).
+  Added `stop_grace_period: 60s` to `enrichment-worker`.
 
-- [ ] **P1.5 — Backup verification on a schedule.**
+- [x] **P1.5 — Backup verification on a schedule.**
   Nothing ever runs `scripts/restore.sh --verify`; a corrupt backup could sit unnoticed
   for the full 30-day retention. Add a weekly systemd timer (or Actions cron over SSH)
   that verifies the newest dump and alerts on failure.
+  **Fixed:** added `scripts/verify-backup.sh` (resolves the newest backup via the
+  `LATEST` marker inside `db-backup`, runs `restore.sh --verify`, exits nonzero
+  with a clear message on failure) plus `scripts/systemd/avail-backup-verify.{service,timer}`
+  (weekly, Sun 04:00); install one-liner is in the script's header and in
+  `docs/APP_MAP_ARCHITECTURE.md`'s Scripts table.
 
-- [ ] **P1.6 — Rename `scripts/deploy.sh` → `scripts/bootstrap-server.sh`.**
+- [x] **P1.6 — Rename `scripts/deploy.sh` → `scripts/bootstrap-server.sh`.**
   Two files named `deploy.sh` with wildly different behavior (one runs
   `docker compose down`); an operator mixup takes prod down.
+  **Fixed:** copied to `scripts/bootstrap-server.sh` (filesystem copy, not
+  `git mv`), deleted `scripts/deploy.sh`, updated its self-referential header
+  (curl URL, usage line) and added an explicit "this is NOT the deploy script"
+  banner pointing at the real `./deploy.sh`. No other docs/README/scripts
+  referenced the old path except `docs/audit/2026-07-02-production-polish-review.md`
+  (a dated historical audit record of the old script's own bugs — left
+  untouched so the historical evidence quotes stay accurate to what was
+  reviewed at the time).
 
 ---
 

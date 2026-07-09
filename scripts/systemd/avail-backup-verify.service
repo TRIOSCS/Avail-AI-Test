@@ -1,0 +1,15 @@
+[Unit]
+Description=AvailAI weekly database backup verification (P1.5)
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/availai
+ExecStart=/root/availai/scripts/verify-backup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
