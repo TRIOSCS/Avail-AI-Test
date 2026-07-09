@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+from app.constants import DiscoveryBatchStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scheduler import (
@@ -53,7 +54,7 @@ def _make_batch(db: Session, **overrides) -> DiscoveryBatch:
     defaults = {
         "batch_id": f"batch-{id(overrides)}",
         "source": "explorium",
-        "status": "complete",
+        "status": DiscoveryBatchStatus.COMPLETED,
         "started_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)

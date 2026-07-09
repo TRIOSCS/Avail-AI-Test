@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
+from ..constants import DiscoveryBatchStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -25,8 +26,8 @@ class DiscoveryBatch(Base):
     regions = Column(JSONB, default=list)
     search_filters = Column(JSONB, default=dict)
 
-    # Run status
-    status = Column(String(20), default="running")
+    # Run status — see app.constants.DiscoveryBatchStatus
+    status = Column(String(20), default=DiscoveryBatchStatus.RUNNING.value)
     prospects_found = Column(Integer, default=0)
     prospects_new = Column(Integer, default=0)
     prospects_updated = Column(Integer, default=0)

@@ -229,7 +229,7 @@ class TestDiscoveryBatchModel:
             segment="aerospace",
             regions=["US"],
             search_filters={"naics": ["336412"], "employee_min": 200},
-            status="complete",
+            status="completed",
             prospects_found=150,
             prospects_new=42,
             prospects_updated=8,

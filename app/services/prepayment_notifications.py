@@ -39,6 +39,7 @@ Depends on: app.database (SessionLocal), app.config (settings.admin_emails),
 
 from __future__ import annotations
 
+import asyncio
 import html as html_mod
 from decimal import Decimal
 
@@ -62,6 +63,12 @@ from ..utils.async_helpers import safe_background_task
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localtime
 
 _CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_webhook"]
+
+# Fire-and-forget tasks scheduled by schedule_prepayment_notify() must be held in a
+# strong reference until they complete — asyncio only weakly references a bare task,
+# so without this the event loop can garbage-collect the notify task mid-flight,
+# silently dropping the accounting/AP notification.
+_bg_tasks: set[asyncio.Task] = set()
 
 _HEADINGS = {
     "requested": "PENDING APPROVAL — DO NOT PAY YET",
@@ -112,14 +119,14 @@ def schedule_prepayment_notify(coro) -> None:
     drove the transition) schedule it as a fire-and-forget task; otherwise (a sync/CLI/test
     caller) close the coroutine cleanly so nothing dangles and no dispatch is attempted.
     """
-    import asyncio
-
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         coro.close()
     else:
-        loop.create_task(coro)
+        task = loop.create_task(coro)
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
 
 # ── Public notify functions ──────────────────────────────────────────

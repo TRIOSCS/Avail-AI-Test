@@ -23,7 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.constants import ProspectAccountStatus
+from app.constants import DiscoveryBatchStatus, ProspectAccountStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_free_enrichment import run_contact_enrichment_batch
@@ -149,7 +149,7 @@ def get_next_discovery_slice(db: Session) -> dict:
         db.query(DiscoveryBatch)
         .filter(
             DiscoveryBatch.source == "explorium",
-            DiscoveryBatch.status == "complete",
+            DiscoveryBatch.status == DiscoveryBatchStatus.COMPLETED,
         )
         .order_by(DiscoveryBatch.created_at.desc())
         .first()
@@ -193,7 +193,7 @@ async def job_discover_prospects() -> dict:
             source="explorium",
             segment=slice_info["segment"],
             regions=slice_info["regions"],
-            status="running",
+            status=DiscoveryBatchStatus.RUNNING,
             started_at=datetime.now(timezone.utc),
         )
         db.add(batch)
@@ -257,7 +257,7 @@ async def job_discover_prospects() -> dict:
             db.rollback()
 
         # Update batch record
-        batch.status = "complete"
+        batch.status = DiscoveryBatchStatus.COMPLETED
         batch.prospects_found = explorium_count + email_count
         batch.prospects_new = explorium_count + email_count
         batch.completed_at = datetime.now(timezone.utc)

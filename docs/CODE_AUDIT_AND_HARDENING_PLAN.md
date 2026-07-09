@@ -14,14 +14,14 @@ work items. Check items off in this doc in the same PR that fixes them.
 
 These are confirmed defects shipping today, not style issues.
 
-- [ ] **P0.1 — Unawaited async coroutines: all 4 "Refresh AI insights" buttons are no-ops.**
+- [x] **P0.1 — Unawaited async coroutines: all 4 "Refresh AI insights" buttons are no-ops.**
   `app/routers/htmx_views.py:1644, 1676, 1708, 1738` call `generate_insights(db, id)` /
   `generate_vendor_insights(...)` etc. without `await` — the coroutine is created and
   discarded; the surrounding `try/except` never fires; the endpoint re-renders stale
   cache. Fix: `await` all four. Add regression tests asserting the service is awaited
   (e.g. `AsyncMock` + `assert_awaited_once`).
 
-- [ ] **P0.2 — Duplicate-column migration breaks fresh-DB `alembic upgrade head`.**
+- [x] **P0.2 — Duplicate-column migration breaks fresh-DB `alembic upgrade head`.**
   `alembic/versions/5c6736d6381f_add_screenshot_path_ai_summary_root_.py:34-42`
   unconditionally re-adds `offers.excess_line_item_id` + FK already created by its
   ancestor `d1a2b3c4e5f6_add_excess_phase4_columns.py` (which is guarded). On a fresh
@@ -35,7 +35,7 @@ These are confirmed defects shipping today, not style issues.
   page. Every sibling lazy-load carries a "LANDMINE" guard comment; this one was missed.
   Fix: add `hx-target="this"`. Add a dead-ends E2E case.
 
-- [ ] **P0.4 — Dangling `asyncio.create_task`: SSE events can be GC'd mid-flight.**
+- [x] **P0.4 — Dangling `asyncio.create_task`: SSE events can be GC'd mid-flight.**
   `app/email_service.py:1605`, `app/services/prepayment_notifications.py:122` —
   task results unreferenced; `sighting-updated` events silently lost. Fix: hold refs
   (`_bg_tasks.add(task); task.add_done_callback(_bg_tasks.discard)`).
@@ -50,10 +50,17 @@ These are confirmed defects shipping today, not style issues.
   `check_untyped_defs = true`, burn down errors module-group by module-group
   (273 `no-any-return`, 81 `attr-defined`, 73 `union-attr`, 46 `arg-type`, …).
 
-- [ ] **P0.6 — `"complete"` vs `"completed"` status-string landmine.**
+- [x] **P0.6 — `"complete"` vs `"completed"` status-string landmine.**
   `app/services/prospect_scheduler.py:260` sets `batch.status = "complete"` while
   `PendingBatchStatus.COMPLETED` is `"completed"`. Audit consumers of
   `DiscoveryBatch.status`, pick one value, add a `DiscoveryBatchStatus` StrEnum (see P2.5).
+  Fixed: added `DiscoveryBatchStatus` (`running`/`completed`/`failed`) to
+  `app/constants.py`; the only reader (`get_next_discovery_slice`'s "already ran this
+  month" filter, same file) and the only writers now agree on `COMPLETED`. Caveat: any
+  pre-existing production rows persisted with the old `"complete"` literal will no
+  longer match the filter — no data migration was written for this (out of scope here);
+  ops should check `SELECT count(*) FROM discovery_batches WHERE status = 'complete'`
+  before relying on rotation continuity.
 
 ---
 

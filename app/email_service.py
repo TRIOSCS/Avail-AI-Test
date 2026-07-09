@@ -39,6 +39,12 @@ from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
 from .shared_constants import RFQ_SUBJECT_TAG_RE
 from .vendor_utils import normalize_vendor_name
 
+# Fire-and-forget SSE publish tasks (e.g. sighting-updated) must be held in a strong
+# reference until they complete — asyncio only holds a weak reference to a task once
+# created, so without this the event loop can garbage-collect an in-flight publish
+# before it runs, silently dropping the SSE event.
+_bg_tasks: set[asyncio.Task] = set()
+
 
 def _build_html_body(plain_text: str) -> str:
     """Convert plain text to minimal HTML that looks like a normal email."""
@@ -1602,13 +1608,15 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
             affected_req_ids = set(mpn_to_req_id.values())
             loop = asyncio.get_event_loop()
             for rid in affected_req_ids:
-                loop.create_task(
+                task = loop.create_task(
                     broker.publish(
                         f"user:{owner_id}",
                         "sighting-updated",
                         json.dumps({"requirement_id": rid}),
                     )
                 )
+                _bg_tasks.add(task)
+                task.add_done_callback(_bg_tasks.discard)
         except Exception:
             logger.debug("SSE publish from auto-create offers skipped (no event loop)")
 

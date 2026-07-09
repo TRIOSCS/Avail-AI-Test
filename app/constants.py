@@ -600,6 +600,19 @@ class PendingBatchStatus(StrEnum):
     FAILED = "failed"
 
 
+class DiscoveryBatchStatus(StrEnum):
+    """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run)
+    audit records — app.services.prospect_scheduler.job_discover_prospects is the
+    sole writer. FAILED is not currently written (an unhandled exception leaves the
+    row at RUNNING and is only surfaced via the job's log/return value) but is
+    reserved here to match the PendingBatchStatus run-lifecycle convention.
+    """
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class ApiSourceStatus(StrEnum):
     """ApiSource.status — managed by health_monitor.ping_source.
 
