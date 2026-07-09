@@ -190,3 +190,60 @@ class TestTimezoneEndpoint:
     def test_empty_zone_rejected(self, client, test_user):
         resp = client.post("/v2/profile/timezone", data={"timezone": ""})
         assert resp.status_code == 400
+
+
+# ── Extra coverage for uncovered branches ──────────────────────────────
+
+
+class TestTimezoneExtraCoverage:
+    UTC_DT = datetime(2026, 7, 4, 23, 30, tzinfo=timezone.utc)
+
+    def test_to_display_tz_with_zoneinfo_object(self):
+        """Line 90: tz is a ZoneInfo object (not str, not None) — uses it directly."""
+        from zoneinfo import ZoneInfo
+
+        from app.utils.timezones import to_display_tz
+
+        zone = ZoneInfo("Asia/Tokyo")
+        result = to_display_tz(self.UTC_DT, tz=zone)
+        assert result is not None
+        assert result.tzname() in ("JST", "+09")
+
+    def test_format_localtime_with_zoneinfo_object(self):
+        """format_localtime with a ZoneInfo instance (exercises the else branch)."""
+        from zoneinfo import ZoneInfo
+
+        from app.utils.timezones import format_localtime
+
+        zone = ZoneInfo("Asia/Tokyo")
+        result = format_localtime(self.UTC_DT, "%H:%M", tz=zone)
+        assert result == "08:30"
+
+    def test_grouped_timezones_returns_sorted_regions(self):
+        """grouped_timezones(): covers lines 135-147."""
+        from app.utils.timezones import grouped_timezones
+
+        groups = grouped_timezones()
+        assert isinstance(groups, list)
+        assert len(groups) > 1
+        # Each entry is (region_str, sorted_list_of_zones)
+        regions = [g[0] for g in groups]
+        assert "America" in regions
+        assert "Asia" in regions
+        # "Other" goes last if present
+        if "Other" in regions:
+            assert regions[-1] == "Other"
+
+    def test_grouped_timezones_members_are_sorted(self):
+        """Zone names within each region are sorted."""
+        from app.utils.timezones import grouped_timezones
+
+        for _region, zones in grouped_timezones():
+            assert zones == sorted(zones)
+
+    def test_grouped_timezones_non_empty_lists(self):
+        """Every region has at least one timezone."""
+        from app.utils.timezones import grouped_timezones
+
+        for _region, zones in grouped_timezones():
+            assert len(zones) > 0
