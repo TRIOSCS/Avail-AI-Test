@@ -19,7 +19,7 @@ Depends on: conftest fixtures (db_session, test_user, test_requisition),
             app.services.alerts.sources.offers.OfferConfirmedSource.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,7 +41,7 @@ def _make_user(db: Session, *, email: str, notify_buyplan_email_enabled=True, no
         m365_connected=True,
         notify_buyplan_email_enabled=notify_buyplan_email_enabled,
         notify_new_offer_alert_enabled=notify_new_offer_alert_enabled,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()
@@ -102,10 +102,10 @@ class TestBuyplanEmailGuard:
         submitter = _make_user(db_session, email="rejsub@trioscs.com", notify_buyplan_email_enabled=False)
         mgr = _make_user(db_session, email="rejmgr@trioscs.com")
 
-        req = Requisition(name="REQ-G", status="open", created_by=submitter.id, created_at=datetime.now(timezone.utc))
+        req = Requisition(name="REQ-G", status="open", created_by=submitter.id, created_at=datetime.now(UTC))
         db_session.add(req)
         db_session.flush()
-        co = Company(name="Guard Co", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="Guard Co", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="Guard HQ")
@@ -121,7 +121,7 @@ class TestBuyplanEmailGuard:
             total_cost=1.0,
             total_margin_pct=0.0,
             created_by_id=submitter.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(quote)
         db_session.flush()
@@ -170,8 +170,8 @@ def _seed_approved_offer(db: Session, requirement: Requirement) -> Offer:
         unit_price=0.50,
         status=OfferStatus.APPROVED,
         qualification_status=QualificationStatus.ESSENTIALS,
-        approved_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()

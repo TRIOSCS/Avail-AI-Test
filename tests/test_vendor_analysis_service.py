@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/vendor_analysis_service.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,7 +32,7 @@ def _make_vendor_card(db, name="test vendor"):
         display_name=name,
         brand_tags=[],
         commodity_tags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -44,7 +44,7 @@ def _make_material_card(db, mpn="LM317T", manufacturer="Texas Instruments"):
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.flush()
@@ -57,7 +57,7 @@ def _make_mvh(db, material_card_id, vendor_name, manufacturer=None):
         vendor_name=vendor_name.lower(),
         last_manufacturer=manufacturer,
         times_seen=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mvh)
     db.flush()
@@ -73,7 +73,7 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
             name="Sighting User",
             role="buyer",
             azure_id="az-sighting",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(user)
         db.flush()
@@ -85,7 +85,7 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
             customer_name="Test",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(req)
         db.flush()
@@ -96,7 +96,7 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
             requisition_id=req.id,
             primary_mpn=mpn,
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(requirement)
         db.flush()
@@ -107,7 +107,7 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
         mpn_matched=mpn,
         manufacturer=manufacturer,
         source_type="api",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.flush()

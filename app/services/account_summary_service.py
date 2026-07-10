@@ -6,7 +6,7 @@ router and rendered on the account overview tab.
 """
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -82,7 +82,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
 
     # ── Build prompt context ─────────────────────────────────────────
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Company basics
     ctx_parts = [f"Company: {company.name}"]

@@ -11,7 +11,7 @@ Graph is mocked at the source (GraphClient) — no network. Called by: pytest.
 Depends on: app.email_service, app.services.resell_outreach_service, tests.conftest.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -189,7 +189,7 @@ class TestResellReplyMatching:
             vendor_name="Buyer One",
             vendor_contact="sales@buyerone.com",
             graph_conversation_id="conv-shared",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()

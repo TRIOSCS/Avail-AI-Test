@@ -10,7 +10,7 @@ Called by: requisitions.__init__ (sub-router)
 Depends on: models, schemas, search_service, file_utils, normalization utils
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
@@ -329,7 +329,7 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
     last_activity_row = db.query(sqlfunc.max(Contact.created_at)).filter(Contact.requisition_id == req_id).scalar()
     hours_since = None
     if last_activity_row:
-        delta = datetime.now(timezone.utc) - last_activity_row.replace(tzinfo=timezone.utc)
+        delta = datetime.now(UTC) - last_activity_row.replace(tzinfo=UTC)
         hours_since = delta.total_seconds() / 3600
 
     results = []
@@ -396,7 +396,7 @@ async def add_requirements(
             parsed = RequirementCreate.model_validate(item)
         except (ValueError, TypeError) as exc:
             if not is_batch:
-                raise HTTPException(422, str(exc))
+                raise HTTPException(422, str(exc)) from exc
             skipped.append({"index": idx, "error": str(exc)})
             continue
         deduped_subs = _dedupe_substitutes(parsed.substitutes, parsed.primary_mpn)
@@ -470,7 +470,7 @@ async def add_requirements(
     if req.customer_site_id and created:
         from datetime import timedelta
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.now(UTC) - timedelta(days=30)
         card_ids = [r.material_card_id for r in created if r.material_card_id]
         if card_ids:
             dup_rows = (
@@ -520,7 +520,7 @@ async def upload_requirements(
 
         rows = parse_tabular_file(content, fname)
     except (ValueError, KeyError, TypeError) as e:
-        raise HTTPException(400, f"Could not parse file: {str(e)[:200]}")
+        raise HTTPException(400, f"Could not parse file: {str(e)[:200]}") from e
 
     created = 0
     for row in rows:
@@ -747,7 +747,7 @@ async def get_saved_sightings(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     results: dict = {}
     req_ids = [r.id for r in req.requirements]
     all_sightings = (
@@ -1097,7 +1097,7 @@ async def import_stock_list(
                 source_type="stock_list",
                 confidence=70,
                 raw_data=row,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             s.score = 50  # Neutral score for manual imports
             db.add(s)
@@ -1114,10 +1114,10 @@ async def import_stock_list(
                 apply_to_fresh_sightings(db, req_by_id[req_id_key], fresh_rows)
 
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
         logger.exception("Stock import failed for requisition {}", req_id)
-        raise HTTPException(500, "Stock import failed — no data was saved")
+        raise HTTPException(500, "Stock import failed — no data was saved") from e
     return {"imported_rows": imported, "matched_sightings": matched}
 
 
@@ -1173,7 +1173,7 @@ async def list_requirement_sightings(
 
     fresh_vendors = {s.vendor_name.lower() for s in rows if s.vendor_name}
     for h in _get_material_history(list(card_ids), fresh_vendors, db):
-        sighting_dicts.append(_history_to_result(h, datetime.now(timezone.utc)))
+        sighting_dicts.append(_history_to_result(h, datetime.now(UTC)))
 
     sighting_dicts = _deduplicate_sightings(sighting_dicts)
     sighting_dicts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
@@ -1209,7 +1209,7 @@ async def list_requirement_offers(
     def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
         age_days = 0
         if o.created_at:
-            age_days = (datetime.now(timezone.utc) - o.created_at.replace(tzinfo=timezone.utc)).days
+            age_days = (datetime.now(UTC) - o.created_at.replace(tzinfo=UTC)).days
         return {
             "id": o.id,
             "vendor_name": o.vendor_name,
@@ -1297,7 +1297,7 @@ async def toggle_quote_selection(
     if not req:
         raise HTTPException(403, "Not authorized")
     offer.selected_for_quote = not offer.selected_for_quote
-    offer.selected_at = datetime.now(timezone.utc) if offer.selected_for_quote else None
+    offer.selected_at = datetime.now(UTC) if offer.selected_for_quote else None
     db.commit()
     return {"ok": True, "selected_for_quote": offer.selected_for_quote}
 
@@ -1347,7 +1347,7 @@ async def add_requirement_note(
         raise HTTPException(404, "Requirement not found")
     require_requisition_access(db, req.requisition_id, user, label="Requirement")
     # Append to existing notes with timestamp
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
     entry = f"[{timestamp} {user.email}] {body.text}"
     req.notes = f"{req.notes}\n{entry}" if req.notes else entry
     db.commit()

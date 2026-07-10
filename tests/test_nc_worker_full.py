@@ -10,7 +10,7 @@ Depends on: conftest.py, nc_worker modules
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -513,7 +513,7 @@ class TestQueueManager:
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -524,7 +524,7 @@ class TestQueueManager:
             customer_name="Acme",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req1)
         db_session.flush()
@@ -534,7 +534,7 @@ class TestQueueManager:
             primary_mpn="LM317T",
             target_qty=100,
             material_card_id=mc.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item1_req)
         db_session.flush()
@@ -546,7 +546,7 @@ class TestQueueManager:
             mpn="LM317T",
             normalized_mpn="LM317T",
             status="completed",
-            last_searched_at=datetime.now(timezone.utc),
+            last_searched_at=datetime.now(UTC),
         )
         db_session.add(queue1)
         db_session.flush()
@@ -560,7 +560,7 @@ class TestQueueManager:
             normalized_mpn="LM317T",
             source_type="netcomponents",
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -571,7 +571,7 @@ class TestQueueManager:
             customer_name="Beta Corp",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -581,7 +581,7 @@ class TestQueueManager:
             primary_mpn="LM317T",
             target_qty=200,
             material_card_id=mc.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item2_req)
         db_session.commit()
@@ -612,7 +612,7 @@ class TestQueueManager:
             customer_name="X",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req1)
         db_session.flush()
@@ -621,7 +621,7 @@ class TestQueueManager:
             requisition_id=req1.id,
             primary_mpn="LM317T",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item1)
         db_session.flush()
@@ -632,7 +632,7 @@ class TestQueueManager:
             mpn="LM317T",
             normalized_mpn="LM317T",
             status="completed",
-            last_searched_at=datetime.now(timezone.utc),
+            last_searched_at=datetime.now(UTC),
         )
         db_session.add(queue1)
         db_session.commit()
@@ -643,7 +643,7 @@ class TestQueueManager:
             customer_name="Y",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -652,7 +652,7 @@ class TestQueueManager:
             requisition_id=req2.id,
             primary_mpn="LM317T",
             target_qty=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item2)
         db_session.commit()
@@ -1377,11 +1377,11 @@ class TestWorker:
 
     def test_record_heartbeat_advances_timestamp(self, db_session):
         """_record_heartbeat refreshes last_heartbeat to ~now and sets is_running."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.services.nc_worker.worker import _record_heartbeat
 
-        stale = datetime.now(timezone.utc) - timedelta(hours=1)
+        stale = datetime.now(UTC) - timedelta(hours=1)
         ws = NcWorkerStatus(id=1, is_running=False, last_heartbeat=stale)
         db_session.add(ws)
         db_session.commit()
@@ -1392,7 +1392,7 @@ class TestWorker:
         assert ws.is_running is True
         assert ws.last_heartbeat is not None
         assert ws.last_heartbeat > stale
-        assert datetime.now(timezone.utc) - ws.last_heartbeat < timedelta(seconds=30)
+        assert datetime.now(UTC) - ws.last_heartbeat < timedelta(seconds=30)
 
     def test_update_worker_status_no_row(self, db_session):
         """update_worker_status does nothing when no singleton row exists."""
@@ -3329,9 +3329,9 @@ class TestNcWorkerGaps:
             if tz is not None and str(tz) == str(EASTERN):
                 eastern_calls += 1
                 if eastern_calls == 1:
-                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=timezone.utc)
-                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=timezone.utc)
-            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=UTC)
+                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=UTC)
+            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=UTC)
 
         mock_session = MagicMock()
         mock_session.start = MagicMock()

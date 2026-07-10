@@ -13,7 +13,7 @@ Called by: pytest
 Depends on: app/services/engagement_scorer.py, tests/conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -38,7 +38,7 @@ def _make_vendor_card(db: Session, normalized_name: str, display_name: str, doma
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -93,7 +93,7 @@ class TestComputeAllEngagementScoresResponseWithoutAt:
             vendor_name="Skip",
             vendor_email="noemail",  # No @ sign
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.commit()
@@ -115,7 +115,7 @@ class TestComputeAllEngagementScoresFallbackNorm:
             vendor_name="rep",
             vendor_email="rep@unknown-co.com",  # Domain not in domain_to_norm
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.commit()
@@ -138,7 +138,7 @@ class TestComputeAllEngagementScoresWinMap:
             name="Win Buyer",
             role="buyer",
             azure_id="az-buyer-win",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -149,7 +149,7 @@ class TestComputeAllEngagementScoresWinMap:
             customer_name="Test Customer",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -166,7 +166,7 @@ class TestComputeAllEngagementScoresWinMap:
                 unit_price=1.0,
                 status=OfferStatus.WON,
                 entered_by_id=user.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(o)
         db_session.commit()

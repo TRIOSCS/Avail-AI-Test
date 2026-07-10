@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.models.crm (Company, SiteContact), app.routers.htmx_views, conftest
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +27,7 @@ def owned_company(db_session: Session, test_user: User) -> Company:
         name="Custom Field Corp",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -66,7 +66,7 @@ def company_contact(db_session: Session, company_site: CustomerSite) -> SiteCont
 @pytest.fixture()
 def other_company(db_session: Session) -> Company:
     """A separate company with its own site + contact (IDOR target)."""
-    co = Company(name="Other Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name="Other Corp", is_active=True, created_at=datetime.now(UTC))
     db_session.add(co)
     db_session.commit()
     db_session.refresh(co)
@@ -92,14 +92,14 @@ class TestCustomFieldsModelValidation:
     """@validates enforcement on Company and SiteContact."""
 
     def test_company_accepts_valid_dict(self, db_session: Session):
-        co = Company(name="Test", custom_fields={"k": "v"}, created_at=datetime.now(timezone.utc))
+        co = Company(name="Test", custom_fields={"k": "v"}, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
         assert co.custom_fields == {"k": "v"}
 
     def test_company_none_becomes_empty_dict(self, db_session: Session):
-        co = Company(name="None Test", custom_fields=None, created_at=datetime.now(timezone.utc))
+        co = Company(name="None Test", custom_fields=None, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
@@ -107,12 +107,12 @@ class TestCustomFieldsModelValidation:
 
     def test_company_rejects_non_dict(self):
         with pytest.raises(ValueError, match="must be a dict"):
-            Company(name="Bad", custom_fields=["list"], created_at=datetime.now(timezone.utc))
+            Company(name="Bad", custom_fields=["list"], created_at=datetime.now(UTC))
 
     def test_company_rejects_too_many_keys(self):
         big = {str(i): "v" for i in range(31)}
         with pytest.raises(ValueError, match="max 30 keys"):
-            Company(name="Too Many", custom_fields=big, created_at=datetime.now(timezone.utc))
+            Company(name="Too Many", custom_fields=big, created_at=datetime.now(UTC))
 
     def test_company_rejects_long_key(self):
         long_key = "k" * 61
@@ -120,7 +120,7 @@ class TestCustomFieldsModelValidation:
             Company(
                 name="Long Key",
                 custom_fields={long_key: "v"},
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_company_rejects_long_value(self):
@@ -128,7 +128,7 @@ class TestCustomFieldsModelValidation:
             Company(
                 name="Long Val",
                 custom_fields={"k": "v" * 501},
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_site_contact_accepts_valid_dict(self, db_session: Session, company_site: CustomerSite):
@@ -307,7 +307,7 @@ class TestCompanyCustomFieldsEndpoints:
             name="Unowned Corp",
             is_active=True,
             account_owner_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(unowned)
         db_session.commit()

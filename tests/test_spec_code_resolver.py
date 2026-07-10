@@ -13,7 +13,7 @@ UNIQUE constraint at resolver-commit time).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -64,7 +64,7 @@ def approved_mapping(db_session):
         spec_code="SPREJ",
         avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
         source="manual",
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     db_session.add(row)
     db_session.commit()

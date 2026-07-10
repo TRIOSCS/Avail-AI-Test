@@ -14,7 +14,7 @@ Depends on: Base, UTCDateTime (app/database.py); migration
       alembic/versions/104_trust_telemetry.py.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, Column, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -34,7 +34,7 @@ class ReconcileRun(Base):
     __tablename__ = "reconcile_runs"
 
     id = Column(Integer, primary_key=True)
-    ran_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    ran_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
     mode = Column(String(8), nullable=False)  # 'dry-run' | 'apply'
     sources = Column(JSONB, nullable=False)  # list[str] — the facet sources reconciled
     keys = Column(JSONB, nullable=False)  # list[str] — the spec_keys reconciled
@@ -48,7 +48,7 @@ class FacetAudit(Base):
     __tablename__ = "facet_audits"
 
     id = Column(Integer, primary_key=True)
-    audited_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    audited_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
     card_id = Column(Integer, index=True)  # No FK — the audit record survives card deletion
     category = Column(String(64))
     spec_key = Column(String(64))

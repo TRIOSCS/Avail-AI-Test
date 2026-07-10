@@ -12,6 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 from app.models import Requirement
@@ -132,12 +133,12 @@ class TestBatchRefreshAsync:
         assert resp.status_code == 200
 
     async def test_batch_refresh_search_exception(self, client, db_session, test_user, test_requisition):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         r = _make_requirement(
             db_session,
             test_requisition,
-            last_searched_at=datetime.now(timezone.utc) - timedelta(hours=2),  # Stale
+            last_searched_at=datetime.now(UTC) - timedelta(hours=2),  # Stale
         )
 
         async def _fail(*args, **kwargs):

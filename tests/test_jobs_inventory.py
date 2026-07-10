@@ -8,7 +8,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -161,7 +161,7 @@ def test_stock_autocomplete_completes_stuck_plans(
         status="active",
         is_stock_sale=True,
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        approved_at=datetime.now(UTC) - timedelta(hours=2),
     )
     scheduler_db.add(plan)
     scheduler_db.commit()
@@ -187,7 +187,7 @@ def test_stock_autocomplete_blocked_by_pending_verify_line(
         status="active",
         is_stock_sale=True,
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        approved_at=datetime.now(UTC) - timedelta(hours=2),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -231,7 +231,7 @@ def test_stock_autocomplete_skips_recent_plans(
         status="active",
         is_stock_sale=True,
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+        approved_at=datetime.now(UTC) - timedelta(minutes=30),
     )
     scheduler_db.add(plan)
     scheduler_db.commit()

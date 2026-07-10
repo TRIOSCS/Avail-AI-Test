@@ -16,15 +16,13 @@ import asyncio
 import hashlib
 import signal
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # pragma: no cover
+from app.constants import SearchQueueStatus
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -78,7 +76,7 @@ def update_worker_status(db: Session, **kwargs):
     for key, value in kwargs.items():
         if hasattr(status, key):
             setattr(status, key, value)
-    status.updated_at = datetime.now(timezone.utc)
+    status.updated_at = datetime.now(UTC)
     db.commit()
 
 
@@ -89,7 +87,7 @@ def _record_heartbeat(db: Session):
     path (idle, cap-sleep, breaker-open, off-hours) — not just after a completed search.
     Keeps liveness monitors from false-alarming "worker DOWN".
     """
-    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
 
 async def main():
@@ -125,7 +123,7 @@ async def main():
     # Recover stale items from previous crash
     with _db_session() as db:
         recover_stale_searches(db)
-        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
     # Start browser session
     session = IcsSessionManager(config)
@@ -260,7 +258,7 @@ async def main():
                     # Ensure session is valid
                     if not await session.ensure_session():
                         logger.error("ICS worker: session re-auth failed, sleeping 5 min")
-                        mark_status(db, item, "failed", error="Session authentication failed")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Session authentication failed")
                         db.close()
                         await _async_sleep(5 * 60)
                         continue
@@ -274,24 +272,24 @@ async def main():
                             search_part(session.page, item.mpn),
                             timeout=config.ICS_SEARCH_TIMEOUT_SECONDS,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.error(
                             "ICS worker: search timed out after {}s (queue id={}) — failing item",
                             config.ICS_SEARCH_TIMEOUT_SECONDS,
                             item.id,
                         )
-                        mark_status(db, item, "failed", error="Search timeout")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Search timeout")
                         db.close()
                         continue
 
                     # Check page health
                     health = await breaker.check_page_health(session.page)
                     if health == "SESSION_EXPIRED":
-                        mark_status(db, item, "queued")  # re-queue for next attempt
+                        mark_status(db, item, SearchQueueStatus.QUEUED)  # re-queue for next attempt
                         db.close()
                         continue
                     if breaker.should_stop():
-                        mark_status(db, item, "failed", error=f"Circuit breaker: {breaker.trip_reason}")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error=f"Circuit breaker: {breaker.trip_reason}")
                         db.close()
                         continue
 
@@ -327,10 +325,10 @@ async def main():
                     # Update worker status after each search
                     update_worker_status(
                         db,
-                        last_search_at=datetime.now(timezone.utc),
+                        last_search_at=datetime.now(UTC),
                         searches_today=searches_today,
                         sightings_today=sightings_today,
-                        last_heartbeat=datetime.now(timezone.utc),
+                        last_heartbeat=datetime.now(UTC),
                     )
 
                     logger.info(
@@ -346,7 +344,7 @@ async def main():
                     logger.error("ICS worker: search iteration error: {}", e)
                     try:
                         if item:
-                            mark_status(db, item, "failed", error=str(e)[:500])
+                            mark_status(db, item, SearchQueueStatus.FAILED, error=str(e)[:500])
                     except Exception as mark_err:
                         logger.debug("ICS worker: failed to mark item as failed: {}", mark_err)
                 finally:

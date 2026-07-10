@@ -201,10 +201,10 @@ def call_initiated(
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("call-initiated error")
         db.rollback()
-        raise HTTPException(500, "Failed to record phone contact")
+        raise HTTPException(500, "Failed to record phone contact") from e
 
 
 @router.post("/outreach-initiated", status_code=201)
@@ -255,8 +255,8 @@ def outreach_initiated(
             )
         except ValueError as exc:
             if "do-not-contact" in str(exc).lower() or "do not contact" in str(exc).lower():
-                raise HTTPException(403, "Contact is marked do-not-contact — outreach not permitted")
-            raise HTTPException(400, str(exc))
+                raise HTTPException(403, "Contact is marked do-not-contact — outreach not permitted") from exc
+            raise HTTPException(400, str(exc)) from exc
         db.commit()
         # dropped_links tells the client which stale entity links were removed —
         # the touch IS logged, but it won't appear on the account it was clicked
@@ -265,10 +265,10 @@ def outreach_initiated(
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("outreach-initiated error")
         db.rollback()
-        raise HTTPException(500, "Failed to record outreach")
+        raise HTTPException(500, "Failed to record outreach") from e
 
 
 @router.post("/{activity_id}/call-outcome", status_code=200)
@@ -312,10 +312,10 @@ def record_call_outcome(
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("call-outcome error")
         db.rollback()
-        raise HTTPException(500, "Failed to record call outcome")
+        raise HTTPException(500, "Failed to record call outcome") from e
 
 
 @router.get("/account/{company_id}", response_model=ActivityTimelineResponse)
@@ -393,8 +393,8 @@ def _parse_date_range(date_from: str | None, date_to: str | None) -> tuple[datet
     try:
         df = datetime.fromisoformat(date_from) if date_from else None
         dto = datetime.fromisoformat(date_to) if date_to else None
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid date format — expected ISO 8601")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "Invalid date format — expected ISO 8601") from e
     return df, dto
 
 

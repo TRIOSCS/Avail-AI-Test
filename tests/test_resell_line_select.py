@@ -18,7 +18,7 @@ owns the seeded list (the endpoints are owner-gated).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -44,7 +44,7 @@ def trader_user(db_session: Session) -> User:
         role="trader",
         azure_id="ls-azure-trader",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -80,7 +80,7 @@ def posted_multiline_list(db_session: Session, trader_user: User, test_company: 
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -99,7 +99,7 @@ def draft_multiline_list(db_session: Session, trader_user: User, test_company: C
         owner_id=trader_user.id,
         status=ExcessListStatus.DRAFT,
         total_line_items=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()

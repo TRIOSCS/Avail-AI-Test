@@ -4,7 +4,7 @@ The count is match-framed: "N results [in <commodity>] [· matching "<q>"]" — 
 "results" (not "parts") makes clear it's how many matched the current search/filters.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ def _card(db: Session, mpn: str) -> None:
             normalized_mpn=mpn,
             display_mpn=mpn.upper(),
             category="dram",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 

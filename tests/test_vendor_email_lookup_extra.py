@@ -18,7 +18,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -51,7 +51,7 @@ def req_and_item(db_session: Session, test_user: User):
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -59,7 +59,7 @@ def req_and_item(db_session: Session, test_user: User):
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -79,7 +79,7 @@ def _make_sighting(db: Session, requirement_id: int, mpn: str, vendor_name: str,
         qty_available=kwargs.get("qty_available"),
         unit_price=kwargs.get("unit_price"),
         currency=kwargs.get("currency", "USD"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.commit()
@@ -157,7 +157,7 @@ class TestSightingPhoneAndSource:
             normalized_mpn="NOSRC_PART",
             vendor_name="No Source Vendor",
             source_type=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -189,7 +189,7 @@ class TestMaterialVendorHistory:
             normalized_mpn="mvhtest",
             display_mpn="MVHTEST",
             manufacturer="Test Mfr",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -215,7 +215,7 @@ class TestMaterialVendorHistory:
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -252,7 +252,7 @@ class TestVendorCardMerge:
             emails=["extra@arrow.com", "sales@arrow.com"],
             phones=["+1-555-9999"],
             domain="arrow.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -272,7 +272,7 @@ class TestVendorCardMerge:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             emails=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -303,7 +303,7 @@ class TestVendorCardMerge:
             display_name="PhoneVendorCo",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -337,7 +337,7 @@ class TestVendorCardMerge:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             emails=["sales@arrow.com"],  # same as sighting
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -363,7 +363,7 @@ class TestPastRfqContacts:
             vendor_name_normalized=vendor_name.lower(),
             contact_type="email",
             vendor_contact=vendor_contact,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(contact)
         db.commit()
@@ -423,7 +423,7 @@ class TestBroadcastVendorContacts:
             emails=[],
             is_broadcast=True,
             is_blacklisted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -452,7 +452,7 @@ class TestBroadcastVendorContacts:
             phones=None,
             is_broadcast=True,
             is_blacklisted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -475,7 +475,7 @@ class TestBroadcastVendorContacts:
             emails=["bcast@existing.com"],
             is_broadcast=True,
             is_blacklisted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()

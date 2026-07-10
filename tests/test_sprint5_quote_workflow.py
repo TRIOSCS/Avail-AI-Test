@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +30,7 @@ def draft_quote(db_session: Session, test_requisition: Requisition, test_custome
         payment_terms="Net 30",
         shipping_terms="FOB Origin",
         created_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(q)
     db_session.commit()
@@ -271,7 +271,7 @@ class TestEditQuoteMetadata:
     ):
         # A SENT quote: validity_days is measured from sent_at, NOT today. sent_at is 10
         # days ago and the (future) target is today+20 → validity_days == 30.
-        sent_at = datetime.now(timezone.utc) - timedelta(days=10)
+        sent_at = datetime.now(UTC) - timedelta(days=10)
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=test_customer_site.id,
@@ -281,7 +281,7 @@ class TestEditQuoteMetadata:
             sent_at=sent_at,
             validity_days=7,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -308,10 +308,10 @@ class TestEditQuoteMetadata:
             quote_number="TEST-Q-SENT-PAST",
             status="sent",
             line_items=[],
-            sent_at=datetime.now(timezone.utc) - timedelta(days=40),
+            sent_at=datetime.now(UTC) - timedelta(days=40),
             validity_days=7,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -454,6 +454,11 @@ class TestReviseClonesLines:
         assert float(rev_lines[0].sell_price) == 0.55
         # The revision detail must render the line (not "No line items yet").
         assert "LM317T" in resp.text
+        # P0.3: the pricing-history lazy-load div MUST carry an explicit hx-target="this"
+        # — under #main-content's hx-target="this" (base.html), omitting it swaps the
+        # whole page in on "revealed" instead of just this row.
+        assert 'hx-trigger="revealed"' in resp.text
+        assert 'hx-target="this"' in resp.text
 
 
 class TestPricingHistoryUrl:

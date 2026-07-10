@@ -5,7 +5,7 @@ Depends on: conftest fixtures, unittest.mock
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -90,7 +90,7 @@ class TestJobTokenRefresh:
 
         test_user.refresh_token = "rt-test-123"
         test_user.access_token = "at-test-123"
-        test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         db_session.commit()
 
         mock_refresh = AsyncMock()
@@ -133,7 +133,7 @@ class TestJobTokenRefresh:
 
         test_user.refresh_token = "rt-test"
         test_user.access_token = "at-test"
-        test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
         db_session.commit()
 
         mock_refresh = AsyncMock()
@@ -178,7 +178,7 @@ class TestJobTokenRefresh:
 
         test_user.refresh_token = "rt-test"
         test_user.access_token = "at-test"
-        test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         db_session.commit()
 
         mock_refresh = AsyncMock()
@@ -341,7 +341,7 @@ class TestJobInboxScan:
         test_user.refresh_token = "rt-test"
         test_user.access_token = "at-test"
         test_user.m365_connected = True
-        test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(minutes=1)
+        test_user.last_inbox_scan = datetime.now(UTC) - timedelta(minutes=1)
         db_session.commit()
 
         mock_scan = AsyncMock()
@@ -373,7 +373,7 @@ class TestJobInboxScan:
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
             patch("app.jobs.email_jobs._scan_user_inbox", slow_scan),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -450,7 +450,7 @@ class TestJobBatchResults:
     @pytest.mark.parametrize(
         ("side_effect", "expected_exc", "match"),
         [
-            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
             pytest.param(ValueError("bad data"), ValueError, "bad data", id="generic_exception"),
         ],
     )
@@ -500,7 +500,7 @@ class TestJobBatchParseSignatures:
     @pytest.mark.parametrize(
         ("side_effect", "expected_exc", "match"),
         [
-            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
             pytest.param(RuntimeError("parse error"), RuntimeError, "parse error", id="exception"),
         ],
     )
@@ -543,7 +543,7 @@ class TestJobPollSignatureBatch:
     @pytest.mark.parametrize(
         ("side_effect", "expected_exc", "match"),
         [
-            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
             pytest.param(RuntimeError("poll error"), RuntimeError, "poll error", id="exception"),
         ],
     )

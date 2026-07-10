@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.routers.crm.views
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -264,7 +264,7 @@ class TestOverdueChip:
             account_owner_id=test_user.id,
             # Stale non-NULL outbound — this is the real overdue case the chip tracks.
             # last_activity_at is irrelevant to the chip (chip keys off last_outbound_at).
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=35),
         )
         db_session.add(overdue)
         db_session.commit()
@@ -281,7 +281,7 @@ class TestOverdueChip:
             name="Hidden Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+            last_activity_at=datetime.now(UTC) - timedelta(days=35),
         )
         db_session.add(overdue)
         db_session.commit()
@@ -304,7 +304,7 @@ class TestOverdueChip:
             name="Recent Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=5),
         )
         db_session.add(recent)
         db_session.commit()
@@ -357,7 +357,7 @@ class TestOverdueChip:
             name="LongOverdue Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),  # stale non-NULL outbound → overdue
+            last_outbound_at=datetime.now(UTC) - timedelta(days=45),  # stale non-NULL outbound → overdue
         )
         db_session.add_all([never, overdue])
         db_session.commit()
@@ -381,7 +381,7 @@ class TestOverdueChip:
             name="OtherOwner Corp",
             is_active=True,
             account_owner_id=None,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+            last_activity_at=datetime.now(UTC) - timedelta(days=35),
         )
         db_session.add(other)
         db_session.commit()
@@ -401,12 +401,12 @@ class TestWorkspaceFiltersAndSort:
         c_old = Company(
             name="ZZZ Oldest",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+            last_activity_at=datetime.now(UTC) - timedelta(days=60),
         )
         c_recent = Company(
             name="MMM Freshest",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+            last_activity_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add_all([c_new, c_old, c_recent])
         db_session.commit()
@@ -419,12 +419,12 @@ class TestWorkspaceFiltersAndSort:
         c_old = Company(
             name="ZZZ Oldest",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+            last_activity_at=datetime.now(UTC) - timedelta(days=60),
         )
         c_recent = Company(
             name="MMM Freshest",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+            last_activity_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add_all([c_old, c_recent])
         db_session.commit()
@@ -438,7 +438,7 @@ class TestWorkspaceFiltersAndSort:
         c_a = Company(
             name="Alpha Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+            last_activity_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add_all([c_b, c_a])
         db_session.commit()
@@ -451,12 +451,12 @@ class TestWorkspaceFiltersAndSort:
         stale = Company(
             name="Stale Filter Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+            last_activity_at=datetime.now(UTC) - timedelta(days=45),
         )
         fresh = Company(
             name="Fresh Filter Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
+            last_activity_at=datetime.now(UTC) - timedelta(days=2),
         )
         db_session.add_all([stale, fresh])
         db_session.commit()
@@ -471,7 +471,7 @@ class TestWorkspaceFiltersAndSort:
         touched = Company(
             name="Touched Filter Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
+            last_activity_at=datetime.now(UTC) - timedelta(days=2),
         )
         db_session.add_all([never, touched])
         db_session.commit()
@@ -489,17 +489,17 @@ class TestWorkspaceFiltersAndSort:
         c5 = Company(
             name="Band5d Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_activity_at=datetime.now(UTC) - timedelta(days=5),
         )
         c20 = Company(
             name="Band20d Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=20),
+            last_activity_at=datetime.now(UTC) - timedelta(days=20),
         )
         c45 = Company(
             name="Band45d Co",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+            last_activity_at=datetime.now(UTC) - timedelta(days=45),
         )
         db_session.add_all([c5, c20, c45])
         db_session.commit()
@@ -593,9 +593,7 @@ class TestCustomerStaleness:
         (past tier target, ≤30d) → amber-400,   on_target (within tier target) →
         emerald-400.
         """
-        last_outbound = (
-            None if outbound_days_ago is None else datetime.now(timezone.utc) - timedelta(days=outbound_days_ago)
-        )
+        last_outbound = None if outbound_days_ago is None else datetime.now(UTC) - timedelta(days=outbound_days_ago)
         c = Company(name=name, is_active=True, tier=tier, last_outbound_at=last_outbound)
         db_session.add(c)
         db_session.commit()
@@ -610,12 +608,12 @@ class TestCustomerStaleness:
         c_old = Company(
             name="ZZZ Old",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+            last_activity_at=datetime.now(UTC) - timedelta(days=60),
         )
         c_recent = Company(
             name="MMM Recent",
             is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+            last_activity_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add_all([c_new, c_old, c_recent])
         db_session.commit()
@@ -1182,7 +1180,7 @@ class TestCompanyDetailCadenceCard:
         Fails until: route computes cadence_state and template renders the
         overdue badge via badge() tone=danger: bg-rose-50 text-rose-700.
         """
-        outbound_40d_ago = datetime.now(timezone.utc) - timedelta(days=40)
+        outbound_40d_ago = datetime.now(UTC) - timedelta(days=40)
         co = self._make_company(db_session, last_outbound_at=outbound_40d_ago)
 
         resp = client.get(f"/v2/partials/customers/{co.id}")
@@ -1200,7 +1198,7 @@ class TestCompanyDetailCadenceCard:
         Fails until: route passes last_outbound_at (or computed days) to template
         AND template renders the outbound clock.
         """
-        outbound_7d_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        outbound_7d_ago = datetime.now(UTC) - timedelta(days=7)
         co = self._make_company(db_session, last_outbound_at=outbound_7d_ago)
 
         resp = client.get(f"/v2/partials/customers/{co.id}")
@@ -1379,7 +1377,7 @@ class TestUnifiedActivityTimeline:
             contact_type="rfq",
             vendor_name="Acme Vendor",
             status="sent",
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         db_session.add(rfq)
 
@@ -1389,7 +1387,7 @@ class TestUnifiedActivityTimeline:
             quote_number="QT-2026-001",
             subtotal=Decimal("9999.00"),
             status="sent",
-            created_at=datetime(2026, 6, 11, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 11, tzinfo=UTC),
         )
         db_session.add(q)
 
@@ -1404,7 +1402,7 @@ class TestUnifiedActivityTimeline:
             is_meaningful=True,
             quality_score=0.85,
             quality_classification="meaningful",
-            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 12, tzinfo=UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1438,7 +1436,7 @@ class TestUnifiedActivityTimeline:
             quote_number="QT-ABSENT-001",
             subtotal=Decimal("1234.56"),
             status="sent",
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1464,7 +1462,7 @@ class TestUnifiedActivityTimeline:
             subtotal=Decimal("5000.00"),
             won_revenue=Decimal("4800.00"),
             status="won",
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -1488,7 +1486,7 @@ class TestUnifiedActivityTimeline:
             is_meaningful=True,
             quality_score=0.9,
             quality_classification="meaningful",
-            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 12, tzinfo=UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1512,7 +1510,7 @@ class TestUnifiedActivityTimeline:
             channel="system",
             company_id=co.id,
             summary="Status changed to active",
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         db_session.add(noise)
         db_session.commit()
@@ -1533,7 +1531,7 @@ class TestUnifiedActivityTimeline:
             activity_type="offer_created",
             channel="system",
             company_id=co.id,
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1558,7 +1556,7 @@ class TestUnifiedActivityTimeline:
             channel="manual",
             company_id=co.id,
             notes="Older note from June 1",
-            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 1, tzinfo=UTC),
         )
         newer = ActivityLog(
             user_id=test_user.id,
@@ -1566,7 +1564,7 @@ class TestUnifiedActivityTimeline:
             channel="manual",
             company_id=co.id,
             notes="Newer note from June 5",
-            created_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 5, tzinfo=UTC),
         )
         db_session.add_all([older, newer])
         db_session.commit()
@@ -1656,7 +1654,7 @@ class TestActivityTabTruncation:
         db_session.flush()
 
         # Create 51 activity logs (exceeds .limit(50))
-        base_ts = datetime.now(timezone.utc)
+        base_ts = datetime.now(UTC)
         for i in range(51):
             activity = ActivityLog(
                 company_id=company.id,
@@ -1684,7 +1682,7 @@ class TestActivityTabTruncation:
         db_session.flush()
 
         # Create just 5 activities (well under .limit(50))
-        base_ts = datetime.now(timezone.utc)
+        base_ts = datetime.now(UTC)
         for i in range(5):
             activity = ActivityLog(
                 company_id=company.id,
@@ -1750,9 +1748,7 @@ class TestVendorListCadence:
         expected_class,
     ):
         """Vendor list cadence dot uses correct color for new/on_target/overdue."""
-        last_outbound = (
-            None if outbound_days_ago is None else datetime.now(timezone.utc) - timedelta(days=outbound_days_ago)
-        )
+        last_outbound = None if outbound_days_ago is None else datetime.now(UTC) - timedelta(days=outbound_days_ago)
         self._make_vendor(
             db_session,
             f"DotColor {outbound_days_ago} Vendor",
@@ -1767,7 +1763,7 @@ class TestVendorListCadence:
         self._make_vendor(
             db_session,
             "OutClock Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=7),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=7),
         )
         resp = client.get("/v2/partials/vendors")
         assert resp.status_code == 200
@@ -1786,7 +1782,7 @@ class TestVendorListCadence:
         self._make_vendor(
             db_session,
             "NullReply Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=3),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=3),
             last_reply_at=None,
         )
         resp = client.get("/v2/partials/vendors")
@@ -1809,12 +1805,12 @@ class TestVendorListCadence:
         self._make_vendor(
             db_session,
             "SortA Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=30),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=30),
         )
         self._make_vendor(
             db_session,
             "SortB Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=5),
         )
         resp = client.get("/v2/partials/vendors?sort=outbound_asc")
         assert resp.status_code == 200
@@ -1827,12 +1823,12 @@ class TestVendorListCadence:
         self._make_vendor(
             db_session,
             "OldFirst Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=40),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=40),
         )
         self._make_vendor(
             db_session,
             "RecentLast Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=3),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=3),
         )
         resp = client.get("/v2/partials/vendors?sort=outbound_asc")
         assert resp.status_code == 200
@@ -1900,7 +1896,7 @@ class TestVendorDetailCadenceHero:
         v = self._make_vendor(
             db_session,
             "BadgeOverdue Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=35),
         )
         resp = client.get(f"/v2/partials/vendors/{v.id}")
         assert resp.status_code == 200
@@ -1911,7 +1907,7 @@ class TestVendorDetailCadenceHero:
         v = self._make_vendor(
             db_session,
             "BadgeOnTarget Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=5),
         )
         resp = client.get(f"/v2/partials/vendors/{v.id}")
         assert resp.status_code == 200
@@ -1930,8 +1926,8 @@ class TestVendorDetailCadenceHero:
         v = self._make_vendor(
             db_session,
             "DualClock Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=10),
-            last_reply_at=datetime.now(timezone.utc) - timedelta(days=8),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=10),
+            last_reply_at=datetime.now(UTC) - timedelta(days=8),
         )
         resp = client.get(f"/v2/partials/vendors/{v.id}")
         assert resp.status_code == 200
@@ -1952,7 +1948,7 @@ class TestVendorDetailCadenceHero:
         v = self._make_vendor(
             db_session,
             "NullReply Detail Vendor",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=5),
             last_reply_at=None,
         )
         resp = client.get(f"/v2/partials/vendors/{v.id}")
@@ -2134,7 +2130,7 @@ class TestTierSetter:
         """Setting tier=key on an account that was last contacted 10 days ago changes
         cadence from 'due' (standard 30d) to 'overdue' would NOT apply here but key
         target is 7d so 10d ago → 'due' badge → amber classes present."""
-        outbound_10d_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        outbound_10d_ago = datetime.now(UTC) - timedelta(days=10)
         co = self._make_company(db_session, last_outbound_at=outbound_10d_ago, account_owner_id=test_user.id)
         # Before: standard tier → 10d is on_target (target=30)
         resp_before = client.get(f"/v2/partials/customers/{co.id}")
@@ -3073,14 +3069,14 @@ class TestCRMMacroDedup:
             contact_type="rfq",
             vendor_name="Badge Vendor",
             status="sent",
-            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 10, tzinfo=UTC),
         )
         q = Quote(
             requisition_id=req.id,
             quote_number="QT-MD-AT",
             subtotal=Decimal("500.00"),
             status="sent",
-            created_at=datetime(2026, 6, 11, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 11, tzinfo=UTC),
         )
         act = ActivityLog(
             user_id=test_user.id,
@@ -3090,7 +3086,7 @@ class TestCRMMacroDedup:
             subject="RE: badge",
             direction="inbound",
             is_meaningful=True,
-            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 12, tzinfo=UTC),
         )
         db_session.add_all([rfq, q, act])
         db_session.commit()
@@ -3602,7 +3598,7 @@ class TestC3KebabActionsAndCadence:
 
         overdue_ts = None
         if overdue_days > 0:
-            overdue_ts = datetime.now(timezone.utc) - timedelta(days=overdue_days)
+            overdue_ts = datetime.now(UTC) - timedelta(days=overdue_days)
 
         contact_a = SiteContact(
             customer_site_id=site.id,
@@ -3829,7 +3825,7 @@ class TestC3KebabActionsAndCadence:
         contact = SiteContact(
             customer_site_id=site.id,
             full_name="Has Cadence",
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=45),
         )
         db_session.add(contact)
         db_session.commit()
@@ -4899,7 +4895,7 @@ class TestAccountActivityTab:
         # runs within ~3h after UTC midnight, so the "Today" date header never
         # renders and this test flakes. Noon ± a few hours stays on today's date
         # regardless of run time, making the date-grouping assertions deterministic.
-        now = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+        now = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
         rows = [
             ActivityLog(
                 company_id=_activity_company.id,
@@ -4987,7 +4983,7 @@ class TestAccountActivityTab:
     ):
         """(c) Date headers (Today / Yesterday / date string) appear in section
         bodies."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
         html = resp.text
@@ -4996,7 +4992,7 @@ class TestAccountActivityTab:
         # status_changed is 1 day ago → "Yesterday" appears in the Other section
         assert "Yesterday" in html
         # The 3-day-old note renders as a %b %d, %Y date string (day_delta >= 2)
-        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%b %d, %Y")
+        three_days_ago = (datetime.now(UTC) - timedelta(days=3)).strftime("%b %d, %Y")
         assert three_days_ago in html
 
     def test_other_section_hidden_by_default(self, client: TestClient, _activity_company: Company, _mixed_activities):
@@ -5024,7 +5020,7 @@ class TestAccountActivityTab:
                 activity_type="note",
                 channel="manual",
                 summary="Just a note",
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
         )
@@ -5062,7 +5058,7 @@ class TestAccountActivityTab:
                 activity_type="meeting",
                 channel="manual",
                 summary="Board call",
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
         )

@@ -43,7 +43,6 @@ async def test_run_inbox_scan_now_calls_scanner_when_not_testing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_inbox_scan_now_swallows_timeout(monkeypatch):
-    import asyncio
     from types import SimpleNamespace
 
     import app.routers.htmx.settings as hv
@@ -51,13 +50,13 @@ async def test_run_inbox_scan_now_swallows_timeout(monkeypatch):
     monkeypatch.setenv("TESTING", "0")
 
     async def slow_scan(user, db):
-        raise asyncio.TimeoutError()  # simulate wait_for timing out
+        raise TimeoutError()  # simulate wait_for timing out
 
     # Patch asyncio.wait_for as used in htmx_views to raise TimeoutError deterministically
     async def fake_wait_for(coro, timeout):
         # close the passed coroutine to avoid 'never awaited' warning, then raise
         coro.close()
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     monkeypatch.setattr("app.jobs.email_jobs._scan_user_inbox", slow_scan)
     monkeypatch.setattr(hv.asyncio, "wait_for", fake_wait_for)

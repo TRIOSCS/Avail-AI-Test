@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: conftest (db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -64,7 +64,7 @@ def test_warm_intro_vendor_card_match(db_session):
         domain="testcorp.com",
         normalized_name="test corp vendor",
         engagement_score=70.0,
-        last_contact_at=datetime.now(timezone.utc),
+        last_contact_at=datetime.now(UTC),
     )
     db_session.add(vc)
     db_session.commit()
@@ -225,7 +225,7 @@ def test_warm_intro_vendor_card_warm_engagement(db_session):
         domain="warmcorp.com",
         normalized_name="warm corp vendor",
         engagement_score=45.0,
-        last_contact_at=datetime.now(timezone.utc),
+        last_contact_at=datetime.now(UTC),
     )
     db_session.add(vc)
     db_session.commit()

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.services.tagging, app.models.tags, tests.conftest (engine, db_session)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +22,7 @@ from app.services.tagging import (
 
 def add_tag(db_session, name, tag_type):
     """Insert and flush a Tag, returning the persisted instance."""
-    tag = Tag(name=name, tag_type=tag_type, created_at=datetime.now(timezone.utc))
+    tag = Tag(name=name, tag_type=tag_type, created_at=datetime.now(UTC))
     db_session.add(tag)
     db_session.flush()
     return tag

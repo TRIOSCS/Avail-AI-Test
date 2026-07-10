@@ -16,7 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -76,7 +76,7 @@ def test_assign_dropdown_lists_only_active_buyers_and_traders(client, db_session
         role=UserRole.TRADER,
         azure_id="trader-azure",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     sales = User(
         email="sales@test.com",
@@ -84,7 +84,7 @@ def test_assign_dropdown_lists_only_active_buyers_and_traders(client, db_session
         role=UserRole.SALES,
         azure_id="sales-azure",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     inactive_buyer = User(
         email="inactive@test.com",
@@ -92,7 +92,7 @@ def test_assign_dropdown_lists_only_active_buyers_and_traders(client, db_session
         role=UserRole.BUYER,
         azure_id="inactive-azure",
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([trader, sales, inactive_buyer])
     _make_req_and_requirement(db_session, test_user.id)

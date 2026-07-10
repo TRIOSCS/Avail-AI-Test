@@ -1,6 +1,8 @@
 """Vendor name normalization, card enrichment, and fuzzy matching helpers."""
 
 import re
+from collections.abc import Callable, Sequence
+from typing import Any
 
 # Generic email domains — not useful for vendor enrichment or domain matching.
 # Shared by: app.routers.vendors, app.services.activity_service
@@ -197,6 +199,70 @@ def fuzzy_match_vendor(query: str, candidates: list[str], threshold: int = 80) -
             results.append({"name": name, "score": score})
 
     results.sort(key=lambda x: x["score"], reverse=True)  # type: ignore[arg-type,return-value]
+    return results
+
+
+def fuzzy_dedup_scan(
+    rows: Sequence[Any],
+    key_fn: Callable[[Any], str],
+    *,
+    threshold: int = 80,
+    limit: int | None = None,
+    anchor_key: str | None = None,
+) -> list[tuple[Any, Any, float]]:
+    """Generic rapidfuzz token_sort_ratio scan — the shared Python-side fallback for
+    every fuzzy-dedup caller that has no trigram index to lean on (SQLite tests, or a
+    dialect without pg_trgm). `key_fn` extracts the (already-normalized) comparison
+    string from a row; pairs/rows scoring below `threshold` are dropped. Pure scan +
+    filter only — sorting and any final truncation is left to the caller (each of the
+    two current callers sorts/truncates on its own derived score field, e.g. after
+    rounding or building a result dict, so a scan-only helper keeps this a byte-for-
+    byte-identical extraction rather than subtly reordering ties).
+
+    Two modes, matching the two shapes this scan is used for:
+
+      - Pairwise (anchor_key=None, the default): every unordered pair within `rows`
+        is scored — O(n^2) — for finding duplicate CLUSTERS inside one table
+        (company/vendor card dedup). Scanning stops as soon as `limit` matching
+        pairs have been collected (an early exit during the scan, not a post-hoc
+        truncation — this preserves the original callers' behavior of capping total
+        comparisons on a large table rather than guaranteeing the globally highest-
+        scoring `limit` pairs). Returns ``(row_a, row_b, score)`` tuples in scan
+        order.
+
+      - Anchor (anchor_key=<a caller-normalized string>): every row in `rows` is
+        scored against the fixed `anchor_key` — O(n) — for a single query-vs-
+        candidates lookup (e.g. "does this new vendor name match anything we
+        already have?"). Every row is scanned (no early exit — `limit` is ignored
+        in this mode) so a low match found early can never crowd out a better one
+        found later; the caller sorts and truncates afterward. Returns
+        ``(row, None, score)`` tuples in scan order.
+
+    Called by: app.company_utils._find_company_dedup_candidates_rapidfuzz (pairwise),
+               app.services.vendor_duplicates._fuzzy_match_python (anchor)
+    Depends on: rapidfuzz.fuzz.token_sort_ratio
+    """
+    from rapidfuzz import fuzz
+
+    results: list[tuple[Any, Any, float]] = []
+
+    if anchor_key is not None:
+        for row in rows:
+            score = fuzz.token_sort_ratio(anchor_key, key_fn(row))
+            if score >= threshold:
+                results.append((row, None, score))
+        return results
+
+    for i, row_a in enumerate(rows):
+        key_a = key_fn(row_a)
+        for row_b in rows[i + 1 :]:
+            score = fuzz.token_sort_ratio(key_a, key_fn(row_b))
+            if score >= threshold:
+                results.append((row_a, row_b, score))
+                if limit is not None and len(results) >= limit:
+                    break
+        if limit is not None and len(results) >= limit:
+            break
     return results
 
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from loguru import logger
@@ -47,7 +47,7 @@ from app.services.proactive_matching import find_matches_for_offer
 
 SEED_TAG = "PROACTIVE_DEMO_SEED"
 VIEWER_EMAIL = "mkhoury@trioscs.com"
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def norm(mpn: str) -> str:

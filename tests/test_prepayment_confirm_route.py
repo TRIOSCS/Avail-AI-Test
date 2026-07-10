@@ -33,6 +33,7 @@ from app.models.quality_plan import Prepayment
 from app.services import prepayment_notifications as pn
 
 # Reuse the plan/user builders the sibling prepayment tests rely on.
+from tests._route_helpers import iter_routes
 from tests.test_po_line_signoff import _make_plan, _make_user
 
 
@@ -193,7 +194,7 @@ def test_confirm_route_has_no_auth_dependency():
     from app.main import app
 
     auth_deps = {require_user, require_admin, require_buyer}
-    confirm_routes = [r for r in app.routes if getattr(r, "path", "") == "/p/confirm/{token}"]
+    confirm_routes = [r for r in iter_routes(app.routes) if getattr(r, "path", "") == "/p/confirm/{token}"]
     assert confirm_routes, "confirm route not registered"
     for route in confirm_routes:
         dep_calls = {d.call for d in route.dependant.dependencies}

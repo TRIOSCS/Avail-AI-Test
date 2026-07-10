@@ -7,7 +7,7 @@ Called by: manual invocation, tests/test_models/test_prospect_account.py
 Depends on: app.models, app.database
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import or_
@@ -72,8 +72,8 @@ def migrate(dry_run: bool = True) -> dict:
                 batch_id=f"sf_migration_{uuid.uuid4().hex[:12]}",
                 source="salesforce_import",
                 status="completed",
-                started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
             )
             db.add(batch)
             db.flush()

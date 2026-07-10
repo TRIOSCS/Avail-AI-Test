@@ -1,6 +1,6 @@
 """Tests for app/company_utils.py — normalization and dedup detection."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -46,7 +46,7 @@ class TestFindCompanyDedupCandidates:
             is_active=True,
             account_owner_id=owner_id,
             is_strategic=is_strategic,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(c)
         db.flush()
@@ -54,7 +54,7 @@ class TestFindCompanyDedupCandidates:
             s = CustomerSite(
                 company_id=c.id,
                 site_name=f"Site {i + 1}",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db.add(s)
         db.flush()
@@ -116,7 +116,7 @@ class TestFindCompanyDedupCandidates:
         c2 = Company(
             name="Gamma",
             is_active=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(c2)
         db_session.commit()

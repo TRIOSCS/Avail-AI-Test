@@ -1,7 +1,7 @@
 import os
 
 os.environ["TESTING"] = "1"
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -51,7 +51,7 @@ async def test_capture_skips_within_cooldown(_session):
     card = MaterialCard(
         normalized_mpn="ne555",
         display_mpn="NE555",
-        datasheet_searched_at=datetime.now(timezone.utc) - timedelta(days=5),
+        datasheet_searched_at=datetime.now(UTC) - timedelta(days=5),
     )
     _session.add(card)
     _session.commit()

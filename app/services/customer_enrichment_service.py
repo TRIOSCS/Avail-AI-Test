@@ -12,7 +12,7 @@ Depends on: enrichment_service.find_suggested_contacts_with_errors (the live mul
             contact-discovery waterfall), contact_quality.py.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -172,7 +172,7 @@ async def enrich_customer_account(
     if not force and company.customer_enrichment_at:
         cooldown = timedelta(days=settings.customer_enrichment_cooldown_days)
         next_enrichment_at = company.customer_enrichment_at + cooldown
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if now < next_enrichment_at:
             days_left = (next_enrichment_at - now).days
             return {
@@ -189,7 +189,7 @@ async def enrich_customer_account(
     needed = _contacts_needed(db, company_id, target)
     if needed <= 0 and not force:
         company.customer_enrichment_status = "complete"
-        company.customer_enrichment_at = datetime.now(timezone.utc)
+        company.customer_enrichment_at = datetime.now(UTC)
         db.flush()
         return {"ok": True, "contacts_added": 0, "status": "already_complete"}
 
@@ -209,7 +209,7 @@ async def enrich_customer_account(
 
     added, verified = _persist_discovered_contacts(db, company, contacts)
 
-    company.customer_enrichment_at = datetime.now(timezone.utc)
+    company.customer_enrichment_at = datetime.now(UTC)
     remaining = _contacts_needed(db, company_id, target)
     company.customer_enrichment_status = "complete" if remaining <= 0 else "partial"
     db.flush()
@@ -247,7 +247,7 @@ def get_enrichment_gaps(db: Session, limit: int = 50) -> list[dict]:
     """
     target = settings.customer_enrichment_contacts_per_account
     cooldown = timedelta(days=settings.customer_enrichment_cooldown_days)
-    cutoff = datetime.now(timezone.utc) - cooldown
+    cutoff = datetime.now(UTC) - cooldown
 
     companies = (
         db.query(Company)

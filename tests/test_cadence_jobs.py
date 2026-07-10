@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import ActivityType, Channel, Direction
 from app.management.backfill_cadence_clocks import backfill_for_session
 from app.models.crm import Company
 from app.models.intelligence import ActivityLog
 
-NOW = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
 
 
 def test_backfill_populates_existing_companies(db_session):

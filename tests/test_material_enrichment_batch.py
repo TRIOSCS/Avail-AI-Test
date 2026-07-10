@@ -8,7 +8,7 @@ Depends on: app.services.material_enrichment_service, conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +18,7 @@ from app.services.material_enrichment_service import (
     batch_enrich_materials,
     process_material_batch_results,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _run(coro):
@@ -43,7 +43,7 @@ def unenriched_cards(db_session):
             display_mpn=f"TEST-MPN-{i:03d}",
             normalized_mpn=f"test-mpn-{i:03d}",
             manufacturer=f"Vendor{i}" if i % 2 == 0 else None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         cards.append(card)
@@ -61,9 +61,9 @@ def enriched_cards(db_session):
         card = MaterialCard(
             display_mpn=f"DONE-MPN-{i:03d}",
             normalized_mpn=f"done-mpn-{i:03d}",
-            enriched_at=datetime.now(timezone.utc),
+            enriched_at=datetime.now(UTC),
             enrichment_source="claude_haiku",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         cards.append(card)

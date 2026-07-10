@@ -10,7 +10,7 @@ Depends on: conftest.py fixtures, app models, app/services/sighting_status.py,
             app/services/vendor_unavailability.py (is_active authority)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import UnavailabilityReason
 from app.models.auth import User
@@ -354,7 +354,7 @@ def _add_record(db_session, vendor: str, key: str, age_days: int = 0, reason=Una
         vendor_name_normalized=normalize_vendor_name(vendor),
         normalized_mpn=key,
         reason=reason,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        created_at=datetime.now(UTC) - timedelta(days=age_days),
     )
     db_session.add(rec)
     db_session.flush()
@@ -409,7 +409,7 @@ class TestReaderAuthorityRule:
         _make_summary(db_session, r.id, "Acme Corp")
         _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
         rec = _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
-        rec.released_at = datetime.now(timezone.utc)
+        rec.released_at = datetime.now(UTC)
         rec.release_trigger = "offer_received"
         db_session.commit()
 

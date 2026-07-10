@@ -554,9 +554,9 @@ async def mark_outcome(
     try:
         transition(req, body.outcome, user, db, reason=body.reason)
     except OutcomeReasonRequired as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -675,7 +675,7 @@ async def claim_requisition_endpoint(
     try:
         changed = claim_requisition(req, user, db)
     except ValueError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "claimed": changed, "claimed_by_id": req.claimed_by_id}

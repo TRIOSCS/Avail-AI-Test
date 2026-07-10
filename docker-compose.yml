@@ -50,11 +50,24 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    # P1.4: --requirepass wired from REDIS_PASSWORD (compose-file interpolation,
+    # not a container env var — redis-server only needs the value on argv).
+    # ${REDIS_PASSWORD:+...} expands to nothing when REDIS_PASSWORD is unset/empty,
+    # so local dev with no REDIS_PASSWORD in .env keeps running with no auth
+    # (unchanged default behavior). Production MUST set REDIS_PASSWORD in .env —
+    # Redis is not exposed past the internal compose network either way, but
+    # requirepass is defense-in-depth against a compromised container reaching it.
+    command: >
+      redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Same conditional: only pass -a when a password is actually configured,
+      # otherwise `redis-cli -a ''` sends a spurious AUTH and errors against a
+      # server with no requirepass set — exactly the "silently break local dev"
+      # failure mode P1.4 calls out.
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a ${REDIS_PASSWORD} --no-auth-warning} ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -78,6 +91,13 @@ services:
     # X-Forwarded-For from any client that reached uvicorn directly.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24"]
     env_file: .env
+    # P1.4: REDIS_URL is composed here (not left to whatever plain value is in
+    # .env) so redis auth wiring can never drift from the redis service's own
+    # --requirepass above. `environment:` here overrides any REDIS_URL from
+    # env_file for the same key. Empty REDIS_PASSWORD -> plain
+    # redis://redis:6379/0 (unchanged default local-dev behavior).
+    environment:
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
     stop_grace_period: 60s
     depends_on:
       db:
@@ -90,6 +110,14 @@ services:
       - applogs:/var/log/avail
       - ./scripts:/app/scripts:ro
     healthcheck:
+      # Liveness only (P2.7 docs/CODE_AUDIT_AND_HARDENING_PLAN.md): /health answers as
+      # soon as the app can serve traffic. Startup's SLOW idempotent backfills/ANALYZE
+      # now run in a post-yield background task (see app/startup.py
+      # run_deferred_startup_backfills), so a prod-sized DB can no longer make this
+      # healthcheck (or deploy.sh's wait loop, which polls this same status) time out
+      # behind a full-table scan. Readiness for that background phase is reported
+      # separately at GET /health/ready — deliberately NOT wired here, so a slow
+      # deferred phase can never flip this container "unhealthy".
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
@@ -114,6 +142,10 @@ services:
     restart: always
     command: ["python", "-m", "app.services.enrichment_worker"]
     env_file: .env
+    # stop_grace_period 60s: worker.py's graceful-shutdown handler needs room to
+    # finish an in-flight enrichment batch instead of being SIGKILLed at the
+    # compose default 10s mid-batch (P1.4).
+    stop_grace_period: 60s
     environment:
       - ENRICHMENT_BATCH_SIZE=${ENRICHMENT_BATCH_SIZE:-5}
       - ENRICHMENT_DAILY_CAP=${ENRICHMENT_DAILY_CAP:-200}
@@ -122,6 +154,8 @@ services:
       - ENRICHMENT_IDLE_SLEEP_SECONDS=${ENRICHMENT_IDLE_SLEEP_SECONDS:-60}
       - ENRICHMENT_NOT_FOUND_RETRY_HOURS=${ENRICHMENT_NOT_FOUND_RETRY_HOURS:-22}
       - ENRICHMENT_CIRCUIT_BREAKER_ERRORS=${ENRICHMENT_CIRCUIT_BREAKER_ERRORS:-5}
+      # P1.4: same REDIS_URL composition as `app` — keep in sync if changed.
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
     depends_on:
       db:
         condition: service_healthy

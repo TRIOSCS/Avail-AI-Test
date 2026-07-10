@@ -19,7 +19,7 @@ Depends on: app.services.prospect_claim, app.services.crm_service, app.models,
             app.routers.htmx_views (via the TestClient `client` fixture)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ from app.models.prospect_account import ProspectAccount
 from app.services import crm_service
 from app.services.prospect_claim import send_company_to_prospecting
 
-NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 18, 12, 0, 0, tzinfo=UTC)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

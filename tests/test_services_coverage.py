@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -44,7 +44,7 @@ def _add_requirement(db_session, customer_site_id, *, req_name, mpn, brand, qty)
         customer_name="Acme",
         customer_site_id=customer_site_id,
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -53,7 +53,7 @@ def _add_requirement(db_session, customer_site_id, *, req_name, mpn, brand, qty)
         primary_mpn=mpn,
         brand=brand,
         target_qty=qty,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()
@@ -76,7 +76,7 @@ class TestHealthService:
     def test_check_backup_freshness_ok(self, db_session):
         from app.services.health_service import check_backup_freshness
 
-        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value=recent),
@@ -87,7 +87,7 @@ class TestHealthService:
     def test_check_backup_freshness_stale(self, db_session):
         from app.services.health_service import check_backup_freshness
 
-        old = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        old = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value=old),
@@ -98,7 +98,7 @@ class TestHealthService:
     def test_check_backup_freshness_z_suffix(self, db_session):
         from app.services.health_service import check_backup_freshness
 
-        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        recent = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value=recent),
@@ -109,7 +109,7 @@ class TestHealthService:
     def test_check_backup_freshness_naive_timestamp(self, db_session):
         from app.services.health_service import check_backup_freshness
 
-        naive = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        naive = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value=naive),
@@ -436,7 +436,7 @@ class TestCustomerAnalysisService:
             mpn_matched="MEM-MODULE-X",
             manufacturer="Samsung",
             qty_available=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.flush()
@@ -754,7 +754,7 @@ class TestCustomerEnrichmentService:
     async def test_enrich_cooldown_active(self, db_session, test_company):
         from app.services.customer_enrichment_service import enrich_customer_account
 
-        test_company.customer_enrichment_at = datetime.now(timezone.utc) - timedelta(days=1)
+        test_company.customer_enrichment_at = datetime.now(UTC) - timedelta(days=1)
         db_session.flush()
 
         with patch("app.services.customer_enrichment_service.settings") as mock_settings:

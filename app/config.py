@@ -269,13 +269,13 @@ class Settings(BaseSettings):
     # precedent): changing a knob re-evaluates EXISTING marks at the next render —
     # there is no stored expiry. different_part never expires by design (identity
     # knowledge, not stock state) — deliberately a hard-coded constant, not a knob.
-    unavailability_suppress_days: int = Field(30, ge=1)  # LOT: bought_by_us/sold_elsewhere/broken/other
-    unavailability_listing_suppress_days: int = Field(180, ge=1)  # LISTING: not_really_there
+    unavailability_suppress_days: int = Field(default=30, ge=1)  # LOT: bought_by_us/sold_elsewhere/broken/other
+    unavailability_listing_suppress_days: int = Field(default=180, ge=1)  # LISTING: not_really_there
     # O2 restock override: fresh qty must be >= factor x qty_at_mark AND strictly
     # greater — strict-greater holds even at factor 1.0, so an identical echo can
     # never surface the row (un-suppress) regardless of misconfiguration. O2 is
     # row-level only; it never writes released_at (only O3 and the offer hook do).
-    unavailability_qty_jump_factor: float = Field(2.0, ge=1.0)
+    unavailability_qty_jump_factor: float = Field(default=2.0, ge=1.0)
 
     # --- Search ---
     search_concurrency_limit: int = 10
@@ -331,6 +331,12 @@ class Settings(BaseSettings):
     acs_connection_string: str = ""
     acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)
     acs_callback_url: str = ""
+    # Shared secret minted into the ACS/Event Grid webhook subscription URL as a
+    # `?secret=` query param (Event Grid has no clientState-style body field like
+    # Graph, so the secret travels in the URL instead). Required for the webhook
+    # to accept events — unset/empty means POST /api/webhooks/acs fails closed
+    # (403) even if ACS is otherwise configured. See app/routers/v13_features/activity.py.
+    acs_webhook_secret: str = ""
 
     # --- MVP Mode ---
     # Now gates ONLY the Teams chat integration: the POST /api/webhooks/teams endpoint

@@ -8,7 +8,7 @@ Called by: routers/error_reports.py, startup.py
 Depends on: models/base.py, models/auth.py (User FK)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -64,8 +64,8 @@ class TroubleTicket(Base):
     cost_usd = Column(Float)
     resolution_notes = Column(Text)
     parent_ticket_id = Column(Integer, ForeignKey("trouble_tickets.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
     diagnosed_at = Column(UTCDateTime)
     resolved_at = Column(UTCDateTime)
 

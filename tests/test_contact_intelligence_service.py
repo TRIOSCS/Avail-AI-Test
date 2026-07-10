@@ -17,7 +17,7 @@ Called by: pytest
 Depends on: app/services/contact_intelligence.py, app/routers/vendors.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -43,7 +43,7 @@ def _make_card(db: Session, name: str, domain: str) -> VendorCard:
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -78,8 +78,8 @@ def _make_activity(db: Session, user_id: int, contact: VendorContact, **override
         "vendor_card_id": contact.vendor_card_id,
         "vendor_contact_id": contact.id,
         "auto_logged": True,
-        "occurred_at": datetime.now(timezone.utc),
-        "created_at": datetime.now(timezone.utc),
+        "occurred_at": datetime.now(UTC),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     a = ActivityLog(**defaults)
@@ -115,7 +115,7 @@ class TestProcessInboundEmailContact:
                 sender_name="Jane Sales",
                 body="Hello\n--\nJane Sales\nVP Sales\n+1-555-9999",
                 subject="Re: RFQ",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
 
@@ -151,7 +151,7 @@ class TestProcessInboundEmailContact:
                 sender_name="Bob",
                 body="Hi there",
                 subject="Quote",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
 
@@ -174,7 +174,7 @@ class TestProcessInboundEmailContact:
                 sender_name="Nobody",
                 body="Hello",
                 subject="Hi",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
         assert vc is None
@@ -230,7 +230,7 @@ class TestProcessInboundEmailContact:
                 sender_name="Dan Delta",
                 body="Hey",
                 subject="Test",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
 
@@ -303,10 +303,10 @@ class TestComputeAllContactScores:
     def test_scores_contacts_with_activity(self, db_session, test_user):
         card = _make_card(db_session, "ScoreCo", "scoreco.com")
         vc = _make_contact(db_session, card, "rep@scoreco.com")
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=3)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=3)
 
         # Create varied activities
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for i in range(5):
             _make_activity(db_session, test_user.id, vc, occurred_at=now - timedelta(days=i))
         for i in range(3):
@@ -348,9 +348,9 @@ class TestComputeAllContactScores:
     def test_win_count_boosts_score(self, db_session, test_user):
         card = _make_card(db_session, "WinCo", "winco.com")
         vc = _make_contact(db_session, card, "winner@winco.com")
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=1)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=1)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # 5 regular activities
         for i in range(5):
             _make_activity(db_session, test_user.id, vc, occurred_at=now - timedelta(days=i))
@@ -374,9 +374,9 @@ class TestComputeAllContactScores:
     def test_channel_diversity_counted(self, db_session, test_user):
         card = _make_card(db_session, "MultiCh", "multich.com")
         vc = _make_contact(db_session, card, "multi@multich.com")
-        vc.last_interaction_at = datetime.now(timezone.utc)
+        vc.last_interaction_at = datetime.now(UTC)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _make_activity(db_session, test_user.id, vc, channel="outlook", occurred_at=now)
         _make_activity(db_session, test_user.id, vc, channel="phone", occurred_at=now)
         _make_activity(db_session, test_user.id, vc, channel="avail_system", occurred_at=now)
@@ -401,7 +401,7 @@ class TestGenerateContactNudges:
         card = _make_card(db_session, "DormantCo", "dormantco.com")
         vc = _make_contact(db_session, card, "old@dormantco.com", full_name="Old Contact")
         vc.activity_trend = "dormant"
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=45)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=45)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -414,7 +414,7 @@ class TestGenerateContactNudges:
         card = _make_card(db_session, "CoolCo", "coolco.com")
         vc = _make_contact(db_session, card, "cool@coolco.com", full_name="Cool Guy")
         vc.activity_trend = "cooling"
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=20)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=20)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -426,7 +426,7 @@ class TestGenerateContactNudges:
         vc = _make_contact(db_session, card, "ok@stableco.com")
         vc.activity_trend = "stable"
         vc.relationship_score = 75.0
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=5)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=5)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -437,7 +437,7 @@ class TestGenerateContactNudges:
         vc = _make_contact(db_session, card, "hot@warmco.com")
         vc.activity_trend = "warming"
         vc.relationship_score = 60.0
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=2)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=2)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -448,7 +448,7 @@ class TestGenerateContactNudges:
         card = _make_card(db_session, "NullTrend", "nulltrend.com")
         vc = _make_contact(db_session, card, "null@nulltrend.com", full_name="Null")
         vc.activity_trend = None
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=40)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=40)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -499,7 +499,7 @@ class TestGenerateContactSummary:
             db_session,
             test_user.id,
             vc,
-            occurred_at=datetime.now(timezone.utc) - timedelta(days=1),
+            occurred_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.commit()
 
@@ -519,7 +519,7 @@ class TestContactEndpoints:
         vc.phone_mobile = "+1-555-1234"
         vc.relationship_score = 72.5
         vc.activity_trend = "warming"
-        vc.score_computed_at = datetime.now(timezone.utc)
+        vc.score_computed_at = datetime.now(UTC)
         db_session.commit()
 
         resp = client.get(f"/api/vendors/{test_vendor_card.id}/contacts")
@@ -536,7 +536,7 @@ class TestContactEndpoints:
         assert "score_computed_at" in contact
 
     def test_contact_timeline(self, client, db_session, test_user, test_vendor_card, test_vendor_contact):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         al = ActivityLog(
             user_id=test_user.id,
             activity_type="email_received",
@@ -695,7 +695,7 @@ class TestProcessInboundFieldUpdates:
                 sender_name="New Name",
                 body="Hello\n--\nNew Name\nVP Sales",
                 subject="Quote",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
 
@@ -754,7 +754,7 @@ class TestVendorContactFlushConflict:
                 sender_name="Conflict Person",
                 body="Hello",
                 subject="Test",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
             db_session.flush = original_flush
@@ -799,7 +799,7 @@ class TestActivityLogFlushError:
                 sender_name="Activity Err",
                 body="Hello",
                 subject="Test",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 user_id=test_user.id,
             )
             db_session.flush = original_flush
@@ -846,7 +846,7 @@ class TestContactRelationshipScoreEdgeCases:
         """Lines 318-321: recency between ideal and max decays linearly."""
         from app.services.contact_intelligence import compute_contact_relationship_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # 100 days ago -- between 7 and 365
         result = compute_contact_relationship_score(
             last_interaction_at=now - timedelta(days=100),
@@ -866,7 +866,7 @@ class TestContactRelationshipScoreEdgeCases:
         """Lines 318-319: recency at >= 365 days is 0."""
         from app.services.contact_intelligence import compute_contact_relationship_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = compute_contact_relationship_score(
             last_interaction_at=now - timedelta(days=400),
             interactions_30d=0,
@@ -884,7 +884,7 @@ class TestContactRelationshipScoreEdgeCases:
         """Line 330-331: response time <= 4h gives 100."""
         from app.services.contact_intelligence import compute_contact_relationship_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = compute_contact_relationship_score(
             last_interaction_at=now - timedelta(days=1),
             interactions_30d=5,
@@ -902,7 +902,7 @@ class TestContactRelationshipScoreEdgeCases:
         """Line 332-333: response time >= 168h gives 0."""
         from app.services.contact_intelligence import compute_contact_relationship_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = compute_contact_relationship_score(
             last_interaction_at=now - timedelta(days=1),
             interactions_30d=5,
@@ -920,7 +920,7 @@ class TestContactRelationshipScoreEdgeCases:
         """Line 335: response time between 4h and 168h decays linearly."""
         from app.services.contact_intelligence import compute_contact_relationship_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = compute_contact_relationship_score(
             last_interaction_at=now - timedelta(days=1),
             interactions_30d=5,
@@ -1061,7 +1061,7 @@ class TestNudgeDaysSinceFallback:
         vc = _make_contact(db_session, card, "seen@seenco.com", full_name="Seen Guy")
         vc.activity_trend = "dormant"
         vc.last_interaction_at = None
-        vc.last_seen_at = datetime.now(timezone.utc) - timedelta(days=45)
+        vc.last_seen_at = datetime.now(UTC) - timedelta(days=45)
         db_session.commit()
 
         nudges = generate_contact_nudges(db_session, card.id)
@@ -1090,7 +1090,7 @@ class TestNudgeAIEnrichmentError:
         card = _make_card(db_session, "EnrichErr", "enricherr.com")
         vc = _make_contact(db_session, card, "err@enricherr.com", full_name="Err Person")
         vc.activity_trend = "dormant"
-        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=45)
+        vc.last_interaction_at = datetime.now(UTC) - timedelta(days=45)
         db_session.commit()
 
         with patch(

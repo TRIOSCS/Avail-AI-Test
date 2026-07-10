@@ -58,7 +58,7 @@ def count_for_tab(db: Session, user: User, tab_key: str) -> int:
     for source in sources_for_tab(tab_key):
         try:
             total += source.count_for_user(db, user)
-        except Exception:  # noqa: BLE001 — a badge must never break the nav
+        except Exception:
             logger.exception("alert source {} count failed", source.kind)
     return total
 
@@ -74,7 +74,7 @@ def markers_for_tab(db: Session, user: User, tab_key: str) -> dict[str, dict]:
     for source in sources_for_tab(tab_key):
         try:
             items = source.new_items_for_user(db, user)
-        except Exception:  # noqa: BLE001 — a spotlight must never break the page
+        except Exception:
             logger.exception("alert source {} new_items failed", source.kind)
             continue
         for item in items:

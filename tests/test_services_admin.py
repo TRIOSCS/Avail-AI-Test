@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/admin_service.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import SystemConfig
 from app.services.admin_service import (
@@ -29,7 +29,7 @@ def _make_config(db, key, value, desc=""):
         key=key,
         value=value,
         description=desc,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     db.add(row)
     db.flush()

@@ -1,7 +1,7 @@
 """tests/test_customer_analysis_service.py — Tests for customer material analysis
 service."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,7 +16,7 @@ def company_with_reqs(db_session: Session):
     co = Company(
         name="TagCo Inc",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.flush()
@@ -33,7 +33,7 @@ def company_with_reqs(db_session: Session):
         name="TAG-REQ-001",
         customer_site_id=site.id,
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -51,7 +51,7 @@ def company_with_reqs(db_session: Session):
                 requisition_id=req.id,
                 primary_mpn=mpn,
                 brand=brand,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
@@ -64,7 +64,7 @@ def company_with_reqs(db_session: Session):
         r = Requirement(
             requisition_id=req.id,
             primary_mpn=mpn,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
         db_session.flush()
@@ -74,7 +74,7 @@ def company_with_reqs(db_session: Session):
                 vendor_name="test_vendor",
                 mpn_matched=mpn,
                 manufacturer=mfr,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
@@ -89,7 +89,7 @@ def company_no_reqs(db_session: Session):
     co = Company(
         name="EmptyCo",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -140,7 +140,7 @@ class TestAnalyzeCustomerMaterials:
     @pytest.mark.asyncio
     async def test_analyze_with_site_but_no_parts(self, mock_claude, db_session):
         """Company has site but no requisitions → no Claude call."""
-        co = Company(name="SiteOnly", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="SiteOnly", is_active=True, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(company_id=co.id, site_name="Empty Site", is_active=True)

@@ -1,6 +1,6 @@
 """Test for GET /api/admin/workers/status (admin worker liveness snapshot)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import IcsWorkerStatus
 
@@ -10,7 +10,7 @@ def test_workers_status_endpoint(client, db_session):
         IcsWorkerStatus(
             id=1,
             is_running=True,
-            last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20),
+            last_heartbeat=datetime.now(UTC) - timedelta(minutes=20),
             circuit_breaker_open=False,
         )
     )

@@ -13,7 +13,7 @@ Called by: pytest
 Depends on: conftest fixtures, all service layer modules
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -56,7 +56,7 @@ def _full_setup(db: Session):
         name="Sales Rep",
         role="sales",
         azure_id="az-sales-e2e",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     manager = User(
         email="manager@trioscs.com",
@@ -65,14 +65,14 @@ def _full_setup(db: Session):
         azure_id="az-mgr-e2e",
         # Approval is gated by the per-user right (not role), so grant it to the approver.
         can_approve_buy_plans=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     buyer = User(
         email="buyer@trioscs.com",
         name="Buyer",
         role="buyer",
         azure_id="az-buyer-e2e",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     ops = User(
         email="ops@trioscs.com",
@@ -81,7 +81,7 @@ def _full_setup(db: Session):
         azure_id="az-ops-e2e",
         # Phase D: verify-PO gates on this per-user right (not ops-group membership).
         can_approve_purchase_orders=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add_all([sales, manager, buyer, ops])
     db.flush()
@@ -93,7 +93,7 @@ def _full_setup(db: Session):
     company = Company(
         name="Acme Electronics",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(company)
     db.flush()
@@ -101,7 +101,7 @@ def _full_setup(db: Session):
     site = CustomerSite(
         company_id=company.id,
         site_name="Main",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -109,7 +109,7 @@ def _full_setup(db: Session):
     vendor = VendorCard(
         normalized_name="arrow electronics",
         display_name="Arrow Electronics",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vendor)
     db.flush()
@@ -119,7 +119,7 @@ def _full_setup(db: Session):
         status="draft",
         created_by=sales.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -130,7 +130,7 @@ def _full_setup(db: Session):
         target_qty=1000,
         target_price=1.50,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -227,7 +227,7 @@ class TestBuyPlanFullLifecycle:
             unit_price=0.50,
             status="active",
             entered_by_id=data["buyer"].id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -238,7 +238,7 @@ class TestBuyPlanFullLifecycle:
             quote_number="Q-E2E-001",
             status="won",
             created_by_id=data["sales"].id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(quote)
         db_session.flush()
@@ -249,7 +249,7 @@ class TestBuyPlanFullLifecycle:
             status=BuyPlanStatus.DRAFT.value,
             total_cost=total_cost,
             ai_flags=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -285,9 +285,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Confirm PO
-        line = confirm_po(
-            plan.id, line.id, "PO-12345", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
-        )
+        line = confirm_po(plan.id, line.id, "PO-12345", datetime(2026, 4, 1, tzinfo=UTC), ctx["buyer"], db_session)
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Verify PO
@@ -379,9 +377,7 @@ class TestBuyPlanFullLifecycle:
 
         plan = submit_buy_plan(plan.id, "SO-006", ctx["sales"], db_session)
         plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
-        line = confirm_po(
-            plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
-        )
+        line = confirm_po(plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=UTC), ctx["buyer"], db_session)
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Reject PO
@@ -390,9 +386,7 @@ class TestBuyPlanFullLifecycle:
         assert line.po_number is None
 
         # Re-confirm with correct PO
-        line = confirm_po(
-            plan.id, line.id, "PO-GOOD", datetime(2026, 4, 5, tzinfo=timezone.utc), ctx["buyer"], db_session
-        )
+        line = confirm_po(plan.id, line.id, "PO-GOOD", datetime(2026, 4, 5, tzinfo=UTC), ctx["buyer"], db_session)
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
         assert line.po_number == "PO-GOOD"
 
@@ -416,7 +410,7 @@ class TestBuildBuyPlanIntegration:
             unit_price=0.50,
             status="active",
             entered_by_id=data["buyer"].id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -427,7 +421,7 @@ class TestBuildBuyPlanIntegration:
             quote_number="Q-BUILD-E2E",
             status="won",
             created_by_id=data["sales"].id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(quote)
         db_session.flush()

@@ -8,7 +8,7 @@ Depends on: routers/materials.py
 """
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,7 +29,7 @@ def _make_material_card(**overrides) -> SimpleNamespace:
         manufacturer="Texas Instruments",
         description="Dual Op-Amp",
         search_count=5,
-        last_searched_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+        last_searched_at=datetime(2026, 1, 20, tzinfo=UTC),
         # Enrichment fields
         lifecycle_status=None,
         package_type=None,
@@ -41,8 +41,8 @@ def _make_material_card(**overrides) -> SimpleNamespace:
         specs_summary=None,
         enrichment_source=None,
         enriched_at=None,
-        created_at=datetime(2025, 12, 1, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+        created_at=datetime(2025, 12, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 20, tzinfo=UTC),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -54,8 +54,8 @@ def _make_vendor_history(**overrides) -> SimpleNamespace:
         vendor_name="Acme Electronics",
         source_type="broker",
         is_authorized=False,
-        first_seen=datetime(2025, 12, 15, tzinfo=timezone.utc),
-        last_seen=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        first_seen=datetime(2025, 12, 15, tzinfo=UTC),
+        last_seen=datetime(2026, 1, 10, tzinfo=UTC),
         times_seen=3,
         last_qty=500,
         last_price=0.45,
@@ -75,7 +75,7 @@ def _make_req_and_requirement(db_session, test_user, req_name: str, primary_mpn:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -84,7 +84,7 @@ def _make_req_and_requirement(db_session, test_user, req_name: str, primary_mpn:
         requisition_id=req.id,
         primary_mpn=primary_mpn,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(requirement)
     db_session.flush()
@@ -163,7 +163,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
         unit_price=0.45,
         source_type="api",
         is_unavailable=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
 
@@ -177,7 +177,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
         unit_price=0.45,
         status="active",
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -199,7 +199,7 @@ def test_material_card_to_dict_unavailable_sightings_excluded(db_session, test_m
         qty_available=1,
         source_type="api",
         is_unavailable=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()
@@ -224,9 +224,9 @@ def test_material_card_to_dict_enrichment_fields(db_session):
         cross_references=[{"mpn": "ALT123", "manufacturer": "NXP"}],
         specs_summary="32-bit ARM Cortex",
         enrichment_source="claude_agent",
-        enriched_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        enriched_at=datetime(2026, 1, 15, tzinfo=UTC),
         search_count=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.commit()
@@ -360,7 +360,7 @@ def test_delete_material_admin(admin_client, db_session, admin_user):
         display_mpn="DELETEME123",
         manufacturer="Test Mfr",
         search_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.commit()
@@ -458,7 +458,7 @@ def test_update_material_sets_manual_enrichment_source(client, db_session):
         display_mpn="ENRICHSOURCE123",
         manufacturer="Test",
         search_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.commit()
@@ -640,7 +640,7 @@ def test_import_stock_update_existing_mvh(client, db_session, monkeypatch):
         display_mpn="EXIST-MPN-001",
         manufacturer="Test Mfr",
         search_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(mc)
     db_session.commit()

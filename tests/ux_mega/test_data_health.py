@@ -8,7 +8,7 @@ Called by: pytest tests/ux_mega/test_data_health.py
 Depends on: conftest.py fixtures, app.models, app.services.integrity_service
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import (
     MaterialCard,
@@ -56,7 +56,7 @@ class TestOrphanedRecords:
             unit_price=0.50,
             material_card_id=None,  # orphaned!
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -105,8 +105,8 @@ class TestStatusConsistency:
             unit_price=0.50,
             status="active",
             attribution_status="active",
-            expires_at=datetime.now(timezone.utc) - timedelta(days=30),
-            created_at=datetime.now(timezone.utc) - timedelta(days=60),
+            expires_at=datetime.now(UTC) - timedelta(days=30),
+            created_at=datetime.now(UTC) - timedelta(days=60),
         )
         db_session.add(offer)
         db_session.flush()
@@ -117,7 +117,7 @@ class TestStatusConsistency:
             .filter(
                 Offer.status == "active",
                 Offer.expires_at.isnot(None),
-                Offer.expires_at < datetime.now(timezone.utc),
+                Offer.expires_at < datetime.now(UTC),
             )
             .count()
         )

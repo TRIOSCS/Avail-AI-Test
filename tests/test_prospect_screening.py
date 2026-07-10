@@ -8,7 +8,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ def _prospect(db: Session, **kw) -> ProspectAccount:
         domain=kw.pop("domain", f"co-{uuid.uuid4().hex[:6]}.com"),
         status="suggested",
         discovery_source="clay",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(p)

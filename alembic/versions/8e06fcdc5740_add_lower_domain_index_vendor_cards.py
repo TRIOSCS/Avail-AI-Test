@@ -9,7 +9,7 @@ Revises: ba090b14bf74
 Create Date: 2026-03-20 21:00:12.867258
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from sqlalchemy import text
 
@@ -17,9 +17,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "8e06fcdc5740"
-down_revision: Union[str, None] = "ba090b14bf74"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "ba090b14bf74"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

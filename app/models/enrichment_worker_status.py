@@ -15,7 +15,7 @@ Called by: enrichment_worker.worker (heartbeat updates)
 Depends on: nothing (standalone table)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import JSON, Boolean, CheckConstraint, Column, Date, Integer, Text
@@ -47,8 +47,8 @@ class EnrichmentWorkerStatus(Base):
     daily_stats_json = Column(JSON)
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (CheckConstraint("id = 1", name="ck_enrichment_worker_status_singleton"),)
@@ -79,5 +79,5 @@ def update_enrichment_worker_status(db, **kwargs) -> None:
         return
     for key, value in kwargs.items():
         setattr(status, key, value)
-    status.updated_at = datetime.now(timezone.utc)
+    status.updated_at = datetime.now(UTC)
     db.commit()

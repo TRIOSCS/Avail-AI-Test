@@ -13,12 +13,10 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 
 import asyncio
 import json
-import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -36,6 +34,8 @@ from ..constants import (
     RESTRICTED_ROLES,
     AccessKey,
     ActivityType,
+    Channel,
+    OfferCondition,
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
@@ -51,6 +51,7 @@ from ..dependencies import (
     require_buyer,
     require_fresh_token,
     require_requisition_access,
+    require_requisition_access_bulk,
     require_user,
 )
 from ..models import User
@@ -68,6 +69,8 @@ from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..services.vendor_duplicates import check_vendor_duplicate
+from ..services.vendor_reachability import cards_with_resolvable_email as _cards_with_resolvable_email
+from ..services.vendor_reachability import dnc_emails_for_cards as _dnc_emails_for_cards
 from ..services.vendor_unavailability import (
     clear_unavailability,
     condition_matches,
@@ -79,7 +82,7 @@ from ..services.vendor_unavailability import (
 from ..template_env import template_response
 from ..utils import safe_float, safe_int
 from ..utils.csv_export import stream_csv
-from ..utils.normalization import normalize_condition
+from ..utils.normalization import normalize_condition, parse_website_domain
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -387,7 +390,7 @@ def build_board_requirement_query(db: Session, user: User, filters: SightingsLis
     if user.role in RESTRICTED_ROLES:
         query = query.filter(Requisition.created_by == user.id)
 
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    stale_threshold = datetime.now(UTC) - timedelta(days=settings.sighting_stale_days)
     deadline_48h = date.today() + timedelta(days=2)
 
     if filters.status:
@@ -457,7 +460,7 @@ async def _render_sightings_table(
 
     # Thresholds reused below by the dashboard-strip counters + heatmap (the builder applies
     # its own copies to the query). UTC-aware to line up with UTCDateTime columns.
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    stale_threshold = datetime.now(UTC) - timedelta(days=settings.sighting_stale_days)
     deadline_48h = date.today() + timedelta(days=2)
 
     total = query.count()
@@ -625,9 +628,9 @@ async def _render_sightings_table(
     # ── MPN → MaterialCard link map ─────────────────────────────
     link_map = _mpn_link_map(db, requirements) if requirements else {}
 
-    groups = None
+    groups: dict[str, list] | None = None
     if filters.group_by in ("brand", "manufacturer"):
-        groups: dict[str, list] = {}
+        groups = {}
         for r in requirements:
             # Group by the ENRICHED value from the linked material card (the manufacturer/
             # brand derived from the MPN) first; fall back to the requirement's own field.
@@ -871,7 +874,7 @@ async def sightings_detail(
         # Intelligence fields
         age_days = None
         if s.newest_sighting_at:
-            age_days = (datetime.now(timezone.utc) - s.newest_sighting_at).days
+            age_days = (datetime.now(UTC) - s.newest_sighting_at).days
 
         lead_explanation = explain_lead(
             vendor_name=s.vendor_name,
@@ -945,7 +948,7 @@ async def sightings_detail(
             .scalar()
         )
         if last_rfq:
-            days_since = (datetime.now(timezone.utc) - last_rfq).days
+            days_since = (datetime.now(UTC) - last_rfq).days
             if days_since > 3:
                 suggested_action = f"RFQs pending for {days_since} days — follow up"
             else:
@@ -1147,8 +1150,8 @@ async def sightings_batch_refresh(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
@@ -1160,8 +1163,7 @@ async def sightings_batch_refresh(
         int_ids = [int(rid) for rid in requirement_ids]
         reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
         reqs_by_id = {r.id: r for r in reqs}
-        for r in reqs:
-            require_requisition_access(db, r.requisition_id, user, label="Requirement")
+        require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
         valid_ids = [rid for rid in int_ids if rid in reqs_by_id]
 
     is_sse = source == "sse"
@@ -1212,8 +1214,8 @@ async def sightings_batch_assign(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     buyer_id_str = form.get("buyer_id", "")
     buyer_id = int(buyer_id_str) if buyer_id_str else None
 
@@ -1225,8 +1227,7 @@ async def sightings_batch_assign(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     buyer_name = "nobody"
     if buyer_id:
@@ -1260,8 +1261,8 @@ async def sightings_batch_status(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     new_status = form.get("status", "")
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -1272,13 +1273,12 @@ async def sightings_batch_status(
 
     try:
         SourcingStatus(new_status)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}") from e
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     updated = 0
     skipped = 0
@@ -1328,8 +1328,8 @@ async def sightings_batch_notes(
         requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
         if not isinstance(requirement_ids, list):
             requirement_ids = []
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format") from e
     notes = form.get("notes", "").strip()
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
@@ -1343,14 +1343,13 @@ async def sightings_batch_notes(
 
     int_ids = [int(rid) for rid in requirement_ids]
     reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
-    for r in reqs:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in reqs), user, label="Requirement")
 
     for r in reqs:
         activity = ActivityLog(
             user_id=user.id,
-            activity_type="note",
-            channel="manual",
+            activity_type=ActivityType.NOTE,
+            channel=Channel.MANUAL,
             requirement_id=r.id,
             requisition_id=r.requisition_id,
             notes=notes,
@@ -1714,66 +1713,13 @@ class SuggestedVendor(NamedTuple):
     lead_time_days: int | None = None
 
 
-def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
-    """Card ids for which the send path would resolve a non-empty contact email.
-
-    MIRRORS the send-path contact resolution in sightings_send_inquiry /
-    sightings_preview_inquiry EXACTLY: a vendor is reachable iff a VendorContact for its
-    card has a non-empty ``email`` (the send path reads ``contact.email`` from
-    _best_contacts_by_card; it never consults ``card.emails``). One batched query over
-    all representative card ids — no N+1 over groups. Empty input → empty set.
-    """
-    if not card_ids:
-        return set()
-    rows = (
-        db.query(VendorContact.vendor_card_id)
-        .filter(
-            VendorContact.vendor_card_id.in_(card_ids),
-            VendorContact.email.isnot(None),
-            VendorContact.email != "",
-        )
-        .distinct()
-        .all()
-    )
-    return {cid for (cid,) in rows}
-
-
-def _dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
-    """Return the lowercased email addresses (from VendorContact) that will be DNC-
-    skipped by send_batch_rfq for the given vendor card ids.
-
-    Mirrors the send-time DNC check in email_service.send_batch_rfq (line ~181):
-    join VendorContact → SiteContact by func.lower(email), filtered on
-    SiteContact.do_not_contact.is_(True). Uses func.lower on BOTH sides so the
-    advisory set is consistent with the case-insensitive send-time check.
-
-    Returns a set of lowercased emails — the caller compares contact.email.lower()
-    against this set. Advisory only; the authoritative skip stays in send_batch_rfq
-    (TOCTOU guard — a SiteContact can be flagged after the modal opens).
-
-    Called by: sightings_vendor_modal, sightings_preview_inquiry.
-    """
-    if not card_ids:
-        return set()
-
-    from ..models.crm import SiteContact
-
-    rows = (
-        db.query(VendorContact.email)
-        .join(
-            SiteContact,
-            sqlfunc.lower(VendorContact.email) == sqlfunc.lower(SiteContact.email),
-        )
-        .filter(
-            VendorContact.vendor_card_id.in_(card_ids),
-            VendorContact.email.isnot(None),
-            VendorContact.email != "",
-            SiteContact.do_not_contact.is_(True),
-        )
-        .distinct()
-        .all()
-    )
-    return {email.lower() for (email,) in rows}
+# ``_cards_with_resolvable_email`` / ``_dnc_emails_for_cards`` live in
+# ``app.services.vendor_reachability`` now (P4.1 — buyer_affinity_service.py needed
+# them too and was reaching into this router's privates to get them; both routers and
+# services now import the same service module). Imported above and re-bound to these
+# original private names so this router's many call sites below, and the existing test
+# suite (which imports/patches them off ``app.routers.sightings``), keep working
+# unmodified.
 
 
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
@@ -2250,27 +2196,56 @@ async def sightings_vendor_affinity(
     return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
 
 
-def _parse_website_domain(website: str) -> str:
-    """Extract a usable domain from user-typed website input (F12).
+@router.get("/v2/partials/sightings/vendor-search", response_class=HTMLResponse)
+async def sightings_vendor_search(
+    request: Request,
+    q: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """P5.2: server-rendered debounced dropdown for the composer's "Find any vendor"
+    picker (sightings/vendor_modal.html, rfqVendorModal.searchVendors()).
 
-    urlsplit-based (scheme optional), lowercased host, strips ONE leading
-    "www." — never a blanket str.replace that mangles hosts containing the
-    substring. Returns "" when no plausible domain can be extracted; the caller
-    turns that into a visible 400 instead of silently saving a junk domain.
-
-    Called by: sightings_composer_vendor.
+    Reuses the SAME VendorCard name/alternate-names match that backs
+    /api/autocomplete/names (vendors_crud.autocomplete_names) — that JSON endpoint mixes
+    vendors + customers for a different caller and is left intact; this is a vendors-
+    only HTML sibling so the picker's dropdown is a real hx-get swap instead of a
+    client-side fetch + filter.
     """
-    raw = website.strip()
-    try:
-        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
-        host = (parsed.hostname or "").strip().lower()
-    except ValueError:
-        return ""
-    if host.startswith("www."):
-        host = host[4:]
-    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
-        return ""
-    return host
+    from sqlalchemy import String, cast
+
+    from ..utils.search_builder import SearchBuilder
+
+    query = q.strip().lower()
+    vendors: list[VendorCard] = []
+    limit = 8
+    if len(query) >= 2:
+        sb = SearchBuilder(query)
+        # Primary: match on normalized_name (mirrors autocomplete_names).
+        vendors = (
+            db.query(VendorCard)
+            .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%", escape="\\"))
+            .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
+            .limit(limit)
+            .all()
+        )
+        # Secondary: match on alternate_names JSON (cast to text for ILIKE), deduped
+        # against the primary hits and appended after them — same order as
+        # autocomplete_names (vendors_crud.py).
+        seen_ids = {v.id for v in vendors}
+        vendors_by_alt = (
+            db.query(VendorCard)
+            .filter(
+                cast(VendorCard.alternate_names, String).ilike(f"%{sb.safe}%", escape="\\"),
+                VendorCard.id.notin_(seen_ids) if seen_ids else True,
+            )
+            .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
+            .limit(limit)
+            .all()
+        )
+        vendors = (vendors + vendors_by_alt)[:limit]
+    ctx = {"request": request, "vendors": vendors}
+    return template_response("htmx/partials/sightings/_vendor_search_results.html", ctx)
 
 
 @router.post("/v2/partials/sightings/composer-vendor", response_class=HTMLResponse)
@@ -2312,7 +2287,7 @@ async def sightings_composer_vendor(
         raise HTTPException(status_code=400, detail="invalid contact email")
     domain = ""
     if website:
-        domain = _parse_website_domain(website)
+        domain = parse_website_domain(website)
         if not domain:
             raise HTTPException(status_code=400, detail="invalid website — could not extract a domain")
     req_id_list = [int(x) for x in form.getlist("requirement_ids") if str(x).strip().isdigit()]
@@ -2489,8 +2464,7 @@ async def sightings_preview_inquiry(
         raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
-    for r in requirements:
-        require_requisition_access(db, r.requisition_id, user, label="Requirement")
+    require_requisition_access_bulk(db, (r.requisition_id for r in requirements), user, label="Requirement")
 
     # Request-time re-validation against ACTIVE unavailability records (the modal
     # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
@@ -2636,10 +2610,9 @@ async def sightings_send_inquiry(
         raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
 
     # IDOR guard: a restricted (SALES/TRADER) user may only send RFQs for parts on
-    # requisitions they own. Enforce per distinct requisition_id in the basket — any
+    # requisitions they own. Enforce over the whole basket in one query — any
     # non-owned requisition 404s the whole send rather than emailing on its behalf.
-    for _req_id in {r.requisition_id for r in requirements}:
-        require_requisition_access(db, _req_id, user)
+    require_requisition_access_bulk(db, {r.requisition_id for r in requirements}, user)
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -2977,7 +2950,7 @@ async def sightings_create_offer(
     unit_price: str = Form(""),
     lead_time: str = Form(""),
     date_code: str = Form(""),
-    condition: str = Form("new"),
+    condition: str = Form(OfferCondition.NEW),
     packaging: str = Form(""),
     firmware: str = Form(""),
     hardware_code: str = Form(""),
@@ -3024,7 +2997,7 @@ async def sightings_create_offer(
             unit_price=safe_float(unit_price),
             lead_time=lead_time or None,
             date_code=date_code or None,
-            condition=condition or "new",
+            condition=condition or OfferCondition.NEW,
             packaging=packaging or None,
             firmware=firmware or None,
             hardware_code=hardware_code or None,
@@ -3054,7 +3027,7 @@ async def sightings_create_offer(
     # canonical builder (which no longer blocks). On a missing essential, re-render the
     # modal with inline errors and do not persist. Uses the schema-normalized condition.
     gate_errors = validate_essentials(
-        normalize_offer_condition(payload.condition) or "new",
+        normalize_offer_condition(payload.condition) or OfferCondition.NEW,
         essentials_data(
             manufacturer=manufacturer,
             packaging=packaging,
@@ -3620,7 +3593,7 @@ async def sightings_offer_request(
     `.../offers/{offer_id}/request/{index}/send` (sightings_offer_request_send) — the
     buyer no longer has to copy the draft into the solicit modal by hand.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ..services.offer_qualification import REQUEST_KINDS, request_template
 
@@ -3639,7 +3612,7 @@ async def sightings_offer_request(
         {
             "kind": kind,
             "status": "pending",
-            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_at": datetime.now(UTC).isoformat(),
             "contact_id": None,
         }
     )
@@ -3679,7 +3652,7 @@ async def sightings_offer_request_send(
     entry; a single request is logged as an outreach activity but does NOT auto-progress
     the sourcing status (one clarification is not a full RFQ round).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ..email_service import send_batch_rfq
     from ..services.offer_qualification import request_template
@@ -3772,7 +3745,7 @@ async def sightings_offer_request_send(
     if r["status"] == "sent":
         entry["status"] = "sent"
         entry["contact_id"] = r.get("id")
-        entry["sent_at"] = datetime.now(timezone.utc).isoformat()
+        entry["sent_at"] = datetime.now(UTC).isoformat()
         toast_msg, toast_level = (f"Request sent to {offer.vendor_name}", "success")
         # Log the outreach (mirrors sightings_send_inquiry's rfq_sent), but deliberately
         # NO auto_progress: one clarification request is not a full RFQ round.

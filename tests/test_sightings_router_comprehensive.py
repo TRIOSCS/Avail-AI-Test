@@ -10,7 +10,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -176,7 +176,7 @@ class TestSightingsListFilters:
     def test_stale_detection_with_old_activity(self, client, db_session):
         req, r, _ = _seed(db_session)
         # Add an old activity log
-        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+        old_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
         log = ActivityLog(
             activity_type="note",
             channel="system",
@@ -223,7 +223,7 @@ class TestSightingsDetailBranches:
     def test_detail_sourcing_stale_rfq(self, client, db_session):
         """Detail: sourcing with RFQ sent >3 days ago shows follow up."""
         req, r, _ = _seed(db_session, sourcing_status="sourcing")
-        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5)
+        old_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=5)
         log = ActivityLog(
             activity_type="rfq_sent",
             channel="email",
@@ -290,7 +290,7 @@ class TestSightingsDetailBranches:
         """Detail: age_days calculated from newest_sighting_at."""
         req, r, _ = _seed(db_session)
         summary = db_session.query(VendorSightingSummary).filter_by(requirement_id=r.id).first()
-        summary.newest_sighting_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+        summary.newest_sighting_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200

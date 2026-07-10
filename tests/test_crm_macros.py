@@ -19,12 +19,12 @@ test_crm_views.py against the authenticated TestClient.
 Depends on: app.template_env.templates
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.template_env import templates
 
-UTC_NOW = datetime.now(timezone.utc)
+UTC_NOW = datetime.now(UTC)
 
 
 def _render(macro: str, call: str, **ctx) -> str:

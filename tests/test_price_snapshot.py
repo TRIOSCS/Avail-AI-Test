@@ -1,6 +1,6 @@
 """Tests for MaterialPriceSnapshot model and service."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.price_snapshot import MaterialPriceSnapshot
 
@@ -26,7 +26,7 @@ def test_price_snapshot_creation(db_session):
         currency="USD",
         quantity=100,
         source="api_sighting",
-        recorded_at=datetime.now(timezone.utc),
+        recorded_at=datetime.now(UTC),
     )
     db_session.add(snap)
     db_session.commit()

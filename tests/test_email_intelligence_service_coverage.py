@@ -21,7 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -159,7 +159,7 @@ class TestStoreEmailIntelligence:
             user_id=test_user.id,
             sender_email="vendor@parts.com",
             subject="Offer: LM317T in stock",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id="conv-1",
             classification=classification,
             parsed_quotes={"offers": [{"mpn": "LM317T"}]},
@@ -183,7 +183,7 @@ class TestStoreEmailIntelligence:
             user_id=test_user.id,
             sender_email="vendor@parts.com",
             subject="Maybe an offer",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id="conv-2",
             classification=classification,
         )
@@ -229,7 +229,7 @@ class TestStoreEmailIntelligence:
             user_id=test_user.id,
             sender_email="contact@myvendor.com",
             subject="Hello",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id=None,
             classification=classification,
         )
@@ -285,7 +285,7 @@ class TestProcessEmailIntelligence:
                 sender_name="Vendor",
                 subject="Stock available",
                 body="LM317T in stock, unit price $0.50, qty 500",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 conversation_id="conv-rx-1",
                 regex_offer_matches=3,
             )
@@ -349,7 +349,7 @@ class TestProcessEmailIntelligence:
                 sender_name="Vendor",
                 subject="Re: RFQ for NE555",
                 body="We can offer NE555 at $0.10 each, 500 in stock.",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
                 conversation_id="conv-qr",
                 regex_offer_matches=0,
             )
@@ -420,7 +420,7 @@ class TestGetRecentIntelligence:
             user_id=test_user.id,
             sender_email="v@v.com",
             subject="Offer",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id=None,
             classification=classification,
         )
@@ -552,7 +552,7 @@ class TestSummarizeThread:
             has_pricing=True,
             conversation_id="conv-cached",
             thread_summary={"key_points": ["point A"], "thread_status": "active"},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(record)
         db_session.commit()

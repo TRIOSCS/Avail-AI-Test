@@ -7,7 +7,7 @@ Depends on: app/vendor_utils, app/models/VendorCard, app/models/VendorReview
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 os.environ["TESTING"] = "1"
@@ -28,7 +28,7 @@ def _make_card(db, normalized_name, display_name, **kwargs):
         is_new_vendor=kwargs.get("is_new_vendor", True),
         vendor_score=kwargs.get("vendor_score", None),
         website=kwargs.get("website", None),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()

@@ -13,7 +13,7 @@ Depends on: app.routers.crm.export (export_companies_csv, export_contacts_csv)
 
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,7 +70,7 @@ def owned_company(db_session: Session, sales_user: User) -> Company:
         account_type="customer",
         is_active=True,
         account_owner_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.flush()
@@ -87,7 +87,7 @@ def other_company(db_session: Session) -> Company:
         name="Other Corp",
         domain="other.com",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -102,7 +102,7 @@ def contact_for_owned(db_session: Session, owned_company: Company) -> SiteContac
         company_id=owned_company.id,
         site_name="HQ",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.flush()
@@ -115,7 +115,7 @@ def contact_for_owned(db_session: Session, owned_company: Company) -> SiteContac
         phone="555-1234",
         contact_role="decision_maker",
         is_primary=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(contact)
     db_session.commit()
@@ -178,7 +178,7 @@ class TestCompaniesCSVExport:
         inactive = Company(
             name="Inactive Corp",
             is_active=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(inactive)
         db_session.commit()
@@ -233,7 +233,7 @@ class TestContactsCSVExport:
             company_id=other_company.id,
             site_name="Other HQ",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_site)
         db_session.flush()
@@ -241,7 +241,7 @@ class TestContactsCSVExport:
             customer_site_id=other_site.id,
             full_name="Ghost Contact",
             email="ghost@other.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_contact)
         db_session.commit()
@@ -263,7 +263,7 @@ class TestContactsCSVExport:
             company_id=owned_company.id,
             site_name="Branch",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(site)
         db_session.flush()
@@ -273,7 +273,7 @@ class TestContactsCSVExport:
             full_name="Deactivated Person",
             email="gone@owned.com",
             is_active=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(inactive_contact)
         db_session.commit()
@@ -297,7 +297,7 @@ class TestCSVFormulaSafety:
             name="=cmd()",
             domain="+evil.com",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(evil)
         db_session.commit()
@@ -318,7 +318,7 @@ class TestCSVFormulaSafety:
             company_id=owned_company.id,
             site_name="@BadSite",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(site)
         db_session.flush()
@@ -329,7 +329,7 @@ class TestCSVFormulaSafety:
             title="@Title",
             email="=user@evil.com",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()

@@ -21,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,7 +57,7 @@ def _req(db: Session, owner: User, *, customer: str = "Acme Electronics") -> Req
         customer_name=customer,
         status="open",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -67,7 +67,7 @@ def _req(db: Session, owner: User, *, customer: str = "Acme Electronics") -> Req
             primary_mpn="LM317T",
             target_qty=1000,
             target_price=0.75,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db.commit()
@@ -88,7 +88,7 @@ def _plan(db: Session, req: Requisition, *, status=BuyPlanStatus.DRAFT.value, **
         total_revenue=200.00,
         total_margin_pct=50.00,
         ai_flags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(ov)
     plan = BuyPlan(**defaults)
@@ -474,7 +474,7 @@ def test_resume_non_manager_forbidden(db_session, sales_user, test_requisition):
         test_requisition,
         status=BuyPlanStatus.HALTED.value,
         halted_by_id=sales_user.id,
-        halted_at=datetime.now(timezone.utc),
+        halted_at=datetime.now(UTC),
     )
     with pytest.raises(PermissionError):
         resume_plan(plan.id, sales_user, db_session)
@@ -494,7 +494,7 @@ def test_resume_endpoint_manager_activates(client, db_session, manager_user, tes
         test_requisition,
         status=BuyPlanStatus.HALTED.value,
         halted_by_id=manager_user.id,
-        halted_at=datetime.now(timezone.utc),
+        halted_at=datetime.now(UTC),
     )
     with _acting_as(manager_user):
         resp = client.post(f"/v2/partials/buy-plans/{plan.id}/resume")

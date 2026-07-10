@@ -14,7 +14,7 @@ Depends on: tests/conftest.py fixtures (db_session), app.services.activity_score
 app.models, app.constants.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +30,7 @@ from app.services.activity_scorecard import (
     range_start,
 )
 
-UTC = timezone.utc
+UTC = UTC
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -45,7 +45,7 @@ class TestSightingSourceCompanyId:
             source_type="excess_list",
             source_company_id=test_company.id,
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -135,7 +135,7 @@ class TestActivityLogDismissedAt:
         db_session.add(a)
         db_session.flush()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         a.dismissed_at = now
         db_session.commit()
         db_session.refresh(a)

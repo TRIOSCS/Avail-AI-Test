@@ -14,7 +14,7 @@ Depends on: app.database.SessionLocal, app.models (MaterialCard, Sighting, Offer
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -105,9 +105,7 @@ def merge(dry_run: bool = False) -> dict:
             if not dry_run:
                 # Soft-delete the suffix card
                 db.execute(
-                    update(MaterialCard)
-                    .where(MaterialCard.id == suffix_id)
-                    .values(deleted_at=datetime.now(timezone.utc))
+                    update(MaterialCard).where(MaterialCard.id == suffix_id).values(deleted_at=datetime.now(UTC))
                 )
 
             stats["merged"] += 1

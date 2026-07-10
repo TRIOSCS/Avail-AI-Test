@@ -6,7 +6,7 @@ Called by: routers/htmx_views.py
 Depends on: buyplan_scoring, models
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
@@ -462,7 +462,7 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
     falls back to deriving the region from ``plan.quote_id`` when not supplied.
     """
     flags = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_days = settings.buyplan_stale_offer_days
     min_margin = settings.buyplan_min_margin_pct
     better_pct = settings.buyplan_better_offer_pct
@@ -479,7 +479,7 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
 
         # ── Stale offer check
         if offer and offer.created_at:
-            age = (now - offer.created_at.replace(tzinfo=timezone.utc)).days
+            age = (now - offer.created_at.replace(tzinfo=UTC)).days
             if age > stale_days:
                 flags.append(
                     {

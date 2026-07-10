@@ -13,7 +13,7 @@ Includes:
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import sqlalchemy.exc
@@ -109,7 +109,7 @@ async def _job_contacts_sync():
     # Short-lived session to identify users needing sync
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         user_ids = []
         for user in users:
@@ -132,7 +132,7 @@ async def _job_contacts_sync():
             if not user:
                 continue
             await asyncio.wait_for(_sync_user_contacts(user, sync_db), timeout=300)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Contacts sync timed out for user {user_id}")
             sync_db.rollback()
         except Exception as e:
@@ -198,7 +198,7 @@ async def _job_contact_scoring():
             timeout=300,
         )
         logger.info(f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Contact scoring timed out after 300s")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
@@ -230,7 +230,7 @@ async def _job_contact_status_compute():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Subquery: most recent activity per site_contact_id
         last_activity_sq = (
@@ -305,7 +305,7 @@ async def _job_email_health_update():
             timeout=300,
         )
         logger.info(f"Email health update: {result.get('updated', 0)} vendors scored")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Email health update timed out after 300s")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
@@ -358,7 +358,7 @@ async def _job_calendar_scan():
                     result.get("events_scanned", 0),
                     result.get("activities_logged", 0),
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(f"Calendar scan TIMEOUT for user {user_id}")
                 scan_db.rollback()
             except Exception as e:
@@ -450,7 +450,7 @@ async def _scan_user_inbox(user, db):
         logger.warning("Inbox scan partial failure for {} — failed sub-ops: {}", user.email, sub_op_failures)
 
     if poll_succeeded:
-        user.last_inbox_scan = datetime.now(timezone.utc)
+        user.last_inbox_scan = datetime.now(UTC)
         # A successful poll proves the token + connectivity are healthy right
         # now, so a stale token/scan error no longer reflects reality — clear it
         # so the Settings card stops showing a resolved error. Leave the Graph
@@ -461,7 +461,7 @@ async def _scan_user_inbox(user, db):
 
         if user.m365_error_reason and user.m365_error_reason != REASON_SUBSCRIPTION:
             user.m365_error_reason = None
-        user.m365_last_healthy = datetime.now(timezone.utc)
+        user.m365_last_healthy = datetime.now(UTC)
         db.commit()
 
 
@@ -584,7 +584,7 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
-            card.last_contact_at = datetime.now(timezone.utc)
+            card.last_contact_at = datetime.now(UTC)
             updated += 1
 
     try:
@@ -631,14 +631,14 @@ async def _sync_user_contacts(user, db):
         if new_token:
             if sync_state:
                 sync_state.delta_token = new_token
-                sync_state.last_sync_at = datetime.now(timezone.utc)
+                sync_state.last_sync_at = datetime.now(UTC)
             else:
                 db.add(
                     SyncState(
                         user_id=user.id,
                         folder=folder_key,
                         delta_token=new_token,
-                        last_sync_at=datetime.now(timezone.utc),
+                        last_sync_at=datetime.now(UTC),
                     )
                 )
             db.flush()
@@ -713,7 +713,7 @@ async def _sync_user_contacts(user, db):
         merge_phones_into_card(card, all_phones)
 
     try:
-        user.last_contacts_sync = datetime.now(timezone.utc)
+        user.last_contacts_sync = datetime.now(UTC)
         db.commit()
         logger.info(f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails")
     except sqlalchemy.exc.SQLAlchemyError as e:
@@ -752,7 +752,7 @@ async def _job_scan_sent_folders():
             if not user:
                 continue
             await asyncio.wait_for(scan_sent_folder(user, scan_db), timeout=120)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Sent folder scan TIMEOUT for user {user_id}")
             scan_db.rollback()
         except Exception as e:
@@ -821,14 +821,14 @@ async def scan_sent_folder(user, db):
     if new_token:
         if sync_state:
             sync_state.delta_token = new_token
-            sync_state.last_sync_at = datetime.now(timezone.utc)
+            sync_state.last_sync_at = datetime.now(UTC)
         else:
             db.add(
                 SyncState(
                     user_id=user.id,
                     folder=folder_key,
                     delta_token=new_token,
-                    last_sync_at=datetime.now(timezone.utc),
+                    last_sync_at=datetime.now(UTC),
                 )
             )
         db.flush()
@@ -904,15 +904,13 @@ async def scan_sent_folder(user, db):
                     try:
                         occurred_at = datetime.fromisoformat(sent_dt.replace("Z", "+00:00"))
                     except (ValueError, TypeError):
-                        occurred_at = datetime.now(timezone.utc)
+                        occurred_at = datetime.now(UTC)
 
                 # Reconcile with send-time rows first, then fall back to CREATE.
                 # A send-time ActivityLog row has external_id=NULL (the graph id was
                 # not available at send time).  Match on user + recipient + req +
                 # outbound direction within the reconcile window.
-                reconcile_window_start = (occurred_at or datetime.now(timezone.utc)) - timedelta(
-                    hours=RECONCILE_WINDOW_HOURS
-                )
+                reconcile_window_start = (occurred_at or datetime.now(UTC)) - timedelta(hours=RECONCILE_WINDOW_HOURS)
                 for requisition_id in token_req_ids or [None]:
                     # Try to find the send-time row to reconcile
                     send_time_row: ActivityLog | None = None

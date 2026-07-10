@@ -14,6 +14,40 @@ Design: Prefer less data if it means better data. Return None for ambiguous valu
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
+
+# ── Website domain normalization ──────────────────────────────────────
+
+
+def parse_website_domain(website: str) -> str:
+    """Extract a usable bare domain from user-typed website input (F12).
+
+    urlsplit-based (scheme optional), lowercased host, strips ONE leading "www." —
+    never a blanket str.replace that mangles hosts containing the substring. Returns
+    "" when no plausible domain can be extracted (no ``.`` in the host, or characters
+    outside ``[a-z0-9.-]``) — callers turn that into a visible error/None instead of
+    silently saving a junk domain.
+
+    Extracted from app.routers.sightings._parse_website_domain (originally the only
+    validated extractor in the codebase — see that module's history) so
+    app.services.company_import_service can share it instead of its own narrower
+    regex-based ``_company_domain``. app.enrichment_service._clean_domain and
+    app.utils.vendor_helpers.scrape_website_contacts's inline extractor are legacy
+    siblings not yet migrated onto this helper (each has its own behavior nuance —
+    see the TODO at their call sites).
+    """
+    raw = website.strip()
+    try:
+        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+        host = (parsed.hostname or "").strip().lower()
+    except ValueError:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        return ""
+    return host
+
 
 # ── Price normalization ───────────────────────────────────────────────
 

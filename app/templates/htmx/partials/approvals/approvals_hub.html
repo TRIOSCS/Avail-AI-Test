@@ -15,6 +15,7 @@
               approvals/ (lazy-loaded into #ap-hub-body) — _tab_buy_plan / _tab_po_approval
               / _tab_prepayment.
 #}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 <title hx-swap-oob="true">Approvals — AvailAI</title>
 
 <div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
@@ -42,15 +43,9 @@
     {% endfor %}
   </div>
 
-  {# ── Lazy body ──
-     LANDMINE: hx-trigger="load" MUST carry the explicit hx-target="#ap-hub-body".
-     Without it the element inherits #main-content's hx-target="this" and the load wipes
-     the whole page (known cards-vanish regression). #}
-  <div id="ap-hub-body"
-       hx-get="/v2/partials/approvals/{{ active_tab }}"
-       hx-trigger="load"
-       hx-target="#ap-hub-body"
-       hx-swap="innerHTML">
+  {# ── Lazy body ── (lazy_body macro structurally enforces the explicit
+     hx-target guard — see shared/_macros.html for the landmine rationale) #}
+  {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab) %}
     <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
@@ -58,5 +53,5 @@
       </svg>
       <span>Loading…</span>
     </div>
-  </div>
+  {% endcall %}
 </div>

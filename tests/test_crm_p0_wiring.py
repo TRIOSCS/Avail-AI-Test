@@ -18,7 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def owned_company(db_session: Session, test_user: User) -> Company:
         name="Owned Corp",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -55,7 +55,7 @@ def unrelated_user(db_session: Session) -> User:
         name="Nobody",
         role="buyer",
         azure_id="test-azure-nobody",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -170,7 +170,7 @@ class TestTaskDeleteRoute:
             name="Admin",
             role="admin",
             azure_id="test-azure-admin",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(admin)
         db_session.commit()
@@ -458,7 +458,6 @@ class TestDueAtClearable:
     ):
         """Posting the edit form with an empty due_at field must clear a previously set
         due_at."""
-        from datetime import timezone
 
         from app.services.task_service import create_company_task
 
@@ -468,7 +467,7 @@ class TestDueAtClearable:
             title="Has a due date",
             created_by=test_user.id,
             assigned_to_id=test_user.id,
-            due_at=datetime(2030, 6, 1, tzinfo=timezone.utc),
+            due_at=datetime(2030, 6, 1, tzinfo=UTC),
         )
         assert task.due_at is not None
 

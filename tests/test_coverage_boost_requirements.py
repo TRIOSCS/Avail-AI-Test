@@ -17,7 +17,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +35,7 @@ def _make_requisition(db_session: Session, test_user: User, name: str) -> Requis
         status="open",
         urgency="normal",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(reqn)
     db_session.commit()
@@ -51,7 +51,7 @@ def req_with_string_subs(db_session: Session, test_user: User) -> tuple:
         customer_name="SubCorp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -61,7 +61,7 @@ def req_with_string_subs(db_session: Session, test_user: User) -> tuple:
         target_qty=100,
         # Legacy format: plain strings instead of dicts
         substitutes=["LM555", "UA555"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -78,7 +78,7 @@ def req_with_lead(db_session: Session, test_user: User) -> tuple:
         customer_name="LeadCorp",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -86,7 +86,7 @@ def req_with_lead(db_session: Session, test_user: User) -> tuple:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=500,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()
@@ -104,8 +104,8 @@ def req_with_lead(db_session: Session, test_user: User) -> tuple:
         confidence_score=0.8,
         confidence_band="high",
         reason_summary="Found in BrokerBin",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         buyer_status="open",
     )
     db_session.add(lead)
@@ -252,7 +252,7 @@ class TestRequirementSightingsGaps:
             primary_mpn="LM317T",
             target_qty=100,
             material_card_id=card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req_item)
         db_session.commit()
@@ -282,7 +282,7 @@ class TestRequirementSightingsGaps:
             primary_mpn="NE555",
             target_qty=50,
             substitutes=["NE555P"],  # STRING format — exercises sub_str branch
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req_item)
         db_session.commit()
@@ -320,7 +320,7 @@ class TestRequirementOffersGaps:
             primary_mpn="LM358",
             target_qty=200,
             substitutes=["LM358N"],  # STRING format — exercises lines 1430-1435
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req_item)
         db_session.commit()
@@ -348,7 +348,7 @@ class TestListRequirementsContactGap:
             user_id=test_user.id,
             contact_type="email",
             vendor_name="Test Co",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()

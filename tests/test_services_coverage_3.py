@@ -16,7 +16,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1528,7 +1528,7 @@ class TestQueryDbForPartWithRealDB:
             unit_price=0.50,
             currency="USD",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -1557,7 +1557,7 @@ class TestQueryDbForPartWithRealDB:
             sighting_count=0,
             is_broadcast=True,
             is_blacklisted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -1577,7 +1577,7 @@ class TestQueryDbForPartWithRealDB:
             vendor_name="Arrow Electronics",
             normalized_mpn="LM317T",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -1597,7 +1597,7 @@ class TestQueryDbForPartWithRealDB:
             vendor_name="Arrow Electronics",
             normalized_mpn="LM317T",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -1780,7 +1780,7 @@ class TestRefreshBlurbs:
 
         db = MagicMock()
         snap = MagicMock()
-        snap.ai_blurb_generated_at = datetime.now(timezone.utc)
+        snap.ai_blurb_generated_at = datetime.now(UTC)
         db.query.return_value.filter.return_value.first.return_value = snap
 
         results = [
@@ -1802,7 +1802,7 @@ class TestRefreshBlurbs:
 
         db = MagicMock()
         snap = MagicMock()
-        snap.ai_blurb_generated_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        snap.ai_blurb_generated_at = datetime.now(UTC) - timedelta(hours=3)
         db.query.return_value.filter.return_value.first.return_value = snap
 
         results = [

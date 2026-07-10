@@ -23,7 +23,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,7 +45,7 @@ def sales_rep(db_session: Session) -> User:
         name="Sales Rep",
         role="sales",
         azure_id="bulk-test-sales-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -61,7 +61,7 @@ def mgr_user(db_session: Session) -> User:
         name="Manager Bulk",
         role="manager",
         azure_id="bulk-test-mgr-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -77,7 +77,7 @@ def other_user(db_session: Session) -> User:
         name="Other Sales",
         role="sales",
         azure_id="bulk-test-other-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -92,7 +92,7 @@ def owned_company(db_session: Session, sales_rep: User) -> Company:
         name="Owned Corp",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -107,7 +107,7 @@ def unowned_company(db_session: Session, other_user: User) -> Company:
         name="Unowned Corp",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -122,7 +122,7 @@ def mgr_owned_company(db_session: Session, mgr_user: User) -> Company:
         name="Manager Corp",
         is_active=True,
         account_owner_id=mgr_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -324,7 +324,7 @@ def test_bulk_assign_owner_missing_owner_id_400(db_session: Session, mgr_user: U
 # ---------------------------------------------------------------------------
 
 
-def test_bulk_empty_ids_returns_200(db_session: Session, sales_rep: User):
+def test_bulk_empty_ids_returns_200(db_session: Session, sales_rep: User, owned_company: Company):
     """Bulk action with empty ids string returns 200 (no-op, refreshed list)."""
     for c in _make_client(db_session, sales_rep):
         resp = c.post(
@@ -332,6 +332,11 @@ def test_bulk_empty_ids_returns_200(db_session: Session, sales_rep: User):
             data={"ids": ""},
         )
         assert resp.status_code == 200
+        # No-op means no company was deactivated and the refreshed list still
+        # renders the untouched company.
+        db_session.expire_all()
+        assert db_session.get(Company, owned_company.id).is_active is True
+        assert owned_company.name in resp.text
 
 
 def test_bulk_invalid_action_returns_400(db_session: Session, sales_rep: User, owned_company: Company):
@@ -412,7 +417,7 @@ def test_import_preview_flags_duplicate_company(db_session: Session, sales_rep: 
     existing = Company(
         name="Existing Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -465,6 +470,30 @@ def test_import_preview_bad_csv_returns_graceful_error(db_session: Session, sale
         assert resp.status_code != 500
 
 
+def test_import_preview_non_file_field_returns_friendly_partial(db_session: Session, sales_rep: User):
+    """A 'file' form field submitted as a plain string (not an actual upload) has no
+    .read()/.file to pull bytes from — must render the friendly "Could not parse CSV"
+    partial, not a 500."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/preview",
+            data={"file": "not-a-real-upload"},
+        )
+        assert resp.status_code == 200
+        assert "Could not parse CSV" in resp.text
+
+
+def test_import_contacts_preview_non_file_field_returns_friendly_partial(db_session: Session, sales_rep: User):
+    """Same non-file-field guard on the contacts-import preview route."""
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/preview",
+            data={"file": "not-a-real-upload"},
+        )
+        assert resp.status_code == 200
+        assert "Could not parse CSV" in resp.text
+
+
 # ---------------------------------------------------------------------------
 # CSV Import — confirm
 # ---------------------------------------------------------------------------
@@ -506,7 +535,7 @@ def test_import_confirm_deduplicates_by_normalized_name(db_session: Session, sal
     existing = Company(
         name="Dup Check Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -575,7 +604,7 @@ def test_import_contacts_preview_parses_rows(db_session: Session, sales_rep: Use
         name="Existing Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -597,7 +626,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
         name="Existing Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -607,7 +636,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
     site = CustomerSite(
         company_id=co.id,
         site_name="HQ",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.commit()
@@ -617,7 +646,7 @@ def test_import_contacts_preview_flags_duplicate_email(db_session: Session, sale
         customer_site_id=site.id,
         full_name="Existing Person",
         email="john@existingco.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(contact)
     db_session.commit()
@@ -654,7 +683,7 @@ def test_bulk_assign_owner_inactive_user_400(db_session: Session, mgr_user: User
         role="sales",
         azure_id="bulk-test-inactive-owner-001",
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(inactive)
     db_session.commit()
@@ -719,7 +748,7 @@ def test_import_contacts_preview_escapes_script_tag(db_session: Session, sales_r
 # F3: confirm row-cap bypass
 # ---------------------------------------------------------------------------
 
-import json as _json  # noqa: E402
+import json as _json
 
 
 def test_import_confirm_row_cap_exceeded_400(db_session: Session, sales_rep: User):
@@ -744,7 +773,7 @@ def test_import_contacts_confirm_creates_contacts(db_session: Session, sales_rep
         name="Confirm Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -806,7 +835,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         name="Dedup Contact Co",
         is_active=True,
         account_owner_id=sales_rep.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -816,7 +845,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         company_id=co.id,
         site_name="HQ",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.commit()
@@ -826,7 +855,7 @@ def test_import_contacts_confirm_deduplicates_by_email(db_session: Session, sale
         customer_site_id=site.id,
         full_name="Existing Person",
         email="dup@dedupco.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -883,7 +912,7 @@ def test_import_contacts_confirm_rep_cannot_import_into_unowned_company(
         name="Foreign Corp IDOR",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(foreign_co)
     db_session.commit()
@@ -924,7 +953,7 @@ def test_import_contacts_confirm_manager_can_import_into_any_company(
         name="Any Corp Manager Import",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(any_co)
     db_session.commit()
@@ -954,6 +983,105 @@ def test_import_contacts_confirm_manager_can_import_into_any_company(
     assert len(contacts) == 1, "Manager must be able to import contacts into any company"
 
 
+def test_import_contacts_confirm_multi_row_batched_lookups(db_session: Session, sales_rep: User, other_user: User):
+    """P3.2 regression: a multi-row import spanning several companies exercises the
+    batched CustomerSite + dedup pre-fetch (instead of per-row round trips) and must.
+
+    produce the EXACT same created/skipped counts as the original per-row code:
+    - 2 rows for the same owned company share its (pre-existing) first ACTIVE site.
+    - 1 row creates a brand-new site for a second owned company with no site yet, and a
+      second row for that SAME company reuses the just-created site (in-batch cache).
+    - 1 row is skipped as a within-batch email duplicate against a row processed earlier
+      in this same import (no site pre-existing DB row for that email).
+    - 1 row targets a company the rep does not manage → skipped_unauthorized.
+    - 1 row targets no matching company → skipped_no_company.
+    """
+    co_a = Company(name="Batch Co A", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(UTC))
+    co_b = Company(name="Batch Co B", is_active=True, account_owner_id=sales_rep.id, created_at=datetime.now(UTC))
+    foreign_co = Company(
+        name="Batch Foreign Co", is_active=True, account_owner_id=other_user.id, created_at=datetime.now(UTC)
+    )
+    db_session.add_all([co_a, co_b, foreign_co])
+    db_session.commit()
+    db_session.refresh(co_a)
+
+    site_a = CustomerSite(company_id=co_a.id, site_name="HQ", is_active=True, created_at=datetime.now(UTC))
+    db_session.add(site_a)
+    db_session.commit()
+    db_session.refresh(site_a)
+
+    rows = _json.dumps(
+        [
+            # Two rows for co_a — both reuse the pre-existing site_a.
+            {"company_name": "Batch Co A", "contact_name": "A One", "email": "a1@batchco.com", "phone": "", "role": ""},
+            {"company_name": "Batch Co A", "contact_name": "A Two", "email": "a2@batchco.com", "phone": "", "role": ""},
+            # Two rows for co_b — no site exists yet; the second row must reuse the site
+            # the first row creates (in-batch cache), not create a second one.
+            {"company_name": "Batch Co B", "contact_name": "B One", "email": "b1@batchco.com", "phone": "", "role": ""},
+            {"company_name": "Batch Co B", "contact_name": "B Two", "email": "b2@batchco.com", "phone": "", "role": ""},
+            # Within-batch duplicate email for co_a — must be skipped as a dup even
+            # though no DB row for it existed before this import ran.
+            {
+                "company_name": "Batch Co A",
+                "contact_name": "A One Dup",
+                "email": "a1@batchco.com",
+                "phone": "",
+                "role": "",
+            },
+            # Unmanaged company → skipped_unauthorized.
+            {
+                "company_name": "Batch Foreign Co",
+                "contact_name": "Injected",
+                "email": "injected@foreign.com",
+                "phone": "",
+                "role": "",
+            },
+            # No matching company → skipped_no_company.
+            {
+                "company_name": "No Such Batch Co",
+                "contact_name": "Nobody",
+                "email": "nobody@nowhere.com",
+                "phone": "",
+                "role": "",
+            },
+        ]
+    )
+    for c in _make_client(db_session, sales_rep):
+        resp = c.post(
+            "/v2/partials/customers/import/contacts/confirm",
+            data={"rows_json": rows},
+        )
+        assert resp.status_code == 200
+
+    db_session.expire_all()
+    created_contacts = (
+        db_session.query(SiteContact)
+        .filter(SiteContact.email.in_(["a1@batchco.com", "a2@batchco.com", "b1@batchco.com", "b2@batchco.com"]))
+        .all()
+    )
+    assert len(created_contacts) == 4, "expected exactly 4 contacts created (dup/unauthorized/no-company skipped)"
+
+    # co_a rows land on the pre-existing site.
+    assert all(
+        c.customer_site_id == site_a.id for c in created_contacts if c.email in ("a1@batchco.com", "a2@batchco.com")
+    )
+
+    # co_b rows share ONE newly created site (in-batch cache reused across both rows).
+    co_b_contacts = [c for c in created_contacts if c.email in ("b1@batchco.com", "b2@batchco.com")]
+    b_site_ids = {c.customer_site_id for c in co_b_contacts}
+    assert len(b_site_ids) == 1, "both Batch Co B rows must share the single site created in this batch"
+    b_site = db_session.get(CustomerSite, next(iter(b_site_ids)))
+    assert b_site.company_id == co_b.id
+
+    # Duplicate/unauthorized/no-company rows produced no extra contacts.
+    assert db_session.query(SiteContact).filter(SiteContact.email == "injected@foreign.com").count() == 0, (
+        "unauthorized row must not create a contact"
+    )
+    assert db_session.query(SiteContact).filter(SiteContact.email == "nobody@nowhere.com").count() == 0, (
+        "unmatched-company row must not create a contact"
+    )
+
+
 def test_import_contacts_preview_flags_unauthorized_for_rep(db_session: Session, sales_rep: User, other_user: User):
     """Contacts preview must show rows matching an unmanageable company as
     'unauthorized' (not importable) for a rep, but 'valid' for a manager."""
@@ -962,7 +1090,7 @@ def test_import_contacts_preview_flags_unauthorized_for_rep(db_session: Session,
         name="Unmanageable Preview Corp",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(foreign_co)
     db_session.commit()
@@ -997,7 +1125,7 @@ def test_import_contacts_preview_manager_sees_all_valid(db_session: Session, mgr
         name="Preview Any Corp Mgr",
         is_active=True,
         account_owner_id=other_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(any_co)
     db_session.commit()

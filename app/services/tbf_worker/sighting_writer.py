@@ -8,7 +8,7 @@ Called by: worker loop
 Depends on: result_parser.TbfSighting, sighting model, vendor_utils
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ def save_tbf_sightings(
         return 0
 
     material_card_id = req.material_card_id
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Build dedup set from existing TBF sightings for this requirement
     existing = (

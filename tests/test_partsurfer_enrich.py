@@ -11,6 +11,7 @@ Depends on: conftest.py (db_session), seed_commodity_schemas, MaterialCard +
 MaterialSpecFacet schema, spec_tiers.SOURCE_TIER (partsurfer_desc=84).
 """
 
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -523,7 +524,7 @@ async def test_fresh_negative_suppresses_refetch(db_session: Session, monkeypatc
 async def test_stale_negative_is_retried_after_window(db_session: Session, monkeypatch):
     # A STALE negative row (retry_after in the past) does NOT suppress -- the spare is
     # re-fetched and the row refreshed in place (no duplicate).
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.services.enrichment_worker import worker
     from app.services.enrichment_worker.partsurfer_negative_cache import record_negative
@@ -531,7 +532,7 @@ async def test_stale_negative_is_retried_after_window(db_session: Session, monke
 
     seed_commodity_schemas(db_session)
     card = _hp_card(db_session, "726719-B21")
-    stale = datetime.now(timezone.utc) - timedelta(days=100)  # past the 90d window
+    stale = datetime.now(UTC) - timedelta(days=100)  # past the 90d window
     record_negative(db_session, card.display_mpn, normalize_mpn_key(card.display_mpn), "no_result", now=stale)
     db_session.commit()
 
@@ -558,7 +559,7 @@ async def test_stale_negative_is_retried_after_window(db_session: Session, monke
 async def test_ungrammatical_description_is_short_cached(db_session: Session, monkeypatch):
     # Fetch SUCCEEDS but the grammar declines (categorize_and_record -> (False, 0)). That is
     # NOT a no-result: it is cached as 'ungrammatical' with the SHORT window, never long.
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.services.desc_extractor import writer as desc_writer
     from app.services.enrichment_worker import worker
@@ -588,7 +589,7 @@ async def test_ungrammatical_description_is_short_cached(db_session: Session, mo
     delta_days = (rows[0].retry_after - rows[0].looked_up_at).days
     assert delta_days == PARTSURFER_UNGRAMMATICAL_RETRY_DAYS
     # And it really does suppress a re-fetch within the short window.
-    assert datetime.now(timezone.utc) < rows[0].retry_after
+    assert datetime.now(UTC) < rows[0].retry_after
 
 
 async def test_transient_is_never_negative_cached(db_session: Session, monkeypatch):

@@ -13,7 +13,7 @@ import uuid
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="N5 Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requisition(**defaults)
@@ -50,7 +50,7 @@ def _requirement(db: Session, req: Requisition, mpn: str = "LM317T", **kw) -> Re
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requirement(**defaults)
@@ -68,7 +68,7 @@ def _offer(db: Session, req: Requisition, user: User, mpn: str = "LM317T", **kw)
         unit_price=0.75,
         entered_by_id=user.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Offer(**defaults)
@@ -85,7 +85,7 @@ def _quote(db: Session, req: Requisition, user: User, status: str = "draft", **k
         status=status,
         line_items=[],
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Quote(**defaults)
@@ -102,7 +102,7 @@ def _vendor_response(db: Session, req: Requisition, **kw) -> VendorResponse:
         subject="Re: RFQ",
         body="We have stock.",
         status="new",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = VendorResponse(**defaults)
@@ -122,7 +122,7 @@ def _sourcing_lead(db: Session, req: Requisition, requirement: Requirement, **kw
         vendor_name_normalized="testvendorlead",
         primary_source_type="manual",
         primary_source_name="test",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = SourcingLead(**defaults)

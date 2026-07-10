@@ -10,7 +10,7 @@ Depends on: app/routers/part_dossier.py, app/routers/htmx_views.py, MaterialCard
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,9 +34,9 @@ def known_card(db_session):
         specs_summary="Adjustable 1.2V–37V linear regulator, 1.5A.",
         specs_structured={"v_out": {"value": "1.2-37V", "source": "digikey", "confidence": 0.99}},
         search_count=4,
-        last_searched_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        last_searched_at=datetime(2026, 6, 1, tzinfo=UTC),
         enrichment_status="verified",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -289,11 +289,11 @@ def test_market_health_all_down_no_available(db_session):
 
 
 def test_specs_shows_stored_datasheet(client, db_session):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models.intelligence import MaterialCard, MaterialCardDatasheet
 
-    card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", datasheet_captured_at=datetime.now(timezone.utc))
+    card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", datasheet_captured_at=datetime.now(UTC))
     db_session.add(card)
     db_session.flush()
     ds = MaterialCardDatasheet(
@@ -304,7 +304,7 @@ def test_specs_shows_stored_datasheet(client, db_session):
         library_drive_id="DRV",
         source="connector",
         verified=True,
-        captured_at=datetime.now(timezone.utc),
+        captured_at=datetime.now(UTC),
     )
     db_session.add(ds)
     db_session.commit()

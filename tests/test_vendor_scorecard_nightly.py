@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def _make_user(db: Session, tag: str = "vs") -> User:
         name=tag,
         role="buyer",
         azure_id=f"az-{tag}-{id(tag)}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -44,7 +44,7 @@ def _make_vendor(db: Session, name: str = "test vendor", **kwargs) -> VendorCard
         phones=[],
         sighting_count=0,
         domain_aliases=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kwargs)
     vc = VendorCard(**defaults)
@@ -59,7 +59,7 @@ def _make_req_and_item(db: Session, user: User) -> tuple:
         customer_name="C",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -67,7 +67,7 @@ def _make_req_and_item(db: Session, user: User) -> tuple:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.flush()
@@ -86,7 +86,7 @@ def _make_offer(db: Session, vendor_card_id: int, user: User) -> Offer:
         unit_price=0.50,
         qty_available=1000,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.flush()
@@ -145,7 +145,7 @@ class TestComputeVendorScorecardLazyLookups:
             quote_id=q.id,
             requisition_id=offer.requisition_id,
             status="completed",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(bp)
         db_session.flush()

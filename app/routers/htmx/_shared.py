@@ -11,7 +11,7 @@ Depends on: app.constants, app.models, app.routers.admin.users (lazy)
 
 import json
 import os
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from fastapi import HTTPException, Request
@@ -80,7 +80,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
-        "now_utc": datetime.now(timezone.utc),
+        "now_utc": datetime.now(UTC),
         "build_commit": os.environ.get("BUILD_COMMIT", "dev"),
         # The user's stored IANA display timezone (or "" when unset) — the base layout
         # renders it onto <body data-user-tz> so the client only posts the browser zone
@@ -129,7 +129,7 @@ def _parse_task_due_date(raw: str | None) -> datetime | None:
     d = _parse_date_safe(raw.strip(), date)
     if d is None:
         raise HTTPException(422, "Invalid due date")
-    return datetime.combine(d, datetime.min.time()).replace(tzinfo=timezone.utc)
+    return datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
 
 
 _DASH = "\u2014"  # em-dash for template fallbacks

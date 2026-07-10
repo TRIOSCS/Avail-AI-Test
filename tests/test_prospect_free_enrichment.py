@@ -6,7 +6,7 @@ Depends on: conftest fixtures, unittest.mock
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree.ElementTree import Element, SubElement, tostring
 
@@ -36,7 +36,7 @@ def _make_prospect(db: Session, **overrides) -> ProspectAccount:
         "discovery_source": "manual",
         "enrichment_data": {},
         "readiness_signals": {},
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     p = ProspectAccount(**defaults)
@@ -619,7 +619,7 @@ class TestEnrichContactsForProspect:
         p = _make_prospect(
             db_session,
             domain="recent-contacts.com",
-            enrichment_data={"contacts_enriched_at": datetime.now(timezone.utc).isoformat()},
+            enrichment_data={"contacts_enriched_at": datetime.now(UTC).isoformat()},
         )
         db_session.commit()
 
@@ -634,7 +634,7 @@ class TestEnrichContactsForProspect:
         p = _make_prospect(
             db_session,
             domain="force-contacts.com",
-            enrichment_data={"contacts_enriched_at": datetime.now(timezone.utc).isoformat()},
+            enrichment_data={"contacts_enriched_at": datetime.now(UTC).isoformat()},
         )
         db_session.commit()
 

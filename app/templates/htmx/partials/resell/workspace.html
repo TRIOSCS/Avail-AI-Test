@@ -9,6 +9,7 @@
   Called by: resell.resell_workspace.
   Depends on: shared/_macros.html, partials/resell/_lists.html, splitPanel JS.
 #}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 <title hx-swap-oob="true">Resell — AvailAI</title>
 
 <div class="page-fluid flex flex-col h-[calc(100vh-7.5rem)]"
@@ -91,20 +92,16 @@
        id="split-resell"
        x-data="splitPanel('resell', 38)">
 
-    {# Left: lists — lazy-loaded so the shell paints instantly.
-       LANDMINE (spec HTMX trap): hx-trigger="load" carries an EXPLICIT
-       hx-target so it doesn't inherit #main-content's hx-target="this" and
-       wipe the page. #}
+    {# Left: lists — lazy-loaded so the shell paints instantly. lazy_body macro
+       structurally enforces the explicit hx-target guard (see shared/_macros.html
+       for the landmine rationale). #}
     <div class="overflow-auto border-r border-line-base flex-shrink-0"
          :style="'width:' + leftWidth + '%'"
          id="split-left-resell">
-      <div id="resell-list-body"
-           hx-get="/v2/partials/resell/lists?lens={{ lens }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
-           hx-trigger="load"
-           hx-target="#resell-list-body"
-           hx-swap="innerHTML">
+      {% set _resell_list_url %}/v2/partials/resell/lists?lens={{ lens }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}{% if q %}&q={{ q }}{% endif %}{% endset %}
+      {% call lazy_body('resell-list-body', _resell_list_url) %}
         <div class="p-8 text-center text-gray-400 text-sm">Loading…</div>
-      </div>
+      {% endcall %}
     </div>
 
     {# Resizable divider — same affordance as the sourcing workspace. #}

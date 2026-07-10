@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/vendor_score.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -41,7 +41,7 @@ def _make_vendor_card(db, name="test vendor"):
     card = VendorCard(
         normalized_name=name.lower(),
         display_name=name,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -58,7 +58,7 @@ def _make_offers(db, card_id, vendor_name, count):
         name="Offer User",
         role="buyer",
         azure_id=f"az-{vendor_name}-{count}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -68,7 +68,7 @@ def _make_offers(db, card_id, vendor_name, count):
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -87,7 +87,7 @@ def _make_offers(db, card_id, vendor_name, count):
             unit_price=1.00,
             entered_by_id=user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(o)
         offers.append(o)
@@ -104,7 +104,7 @@ def _make_offers_full(db, card_id, vendor_name, count):
         name="User",
         role="buyer",
         azure_id=f"az-{vendor_name}-{count}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -114,7 +114,7 @@ def _make_offers_full(db, card_id, vendor_name, count):
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -131,7 +131,7 @@ def _make_offers_full(db, card_id, vendor_name, count):
             unit_price=1.00,
             entered_by_id=user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(o)
         offers.append(o)
@@ -144,7 +144,7 @@ def _make_review(db, card_id, user_id, rating):
         vendor_card_id=card_id,
         user_id=user_id,
         rating=rating,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -288,7 +288,7 @@ class TestComputeSingleVendorScore:
             name="Fallback User",
             role="buyer",
             azure_id="az-fallback-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -298,7 +298,7 @@ class TestComputeSingleVendorScore:
             customer_name="Test",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -314,7 +314,7 @@ class TestComputeSingleVendorScore:
                 unit_price=1.00,
                 entered_by_id=user.id,
                 status="active",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(o)
         db_session.commit()
@@ -337,7 +337,7 @@ def _make_customer_site(db):
     co = Company(
         name="Score Test Co",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.flush()
@@ -362,7 +362,7 @@ def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
         total_cost=50.0,
         total_margin_pct=50.0,
         created_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -378,7 +378,7 @@ def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
         requisition_id=req_id,
         quote_id=quote_id,
         status=v4_status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -439,7 +439,7 @@ class TestComputeAllVendorScores:
             name="NMV",
             role="buyer",
             azure_id="az-nmv",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -449,7 +449,7 @@ class TestComputeAllVendorScores:
             customer_name="Test",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -466,7 +466,7 @@ class TestComputeAllVendorScores:
                     unit_price=1.00,
                     entered_by_id=user.id,
                     status="active",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db_session.commit()
@@ -607,7 +607,7 @@ class TestGetQuoteOfferIds:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -634,7 +634,7 @@ class TestGetQuoteOfferIds:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -834,7 +834,7 @@ class TestComputeAllVendorScoresGaps:
             requisition_id=req.id,
             quote_id=q.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(bp)
         db_session.commit()
@@ -861,7 +861,7 @@ class TestComputeAllVendorScoresGaps:
             total_cost=0,
             total_margin_pct=0,
             created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(q)
         db_session.commit()
@@ -880,7 +880,7 @@ class TestComputeAllVendorScoresGaps:
             vendor_card_id=card.id,
             user_id=user.id,
             rating=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(review)
         db_session.commit()

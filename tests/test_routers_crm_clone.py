@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user, test_requisition)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import Offer, Requirement, Requisition
 
@@ -53,7 +53,7 @@ class TestCloneRequisition:
             primary_mpn="NE555P",
             target_qty=500,
             target_price=0.25,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r2)
         db_session.commit()

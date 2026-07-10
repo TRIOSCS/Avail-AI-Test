@@ -1,7 +1,7 @@
 import os
 
 os.environ["TESTING"] = "1"
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.intelligence import MaterialCard, MaterialCardDatasheet
 
@@ -20,7 +20,7 @@ def test_datasheet_row_links_to_card(db_session):
         source="connector",
         original_url="https://ti.com/lm317t.pdf",
         verified=True,
-        captured_at=datetime.now(timezone.utc),
+        captured_at=datetime.now(UTC),
     )
     db_session.add(ds)
     db_session.commit()
@@ -31,7 +31,7 @@ def test_datasheet_row_links_to_card(db_session):
 
 def test_card_has_datasheet_stamp_columns(db_session):
     card = MaterialCard(normalized_mpn="ne555", display_mpn="NE555")
-    card.datasheet_searched_at = datetime.now(timezone.utc)
+    card.datasheet_searched_at = datetime.now(UTC)
     db_session.add(card)
     db_session.commit()
     assert card.datasheet_searched_at is not None

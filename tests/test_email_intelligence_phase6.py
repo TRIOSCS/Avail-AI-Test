@@ -12,7 +12,7 @@ Depends on: app.connectors.email_mining, app.services.email_intelligence_service
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -149,7 +149,7 @@ class TestNeedsReviewLogic:
             user_id=1,
             sender_email="test@vendor.com",
             subject="Test",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id=None,
             classification={
                 "classification": cls_type,

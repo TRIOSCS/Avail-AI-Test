@@ -66,6 +66,18 @@ class TestOfferCreate:
         assert o.condition == "new"
         assert o.status == "active"
 
+    def test_condition_default_is_offer_condition_new(self) -> None:
+        """P2.5: default now comes from OfferCondition.NEW, value-identical to the old
+        raw literal — serializes as a plain str, not an enum repr."""
+        from app.constants import OfferCondition
+
+        o = OfferCreate(mpn="LM317T", vendor_name="Arrow")
+        assert o.condition == OfferCondition.NEW
+        dumped = o.model_dump()
+        assert dumped["condition"] == "new"
+        assert isinstance(dumped["condition"], str)
+        assert o.model_dump_json().__contains__('"condition":"new"')
+
     def test_blank_mpn_raises(self) -> None:
         with pytest.raises(ValidationError):
             OfferCreate(mpn="  ", vendor_name="Arrow")

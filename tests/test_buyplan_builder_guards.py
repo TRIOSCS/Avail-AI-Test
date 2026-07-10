@@ -10,7 +10,7 @@ Called by: pytest
 Depends on: conftest fixtures, app/services/buyplan_builder.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
         name="Builder Test",
         role="sales",
         azure_id="az-builder-test",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -37,7 +37,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
     company = Company(
         name="Test Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(company)
     db.flush()
@@ -45,7 +45,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
     site = CustomerSite(
         company_id=company.id,
         site_name="HQ",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -55,7 +55,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
         status="won",
         created_by=user.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -65,7 +65,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
         primary_mpn="TEST-MPN",
         target_qty=100,
         target_price=1.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -73,7 +73,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
     vendor = VendorCard(
         normalized_name="test vendor",
         display_name="Test Vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vendor)
     db.flush()
@@ -88,7 +88,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
         unit_price=0.50,
         status="active",
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()
@@ -99,7 +99,7 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
         quote_number="Q-BUILD-001",
         status=quote_status,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -145,7 +145,7 @@ class TestBuildBuyPlanDuplicate:
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(existing)
         db_session.flush()
@@ -161,7 +161,7 @@ class TestBuildBuyPlanDuplicate:
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.CANCELLED.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(cancelled)
         db_session.flush()
@@ -182,7 +182,7 @@ class TestNoBuyerFlag:
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()

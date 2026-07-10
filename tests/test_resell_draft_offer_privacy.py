@@ -12,7 +12,7 @@ app.routers.resell, app.services.excess_service.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -32,7 +32,7 @@ def owner_user(db_session: Session) -> User:
         name="Olive Owner",
         role="trader",
         azure_id="test-azure-owner-trader",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -47,7 +47,7 @@ def _list_with_line(db_session: Session, owner: User, company: Company, status: 
         owner_id=owner.id,
         status=status,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()

@@ -56,9 +56,10 @@
         <label class="block text-secondary mb-1">Condition</label>
         <select name="condition" class="input input-sm">
           <option value="">--</option>
-          <option value="new" {{ 'selected' if offer.condition == 'new' }}>New</option>
-          <option value="refurb" {{ 'selected' if offer.condition in ('refurb', 'refurbished') }}>Refurbished</option>
-          <option value="used" {{ 'selected' if offer.condition == 'used' }}>Used</option>
+          <option value="new" {{ 'selected' if offer.condition == 'new' }}>New (mfr packaging)</option>
+          <option value="new_no_pkg" {{ 'selected' if offer.condition == 'new_no_pkg' }}>New (no mfr packaging)</option>
+          <option value="pulls" {{ 'selected' if offer.condition == 'pulls' }}>Pulls</option>
+          <option value="refurb" {{ 'selected' if offer.condition == 'refurb' }}>Refurbs</option>
         </select>
       </div>
       <div>

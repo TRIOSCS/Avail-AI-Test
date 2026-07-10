@@ -24,6 +24,7 @@ Depends on: conftest fixtures (client, db_session, test_user),
             app.routers.htmx.materials, app.services.material_enrich_runs.
 """
 
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -303,10 +304,10 @@ def test_crosses_poller_no_run_stops_polling(client, db_session):
 
 
 def test_crosses_poller_deleted_card_stops_polling(client, db_session):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     card = _make_card(db_session, "poll-cross-5")
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     db_session.commit()
     crosses_runs.begin(card.id)
 

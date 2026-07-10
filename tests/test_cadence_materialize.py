@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import ActivityType, Channel, Direction
 from app.models.crm import Company, CustomerSite, SiteContact
 from app.models.intelligence import ActivityLog
 from app.services.cadence_service import materialize_company_clocks
 
-NOW = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
 
 
 def _log(db, *, company_id, site_contact_id=None, customer_site_id=None, direction, meaningful, created):

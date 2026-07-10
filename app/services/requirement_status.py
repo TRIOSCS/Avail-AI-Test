@@ -10,7 +10,7 @@ Called by: routers/rfq.py, routers/crm/offers.py, routers/crm/quotes.py
 Depends on: models (Requirement, Requisition), enums (RequirementSourcingStatus)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -156,7 +156,7 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
         raise ValueError(f"Requisition already claimed by user {locked.claimed_by_id}")
 
     locked.claimed_by_id = buyer.id
-    locked.claimed_at = datetime.now(timezone.utc)
+    locked.claimed_at = datetime.now(UTC)
 
     log_activity(
         db,

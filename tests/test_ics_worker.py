@@ -6,7 +6,7 @@ Depends on: conftest.py fixtures (db_session)
 
 import asyncio
 import signal
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,7 +48,7 @@ class TestUpdateWorkerStatus:
 
     def test_update_multiple_fields(self, db_session):
         _seed_worker_status(db_session)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         update_worker_status(
             db_session,
             is_running=True,
@@ -85,20 +85,20 @@ class TestRecordHeartbeat:
         """_record_heartbeat refreshes last_heartbeat to ~now and sets is_running."""
         status = _seed_worker_status(db_session)
         # Seed a stale heartbeat well in the past.
-        stale = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        stale = datetime(2000, 1, 1, tzinfo=UTC)
         status.last_heartbeat = stale
         status.is_running = False
         db_session.commit()
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         _record_heartbeat(db_session)
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         refreshed = db_session.query(IcsWorkerStatus).filter_by(id=1).first()
         assert refreshed.is_running is True
         hb = refreshed.last_heartbeat
         if hb.tzinfo is None:
-            hb = hb.replace(tzinfo=timezone.utc)
+            hb = hb.replace(tzinfo=UTC)
         assert hb > stale
         assert before <= hb <= after
 

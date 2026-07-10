@@ -16,7 +16,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -206,7 +206,7 @@ class TestJobPerformanceTracking:
             with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
                 mock_loop_fn.return_value = MagicMock()
                 with patch("app.jobs.offers_jobs.datetime") as mock_dt:
-                    mock_dt.now.return_value = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+                    mock_dt.now.return_value = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
                     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
                     with patch("app.database.SessionLocal", return_value=mock_db):
                         _run(_job_performance_tracking.__wrapped__())
@@ -232,7 +232,7 @@ class TestJobPerformanceTracking:
             with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
                 mock_loop_fn.return_value = MagicMock()
                 with patch("app.jobs.offers_jobs.datetime") as mock_dt:
-                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
+                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
                     mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
                     with patch("app.database.SessionLocal", return_value=mock_db):
                         _run(_job_performance_tracking.__wrapped__())
@@ -249,7 +249,7 @@ class TestJobPerformanceTracking:
             with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
                 mock_loop_fn.return_value = MagicMock()
                 with patch("app.jobs.offers_jobs.datetime") as mock_dt:
-                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
+                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
                     with patch("app.database.SessionLocal", return_value=mock_db):
                         _run(_job_performance_tracking.__wrapped__())
 
@@ -266,7 +266,7 @@ class TestJobPerformanceTracking:
             with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
                 mock_loop_fn.return_value = MagicMock()
                 with patch("app.jobs.offers_jobs.datetime") as mock_dt:
-                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
+                    mock_dt.now.return_value = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
                     with patch("app.database.SessionLocal", return_value=mock_db):
                         _run(_job_performance_tracking.__wrapped__())
 
@@ -452,7 +452,7 @@ class TestJobWarnStrategicExpiring:
         sv = MagicMock()
         sv.id = 1
         sv.user_id = 10
-        sv.expires_at = datetime.now(timezone.utc) + timedelta(days=3)
+        sv.expires_at = datetime.now(UTC) + timedelta(days=3)
         sv.vendor_card.display_name = "Acme Parts"
 
         # No existing log entry
@@ -478,7 +478,7 @@ class TestJobWarnStrategicExpiring:
         sv = MagicMock()
         sv.id = 1
         sv.user_id = 10
-        sv.expires_at = datetime.now(timezone.utc) + timedelta(days=3)
+        sv.expires_at = datetime.now(UTC) + timedelta(days=3)
         sv.vendor_card.display_name = "Acme Parts"
 
         # Existing log entry found
@@ -668,7 +668,7 @@ class TestJobStockAutocomplete:
         plan.id = 1
         plan.is_stock_sale = True
         plan.status = "active"
-        plan.approved_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        plan.approved_at = datetime.now(UTC) - timedelta(hours=2)
         mock_db.query.return_value.filter.return_value.all.return_value = [plan]
 
         with patch("app.database.SessionLocal", return_value=mock_db):
@@ -790,7 +790,7 @@ class TestJobTokenRefresh:
         user = MagicMock()
         user.id = 1
         user.refresh_token = "rt_123"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.access_token = "at_123"
 
         selector_db = _mock_db()
@@ -2483,7 +2483,7 @@ class TestJobTokenRefreshEdgeCases:
         user = MagicMock()
         user.id = 1
         user.refresh_token = "rt_123"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.access_token = "at_123"
         user.email = "test@example.com"
 
@@ -2515,7 +2515,7 @@ class TestJobTokenRefreshEdgeCases:
         user = MagicMock()
         user.id = 1
         user.refresh_token = "rt_123"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.access_token = "at_123"
         user.email = "test@example.com"
 
@@ -2542,7 +2542,7 @@ class TestJobTokenRefreshEdgeCases:
         user = MagicMock()
         user.id = 1
         user.refresh_token = "rt_123"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.access_token = "at_123"
 
         selector_db = _mock_db()
@@ -2649,7 +2649,7 @@ class TestJobInboxScanEdgeCases:
         user.access_token = "at_123"
         user.m365_connected = True
         user.refresh_token = "rt_123"
-        user.last_inbox_scan = datetime.now(timezone.utc)
+        user.last_inbox_scan = datetime.now(UTC)
 
         mock_db = _mock_db()
         mock_db.query.return_value.filter.return_value.all.return_value = [user]

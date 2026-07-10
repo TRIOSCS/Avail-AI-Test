@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures (db_session, test_user, test_requisition, client)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ def _make_requirement(db: Session, req: Requisition, mpn="LM317T", qty=1000, pri
         normalized_mpn=mpn.lower().replace("-", "").replace(" ", ""),
         target_qty=qty,
         target_price=price,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(r)
@@ -55,7 +55,7 @@ def _make_sighting(db: Session, req_item: Requirement, vendor="Arrow", mpn="LM31
         unit_price=0.45,
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(s)
@@ -76,7 +76,7 @@ def _make_offer(db: Session, req: Requisition, req_item: Requirement, user: User
         unit_price=0.50,
         entered_by_id=user.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(o)
@@ -483,7 +483,7 @@ class TestRequirementHistory:
             field_name="target_qty",
             old_value="1000",
             new_value="2000",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(cl)
         db_session.commit()
@@ -508,7 +508,7 @@ class TestRequirementHistory:
             contact_type="rfq",
             vendor_name="Arrow",
             parts_included=["LM317T"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(ct)
         db_session.commit()
@@ -527,8 +527,8 @@ class TestRequirementHistory:
             source="manual",
             source_ref=f"requirement:{req_item.id}",
             created_by=test_user.id,
-            completed_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.commit()

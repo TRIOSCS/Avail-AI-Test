@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -28,7 +28,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -49,7 +49,7 @@ def _req_tasks(db: Session, requisition_id: int) -> list[RequisitionTask]:
 
 class TestCreateTask:
     def test_create_manual_task_far_future(self, db_session: Session, requisition: Requisition, test_user: User):
-        due = datetime.now(timezone.utc) + timedelta(days=2)
+        due = datetime.now(UTC) + timedelta(days=2)
         task = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
@@ -73,7 +73,7 @@ class TestCreateTask:
         assert task.source == "system"
 
     def test_manual_task_within_24h_raises(self, db_session: Session, requisition: Requisition):
-        due = datetime.now(timezone.utc) + timedelta(hours=10)
+        due = datetime.now(UTC) + timedelta(hours=10)
         with pytest.raises(ValueError, match="24 hours"):
             task_service.create_task(
                 db_session,

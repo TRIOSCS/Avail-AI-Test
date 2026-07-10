@@ -14,7 +14,7 @@ os.environ["TESTING"] = "1"
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -50,7 +50,7 @@ def _quote(
         status=status,
         line_items=[],
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     q = Quote(**defaults)

@@ -29,7 +29,7 @@ class SourcengineConnector(BaseConnector):
             "Content-Type": "application/json",
         }
 
-        params = {
+        params: dict[str, str | int] = {
             "q": part_number,
             "limit": 30,
         }

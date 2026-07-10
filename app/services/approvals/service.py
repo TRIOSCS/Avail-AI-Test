@@ -32,7 +32,7 @@ Note: the inline ApprovalEvent writer here is intentionally minimal; Task 5 repl
       with ApprovalEventService.record (YAGNI for this task).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -187,7 +187,7 @@ def decide(
     if recipient is None:
         raise PermissionError(f"User {user.id} is not a pending recipient of request {request_id}")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     approved = action == _APPROVE
 
     # Record this recipient's decision.

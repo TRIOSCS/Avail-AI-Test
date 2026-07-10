@@ -9,15 +9,15 @@ Revises: 1e277d3b08a6
 Create Date: 2026-03-18 20:55:45.183158
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a513288799de"
-down_revision: Union[str, None] = "1e277d3b08a6"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "1e277d3b08a6"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # (table, column) pairs that need trigram indexes
 _TRIGRAM_INDEXES: list[tuple[str, str]] = [

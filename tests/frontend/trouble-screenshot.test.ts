@@ -130,11 +130,10 @@ describe('collectTroubleContext', () => {
 describe('submitTroubleReport (Alpine-safe single-call handler)', () => {
   const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 
-  it('POSTs the report payload with CSRF + screenshot + context, toggles submitting', async () => {
+  it('POSTs the report payload via postJSON, toggles submitting, swaps the modal', async () => {
     document.body.innerHTML = '<textarea id="tr-description">It broke</textarea><div id="modal-content"></div>';
-    document.cookie = 'csrftoken=tok123';
-    const fetchMock = vi.fn().mockResolvedValue({ text: async () => '<div>Report submitted!</div>' });
-    vi.stubGlobal('fetch', fetchMock);
+    const postJSONSpy = vi.spyOn(window as any, 'postJSON')
+      .mockResolvedValue({ ok: true, status: 200, text: '<div>Report submitted!</div>', json: () => ({}) });
     (window as any)._ttScreenshot = 'data:image/png;base64,AAA';
     (window as any)._ttContext = { current_view: 'search' };
     const data: any = { submitting: false };
@@ -143,22 +142,22 @@ describe('submitTroubleReport (Alpine-safe single-call handler)', () => {
     expect(data.submitting).toBe(true); // set synchronously
     await flush();
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/trouble-tickets/submit', expect.objectContaining({ method: 'POST' }));
-    const opts = fetchMock.mock.calls[0][1];
-    expect(opts.headers['X-CSRFToken']).toBe('tok123');
-    const body = JSON.parse(opts.body);
-    expect(body.description).toBe('It broke');
-    expect(body.screenshot).toBe('data:image/png;base64,AAA');
+    expect(postJSONSpy).toHaveBeenCalledWith(
+      '/api/trouble-tickets/submit',
+      expect.objectContaining({ description: 'It broke', screenshot: 'data:image/png;base64,AAA' }),
+    );
+    const body = postJSONSpy.mock.calls[0][1];
     expect(JSON.parse(body.auto_captured_context).current_view).toBe('search');
     expect(data.submitting).toBe(false); // reset after response
+    postJSONSpy.mockRestore();
   });
 
   it('does nothing when the description is empty', () => {
     document.body.innerHTML = '<textarea id="tr-description">   </textarea>';
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    const postJSONSpy = vi.spyOn(window as any, 'postJSON');
     (window as any).submitTroubleReport({ submitting: false });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(postJSONSpy).not.toHaveBeenCalled();
+    postJSONSpy.mockRestore();
   });
 });
 

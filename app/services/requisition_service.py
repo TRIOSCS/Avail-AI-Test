@@ -7,7 +7,7 @@ Called by: routers/requisitions/, routers/crm/clone.py
 Depends on: models (Requisition, Requirement, Offer), database
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
@@ -65,8 +65,8 @@ def to_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ def parse_date_field(value: str, field_name: str = "date") -> datetime:
         dt = datetime.fromisoformat(value)
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, f"Invalid {field_name}: {value!r} — expected ISO 8601 format") from exc
-    return to_utc(dt)  # type: ignore[return-value]
+    return to_utc(dt)
 
 
 def parse_positive_int(value: str | int, field_name: str = "value") -> int:

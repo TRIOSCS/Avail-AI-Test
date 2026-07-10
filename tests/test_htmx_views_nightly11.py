@@ -15,7 +15,7 @@ os.environ["TESTING"] = "1"
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -48,7 +48,7 @@ def make_prospect(db_session: Session, **kw):
         fit_score=75,
         readiness_score=60,
         discovery_source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectAccount(**defaults)
@@ -67,7 +67,7 @@ def make_proactive_match(db_session: Session, offer: Offer, user: User, site: Cu
         mpn="LM317T",
         status="new",
         match_score=80,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     m = ProactiveMatch(**defaults)
@@ -84,7 +84,7 @@ def make_knowledge_entry(db_session: Session, user: User, **kw) -> KnowledgeEntr
         content=f"Note about components {uuid.uuid4().hex[:6]}",
         source="manual",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     e = KnowledgeEntry(**defaults)

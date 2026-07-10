@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,7 +40,7 @@ class TestUTCDateTime:
 
         result = utc_type.process_result_value(naive, dialect=None)
         assert result is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
         assert result.year == 2026
         assert result.month == 1
         assert result.day == 15
@@ -50,11 +50,11 @@ class TestUTCDateTime:
         from app.database import UTCDateTime
 
         utc_type = UTCDateTime()
-        aware = datetime(2026, 3, 15, 9, 30, 0, tzinfo=timezone.utc)
+        aware = datetime(2026, 3, 15, 9, 30, 0, tzinfo=UTC)
 
         result = utc_type.process_result_value(aware, dialect=None)
         assert result == aware
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_utcdatetime_cache_ok(self):
         """UTCDateTime has cache_ok = True for SQLAlchemy query caching."""

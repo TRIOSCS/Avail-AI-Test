@@ -14,7 +14,7 @@ Depends on: app/management/cleanup_known_bad.py, conftest (db_session, force_car
             MaterialCard / MaterialSpecFacet / MaterialCardAudit.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,7 @@ def _card(db: Session, mpn: str, **kw) -> MaterialCard:
     card = MaterialCard(
         normalized_mpn=mpn.lower(),
         display_mpn=mpn.upper(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(card)

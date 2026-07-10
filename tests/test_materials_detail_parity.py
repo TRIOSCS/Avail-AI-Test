@@ -5,7 +5,7 @@ Called by: pytest (regression guard for Task 5 refactor).
 Depends on: the /v2/partials/materials/{card_id} and .../tab/{tab_name} routes.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -37,7 +37,7 @@ def _seed(db: Session) -> MaterialCard:
             qty_available=10,
             unit_price=Decimal("4.1"),
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     requirement = Requirement(

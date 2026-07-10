@@ -10,7 +10,7 @@ Called by: app/jobs/__init__.py via register_knowledge_jobs()
 Depends on: app/database.py, models/knowledge.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
@@ -39,7 +39,7 @@ async def _job_expire_stale():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired_count = (
             db.query(KnowledgeEntry)
             .filter(KnowledgeEntry.expires_at.isnot(None), KnowledgeEntry.expires_at < now)

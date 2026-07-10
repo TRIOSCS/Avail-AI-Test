@@ -20,7 +20,7 @@ def _credential_present(src: ApiSource, env_var: str) -> bool:
     Mirrors ``credential_service.credential_is_set`` but reuses the already-loaded row
     (no per-var re-query) since the caller holds every ApiSource in hand.
     """
-    creds = src.credentials or {}
+    creds: dict = dict(src.credentials or {})
     if creds.get(env_var):
         return True
     return bool(os.getenv(env_var))

@@ -124,6 +124,24 @@ class TestUpload:
         )
         assert resp.status_code in (401, 403)
 
+    def test_write_failure_returns_500_and_leaves_avatar_path_unset(self, client, db_session, test_user, avatars_tmp):
+        """P2.6: the disk write now runs via asyncio.to_thread — an OSError raised on
+        that worker thread must still propagate back to the route's except clause
+        instead of being swallowed or crashing the event loop."""
+        from app.routers import avatars
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(avatars, "_write_avatar_file", lambda path, data: (_ for _ in ()).throw(OSError("disk full")))
+            resp = client.post(
+                "/api/user/avatar",
+                files={"file": ("me.png", _PNG_1X1, "image/png")},
+            )
+
+        assert resp.status_code == 500
+        assert "not writable" in resp.json()["error"]
+        db_session.refresh(test_user)
+        assert test_user.avatar_path is None
+
 
 class TestServeAndDelete:
     def test_serve_returns_stored_image(self, client, db_session, test_user, avatars_tmp):

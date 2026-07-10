@@ -137,7 +137,7 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
                     "datasheet_url": (r.get("datasheet_url") or "").strip() or None,
                 }
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Connector {} timed out for {}", config["name"], mpn)
         return None
     except Exception as exc:

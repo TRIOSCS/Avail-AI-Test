@@ -10,15 +10,11 @@ Depends on: config
 import math
 import random
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from .config import NcConfig
-
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

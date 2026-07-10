@@ -19,7 +19,7 @@ Depends on: app.routers.{ai,proactive,sources,htmx_views,quality_plans,crm.quote
             app.services.prepayment_service, conftest fixtures.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -47,7 +47,7 @@ from app.models.quotes import Quote
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _make_sales(test_user, db_session):

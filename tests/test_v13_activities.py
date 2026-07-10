@@ -11,7 +11,7 @@ Called by: pytest
 Depends on: conftest (client, test_user, test_company, test_vendor_card, test_activity)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import ActivityLog
 
@@ -47,7 +47,7 @@ def test_get_vendor_activities_returns_list(client, db_session, test_user, test_
         vendor_card_id=test_vendor_card.id,
         contact_email="sales@arrow.com",
         subject="RFQ for LM317T",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(activity)
     db_session.commit()
@@ -151,7 +151,7 @@ def test_activity_status_strategic_company(client, db_session, test_user, test_c
         channel="email",
         company_id=test_company.id,
         contact_email="x@example.com",
-        created_at=datetime.now(timezone.utc) - timedelta(days=25),
+        created_at=datetime.now(UTC) - timedelta(days=25),
     )
     db_session.add(old)
     db_session.commit()

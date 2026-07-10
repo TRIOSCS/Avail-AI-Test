@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/activity_service.py, conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import (
     ActivityLog,
@@ -38,7 +38,7 @@ def _make_company(db, name="Acme Electronics", domain="acme.com"):
         name=name,
         domain=domain,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.flush()
@@ -52,7 +52,7 @@ def _make_site(db, company_id, email="john@acme.com", phone="+12025550143"):
         is_active=True,
         contact_email=email,
         contact_phone=phone,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -66,7 +66,7 @@ def _make_vendor_card(db, name="Arrow Electronics", domain="arrow.com"):
         domain=domain,
         is_blacklisted=False,
         sighting_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -391,7 +391,7 @@ class TestQueryHelpers:
             company_id=company_id,
             vendor_card_id=vendor_card_id,
             contact_email="test@test.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(a)
         db.flush()
@@ -434,7 +434,7 @@ class TestQueryHelpers:
             channel="email",
             company_id=co.id,
             contact_email="x@x.com",
-            created_at=datetime.now(timezone.utc) - timedelta(days=5),
+            created_at=datetime.now(UTC) - timedelta(days=5),
         )
         db_session.add(a)
         db_session.commit()
@@ -473,7 +473,7 @@ class TestDaysSinceLastVendorActivity:
             activity_type="email_sent",
             channel="email",
             vendor_card_id=test_vendor_card.id,
-            created_at=datetime.now(timezone.utc) - timedelta(days=3),
+            created_at=datetime.now(UTC) - timedelta(days=3),
         )
         db_session.add(activity)
         db_session.commit()

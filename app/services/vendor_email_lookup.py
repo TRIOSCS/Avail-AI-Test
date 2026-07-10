@@ -373,7 +373,7 @@ async def _enrich_vendors_batch(
                             merge_phones_into_card(card, phones)
                 vendor["emails"] = emails
                 vendor["phones"] = phones
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.debug("Enrichment timed out for {}", name)
             except Exception as e:
                 logger.debug("Enrichment failed for {}: {}", name, e)
@@ -387,7 +387,7 @@ async def _enrich_vendors_batch(
             timeout=timeout,
         )
         db.commit()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.info("Batch vendor enrichment hit {}s cap", timeout)
         try:
             db.commit()

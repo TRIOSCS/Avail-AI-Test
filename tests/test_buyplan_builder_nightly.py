@@ -10,7 +10,7 @@ Depends on: conftest db_session fixture, app/services/buyplan_builder.py
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 os.environ["TESTING"] = "1"
@@ -41,7 +41,7 @@ def _make_user(db: Session, *, email="nightly@trioscs.com", role="buyer", azure_
         role=role,
         azure_id=azure_id,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -62,7 +62,7 @@ def _make_chain(
 ):
     """Create full quote → requisition → requirement → offer chain."""
     user = _make_user(db, email=f"chain-{id(db)}@test.com", azure_id=f"az-{id(db)}")
-    company = Company(name="Chain Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    company = Company(name="Chain Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(company)
     db.flush()
 
@@ -71,7 +71,7 @@ def _make_chain(
         site_name="HQ",
         country=country,
         state=state,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -81,7 +81,7 @@ def _make_chain(
         status="open",
         created_by=user.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requisition)
     db.flush()
@@ -91,7 +91,7 @@ def _make_chain(
         primary_mpn="NLY-MPN-001",
         target_qty=target_qty,
         target_price=target_price,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -99,7 +99,7 @@ def _make_chain(
     vendor = VendorCard(
         normalized_name="nightly vendor",
         display_name="Nightly Vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vendor)
     db.flush()
@@ -114,7 +114,7 @@ def _make_chain(
         unit_price=offer_price,
         status=offer_status,
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()
@@ -125,7 +125,7 @@ def _make_chain(
         quote_number=f"Q-NIGHTLY-{id(db)}",
         status=quote_status,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -150,14 +150,14 @@ class TestBuildBuyPlanNoRequirements:
     def test_raises_when_no_requirements(self, db_session: Session):
         """Should raise ValueError when the requisition has no requirements."""
         user = _make_user(db_session)
-        company = Company(name="Empty Corp", is_active=True, created_at=datetime.now(timezone.utc))
+        company = Company(name="Empty Corp", is_active=True, created_at=datetime.now(UTC))
         db_session.add(company)
         db_session.flush()
 
         site = CustomerSite(
             company_id=company.id,
             site_name="HQ",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(site)
         db_session.flush()
@@ -167,7 +167,7 @@ class TestBuildBuyPlanNoRequirements:
             status="open",
             created_by=user.id,
             customer_site_id=site.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(requisition)
         db_session.flush()
@@ -178,7 +178,7 @@ class TestBuildBuyPlanNoRequirements:
             quote_number="Q-EMPTY-001",
             status=QuoteStatus.WON.value,
             created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(quote)
         db_session.flush()
@@ -198,7 +198,7 @@ class TestNoOffersForRequirement:
             name="REQ-NOOFFER",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(requisition)
         db_session.flush()
@@ -207,7 +207,7 @@ class TestNoOffersForRequirement:
             requisition_id=requisition.id,
             primary_mpn="NO-OFFER-MPN",
             target_qty=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(requirement)
         db_session.flush()
@@ -237,7 +237,7 @@ class TestAutoSplit:
         vendor2 = VendorCard(
             normalized_name="second vendor",
             display_name="Second Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor2)
         db_session.flush()
@@ -252,7 +252,7 @@ class TestAutoSplit:
             unit_price=0.55,
             status=OfferStatus.ACTIVE.value,
             entered_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer2)
         db_session.flush()
@@ -270,7 +270,7 @@ class TestAutoSplit:
         vendor2 = VendorCard(
             normalized_name="third vendor",
             display_name="Third Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor2)
         db_session.flush()
@@ -285,7 +285,7 @@ class TestAutoSplit:
             unit_price=0.60,
             status=OfferStatus.ACTIVE.value,
             entered_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer2)
         db_session.flush()
@@ -360,7 +360,7 @@ class TestStaleOfferFlag:
         quote, _, requirement, offer, _, _, _ = _make_chain(db_session)
 
         # Backdate the offer so it's definitely stale (stale_days default = 5)
-        stale_date = datetime.now(timezone.utc) - timedelta(days=10)
+        stale_date = datetime.now(UTC) - timedelta(days=10)
         offer.created_at = stale_date
         db_session.flush()
 
@@ -368,7 +368,7 @@ class TestStaleOfferFlag:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -405,7 +405,7 @@ class TestLowMarginFlag:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -438,7 +438,7 @@ class TestLowMarginFlag:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -478,7 +478,7 @@ class TestCustomerRegionFromSite:
                 quote_id=quote.id,
                 requisition_id=quote.requisition_id,
                 status=BuyPlanStatus.DRAFT.value,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(plan)
             db_session.flush()
@@ -538,7 +538,7 @@ class TestCheckBetterOffer:
         vendor2 = VendorCard(
             normalized_name="cheap vendor",
             display_name="Cheap Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor2)
         db_session.flush()
@@ -553,7 +553,7 @@ class TestCheckBetterOffer:
             unit_price=0.80,  # 20% cheaper → exceeds 5% threshold
             status=OfferStatus.ACTIVE.value,
             entered_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(cheaper_offer)
         db_session.flush()
@@ -562,7 +562,7 @@ class TestCheckBetterOffer:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -592,7 +592,7 @@ class TestCheckBetterOffer:
         vendor2 = VendorCard(
             normalized_name="similar vendor",
             display_name="Similar Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vendor2)
         db_session.flush()
@@ -607,7 +607,7 @@ class TestCheckBetterOffer:
             unit_price=0.98,  # only 2% cheaper, under 5% threshold
             status=OfferStatus.ACTIVE.value,
             entered_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(similar_offer)
         db_session.flush()
@@ -616,7 +616,7 @@ class TestCheckBetterOffer:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -650,7 +650,7 @@ class TestCheckGeoMismatch:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -686,7 +686,7 @@ class TestCheckGeoMismatch:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -721,7 +721,7 @@ class TestCheckGeoMismatch:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -765,7 +765,7 @@ class TestCheckQuantityGaps:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()
@@ -797,7 +797,7 @@ class TestCheckQuantityGaps:
             quote_id=quote.id,
             requisition_id=quote.requisition_id,
             status=BuyPlanStatus.DRAFT.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(plan)
         db_session.flush()

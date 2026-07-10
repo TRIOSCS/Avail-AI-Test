@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -28,7 +28,7 @@ def req_pair(db_session: Session, test_user: User) -> tuple:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -36,7 +36,7 @@ def req_pair(db_session: Session, test_user: User) -> tuple:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -61,7 +61,7 @@ def basic_sighting(db_session: Session, req_pair: tuple) -> Sighting:
         unit_price=0.50,
         currency="USD",
         score=80.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -88,7 +88,7 @@ def vendor_card(db_session: Session) -> VendorCard:
         domain="arrow.com",
         vendor_score=75.0,
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(vc)
     db_session.commit()
@@ -150,12 +150,12 @@ class TestUtilityFunctions:
     def test_freshness_score_recent(self):
         from app.services.sourcing_leads import _freshness_score
 
-        assert _freshness_score(datetime.now(timezone.utc)) == 95.0
+        assert _freshness_score(datetime.now(UTC)) == 95.0
 
     def test_freshness_score_old(self):
         from app.services.sourcing_leads import _freshness_score
 
-        old = datetime.now(timezone.utc) - timedelta(days=60)
+        old = datetime.now(UTC) - timedelta(days=60)
         assert _freshness_score(old) == 25.0
 
     def test_freshness_score_none(self):
@@ -274,7 +274,7 @@ class TestUtilityFunctions:
     def test_as_utc_aware_converted(self):
         from app.services.sourcing_leads import _as_utc
 
-        aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         result = _as_utc(aware)
         assert result.tzinfo is not None
 
@@ -301,7 +301,7 @@ class TestContactabilityScore:
             normalized_mpn="testmpn",
             vendor_name="No Contact",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -324,7 +324,7 @@ class TestComputeVendorSafety:
             normalized_name="blacklisted",
             display_name="Bad Vendor",
             is_blacklisted=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vc)
         db_session.commit()
@@ -400,7 +400,7 @@ class TestUpsertLeadFromSighting:
         s.is_authorized = False
         s.unit_price = None
         s.qty_available = None
-        s.created_at = datetime.now(timezone.utc)
+        s.created_at = datetime.now(UTC)
 
         lead = upsert_lead_from_sighting(db_session, item, s)
         db_session.flush()
@@ -445,7 +445,7 @@ class TestSyncLeadsForSightings:
             vendor_name="Mouser Electronics",
             source_type="mouser",
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s2)
         db_session.commit()

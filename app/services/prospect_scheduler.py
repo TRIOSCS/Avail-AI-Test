@@ -16,14 +16,14 @@ All jobs:
 - Are idempotent (safe to re-run)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.constants import ProspectAccountStatus
+from app.constants import DiscoveryBatchStatus, ProspectAccountStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_free_enrichment import run_contact_enrichment_batch
@@ -38,7 +38,7 @@ from app.services.prospect_scoring import (
 def _ensure_utc(dt: datetime | None) -> datetime | None:
     """Ensure datetime is tz-aware UTC (SQLite returns naive datetimes)."""
     if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -149,7 +149,7 @@ def get_next_discovery_slice(db: Session) -> dict:
         db.query(DiscoveryBatch)
         .filter(
             DiscoveryBatch.source == "explorium",
-            DiscoveryBatch.status == "complete",
+            DiscoveryBatch.status == DiscoveryBatchStatus.COMPLETED,
         )
         .order_by(DiscoveryBatch.created_at.desc())
         .first()
@@ -186,15 +186,15 @@ async def job_discover_prospects() -> dict:
     db = SessionLocal()
     try:
         slice_info = get_next_discovery_slice(db)
-        batch_id = f"discovery_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}"
+        batch_id = f"discovery_{datetime.now(UTC).strftime('%Y%m%d_%H%M')}"
 
         batch = DiscoveryBatch(
             batch_id=batch_id,
             source="explorium",
             segment=slice_info["segment"],
             regions=slice_info["regions"],
-            status="running",
-            started_at=datetime.now(timezone.utc),
+            status=DiscoveryBatchStatus.RUNNING,
+            started_at=datetime.now(UTC),
         )
         db.add(batch)
         db.commit()
@@ -257,10 +257,10 @@ async def job_discover_prospects() -> dict:
             db.rollback()
 
         # Update batch record
-        batch.status = "complete"
+        batch.status = DiscoveryBatchStatus.COMPLETED
         batch.prospects_found = explorium_count + email_count
         batch.prospects_new = explorium_count + email_count
-        batch.completed_at = datetime.now(timezone.utc)
+        batch.completed_at = datetime.now(UTC)
         db.commit()
 
         summary = {
@@ -431,7 +431,7 @@ async def job_expire_and_resurface() -> dict:
     db = None
     try:
         db = SessionLocal()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expire_cutoff = now - timedelta(days=settings.prospecting_expire_days)
         enrich_cutoff = now - timedelta(days=60)
 
@@ -516,7 +516,7 @@ async def job_pool_health_report() -> dict:
     db = None
     try:
         db = SessionLocal()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         # Status breakdown

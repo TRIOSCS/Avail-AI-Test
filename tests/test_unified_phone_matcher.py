@@ -225,6 +225,72 @@ class TestUnifiedMatcherUnknown:
         assert result is None
 
 
+class TestUnifiedMatcherBatchedLookups:
+    """P3.4 regression: batched CustomerSite/Company/VendorCard lookups (dict lookups
+    keyed off the matched contact rows) must preserve match-priority order exactly even
+    when several rows resolve to the SAME company/vendor within one call."""
+
+    def test_two_site_contacts_same_company_same_site_resolve_together(self, db_session):
+        """Two SiteContacts on the SAME site sharing a phone still collapse to one
+        company candidate (dedup via `seen`, not affected by the batched dict
+        lookup)."""
+        from app.models import Company, CustomerSite, SiteContact
+
+        co = Company(name="Batched Same Site Corp", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        c1 = SiteContact(customer_site_id=site.id, full_name="One", phone="2135550001", is_active=True)
+        c2 = SiteContact(customer_site_id=site.id, full_name="Two", phone="2135550001", is_active=True)
+        db_session.add_all([c1, c2])
+        db_session.flush()
+
+        result = match_phone_to_entity("213-555-0001", db_session)
+        assert result is not None
+        assert result["ambiguous"] is False
+        assert result["company_id"] == co.id
+
+    def test_multiple_customer_sites_different_companies_resolve_via_batched_dict(self, db_session):
+        """Priority-3 CustomerSite match across two distinct companies must still report
+        both as ambiguous candidates via the batched Company dict lookup."""
+        from app.models import Company, CustomerSite
+
+        co1 = Company(name="Batched Site Corp One", is_active=True)
+        co2 = Company(name="Batched Site Corp Two", is_active=True)
+        db_session.add_all([co1, co2])
+        db_session.flush()
+        site1 = CustomerSite(company_id=co1.id, site_name="Branch1", contact_phone="4085550050", is_active=True)
+        site2 = CustomerSite(company_id=co2.id, site_name="Branch2", contact_phone="4085550050", is_active=True)
+        db_session.add_all([site1, site2])
+        db_session.flush()
+
+        result = match_phone_to_entity("408-555-0050", db_session)
+        assert result is not None
+        assert result["ambiguous"] is True
+        candidate_ids = {c["company_id"] for c in result["candidates"]}
+        assert candidate_ids == {co1.id, co2.id}
+
+    def test_multiple_vendor_contacts_same_card_resolve_via_batched_dict(self, db_session):
+        """Two VendorContacts pointing at the SAME VendorCard sharing a phone still
+        collapse to one vendor candidate via the batched VendorCard dict lookup."""
+        from app.models.vendors import VendorCard, VendorContact
+
+        card = VendorCard(normalized_name="batched-vc", display_name="Batched VC", source="test", is_blacklisted=False)
+        db_session.add(card)
+        db_session.flush()
+        vc1 = VendorContact(vendor_card_id=card.id, source="test", phone="7145550099")
+        vc2 = VendorContact(vendor_card_id=card.id, source="test", phone="7145550099")
+        db_session.add_all([vc1, vc2])
+        db_session.flush()
+
+        result = match_phone_to_entity("(714) 555-0099", db_session)
+        assert result is not None
+        assert result["ambiguous"] is False
+        assert result["vendor_card_id"] == card.id
+
+
 class TestUnifiedMatcherAmbiguous:
     def test_two_distinct_contacts_ambiguous(self, db_session):
         from app.models import Company, CustomerSite, SiteContact

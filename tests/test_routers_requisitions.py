@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: routers/requisitions.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -102,7 +102,7 @@ def test_list_requisitions_pagination(client, db_session, test_user):
                 name=f"REQ-PAGE-{i}",
                 status="open",
                 created_by=test_user.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
     db_session.commit()
@@ -326,7 +326,7 @@ def test_get_saved_sightings_with_data(client, db_session, test_requisition):
         unit_price=0.45,
         source_type="api",
         score=75.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -354,7 +354,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         mpn_matched="LM317T",
         source_type="api",
         score=72.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     s_unavail = Sighting(
         requirement_id=req_item.id,
@@ -364,7 +364,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         source_type="api",
         score=40.0,
         is_unavailable=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([s_offer, s_unavail])
     db_session.flush()
@@ -380,7 +380,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         unit_price=0.55,
         entered_by_id=test_user.id,
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -415,7 +415,7 @@ def test_mark_sighting_unavailable(client, db_session, test_requisition):
         mpn_matched="LM317T",
         source_type="api",
         score=50.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -451,7 +451,7 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, te
         mpn_matched="LM317T",
         source_type="api",
         score=50.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -488,8 +488,8 @@ def test_batch_assign(client, db_session, test_user):
     # batch-assign requires admin; override for this test
     app.dependency_overrides[require_admin] = lambda: test_user
 
-    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(UTC))
+    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(UTC))
     db_session.add_all([r1, r2])
     db_session.commit()
 
@@ -606,14 +606,14 @@ def test_sales_user_sees_only_own_requisitions(client, db_session, test_user, sa
         name="Buyer-REQ",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     # Create a requisition owned by sales_user
     sales_req = Requisition(
         name="Sales-REQ",
         status="open",
         created_by=sales_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add_all([buyer_req, sales_req])
     db_session.commit()
@@ -646,7 +646,7 @@ def test_list_requisitions_with_customer_site(client, db_session, test_user, tes
         status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -741,7 +741,7 @@ def test_list_requirements_with_sightings_and_offers(client, db_session, test_re
         mpn_matched="LM317T",
         source_type="api",
         score=60.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
     db_session.commit()
@@ -765,7 +765,7 @@ def test_list_requirements_with_contact_activity(client, db_session, test_requis
         vendor_name="Arrow",
         contact_type="email",
         status="sent",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(contact)
     db_session.commit()
@@ -838,7 +838,7 @@ def test_requirement_action_unauthorized(client, db_session, test_user, test_req
         name="Other",
         role="sales",
         azure_id=azure_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other)
     db_session.commit()
@@ -868,7 +868,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         mpn_matched="LM317T",
         source_type="api",
         score=70.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(s)
 
@@ -877,7 +877,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         name="OTHER-REQ",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other_req)
     db_session.flush()
@@ -890,7 +890,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         unit_price=0.55,
         entered_by_id=test_user.id,
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(hist_offer)
     db_session.commit()

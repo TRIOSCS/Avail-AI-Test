@@ -14,7 +14,7 @@ blended 80/20 with buyer review ratings to produce the final vendor_score.
 Cold start: vendors with < 5 offers get vendor_score=None, is_new_vendor=True.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func
@@ -248,7 +248,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     from app.models.buy_plan import BuyPlan, BuyPlanLine
     from app.vendor_utils import normalize_vendor_name
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # ── Preload all offer_ids grouped by vendor_card_id ──
     offer_rows = db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name).limit(50000).all()

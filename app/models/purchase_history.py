@@ -10,7 +10,7 @@ Used by the proactive matching engine to find customer matches
 for newly available inventory.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Column,
@@ -47,11 +47,11 @@ class CustomerPartHistory(Base):
     total_quantity = Column(Integer, default=0)
     source_ref = Column(String(255))  # SF opportunity ID, AVAIL offer ID, PO number
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     company = relationship("Company", foreign_keys=[company_id])

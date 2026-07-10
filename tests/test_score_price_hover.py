@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models.intelligence import MaterialCard
 from app.models.price_snapshot import MaterialPriceSnapshot
@@ -200,7 +200,7 @@ def test_price_series_for_card_ordered_and_currency_scoped(db_session):
     db_session.add(card)
     db_session.flush()
 
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     # Insert out of order; a EUR row must be excluded (scoped to newest currency = USD).
     for days, price, currency in [(2, 3.00, "USD"), (0, 1.00, "USD"), (1, 99.0, "EUR"), (3, 4.00, "USD")]:
         db_session.add(
@@ -283,7 +283,7 @@ def test_material_price_history_column_renders_with_real_data():
             price=2.00 + i,
             currency="USD",
             source="api_sighting",
-            recorded_at=datetime(2026, 2, 1 + i, tzinfo=timezone.utc),
+            recorded_at=datetime(2026, 2, 1 + i, tzinfo=UTC),
         )
         for i in range(3)
     ]
@@ -373,7 +373,7 @@ def test_vendor_detail_renders_score_hover_wired_to_real_data():
         mpn_filter=None,
         cadence_state="new",
         next_best_touch="Reach out soon",
-        now_utc=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        now_utc=datetime(2026, 3, 1, tzinfo=UTC),
         vendor_score_breakdown=breakdown,
     )
     # Value breakdown popover wired to the real drivers.

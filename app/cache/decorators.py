@@ -96,7 +96,7 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
                 _store_result(cache_key, result)
                 return result
 
-            async_wrapper.cache_prefix = prefix
+            async_wrapper.cache_prefix = prefix  # type: ignore[attr-defined]  # dynamic attr read by invalidation helpers
             return async_wrapper
 
         @functools.wraps(func)
@@ -111,7 +111,7 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             return result
 
         # Expose cache prefix for invalidation
-        wrapper.cache_prefix = prefix
+        wrapper.cache_prefix = prefix  # type: ignore[attr-defined]  # dynamic attr read by invalidation helpers
         return wrapper
 
     return decorator

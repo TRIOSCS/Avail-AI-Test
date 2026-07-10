@@ -51,7 +51,7 @@ async def _instance_classify(parts: list[dict]) -> list[dict] | None:
 
 
 # Route the gate's classification through the module-level (patchable) function.
-_gate.classify_parts_batch = _instance_classify  # type: ignore[method-assign]
+_gate.classify_parts_batch = _instance_classify
 
 
 async def process_ai_gate(db: Session):

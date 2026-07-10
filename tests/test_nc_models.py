@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py (db_session, test_requisition fixtures)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -148,7 +148,7 @@ def test_nc_search_log_error(db_session, test_requisition):
 def test_sighting_source_searched_at(db_session, test_requisition):
     """Sighting model now has source_searched_at column."""
     req = test_requisition.requirements[0]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sighting = Sighting(
         requirement_id=req.id,
         vendor_name="Test Vendor",

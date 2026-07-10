@@ -55,7 +55,7 @@ from app.cache.decorators import invalidate_prefix
 
 # After updating a company record:
 invalidate_prefix("company_list")
-invalidate_prefix("companies_typeahead")
+invalidate_prefix("company_detail")
 ```
 
 ## Key Concepts

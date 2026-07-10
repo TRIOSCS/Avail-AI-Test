@@ -1,6 +1,6 @@
 """Tests for requisition_service — date normalization, validation, error mapping."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,12 +27,12 @@ class TestToUtc:
         naive = datetime(2026, 3, 11, 12, 0, 0)
         result = to_utc(naive)
         assert result is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
         assert result.year == 2026
         assert result.hour == 12
 
     def test_utc_datetime_unchanged(self):
-        aware = datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc)
+        aware = datetime(2026, 3, 11, 12, 0, 0, tzinfo=UTC)
         result = to_utc(aware)
         assert result == aware
 
@@ -41,7 +41,7 @@ class TestToUtc:
         aware = datetime(2026, 3, 11, 12, 0, 0, tzinfo=eastern)
         result = to_utc(aware)
         assert result is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
         assert result.hour == 17  # 12 EST = 17 UTC
 
 
@@ -54,11 +54,11 @@ class TestParseDateField:
     def test_valid_iso_string(self):
         result = parse_date_field("2026-03-11T10:00:00")
         assert result.year == 2026
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_valid_iso_with_tz(self):
         result = parse_date_field("2026-03-11T10:00:00+00:00")
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_invalid_string_raises_400(self):
         with pytest.raises(HTTPException) as exc_info:
@@ -196,9 +196,9 @@ class TestParseEdgeCases:
         assert result == 999999999
 
     def test_to_utc_with_far_future_date(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        dt = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        dt = datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC)
         assert to_utc(dt) == dt
 
     def test_safe_commit_on_generic_exception(self, db_session):

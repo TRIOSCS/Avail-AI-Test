@@ -8,7 +8,7 @@ Depends on: conftest fixtures, app.models, app.services.auto_attribution_service
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,7 +25,7 @@ def _make_user(db: Session) -> User:
         name="Attrib Tester",
         role="buyer",
         azure_id="az-attrib",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -37,7 +37,7 @@ def _make_unmatched_activity(db: Session, user: User, **kw) -> ActivityLog:
         user_id=user.id,
         activity_type="email",
         channel="email",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     act = ActivityLog(**defaults)
@@ -82,7 +82,7 @@ class TestRunAutoAttribution:
         from app.services.auto_attribution_service import run_auto_attribution
 
         user = _make_user(db_session)
-        old = datetime.now(timezone.utc) - timedelta(days=35)
+        old = datetime.now(UTC) - timedelta(days=35)
         act = _make_unmatched_activity(db_session, user, contact_email="nobody@nowhere.com", created_at=old)
         db_session.commit()
 
@@ -105,7 +105,7 @@ class TestRunAutoAttribution:
             channel="email",
             contact_email="x@test.com",
             company_id=co.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -123,8 +123,8 @@ class TestRunAutoAttribution:
             activity_type="email",
             channel="email",
             contact_email="x@test.com",
-            dismissed_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            dismissed_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -215,7 +215,7 @@ class TestRunAutoAttribution:
             db_session,
             user,
             contact_phone="5551234567",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.commit()
 

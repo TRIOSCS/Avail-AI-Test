@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time as _time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -75,7 +75,7 @@ def merge_authoritative(
     merged: dict[str, Any] = {}
     provenance: dict[str, Any] = {}
     contributors: list[str] = []
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     for source in SOURCE_ORDER:
         hits = results_by_source.get(source) or []
@@ -214,7 +214,7 @@ def apply_authoritative(
     card.enrichment_provenance = _apply_merged_core_fields(card, merged, provenance)
     card.enrichment_source = contributors[0] if contributors else card.enrichment_source
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
-    card.enriched_at = datetime.now(timezone.utc)
+    card.enriched_at = datetime.now(UTC)
 
 
 def _apply_evidence_fields(
@@ -259,7 +259,7 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
     manual (100) provenance, and off-vocab categories are rejected, never persisted);
     a ladder-rejected write gets NO per-field provenance entry.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     iso = now.isoformat()
     prov: dict = {
         "web_sourced": True,
@@ -304,7 +304,7 @@ def apply_cross_ref_verified(
     ``_apply_merged_core_fields``; ladder-rejected writes are dropped from the persisted
     provenance).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provenance = _apply_merged_core_fields(card, merged, provenance)
     xrefs = list(card.cross_references or [])
     xrefs.append({"mpn": xr.resolved_mpn, "manufacturer": xr.manufacturer})
@@ -335,7 +335,7 @@ def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
     categories are rejected); a ladder-rejected write gets NO per-field provenance
     entry.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     iso = now.isoformat()
     prov: dict = {
         "oem_sourced": True,
@@ -490,7 +490,7 @@ async def enrich_card(
         inf = await infer_part(card.display_mpn)
         if web_meter is not None:
             web_meter.mark_claude_ok()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         card.enriched_at = now
         if inf.status == "ai_inferred":
             card.description = inf.description
@@ -512,7 +512,7 @@ async def enrich_card(
             }
             return MaterialEnrichmentStatus.AI_INFERRED
     else:
-        card.enriched_at = datetime.now(timezone.utc)
+        card.enriched_at = datetime.now(UTC)
 
     # Terminal: not_catalogued only when a HIGH-PRECISION OEM pattern matched AND the OEM
     # tiers ran. The broad Dell 5-char pattern is excluded (see HIGH_PRECISION_VENDORS) so a

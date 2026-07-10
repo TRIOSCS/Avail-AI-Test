@@ -22,7 +22,7 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..models.auth import User
 from ..services.alerts import count_for_tab, record_seen, tab_for_kind
-from ..services.alerts import sources as _sources  # noqa: F401  (import = source registration)
+from ..services.alerts import sources as _sources  # noqa: F401
 
 router = APIRouter()
 
@@ -49,7 +49,7 @@ async def alert_badge(
     """
     try:
         count = count_for_tab(db, user, tab_key)
-    except Exception:  # noqa: BLE001 — the nav must never break
+    except Exception:
         logger.exception("alert badge failed for tab {}", tab_key)
         count = 0
     return HTMLResponse(_badge_html(count))
@@ -75,7 +75,7 @@ async def alert_seen(
             continue
         try:
             record_seen(db, user, kind, int(raw))
-        except Exception:  # noqa: BLE001 — never 500 a cosmetic seen-ping
+        except Exception:
             logger.exception("alert seen failed for kind {} ref {}", kind, raw)
 
     tab_key = tab_for_kind(kind)
@@ -83,7 +83,7 @@ async def alert_seen(
         return HTMLResponse("")
     try:
         count = count_for_tab(db, user, tab_key)
-    except Exception:  # noqa: BLE001 — never break the seen-ping on a badge recompute
+    except Exception:
         logger.exception("alert seen badge recompute failed for tab {}", tab_key)
         return HTMLResponse("")
     return HTMLResponse(f'<span id="{tab_key}-nav-badge" hx-swap-oob="innerHTML">{_badge_html(count)}</span>')

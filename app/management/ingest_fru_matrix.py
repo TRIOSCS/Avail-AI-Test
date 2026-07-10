@@ -45,10 +45,10 @@ Depends on: openpyxl, app.models.FruLink, app.constants.FruLinkKind/CDC_PENDING,
 import argparse
 import re
 from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import date, datetime
 from functools import lru_cache
-from typing import Callable, Iterable
 
 import sqlalchemy as sa
 from loguru import logger
@@ -228,7 +228,7 @@ def _context_limits() -> dict[str, int]:
     from app.models.fru_link import FruLink
 
     return {
-        name: FruLink.__table__.columns[name].type.length
+        name: FruLink.__table__.columns[name].type.length  # type: ignore[attr-defined]  # String columns expose .length
         for name in ("manufacturer", "series", "machine", "qual_status")
     }
 

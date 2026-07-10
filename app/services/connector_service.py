@@ -14,7 +14,7 @@ Called by: app/routers/htmx_views.py (settings_connectors_tab, connector_card_pa
 app/routers/sources.py (test-all). Depends on: nothing (heartbeat row is passed in).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 GROUP_ORDER: list[tuple[str, str]] = [
     ("part_sourcing", "Part Sourcing"),
@@ -126,7 +126,7 @@ def worker_health(row, *, now: datetime | None = None, stale_seconds: int = WORK
 
     Unhealthy when: no row / no heartbeat / heartbeat stale / not running / breaker open.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if row is None:
         return {
             "healthy": False,
@@ -138,7 +138,7 @@ def worker_health(row, *, now: datetime | None = None, stale_seconds: int = WORK
     hb = row.last_heartbeat
     age = None
     if hb is not None:
-        hb = hb if hb.tzinfo else hb.replace(tzinfo=timezone.utc)
+        hb = hb if hb.tzinfo else hb.replace(tzinfo=UTC)
         age = int((now - hb).total_seconds())
 
     last_search_at = getattr(row, "last_search_at", None)

@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ TEMPLATES_DIR = PROJECT_ROOT / "app" / "templates"
 ROUTERS_DIR = PROJECT_ROOT / "app" / "routers"
 STATIC_DIR = PROJECT_ROOT / "app" / "static"
 FRPRP_DIR = PROJECT_ROOT / "docs" / "frprp"
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+TODAY = datetime.now(UTC).strftime("%Y-%m-%d")
 RUN_DIR = FRPRP_DIR / "runs" / TODAY
 SCREENSHOTS_DIR = RUN_DIR / "screenshots"
 
@@ -99,7 +99,7 @@ CATEGORY_WEIGHTS = {
 
 
 def log(msg: str, level: str = "INFO"):
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    ts = datetime.now(UTC).strftime("%H:%M:%S")
     print(f"[{ts}] [{level}] {msg}")
 
 
@@ -116,7 +116,7 @@ def update_status(phase: int, phase_name: str, detail: str, findings_summary: di
         f"# Frontend Fix Run — {TODAY}",
         "",
         f"## Current Phase: {phase_name} ({phase}/6)",
-        f"## Last Update: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}",
+        f"## Last Update: {datetime.now(UTC).strftime('%H:%M:%S UTC')}",
         "",
         "### Phase Progress",
     ]
@@ -1303,7 +1303,7 @@ def preflight() -> bool:
     # 4. Write manifest
     base_commit = run_cmd(["git", "rev-parse", "HEAD"]).stdout.strip()
     manifest = {
-        "start_time": datetime.now(timezone.utc).isoformat(),
+        "start_time": datetime.now(UTC).isoformat(),
         "base_commit": base_commit,
         "branch": branch_name,
         "mode": "autonomous",

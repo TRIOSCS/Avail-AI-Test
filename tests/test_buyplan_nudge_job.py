@@ -9,7 +9,7 @@ test session with close() disabled (mirrors test_jobs_inventory.py).
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -26,7 +26,7 @@ from app.models.buy_plan import (
 
 
 def _ago(hours: float) -> datetime:
-    return datetime.now(timezone.utc) - timedelta(hours=hours)
+    return datetime.now(UTC) - timedelta(hours=hours)
 
 
 @pytest.fixture()

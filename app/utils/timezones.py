@@ -19,7 +19,7 @@ Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -73,7 +73,7 @@ def current_display_zoneinfo() -> ZoneInfo:
 def _as_utc(dt: datetime) -> datetime:
     """Coerce a naive datetime to UTC-aware; pass aware datetimes through unchanged."""
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 

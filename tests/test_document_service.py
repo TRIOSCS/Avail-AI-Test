@@ -6,7 +6,7 @@ queries, template rendering, and router behaviour.
 """
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,8 +21,8 @@ _fake_weasyprint.HTML = _mock_html_cls
 # Insert into sys.modules so `from weasyprint import HTML` resolves
 sys.modules.setdefault("weasyprint", _fake_weasyprint)
 
-from app.models import Quote  # noqa: E402
-from app.services.document_service import (  # noqa: E402
+from app.models import Quote
+from app.services.document_service import (
     generate_quote_report_pdf,
     generate_rfq_summary_pdf,
 )
@@ -46,7 +46,7 @@ def _make_quote(db, requisition, customer_site, user, *, quote_number, **fields)
         quote_number=quote_number,
         status="draft",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **fields,
     )
     db.add(quote)

@@ -11,7 +11,7 @@ Depends on: routers/vendors_crud.py, utils/vendor_helpers.py
 """
 
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,12 +63,12 @@ def _make_vendor_card(**overrides) -> SimpleNamespace:
         total_responses=14,
         ghost_rate=0.3,
         response_velocity_hours=4.2,
-        last_contact_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        last_contact_at=datetime(2026, 1, 15, tzinfo=UTC),
         brand_tags=[],
         commodity_tags=[],
         material_tags_updated_at=None,
-        created_at=datetime(2025, 11, 1, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        created_at=datetime(2025, 11, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 15, tzinfo=UTC),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -81,7 +81,7 @@ def _make_review(**overrides) -> SimpleNamespace:
         user_id=1,
         rating=4,
         comment="Good vendor",
-        created_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 10, tzinfo=UTC),
         user=SimpleNamespace(name="Mike"),
     )
     defaults.update(overrides)
@@ -273,8 +273,8 @@ def test_card_to_dict_redis_cache_invalid_json():
 def test_card_to_dict_with_enrichment_timestamps():
     """card_to_dict serializes all datetime fields correctly."""
     card = _make_vendor_card(
-        last_enriched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        material_tags_updated_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
+        last_enriched_at=datetime(2026, 1, 1, tzinfo=UTC),
+        material_tags_updated_at=datetime(2026, 1, 5, tzinfo=UTC),
     )
     db = _make_card_db()
 
@@ -1341,7 +1341,7 @@ def test_delete_others_review_forbidden(client, db_session, test_vendor_card):
         name="Other User",
         role="buyer",
         azure_id="test-azure-id-other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other_user)
     db_session.commit()

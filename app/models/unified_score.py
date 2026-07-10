@@ -8,7 +8,7 @@ Called by: services/unified_score_service.py (daily compute via scheduler)
 Depends on: models/performance.py (AvailScoreSnapshot, MultiplierScoreSnapshot)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Column,
@@ -63,11 +63,11 @@ class UnifiedScoreSnapshot(Base):
     ai_blurb_generated_at = Column(UTCDateTime)
 
     # Timestamps
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     user = relationship("User", foreign_keys=[user_id])

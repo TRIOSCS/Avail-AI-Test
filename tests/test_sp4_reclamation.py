@@ -19,7 +19,7 @@ the FK semantics themselves are PG-only and are verified on live Postgres at dep
 import asyncio
 import importlib.util
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,7 +56,7 @@ def _plant_activity(db, company_id, *, days_ago, activity_type="email_sent"):
     """
     from datetime import timedelta
 
-    ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    ts = datetime.now(UTC) - timedelta(days=days_ago)
     db.add(
         ActivityLog(
             company_id=company_id,
@@ -183,8 +183,8 @@ def test_get_last_activity_at_returns_latest(db_session):
     from app.services.activity_service import get_last_activity_at
 
     co = _make_company(db_session)
-    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    t2 = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 1, tzinfo=UTC)
+    t2 = datetime(2026, 3, 1, tzinfo=UTC)
     for t in (t1, t2):
         db_session.add(
             ActivityLog(
@@ -197,7 +197,7 @@ def test_get_last_activity_at_returns_latest(db_session):
     db_session.commit()
     result = get_last_activity_at(co.id, db_session)
     assert result is not None
-    assert result.replace(tzinfo=timezone.utc) == t2 or result == t2
+    assert result.replace(tzinfo=UTC) == t2 or result == t2
 
 
 # ── Task 5: job_account_sweep ─────────────────────────────────────────────────
@@ -259,7 +259,7 @@ def test_sweep_notification_sends_to_rep(db_session, test_user):
 
     mock_gc = AsyncMock()
     mock_gc.post_json = AsyncMock(return_value={})
-    last_dt = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    last_dt = datetime(2026, 1, 1, tzinfo=UTC)
     co = _make_company(db_session, owner_id=test_user.id)
     with (
         patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok")),

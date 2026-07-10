@@ -102,7 +102,7 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | outcome_reason | Text, nullable | Migration 185. The per-part "why won / why lost" close reason. Set by the Sales-Hub bulk Won/Lost action (`POST /v2/partials/parts/bulk-outcome`) when a part-line is marked WON/LOST — the per-part replacement for the removed bulk Archive. Nullable at the DB level (existing/non-closed lines stay valid); enforcement is **app-side** — `bulk_outcome` (routers/htmx/parts.py) 400s on a blank reason, then stamps the reason on every selected `Requirement` it transitions to WON/LOST via the sourcing state machine (`transition_requirement`). Mirrors the requisition-level `Requisition.outcome_reason` (migration 158). |
 | substitutes | JSON | Alternative MPNs |
 | substitutes_text | Text, indexed (GIN) | Flattened substitute MPNs for ILIKE search (used by global search + parts list) |
-| assigned_buyer_id | FK -> users | |
+| assigned_buyer_id | FK -> users, indexed (`ix_requirements_assigned_buyer`, migration `71d3fef96529`) | P3.1: had no index anywhere despite being filtered on every buyer's default sightings board (`routers/sightings.py:413,585`) and the offers alert source (`services/alerts/sources/offers.py:58-60`) |
 | **Relationships** | requisition, sightings, offers, attachments |
 
 **`sightings`** — Search results from supplier APIs
@@ -610,7 +610,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | id | Integer PK | |
 | entity_type | String 20, not null | `'company'` \| `'contact'` — polymorphic discriminator (mirrors `approval_requests.subject_type`); pairs with `entity_id` to scope a record's history without two near-identical tables |
 | entity_id | Integer, not null | `companies.id` or `site_contacts.id` (no FK — polymorphic) |
-| field_name | String 64, not null | raw inline-edit field key (e.g. `industry`, `title`); display label resolved via `FIELD_LABELS` in `companies.py` |
+| field_name | String 64, not null | raw inline-edit field key (e.g. `industry`, `title`); display label resolved via `FIELD_LABELS` in `app/routers/htmx/companies/_registries.py` |
 | old_value | Text, nullable | canonical (stripped) prior value; NULL when previously empty |
 | new_value | Text, nullable | canonical new value; NULL when cleared |
 | changed_by_id | FK -> users (SET NULL), nullable | the editing user (passed explicitly from the route, not the audit contextvar) |
@@ -747,6 +747,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 >   - `ix_mc_last_searched` — partial btree `(last_searched_at) WHERE last_searched_at IS NOT NULL` (`searched_within` buckets)
 >   - Plain (non-CONCURRENT) builds per repo alembic pattern: each takes a write-blocking ShareLock on `material_cards` (~25s total for the migration on the live-size heap); reads unaffected.
 >   - Downgrade drops only the eight 098-owned indexes + the statistics object; the two `eabe89205d07`-owned names survive (only that revision's own downgrade may remove them).
+> - **Migration 187 (`187_startup_backfill_partial_idx`, P2.7)** — eight PostgreSQL-only partial indexes (`postgresql_where`, no-op on the SQLite test DB), one per `app/startup.py` deferred-backfill helper's `IS NULL` predicate, so a repeat-boot scan for the shrinking set of legacy rows still needing normalization is an index scan over the remaining rows instead of a full seq scan on every restart: `ix_requirements_backfill_norm_mpn` (requirements, `normalized_mpn IS NULL AND primary_mpn IS NOT NULL`), `ix_material_cards_backfill_norm_mpn` (material_cards, `normalized_mpn IS NULL AND display_mpn IS NOT NULL`), `ix_sightings_backfill_norm_mpn` / `ix_sightings_backfill_vendor_norm` (sightings, normalized-mpn and vendor-name-normalized `IS NULL` predicates), `ix_offers_backfill_norm_mpn` / `ix_offers_backfill_vendor_norm` (offers, same two predicates), `ix_trouble_tickets_backfill_defaults` (trouble_tickets, `risk_tier IS NULL AND category IS NULL`), and `ix_prospect_accounts_backfill_cooldown` (prospect_accounts, `swept_at IS NOT NULL AND reclaim_blocked_until IS NULL AND status != 'dismissed'`). Each indexes only `id` (existence-check shape, mirroring `ix_mc_has_datasheet`/`ix_mc_has_crosses` above). Serialized directly after migration `71d3fef96529` on the same branch (linear history, no merge point). Downgrade drops all eight (dialect-guarded the same way).
 
 **`material_card_attachments`** — User-uploaded files attached to a material card part dossier (Migration 126, new table; distinct from system-captured `material_card_datasheets`)
 | Column | Type | Notes |
@@ -1068,7 +1069,16 @@ Key columns:
 re-screen with materially new grounding produces a different hash and bypasses the cached verdict.
 Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
 
-**`discovery_batches`** — Import batch tracking
+**`discovery_batches`** — Import batch tracking. Audit trail for every prospect
+discovery/enrichment run (`app/models/discovery_batch.py`); sole writer is
+`prospect_scheduler.job_discover_prospects`. `status` (String 20, indexed —
+`ix_discovery_batches_status`, `ix_discovery_batches_source_status`) uses the
+`DiscoveryBatchStatus` StrEnum (app/constants.py): `running` (default) \| `completed` \|
+`failed`. `failed` is reserved (not currently written — an unhandled exception leaves the
+row at `running`); the vocabulary follows the `PendingBatchStatus` run-lifecycle
+convention. Also carries `batch_id` (unique), `source`/`segment`/`regions`/
+`search_filters` provenance, `prospects_found/new/updated` + `credits_used` counters,
+`error_message`, and `started_at`/`completed_at` timestamps.
 
 **`enrichment_worker_status`** — Singleton (id=1, `ck_enrichment_worker_status_singleton`)
 heartbeat + daily-stats row for the paced material-enrichment worker
@@ -1156,9 +1166,9 @@ SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 
 ### Search Queues
 
-**`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` — backed by a composite UNIQUE (`uq_ics_queue_requirement_mpn`) that replaced the legacy per-requirement UNIQUE — so the spec-code resolver can enqueue multiple AVL MPNs per requirement while concurrent enqueues still can't double-insert (the app-layer check in `QueueManager.enqueue_search` catches the resulting `IntegrityError` and returns the winning row); carries `resolved_via_spec_code` lineage.
-**`nc_search_queue`** — NetComponents browser automation queue (same structure + same composite-UNIQUE dedup `uq_nc_queue_requirement_mpn` / lineage change)
-**`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change). Backed by the `avail-tbf-worker` host worker (ACTIVE: authenticates with member creds and records the real seller `vendor_name` + `vendor_phone` per listing). Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).
+**`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` — backed by a composite UNIQUE (`uq_ics_queue_requirement_mpn`) that replaced the legacy per-requirement UNIQUE — so the spec-code resolver can enqueue multiple AVL MPNs per requirement while concurrent enqueues still can't double-insert (the app-layer check in `QueueManager.enqueue_search` catches the resulting `IntegrityError` and returns the winning row); carries `resolved_via_spec_code` lineage. `status` (String 20, default `pending`) uses the `SearchQueueStatus` StrEnum (app/constants.py): `pending` (enqueued, awaiting AI-gate classification) -> `queued` (gate approved, or reclaimed after a stale/failed attempt) -> `searching` (claimed by a worker) -> `completed` (results recorded) or `gated_out` (AI gate decided not worth searching) or `failed` (worker gave up after retries/circuit-breaker trip). `app/services/search_worker_base/{queue_manager,ai_gate}.py` and the ics_worker wrapper are the sole readers/writers; values are DB-persisted `String` columns, not native DB enums, so they must equal the pre-enum string literals exactly.
+**`nc_search_queue`** — NetComponents browser automation queue (same structure + same composite-UNIQUE dedup `uq_nc_queue_requirement_mpn` / lineage change; same `SearchQueueStatus` vocabulary, nc_worker as reader/writer)
+**`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change; same `SearchQueueStatus` vocabulary, tbf_worker as reader/writer). Backed by the `avail-tbf-worker` host worker (ACTIVE: authenticates with member creds and records the real seller `vendor_name` + `vendor_phone` per listing). Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).
 
 ### OEM Spec-Code Resolver
 
@@ -1190,3 +1200,75 @@ Lineage columns added to existing tables: `requirements.oem_hint`; `sightings.re
 > **Category canonicalization:** `app/services/category_normalizer.py` maps free-text `material_cards.category` variants (e.g. `connectors, interconnects` → `connectors`) to the canonical commodity keys the faceted sidebar buckets on — including the globally-unambiguous TRIO SFDC part-master `Commodity_Code__c` codes (`Main Board`→`motherboards`, `Hard Drive`→`hdd`, `LCD`/`LCD ASSY`→`displays`, `PSU`→`power_supplies`, `Graphics Card`→`gpu`, `Tape Drive`→`tape_drives`, `IC`/`Integrated Circuits (ICs)`→`ics_other`, `OEM ASSY`→`oem_assemblies`). Source-scoped codes that are only unambiguous inside TRIO's export live in `TRIO_SFDC_COMMODITY_CODES` (bare `Memory`→`dram` — supplier taxonomies use "Memory" for flash/EEPROM/SRAM too) and resolve only through `normalize_trio_category()` (the SFDC ingest entry point; falls back to the global map); the global `normalize_category()` never consults them. Forward hook at the three card category write sites; one-off backfill via `scripts/normalize_categories.py --dry-run|--apply`. Ambiguous strings are left untouched. Legacy rows already in the DB were normalized once by data migration `093_normalize_legacy_categories` (case-insensitive rewrite through a frozen snapshot of the full alias vocabulary, incl. `memory`→`dram` — safe because every existing row carries TRIO provenance; downgrade is a documented no-op for categories; migration `096_spec_provenance` (SP2) was re-parented onto `095_wechat_id`, keeping a single linear head). Because 093's snapshot is frozen, an alias added later only covers NEW writes: `tests/test_category_normalizer.py::test_runtime_aliases_are_backfilled_by_093_or_documented` fails CI unless every post-093 alias is registered with its own backfill (first instance: the four 2026-06-10 distributor-taxonomy aliases `hard drives`/`internal hard drives`→`hdd`, `memory module`/`memory modules`→`dram`, backfilled by data migration `100_taxonomy_alias_backfill`), and the boot-time residue check (`startup._warn_non_canonical_categories`) WARNs every boot with count + worst offenders whenever any `material_cards.category` falls outside the canonical keys (such rows are invisible to all commodity browsing).
 >
 > **Deterministic MPN decode (Phase 1 of MPN→spec enrichment):** `app/services/mpn_decoder/` reads facet specs straight from standard manufacturer drive/SSD/DIMM part numbers (HDD: Seagate/WD/Toshiba/HGST in `storage.py`; SSD: Samsung/Micron/Intel-Solidigm/Kioxia/WD in `ssd.py`; DRAM: Samsung/Hynix/Micron/Kingston/Crucial in `memory.py`) — zero network/LLM, strict per-vendor regex gates that require the full family structure (e.g. Toshiba `^(MG|MN|MD|MQ|DT)\d{2}[A-Z]{3}`, so short OEM spares like Dell DPNs don't false-match; HGST `HUS` requires a digit next so the HUSMM/HUSSL SAS-SSD families don't misdecode as 3.5" HDDs), unrecognized schemes skipped. DRAM modules additionally decode `rank` (enum 1Rx4/1Rx8/2Rx4/2Rx8/4Rx4/8Rx4 — 8Rx4 is emittable via the Hynix device-count math but no shipping part exercises it), `registered` (Registered/Unbuffered/Load-Reduced) and `voltage` (numeric V: 1.2/1.35/1.5; DDR5 1.1 V deliberately omitted) where the org block pins them — all three are seeded `dram` spec schemas in `commodity_seeds.json`, and `tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync so `record_spec` never silently drops decoder output; SSD NVMe `interface` is emitted only when the family pins the PCIe generation (the seeded enum has no bare "NVMe"). The full vendor/scheme inventory table lives in APP_MAP_INTERACTIONS.md. The worker second pass (`mpn_decoder/writer.py::decode_and_record_specs`, gated by `settings.mpn_decode_enabled`, default on) writes via `record_spec(source="mpn_decode", confidence=0.95)`, then the deterministic description→spec pass (`app/services/desc_extractor/`, `source="desc_parse"`, confidence 0.90, gated by `settings.desc_parse_enabled`), then the AI spec pass. **As of SP2 the F1 tier ladder — not run order — is authoritative:** `mpn_decode` is tier 85 > `desc_parse` 83 > AI `spec_extraction` 60, so a later lower-tier pass can never clobber a decode value regardless of which ran first (the old "decode runs BEFORE the AI pass" run-order band-aid and the desc writer's confidence pre-gate are gone — `record_spec` arbitrates). Category handling: the decode's commodity is written via `spec_tiers.set_category` (tier 85), which corrects a lower-tier category (e.g. an `ai_guess`/40 misfile) but never overwrites a TRIO-source (95), vendor-API (90), or manual (100) category — a ladder loss against a *different* existing category is counted in the returned stats (`skipped_category_conflict`, INFO-logged by the worker every batch) and WARNed with the `(card_category -> decoded_commodity)` pairs, since a recurring pair signals a missing `CATEGORY_ALIASES` entry; a card with NO category is **categorized from the decode** (the regex-gated commodity). Each card writes inside a `db.begin_nested()` SAVEPOINT so a single DB failure can't poison the shared batch transaction. Coverage dry-run + backfill: `scripts/decode_mpn_dryrun.py` (read-only by default; `--apply` backfills existing inventory in chunked commits). OEM/FRU spare numbers don't match the gates → resolved in later phases (PartSurfer cross-ref / datasheet).
+
+---
+
+## PostgreSQL-Only Code Path Coverage (P6.2 tracker)
+
+Some code paths (`ILIKE`, `JSONB`, `tsvector`/FTS, `pg_trgm` `similarity()`,
+`plainto_tsquery`) only run correctly on PostgreSQL — the in-memory SQLite test engine
+either raises or silently degrades to a different branch, so a real regression there is
+invisible to the main suite. These paths carry the `@requires_postgres` marker (see
+`tests/conftest.py` — `pg_engine`/`pg_session`/`pg_client` fixtures, `PG_TEST_DSN`-gated,
+skip cleanly on SQLite) and are exercised for real only by CI's dedicated
+`postgres-paths` job.
+
+Checklist of modules matching
+`grep -rl 'ILIKE\|JSONB\|tsvector\|pg_trgm\|plainto_tsquery\|similarity(' app/`
+(deduped; generated 2026-07-09) — check off as each gains a real `@requires_postgres`
+test:
+
+- [x] `app/services/vendor_duplicates.py` — pg_trgm `similarity()` ranking
+      (`tests/test_vendor_duplicates.py::TestFuzzyMatchPgTrgmDirect`)
+- [x] `app/services/faceted_search_service.py` — FTS `plainto_tsquery`/`ts_rank`
+      (`tests/test_faceted_search_service.py::TestFacetedSearchFtsRealPostgres`)
+- [ ] `app/cache/intel_cache.py`
+- [ ] `app/company_utils.py`
+- [ ] `app/management/cleanup_known_bad.py`
+- [ ] `app/management/enrichment_coverage_report.py`
+- [ ] `app/management/reconcile_decoded_facets.py`
+- [ ] `app/management/reenrich.py`
+- [ ] `app/models/config.py`
+- [ ] `app/models/crm.py`
+- [ ] `app/models/discovery_batch.py`
+- [ ] `app/models/enrichment.py`
+- [ ] `app/models/enrichment_run.py`
+- [ ] `app/models/faceted_search.py`
+- [ ] `app/models/intelligence.py`
+- [ ] `app/models/offers.py`
+- [ ] `app/models/pipeline.py`
+- [ ] `app/models/prospect_account.py`
+- [ ] `app/models/sourcing.py`
+- [ ] `app/models/telemetry.py`
+- [ ] `app/models/vendors.py`
+- [ ] `app/routers/crm/offers.py`
+- [ ] `app/routers/htmx/prospecting.py`
+- [ ] `app/routers/vendors_crud.py`
+- [ ] `app/search_service.py`
+- [ ] `app/services/activity_service.py`
+- [ ] `app/services/enrichment_types.py`
+- [ ] `app/services/global_search_service.py`
+- [ ] `app/services/prospect_discovery_explorium.py`
+- [ ] `app/services/prospect_free_enrichment.py`
+- [ ] `app/services/prospect_priority.py`
+- [ ] `app/services/prospect_scoring.py`
+- [ ] `app/services/prospect_screening.py`
+- [ ] `app/services/prospect_signals.py`
+- [ ] `app/services/source_ingest/ingest.py`
+- [ ] `app/services/spec_enrichment_service.py`
+- [ ] `app/services/spec_tiers.py`
+- [ ] `app/services/spec_write_service.py`
+- [ ] `app/startup.py` (FTS trigger creation/backfill — see faceted_search_service entry
+      above for the consumer-side test; the trigger DDL itself is exercised indirectly)
+- [ ] `app/utils/search_builder.py`
+- [ ] `app/utils/sql_helpers.py`
+- [ ] `app/utils/vendor_helpers.py`
+- [ ] `app/vendor_utils.py`
+
+Note: many of these hits are `JSONB` column declarations in `app/models/*.py` with no
+PG-only *query logic* to exercise beyond what the ORM read/write round-trip already
+covers on both dialects (SQLAlchemy's `JSONB` type falls back to JSON semantics on
+SQLite) — those are listed for completeness/auditability, not because each needs its
+own bespoke `@requires_postgres` test. Prioritize the ones with actual `ILIKE`/
+`similarity()`/`tsvector` *query* logic (`services/*`, `routers/*`, `search_service.py`,
+`vendor_utils.py`, `company_utils.py`) over pure-model JSONB declarations.

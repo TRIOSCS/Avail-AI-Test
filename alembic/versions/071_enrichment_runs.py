@@ -5,7 +5,7 @@ Revises: f3fbddb04947
 Create Date: 2026-03-19
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
@@ -13,9 +13,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision: str = "071_enrichment_runs"
-down_revision: Union[str, None] = "f3fbddb04947"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "f3fbddb04947"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

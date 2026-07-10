@@ -40,7 +40,7 @@ def nand_die_context(text: str) -> bool:
     return bool(_NAND_DIE_CONTEXT.search(text))
 
 
-def unique_or_none(values: AbstractSet[_T]) -> _T | None:
+def unique_or_none(values: AbstractSet[_T]) -> _T | None:  # noqa: UP047  # PEP 695 syntax needs py3.12+; dev/test envs still run 3.11
     """The single member of *values*, or None when it is empty or holds a conflict.
 
     The shared "unique-or-omit" rule every extractor applies: a facet is emitted only

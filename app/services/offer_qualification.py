@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.constants import OfferCondition
+
 PACKAGING_CHIPS = ("Tape & Reel", "Reels", "Trays", "Tubes", "Antistatic bags", "Boxes")
 USAGE_OPTIONS = ("boards", "systems")
 REFURB_BY_OPTIONS = ("supplier", "third_party")
@@ -130,7 +132,7 @@ def validate_essentials(condition: str | None, data: dict) -> list[str]:
     errors: list[str] = []
     if not condition:
         return errors  # unset is allowed to save
-    if condition == "new":
+    if condition == OfferCondition.NEW:
         if not _s(data, "manufacturer"):
             errors.append("Manufacturer is required for New (original packaging) offers.")
     elif condition == "new_no_pkg":
@@ -193,7 +195,7 @@ def compose_note(condition: str | None, data: dict) -> str:
     if _raw_pkg:
         _norm = _norm_pkg(_raw_pkg)
         pkg = _PKG_DISPLAY.get(_norm, _raw_pkg) if _norm else _raw_pkg
-    if condition == "new":
+    if condition == OfferCondition.NEW:
         return "New — parts are in the original manufacturer's packaging."
     if condition == "new_no_pkg":
         return (
@@ -232,7 +234,7 @@ def compose_note(condition: str | None, data: dict) -> str:
 def _items_for(condition: str, data: dict, has_images: bool) -> dict[str, bool]:
     pkg = bool(_s(data, "packaging"))
     dc = bool(_s(data, "date_code"))
-    if condition == "new":
+    if condition == OfferCondition.NEW:
         return {"manufacturer": bool(_s(data, "manufacturer")), "package_type": pkg, "date_code": dc}
     if condition == "new_no_pkg":
         return {"packaging": pkg, "images": has_images, "date_code": dc}

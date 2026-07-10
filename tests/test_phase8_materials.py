@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,7 +39,7 @@ def material_cards(db_session: Session):
             lifecycle_status=lifecycle,
             category=category,
             search_count=searches,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         cards.append(card)
@@ -62,7 +62,7 @@ def card_with_sightings(db_session: Session, material_cards, test_user: User):
         name="Sighting Test Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -83,7 +83,7 @@ def card_with_sightings(db_session: Session, material_cards, test_user: User):
             unit_price=price,
             qty_available=qty,
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
 

@@ -26,7 +26,7 @@ Depends on: conftest fixtures (client, db_session, test_user),
             app.routers.htmx.vendors, app.services.vendor_contact_runs.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,7 +55,7 @@ def vendor(db_session: Session) -> VendorCard:
         display_name="DigiKey Electronics",
         domain="digikey.com",
         sighting_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -288,7 +288,7 @@ def test_poller_terminal_swaps_results_and_stops(client, db_session, vendor):
             email="carol@digikey.com",
             source="web_search",
             confidence="low",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()

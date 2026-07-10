@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +27,7 @@ def req_with_offers(db_session: Session, test_user: User):
         name="Integration Test Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -49,7 +49,7 @@ def req_with_offers(db_session: Session, test_user: User):
             unit_price=price,
             qty_available=qty,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         offers.append(o)
@@ -188,7 +188,7 @@ class TestVendorEmailsBacklink:
             name="Backlink Req",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -202,7 +202,7 @@ class TestVendorEmailsBacklink:
             vendor_contact="sales@backlink.com",
             subject="RFQ Test",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -226,7 +226,7 @@ class TestMaterialVendorLink:
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -235,7 +235,7 @@ class TestMaterialVendorLink:
             name="Vendor Link Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -252,7 +252,7 @@ class TestMaterialVendorLink:
             unit_price=0.45,
             qty_available=5000,
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -284,7 +284,7 @@ class TestCompanyActivityTab:
             status="open",
             created_by=test_user.id,
             company_id=company.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -298,7 +298,7 @@ class TestCompanyActivityTab:
             vendor_contact="sales@activity.com",
             subject="RFQ Activity",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -341,7 +341,7 @@ class TestCompanyActivityTab:
             status="open",
             created_by=test_user.id,
             company_id=company.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -356,7 +356,7 @@ class TestCompanyActivityTab:
             vendor_contact="rfq@vendor.com",
             subject="RFQ Subject",
             status="sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rfq_contact)
 
@@ -367,7 +367,7 @@ class TestCompanyActivityTab:
             activity_type=ActivityType.RFQ_SENT,
             channel="email",
             summary="RFQ sent to RFQ Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rfq_sent_log)
 
@@ -377,7 +377,7 @@ class TestCompanyActivityTab:
             activity_type=ActivityType.EMAIL_SENT,
             channel="email",
             summary="Follow-up email sent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(email_log)
         db_session.commit()
@@ -408,7 +408,7 @@ class TestInsightsPanels:
             name="Insights Req",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -491,7 +491,7 @@ class TestManualOfferCreation:
             name="Offer Form Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -510,7 +510,7 @@ class TestManualOfferCreation:
             name="Manual Offer Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -539,7 +539,7 @@ class TestManualOfferCreation:
             name="Missing Fields Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -558,7 +558,7 @@ class TestReconfirmOffer:
             name="Reconfirm Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -568,7 +568,7 @@ class TestReconfirmOffer:
             vendor_name="Reconfirm Vendor",
             mpn="RC100",
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()

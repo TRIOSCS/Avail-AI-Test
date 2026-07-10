@@ -13,7 +13,7 @@ Depends on: conftest.py, app.routers.approvals, app.models.approvals
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -34,7 +34,7 @@ def _make_user(db: Session, role: str = "admin", can_approve: bool = True) -> Us
         role=role,
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=can_approve,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -48,7 +48,7 @@ def _make_approval_request(db: Session, requested_by: User) -> ApprovalRequest:
         subject_id=1,
         status="pending",
         requested_by_id=requested_by.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -57,7 +57,7 @@ def _make_approval_request(db: Session, requested_by: User) -> ApprovalRequest:
         request_id=req.id,
         seq=1,
         status="pending",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(step)
     db.flush()

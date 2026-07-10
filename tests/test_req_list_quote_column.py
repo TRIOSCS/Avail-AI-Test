@@ -13,6 +13,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from datetime import UTC
+
 from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
@@ -48,7 +50,7 @@ def test_quoted_req_shows_status_badge(client: TestClient, db_session, test_cust
 
     Uses a clean req + one quote so the priority-ordered quote_status is unambiguous.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import Quote, Requisition
 
@@ -58,7 +60,7 @@ def test_quoted_req_shows_status_badge(client: TestClient, db_session, test_cust
         status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -70,7 +72,7 @@ def test_quoted_req_shows_status_badge(client: TestClient, db_session, test_cust
             status="sent",
             line_items=[],
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -81,7 +83,7 @@ def test_quoted_req_shows_status_badge(client: TestClient, db_session, test_cust
 
 
 def _make_req_with_quote(db_session, site, user, name, quote_status=None, n_quotes=1):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import Quote, Requisition
 
@@ -91,7 +93,7 @@ def _make_req_with_quote(db_session, site, user, name, quote_status=None, n_quot
         status="open",
         customer_site_id=site.id,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -105,7 +107,7 @@ def _make_req_with_quote(db_session, site, user, name, quote_status=None, n_quot
                     status=quote_status,
                     line_items=[],
                     created_by_id=user.id,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
     db_session.commit()
@@ -183,7 +185,7 @@ def test_claim_button_renders_for_buyer_on_unclaimed_req(client: TestClient, db_
     """REQ-07: the req_row kebab gates Claim/Unclaim on `user`, which the list route
     omitted from its context — so the buttons never rendered. With `user` present, a
     buyer sees Claim on an unclaimed requisition."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import Requisition
 
@@ -194,7 +196,7 @@ def test_claim_button_renders_for_buyer_on_unclaimed_req(client: TestClient, db_
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         claimed_by_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

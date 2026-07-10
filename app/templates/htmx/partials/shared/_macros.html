@@ -620,6 +620,54 @@ Usage:
 {% endmacro %}
 
 
+{# ── Lazy Body ────────────────────────────────────────────────────── #}
+{#
+  Purpose:     Canonical hx-get-on-reveal wrapper (P5.1). Structurally enforces
+               an explicit hx-target so the recurring "cards vanish" regression
+               (P0.3) can no longer be reintroduced by copy-paste.
+  LANDMINE (why this macro exists): under <main id="main-content"
+  hx-target="this"> (base.html), ANY nested lazy loader that omits hx-target
+  inherits "this" (resolving to #main-content) and its load/reveal/intersect
+  trigger wipes the whole page instead of swapping just itself. Every call to
+  this macro emits hx-target explicitly — the guard is now structural, not a
+  comment someone has to remember to re-add.
+  Args:
+    id:       Element id (also the default swap target, '#'+id). Pass None to
+              omit the id (e.g. target="this" callers like pricing-history).
+    url:      hx-get URL.
+    target:   Explicit hx-target override. Defaults to '#'+id, or 'this' if id
+              is not given.
+    trigger:  hx-trigger value. Defaults to 'load'; pass 'revealed' or
+              'intersect once' for reveal-on-scroll variants.
+    swap:     hx-swap value. Defaults to 'innerHTML'.
+    class_:   Optional class attribute on the wrapper div.
+    indicator: Optional hx-indicator selector (sites that show a separate
+               spinner element rather than replacing their own content).
+    extra_attrs: Optional raw attribute string (e.g. Alpine x-data) appended
+                 verbatim. Caller-authored (never user input) — build via
+                 {% set %}...{% endset %} capture to avoid quote-escaping.
+    caller(): Block content — the spinner/skeleton markup, rendered unchanged
+              so every site keeps its exact existing markup.
+  Called by: approvals/approvals_hub.html, buy_plans/hub.html, settings/index.html,
+             sightings/list.html, quotes/detail.html, resell/detail.html,
+             resell/workspace.html.
+  Usage:
+    {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab) %}
+      <div class="p-4 text-center text-gray-400 text-sm">Loading…</div>
+    {% endcall %}
+#}
+{% macro lazy_body(id=None, url='', target=None, trigger='load', swap='innerHTML', class_=None, indicator=None, extra_attrs='') %}
+{%- set _target = target if target else ('#' ~ id if id else 'this') -%}
+<div{% if id %} id="{{ id }}"{% endif %}{% if class_ %} class="{{ class_ }}"{% endif %}
+     hx-get="{{ url }}"
+     hx-trigger="{{ trigger }}"
+     hx-target="{{ _target }}"
+     hx-swap="{{ swap }}"
+     {%- if indicator %} hx-indicator="{{ indicator }}"{% endif %}
+     {{ extra_attrs|safe }}>{{ caller() }}</div>
+{%- endmacro %}
+
+
 {# ── User Avatar ──────────────────────────────────────────────────── #}
 {#
   Purpose:     The one user-icon every surface reaches for. Renders `user`'s

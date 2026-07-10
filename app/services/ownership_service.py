@@ -21,7 +21,7 @@ Usage:
 """
 
 import html
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -53,7 +53,7 @@ async def run_ownership_sweep(db: Session) -> dict:
 
     Returns summary dict with counts.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     warned = 0
 
     inactivity_limit = settings.account_sweep_inactivity_days
@@ -146,7 +146,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
     Sites with owner_id set and no activity for 30 days lose ownership.
     Warning zone starts at day 23 (7 days before expiration).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     warned = 0
     cleared = 0
     inactivity_limit = settings.customer_inactivity_days  # 30 days
@@ -227,7 +227,7 @@ def _days_since(last_activity_at: datetime | None, now: datetime) -> int | None:
         return None
     last = last_activity_at
     if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
+        last = last.replace(tzinfo=UTC)
     return (now - last).days
 
 
@@ -253,7 +253,7 @@ def _was_warned_today(company_id: int, owner_id: int, db: Session) -> bool:
 
     Uses a simple activity_log check — warnings are logged as system activities.
     """
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     existing = (
         db.query(ActivityLog)
         .filter(

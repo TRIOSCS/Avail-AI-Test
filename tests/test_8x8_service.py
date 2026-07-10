@@ -1,6 +1,6 @@
 """Tests for 8x8 Work Analytics API client service."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,8 +16,8 @@ FAKE_SETTINGS = SimpleNamespace(
     eight_by_eight_timezone="America/Los_Angeles",
 )
 
-SINCE = datetime(2026, 3, 1, tzinfo=timezone.utc)
-UNTIL = datetime(2026, 3, 2, tzinfo=timezone.utc)
+SINCE = datetime(2026, 3, 1, tzinfo=UTC)
+UNTIL = datetime(2026, 3, 2, tzinfo=UTC)
 
 
 def _mock_async_client(*, get=None, post=None):

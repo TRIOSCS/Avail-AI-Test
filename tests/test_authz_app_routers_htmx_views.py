@@ -8,7 +8,7 @@ The `client` fixture overrides `require_user` to return the *same* `test_user`
 object, so mutating `test_user.role` is observed by the endpoint at request time.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -43,7 +43,7 @@ def _make_offer(db_session, req: Requisition, *, status="active") -> Offer:
         vendor_name="Foreign Vendor",
         mpn="LM317T",
         status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()

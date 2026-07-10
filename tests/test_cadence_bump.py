@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import ActivityType, Channel, Direction
 from app.models.crm import Company
 from app.models.intelligence import ActivityLog
 from app.services.cadence_service import bump_clocks_from_activity
 
-NOW = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 17, 12, 0, tzinfo=UTC)
 
 
 def _mk(db, co, *, direction, meaningful, created):

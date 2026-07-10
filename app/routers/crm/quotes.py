@@ -4,7 +4,7 @@ reopen) and pricing history.
 Extracted from routers/crm.py.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
@@ -432,14 +432,14 @@ async def send_quote(
             override_email=override_email,
             override_name=override_name,
         )
-    except QuoteSendDNCBlocked:
-        raise HTTPException(409, "Recipient is on the do-not-contact list — clear DNC to send.")
+    except QuoteSendDNCBlocked as e:
+        raise HTTPException(409, "Recipient is on the do-not-contact list — clear DNC to send.") from e
     except QuoteSendError as exc:
         # No/invalid recipient is a 400 (caller can fix the address); a Graph send failure
         # is a 502 (upstream). Match the legacy status codes.
         detail = exc.detail
         status_code = 502 if detail.startswith("Failed to send quote email") else 400
-        raise HTTPException(status_code, detail)
+        raise HTTPException(status_code, detail) from exc
 
     return {
         "ok": True,
@@ -465,7 +465,7 @@ async def quote_result(
     quote.result = payload.result
     quote.result_reason = payload.reason
     quote.result_notes = payload.notes
-    quote.result_at = datetime.now(timezone.utc)
+    quote.result_at = datetime.now(UTC)
     require_valid_transition("quote", quote.status, payload.result)
     quote.status = payload.result
     if payload.result == QuoteStatus.WON:

@@ -35,15 +35,10 @@
     {% endif %}
 {% endmacro %}
 
-{# Empty-state card for a tab with no rows. icon_path is the <path d="…"> value
-   for the centred outline icon; title/subtitle are the two lines of copy.
-   Optional: wrap in {% call empty_state(...) %}...action HTML...{% endcall %}
-   to render an action button below the subtitle. #}
-{% macro empty_state(icon_path, title, subtitle) %}    <div class="bg-white rounded-lg border border-line-base p-6 sm:p-8 text-center">
-      <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
-      </svg>
-      <p class="mt-3 text-sm font-medium text-gray-600">{{ title }}</p>
-      <p class="mt-1 text-secondary">{{ subtitle }}</p>
-      {% if caller is defined %}{{ caller() }}{% endif %}
-    </div>{% endmacro %}
+{# Empty-state card for a tab with no rows. P5.3: re-exports the shared
+   shared/empty_state.html call-block macro (dedup — this used to be its own
+   copy of the same markup) so proactive/list.html's two call sites keep their
+   existing `empty_state(icon_path, title, subtitle)` call shape and exact
+   pixel look untouched; see shared/empty_state.html for the macro contract. #}
+{% import "htmx/partials/shared/empty_state.html" as _empty_state_shared %}
+{% set empty_state = _empty_state_shared.empty_state %}

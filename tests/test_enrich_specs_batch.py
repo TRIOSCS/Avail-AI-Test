@@ -10,7 +10,7 @@ Depends on: scripts/enrich_specs_batch.py, app.services.spec_write_service
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -165,7 +165,7 @@ async def test_apply_results_calls_record_spec(db_session: Session, tmp_path):
         display_mpn="MEM-TEST",
         manufacturer="TestCo",
         category="dram",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()

@@ -16,7 +16,7 @@ Depends on: app/models/sourcing.py, app/services/spec_code_resolver.py,
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -107,7 +107,7 @@ async def approve(
         avl=avl_to_save,
         source="llm_approved",
         approved_by_user_id=user.id,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
     db.add(approved)
     db.delete(row)

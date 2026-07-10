@@ -19,7 +19,7 @@ Depends on: conftest client/db_session fixtures, app/services/spec_tiers.py,
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,7 @@ def _card(db: Session, mpn: str, **kw) -> MaterialCard:
         display_mpn=mpn,
         manufacturer="Seagate",
         description="4TB 7.2K SAS HDD",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     card = MaterialCard(**defaults)
@@ -69,7 +69,7 @@ def test_manual_category_change_stamps_manual_provenance(client, db_session: Ses
         category_source="digikey_api",
         category_tier=90,
         category_confidence=0.9,
-        category_updated_at=datetime.now(timezone.utc),
+        category_updated_at=datetime.now(UTC),
     )
 
     resp = client.put(f"/v2/partials/materials/{card.id}", data={"category": "ssd"})
@@ -185,7 +185,7 @@ def test_unchanged_category_not_restamped_as_manual(client, db_session: Session)
         category_source="digikey_api",
         category_tier=90,
         category_confidence=0.9,
-        category_updated_at=datetime.now(timezone.utc),
+        category_updated_at=datetime.now(UTC),
     )
 
     resp = client.put(
@@ -232,7 +232,7 @@ def test_manual_manufacturer_change_stamps_manual_and_clears_conflict(client, db
         manufacturer_source="digikey_api",
         manufacturer_tier=90,
         manufacturer_confidence=0.9,
-        manufacturer_updated_at=datetime.now(timezone.utc),
+        manufacturer_updated_at=datetime.now(UTC),
         validation_conflicts=_manufacturer_conflict(),
         has_validation_conflict=True,
     )
@@ -276,7 +276,7 @@ def test_unchanged_manufacturer_not_restamped_but_clears_conflict(client, db_ses
         manufacturer_source="digikey_api",
         manufacturer_tier=90,
         manufacturer_confidence=0.9,
-        manufacturer_updated_at=datetime.now(timezone.utc),
+        manufacturer_updated_at=datetime.now(UTC),
         validation_conflicts=_manufacturer_conflict(),
         has_validation_conflict=True,
     )
@@ -308,7 +308,7 @@ def test_blank_manufacturer_never_blanks_existing(client, db_session: Session):
         manufacturer_source="manual",
         manufacturer_tier=100,
         manufacturer_confidence=1.0,
-        manufacturer_updated_at=datetime.now(timezone.utc),
+        manufacturer_updated_at=datetime.now(UTC),
     )
 
     resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": ""})

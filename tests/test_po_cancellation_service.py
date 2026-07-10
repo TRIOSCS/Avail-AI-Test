@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/services/po_cancellation_service.py, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.constants import POCancellationReason
 from app.models import Offer, Requirement
@@ -50,7 +50,7 @@ def _make_offer(
         entered_by_id=user.id,
         status="active",
         condition=condition,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.flush()
@@ -60,14 +60,14 @@ def _make_offer(
 def _make_line(db, req, *, po_confirmed_at, po_number="PO-123"):
     q = Quote(
         requisition_id=req.id,
-        quote_number=f"Q-{datetime.now(timezone.utc).timestamp()}",
+        quote_number=f"Q-{datetime.now(UTC).timestamp()}",
         status="sent",
         line_items=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
-    bp = BuyPlan(requisition_id=req.id, quote_id=q.id, status="active", created_at=datetime.now(timezone.utc))
+    bp = BuyPlan(requisition_id=req.id, quote_id=q.id, status="active", created_at=datetime.now(UTC))
     db.add(bp)
     db.flush()
     line = BuyPlanLine(
@@ -89,7 +89,7 @@ def _make_cancellation(db, card, *, days_to_cancel, reason=POCancellationReason.
         vendor_name_normalized="arrow electronics",
         normalized_mpn="LM317T",
         po_number="PO-X",
-        cancelled_at=datetime.now(timezone.utc),
+        cancelled_at=datetime.now(UTC),
         days_to_cancel=days_to_cancel,
         reason_code=reason,
     )
@@ -107,7 +107,7 @@ class TestRecordPoCancellation:
     def test_records_immutable_row_with_days_to_cancel(self, db_session, test_requisition, test_user, test_vendor_card):
         req = test_requisition
         offer = _make_offer(db_session, req, test_user, test_vendor_card)
-        line = _make_line(db_session, req, po_confirmed_at=datetime.now(timezone.utc) - timedelta(days=10))
+        line = _make_line(db_session, req, po_confirmed_at=datetime.now(UTC) - timedelta(days=10))
 
         row = record_po_cancellation(
             db_session,

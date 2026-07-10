@@ -19,7 +19,7 @@ Depends on: conftest.py (db_session, test_user fixtures), app/constants.py,
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from loguru import logger as loguru_logger
@@ -344,7 +344,7 @@ def _make_record(
         vendor_name_normalized=vendor_norm,
         normalized_mpn=key,
         reason=reason,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        created_at=datetime.now(UTC) - timedelta(days=age_days),
         qty_at_mark=qty_at_mark,
         released_at=released_at,
         release_trigger=release_trigger,
@@ -620,13 +620,13 @@ class TestUnavailabilityForRequirement:
             vendor_name_normalized="acme components",
             normalized_mpn=normalize_mpn_key("BBB-222"),
             reason=UnavailabilityReason.BROKEN,
-            created_at=datetime.now(timezone.utc) - timedelta(days=2),
+            created_at=datetime.now(UTC) - timedelta(days=2),
         )
         newer = VendorPartUnavailability(
             vendor_name_normalized="acme components",
             normalized_mpn=normalize_mpn_key("AAA-111"),
             reason=UnavailabilityReason.BOUGHT_BY_US,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([older, newer])
         db_session.commit()
@@ -654,7 +654,7 @@ class TestUnavailabilityForRequirement:
             reason=UnavailabilityReason.BOUGHT_BY_US,
             age_days=40,  # past the 30d LOT window
         )
-        released_at = datetime.now(timezone.utc)
+        released_at = datetime.now(UTC)
         _make_record(
             db_session,
             vendor_norm="initech supply",
@@ -697,7 +697,7 @@ class TestUnavailabilityForRequirement:
             vendor_name_normalized="acme components",
             normalized_mpn=normalize_mpn_key("AAA-111"),
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
-            created_at=datetime.now(timezone.utc) - timedelta(days=5),
+            created_at=datetime.now(UTC) - timedelta(days=5),
             condition=None,
         )
         # Newer specific-condition record — newer but narrower
@@ -705,7 +705,7 @@ class TestUnavailabilityForRequirement:
             vendor_name_normalized="acme components",
             normalized_mpn=normalize_mpn_key("AAA-111"),
             reason=UnavailabilityReason.BOUGHT_BY_US,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             condition="new",
         )
         db_session.add_all([null_rec, new_rec])
@@ -741,19 +741,19 @@ class TestUnavailabilityForRequirement:
                     vendor_name_normalized="acme components",
                     normalized_mpn=normalize_mpn_key("BBB-222"),
                     reason=UnavailabilityReason.BROKEN,
-                    created_at=datetime.now(timezone.utc) - timedelta(days=1),
+                    created_at=datetime.now(UTC) - timedelta(days=1),
                 ),
                 VendorPartUnavailability(
                     vendor_name_normalized="acme components",
                     normalized_mpn=normalize_mpn_key("AAA-111"),
                     reason=UnavailabilityReason.SOLD_ELSEWHERE,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 ),
                 VendorPartUnavailability(
                     vendor_name_normalized="globex parts",
                     normalized_mpn=normalize_mpn_key("AAA-111"),
                     reason=UnavailabilityReason.BOUGHT_BY_US,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 ),
             ]
         )
@@ -829,35 +829,35 @@ class TestIsActive:
             vendor_name_normalized="acme components",
             normalized_mpn="st3300657ss",
             reason=reason,
-            created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+            created_at=datetime.now(UTC) - timedelta(days=age_days),
             **kwargs,
         )
 
     def test_lot_reason_30_day_window(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for reason in LOT_REASONS:
             assert is_active(self._record(reason, age_days=29), now) is True
             assert is_active(self._record(reason, age_days=31), now) is False
 
     def test_listing_reason_180_day_window(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert is_active(self._record(UnavailabilityReason.NOT_REALLY_THERE, age_days=179), now) is True
         assert is_active(self._record(UnavailabilityReason.NOT_REALLY_THERE, age_days=31), now) is True
         assert is_active(self._record(UnavailabilityReason.NOT_REALLY_THERE, age_days=181), now) is False
 
     def test_different_part_never_expires(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert is_active(self._record(UnavailabilityReason.DIFFERENT_PART, age_days=400), now) is True
 
     def test_window_boundary_is_inclusive(self):
         """created_at >= now - window: a mark exactly window days old is still active."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rec = self._record(UnavailabilityReason.BOUGHT_BY_US, age_days=0)
         rec.created_at = now - timedelta(days=30)
         assert is_active(rec, now) is True
 
     def test_released_record_is_never_active(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rec = self._record(
             UnavailabilityReason.DIFFERENT_PART,
             age_days=0,
@@ -869,7 +869,7 @@ class TestIsActive:
     def test_naive_created_at_is_treated_as_utc(self):
         """SQLite/legacy rows may surface naive datetimes — compared as UTC, no
         crash."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rec = self._record(UnavailabilityReason.BOUGHT_BY_US, age_days=0)
         rec.created_at = (now - timedelta(days=1)).replace(tzinfo=None)
         assert is_active(rec, now) is True
@@ -982,7 +982,7 @@ class TestSuppressionMatrixWindows:
             db_session,
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
             age_days=1,
-            released_at=datetime.now(timezone.utc),
+            released_at=datetime.now(UTC),
             release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
@@ -1415,9 +1415,9 @@ class TestReMark:
         db_session.commit()
 
         (rec,) = _records(db_session, "acme components")
-        rec.released_at = datetime.now(timezone.utc) - timedelta(days=1)
+        rec.released_at = datetime.now(UTC) - timedelta(days=1)
         rec.release_trigger = ReleaseTrigger.OFFER_RECEIVED
-        rec.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+        rec.created_at = datetime.now(UTC) - timedelta(days=40)
         db_session.flush()
         assert is_active(rec) is False
 
@@ -1477,7 +1477,7 @@ class TestReleaseOnOffer:
 
     def test_already_released_record_is_not_re_released(self, db_session: Session, test_user: User):
         requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
-        first_release = datetime.now(timezone.utc) - timedelta(days=2)
+        first_release = datetime.now(UTC) - timedelta(days=2)
         rec = _make_record(
             db_session,
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
@@ -1511,7 +1511,7 @@ class TestExcludedVendorNormsActiveOnly:
         _make_record(
             db_session,
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
-            released_at=datetime.now(timezone.utc),
+            released_at=datetime.now(UTC),
             release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         db_session.commit()
@@ -2020,7 +2020,7 @@ class TestQueueDedupReapplication:
                 mpn="LM317T",
                 normalized_mpn="LM317T",
                 status="completed",
-                last_searched_at=datetime.now(timezone.utc),
+                last_searched_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -2048,7 +2048,7 @@ def _hook_record(
         vendor_name_normalized=normalize_vendor_name(vendor),
         normalized_mpn=normalize_mpn_key(mpn),
         reason=reason,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rec)
     db_session.commit()
@@ -2288,7 +2288,7 @@ class TestOfferHookExcludedPaths:
             confidence=0.9,
             scanned_by_user_id=test_user.id,
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             message_id="msg-unav-hook-1",
         )
         db_session.add(vr)
@@ -2366,21 +2366,21 @@ class TestModelTransitionsAndConstraints:
 
     def test_release_sets_the_pair_together(self):
         rec = self._record()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rec.release(ReleaseTrigger.OFFER_RECEIVED, now)
         assert rec.released_at == now
         assert rec.release_trigger == ReleaseTrigger.OFFER_RECEIVED
 
     def test_re_arm_nulls_the_pair_together(self):
         rec = self._record()
-        rec.release(ReleaseTrigger.VENDOR_EMAIL, datetime.now(timezone.utc))
+        rec.release(ReleaseTrigger.VENDOR_EMAIL, datetime.now(UTC))
         rec.re_arm()
         assert rec.released_at is None
         assert rec.release_trigger is None
 
     def test_release_rejects_unknown_trigger(self):
         with pytest.raises(ValueError):
-            self._record().release("manual_whim", datetime.now(timezone.utc))
+            self._record().release("manual_whim", datetime.now(UTC))
 
     def test_release_trigger_assignment_rejects_unknown_value(self):
         rec = self._record()
@@ -2390,7 +2390,7 @@ class TestModelTransitionsAndConstraints:
     def test_half_released_record_is_unrepresentable(self, db_session: Session):
         """released_at without a trigger would render as merely expired in the advisory
         UI — the CHECK constraint makes the state impossible at rest."""
-        rec = self._record(released_at=datetime.now(timezone.utc))
+        rec = self._record(released_at=datetime.now(UTC))
         db_session.add(rec)
         with pytest.raises(IntegrityError):
             db_session.flush()
@@ -2724,7 +2724,7 @@ class TestApplyMultimap:
         _make_record(
             db_session,
             condition="new",
-            released_at=datetime.now(timezone.utc),
+            released_at=datetime.now(UTC),
             release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
 

@@ -23,7 +23,7 @@ import os
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Must set up path before app imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -79,7 +79,7 @@ def audit(phase: int, action: str, entity: str, details: dict):
         "phase": phase,
         "action": action,
         "entity": entity,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         **details,
     }
     AUDIT.append(entry)

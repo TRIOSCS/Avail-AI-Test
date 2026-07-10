@@ -61,12 +61,25 @@ def test_mutating_template_fetches_send_csrf_header():
 
 def test_trouble_report_submit_is_hardened():
     """The trouble-report submit (moved from the template into htmx_app.js) must keep
-    sending CSRF and must swap via htmx, not a raw innerHTML assignment (HIGH-
-    FE-1/2)."""
+    sending CSRF and must swap via htmx, not a raw innerHTML assignment (HIGH- FE-1/2).
+
+    P5.2: submitTroubleReport now posts via window.postJSON (an htmx.ajax wrapper)
+    instead of a hand-rolled fetch() with an inline X-CSRFToken header — CSRF is carried
+    by the app-wide htmx:configRequest listener (asserted separately below) that injects
+    x-csrftoken onto every htmx request, postJSON's included. Either an inline header OR
+    delegating to postJSON/htmx is a hardened site.
+    """
     js = _HTMX_APP_JS.read_text()
     start = js.index("function submitTroubleReport")
     body = js[start : start + 1200]
-    assert "X-CSRFToken" in body or "csrfToken" in body, "submitTroubleReport must send the CSRF header on its POST."
+    uses_postjson_or_htmx = "postJSON(" in body or "htmx.ajax(" in body
+    assert "X-CSRFToken" in body or "csrfToken" in body or uses_postjson_or_htmx, (
+        "submitTroubleReport must send the CSRF header on its POST (directly, or via postJSON/htmx.ajax)."
+    )
+    if uses_postjson_or_htmx:
+        # The CSRF listener attaches x-csrftoken to every htmx request app-wide —
+        # confirm it's actually registered, since that's what makes the above OK.
+        assert "htmx:configRequest" in js and "x-csrftoken" in js
     assert "htmx.swap" in body, "submitTroubleReport must render the response via htmx.swap."
     assert not re.search(r"innerHTML\s*=\s*[A-Za-z_$]", body), (
         "submitTroubleReport must not assign a variable to innerHTML."

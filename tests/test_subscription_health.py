@@ -15,7 +15,7 @@ Depends on: app/services/webhook_service.py, app/routers/admin/system.py,
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,7 +45,7 @@ def _make_user(db: Session, email: str = "sub-health@trioscs.com", m365_connecte
         role="buyer",
         azure_id=f"az-{email[:8]}",
         m365_connected=m365_connected,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.commit()
@@ -66,7 +66,7 @@ def _make_sub(
         subscription_id=sub_id,
         resource="/me/messages",
         change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=expires_in_hours),
+        expiration_dt=datetime.now(UTC) + timedelta(hours=expires_in_hours),
         client_state="test-state",
         renew_fail_count=fail_count,
         last_error=last_error,
@@ -302,7 +302,7 @@ class TestSuccessfulRenewal:
         user = _make_user(db_session, email="success-ts@trioscs.com")
         sub = _make_sub(db_session, user, sub_id="sub-success-ts")
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
 
         mock_gc = MagicMock()
         mock_gc.patch_json = AsyncMock(return_value={})
@@ -320,7 +320,7 @@ class TestSuccessfulRenewal:
         # Normalize for SQLite (strips tz)
         renewed_at = sub.last_renewed_at
         if renewed_at.tzinfo is None:
-            renewed_at = renewed_at.replace(tzinfo=timezone.utc)
+            renewed_at = renewed_at.replace(tzinfo=UTC)
         before_naive = before.replace(tzinfo=None)
         renewed_naive = renewed_at.replace(tzinfo=None)
         assert renewed_naive >= before_naive - timedelta(seconds=5)
@@ -501,7 +501,7 @@ def admin_client(db_session: Session):
         role="admin",
         azure_id="az-admin-health",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(admin_user)
     db_session.commit()
@@ -548,7 +548,7 @@ class TestSubscriptionHealthEndpoint:
             subscription_id="sub-health-endpoint-1",
             resource="/me/messages",
             change_type="created",
-            expiration_dt=datetime.now(timezone.utc) + timedelta(hours=24),
+            expiration_dt=datetime.now(UTC) + timedelta(hours=24),
             client_state="test",
             renew_fail_count=2,
             last_error="503 unavail",
@@ -567,7 +567,7 @@ class TestSubscriptionHealthEndpoint:
         """Response includes last_renewed_at per subscription."""
         client, admin_user = admin_client
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         sub = GraphSubscription(
             user_id=admin_user.id,
             subscription_id="sub-health-endpoint-2",
@@ -591,7 +591,7 @@ class TestSubscriptionHealthEndpoint:
         """Response includes expiration_dt per subscription."""
         client, admin_user = admin_client
 
-        expiry = datetime.now(timezone.utc) + timedelta(hours=12)
+        expiry = datetime.now(UTC) + timedelta(hours=12)
         sub = GraphSubscription(
             user_id=admin_user.id,
             subscription_id="sub-health-endpoint-3",

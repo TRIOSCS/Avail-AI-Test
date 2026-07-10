@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -135,8 +135,8 @@ class TestGetTagEntities:
             interaction_count=5.0,
             total_entity_interactions=10.0,
             is_visible=True,
-            first_seen_at=datetime.now(timezone.utc),
-            last_seen_at=datetime.now(timezone.utc),
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
         )
         # Hidden entity tag
         et_hidden = EntityTag(
@@ -161,7 +161,7 @@ class TestGetTagEntities:
         tag = _make_tag(db_session, "Inductor", "commodity")
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         et = EntityTag(
             entity_type="company",
             entity_id=42,
@@ -284,7 +284,7 @@ class TestGetMaterialCardTags:
             tag_id=tag_high.id,
             confidence=0.95,
             source="ai_classified",
-            classified_at=datetime.now(timezone.utc),
+            classified_at=datetime.now(UTC),
         )
         mt_low = MaterialTag(
             material_card_id=mc.id,
@@ -311,7 +311,7 @@ class TestGetMaterialCardTags:
         tag = _make_tag(db_session, "Signetics", "brand")
         db_session.flush()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mt = MaterialTag(
             material_card_id=mc.id,
             tag_id=tag.id,

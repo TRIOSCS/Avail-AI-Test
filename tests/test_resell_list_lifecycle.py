@@ -18,7 +18,7 @@ Depends on: app.services.excess_service, app.services.excess_mirror, app.jobs.re
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -136,7 +136,7 @@ def _overdue_open_list(db: Session, owner: User, company: Company) -> ExcessList
     """A published (open) list whose close_at deadline is already in the past."""
     el = _make_list(db, owner, company)
     publish_list(db, el.id, owner)  # → open, mirrored
-    el.close_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
     db.commit()
     return el
 
@@ -158,7 +158,7 @@ def test_expire_skips_future_and_null_close_at(db_session, owner, company):
     """A future deadline and a null close_at are both left alone."""
     future = _make_list(db_session, owner, company, parts=("MAX232",))
     publish_list(db_session, future.id, owner)
-    future.close_at = datetime.now(timezone.utc) + timedelta(days=3)
+    future.close_at = datetime.now(UTC) + timedelta(days=3)
     no_deadline = _make_list(db_session, owner, company, parts=("NE555P",))
     publish_list(db_session, no_deadline.id, owner)  # close_at stays None
     db_session.commit()
@@ -175,7 +175,7 @@ def test_expire_skips_resolved_lists(db_session, owner, company):
     eligible)."""
     el = _make_list(db_session, owner, company)
     el.status = ExcessListStatus.BID_OUT
-    el.close_at = datetime.now(timezone.utc) - timedelta(days=1)
+    el.close_at = datetime.now(UTC) - timedelta(days=1)
     db_session.commit()
 
     assert excess_service.expire_overdue_lists(db_session) == 0

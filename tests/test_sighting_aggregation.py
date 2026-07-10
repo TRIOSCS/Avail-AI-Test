@@ -8,7 +8,7 @@ Depends on: app.services.sighting_aggregation, conftest fixtures
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +34,7 @@ def _make_requisition_and_requirement(db: Session, user_id: int) -> tuple[Requis
         customer_name="Test Co",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -42,7 +42,7 @@ def _make_requisition_and_requirement(db: Session, user_id: int) -> tuple[Requis
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=1000,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.flush()
@@ -68,7 +68,7 @@ def _make_sighting(
         score=score,
         source_type=source_type,
         is_unavailable=is_unavailable,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.flush()
@@ -323,7 +323,7 @@ class TestVendorPhoneLookup:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             phones=["+1-555-0100"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -390,7 +390,7 @@ def _make_sighting_extended(
         moq=moq,
         vendor_email=vendor_email,
         vendor_phone=vendor_phone,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
     )
     db.add(s)
     db.flush()
@@ -402,8 +402,8 @@ class TestVendorSummaryNewColumns:
 
     def test_newest_sighting_at_populated(self, db_session: Session, test_user):
         _req, item = _make_requisition_and_requirement(db_session, test_user.id)
-        older = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        newer = datetime(2025, 6, 15, tzinfo=timezone.utc)
+        older = datetime(2025, 1, 1, tzinfo=UTC)
+        newer = datetime(2025, 6, 15, tzinfo=UTC)
         _make_sighting_extended(db_session, item.id, created_at=older)
         _make_sighting_extended(db_session, item.id, created_at=newer)
         db_session.commit()
@@ -416,7 +416,7 @@ class TestVendorSummaryNewColumns:
         # SQLite (used in tests) strips tzinfo on round-trip; compare naive values
         result_ts = results[0].newest_sighting_at
         if result_ts is not None and result_ts.tzinfo is None:
-            result_ts = result_ts.replace(tzinfo=timezone.utc)
+            result_ts = result_ts.replace(tzinfo=UTC)
         assert result_ts == newer
 
     def test_best_lead_time_days_populated(self, db_session: Session, test_user):
@@ -451,7 +451,7 @@ class TestVendorSummaryNewColumns:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -481,7 +481,7 @@ class TestVendorSummaryNewColumns:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             phones=["+1-555-0100"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()

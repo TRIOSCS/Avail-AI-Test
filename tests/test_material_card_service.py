@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.services.material_card_service, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -39,7 +39,7 @@ def _make_material_card(db: Session, normalized_mpn: str, manufacturer=None, **k
         manufacturer=manufacturer,
         description=kw.get("description"),
         search_count=kw.get("search_count", 0),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.flush()
@@ -53,13 +53,13 @@ def _make_vendor_history(db: Session, material_card_id: int, vendor_name: str, *
         vendor_name_normalized=vendor_name.lower(),
         source_type=kw.get("source_type", "api_sighting"),
         is_authorized=kw.get("is_authorized", False),
-        first_seen=kw.get("first_seen", datetime(2025, 1, 1, tzinfo=timezone.utc)),
-        last_seen=kw.get("last_seen", datetime(2025, 6, 1, tzinfo=timezone.utc)),
+        first_seen=kw.get("first_seen", datetime(2025, 1, 1, tzinfo=UTC)),
+        last_seen=kw.get("last_seen", datetime(2025, 6, 1, tzinfo=UTC)),
         times_seen=kw.get("times_seen", 1),
         last_qty=kw.get("last_qty"),
         last_price=kw.get("last_price"),
         last_currency=kw.get("last_currency", "USD"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vh)
     db.flush()
@@ -75,7 +75,7 @@ def _make_sighting(db: Session, requirement_id: int, material_card_id: int, vend
         unit_price=kw.get("unit_price", 1.0),
         source_type=kw.get("source_type", "api"),
         is_unavailable=kw.get("is_unavailable", False),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.flush()
@@ -215,7 +215,7 @@ class TestMergeMaterialCards:
             name="MergeTest",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -225,7 +225,7 @@ class TestMergeMaterialCards:
             primary_mpn="LM317T",
             material_card_id=source.id,
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.flush()
@@ -237,7 +237,7 @@ class TestMergeMaterialCards:
             vendor_name="Vendor A",
             mpn="LM317T",
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -277,8 +277,8 @@ class TestMergeMaterialCards:
             source.id,
             "Arrow Electronics",
             times_seen=3,
-            first_seen=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            last_seen=datetime(2025, 12, 1, tzinfo=timezone.utc),
+            first_seen=datetime(2024, 1, 1, tzinfo=UTC),
+            last_seen=datetime(2025, 12, 1, tzinfo=UTC),
             last_qty=500,
             last_price=1.5,
         )
@@ -287,8 +287,8 @@ class TestMergeMaterialCards:
             target.id,
             "Arrow Electronics",
             times_seen=2,
-            first_seen=datetime(2025, 3, 1, tzinfo=timezone.utc),
-            last_seen=datetime(2025, 6, 1, tzinfo=timezone.utc),
+            first_seen=datetime(2025, 3, 1, tzinfo=UTC),
+            last_seen=datetime(2025, 6, 1, tzinfo=UTC),
         )
         db_session.commit()
 

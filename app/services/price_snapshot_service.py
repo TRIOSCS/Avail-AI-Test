@@ -4,7 +4,7 @@ Called by: search_service, materials router (stock import), inventory_jobs, mate
 Depends on: MaterialPriceSnapshot model.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -35,7 +35,7 @@ def record_price_snapshot(
         currency=currency,
         quantity=quantity,
         source=source,
-        recorded_at=datetime.now(timezone.utc),
+        recorded_at=datetime.now(UTC),
     )
     db.add(snap)
     db.flush()

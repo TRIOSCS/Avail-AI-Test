@@ -17,7 +17,7 @@ Depends on: conftest (db_session), app.startup, app.services.buyplan_workflow,
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def _user(db: Session) -> User:
         name="Sweep User",
         role="admin",
         azure_id=f"azure-sweep-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -57,7 +57,7 @@ def _plan(
         customer_name="SweepCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -67,7 +67,7 @@ def _plan(
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -91,7 +91,7 @@ def _line(db: Session, plan: BuyPlan, status: str) -> BuyPlanLine:
         unit_cost=10.0,
         quantity=10,
         po_number="PO-SW",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()

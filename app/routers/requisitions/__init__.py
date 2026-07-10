@@ -16,12 +16,12 @@ from fastapi import APIRouter
 # Re-export names that test files patch at "app.routers.requisitions.X".
 # Sub-modules use "from . import X" at call time so patched versions are picked up.
 from ...cache.decorators import invalidate_prefix  # noqa: F401
-from ...search_service import (  # noqa: F401
-    _deduplicate_sightings,
-    _get_material_history,
-    _history_to_result,
-    search_requirement,
-    sighting_to_dict,
+from ...search_service import (
+    _deduplicate_sightings,  # noqa: F401
+    _get_material_history,  # noqa: F401
+    _history_to_result,  # noqa: F401
+    search_requirement,  # noqa: F401
+    sighting_to_dict,  # noqa: F401
 )
 from ...vendor_utils import _enrich_with_vendor_cards  # noqa: F401
 from .attachments import router as attachments_router

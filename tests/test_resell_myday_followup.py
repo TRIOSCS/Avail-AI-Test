@@ -21,7 +21,7 @@ Depends on: conftest.py (db_session, test_user, test_company, client),
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 os.environ["TESTING"] = "1"
 
@@ -46,7 +46,7 @@ def _make_card(db: Session, name: str) -> VendorCard:
         normalized_name=name.lower(),
         display_name=name,
         emails=[f"sales@{name.lower().replace(' ', '')}.com"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -73,7 +73,7 @@ def owned_list(db_session: Session, test_user: User, test_company: Company) -> E
         owner_id=test_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -141,7 +141,7 @@ class TestFollowupTaskService:
             buyer_name=buyer_card_a.display_name,
         )
         task.status = TaskStatus.DONE.value
-        task.completed_at = datetime.now(timezone.utc)
+        task.completed_at = datetime.now(UTC)
         db_session.commit()
         task_service.auto_create_resell_followup_task(
             db_session,

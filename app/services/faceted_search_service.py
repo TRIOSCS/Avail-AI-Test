@@ -7,7 +7,7 @@ Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 from sqlalchemy import Text, and_, cast, exists, func, or_
@@ -496,7 +496,7 @@ def _apply_card_filters(
         query = query.filter(internal_predicate())
     days = SEARCHED_WITHIN_DAYS.get(searched_within)
     if days:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         query = query.filter(MaterialCard.last_searched_at >= cutoff)
     if min_searches and min_searches > 0:
         query = query.filter(MaterialCard.search_count >= min_searches)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
+from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
@@ -356,7 +357,7 @@ def test_prepay_decide_non_recipient_403(
 def test_pipeline_archive_returns_rows(client: TestClient, db_session: Session, test_user, test_requisition):
     """The Pipeline archive route returns completed deal cards for the requested
     page."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     q = _make_quote(db_session, test_requisition.id)
     plan = _make_plan(
@@ -365,7 +366,7 @@ def test_pipeline_archive_returns_rows(client: TestClient, db_session: Session, 
         req_id=test_requisition.id,
         status=BuyPlanStatus.COMPLETED,
         submitted_by_id=test_user.id,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     db_session.commit()
 
@@ -377,12 +378,12 @@ def test_pipeline_archive_returns_rows(client: TestClient, db_session: Session, 
 def test_pipeline_archive_next_page_button(client: TestClient, db_session: Session, test_user, test_requisition):
     """More than one page of completed deals → a Load older button pointing at the next
     offset on the pipeline-archive route (not the legacy board archive)."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.services.buyplan_hub import ARCHIVE_PAGE_SIZE
 
     q = _make_quote(db_session, test_requisition.id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(ARCHIVE_PAGE_SIZE + 1):
         _make_plan(
             db_session,

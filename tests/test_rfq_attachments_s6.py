@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,7 +51,7 @@ def _make_card_with_datasheet(
         normalized_mpn=mpn.lower(),
         display_mpn=mpn.upper(),
         manufacturer="TestMfr",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.flush()
@@ -74,7 +74,7 @@ def _make_requirement_for_card(db: Session, user: User, card: MaterialCard) -> R
         owner_id=user.id,
         title="Test Req",
         status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -249,7 +249,7 @@ class TestCollectRfqAttachments:
             normalized_mpn="mpn_nolib",
             display_mpn="MPN_NOLIB",
             manufacturer="TestMfr",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()

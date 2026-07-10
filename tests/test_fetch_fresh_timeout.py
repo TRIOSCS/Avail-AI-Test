@@ -72,7 +72,7 @@ async def test_fetch_fresh_returns_within_budget_when_one_connector_hangs(monkey
             search_service._fetch_fresh(["FAKE-MPN-1"], db_session),
             timeout=15.0,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail(
             "_fetch_fresh did not return within 15s — the async gather at "
             "app/search_service.py:931 has no outer timeout wrapper, so one "

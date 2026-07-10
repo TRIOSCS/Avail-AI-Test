@@ -22,7 +22,7 @@ Depends on: app.models.quality_plan (QualityPlan),
             app.constants (QualityPlanStatus, QPOrderType, ActivityType, ApprovalGateType).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -238,7 +238,7 @@ def toggle_section_reviewed(db: Session, qp_id: int, gate_type: str, action: str
         errors = validate_section(qp, gate_type)
         if errors:
             raise IncompleteQPError(errors)
-        stamp = datetime.now(timezone.utc)
+        stamp = datetime.now(UTC)
         if gate == "qp_sales":
             qp.sales_section_reviewed_at = stamp
             qp.sales_section_reviewed_by_id = user.id

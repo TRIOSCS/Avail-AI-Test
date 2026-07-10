@@ -20,7 +20,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -39,7 +39,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
         customer_name="Cov Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -48,7 +48,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
         primary_mpn="STM32F4",
         target_qty=200,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()

@@ -8,7 +8,7 @@ Called by: app.routers.tags, app.routers.tagging_admin, app.routers.requisitions
 Depends on: app.models.tags, app.services.prefix_lookup
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -184,7 +184,7 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
 
     try:
         with db.begin_nested():
-            tag = Tag(name=normalized, tag_type="brand", created_at=datetime.now(timezone.utc))
+            tag = Tag(name=normalized, tag_type="brand", created_at=datetime.now(UTC))
             db.add(tag)
             db.flush()
         return tag
@@ -209,7 +209,7 @@ def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> l
     Race-safe: handles concurrent inserts via nested savepoints.
     """
     created = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for tag_data in tags:
         tag_id = tag_data["tag_id"]
@@ -297,7 +297,7 @@ def propagate_tags_to_entity(
     if not material_tags:
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for mt in material_tags:
         existing = db.query(EntityTag).filter_by(entity_type=entity_type, entity_id=entity_id, tag_id=mt.tag_id).first()
         if existing:
@@ -342,7 +342,7 @@ def get_or_create_segment_tag(name: str, db: Session) -> Tag:
 
     try:
         with db.begin_nested():
-            tag = Tag(name=normalized, tag_type="segment", created_at=datetime.now(timezone.utc))
+            tag = Tag(name=normalized, tag_type="segment", created_at=datetime.now(UTC))
             db.add(tag)
             db.flush()
         return tag

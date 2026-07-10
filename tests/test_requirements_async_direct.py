@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,7 +58,7 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "LM317T") -> Req
         normalized_mpn=mpn.lower(),
         target_qty=100,
         target_price=0.50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.commit()
@@ -361,7 +361,7 @@ async def test_get_saved_sightings_with_data(db_session: Session, test_user: Use
         source_type="manual",
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()
@@ -495,7 +495,7 @@ async def test_list_requirement_sightings_success(db_session: Session, test_user
         source_type="manual",
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()
@@ -536,7 +536,7 @@ async def test_list_requirement_sightings_with_material_card(
         normalized_mpn="lm317t",
         target_qty=100,
         material_card_id=test_material_card.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -565,7 +565,7 @@ async def test_list_requirement_sightings_with_substitutes(
         target_qty=100,
         material_card_id=test_material_card.id,
         substitutes=["LM317AT", "LM317BT"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -919,7 +919,7 @@ async def test_import_stock_list_with_requirement_having_substitutes(
         normalized_mpn="lm317t",
         target_qty=100,
         substitutes=["LM317AT"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -1016,7 +1016,7 @@ async def test_list_requirement_sightings_with_material_history(
         normalized_mpn="lm317t",
         target_qty=100,
         material_card_id=test_material_card.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -1024,8 +1024,8 @@ async def test_list_requirement_sightings_with_material_history(
 
     fake_history_row = {
         "vendor_name": "Arrow",
-        "last_seen": datetime.now(timezone.utc),
-        "first_seen": datetime.now(timezone.utc),
+        "last_seen": datetime.now(UTC),
+        "first_seen": datetime.now(UTC),
         "times_seen": 3,
         "unit_price": 0.45,
         "qty_available": 500,
@@ -1070,7 +1070,7 @@ async def test_get_saved_sightings_with_material_history(
         normalized_mpn="lm317t",
         target_qty=100,
         material_card_id=test_material_card.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -1085,15 +1085,15 @@ async def test_get_saved_sightings_with_material_history(
         source_type="manual",
         confidence=70,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()
 
     fake_history_row = {
         "vendor_name": "Mouser",
-        "last_seen": datetime.now(timezone.utc),
-        "first_seen": datetime.now(timezone.utc),
+        "last_seen": datetime.now(UTC),
+        "first_seen": datetime.now(UTC),
         "times_seen": 2,
         "unit_price": 0.30,
         "qty_available": 250,

@@ -315,7 +315,6 @@ describe('rfqVendorModal (real factory)', () => {
       expect(container.children.length).toBe(1);
       expect((htmx as any).process).toHaveBeenCalledWith(container);
       expect(m.vendorQuery).toBe('');
-      expect(m.searchOpen).toBe(false);
     });
 
     it('skips the request entirely when the vendor is already selected (case-insensitive)', async () => {
@@ -537,30 +536,33 @@ describe('rfqVendorModal (real factory)', () => {
     });
   });
 
-  describe('searchVendors failure visibility (F9)', () => {
-    it('toasts ONCE per failure streak, then again after a success resets the flag', async () => {
+  describe('pickVendor (P5.2 — server-rendered vendor-search dropdown)', () => {
+    // The "Find any vendor" dropdown itself is now a server-rendered hx-get
+    // (GET /v2/partials/sightings/vendor-search, swapped into #vendor-search-results
+    // by vendor_modal.html) — there is no more client-side vendorResults/searchOpen
+    // state or searchVendors() fetch to unit-test here. pickVendor() (called from
+    // the swapped-in results' @click) still clears the query and delegates to
+    // _addComposerVendor exactly as before.
+    it('clears vendorQuery and adds the picked vendor via _addComposerVendor', async () => {
+      const container = document.createElement('div');
+      container.id = 'rfq-added-vendors';
+      document.body.appendChild(container);
       const m = makeModal([], [1]);
-      const toastSpy = vi.spyOn(m, '_toast');
       m.vendorQuery = 'arr';
-      (fetch as any).mockRejectedValue(new Error('offline'));
-
-      await m.searchVendors();
-      await m.searchVendors(); // repeated debounce failure — no second toast
-
-      expect(toastSpy).toHaveBeenCalledTimes(1);
-      expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('search failed'), 'error');
-      expect(m.vendorResults).toEqual([]);
-      expect(m.searchOpen).toBe(false);
-
       (fetch as any).mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve([{ name: 'Arrow', type: 'vendor' }]),
+        status: 200,
+        text: () => Promise.resolve('<label><input type="checkbox"><span>arrow electronics</span></label>'),
       });
-      await m.searchVendors(); // success resets the flag
-      (fetch as any).mockRejectedValue(new Error('offline again'));
-      await m.searchVendors();
 
-      expect(toastSpy).toHaveBeenCalledTimes(2);
+      await m.pickVendor('Arrow Electronics');
+
+      expect(m.vendorQuery).toBe('');
+      expect(fetch).toHaveBeenCalledWith(
+        '/v2/partials/sightings/composer-vendor',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect(container.children.length).toBe(1);
     });
   });
 

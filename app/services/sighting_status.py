@@ -25,7 +25,7 @@ Depends on: models (VendorCard, Offer, Contact, Sighting, VendorSightingSummary,
             sighting_vendor_norm shared matching helper)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -141,7 +141,7 @@ def compute_vendor_statuses(
             if rec.normalized_mpn in keys_by_norm.get(rec.vendor_name_normalized, set()):
                 records_by_norm.setdefault(rec.vendor_name_normalized, []).append(rec)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     unavail_norms: set[str] = set()
     for norm in norm_set:
         matching = records_by_norm.get(norm, [])

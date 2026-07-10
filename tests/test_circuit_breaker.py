@@ -8,7 +8,6 @@ Depends on: app.connectors.sources (BaseConnector, CircuitBreaker, get_breaker)
 """
 
 import asyncio
-import time
 
 import pytest
 
@@ -73,12 +72,31 @@ def test_breaker_opens_after_enough_failures():
     assert b.current_state == "open"
 
 
-def test_breaker_half_open_after_timeout():
-    """After reset_timeout elapses, breaker transitions to half_open."""
+def test_breaker_half_open_after_timeout(monkeypatch: pytest.MonkeyPatch):
+    """After reset_timeout elapses, breaker transitions to half_open.
+
+    Uses a fake ``time.monotonic`` clock (advanced explicitly, no real ``sleep``) so
+    the boundary is exact and deterministic under xdist parallelism — the previous
+    version's real `sleep(0.15)` against a 0.1s timeout left only a 50ms margin,
+    which xdist scheduling jitter could blow through and flake the test.
+    """
+    fake_now = 1_000.0
+
+    def _fake_monotonic() -> float:
+        return fake_now
+
+    monkeypatch.setattr("app.connectors.sources.time.monotonic", _fake_monotonic)
+
     b = CircuitBreaker(name="test", fail_max=1, reset_timeout=0.1)
     b.record_failure()
     assert b.current_state == "open"
-    time.sleep(0.15)
+
+    # Just under the timeout: still open (boundary condition, not just "eventually").
+    fake_now += 0.05
+    assert b.current_state == "open"
+
+    # Past the timeout: half_open.
+    fake_now += 0.06  # total elapsed 0.11s > reset_timeout=0.1s
     assert b.current_state == "half_open"
 
 

@@ -9,12 +9,12 @@ from .alert_seen import AlertSeen  # noqa: F401
 
 # Approvals engine (5 tables: request, step, recipient, event, outbox)
 # Approver eligibility uses per-user toggles on the User model — no gate-config table.
-from .approvals import (  # noqa: F401
-    ApprovalEvent,
-    ApprovalOutbox,
-    ApprovalRequest,
-    ApprovalStep,
-    ApprovalStepRecipient,
+from .approvals import (
+    ApprovalEvent,  # noqa: F401
+    ApprovalOutbox,  # noqa: F401
+    ApprovalRequest,  # noqa: F401
+    ApprovalStep,  # noqa: F401
+    ApprovalStepRecipient,  # noqa: F401
 )
 
 # Auth & Users
@@ -28,15 +28,15 @@ from .buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember  # noqa: F40
 from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401
 
 # CRM: Companies & Sites
-from .crm import (  # noqa: F401
-    AccountCollaborator,
-    Company,
-    CompanyAttachment,
-    CrmFieldHistory,
-    CustomerSite,
-    SavedView,
-    SiteContact,
-    SiteContactAttachment,
+from .crm import (
+    AccountCollaborator,  # noqa: F401
+    Company,  # noqa: F401
+    CompanyAttachment,  # noqa: F401
+    CrmFieldHistory,  # noqa: F401
+    CustomerSite,  # noqa: F401
+    SavedView,  # noqa: F401
+    SiteContact,  # noqa: F401
+    SiteContactAttachment,  # noqa: F401
 )
 
 # Discovery / Prospecting
@@ -46,12 +46,12 @@ from .discovery_batch import DiscoveryBatch  # noqa: F401
 from .email_intelligence import EmailIntelligence  # noqa: F401
 
 # Enrichment
-from .enrichment import (  # noqa: F401
-    EmailSignatureExtract,
-    EnrichmentJob,
-    EnrichmentQueue,
-    IntelCache,
-    ProspectContact,
+from .enrichment import (
+    EmailSignatureExtract,  # noqa: F401
+    EnrichmentJob,  # noqa: F401
+    EnrichmentQueue,  # noqa: F401
+    IntelCache,  # noqa: F401
+    ProspectContact,  # noqa: F401
 )
 
 # Enrichment Pipeline State
@@ -61,15 +61,15 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 
 # Excess Inventory / Resell (resell-brokerage) offers
-from .excess import (  # noqa: F401
-    BuyerScore,
-    CustomerBid,
-    CustomerBidLine,
-    ExcessLineItem,
-    ExcessList,
-    ExcessOffer,
-    ExcessOfferLine,
-    ExcessOutreach,
+from .excess import (
+    BuyerScore,  # noqa: F401
+    CustomerBid,  # noqa: F401
+    CustomerBidLine,  # noqa: F401
+    ExcessLineItem,  # noqa: F401
+    ExcessList,  # noqa: F401
+    ExcessOffer,  # noqa: F401
+    ExcessOfferLine,  # noqa: F401
+    ExcessOutreach,  # noqa: F401
 )
 
 # Faceted Search
@@ -82,19 +82,19 @@ from .fru_link import FruLink  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401
 from .ics_worker_status import IcsWorkerStatus  # noqa: F401
-from .intelligence import (  # noqa: F401
-    ActivityDigest,
-    ActivityLog,
-    ChangeLog,
-    MaterialCard,
-    MaterialCardAttachment,
-    MaterialCardAudit,
-    MaterialCardDatasheet,
-    MaterialVendorHistory,
-    ProactiveDoNotOffer,
-    ProactiveMatch,
-    ProactiveOffer,
-    ProactiveThrottle,
+from .intelligence import (
+    ActivityDigest,  # noqa: F401
+    ActivityLog,  # noqa: F401
+    ChangeLog,  # noqa: F401
+    MaterialCard,  # noqa: F401
+    MaterialCardAttachment,  # noqa: F401
+    MaterialCardAudit,  # noqa: F401
+    MaterialCardDatasheet,  # noqa: F401
+    MaterialVendorHistory,  # noqa: F401
+    ProactiveDoNotOffer,  # noqa: F401
+    ProactiveMatch,  # noqa: F401
+    ProactiveOffer,  # noqa: F401
+    ProactiveThrottle,  # noqa: F401
 )
 
 # Knowledge Ledger
@@ -117,13 +117,13 @@ from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F40
 from .partsurfer_desc_negative import PartsurferDescNegative  # noqa: F401
 
 # Performance Tracking
-from .performance import (  # noqa: F401
-    AvailScoreSnapshot,
-    BuyerLeaderboardSnapshot,
-    BuyerVendorStats,
-    MultiplierScoreSnapshot,
-    StockListHash,
-    VendorMetricsSnapshot,
+from .performance import (
+    AvailScoreSnapshot,  # noqa: F401
+    BuyerLeaderboardSnapshot,  # noqa: F401
+    BuyerVendorStats,  # noqa: F401
+    MultiplierScoreSnapshot,  # noqa: F401
+    StockListHash,  # noqa: F401
+    VendorMetricsSnapshot,  # noqa: F401
 )
 
 # Email Pipeline
@@ -147,13 +147,13 @@ from .quotes import Quote, QuoteLine, QuoteRequisition  # noqa: F401
 from .root_cause_group import RootCauseGroup  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
-from .sourcing import (  # noqa: F401
-    Manufacturer,
-    Requirement,
-    RequirementAttachment,
-    Requisition,
-    RequisitionAttachment,
-    Sighting,
+from .sourcing import (
+    Manufacturer,  # noqa: F401
+    Requirement,  # noqa: F401
+    RequirementAttachment,  # noqa: F401
+    Requisition,  # noqa: F401
+    RequisitionAttachment,  # noqa: F401
+    Sighting,  # noqa: F401
 )
 from .sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead  # noqa: F401
 
@@ -188,10 +188,10 @@ from .vendor_part_unavailability import VendorPartUnavailability  # noqa: F401
 from .vendor_sighting_summary import VendorSightingSummary  # noqa: F401
 
 # Vendors
-from .vendors import (  # noqa: F401
-    VendorCard,
-    VendorCardAttachment,
-    VendorContact,
-    VendorContactAttachment,
-    VendorReview,
+from .vendors import (
+    VendorCard,  # noqa: F401
+    VendorCardAttachment,  # noqa: F401
+    VendorContact,  # noqa: F401
+    VendorContactAttachment,  # noqa: F401
+    VendorReview,  # noqa: F401
 )

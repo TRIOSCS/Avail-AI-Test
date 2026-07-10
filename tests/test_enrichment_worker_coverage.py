@@ -14,7 +14,7 @@ Depends on: app.services.enrichment_worker.worker, app.database
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -53,7 +53,7 @@ def test_run_one_batch_spec_extraction_generic_exception(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         MaterialCard(normalized_mpn="gex1", display_mpn="GEX1", enrichment_status="unenriched", created_at=now)
     )
@@ -93,7 +93,7 @@ def test_run_one_batch_commit_failure_triggers_rollback(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         MaterialCard(normalized_mpn="cf01", display_mpn="CF01", enrichment_status="unenriched", created_at=now)
     )
@@ -461,8 +461,8 @@ async def test_main_daily_reset_archives_previous_day_stats():
     original = w._shutdown_requested
     w._shutdown_requested = False
 
-    day1 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-    day2 = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    day1 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    day2 = datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
     call_n = [0]
 
     class FakeDatetime:

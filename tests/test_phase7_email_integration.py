@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,7 +37,7 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
         name="Email Test Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -53,7 +53,7 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
         parts_included="LM317T",
         subject="RFQ - LM317T",
         status="sent",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(contact)
 
@@ -67,7 +67,7 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
         confidence=0.9,
         status="new",
         parsed_data={"parts": ["LM317T"], "price": 0.45},
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
 

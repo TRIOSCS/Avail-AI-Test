@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.services.sourcing_auto_progress, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ def user(db_session: Session) -> User:
         role="buyer",
         azure_id="auto-progress-azure",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -39,7 +39,7 @@ def requisition(db_session: Session, user: User) -> Requisition:
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -55,7 +55,7 @@ def requirement(db_session: Session, requisition: Requisition) -> Requirement:
         primary_mpn="TEST-MPN-001",
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(r)
     db_session.commit()

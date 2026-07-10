@@ -26,7 +26,7 @@ Intentional differences vs. the previous Instrumentator default suite:
 from __future__ import annotations
 
 import time
-from typing import MutableMapping
+from collections.abc import MutableMapping
 
 from loguru import logger
 from prometheus_client import (
@@ -80,6 +80,7 @@ REDIS_DOWNGRADE_TOTAL = Counter(
 _EXCLUDED_EXACT = {
     "/metrics",
     "/health",
+    "/health/ready",
     "/sw.js",
     "/favicon.ico",
     "/robots.txt",

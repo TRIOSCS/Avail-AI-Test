@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -101,7 +101,7 @@ def test_enqueue_dedup_returns_none(db_session, test_requisition, test_user):
         mpn="LM317T",
         normalized_mpn="LM317T",
         status="completed",
-        last_searched_at=datetime.now(timezone.utc),
+        last_searched_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()
@@ -114,7 +114,7 @@ def test_enqueue_dedup_returns_none(db_session, test_requisition, test_user):
         customer_name="Other Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req2)
     db_session.flush()
@@ -122,7 +122,7 @@ def test_enqueue_dedup_returns_none(db_session, test_requisition, test_user):
         requisition_id=req2.id,
         primary_mpn="LM317T",
         target_qty=500,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item2)
     db_session.commit()
@@ -140,14 +140,14 @@ def test_enqueue_no_mpn_returns_none(db_session, test_user):
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
     item = Requirement(
         requisition_id=req.id,
         primary_mpn=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -176,14 +176,14 @@ def test_get_next_queued_item_ordering(db_session, test_user):
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
         r = Requirement(
             requisition_id=req.id,
             primary_mpn=mpn,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
         db_session.flush()
@@ -260,14 +260,14 @@ def test_get_queue_stats(db_session, test_user):
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
         r = Requirement(
             requisition_id=req.id,
             primary_mpn=f"PART{i}",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
         db_session.flush()
@@ -277,7 +277,7 @@ def test_get_queue_stats(db_session, test_user):
             mpn=f"PART{i}",
             normalized_mpn=f"PART{i}",
             status=status,
-            last_searched_at=datetime.now(timezone.utc) if status == "completed" else None,
+            last_searched_at=datetime.now(UTC) if status == "completed" else None,
         )
         db_session.add(q)
     db_session.commit()

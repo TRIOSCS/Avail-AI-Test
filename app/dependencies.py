@@ -17,8 +17,9 @@ Depends on: models, database, config
 """
 
 import hmac
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
@@ -99,7 +100,7 @@ def is_manager_or_admin(user: User) -> bool:
     return user.role in (UserRole.MANAGER, UserRole.ADMIN)
 
 
-def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # noqa: F821
+def can_manage_account(user: User, company: Company, db: "Session") -> bool:
     """True if *user* may act on *company* as an account manager.
 
     Allowed when ANY of the following holds:
@@ -138,6 +139,42 @@ def can_manage_account(user: User, company: Company, db: "Session") -> bool:  # 
     return bool(db.scalar(select(collab_exists)))
 
 
+def manageable_company_ids(user: User, companies: Iterable[Company], db: "Session") -> set[int]:
+    """Return the subset of *companies*' ids that this rep may manage — batched.
+
+    Batched equivalent of calling ``can_manage_account`` once per company for a
+    non-manager: a company is manageable when the user is its ``account_owner``, owns
+    one of its sites, or is a named collaborator. Runs in at most two ownership queries
+    total regardless of how many companies are passed — the per-row alternative issues
+    up to 2*N DB round-trips (one site + one collaborator EXISTS per company). Managers
+    and admins manage everything, so callers must gate on ``is_manager_or_admin`` first
+    and skip this entirely.
+    """
+    company_list = list(companies)
+    ids: set[int] = {int(c.id) for c in company_list}
+    if not ids:
+        return set()
+    # account-owner: resolved from the already-loaded Company rows (no query).
+    manageable: set[int] = {int(c.id) for c in company_list if c.account_owner_id == user.id}
+    remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            int(cid)
+            for (cid,) in db.query(CustomerSite.company_id)
+            .filter(CustomerSite.company_id.in_(remaining), CustomerSite.owner_id == user.id)
+            .distinct()
+        )
+        remaining = ids - manageable
+    if remaining:
+        manageable.update(
+            int(cid)
+            for (cid,) in db.query(AccountCollaborator.company_id)
+            .filter(AccountCollaborator.company_id.in_(remaining), AccountCollaborator.user_id == user.id)
+            .distinct()
+        )
+    return manageable
+
+
 def require_prospect_site_access(db: Session, user: User, pc: "ProspectContact") -> None:
     """Gate a mutation on a site-linked prospect contact on account-management rights.
 
@@ -168,7 +205,9 @@ def can_manage_account_team(user: User, company: Company) -> bool:
 
     Intentionally does NOT accept collaborators, site-owners, or buyers.
     """
-    return is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
+    return bool(
+        is_manager_or_admin(user) or (company.account_owner_id is not None and company.account_owner_id == user.id)
+    )
 
 
 def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:
@@ -235,6 +274,43 @@ def require_requisition_access(
     if owner_id is not None and owner_id == user.id:
         return
     raise HTTPException(status_code=404, detail=f"{label} not found")
+
+
+def require_requisition_access_bulk(
+    db: Session,
+    req_ids: Iterable[int | None],
+    user: User,
+    *,
+    label: str = "Requisition",
+) -> None:
+    """Bulk equivalent of ``require_requisition_access`` — one query for many ids.
+
+    Batched equivalent of calling ``require_requisition_access`` once per id in a loop
+    (the 6 batch endpoints in ``routers/sightings.py`` used to do up to
+    ``MAX_BATCH_SIZE`` sequential ``db.get()`` calls for SALES/TRADER users): a single
+    ``id IN (...)`` select resolves every ``created_by`` in one round trip instead of one
+    per item — mirrors the batching rationale of ``_manageable_company_ids``
+    (routers/htmx/companies.py). No-op for unrestricted roles (buyer/manager/admin),
+    same fast path as the single-item version. For SALES/TRADER, every id in *req_ids*
+    must resolve to a requisition owned (``created_by``) by *user*; any missing or
+    non-owned id raises ``HTTPException(404)`` exactly like the single-item version (404
+    not 403 so existence isn't leaked). ``None`` entries and duplicates in *req_ids* are
+    ignored/deduplicated so callers can pass a set, or a list with repeats, directly.
+    Does not support the single-item version's ``owner_id`` fallback (unscoped/scratch
+    resources) — none of the current bulk call sites need it.
+    """
+    if getattr(user, "role", None) not in RESTRICTED_ROLES:
+        return
+    ids = {rid for rid in req_ids if rid is not None}
+    if not ids:
+        return
+    owners: dict[int, int | None] = {
+        row.id: row.created_by
+        for row in db.execute(select(Requisition.id, Requisition.created_by).where(Requisition.id.in_(ids)))
+    }
+    for rid in ids:
+        if owners.get(rid) != user.id:
+            raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
 def has_buyer_role(user: User | None) -> bool:
@@ -421,8 +497,8 @@ def require_approval_gatekeeper(
 
     try:
         request_id = int(request_id_str)
-    except (ValueError, TypeError):
-        raise HTTPException(403, "Invalid request id")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(403, "Invalid request id") from e
 
     # Direct PENDING recipient
     recipient = db.execute(
@@ -475,14 +551,14 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
 
         m = db.query(VerificationGroupMember).filter_by(user_id=user.id).first()
         return bool(m and m.is_active)
-    overrides = user.access_overrides or {}
+    overrides = cast(dict, user.access_overrides or {})
     if key_str in overrides:
         return bool(overrides[key_str])
     try:
         ak = AccessKey(key_str)
     except ValueError:
         return False
-    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())
+    return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())  # type: ignore[call-overload]  # user.role is a plain str at instance level; StrEnum-keyed lookup by str works
 
 
 def require_access(key):
@@ -582,13 +658,9 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     # 15-min buffer, so the only failure case to handle inline is a truly-expired token
     # (background job missed it or no refresh token) — everything else uses the DB token.
     if user.token_expires_at:
-        expiry = (
-            user.token_expires_at
-            if user.token_expires_at.tzinfo
-            else user.token_expires_at.replace(tzinfo=timezone.utc)
-        )
-        if datetime.now(timezone.utc) > expiry:
-            user.m365_connected = False
+        expiry = user.token_expires_at if user.token_expires_at.tzinfo else user.token_expires_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) > expiry:
+            user.m365_connected = False  # type: ignore[assignment]  # ORM Column[bool] instance write
             db.commit()
             raise HTTPException(401, "Session expired — please log in again")
 

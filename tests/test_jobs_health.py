@@ -8,7 +8,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -83,7 +83,7 @@ def test_job_cleanup_usage_log_deletes_old(scheduler_db):
 
     old = ApiUsageLog(
         source_id=src.id,
-        timestamp=datetime.now(timezone.utc) - timedelta(days=120),
+        timestamp=datetime.now(UTC) - timedelta(days=120),
         endpoint="/test",
         status_code=200,
         response_ms=100,
@@ -92,7 +92,7 @@ def test_job_cleanup_usage_log_deletes_old(scheduler_db):
     )
     recent = ApiUsageLog(
         source_id=src.id,
-        timestamp=datetime.now(timezone.utc) - timedelta(days=10),
+        timestamp=datetime.now(UTC) - timedelta(days=10),
         endpoint="/test",
         status_code=200,
         response_ms=50,

@@ -4,7 +4,7 @@ Avoids circular imports: deep_enrichment_service needs _analyze_vendor_materials
 but should not import from routers.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -103,7 +103,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             card.brand_tags = [str(b).strip() for b in brands if b][:5]
         if isinstance(commodities, list):
             card.commodity_tags = [str(c).strip() for c in commodities if c][:5]
-        card.material_tags_updated_at = datetime.now(timezone.utc)
+        card.material_tags_updated_at = datetime.now(UTC)
         db.commit()
 
         logger.info(

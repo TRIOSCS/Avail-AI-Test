@@ -16,7 +16,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.exc import OperationalError
@@ -33,7 +33,7 @@ def _make_vendor(db: Session, display_name: str, normalized_name: str) -> Vendor
     card = VendorCard(
         display_name=display_name,
         normalized_name=normalized_name,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()

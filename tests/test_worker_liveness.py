@@ -5,7 +5,7 @@ Alerts (debounced) when a worker that should be running has a stale heartbeat
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from app.jobs.worker_liveness_jobs import (
@@ -15,7 +15,7 @@ from app.jobs.worker_liveness_jobs import (
 )
 from app.models import IcsWorkerStatus
 
-NOW = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
 
 
 def _run(db_session):
@@ -40,20 +40,20 @@ def _ics(db_session, **kwargs):
 
 
 def test_stale_running_worker_alerts(db_session):
-    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(minutes=20))
     teams = _run(db_session)
     teams.assert_awaited_once()
     assert "ICS" in teams.await_args.args[0]
 
 
 def test_fresh_worker_no_alert(db_session):
-    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC))
     teams = _run(db_session)
     teams.assert_not_awaited()
 
 
 def test_not_running_no_alert(db_session):
-    _ics(db_session, is_running=False, last_heartbeat=datetime.now(timezone.utc) - timedelta(hours=5))
+    _ics(db_session, is_running=False, last_heartbeat=datetime.now(UTC) - timedelta(hours=5))
     teams = _run(db_session)
     teams.assert_not_awaited()
 
@@ -62,7 +62,7 @@ def test_breaker_open_alerts(db_session):
     _ics(
         db_session,
         is_running=True,
-        last_heartbeat=datetime.now(timezone.utc),
+        last_heartbeat=datetime.now(UTC),
         circuit_breaker_open=True,
         circuit_breaker_reason="Captcha detected",
     )
@@ -77,7 +77,7 @@ def test_missing_rows_no_error(db_session):
 
 
 def test_debounce_suppresses_repeat(db_session):
-    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(minutes=20))
     teams = AsyncMock()
     with (
         patch("app.database.SessionLocal", return_value=db_session),

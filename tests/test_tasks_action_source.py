@@ -16,7 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -37,8 +37,8 @@ def my_open_task(db_session: Session, test_user, test_requisition) -> Requisitio
         title="Source LM317T",
         status=TaskStatus.TODO.value,
         assigned_to_id=test_user.id,
-        due_at=datetime.now(timezone.utc) - timedelta(days=1),
-        created_at=datetime.now(timezone.utc),
+        due_at=datetime.now(UTC) - timedelta(days=1),
+        created_at=datetime.now(UTC),
     )
     db_session.add(t)
     db_session.commit()
@@ -64,8 +64,8 @@ def test_done_task_not_counted(db_session, test_user, test_requisition):
             title="Already done",
             status=TaskStatus.DONE.value,
             assigned_to_id=test_user.id,
-            completed_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -79,7 +79,7 @@ def test_other_users_task_not_counted(db_session, test_user, manager_user, test_
             title="Manager's task",
             status=TaskStatus.TODO.value,
             assigned_to_id=manager_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -103,7 +103,7 @@ def test_count_equals_items_len(db_session, test_user, my_open_task, test_requis
             title="Second task",
             status=TaskStatus.TODO.value,
             assigned_to_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()

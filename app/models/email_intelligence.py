@@ -7,7 +7,7 @@ Called by: connectors/email_mining.py, services/email_intelligence_service.py
 Depends on: models/base.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -56,7 +56,7 @@ class EmailIntelligence(Base):
     # Thread summary (Phase 4)
     thread_summary = Column(JSON)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index("ix_email_intel_user_received", "user_id", "received_at"),

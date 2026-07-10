@@ -1,6 +1,6 @@
 """System configuration models — API sources, config, Graph subscriptions."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -35,11 +35,11 @@ class ApiSource(Base):
     calls_this_month = Column(Integer, default=0, server_default="0")
     last_ping_at = Column(UTCDateTime)
     last_deep_test_at = Column(UTCDateTime)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -57,8 +57,8 @@ class SystemConfig(Base):
     updated_by = Column(String(255))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -73,7 +73,7 @@ class GraphSubscription(Base):
     change_type = Column(String(100), nullable=False)
     expiration_dt = Column(UTCDateTime, nullable=False)
     client_state = Column(String(255))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     # Health tracking columns (migration 115)
     last_renewed_at = Column(UTCDateTime, nullable=True)
     renew_fail_count = Column(Integer, nullable=False, default=0, server_default="0")
@@ -93,7 +93,7 @@ class ApiUsageLog(Base):
     __tablename__ = "api_usage_log"
     id = Column(Integer, primary_key=True)
     source_id = Column(Integer, ForeignKey("api_sources.id", ondelete="CASCADE"), nullable=False)
-    timestamp = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(UTC))
     endpoint = Column(String(200))
     status_code = Column(Integer)
     response_ms = Column(Integer)

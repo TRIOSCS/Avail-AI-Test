@@ -9,7 +9,7 @@ Depends on: app.jobs.offers_jobs, conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -117,7 +117,7 @@ class TestPerformanceTracking:
     def test_performance_tracking_happy_path(self, scheduler_db):
         """Performance tracking calls all scoring services."""
         # Fix datetime to day > 7 to avoid grace-period double-call
-        fixed_now = datetime(2026, 4, 15, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 4, 15, 12, 0, 0, tzinfo=UTC)
         with (
             patch("app.jobs.offers_jobs.datetime") as mock_dt,
             patch("app.services.vendor_scorecard.compute_all_vendor_scorecards") as mock_vs,
@@ -152,7 +152,7 @@ class TestPerformanceTracking:
                 coro.close()
             except Exception:
                 pass
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with (
             patch("app.services.vendor_scorecard.compute_all_vendor_scorecards"),
@@ -177,7 +177,7 @@ class TestPerformanceTracking:
     def test_performance_tracking_grace_period_recompute(self, scheduler_db):
         """During first 7 days of month, previous month is also recomputed."""
         # Force now.day <= 7
-        fixed_now = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 3, 3, 12, 0, 0, tzinfo=UTC)
 
         with (
             patch("app.services.vendor_scorecard.compute_all_vendor_scorecards") as mock_vs,
@@ -256,7 +256,7 @@ class TestWarnStrategicExpiring:
         """Creates ActivityLog entries for expiring strategic vendors."""
         from app.models import ActivityLog
 
-        mock_sv = _mock_strategic_vendor(99, datetime.now(timezone.utc) + timedelta(days=3), test_vendor_card)
+        mock_sv = _mock_strategic_vendor(99, datetime.now(UTC) + timedelta(days=3), test_vendor_card)
         mock_sv.user_id = test_user.id
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
@@ -283,7 +283,7 @@ class TestWarnStrategicExpiring:
         scheduler_db.add(existing)
         scheduler_db.commit()
 
-        mock_sv = _mock_strategic_vendor(99, datetime.now(timezone.utc) + timedelta(days=3), test_vendor_card)
+        mock_sv = _mock_strategic_vendor(99, datetime.now(UTC) + timedelta(days=3), test_vendor_card)
         mock_sv.user_id = test_user.id
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
@@ -308,7 +308,7 @@ class TestWarnStrategicExpiring:
         """Handles missing vendor_card gracefully (shows 'Unknown')."""
         from app.models import ActivityLog
 
-        mock_sv = _mock_strategic_vendor(101, datetime.now(timezone.utc) + timedelta(days=2), None)
+        mock_sv = _mock_strategic_vendor(101, datetime.now(UTC) + timedelta(days=2), None)
         mock_sv.user_id = test_user.id
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
@@ -347,7 +347,7 @@ class TestProactiveOfferExpiryAdditional:
             salesperson_id=test_user.id,
             line_items=[],
             status="sent",
-            sent_at=datetime.now(timezone.utc) - timedelta(days=5),
+            sent_at=datetime.now(UTC) - timedelta(days=5),
         )
         scheduler_db.add(recent_offer)
         scheduler_db.commit()
@@ -376,7 +376,7 @@ class TestFlagStaleOffersAdditional:
             mpn="LM317T",
             status="active",
             is_stale=False,
-            created_at=datetime.now(timezone.utc) - timedelta(days=5),
+            created_at=datetime.now(UTC) - timedelta(days=5),
         )
         scheduler_db.add(recent)
         scheduler_db.commit()
@@ -398,7 +398,7 @@ class TestFlagStaleOffersAdditional:
             mpn="LM317T",
             status="active",
             is_stale=True,
-            created_at=datetime.now(timezone.utc) - timedelta(days=20),
+            created_at=datetime.now(UTC) - timedelta(days=20),
         )
         scheduler_db.add(already_stale)
         scheduler_db.commit()

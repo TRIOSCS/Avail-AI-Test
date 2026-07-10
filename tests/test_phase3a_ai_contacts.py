@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def vendor_with_domain(db_session: Session) -> VendorCard:
         domain="digikey.com",
         emails=["sales@digikey.com"],
         sighting_count=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -49,7 +49,7 @@ def prospect(db_session: Session, vendor_with_domain: VendorCard) -> ProspectCon
         linkedin_url="https://linkedin.com/in/janesmith",
         source="web_search",
         confidence="medium",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(pc)
     db_session.commit()

@@ -8,14 +8,14 @@ Adds B-tree indexes on requisitions.name, requisitions.customer_name,
 and requirements.primary_mpn to eliminate full table scans during search.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "002_search_indexes"
-down_revision: Union[str, None] = "001_initial"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "001_initial"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

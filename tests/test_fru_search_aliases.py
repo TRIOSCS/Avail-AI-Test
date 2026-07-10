@@ -15,7 +15,7 @@ Depends on: app.search_service, app.services.fru_matrix_service,
             app.utils.normalization, app.template_env
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,7 +56,7 @@ def _make_requirement(db: Session, user, primary_mpn: str, substitutes=None) -> 
         customer_name="Test Co",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requisition)
     db.flush()
@@ -64,7 +64,7 @@ def _make_requirement(db: Session, user, primary_mpn: str, substitutes=None) -> 
         requisition_id=requisition.id,
         primary_mpn=primary_mpn,
         substitutes=substitutes or [],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.commit()
@@ -271,7 +271,7 @@ class TestSearchRequirementFruAliases:
     async def test_short_circuit_path_still_persists_aliases(self, db_session, test_user):
         """Every MPN within cooldown including the alias → no connector calls, but the
         system-derived substitute still lands on the requirement."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL, manufacturer="Seagate")
         for mpn in ("00AJ001", "ST91000640NS"):
             db_session.add(

@@ -9,7 +9,7 @@ Enriches prospect accounts with:
 All functions are idempotent — calling twice with same data doesn't duplicate.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -119,7 +119,7 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
             "region": prospect.region,
         }
         prospect.fit_score, prospect.fit_reasoning = calculate_fit_score(prospect_data)
-        prospect.last_enriched_at = datetime.now(timezone.utc)
+        prospect.last_enriched_at = datetime.now(UTC)
         db.commit()
         logger.info("Backfilled firmographics for prospect {} ({})", prospect_id, prospect.domain)
 
@@ -492,7 +492,7 @@ async def generate_ai_writeup(prospect: ProspectAccount, db: Session) -> str:
         writeup = _template_fallback_writeup(prospect)
 
     prospect.ai_writeup = writeup
-    prospect.last_enriched_at = datetime.now(timezone.utc)
+    prospect.last_enriched_at = datetime.now(UTC)
     db.commit()
 
     logger.info("Writeup generated for prospect {} ({} chars)", prospect.id, len(writeup))

@@ -8,7 +8,7 @@ Depends on: app/search_service.py, app/services/spec_code_resolver.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -37,7 +37,7 @@ def known_mpn_requirement(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -45,7 +45,7 @@ def known_mpn_requirement(db_session, test_user):
         requisition_id=rset.id,
         primary_mpn="ABC123",
         target_qty=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -59,7 +59,7 @@ def spec_code_requirement(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -67,7 +67,7 @@ def spec_code_requirement(db_session, test_user):
         requisition_id=rset.id,
         primary_mpn="SPREJ",
         target_qty=700,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -436,7 +436,7 @@ async def test_non_ibm_oem_hint_is_passed_to_resolver(db_session, enable_flag, t
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -445,7 +445,7 @@ async def test_non_ibm_oem_hint_is_passed_to_resolver(db_session, enable_flag, t
         primary_mpn="DELLSPEC1",
         oem_hint="DELL",
         target_qty=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

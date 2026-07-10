@@ -4,7 +4,7 @@ Task 6 of the paced-web-enrichment-worker plan.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from app.models import MaterialCard
@@ -18,7 +18,7 @@ def _card(db, mpn="LM317T"):
     c = MaterialCard(
         normalized_mpn=normalize_mpn_key(mpn),
         display_mpn=mpn,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     db.flush()
@@ -143,7 +143,7 @@ def test_apply_web_sourced_category_loses_to_decode_85(db_session):
     card.category_source = "mpn_decode"
     card.category_confidence = 0.95
     card.category_tier = 85
-    card.category_updated_at = datetime.now(timezone.utc)
+    card.category_updated_at = datetime.now(UTC)
     db_session.flush()
 
     result = WebExtractResult(

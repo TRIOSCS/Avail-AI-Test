@@ -12,7 +12,7 @@ Depends on: part_history_service, fru_matrix_service, the search_history_panel
             route, history_panel.html.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -65,7 +65,7 @@ def test_known_mpn_renders_history(client: TestClient, db_session: Session):
             qty_available=10,
             unit_price=Decimal("4.1"),
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db_session.commit()

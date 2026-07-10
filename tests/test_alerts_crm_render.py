@@ -4,7 +4,7 @@ A new, unseen inbound customer communication on an account the user owns makes t
 account's CDM list row render the data-alert-* spotlight attributes.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.constants import ActivityType, Channel, Direction, EventType
 from app.models.intelligence import ActivityLog
@@ -20,7 +20,7 @@ def _inbound(db, company, user, ext: str) -> ActivityLog:
         company_id=company.id,
         contact_email="buyer@acme.test",
         external_id=ext,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(row)
     db.commit()

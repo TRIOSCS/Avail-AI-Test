@@ -11,7 +11,7 @@ a 404 BEFORE any OneDrive deletion or DB delete happens. Buyer/admin (owner or
 unrestricted) keep working.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.constants import UserRole
 from app.models import (
@@ -29,7 +29,7 @@ def _make_req_attachment(db_session, requisition_id):
         library_web_url="https://example.com/spec.pdf",
         content_type="application/pdf",
         size_bytes=123,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()
@@ -45,7 +45,7 @@ def _make_requirement_attachment(db_session, requirement_id):
         library_web_url="https://example.com/datasheet.pdf",
         content_type="application/pdf",
         size_bytes=456,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(att)
     db_session.commit()

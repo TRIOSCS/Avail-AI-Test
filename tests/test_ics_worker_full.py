@@ -10,7 +10,7 @@ Depends on: conftest.py, ics_worker modules
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -770,7 +770,7 @@ class TestQueueManager:
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -780,7 +780,7 @@ class TestQueueManager:
             customer_name="Acme",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req1)
         db_session.flush()
@@ -790,7 +790,7 @@ class TestQueueManager:
             primary_mpn="LM317T",
             target_qty=100,
             material_card_id=mc.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item1_req)
         db_session.flush()
@@ -801,7 +801,7 @@ class TestQueueManager:
             mpn="LM317T",
             normalized_mpn="LM317T",
             status="completed",
-            last_searched_at=datetime.now(timezone.utc),
+            last_searched_at=datetime.now(UTC),
         )
         db_session.add(queue1)
         db_session.flush()
@@ -814,7 +814,7 @@ class TestQueueManager:
             normalized_mpn="LM317T",
             source_type="icsource",
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -824,7 +824,7 @@ class TestQueueManager:
             customer_name="Beta Corp",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -834,7 +834,7 @@ class TestQueueManager:
             primary_mpn="LM317T",
             target_qty=200,
             material_card_id=mc.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item2_req)
         db_session.commit()
@@ -858,7 +858,7 @@ class TestQueueManager:
             customer_name="X",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req1)
         db_session.flush()
@@ -867,7 +867,7 @@ class TestQueueManager:
             requisition_id=req1.id,
             primary_mpn="LM317T",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item1)
         db_session.flush()
@@ -878,7 +878,7 @@ class TestQueueManager:
             mpn="LM317T",
             normalized_mpn="LM317T",
             status="completed",
-            last_searched_at=datetime.now(timezone.utc),
+            last_searched_at=datetime.now(UTC),
         )
         db_session.add(queue1)
         db_session.commit()
@@ -888,7 +888,7 @@ class TestQueueManager:
             customer_name="Y",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req2)
         db_session.flush()
@@ -897,7 +897,7 @@ class TestQueueManager:
             requisition_id=req2.id,
             primary_mpn="LM317T",
             target_qty=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item2)
         db_session.commit()
@@ -951,14 +951,14 @@ class TestQueueManager:
             customer_name="A",
             status="open",
             created_by=test_user.id,
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
         r2 = Requisition(
             name="NEW",
             customer_name="B",
             status="open",
             created_by=test_user.id,
-            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([r1, r2])
         db_session.flush()
@@ -967,13 +967,13 @@ class TestQueueManager:
             requisition_id=r1.id,
             primary_mpn="OLD-PART",
             target_qty=1,
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
         req2 = Requirement(
             requisition_id=r2.id,
             primary_mpn="NEW-PART",
             target_qty=1,
-            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([req1, req2])
         db_session.flush()
@@ -986,7 +986,7 @@ class TestQueueManager:
             normalized_mpn="old-part",
             status="queued",
             priority=3,
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
         new_item = IcsSearchQueue(
             requirement_id=req2.id,
@@ -995,7 +995,7 @@ class TestQueueManager:
             normalized_mpn="new-part",
             status="queued",
             priority=3,
-            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([old_item, new_item])
         db_session.commit()
@@ -2324,10 +2324,10 @@ class TestIcsWorkerMainLoop:
             if tz is not None and str(tz) == str(EASTERN):
                 eastern_calls += 1
                 if eastern_calls == 1:
-                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=timezone.utc)
-                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=timezone.utc)
+                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=UTC)
+                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=UTC)
             # For timezone.utc calls (update_worker_status, etc.), return a stable time
-            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=UTC)
 
         try:
             worker_mod._shutdown_requested = False

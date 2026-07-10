@@ -16,7 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.orm import Session
@@ -44,7 +44,7 @@ def _make_vendor_response(db: Session, user: User, requisition: Requisition, con
         confidence=confidence,
         scanned_by_user_id=user.id,
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         message_id=f"msg-cov-{id(requisition)}-{confidence}",
     )
     db.add(vr)
@@ -68,7 +68,7 @@ class TestAutoCreateOffersCardIdPath:
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -187,7 +187,7 @@ class TestAutoCreateOffersExceptionHandlers:
             normalized_mpn="lm555t",
             display_mpn="LM555T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -237,7 +237,7 @@ class TestAutoCreateOffersStrategicVendorClock:
         vc = VendorCard(
             normalized_name="sv2vendor",
             display_name="StrategicVendor2",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vc)
         db_session.flush()
@@ -272,7 +272,7 @@ class TestAutoCreateOffersStrategicVendorClock:
         vc = VendorCard(
             normalized_name="sv3vendor",
             display_name="StrategicVendor3",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vc)
         db_session.flush()
@@ -416,7 +416,7 @@ def _make_unsolicited_vr(db: Session, user: User, confidence: float = 0.7) -> Ve
         confidence=confidence,
         scanned_by_user_id=user.id,
         status="quote_provided",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         message_id=f"unsol-msg-{id(user)}-{confidence}",
     )
     db.add(vr)
@@ -443,7 +443,7 @@ class TestUnsolicitedOfferCreation:
             normalized_mpn="abc123",
             display_mpn="ABC123",
             manufacturer="Acme",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -496,7 +496,7 @@ class TestUnsolicitedOfferCreation:
             normalized_mpn="xde789",
             display_mpn="XDE789",
             manufacturer="Test Corp",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.flush()
@@ -509,7 +509,7 @@ class TestUnsolicitedOfferCreation:
             confidence=0.8,
             scanned_by_user_id=test_user.id,
             status="quote_provided",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             message_id="unsol-a-001",
         )
         db_session.add(vr_a)
@@ -522,7 +522,7 @@ class TestUnsolicitedOfferCreation:
             confidence=0.8,
             scanned_by_user_id=test_user.id,
             status="quote_provided",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             message_id="unsol-b-001",
         )
         db_session.add(vr_b)

@@ -166,7 +166,7 @@ results_shell.html (right column)
     +---> hx-get /v2/partials/search/history?mpn=<searched mpn>   (hx-trigger=load)
               |
               v
-          htmx_views.search_history_panel
+          htmx.search_views.search_history_panel
               |
               +---> normalize_mpn_key(mpn)        # same key MaterialCard stores
               +---> part_history_service.get_part_history(db, key)   # READ-ONLY
@@ -331,7 +331,7 @@ identity/specs/history instantly from the DB, with the live market streaming in 
 GET /v2/search?mpn=<PN>  (v2_page → base_page.html fires hx-get partial_url)
     |  v2_page search branch: partial_url = /v2/partials/search?mpn=<quote(PN)>
     v
-htmx_views.py: search_form_partial(mpn)
+htmx/search_views.py: search_form_partial(mpn)
     |  mpn present  → dossier_shell.html      (the Bench)
     |  no mpn       → form.html landing + lazy /v2/partials/search/recent
     v
@@ -457,7 +457,7 @@ fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
 Browser POST /v2/partials/search/run  (manual MPN entry)
     |
     v
-htmx_views.py: search_run()
+htmx/search_views.py: search_run()
     |
     +---> Returns HTML shell + spinner immediately (200 OK)
     |
@@ -1038,7 +1038,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    stamping). A RE-SENT attachment that hits the dedup key refreshes the
    existing row's qty/price from the new parse and joins the apply batch, so
    the O3 release still fires — never a silent skip.
-5. `app/routers/htmx_views.py` — add-to-requisition picker (deliberately stamped;
+5. `app/routers/htmx/search_views.py` — add-to-requisition picker (deliberately stamped;
    the user can Mark available to override).
 6. `app/jobs/inventory_jobs.py` — excess-list sighting creation (rows grouped
    per requirement before calling).
@@ -1429,6 +1429,19 @@ per-subscription `clientState` (`secrets.token_hex(16)`) on `graph_subscriptions
   shares this contract but is gated off in `MVP_MODE` (returns 404); the mail/graph
   endpoint runs in MVP mode (mail subscriptions are created regardless of `MVP_MODE`).
 
+**ACS (Azure Communication Services) webhook — sibling endpoint, different auth
+shape.** `POST /api/webhooks/acs` (`app/routers/v13_features/activity.py`) logs
+`CallCompleted`/`CallDisconnected` events and handles the Event Grid
+`SubscriptionValidationEvent` handshake. Event Grid has no per-subscription
+`clientState` body field like Graph, so the shared secret instead travels as a
+`?secret=` query param baked into the webhook URL at Event Grid subscription time
+(and into the default call-callback URL built by `POST /api/calls/initiate`),
+compared with `hmac.compare_digest` against `settings.acs_webhook_secret`
+(`app/config.py`). Fails closed: an unset secret rejects (403) every event —
+including the validation handshake — even when `ACS_CONNECTION_STRING` is
+configured; the app lifespan (`app/main.py`) logs a startup warning for that
+misconfiguration.
+
 ## 5. Quote Building
 
 **Where quotes are surfaced.** The standalone Quotes nav tab was retired
@@ -1628,7 +1641,9 @@ buyplan_builder.py
     +---> buyplan_scoring.py (ai_score per line)
     |
     v
-buyplan_workflow.py (state machine)
+buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/approve/reject/
+                    halt/resume/reset/cancel + completion; buyplan_lines.py owns the per-line
+                    claim/flag/resolve/resource ops; buyplan_po.py owns PO confirm/verify)
     |
     |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
     |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
@@ -1741,7 +1756,8 @@ buyplan_workflow.py (state machine)
 
 ### 6e. Re-source (fall-down → open claim pool → urgent buyer backfill)
 
-`buyplan_workflow.resource_line` is the **single** fall-down → re-source engine, fed by
+`buyplan_workflow.resource_line` (`app/services/buyplan_workflow/buyplan_lines.py`) is the
+**single** fall-down → re-source engine, fed by
 **two triggers** (never a parallel queue):
 
 - **Vendor-cancel (SP-3):** a buyer records a PO on a line in Acctivate; when a **vendor
@@ -1762,7 +1778,7 @@ buyplan_workflow.py (state machine)
 
 Both triggers are gated by `get_buyplan_for_user` ownership + `_require_po_cutter` role and
 both funnel through the router helper `_resource_lines_and_alert` (pool + commit + alert
-fan-out). `buyplan_workflow.resource_line` (default one line; `scope=plan` escalates to the
+fan-out). `buyplan_workflow.resource_line` (`buyplan_lines.py`; default one line; `scope=plan` escalates to the
 plan's other cut/received lines) for each target, in one transaction:
 
 1. `po_cancellation_service.record_po_cancellation` — append the immutable `po_cancellations`
@@ -2099,12 +2115,12 @@ so it is short-TTL cached (`@cached_endpoint`) to stay off the aggregation queri
 CRM list refresh while the chip still re-renders.
 
 **Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
-(app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
+(app/services/buyplan_workflow/buyplan_approval.py) transitions a plan to COMPLETE, it calls
 `record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)
 inside a best-effort try/except so a CPH failure never rolls back the completion.
 
 ```
-check_completion (buyplan_workflow.py)
+check_completion (buyplan_workflow/buyplan_approval.py)
     |
     v  [plan transitions to COMPLETE]
 record_buyplan_purchase_history (purchase_history_service.py)
@@ -2267,7 +2283,7 @@ Browser (Activity tab loads) — lazy HTMX placeholder fires GET
     |     GET /v2/partials/customers/{company_id}/activity-digest?force=0
     |
     v
-htmx_views.py: requisition_activity_digest() / customer_activity_digest()
+htmx/insights_views.py: requisition_activity_digest() / customer_activity_digest()
     |
     v
 activity_digest_service.get_or_build_digest(entity_type, entity_id, db, force)
@@ -2299,6 +2315,24 @@ Rendered via shared/activity_digest_card.html (states: ready/insufficient/genera
 Self-invalidating: the service regens automatically when `basis_last_activity_at` or
 `basis_activity_count` changes on next view — no write-path hooks needed.
 `?force=1` bypasses both the cooldown and the basis freshness check.
+
+---
+
+### 8a. AI Insights refresh — interactive Claude budget (P2.8)
+
+The four "Refresh AI insights" HTMX endpoints in `app/routers/htmx/insights_views.py`
+(requisition/vendor/customer/pipeline panels) call `knowledge_service.generate_insights` /
+`generate_vendor_insights` / `generate_company_insights` / `generate_pipeline_insights` with
+`interactive=True`. That flag tightens the shared `_regenerate_insights` Claude call to a
+**~25s timeout, single attempt (no retries)** (`_INTERACTIVE_TIMEOUT_SECONDS = 25`,
+`_INTERACTIVE_MAX_ATTEMPTS = 1` in `knowledge_service.py`) so a slow/overloaded API can't hold
+the HTTP request open for the default `claude_structured` worst case (30s timeout × 3 attempts
+≈ 96s). On timeout/failure the call returns `[]` and the route falls back to serving the
+existing cached insights (`entries or get_cached_*_insights(...)`) rather than erroring.
+Non-interactive callers (`interactive=False`, the default) keep the original uncapped
+budget, but none exist today — the dormant KB-insight refresh job
+(`knowledge_jobs._job_refresh_insights`) was deleted 2026-07-06 (no UI consumer, burned
+Anthropic API cost when enabled; recoverable from git history).
 
 ---
 
@@ -2497,9 +2531,13 @@ POST /v2/partials/settings/connectors/test-all  → OOB bundle of refreshed card
 ```
 
 **Testability & Test-all concurrency.** A source is "testable" iff a real test path
-exists — `routers/sources.source_has_test_path` (= `_get_connector_for_source` can build
-a probe: credential present, or a keyless test hook such as `AIWebSearchConnector` for
-`ai_live_web`). Keyless sources with no hook (`sam_gov_enrichment`, `stock_list_import`)
+exists — `services.connector_registry.source_has_test_path` (= `get_connector_for_source`
+can build a probe: credential present, or a keyless test hook such as
+`AIWebSearchConnector` for `ai_live_web`; P4.1 moved connector lookup out of
+`routers/sources.py` into `app/services/connector_registry.py` so `health_monitor.py`
+stopped reaching into the router for it — `routers/sources.py` still imports it back
+under its original private name for its own Test-button call site). Keyless sources
+with no hook (`sam_gov_enrichment`, `stock_list_import`)
 are NOT testable and hide their Test button (previously they falsely reported OK). A
 keyless probe's ok/error result IS persisted (the old `has_env_vars` gate was dropped).
 `run_source_test` = `_probe_source` (network only, never raises) + `_persist_test_result`
@@ -2789,14 +2827,15 @@ REUSING the helpers above (no new ad-hoc checks):
 Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
 
-**Read-IDOR closure — offers.py GET partials.** Five requisition-scoped GET partial handlers in
-`app/routers/htmx/offers.py` (`parse_email_form`, `paste_offer_form`, `add_offer_form`,
-`rfq_compose`, `rfq_prepare_panel` — the parse-email/paste-offer/add-offer forms and the
-rfq-compose/rfq-prepare panels) resolved the requisition via `get_requisition_or_404` but skipped
+**Read-IDOR closure — offers/ GET partials.** Five requisition-scoped GET partial handlers in
+`app/routers/htmx/offers/` (`parse_email_form`, `paste_offer_form`, `add_offer_form` in
+`crud.py`; `rfq_compose`, `rfq_prepare_panel` in `rfq.py` — the parse-email/paste-offer/
+add-offer forms and the rfq-compose/rfq-prepare panels) resolved the requisition via
+`get_requisition_or_404` but skipped
 `require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
 rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
 `require_requisition_access(db, req_id, user)` right after the 404 check (404-not-403 so existence
-isn't leaked), matching their mutating siblings in the same file. Regression coverage:
+isn't leaked), matching their mutating siblings in the same submodule. Regression coverage:
 `tests/test_authz_offers_partials_idor.py`.
 
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
@@ -2805,8 +2844,8 @@ ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
 `release_prospect`):
 - `POST .../{company_id}/disposition` (`set_company_disposition`) — `_VALID_DISPOSITIONS`
   allowlist (`active`/`bucket`, invalid → 400), writes `disposition`/`disposition_reason`/
-  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')` +
-  `('companies_typeahead')`, re-renders `_disposition_control.html`. Reversible.
+  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')`,
+  re-renders `_disposition_control.html`. Reversible.
 - `POST .../{company_id}/send-to-prospecting` (`send_company_to_prospecting_htmx`) →
   `prospect_claim.send_company_to_prospecting` (FOR-UPDATE lock, clears
   `account_owner_id` + sets `ownership_cleared_at`, find-or-create
@@ -3014,7 +3053,7 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   `company_utils.suggest_clean_company_name` (display-cased suffix-strip) as "Suggested
   name: X" with an Apply button → `POST .../{company_id}/apply-name`
   (`company_apply_name`; sets `Company.name`, `@validates` resyncs `normalized_name`,
-  `invalidate_prefix('company_list','companies_typeahead')`). Empty 200 when already
+  `invalidate_prefix('company_list')`). Empty 200 when already
   clean. **create_company no longer silently stores the AI-typo-corrected name** — it
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
@@ -3141,8 +3180,9 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
 These extend the audit trail above (migration 169 + reuse of existing primitives):
 
 1. **Field-history (old→new)** — `crm_field_history` table + `app/services/crm_field_history.py`.
-   The inline single-field POST handlers (`company_field_post` / `contact_field_post` in
-   `app/routers/htmx/companies.py`) capture the attribute value *before* and *after*
+   The inline single-field POST handlers (`company_field_post` in
+   `app/routers/htmx/companies/core.py` / `contact_field_post` in
+   `app/routers/htmx/companies/contacts.py`) capture the attribute value *before* and *after*
    `apply_company_field` / `apply_contact_field`, then call `record_field_change` (which
    writes a row only when the canonical value actually changed; None↔"" is a no-op) before
    the same `db.commit()` so the history row and the edit land atomically. `changed_by_id`
@@ -3351,8 +3391,9 @@ rows reuse the shared `partials/shared/_contact_row.html` macro (also used by th
 which makes that endpoint return a self-contained "✓ Added" `<li>` (`hx-swap=outerHTML`,
 `hx-target="closest li"`) instead of re-rendering the Contacts-tab list. The dead
 `enrich_customer_account` stub (returns `no_providers`) is no longer called from the enrich
-endpoint — it stays wired to `companies.py` bulk-create + the `customer_enrichment_batch`
-scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
+endpoint — it stays wired to the CSV bulk-import path
+(`app/routers/htmx/companies/core.py::import_companies_confirm` +
+`app/services/company_import_service.py`) + the `customer_enrichment_batch` scheduler. Contact discovery degrades gracefully: a provider failure renders an amber
 "couldn't reach" banner, never a 500.
 
 **Connectors:**
@@ -4093,6 +4134,29 @@ set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB
     +---> write=False = read-only twin (same verdict, zero mutation) — used by the
           SP-Ingest dry run so its report can't drift from --apply
 
+recategorize(db, card, new_category, *, source, confidence=1.0, force=False,
+             reason=None) -> bool   # (P4.5) the ONE sanctioned way to change
+    |   # card.category outside set_category itself — no caller may ever assign
+    |   # card.category directly (the @validates("category") guard only blocks
+    |   # off-vocab strings; it doesn't enforce the ladder or purge stale facets).
+    +---> force=False (default): thin wrapper over set_category — full ladder
+    |     arbitration, same semantics/return as above.
+    +---> force=True: writes new_category UNCONDITIONALLY (no tier comparison) and
+    |     — unlike every other path — leaves category_source/confidence/tier/
+    |     updated_at UNTOUCHED. For re-spelling an ALREADY-provenanced value (the
+    |     evidence hasn't changed, only its canonical string form); a fresh
+    |     provenance stamp here would be dishonest (nothing new observed) and would
+    |     wrongly reset the updated_at tie-break. Sole legitimate caller today:
+    |     management/cleanup_known_bad.py's cleanup_junk_categories
+    |     "normalized_in_place" branch (Pass 2).
+    +---> either mode, on a real category CHANGE: purges the old commodity's stale
+    |     MaterialSpecFacet rows + specs_structured mirror + orphaned
+    |     validation_conflicts entries via _purge_stale_commodity_data (same
+    |     helper set_category's on_change hook uses).
+    +---> every actual write (either mode) logs a MaterialCardAudit row
+          (action=category_recategorize, details: from/to/source/force/reason) —
+          in ADDITION to any audit row the caller writes for its own broader op.
+
 set_brand(card, value, source, confidence, write=True) -> bool        # dual-brand, mig 097
 set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-brand, mig 097
     +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
@@ -4628,13 +4692,17 @@ capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT
 row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
 normalize-or-null every non-canonical `material_cards.category` (the pre-#267
 bypass-writer residue) — resolvable values route through `set_category` at
-legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
-stale facets purged) when provenanced, unresolvable values are nulled with provenance
-cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
-card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
-`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
-One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
-dry-run rolls back, never commits.
+legacy_backfill when unprovenanced or, when provenanced, through
+`spec_tiers.recategorize(force=True)` (P4.5 — the ladder is deliberately NOT consulted,
+since the evidence hasn't changed, only its spelling; source/confidence/tier/updated_at
+are left byte-identical, and the stale facet purge still runs), unresolvable values are
+nulled with provenance cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf
+0.5, tier 50) on every card with a maker but NULL provenance (attribution of existing
+data, NOT a ladder write; `manufacturer_updated_at` stays NULL so it ranks at the
+runtime NULL-provenance floor). One `MaterialCardAudit` row per changed card (action
+`facet_cleanup` / `category_cleanup`), plus `recategorize`'s own audit row (action
+`category_recategorize`) for the normalized-in-place branch; dry-run rolls back, never
+commits.
 
 Brand/manufacturer canonicalization backfill (OPTIMIZATION_PLAN §1.5B, one-shot
 post-deploy of migration 106): `python -m app.management.normalize_manufacturers
@@ -4968,7 +5036,7 @@ Search coverage:
 ### Universal Top-Search (global search bar)
 
 The header search input (templates/htmx/partials/shared/topbar.html, name="q") debounces
-into `GET /v2/partials/search/global` → `htmx_views.global_search` →
+into `GET /v2/partials/search/global` → `htmx.search_views.global_search` →
 `global_search_service.fast_search(q, db, user)` → renders the grouped dropdown
 `partials/shared/search_results.html`. Pressing Enter posts `/v2/partials/search/ai` →
 `ai_search(q, db, user)` (Claude Haiku intent parse, falls back to fast_search). "View all"
@@ -5504,7 +5572,7 @@ The registries in use:
 |-----------------|--------------|------------------|
 | `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `_RunRegistry` singletons) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
 | `company_enrich_runs.py` | `company_enrich_runs` | Account (Company) "Enrich" (`routers/crm/enrichment.py`) |
-| `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies.py`) — deliberately separate from `company_enrich_runs` |
+| `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies/contacts.py`) — deliberately separate from `company_enrich_runs` |
 | `vendor_contact_runs.py` | `vendor_contact_runs` | Vendor "Find Contacts" (`routers/htmx/vendors.py`) |
 
 (The Prospects tab enrich flow — § Prospect Enrichment — uses the same
@@ -5567,7 +5635,8 @@ deploy.sh
     +---> Step 1: Commit & push
     +---> Step 2: Build with --no-cache (build tag = git commit SHA)
     +---> Step 3: Start with --force-recreate
-    +---> Step 4: Health checks (wait for app to respond)
+    +---> Step 4: Health checks — GET /health (LIVENESS only; gates the deploy)
+    +---> Step 4b: GET /health/ready (READINESS, informational only — never gates)
     +---> Step 5: Verify deployed build tag matches built commit
     +---> Step 6: Verify CSS coverage
     |       +---> Scan templates for Tailwind color classes
@@ -5579,6 +5648,27 @@ deploy.sh
     |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
+
+**Liveness/readiness split (P2.7).** `app/startup.py`'s ~20 boot-time ops split into
+FAST (order-critical seeds/DDL-triggers/single-row checks, run synchronously in
+`run_startup_migrations()` before `main.py`'s lifespan yields) and SLOW (full-table
+backfills + `ANALYZE`, moved to `run_deferred_startup_backfills()`, launched as a
+post-yield background task via `asyncio.to_thread` + `app.utils.async_helpers.
+safe_background_task`). `GET /health` is liveness-only and answers as soon as the
+FAST phase completes — it no longer blocks behind a prod-sized full-table scan, so
+`docker-compose.yml`'s healthcheck and `deploy.sh`'s Step 4 wait loop (which poll
+`/health`) can no longer false-fail a deploy on a large DB. `GET /health/ready`
+reports a tri-state (module variable `app.startup.deferred_backfills_state`:
+`running` / `completed` / `failed`, `app.constants.DeferredBackfillState`) as both
+`{"ready": bool, "state": str}` — `ready` is only `true` when the phase reports
+`completed`, so a deferred phase that crashes (`failed`) is never misreported as
+ready. `deploy.sh` Step 4b curls it once, purely to log the state — it never gates
+the deploy on it. `_maybe_analyze_hot_tables`
+additionally gates the `ANALYZE` call behind a `system_config` marker keyed to
+`BUILD_COMMIT`, so a same-image container restart skips it and only a genuine new
+deploy re-runs it. Migration `187_startup_backfill_partial_idx` adds 8 PostgreSQL
+partial indexes on the exact `IS NULL` predicates the deferred backfills scan, so
+repeat-boot scans stay O(remaining rows) instead of O(table).
 
 **Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
 / `avail-ics-worker` / `avail-tbf-worker` systemd units run on the HOST (outside docker, from
@@ -5850,7 +5940,7 @@ minimal and mirrors the accounts pattern; no rearrangement of existing controls.
   download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
   `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
 
-### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies.py`)
+### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies/contacts.py`)
 - Actions: `archive` (`SiteContact.is_archived=True`), `dnc` (`do_not_contact=True`) — both
   wire the existing single-row toggles (`set_contact_archive` / `set_contact_dnc`) to the
   selected set. Mirrors the accounts `customers_bulk_action` contract.
@@ -6130,7 +6220,7 @@ currency="USD")` is the single entry for spawning a routed approval:
 
 **On-resolve subject dispatch (QP Phase C1):** after the flush, a `subject_type=='buy_plan'`
 request drives the EXISTING buy-plan side effects in the SAME session — approve →
-`buyplan_workflow._run_approve_side_effects` (plan `ACTIVE` + `_generate_buyer_tasks` +
+`buyplan_workflow._run_approve_side_effects` (`buyplan_approval.py`; plan `ACTIVE` + `_generate_buyer_tasks` +
 approver stamp + audit `ActivityLog`); reject → `_run_reject_side_effects` (plan `DRAFT`).
 The dispatch runs inline with **no swallowing try/except**, so a side-effect failure
 propagates and the router's transaction rolls the whole decision back atomically — a request
@@ -6159,7 +6249,7 @@ dispatch and the legacy `approve_buy_plan`, so the two paths can never drift.
   savepoint, so each row owns its own commit.
 
 **Buy-plan submission → engine gate (QP Phase C1):** `buyplan_workflow.submit_buy_plan`
-(and `resubmit_buy_plan`), on the non-auto-approve path, call
+(`buyplan_approval.py`; and `resubmit_buy_plan`, same module), on the non-auto-approve path, call
 `_open_engine_request_for_plan(plan, user, db)` — which FIRST cancels every existing open
 (`REQUESTED`) `ApprovalRequest` for the plan via `events.cancel` (so a resubmit never leaves
 two live requests — RISK 2), THEN `create_request(gate_type=BUY_PLAN, subject=plan,

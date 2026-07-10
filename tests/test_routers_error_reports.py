@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/routers/error_reports.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -42,7 +42,7 @@ def sample_report(db_session: Session, test_user: User) -> TroubleTicket:
         source="report_button",
         risk_tier="low",
         category="other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(ticket)
     db_session.commit()
@@ -63,7 +63,7 @@ def second_report(db_session: Session, test_user: User) -> TroubleTicket:
         source="report_button",
         risk_tier="low",
         category="other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(ticket)
     db_session.commit()
@@ -190,7 +190,7 @@ class TestListErrorReports:
             source="ticket_form",
             risk_tier="low",
             category="other",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other)
         db_session.commit()

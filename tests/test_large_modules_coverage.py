@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,7 +27,7 @@ def _make_user(db_session, *, email, azure_id, name):
         name=name,
         role="buyer",
         azure_id=azure_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -450,7 +450,7 @@ class TestScanUserInbox:
 
         mock_user = MagicMock()
         mock_user.email = "buyer@test.com"
-        mock_user.last_inbox_scan = datetime.now(timezone.utc)
+        mock_user.last_inbox_scan = datetime.now(UTC)
 
         mock_db = MagicMock()
 
@@ -471,7 +471,7 @@ class TestScanUserInbox:
 
         mock_user = MagicMock()
         mock_user.email = "buyer@test.com"
-        mock_user.last_inbox_scan = datetime.now(timezone.utc)
+        mock_user.last_inbox_scan = datetime.now(UTC)
 
         mock_db = MagicMock()
 
@@ -492,7 +492,7 @@ class TestScanUserInbox:
 
         mock_user = MagicMock()
         mock_user.email = "buyer@test.com"
-        mock_user.last_inbox_scan = datetime.now(timezone.utc)
+        mock_user.last_inbox_scan = datetime.now(UTC)
 
         mock_db = MagicMock()
 
@@ -686,14 +686,14 @@ class TestIsExpired:
     def test_relative_to_now(self, offset, expected):
         from app.services.knowledge_service import _is_expired
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         value = None if offset is None else now + offset
         assert _is_expired(value, now) is expected
 
     def test_naive_datetime_handled(self):
         from app.services.knowledge_service import _is_expired
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         naive_past = datetime(2020, 1, 1)
         assert _is_expired(naive_past, now) is True
 
@@ -850,7 +850,7 @@ class TestBuildContext:
             name="Test Req",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -890,7 +890,7 @@ class TestGenerateInsights:
             name="Test Req 2",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -930,7 +930,7 @@ class TestGenerateInsights:
             name="Test Req 3",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -964,7 +964,7 @@ class TestGenerateInsights:
             name="Test Req 4",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -1033,7 +1033,7 @@ class TestGetCachedInsights:
             name="Test Req 5",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -1129,7 +1129,7 @@ class TestBuildPipelineContext:
                 name=f"Req {status}",
                 status=status,
                 created_by=user.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(req)
         db_session.commit()
@@ -1155,7 +1155,7 @@ class TestBuildCompanyContext:
             name="TestCo Electronics",
             industry="Semiconductors",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(co)
         db_session.commit()

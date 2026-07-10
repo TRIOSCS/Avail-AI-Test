@@ -10,7 +10,7 @@ Called by: pytest
 Depends on: conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -26,7 +26,7 @@ def _make_vendor_with_response(db, *, slug, response_delay_hours):
     from app.models import VendorCard
     from app.models.offers import VendorResponse
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     domain = f"{slug}.com"
     vendor = VendorCard(
         normalized_name=f"{slug} vendor",
@@ -66,7 +66,7 @@ class TestVendorResponseMetrics:
         from app.models.offers import VendorResponse
         from app.services.response_analytics import compute_vendor_response_metrics
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create VendorResponse records for the vendor domain
         for i in range(3):
@@ -206,7 +206,7 @@ class TestBatchEmailHealth:
         """Batch update processes vendors with recent activity."""
         from app.services.response_analytics import batch_update_email_health
 
-        test_vendor_card.last_contact_at = datetime.now(timezone.utc) - timedelta(days=5)
+        test_vendor_card.last_contact_at = datetime.now(UTC) - timedelta(days=5)
         db_session.commit()
 
         result = batch_update_email_health(db_session, lookback_days=90)
@@ -234,7 +234,7 @@ class TestContactIntelligenceIntegration:
 
         # Verify that when avg_response_hours is provided, it affects the score
         result_with = compute_contact_relationship_score(
-            last_interaction_at=datetime.now(timezone.utc),
+            last_interaction_at=datetime.now(UTC),
             interactions_30d=5,
             interactions_60d=10,
             interactions_90d=15,
@@ -245,7 +245,7 @@ class TestContactIntelligenceIntegration:
         )
 
         result_without = compute_contact_relationship_score(
-            last_interaction_at=datetime.now(timezone.utc),
+            last_interaction_at=datetime.now(UTC),
             interactions_30d=5,
             interactions_60d=10,
             interactions_90d=15,
@@ -270,7 +270,7 @@ class TestVendorCardHealthColumns:
     def test_email_health_columns_exist(self, db_session, test_vendor_card):
         """VendorCard has email_health_score and related columns."""
         test_vendor_card.email_health_score = 75.5
-        test_vendor_card.email_health_computed_at = datetime.now(timezone.utc)
+        test_vendor_card.email_health_computed_at = datetime.now(UTC)
         test_vendor_card.response_rate = 0.65
         test_vendor_card.quote_quality_rate = 0.80
         db_session.commit()
@@ -291,7 +291,7 @@ class TestVendorResponseMetricsNoDomain:
         from app.models.offers import VendorResponse
         from app.services.response_analytics import compute_vendor_response_metrics
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Vendor with NO domain set
         vendor = VendorCard(
@@ -340,7 +340,7 @@ class TestMedianEvenCount:
         from app.models.offers import VendorResponse
         from app.services.response_analytics import compute_vendor_response_metrics
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="median test vendor",
@@ -394,7 +394,7 @@ class TestResponseTimeInterpolation:
             compute_email_health_score,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="interp vendor",
@@ -460,7 +460,7 @@ class TestThreadResolutionScoring:
         from app.models import EmailIntelligence, VendorCard
         from app.services.response_analytics import compute_email_health_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="thread vendor",
@@ -506,7 +506,7 @@ class TestThreadResolutionScoring:
         from app.models import EmailIntelligence, VendorCard
         from app.services.response_analytics import compute_email_health_score
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="nondict vendor",
@@ -564,7 +564,7 @@ class TestUpdateVendorAvgResponseHours:
         from app.models.offers import VendorResponse
         from app.services.response_analytics import update_vendor_email_health
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="avg hrs vendor",
@@ -611,7 +611,7 @@ class TestBatchUpdateErrors:
         from app.models import VendorCard
         from app.services.response_analytics import batch_update_email_health
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="error vendor",
@@ -639,7 +639,7 @@ class TestBatchUpdateErrors:
         from app.models import VendorCard
         from app.services.response_analytics import batch_update_email_health
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         vendor = VendorCard(
             normalized_name="commit fail vendor",

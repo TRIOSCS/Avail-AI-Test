@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.v13_features
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import ActivityLog
 
@@ -26,7 +26,7 @@ def _seed_activity(db, user_id: int, company_id: int, **overrides) -> ActivityLo
         "company_id": company_id,
         "contact_email": "vendor@example.com",
         "subject": "RFQ for LM317T",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     a = ActivityLog(**defaults)

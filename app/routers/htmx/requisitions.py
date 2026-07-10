@@ -7,11 +7,13 @@ and the detail tabs. Extracted verbatim from htmx_views.py (same `/v2/partials`
 paths, same `htmx-views` tag) as the first domain split.
 
 Called by: app/main.py (router mount); htmx_views.py re-imports
-    requisitions_list_partial / requisition_tab for its offer/response routes.
+    requisitions_list_partial for its offer/response routes.
 Depends on: app.models, app.dependencies, app.database, app.search_service,
-    app.services.freeform_parser_service, ._shared
+    app.services.freeform_parser_service, ._shared, ._shared_tabs (requisition_tab —
+    the tab body itself lives there now; registered on this router's route table)
 """
 
+import asyncio
 import html as html_mod
 import json
 from datetime import datetime
@@ -24,11 +26,10 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus, SourcingStatus, TaskStatus
+from ...constants import RESTRICTED_ROLES, OfferCondition, RequisitionStatus, SourcingStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
-    BuyPlan,
     Company,
     CustomerSite,
     Offer,
@@ -40,7 +41,6 @@ from ...models import (
     User,
 )
 from ...services.freeform_parser_service import parse_freeform_rfq
-from ...services.quote_requisitions import quotes_for_requisition
 from ...services.task_service import create_requisition_task, delete_task, update_task
 from ...template_env import template_response
 from ...utils.csv_export import stream_csv
@@ -48,12 +48,17 @@ from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
 from ._shared import _base_ctx, _parse_date_safe, _parse_task_due_date
+from ._shared_tabs import requisition_tab as _requisition_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
 
 # Quote-status significance for the list's aggregate Quotes column — lower wins
 # (won > lost > sent > revised > everything else).
 _QUOTE_STATUS_PRIORITY = {"won": 1, "lost": 2, "sent": 3, "revised": 4}
+
+# Import-parse upload cap (P2.6) — same 10MB convention as resell.py's
+# MAX_UPLOAD_BYTES / requisitions/requirements.py's inline 10_000_000 check.
+MAX_IMPORT_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def _best_quote_status(quotes) -> str | None:
@@ -62,6 +67,27 @@ def _best_quote_status(quotes) -> str | None:
     if not quotes:
         return None
     return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
+
+
+def _parse_xlsx_rows(content: bytes) -> str:
+    """Parse an uploaded XLSX/XLS workbook into tab-separated text.
+
+    Sync (openpyxl has no async API) — always dispatched via ``asyncio.to_thread``
+    from ``requisition_import_parse`` (P2.6), since ``load_workbook`` + full-sheet
+    iteration can block the event loop for a large workbook.
+    """
+    from io import BytesIO
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+    rows = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c) if c is not None else "" for c in row]
+            if any(cells):
+                rows.append("\t".join(cells))
+    return "\n".join(rows)
 
 
 def build_requisition_list_query(
@@ -541,30 +567,37 @@ async def requisition_import_parse(
     user: User = Depends(require_user),
 ):
     """Parse pasted text or uploaded file with AI, return editable preview."""
+    json_mode = request.query_params.get("format") == "json"
+
     # Extract text from file if uploaded
     text = raw_text.strip()
     if file and file.filename:
         content = await file.read()
+        if len(content) > MAX_IMPORT_UPLOAD_BYTES:
+            req_id = getattr(request.state, "request_id", "unknown")
+            message = "File too large — 10MB maximum."
+            if json_mode:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": message, "status_code": 413, "request_id": req_id},
+                )
+            return HTMLResponse(
+                f'<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+                f"{message}"
+                "</div>",
+                status_code=413,
+            )
         fname = file.filename.lower()
         if fname.endswith((".xlsx", ".xls")):
-            from io import BytesIO
-
-            import openpyxl
-
-            wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
-            rows = []
-            for ws in wb.worksheets:
-                for row in ws.iter_rows(values_only=True):
-                    cells = [str(c) if c is not None else "" for c in row]
-                    if any(cells):
-                        rows.append("\t".join(cells))
-            text = "\n".join(rows)
+            # openpyxl has no async API and full-sheet iteration can block the event
+            # loop for a large workbook — parse on a worker thread (P2.6).
+            text = await asyncio.to_thread(_parse_xlsx_rows, content)
         elif fname.endswith(".csv"):
             text = content.decode("utf-8", errors="replace")
         else:
             text = content.decode("utf-8", errors="replace")
-
-    json_mode = request.query_params.get("format") == "json"
 
     if not text:
         if json_mode:
@@ -670,7 +703,7 @@ async def requisition_import_save(
                     "target_qty": int(form.get(f"reqs[{idx}].target_qty", "1") or "1"),
                     "brand": form.get(f"reqs[{idx}].brand", "").strip() or None,
                     "target_price": float(form.get(f"reqs[{idx}].target_price") or "0") or None,
-                    "condition": form.get(f"reqs[{idx}].condition", "new").strip(),
+                    "condition": form.get(f"reqs[{idx}].condition", OfferCondition.NEW).strip(),
                     "customer_pn": form.get(f"reqs[{idx}].customer_pn", "").strip() or None,
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,
@@ -782,6 +815,34 @@ async def requisition_import_save(
     )
     resp.headers["HX-Trigger"] = "reqListRefresh"
     return resp
+
+
+@router.get("/v2/partials/requisitions/customer-typeahead", response_class=HTMLResponse)
+async def customers_typeahead_dropdown(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """P5.2: server-rendered debounced dropdown for the unified requisition modal's
+    customer picker (unified_modal.html, customerPicker() in htmx_app.js).
+
+    Runs the same active-Company + site query the retired JSON
+    `/api/companies/typeahead` endpoint (crm.companies.companies_typeahead, removed —
+    it had no remaining consumers once this HTML sibling replaced its only caller)
+    used to serve, filtered server-side by `q` so the picker is a real hx-get swap
+    instead of a client-side fetch-all + filter.
+    """
+    query = q.strip()
+    companies_q = db.query(Company).filter(Company.is_active.is_(True)).options(selectinload(Company.sites))
+    if query:
+        companies_q = companies_q.filter(Company.name.ilike(f"%{escape_like(query)}%", escape="\\"))
+    companies = companies_q.order_by(Company.name).limit(20).all()
+    ctx = {
+        "request": request,
+        "companies": [{"id": c.id, "name": c.name, "sites": [s for s in c.sites if s.is_active]} for c in companies],
+    }
+    return template_response("htmx/partials/requisitions/_customer_typeahead_results.html", ctx)
 
 
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
@@ -962,7 +1023,6 @@ async def customer_quick_create(
     db.add(site)
     db.commit()
 
-    invalidate_prefix("companies_typeahead")
     invalidate_prefix("company_list")
 
     display = html_mod.escape(f"{company.name} — {site.site_name}")
@@ -1225,108 +1285,13 @@ async def requisition_search_all(
     return resp
 
 
-@router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
-async def requisition_tab(
-    request: Request,
-    req_id: int,
-    tab: str,
-    qual: str | None = None,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return a specific tab partial for requisition detail."""
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-
-    valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity", "responses"}
-    if tab not in valid_tabs:
-        raise HTTPException(404, f"Unknown tab: {tab}")
-
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-
-    if tab == "parts":
-        requirements = (
-            db.query(Requirement)
-            .options(selectinload(Requirement.sightings))
-            .filter(Requirement.requisition_id == req_id)
-            .all()
-        )
-        for r in requirements:
-            r.sighting_count = len(r.sightings) if r.sightings else 0
-        ctx["requirements"] = requirements
-        return template_response("htmx/partials/requisitions/tabs/parts.html", ctx)
-
-    elif tab == "offers":
-        q = db.query(Offer).filter(Offer.requisition_id == req_id)
-        if qual in ("unset", "incomplete", "essentials", "complete"):
-            q = q.filter(Offer.qualification_status == qual)
-        offers = q.order_by(Offer.created_at.desc().nullslast()).all()
-        # Check for existing draft quote to show "Add to Quote" button — join-table scoped
-        # so a combined draft quote is offered on every contributing requisition.
-        draft_quote = (
-            quotes_for_requisition(db, req_id)
-            .filter(Quote.status == QuoteStatus.DRAFT)
-            .order_by(Quote.created_at.desc())
-            .first()
-        )
-        ctx["offers"] = offers
-        ctx["draft_quote"] = draft_quote
-        ctx["qual"] = qual
-        return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
-
-    elif tab == "quotes":
-        # Join-table scoped so a combined quote appears on the Quotes tab of EVERY
-        # contributing requisition, not just the one it anchors.
-        quotes = quotes_for_requisition(db, req_id).order_by(Quote.created_at.desc().nullslast()).all()
-        ctx["quotes"] = quotes
-        return template_response("htmx/partials/requisitions/tabs/quotes.html", ctx)
-
-    elif tab == "buy_plans":
-        buy_plans = (
-            db.query(BuyPlan)
-            .options(joinedload(BuyPlan.lines))
-            .filter(BuyPlan.requisition_id == req_id)
-            .order_by(BuyPlan.created_at.desc().nullslast())
-            .all()
-        )
-        ctx["buy_plans"] = buy_plans
-        return template_response("htmx/partials/requisitions/tabs/buy_plans.html", ctx)
-
-    elif tab == "tasks":
-        tasks = (
-            db.query(RequisitionTask)
-            .options(joinedload(RequisitionTask.assignee))
-            .filter(RequisitionTask.requisition_id == req_id)
-            .order_by(RequisitionTask.priority.desc(), RequisitionTask.created_at.desc().nullslast())
-            .all()
-        )
-        users = db.query(User).order_by(User.name).all()
-        ctx["tasks"] = tasks
-        ctx["users"] = users
-        return template_response("htmx/partials/requisitions/tabs/tasks.html", ctx)
-
-    elif tab == "responses":
-        # Fetch vendor responses for this requisition
-        from ...models.offers import VendorResponse
-
-        responses = (
-            db.query(VendorResponse)
-            .filter(VendorResponse.requisition_id == req_id)
-            .order_by(VendorResponse.received_at.desc().nullslast())
-            .all()
-        )
-        ctx["responses"] = responses
-        return template_response("htmx/partials/requisitions/tabs/responses.html", ctx)
-
-    else:  # activity
-        from ...services.activity_service import get_requisition_activities
-
-        show_all = request.query_params.get("show_all") == "1"
-        ctx["activities"] = get_requisition_activities(req_id, db, meaningful_only=not show_all)
-        ctx["show_all"] = show_all
-        ctx["req"] = req
-        return template_response("htmx/partials/requisitions/tabs/activity.html", ctx)
+# Implementation lives in ._shared_tabs (P4.1 — offers.py / htmx_views.py reused this
+# tab render by importing it straight off this sibling router module; it's now a
+# shared home both import from). Registered here, unchanged, so the route/URL/tag and
+# the `requisition_tab` name importable off this module are exactly as before.
+requisition_tab = router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)(
+    _requisition_tab_impl
+)
 
 
 # ── Requisition Task board mutations ─────────────────────────────────────

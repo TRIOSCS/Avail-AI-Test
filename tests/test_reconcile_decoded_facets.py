@@ -393,7 +393,7 @@ def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Sessi
 
     call_count = 0
 
-    def _exploding_record_spec(*args, **kwargs):  # noqa: ANN002, ANN003
+    def _exploding_record_spec(*args, **kwargs):
         nonlocal call_count
         call_count += 1
         raise RuntimeError("simulated record_spec failure")
@@ -418,7 +418,7 @@ def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkey
 
     original_get = db_session.get
 
-    def _failing_get(model, pk, *args, **kwargs):  # noqa: ANN002, ANN003
+    def _failing_get(model, pk, *args, **kwargs):
         if model is MaterialCard:
             raise RuntimeError("simulated db.get failure")
         return original_get(model, pk, *args, **kwargs)
@@ -439,7 +439,7 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):
         reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "dry-run",
@@ -502,7 +502,7 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):
         reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "apply",

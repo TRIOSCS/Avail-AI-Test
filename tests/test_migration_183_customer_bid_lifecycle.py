@@ -47,11 +47,11 @@ _NEW_COLS = ("sent_at", "responded_at", "responded_by_id")
 # ---------------------------------------------------------------------------
 
 
-def _noop_fk(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_fk(*args, **kwargs):
     """No-op replacement for create_foreign_key on SQLite."""
 
 
-def _noop_constraint(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_constraint(*args, **kwargs):
     """No-op replacement for drop_constraint on SQLite."""
 
 

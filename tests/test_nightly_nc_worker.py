@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import engine
 
 # ══════════════════════════════════════════════════════════════════════════════
 # nc_worker/circuit_breaker.py

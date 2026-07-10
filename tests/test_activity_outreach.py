@@ -4,7 +4,7 @@ Covers: all four channels (phone/email/teams/wechat), last_activity_at bumps on
 company and site, validation errors, and the log_outreach_initiated service.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -33,7 +33,7 @@ def cdm_company(db_session, test_user):
         name="Outreach Test Co",
         is_active=True,
         account_owner_id=test_user.id,
-        last_activity_at=datetime.now(timezone.utc) - timedelta(days=40),
+        last_activity_at=datetime.now(UTC) - timedelta(days=40),
     )
     db_session.add(company)
     db_session.flush()
@@ -113,7 +113,7 @@ class TestOutreachInitiated:
         assert "pat_wechat" in record.notes
 
     def test_bumps_company_and_site_last_activity(self, client, db_session, cdm_company):
-        before = datetime.now(timezone.utc) - timedelta(minutes=1)
+        before = datetime.now(UTC) - timedelta(minutes=1)
         resp = self._post(client, cdm_company, "phone", "+14155551234")
         assert resp.status_code == 201
 
@@ -121,9 +121,9 @@ class TestOutreachInitiated:
         company = db_session.get(Company, cdm_company["company"].id)
         site = db_session.get(CustomerSite, cdm_company["site"].id)
         assert company.last_activity_at is not None
-        assert company.last_activity_at.replace(tzinfo=timezone.utc) > before
+        assert company.last_activity_at.replace(tzinfo=UTC) > before
         assert site.last_activity_at is not None
-        assert site.last_activity_at.replace(tzinfo=timezone.utc) > before
+        assert site.last_activity_at.replace(tzinfo=UTC) > before
 
     @pytest.mark.parametrize(
         ("channel", "value"),
@@ -209,7 +209,7 @@ class TestOutreachInitiated:
         first = self._post(client, cdm_company, "phone", "+14155551234")
         assert first.status_code == 201
         record = db_session.get(ActivityLog, first.json()["id"])
-        record.created_at = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS + 60)
+        record.created_at = datetime.now(UTC) - timedelta(seconds=OUTREACH_DEDUP_SECONDS + 60)
         db_session.commit()
 
         second = self._post(client, cdm_company, "phone", "+14155551234")
@@ -320,7 +320,7 @@ class TestOutreachInitiated:
 
     def test_call_initiated_bumps_last_activity(self, client, db_session, cdm_company):
         """Click-to-call (legacy endpoint) also feeds the staleness sort now."""
-        before = datetime.now(timezone.utc) - timedelta(minutes=1)
+        before = datetime.now(UTC) - timedelta(minutes=1)
         resp = client.post(
             "/api/activity/call-initiated",
             json={
@@ -333,7 +333,7 @@ class TestOutreachInitiated:
         db_session.expire_all()
         company = db_session.get(Company, cdm_company["company"].id)
         assert company.last_activity_at is not None
-        assert company.last_activity_at.replace(tzinfo=timezone.utc) > before
+        assert company.last_activity_at.replace(tzinfo=UTC) > before
 
 
 class TestLogOutreachService:

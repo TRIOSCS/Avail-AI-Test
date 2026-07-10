@@ -21,7 +21,7 @@ Depends on: app/models/po_cancellation.POCancellation, app/models VendorCard/Off
             UnavailabilityReason).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -56,12 +56,12 @@ def record_po_cancellation(
     validates ``reason_code`` (a ``LineResourceReason``/``POCancellationReason`` value —
     they share the same string values). Flushes so the row carries an id. Returns the row.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     po_cut_at = line.po_confirmed_at
     days_to_cancel = None
     if po_cut_at is not None:
-        cut = po_cut_at if po_cut_at.tzinfo is not None else po_cut_at.replace(tzinfo=timezone.utc)
+        cut = po_cut_at if po_cut_at.tzinfo is not None else po_cut_at.replace(tzinfo=UTC)
         days_to_cancel = (now - cut).days
 
     mpn_source = offer.normalized_mpn or offer.mpn or (requirement.primary_mpn if requirement else None)
@@ -116,7 +116,7 @@ def mark_offer_sold(db: Session, offer, user) -> None:
         logger.warning("Re-source: offer {} in status {!r} cannot be marked sold — skipping", offer.id, offer.status)
         return
     offer.status = OfferStatus.SOLD
-    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(UTC)
     offer.updated_by_id = user.id if user else None
 
     db.add(

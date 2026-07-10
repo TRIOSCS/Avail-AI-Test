@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +25,7 @@ def req_with_offer(db_session: Session, test_user: User):
         name="Sprint2 Test Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -44,7 +44,7 @@ def req_with_offer(db_session: Session, test_user: User):
         lead_time="2 weeks",
         status="active",
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -60,7 +60,7 @@ def pending_review_offer(db_session: Session, test_user: User):
         name="Review Queue Req",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -75,7 +75,7 @@ def pending_review_offer(db_session: Session, test_user: User):
         evidence_tier="T4",
         parse_confidence=0.65,
         entered_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer)
     db_session.commit()
@@ -133,6 +133,40 @@ class TestEditOffer:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404
+
+    def test_edit_form_renders_pulls_condition_selected(self, client: TestClient, req_with_offer, db_session: Session):
+        """A canonical 'pulls' condition (OfferCondition.PULLS) must render a <select>
+        with the Pulls option marked selected — the option list must cover every
+        canonical value, not the legacy 'used'/'refurbished' strings."""
+        req, offer = req_with_offer
+        offer.condition = "pulls"
+        db_session.commit()
+        resp = client.get(
+            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/edit-form",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert '<option value="pulls" selected>Pulls</option>' in resp.text
+        # All four canonical OfferCondition values must be present as options.
+        assert 'value="new"' in resp.text
+        assert 'value="new_no_pkg"' in resp.text
+        assert "New (no mfr packaging)" in resp.text
+        assert 'value="refurb"' in resp.text
+
+    def test_edit_form_renders_new_no_pkg_condition_selected(
+        self, client: TestClient, req_with_offer, db_session: Session
+    ):
+        """A canonical 'new_no_pkg' condition must render selected too — this value was
+        entirely missing from the option list before the fix."""
+        req, offer = req_with_offer
+        offer.condition = "new_no_pkg"
+        db_session.commit()
+        resp = client.get(
+            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/edit-form",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert '<option value="new_no_pkg" selected>New (no mfr packaging)</option>' in resp.text
 
 
 # ── Delete Offer ──────────────────────────────────────────────────────

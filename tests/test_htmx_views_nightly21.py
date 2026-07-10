@@ -18,7 +18,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +36,7 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "LM741") -> Requ
         requisition_id=req.id,
         primary_mpn=mpn,
         target_qty=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.commit()

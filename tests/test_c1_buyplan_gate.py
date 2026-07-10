@@ -22,7 +22,7 @@ Depends on: conftest (db_session), app.services.buyplan_workflow,
 
 import contextlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -61,7 +61,7 @@ def _make_approver(db: Session) -> User:
         role="admin",
         azure_id=f"azure-c1-appr-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -76,7 +76,7 @@ def _make_draft_plan(db: Session, user: User, *, total_cost: float = 10_000.0) -
         customer_name="C1Co",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -87,7 +87,7 @@ def _make_draft_plan(db: Session, user: User, *, total_cost: float = 10_000.0) -
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -192,7 +192,10 @@ def test_decide_approve_rolls_back_on_side_effect_failure(db_session: Session, m
     db_session.commit()
     ar = _open_requests(db_session, plan.id)[0]
 
-    import app.services.buyplan_workflow as bw
+    # _generate_buyer_tasks is called from WITHIN buyplan_approval (same module, plain
+    # intra-module call) — the patch must target that submodule directly, not the
+    # `app.services.buyplan_workflow` package (P4.3 split).
+    import app.services.buyplan_workflow.buyplan_approval as bw
 
     def _boom(*args, **kwargs):
         raise RuntimeError("buyer task generation blew up")
@@ -281,7 +284,7 @@ def test_submit_with_no_approver_leaves_plan_pending(db_session: Session) -> Non
         role="buyer",
         azure_id=f"azure-c1-noappr-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(submitter)
     db_session.flush()
@@ -423,7 +426,7 @@ def _ops_member(db: Session, *, role: str = "buyer") -> User:
         role=role,
         azure_id=f"azure-c1-ops-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -467,7 +470,11 @@ def test_orphan_request_approval_does_not_resurrect_cancelled_plan(db_session: S
     The state guard in ``_run_approve_side_effects`` raises ValueError → the request stays
     open and the plan stays CANCELLED with no buyer tasks generated.
     """
-    import app.services.buyplan_workflow as bw
+    # _cancel_open_engine_requests_for_plan and _generate_buyer_tasks are both called from
+    # WITHIN buyplan_approval (same module, plain intra-module calls) — the patch must
+    # target that submodule directly, not the `app.services.buyplan_workflow` package
+    # (P4.3 split).
+    import app.services.buyplan_workflow.buyplan_approval as bw
 
     approver = _make_approver(db_session)
     plan = _make_draft_plan(db_session, approver)

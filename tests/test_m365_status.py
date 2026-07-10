@@ -10,7 +10,7 @@ Regression guards for the original bug:
     cleared User.m365_error_reason on a successful scan
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.constants import InboxSyncHealth
@@ -30,8 +30,8 @@ from app.services.m365_status import (
 def _user(**kw):
     base = dict(
         m365_connected=True,
-        last_inbox_scan=datetime.now(timezone.utc),
-        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        last_inbox_scan=datetime.now(UTC),
+        token_expires_at=datetime.now(UTC) + timedelta(hours=1),
         access_token="t",
         m365_error_reason=None,
     )

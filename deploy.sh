@@ -116,6 +116,16 @@ if [ "$STATUS" != "healthy" ]; then
     exit 1
 fi
 
+# Step 4b: Log the P2.7 deferred-backfill readiness state. This is OBSERVABILITY
+# ONLY — the deploy is already gated on liveness (Step 4 above) and must NEVER be
+# failed by a still-running background backfill/ANALYZE phase on a prod-sized DB
+# (that false-failure was exactly what P2.7 fixed). /health/ready may legitimately
+# still report false here on a large DB; that's expected and not an error.
+echo ""
+echo "==> Checking deferred startup-backfill readiness (informational only)..."
+READY_BODY=$(docker compose exec -T app curl -sf http://localhost:8000/health/ready 2>/dev/null || echo '{"ready":"unknown"}')
+echo "==> /health/ready: ${READY_BODY}"
+
 # Step 5: Verify deployed build tag matches what we just built
 echo ""
 echo "==> Verifying deployed build tag..."
@@ -241,6 +251,20 @@ if [ -n "${HOST_WORKER_WARN}" ]; then
     echo "==>    ${HOST_WORKER_WARN}"
     echo "==>     Fix manually: 'cd /root/availai && .venv/bin/pip install -r requirements.txt' (deps),"
     echo "==>     then 'sudo systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker'."
+fi
+
+# Step 8: Surface a stale weekly backup-verification failure, if any. The
+# avail-backup-verify-alert.service OnFailure= hook (scripts/systemd/
+# avail-backup-verify-alert.service) writes this marker when the Sun 04:00
+# verify-backup.sh timer finds a corrupt/missing newest backup — it stays until
+# manually cleared, so a deploy loudly re-surfaces it instead of it quietly
+# expiring off the top of `journalctl`. Informational only — never fails the deploy.
+BACKUP_ALERT_MARKER="${BACKUP_ALERT_MARKER:-/root/backups/VERIFY_FAILED}"
+if [ -f "${BACKUP_ALERT_MARKER}" ]; then
+    echo ""
+    echo "==> ⚠️  UNRESOLVED backup-verify failure marker found: ${BACKUP_ALERT_MARKER}"
+    cat "${BACKUP_ALERT_MARKER}"
+    echo "==>     Investigate, then clear with: rm -f ${BACKUP_ALERT_MARKER}"
 fi
 
 echo ""

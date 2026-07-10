@@ -5,14 +5,14 @@ Revises: 5c6736d6381f
 Create Date: 2026-03-21 03:45:00.000000
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "b7e2a1f3c4d5"
-down_revision: Union[str, None] = "5c6736d6381f"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "5c6736d6381f"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

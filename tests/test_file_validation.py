@@ -73,7 +73,7 @@ class TestValidateFile:
 
 class TestDetectEncoding:
     def test_utf8(self):
-        content = "Hello, World!".encode("utf-8")
+        content = b"Hello, World!"
         enc = detect_encoding(content)
         assert enc is not None
         assert "utf" in enc.lower() or "ascii" in enc.lower()
@@ -84,7 +84,7 @@ class TestDetectEncoding:
         assert enc is not None
 
     def test_utf8_bom(self):
-        content = b"\xef\xbb\xbf" + "MPN,Qty\nLM317T,100".encode("utf-8")
+        content = b"\xef\xbb\xbf" + b"MPN,Qty\nLM317T,100"
         enc = detect_encoding(content)
         assert enc is not None
 
@@ -105,7 +105,7 @@ class TestDetectEncoding:
 
 class TestDecodeText:
     def test_decode_utf8(self):
-        content = "Hello".encode("utf-8")
+        content = b"Hello"
         text = decode_text(content)
         assert text == "Hello"
 
@@ -116,7 +116,7 @@ class TestDecodeText:
 
     def test_decode_with_replacement(self):
         """Bad bytes get replaced, not crash."""
-        content = b"\xff\xfe" + "test".encode("utf-8")
+        content = b"\xff\xfe" + b"test"
         text = decode_text(content)
         assert isinstance(text, str)
 
@@ -212,7 +212,7 @@ class TestDetectEncodingAdditional:
         """Falls back to manual detection when charset_normalizer raises ImportError."""
         from unittest.mock import patch
 
-        content = "Hello, World!".encode("utf-8")
+        content = b"Hello, World!"
         with patch("charset_normalizer.from_bytes", side_effect=ImportError("not installed")):
             enc = detect_encoding(content)
             assert enc is not None
@@ -221,7 +221,7 @@ class TestDetectEncodingAdditional:
         """Falls back when charset_normalizer raises other exception."""
         from unittest.mock import patch
 
-        content = "Hello".encode("utf-8")
+        content = b"Hello"
         with patch("charset_normalizer.from_bytes", side_effect=RuntimeError("unexpected")):
             enc = detect_encoding(content)
             assert enc is not None

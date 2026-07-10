@@ -24,7 +24,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,7 +44,7 @@ def mgr_user(db_session: Session) -> User:
         name="P4 Mgr",
         role="manager",
         azure_id="p4-mgr",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -59,7 +59,7 @@ def rep_user(db_session: Session) -> User:
         name="P4 Rep",
         role="sales",
         azure_id="p4-rep",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -74,7 +74,7 @@ def other_user(db_session: Session) -> User:
         name="P4 Other",
         role="sales",
         azure_id="p4-other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -89,7 +89,7 @@ def _company(db: Session, name: str, owner: User | None = None, account_type: st
         account_type=account_type,
         is_active=True,
         account_owner_id=owner.id if owner else None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.commit()
@@ -98,7 +98,7 @@ def _company(db: Session, name: str, owner: User | None = None, account_type: st
 
 
 def _contact(db: Session, company: Company, full_name: str, email: str) -> SiteContact:
-    site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True, created_at=datetime.now(timezone.utc))
+    site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True, created_at=datetime.now(UTC))
     db.add(site)
     db.flush()
     contact = SiteContact(
@@ -106,7 +106,7 @@ def _contact(db: Session, company: Company, full_name: str, email: str) -> SiteC
         full_name=full_name,
         email=email,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(contact)
     db.commit()

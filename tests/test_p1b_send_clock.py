@@ -15,7 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,7 +79,7 @@ class TestSendBatchRfqSentAt:
             }
         ]
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         with (
             patch("app.utils.graph_client.GraphClient", return_value=gc),
             patch("app.email_service.get_credential_cached", return_value=None),
@@ -92,7 +92,7 @@ class TestSendBatchRfqSentAt:
                 requisition_id=test_requisition.id,
                 vendor_groups=vendor_groups,
             )
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         assert results[0]["status"] == "sent"
 
@@ -101,7 +101,7 @@ class TestSendBatchRfqSentAt:
         # sent_at must be set and fall within the test window
         assert contact.sent_at is not None, "Contact.sent_at must be set at send time"
         # Normalise tz-naive values from SQLite
-        ca = contact.sent_at.replace(tzinfo=timezone.utc) if contact.sent_at.tzinfo is None else contact.sent_at
+        ca = contact.sent_at.replace(tzinfo=UTC) if contact.sent_at.tzinfo is None else contact.sent_at
         assert before <= ca <= after, f"sent_at {ca} not in [{before}, {after}]"
 
     @pytest.mark.asyncio
@@ -202,7 +202,7 @@ class TestScanSentFolderReconcile:
 
         # --- Step 1: simulate send_batch_rfq side-effects ---
         # Create the Contact (status=sent, sent_at set)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         contact = Contact(
             requisition_id=test_requisition.id,
             user_id=test_user.id,
@@ -308,7 +308,7 @@ class TestScanSentFolderReconcile:
         # No ActivityLog or Contact row exists (old send, pre-P1b)
 
         gc_mock = MagicMock()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         gc_mock.delta_query = AsyncMock(
             return_value=(
                 [
@@ -355,7 +355,7 @@ class TestReplyMatchingAfterReconcile:
 
         # Create a Contact with graph_conversation_id (set by _find_sent_message
         # right after send, OR by scan_sent_folder reconcile path)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         contact = Contact(
             requisition_id=test_requisition.id,
             user_id=test_user.id,

@@ -9,7 +9,7 @@ Depends on: app.template_env.templates.env, the shared empty_state.html partial 
     the sightings / approvals / tasks / parts / search / prospecting partials.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.template_env import templates
@@ -154,7 +154,7 @@ def test_approvals_halted_lane_shown_when_non_empty():
 def _tasks_ctx(**over):
     ctx = {
         "tasks": [],
-        "now_utc": datetime.now(timezone.utc),
+        "now_utc": datetime.now(UTC),
         "filter_status": "",
         "filter_priority": "",
         "filter_due": "",

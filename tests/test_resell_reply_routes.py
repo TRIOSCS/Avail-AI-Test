@@ -12,7 +12,7 @@ user, and non-owner cases seed the list under a different owner.
 Called by: pytest. Depends on: app.routers.resell, tests.conftest.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -97,7 +97,7 @@ class TestRepliesContext:
         # An outreach with NO conversation id must be excluded from the map.
         _outreach(db_session, el, buyer_card, test_user, conv=None, msg="mC")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         older = _reply(db_session, "cA", received_at=now - timedelta(hours=2), body="first")
         newer = _reply(db_session, "cA", received_at=now - timedelta(hours=1), body="second")
         _reply(db_session, "cB", received_at=now, body="onB")
@@ -118,7 +118,7 @@ class TestReplyViewerRoute:
     def test_renders_thread_for_owner(self, client, db_session: Session, test_user: User, buyer_card: VendorCard):
         el = _list(db_session, test_user)
         row = _outreach(db_session, el, buyer_card, test_user)
-        _reply(db_session, "conv-r", received_at=datetime.now(timezone.utc), body="Yes please")
+        _reply(db_session, "conv-r", received_at=datetime.now(UTC), body="Yes please")
 
         resp = client.get(f"/v2/partials/resell/{el.id}/outreach/{row.id}/reply")
         assert resp.status_code == 200

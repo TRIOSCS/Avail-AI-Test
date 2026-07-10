@@ -10,6 +10,7 @@ MaterialSpecFacet, the desc grammar (capacitors registered). No live network.
 """
 
 import asyncio
+from datetime import UTC
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -205,9 +206,9 @@ def test_pre_existing_counter_respected(db_session: Session):
     _card(db_session, "MID", sourced_qty_90d=50)
     conn = _FakeMouser()
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
     summary, counters = _run_cli(
         db_session,
         conn,

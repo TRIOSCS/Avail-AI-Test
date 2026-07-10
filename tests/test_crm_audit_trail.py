@@ -15,7 +15,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -56,11 +56,11 @@ def _scratch_engine_with_tables():
     return engine
 
 
-def _noop_fk(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_fk(*args, **kwargs):
     """No-op replacement for create_foreign_key — SQLite doesn't support ALTER FK."""
 
 
-def _noop_constraint(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_constraint(*args, **kwargs):
     """No-op replacement for drop_constraint — SQLite doesn't support ALTER FK."""
 
 
@@ -149,7 +149,7 @@ def _ensure_listeners():
 
 
 def _make_user(db: Session, email: str = "audit@test.com") -> User:
-    u = User(email=email, name="Audit User", role="buyer", created_at=datetime.now(timezone.utc))
+    u = User(email=email, name="Audit User", role="buyer", created_at=datetime.now(UTC))
     db.add(u)
     db.flush()
     return u
@@ -221,7 +221,7 @@ class TestContextvarSetOnCreate:
 class TestContextvarSetOnUpdate:
     def test_modified_by_updated_on_write(self, db_session: Session):
         creator = _make_user(db_session, "creator@test.com")
-        editor = User(email="editor@test.com", name="Editor", role="buyer", created_at=datetime.now(timezone.utc))
+        editor = User(email="editor@test.com", name="Editor", role="buyer", created_at=datetime.now(UTC))
         db_session.add(editor)
         db_session.flush()
 
@@ -270,7 +270,7 @@ class TestNoContextvarNulls:
 class TestNoCrossRequestLeak:
     def test_second_request_uses_new_user(self, db_session: Session):
         user1 = _make_user(db_session, "user1@test.com")
-        user2 = User(email="user2@test.com", name="User2", role="buyer", created_at=datetime.now(timezone.utc))
+        user2 = User(email="user2@test.com", name="User2", role="buyer", created_at=datetime.now(UTC))
         db_session.add(user2)
         db_session.flush()
 
@@ -406,7 +406,7 @@ class TestHTTPPathAuditIntegration:
         A second user edits the company; created_by_id must stay as the original creator
         and modified_by_id must switch to the editor.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.config import settings
         from app.database import get_db
@@ -417,7 +417,7 @@ class TestHTTPPathAuditIntegration:
             email="editor_http@test.com",
             name="HTTP Editor",
             role="buyer",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(editor)
         db_session.flush()

@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.orm import Session
@@ -155,7 +155,7 @@ class TestMaterialVendorHistoryLoopBody:
         sighting_mock.qty_available = None
         sighting_mock.unit_price = None
         sighting_mock.currency = None
-        sighting_mock.created_at = datetime.now(timezone.utc)
+        sighting_mock.created_at = datetime.now(UTC)
 
         sighting_chain = _make_query_chain([sighting_mock])
 
@@ -297,7 +297,7 @@ class TestEmailIntelligenceLoopBody:
         ei_row = _make_ei_row(
             sender_email="sales@future.com",
             sender_domain="future.com",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         ei_chain = _make_query_chain([ei_row])
         sighting_chain = _make_query_chain([])
@@ -359,7 +359,7 @@ class TestEmailIntelligenceLoopBody:
         sighting_mock.qty_available = None
         sighting_mock.unit_price = None
         sighting_mock.currency = None
-        sighting_mock.created_at = datetime.now(timezone.utc)
+        sighting_mock.created_at = datetime.now(UTC)
 
         sighting_chain = _make_query_chain([sighting_mock])
 
@@ -367,7 +367,7 @@ class TestEmailIntelligenceLoopBody:
         ei_row = _make_ei_row(
             sender_email="rfq@arrow.com",
             sender_domain="arrow.com",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         ei_chain = _make_query_chain([ei_row])
         history_chain = _make_query_chain([])
@@ -437,7 +437,7 @@ class TestEmailIntelligenceLoopBody:
         ei_row = _make_ei_row(
             sender_email="offer@gamma.net",
             sender_domain="gamma.net",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
 
         def patched_query(model, *args, **kwargs):

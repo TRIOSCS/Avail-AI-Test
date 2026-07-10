@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.exc import OperationalError
@@ -23,6 +23,7 @@ from app.services.vendor_duplicates import (
     _fuzzy_match_python,
     check_vendor_duplicate,
 )
+from tests.conftest import requires_postgres
 
 
 def _make_vendor(db: Session, normalized: str, display: str) -> VendorCard:
@@ -31,7 +32,7 @@ def _make_vendor(db: Session, normalized: str, display: str) -> VendorCard:
         display_name=display,
         emails=[],
         phones=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -156,35 +157,75 @@ class TestCheckVendorDuplicatePgTrgmFallback:
         assert results == fallback_result
 
 
+@requires_postgres
 class TestFuzzyMatchPgTrgmDirect:
-    def test_pg_trgm_with_mocked_session_returns_list(self):
-        """Call _fuzzy_match_pg_trgm with a mock session to cover the function body."""
-        mock_row = MagicMock()
-        mock_row.id = 99
-        mock_row.display_name = "Texas Instruments"
-        mock_row.score = 0.85
+    """Real-Postgres pg_trgm ranking tests (P6.2a).
 
-        mock_session = MagicMock()
-        (
-            mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value
-        ) = [mock_row]
+    The prior version of this class mocked the whole ORM chain
+    (``query().filter().order_by().limit().all()``) and asserted on the exact rows it
+    told the mock to return — i.e. it tested the mock, not pg_trgm's actual similarity()
+    ranking. These run against a real Postgres (``pg_session``, skipped without
+    PG_TEST_DSN) with real VendorCard rows so the ranking order, threshold cutoff, and
+    anchor-vs-candidates shape are genuinely exercised. The OperationalError/
+    ProgrammingError EXCEPTION-path tests above (``TestCheckVendorDuplicatePgTrgmFallback``)
+    keep their whole-session MagicMock — simulating a missing pg_trgm extension against a
+    real Postgres would require dropping/recreating the extension per test, which is not
+    worth the fixture complexity for a fallback branch that never touches ranking.
+    """
 
-        results = _fuzzy_match_pg_trgm(mock_session, "texas instruments")
+    def test_ranking_order_by_similarity_desc(self, pg_session):
+        """Closer matches to the anchor rank above weaker (but still >= threshold)
+        matches; a wholly dissimilar name is excluded entirely."""
+        _make_vendor(pg_session, "texas instruments", "Texas Instruments")  # anchor itself: sim=1.0
+        _make_vendor(pg_session, "texas instrument", "Texas Instrument")  # near-exact
+        _make_vendor(pg_session, "texas instrumints", "Texas Instrumints")  # 1-letter typo
+        _make_vendor(pg_session, "arrow electronics", "Arrow Electronics")  # unrelated — below threshold
+
+        results = _fuzzy_match_pg_trgm(pg_session, "texas instruments")
+
+        names = [r["name"] for r in results]
+        assert names[0] == "Texas Instruments"  # exact-normalized anchor ranks first
+        assert "Arrow Electronics" not in names  # dissimilar name never appears
+        scores = [r["score"] for r in results]
+        assert scores == sorted(scores, reverse=True)
+        assert all(r["match"] == "fuzzy" for r in results)
+
+    def test_threshold_cutoff_excludes_dissimilar_names(self, pg_session):
+        """Rows below TRIGRAM_SIMILARITY_THRESHOLD (0.3) never appear, regardless of how
+        many exist."""
+        _make_vendor(pg_session, "digikey electronics", "Digi-Key Electronics")
+        _make_vendor(pg_session, "zzz totally unrelated corp", "Totally Unrelated Corp")
+        _make_vendor(pg_session, "another random company", "Another Random Company")
+
+        results = _fuzzy_match_pg_trgm(pg_session, "digikey electronics")
 
         assert len(results) == 1
-        assert results[0]["id"] == 99
-        assert results[0]["name"] == "Texas Instruments"
-        assert results[0]["match"] == "fuzzy"
-        assert results[0]["score"] == 85
+        assert results[0]["name"] == "Digi-Key Electronics"
 
-    def test_pg_trgm_empty_result(self):
-        mock_session = MagicMock()
-        (
-            mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value
-        ) = []
+    def test_anchor_vs_candidates_shape(self, pg_session):
+        """Each match dict carries id/name/match/score keyed off the CANDIDATE row, not
+        the anchor string — the anchor is only the comparison operand."""
+        card = _make_vendor(pg_session, "mouser electronics", "Mouser Electronics")
 
-        results = _fuzzy_match_pg_trgm(mock_session, "no match")
+        results = _fuzzy_match_pg_trgm(pg_session, "mouser electronic")
 
+        assert len(results) == 1
+        assert results[0]["id"] == card.id
+        assert results[0]["name"] == "Mouser Electronics"
+        assert set(results[0].keys()) == {"id", "name", "match", "score"}
+        assert isinstance(results[0]["score"], int)
+
+    def test_capped_at_five_results(self, pg_session):
+        """Regardless of how many rows clear the threshold, at most 5 are returned."""
+        for i in range(8):
+            _make_vendor(pg_session, f"arrow electronics variant {i}", f"Arrow Electronics Variant {i}")
+
+        results = _fuzzy_match_pg_trgm(pg_session, "arrow electronics")
+
+        assert len(results) <= 5
+
+    def test_empty_db_returns_empty_list(self, pg_session):
+        results = _fuzzy_match_pg_trgm(pg_session, "any name")
         assert results == []
 
 

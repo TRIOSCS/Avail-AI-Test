@@ -21,7 +21,7 @@ Depends on: conftest (db_session), app.services.approvals.routing,
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -67,7 +67,7 @@ def _make_user(
         can_approve_qp_sales=can_approve_qp_sales,
         can_approve_qp_purchasing=can_approve_qp_purchasing,
         can_approve_purchase_orders=can_approve_purchase_orders,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -86,7 +86,7 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         customer_name="C2ACo",
         status="active",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -97,7 +97,7 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         line_items=[],
         status="sent",
         created_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()

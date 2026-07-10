@@ -12,16 +12,16 @@ Addresses performance audit findings:
 - requisitions: missing indexes on customer_site_id, created_by, cloned_from_id
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from sqlalchemy import text
 
 from alembic import op
 
 revision: str = "003_perf_fk_indexes"
-down_revision: Union[str, None] = "002_search_indexes"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "002_search_indexes"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _drop_index_if_exists(index_name: str, table_name: str) -> None:

@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/routers/htmx/vendors.py, conftest.py fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ def admin_user(db_session: Session) -> User:
         name="Gaps Admin",
         role="admin",
         azure_id="test-azure-gaps-admin",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -159,7 +159,7 @@ class TestVendorTabActivityOther:
             channel="email",  # NOT NULL in schema
             vendor_card_id=test_vendor_card.id,
             user_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -168,7 +168,7 @@ class TestVendorTabActivityOther:
         req.headers = {}
         user = db_session.query(User).first() or User(email="tmp@x.com", name="X", role="buyer", azure_id="x-az")
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<html/>")
             result = await vendor_tab(
                 request=req,
@@ -200,7 +200,7 @@ class TestVendorTabTasks:
         user = MagicMock()
 
         with (
-            patch("app.routers.htmx.vendors.template_response") as mock_tpl,
+            patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl,
             patch(
                 "app.services.task_service.get_open_tasks_for_vendor_card",
                 return_value=[],
@@ -342,7 +342,7 @@ class TestVendorContactEdit:
 
     def test_edit_contact_updates_full_name(self, client, db_session, test_vendor_card, test_vendor_contact):
         """Lines 897-918: full_name, title, phone submitted → contact updated."""
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<tr>row</tr>")
             resp = client.put(
                 f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}",
@@ -360,7 +360,7 @@ class TestVendorContactEdit:
 
     def test_edit_contact_email_change(self, client, db_session, test_vendor_card, test_vendor_contact):
         """Lines 907-911: email change (no collision) → email updated."""
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<tr>row</tr>")
             resp = client.put(
                 f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}",
@@ -407,7 +407,7 @@ class TestVendorAddCustomField:
 
     def test_add_custom_field_stores_and_renders(self, client, db_session, test_vendor_card):
         """Lines 1076-1092: label+value submitted → custom_fields updated."""
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>custom fields</div>")
             resp = client.post(
                 f"/v2/partials/vendors/{test_vendor_card.id}/custom-fields",
@@ -452,7 +452,7 @@ class TestVendorDeleteCustomField:
         test_vendor_card.custom_fields = {"RemoveMe": "value"}
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>fields</div>")
             resp = client.delete(f"/v2/partials/vendors/{test_vendor_card.id}/custom-fields/RemoveMe")
         assert resp.status_code == 200
@@ -470,7 +470,7 @@ class TestAddVendorReview:
         """Lines 1197-1213: valid rating + comment → VendorReview created, reviews returned."""
         from app.models import VendorReview
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>reviews</div>")
             resp = client.post(
                 f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
@@ -487,7 +487,7 @@ class TestAddVendorReview:
         """Lines 1197-1200: non-integer rating → defaults to 3."""
         from app.models import VendorReview
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx._shared_tabs.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>reviews</div>")
             resp = client.post(
                 f"/v2/partials/vendors/{test_vendor_card.id}/reviews",

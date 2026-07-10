@@ -15,7 +15,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -42,7 +42,7 @@ def _review(db: Session, vendor: VendorCard, user: User, **kw) -> VendorReview:
         user_id=user.id,
         rating=4,
         comment="Good vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = VendorReview(**defaults)
@@ -60,7 +60,7 @@ def _prospect(db: Session, vendor: VendorCard, **kw) -> ProspectContact:
         email=f"bob-{uuid.uuid4().hex[:6]}@vendor.com",
         source="web_search",
         confidence="medium",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectContact(**defaults)
@@ -82,7 +82,7 @@ def _rfq_contact(db: Session, req: Requisition, user: User | None = None, **kw) 
         status="sent",
         subject="RFQ for LM317T",
         parts_included=["LM317T"],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     if user is not None:
         defaults["user_id"] = user.id
@@ -221,7 +221,7 @@ class TestVendorReviews:
             name="Other",
             role="buyer",
             azure_id="other-az-01",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_user)
         db_session.commit()
@@ -313,7 +313,7 @@ class TestFollowUpsList:
     ) -> None:
         from datetime import timedelta
 
-        old_date = datetime.now(timezone.utc) - timedelta(days=10)
+        old_date = datetime.now(UTC) - timedelta(days=10)
         _rfq_contact(db_session, test_requisition, user=test_user, created_at=old_date)
         resp = client.get("/v2/partials/follow-ups")
         assert resp.status_code == 200
@@ -353,7 +353,7 @@ class TestResponseReview:
             subject="Re: RFQ",
             body="We have stock",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db.add(vr)
         db.commit()
@@ -450,20 +450,20 @@ class TestDeleteRequirement:
             name="REQ-A",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         req2 = Requisition(
             name="REQ-B",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([req1, req2])
         db_session.flush()
         item = Requirement(
             requisition_id=req2.id,
             primary_mpn="BC547",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()

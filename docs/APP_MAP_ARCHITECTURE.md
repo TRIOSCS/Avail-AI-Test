@@ -174,6 +174,19 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Real-time:** SSE via `hx-ext="sse"` for notifications
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
 - **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
+- **Lazy-load wrapper:** `lazy_body` macro (`partials/shared/_macros.html`) is the mandated
+  wrapper for any faceted/lazy-load sub-container (spinner/skeleton `caller()` block ->
+  `hx-get` on `trigger` swapped into an explicit `hx-target`, defaulting to `this`) — used by
+  `approvals/approvals_hub.html`, `buy_plans/hub.html`, `settings/index.html`,
+  `sightings/list.html`, `quotes/detail.html`, `resell/detail.html`, `resell/workspace.html`.
+  Never hand-roll an inner `hx-get` container without it.
+- **Typeahead is server-rendered, not client-fetch:** the customer picker
+  (`requisitions/_customer_typeahead_results.html`) and the vendor search dropdown
+  (`sightings/_vendor_search_results.html`) are both plain `hx-get`-debounced partials —
+  neither calls `fetch()` client-side (the pre-P5.2 pattern of preloading JSON and filtering
+  in Alpine `x-data` is retired for these two pickers). Follow this pattern for any new
+  typeahead: render the options list server-side and swap it in via HTMX, never ship data to
+  filter in JS.
 - **Modals:** One global wrapper in `base.html` driven by the `resizableModal()` Alpine
   component (`htmx_app.js`); every dialog loads into `#modal-content` via
   `$dispatch('open-modal', {url, wide})`. The panel (`.modal-shell`) is a flex column
@@ -192,8 +205,10 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 The HTMX/Alpine frontend partials are served by `app/routers/htmx_views.py` (the
 historical monolith) plus a growing **per-domain package `app/routers/htmx/`** that it
 is being split into one cohesive slice at a time. All sub-routers keep the same `/v2/...`
-URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
-`htmx_views_router` (so URLs are unchanged):
+URL space and the `htmx-views` tag. Most are mounted by `main.py` alongside
+`htmx_views_router` (so URLs are unchanged); the final 5 (`my_day.py`, `email_views.py`,
+`insights_views.py`, `search_views.py`, `requisitions_edit.py` — see below) are instead
+aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mount lines:
 
 - `app/routers/htmx/_shared.py` — shared module-level helpers/state used by both the
   monolith and the sub-routers: the Vite manifest loader (`_vite_manifest`/`_vite_assets`),
@@ -215,15 +230,25 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   ownership (claim/release/badge), vendor custom fields, reviews/nudges, and the AI contact
   finder (find/save/promote/delete). `htmx_views.py` re-imports `vendor_tab` (its vendor
   activity add-note route re-renders the Activity tab).
-- `app/routers/htmx/companies.py` — **CRM-cluster split (company/customer + contact slice)**:
-  the company/customer + contact partials (`/v2/partials/customers/*` + `/v2/partials/companies/*`
-  redirects + `/v2/partials/contacts/*`) — customers (account) list, global customer-contacts
-  list, company CRUD, CSV import (companies + contacts), bulk actions, segment/contact tags,
-  the inline-edit field registry + account/contact inline editors, custom fields, company +
-  contact merge, contact move, sites & site-contacts CRUD, account collaborators, the company
-  detail shell + tabs, the contacts-tab/suggested-contacts loops, and contact notes/files.
-  `htmx_views.py` re-imports `company_tab` (its company activity add-note route re-renders the
-  Activity tab); tests import `_staleness_tier` from here.
+- `app/routers/htmx/companies/` — **CRM-cluster split (company/customer + contact slice)**,
+  itself further split into a package (P4.3+) along its audited seams: `core.py` (customers/
+  account list, company CRUD, CSV bulk import preview/confirm for companies + contacts, bulk
+  actions), `detail.py` (the company detail shell + `company_tab` render path), `contacts.py`
+  (Contacts-tab CRUD, bulk actions, suggested-contacts + AI contact-discovery loops, contact
+  notes/history/files, contact move), `sites.py` (CustomerSite + site-contacts CRUD, account
+  collaborators), `merge.py` (company + contact duplicate merge), `tags.py` (segment/contact
+  tags), `custom_fields.py`, `saved_views.py` (filter presets), and `_registries.py` (the
+  inline-edit field registry — `apply_company_field`/`apply_contact_field` + `CANONICAL_ROLES`/
+  `FIELD_LABELS`). Every submodule imports and decorates the SAME `router` instance created in
+  `__init__.py` (byte-for-byte the object every route registers on), so the URL space is
+  unchanged (`/v2/partials/customers/*` + `/v2/partials/companies/*` redirects +
+  `/v2/partials/contacts/*`). **`__init__.py` re-exports every name the old single-file module
+  made patchable/importable** off `app.routers.htmx.companies` — the late-resolution package-
+  attribute lookup (`app.routers.htmx.companies.X`) keeps every existing
+  `unittest.mock.patch("app.routers.htmx.companies.X")` target working unchanged across the
+  split, same as `app.main` importing only `router`. `htmx_views.py` re-imports `company_tab`
+  (its company activity add-note route re-renders the Activity tab); tests import
+  `_staleness_tier` from here.
 - `app/routers/htmx/buy_plans.py` — **deal/sourcing-cluster split (Buy Plans / Approvals slice)**:
   the Approvals (Buy Plans) hub partials (`/v2/partials/approvals*` two-lens shell +
   `{tab}` body — only **My Queue** + **Pipeline** survive after Approvals-rework Phase F-2;
@@ -242,15 +267,25 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   it). **Trap:** the `settings/ops-group|users` routes are interleaved in the source
   between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they now
   live in `app/routers/htmx/settings.py`.
-- `app/routers/htmx/offers.py` — **deal/sourcing-cluster split (offer/RFQ/follow-up slice)**:
-  AI offer parsing (`/v2/partials/requisitions/{id}/parse-email|paste-offer|parse-offer|
-  save-parsed-offers`), offer CRUD + review/promote/reject/changelog (`/v2/partials/offers/*`),
-  quote-from-offers, activity logging, RFQ compose/cleanup/rephrase/send, follow-ups
-  (list/send/ai-draft/batch/badge), and vendor-response review/reply. Imports `requisition_tab`
-  from `requisitions` (every offer route re-renders the requisition offers/responses tab) and
-  `_safe_int`/`_safe_float` from `_shared`. **Trap:** the interleaved requisition-management
-  routes (bulk action, inline edit/win-prob/opp-value/row-action, delete/update requirement,
-  poll-inbox) are NOT offers and stay in `htmx_views.py`.
+- `app/routers/htmx/offers/` — **deal/sourcing-cluster split (offer/RFQ/follow-up slice)**,
+  itself further split into a package (P4.3+) along its audited seams: `crud.py` (AI offer
+  parsing — `/v2/partials/requisitions/{id}/parse-email|paste-offer|parse-offer|
+  save-parsed-offers` — plus offer CRUD + review/promote/reject/changelog
+  (`/v2/partials/offers/*`) and quote-from-offers), `rfq.py` (RFQ compose form, AI cleanup/
+  rephrase, RFQ send, `rfq_prepare_panel`), `follow_ups.py` (follow-up queue
+  list/send/ai-draft/batch/badge), and `replies.py` (vendor-response review/reply, manual
+  activity/phone-call logging). `__init__.py` builds its own `router` and `include_router()`s
+  all four sub-routers so `app/main.py` keeps mounting a single `htmx_offers_router` with no
+  change. **Test-patch note:** `template_response`/`requisition_tab`/`maybe_release_on_offer`/
+  `offer_review_queue` are re-exported at package level, but every sub-module call site
+  re-pulls them via a FUNCTION-LOCAL `from . import X` (never a module-level import) so
+  `patch("app.routers.htmx.offers.X")` still intercepts every call site post-split — a
+  module-level import would bind the pre-patch object permanently at import time. Imports
+  `requisition_tab` from `requisitions` (every offer route re-renders the requisition
+  offers/responses tab) and `_safe_int`/`_safe_float` from `_shared`. **Trap:** the interleaved
+  requisition-management routes (bulk action, inline edit/win-prob/opp-value/row-action,
+  delete/update requirement, poll-inbox) are NOT offers — they live in
+  `app/routers/htmx/requisitions_edit.py` (see below).
 - `app/routers/htmx/sourcing.py` — **deal/sourcing-cluster split (sourcing-engine slice)**:
   the self-contained sourcing surface (`/v2/sourcing/*` pages + `/v2/partials/sourcing/*`) —
   results page/stream, manual search trigger, lead detail/status/feedback, and the split-panel
@@ -272,8 +307,8 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
   vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health +
   data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
-  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (re-imported back into `htmx_views.py`
-  because the staying poll-inbox route calls it).
+  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (imported by
+  `app/routers/htmx/requisitions_edit.py` because its poll-inbox route calls it).
 - `app/routers/htmx/materials.py` — **tail split (materials-partials slice; distinct from the
   domain router `app/routers/materials.py`)**: the faceted list + filter sidebars
   (manufacturers/global/tree/sub), manufacturer search/add, AI interpret, faceted results,
@@ -295,19 +330,63 @@ URL space and the `htmx-views` tag, and `main.py` mounts each one alongside
   complete/delete/edit/snooze, and the account/contact + vendor activity add-note forms. Imports
   `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs); `htmx_views.py`
   re-imports `_build_ticket_list_context` for `error_reports.analyze_tickets`.
+- `app/routers/htmx/my_day.py` — **P4.3 final split (My Day / Tasks slice)**: the Tasks
+  page (`GET /v2/partials/my-day` + filter-bar re-render) plus create/snooze/reopen
+  mutations. Owns `_my_day_filtered_tasks`/`_my_day_results_response`; imports
+  `_coerce_task_priority` from `requisitions.py`.
+- `app/routers/htmx/email_views.py` — **P4.3 final split (email integration slice)**:
+  the Sprint 7 email thread viewer + AI summary, reply send (with the DNC hard-block),
+  and the email-intelligence dashboard partial.
+- `app/routers/htmx/insights_views.py` — **P4.3 final split (AI insights/knowledge/
+  dashboard slice)**: the Phase 6 AI-insights panels (requisitions/vendors/customers/
+  dashboard) + their refresh actions, the AI activity-digest cards
+  (requisition + customer), the top-level dashboard stats partial, and the Sprint 9
+  knowledge-base list/create routes. Moved verbatim — this is the surface P0.1/P2.8
+  most recently touched, so behavior must stay byte-for-byte identical.
+- `app/routers/htmx/search_views.py` — **P4.3 final split (search slice)**: global
+  type-ahead + AI search + full results page, the Part Dossier search-form entry point
+  + "what we know" history panel, the streaming MPN search (`search/run` + SSE
+  `search/stream` + `search/filter` + `search/lead-detail`), and the requisition-picker
+  "add shortlisted results to a requisition" flow. Owns `_get_enabled_sources` /
+  `_get_cached_search_results` (Redis-backed search-result cache reads).
+- `app/routers/htmx/requisitions_edit.py` — **P4.3 final split (requisition bulk +
+  inline-edit slice)**: the requisitions-list bulk action (owner reassign), inline
+  cell edit + save (name/status/urgency/deadline/owner), win-probability +
+  opportunity-value inline edits, row-level actions (claim/unclaim/won/lost/clone),
+  the inbox-poll trigger, and the requirement delete/update endpoints. Imports
+  `_best_quote_status`/`requisitions_list_partial` from `requisitions.py` and
+  `_run_inbox_scan_now` from `settings.py`.
 
-After this tail split, `htmx_views.py` retains only the cross-cutting surface: the full-page
-entry points (`v2_page` + `/v2/quotes` redirect), global search + the search/sourcing partials,
-the parts-workspace shell, AI digests, the requisitions inline-edit/bulk/row-action +
-requirement CRUD + poll-inbox routes, email integration, the dashboard + AI-insights panels,
-knowledge, the vendor stock-list import (`/v2/partials/vendors/import-stock`), My Day, and the
-shared helpers.
+After this final split, `htmx_views.py` retains only the cross-cutting surface: the
+full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace shell
+(`GET /v2/partials/parts/workspace`), the vendor stock-list import
+(`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
+(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). It no longer defines any
+`/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,
+or requisition bulk/inline-edit — those now live in the 5 modules above.
+
+**Registration pattern for this final split** differs from every prior domain above:
+instead of `main.py` importing and mounting each new sub-router individually (which
+would require touching `main.py`), `htmx_views.py` imports the 5 new routers and
+aggregates them into its own exported `router` via `router.include_router(...)` at
+module load time. `main.py` keeps its single, unchanged
+`app.include_router(htmx_views_router)` line — route registration is identical, only
+internally re-composed. `htmx_views.py` also re-imports every name tests
+patch/import directly at `app.routers.htmx_views.X` (`_get_cached_search_results`,
+`_get_enabled_sources`, `add_to_requisition`, `requisition_picker`, `search_filter`,
+`search_run`, `send_email_reply`, `update_requirement`) so those call sites keep
+resolving; a few `unittest.mock.patch("app.routers.htmx_views.X")` targets that
+actually intercept a collaborator called *from inside* the moved function (not just
+imported for re-export) were repointed to `app.routers.htmx.search_views.X` /
+`app.routers.htmx.requisitions_edit.X` so the patch still takes effect post-split.
 
 When extracting a domain: move the cohesive route block verbatim into a new
 `app/routers/htmx/<domain>.py` with its own `APIRouter(tags=["htmx-views"])`, pull any
 genuinely cross-cutting helpers into `_shared.py` (re-imported back into the monolith), and
-register the sub-router in `main.py`. Verify route parity (dump `app.routes` method+path,
-sort, diff — must be empty) before and after.
+register the sub-router in `main.py` (or, if `main.py` must stay untouched, aggregate it
+into the parent module's `router` via `include_router()` as `htmx_views.py` does above).
+Verify route parity (dump `app.routes` method+path, sort, diff — must be empty) before and
+after.
 
 ### HTMX Conventions
 
@@ -328,14 +407,14 @@ authoritative reference. Static-analysis tests in
 
 | Feature | Count | Directory |
 |---------|-------|-----------|
-| Requisitions | 32 | partials/requisitions/ |
+| Requisitions | 32 | partials/requisitions/ — incl. `_customer_typeahead_results.html` (server-rendered debounced customer-picker dropdown, `GET /v2/partials/requisitions/customer-typeahead`, swapped into `#customer-typeahead-results` inside `unified_modal.html`'s `customerPicker()` Alpine scope) |
 | Vendors | 16 | partials/vendors/ |
 | Customers | 14 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
 | Resell | 11 | partials/resell/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/resell.py`) |
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
-| Sightings | 7 | partials/sightings/ |
+| Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope) |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
 | Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |
@@ -343,7 +422,7 @@ authoritative reference. Static-analysis tests in
 | Tickets | 4 | partials/tickets/ |
 | Settings | 8 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
 | Shared | 18 | partials/shared/ |
-| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module** (renamed from Buy Plans), a **two-lens** shell at `/v2/approvals` (own primary-nav tab; legacy `/v2/buy-plans` 302s to it). `buy_plans/hub.html` is the shell with only two lenses after Approvals-rework **Phase F-2**: **My Queue** (`approvals/_surface_my_queue.html`, the role-aware "what needs YOU now" surface, default for non-supervisors) + **Pipeline** (`approvals/_surface_pipeline.html`, the 4-stage deal board Build/Approve/Purchase/Done via `approvals/_pipeline_macros.html` `deal_card` + `_pipeline_archive_rows.html` for lazy Done paging, default for supervisors). The old 5 stage lenses (Sales Orders / Buy Plans / Purchase Orders / Vendor Prepayments / Supervise) and their standalone `/orders` `/board` `/resource` `/archive` `/supervise` boards were **RETIRED** in F-2 (parity restored by My Queue + Pipeline in F-1; the `_tab_*`/`_pending_section`/`_board`/`_orders_queue`/`_resource_queue`/`_supervise`/`_archive*` templates were deleted). Routes (all `routers/htmx/buy_plans.py`): `GET /v2/partials/approvals` (shell, alias `/v2/partials/buy-plans`, `lens=` → `_default_lens`; unknown lens 404s), `GET /v2/partials/approvals/{tab}?scope=` (`approvals_tab_partial`, my-queue\|pipeline), `GET /v2/partials/approvals/pipeline-archive` (lazy Done), plus sales-order new/create + prepay decide. **Pipeline scope is role-defaulted** via `_can_see_all_deals` + `_resolve_deal_scope` (buyers/managers/ops default `all` + an All/Mine toggle; sales/traders locked to `mine`); the toggle reloads `#bp-hub-body` in place. `detail.html`/`_macros.html` are the single-plan view. Read models in `services/buyplan_hub.py` (`deals_board`/`completed_archive`/`my_queue` — the role-aware `QueueRow` builder; `buyer_line_queue`/`team_line_queue`/`resourcing_pool_queue`/`supervise_overview` survive as independently-tested read models) + `services/approvals/queue.py` (`build_queue_view`, per gate). The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
+| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module** (renamed from Buy Plans), a **two-lens** shell at `/v2/approvals` (own primary-nav tab; legacy `/v2/buy-plans` 302s to it). `buy_plans/hub.html` is the shell with only two lenses after Approvals-rework **Phase F-2**: **My Queue** (`approvals/_surface_my_queue.html`, the role-aware "what needs YOU now" surface, default for non-supervisors) + **Pipeline** (`approvals/_surface_pipeline.html`, the 4-stage deal board Build/Approve/Purchase/Done via `approvals/_pipeline_macros.html` `deal_card` + `_pipeline_archive_rows.html` for lazy Done paging, default for supervisors). The old 5 stage lenses (Sales Orders / Buy Plans / Purchase Orders / Vendor Prepayments / Supervise) and their standalone `/orders` `/board` `/resource` `/archive` `/supervise` boards were **RETIRED** in F-2 (parity restored by My Queue + Pipeline in F-1; the `_tab_*`/`_pending_section`/`_board`/`_orders_queue`/`_resource_queue`/`_supervise`/`_archive*` templates were deleted). Routes (all `routers/htmx/buy_plans.py`): `GET /v2/partials/approvals` (shell, alias `/v2/partials/buy-plans`, `lens=` → `_default_lens`; unknown lens 404s), `GET /v2/partials/approvals/{tab}?scope=` (`approvals_tab_partial`, my-queue\|pipeline), `GET /v2/partials/approvals/pipeline-archive` (lazy Done), plus sales-order new/create + prepay decide. **Pipeline scope is role-defaulted** via `_can_see_all_deals` + `_resolve_deal_scope` (buyers/managers/ops default `all` + an All/Mine toggle; sales/traders locked to `mine`); the toggle reloads `#bp-hub-body` in place. `detail.html`/`_macros.html` are the single-plan view. Read models in `services/buyplan_hub.py` (`deals_board`/`completed_archive`/`my_queue` — the role-aware `QueueRow` builder; `buyer_line_queue`/`team_line_queue`/`resourcing_pool_queue`/`supervise_overview` survive as independently-tested read models) + `services/approvals/queue.py` (`build_queue_view`, per gate). The write-side state machine, `services/buyplan_workflow.py` (1,855 lines), is now a **package** (P4.3+): `buyplan_approval.py` (submit/approve/reject, halt/resume, reset/cancel/resubmit, `check_completion`), `buyplan_po.py` (buyer PO confirmation + approver PO verification), `buyplan_lines.py` (claim/flag/resolve/resource + the line-editing API), and `buyplan_reports.py` (favoritism detection + case-report generation) — `__init__.py` re-exports every public AND internal name reached via `app.services.buyplan_workflow.<name>` so no caller/test needs to change its import path. The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
 
@@ -500,6 +579,17 @@ reader (>= 0.85) — see APP_MAP_INTERACTIONS "Worker second-pass ordering":
 | `cpu.py` | CPU grammars (wave 3B — steps 0/1/1b of `docs/CPU_DECODE_FEASIBILITY.md`): HP `IC,uP,<codename>,<model>,<GHz>,<W>,<MB>` + `SPS-CPU/SPS-PROC` spares forms (underscore decimals `1_7GHZ`, glued `E52650Lv2`, `Xeon-G/-S/-P/-B`), generic model strings (E3/E5/E7 vN, Scalable, Core iN, EPYC, Ryzen), core-count/GHz/TDP tokens (turbo/"up to" clocks dropped; TDP emits `tdp_watts`, never `wattage`; digit-range/sign markers block glued cores so "0-70C" temp ranges never read as 70 cores), HP codename→architecture map (CFL/KBL/BDW/SKL/HSW/CLX/ICL/SNB) → full names → vN map. Pentium Gold / Athlon Gold-Silver suppress the Scalable metal-word interpretation (no Xeon family/model from "PENTIUM GOLD 7505"); a dangling slash-alternate after a model ("E5-2620 V3/V4", "GOLD 6230R/6240R") expands to a second model so unique-or-omit skips the table merge. `is_cpu_pollution` step-0 deny-list (Murata/Panasonic/EPCOS B32-B88 clusters/AVX/TI/TVS/TE 6-7-digit/StorageTek shapes — the report's false-positive MPN classes, not its full ≥5.6k re-bucket sweep) makes polluted rows return None outright. Curated model→spec table `app/data/cpu_model_specs.json` (~280 entries: E5 v1-v4, Scalable gen1/2, E3/E7, EPYC 7001/7002, Core desktop) fills missing facets, merged UNDER desc tokens; socket is table-only; the drift guard pins every key as parser-reachable and vN-arch-coherent. Bare cores/TDP tokens AND codename-only architecture require a CPU-context signal (MPN-echo descs and "SPS-BASE ENCLOSURE KBL-R" chassis rows emit nothing). |
 | `writer.py` | Worker adapter `extract_and_record_specs`: writes via `record_spec(source="desc_parse", confidence=0.90)`, gated by `settings.desc_parse_enabled`; skips keys held at strictly higher confidence; never categorizes; per-card SAVEPOINT isolation; returns `{parsed, written, failed}`. |
 
+## Other Notable Service Modules
+
+Single-file services worth flagging individually (not grouped under a shared package):
+
+| Module | Purpose |
+|--------|---------|
+| `app/services/pricing_history.py` | One preload query over recent Quotes (sent/won/lost — a quote only counts as a real market price once it left draft) building an MPN/`material_card_id` -> last-quoted-price lookup dict. Seeds the smart default sell price on Build-Quote tab / builder-modal lines. Called by `app.services.quote_builder_service` + `app.routers.crm._helpers` (re-exported for the Quote-detail and Quote-list pricing-history panels). |
+| `app/services/vendor_reachability.py` | Two batched (no N+1) "can we actually reach this vendor/buyer card" gates — `cards_with_resolvable_email` (non-empty VendorContact email) and `dnc_emails_for_cards` (which of those are Do-Not-Contact flagged) — mirroring the RFQ/offer send-path contact resolution exactly. Advisory only (TOCTOU: the send path itself is the authoritative skip). Called by `app.routers.sightings` (vendor coverage modal, RFQ preview/send) and `app.services.buyer_affinity_service` (resell who-to-offer ranking). |
+| `app/services/company_import_service.py` | CSV bulk import for companies + contacts: parses into a status-flagged preview (no writes), then creates rows from the confirmed payload, deduped by normalized name/website/email, with authz-aware row flags for non-manager reps. Called by `app.routers.htmx.companies.core` (`import_companies_preview/confirm`, `import_contacts_preview/confirm`). |
+| `app/services/connector_registry.py` | Central connector-metadata registry (`get_connector_for_source`, `source_has_test_path`) — P4.1 extracted this out of `routers/sources.py` so `health_monitor.py` can resolve a connector's test path without importing the router; `routers/sources.py` still imports it back under its original private name for its own Test-button call site. See APP_MAP_INTERACTIONS.md § 9a (Settings → Connectors Tab) "Testability & Test-all concurrency" for the full testability contract. |
+
 ## Scripts (`scripts/`)
 
 | Script | Purpose |
@@ -507,6 +597,7 @@ reader (>= 0.85) — see APP_MAP_INTERACTIONS "Worker second-pass ordering":
 | `backfill_oem_enrichment.py` | Dry-run-first backfill over `not_found` / `not_catalogued` cards through the OEM tiers. Writes a coverage CSV; rolls back unless `--commit`. Shared `web_meter` budget cap (`--max-web-calls`, default 300) halts mid-run to prevent API overspend. The paced worker drains any remainder. |
 | `backup.sh` / `restore.sh` | `pg_dump` custom-format backups (verify → optional encrypt → checksum → rotate) and their restore. Optional at-rest encryption: when `BACKUP_GPG_PASSPHRASE` is set, the verified `.gz` is gpg-symmetric AES256-encrypted (`.dump.gz.gpg`) and the plaintext removed; unset → plaintext with a loud warning. The passphrase is fed via **stdin** (`--passphrase-fd 0`), never argv, so it never appears in `ps`. `restore.sh` transparently decrypts `.gpg` backups (needs the same passphrase) and encrypts its pre-restore safety dump too. (Repo-root `backup.sh` is the equivalent host-cron variant.) |
 | `backup-to-spaces.sh` | Off-site upload of the latest backup to DigitalOcean Spaces. Requests server-side encryption (`SPACES_SSE`, default `AES256`; set `SPACES_SSE=none` to disable) — defence-in-depth on top of the optional gpg-at-rest encryption. Skips cleanly when `DO_SPACES_*` is unset. |
+| `verify-backup.sh` | P1.5: scheduled verification that the newest backup is actually restorable — runs `restore.sh --verify` (checksum + `pg_restore --list` sanity check, read-only) against the `LATEST` marker inside the `db-backup` container. Exits nonzero with a clear message on failure so a corrupt backup can't sit unnoticed for the full 30-day retention. Installed as a weekly (Sun 04:00) systemd timer — units in `scripts/systemd/avail-backup-verify.{service,timer}`; install one-liner is in the script's own header comment. A failing run's `OnFailure=` fires `avail-backup-verify-alert.service`, which runs `backup-verify-alert.sh`: self-contained (no host mail/SMTP convention exists) — `systemd-cat -p err` + a `wall` broadcast + a durable `/root/backups/VERIFY_FAILED` marker that `deploy.sh`'s final step checks and re-surfaces on every deploy until manually cleared (`rm -f /root/backups/VERIFY_FAILED`). |
 
 ## CI & DevOps
 

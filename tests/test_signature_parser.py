@@ -9,7 +9,7 @@ Depends on: app.services.signature_parser, conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,7 +22,7 @@ from app.services.signature_parser import (
     parse_signature_ai,
     parse_signature_regex,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 # ── _extract_signature_block tests ─────────────────────────────────────
 
@@ -464,7 +464,7 @@ class TestCacheSignatureExtract:
             extraction_method="regex",
             confidence=0.4,
             seen_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(initial)
         db_session.commit()
@@ -485,7 +485,7 @@ class TestCacheSignatureExtract:
             extraction_method="regex",
             confidence=0.4,
             seen_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(initial)
         db_session.commit()
@@ -517,7 +517,7 @@ class TestCacheSignatureExtract:
             extraction_method="regex",
             confidence=0.3,
             seen_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(initial)
         db_session.commit()

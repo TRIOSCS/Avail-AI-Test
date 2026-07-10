@@ -4,7 +4,7 @@ Analyzes a customer's requisition history to identify brand and commodity
 concentrations, mirroring the vendor_analysis_service pattern.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -107,7 +107,7 @@ async def analyze_customer_materials(company_id: int, db_session=None):
             company.brand_tags = [str(b).strip() for b in brands if b][:5]
         if isinstance(commodities, list):
             company.commodity_tags = [str(c).strip() for c in commodities if c][:5]
-        company.material_tags_updated_at = datetime.now(timezone.utc)
+        company.material_tags_updated_at = datetime.now(UTC)
         db.commit()
 
         logger.info(

@@ -16,7 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from fastapi.responses import HTMLResponse
@@ -814,7 +814,7 @@ class TestVendorClaimRelease:
         sv = StrategicVendor(
             user_id=test_user.id,
             vendor_card_id=test_vendor_card.id,
-            expires_at=datetime(2099, 12, 31, tzinfo=timezone.utc),
+            expires_at=datetime(2099, 12, 31, tzinfo=UTC),
         )
         db_session.add(sv)
         db_session.commit()

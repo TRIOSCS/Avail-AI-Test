@@ -10,7 +10,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -50,14 +50,14 @@ def _clear_scheduler_jobs():
         pytest.param(
             "rt_test_123",
             "old_token",
-            datetime.now(timezone.utc) - timedelta(hours=1),
+            datetime.now(UTC) - timedelta(hours=1),
             True,
             id="expired_gets_refreshed",
         ),
         pytest.param(
             "rt_test_123",
             "still_valid",
-            datetime.now(timezone.utc) + timedelta(hours=1),
+            datetime.now(UTC) + timedelta(hours=1),
             False,
             id="valid_skipped",
         ),
@@ -93,7 +93,7 @@ def test_token_refresh_by_token_state(
 def test_token_refresh_handles_error_per_user(scheduler_db, test_user):
     """Errors during per-user refresh are caught and do not crash the job."""
     test_user.refresh_token = "rt_test_err"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.access_token = "old"
     scheduler_db.commit()
 
@@ -117,7 +117,7 @@ def test_token_refresh_outer_exception(scheduler_db):
 def test_token_refresh_redis_lock_acquired(scheduler_db, test_user):
     """Token refresh acquires Redis lock and refreshes user."""
     test_user.refresh_token = "rt_lock"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.access_token = "old_token"
     scheduler_db.commit()
 
@@ -139,7 +139,7 @@ def test_token_refresh_redis_lock_acquired(scheduler_db, test_user):
 def test_token_refresh_redis_lock_not_acquired(scheduler_db, test_user):
     """Token refresh skipped when Redis lock is held by another process."""
     test_user.refresh_token = "rt_lock_held"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.access_token = "old_token"
     scheduler_db.commit()
 
@@ -159,7 +159,7 @@ def test_token_refresh_redis_lock_not_acquired(scheduler_db, test_user):
 def test_token_refresh_redis_delete_exception(scheduler_db, test_user):
     """Redis lock delete exception in finally block is swallowed."""
     test_user.refresh_token = "rt_lock_del_err"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.access_token = "old_token"
     scheduler_db.commit()
 
@@ -184,7 +184,7 @@ def test_token_refresh_redis_delete_exception(scheduler_db, test_user):
 def test_get_valid_token_returns_current_when_valid(db_session, test_user):
     """Returns existing access_token when it has not expired."""
     test_user.access_token = "valid_token_abc"
-    test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
     db_session.commit()
 
     from app.utils.token_manager import get_valid_token
@@ -196,7 +196,7 @@ def test_get_valid_token_returns_current_when_valid(db_session, test_user):
 def test_get_valid_token_refreshes_when_near_expiry(db_session, test_user):
     """Refreshes token when it expires within 5 minutes."""
     test_user.access_token = "about_to_expire"
-    test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=3)
+    test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=3)
     test_user.refresh_token = "rt_123"
     db_session.commit()
 
@@ -214,7 +214,7 @@ def test_get_valid_token_refreshes_when_near_expiry(db_session, test_user):
 def test_get_valid_token_refreshes_when_expired(db_session, test_user):
     """Refreshes token when it has already expired."""
     test_user.access_token = "expired_token"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.refresh_token = "rt_456"
     db_session.commit()
 
@@ -229,7 +229,7 @@ def test_get_valid_token_refreshes_when_expired(db_session, test_user):
 def test_get_valid_token_sets_error_when_refresh_fails(db_session, test_user):
     """Sets m365_error_reason when token refresh fails."""
     test_user.access_token = "expired_token"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
     test_user.refresh_token = "rt_bad"
     db_session.commit()
 
@@ -391,7 +391,7 @@ def test_batch_results_handles_timeout(scheduler_db):
         patch(
             "asyncio.wait_for",
             new_callable=AsyncMock,
-            side_effect=asyncio.TimeoutError(),
+            side_effect=TimeoutError(),
         ),
     ):
         from app.jobs.core_jobs import _job_batch_results
@@ -422,7 +422,7 @@ def test_batch_results_handles_error(scheduler_db):
         pytest.param(
             "at_inbox",
             True,
-            datetime.now(timezone.utc) - timedelta(hours=2),
+            datetime.now(UTC) - timedelta(hours=2),
             True,
             id="connected_stale_scanned",
         ),
@@ -450,7 +450,7 @@ def test_batch_results_handles_error(scheduler_db):
         pytest.param(
             "at_inbox",
             True,
-            datetime.now(timezone.utc) - timedelta(minutes=5),
+            datetime.now(UTC) - timedelta(minutes=5),
             False,
             id="recently_scanned_skipped",
         ),
@@ -493,7 +493,7 @@ def test_inbox_scan_handles_timeout(scheduler_db, test_user):
     with (
         patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock, side_effect=slow_scan),
         patch("app.config.settings") as mock_settings,
-        patch("asyncio.wait_for", new_callable=AsyncMock, side_effect=asyncio.TimeoutError()),
+        patch("asyncio.wait_for", new_callable=AsyncMock, side_effect=TimeoutError()),
     ):
         mock_settings.inbox_scan_interval_min = 30
         from app.jobs.core_jobs import _job_inbox_scan
@@ -527,7 +527,7 @@ def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
     scheduler_db.commit()
 
     async def _timeout_scan(user, db):
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with (
         patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,
@@ -544,7 +544,7 @@ def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
                 coro.close()
             except Exception:
                 pass
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch("asyncio.wait_for", side_effect=_mock_wait_for):
             from app.jobs.core_jobs import _job_inbox_scan
@@ -646,7 +646,7 @@ def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
                 coro.close()
             except Exception:
                 pass
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         scheduler_db.commit = _fail_recovery_commit
 

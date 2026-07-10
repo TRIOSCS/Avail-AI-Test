@@ -8,7 +8,7 @@ Called by: routers/strategic.py, routers/crm/offers.py, email_service.py,
 Depends on: models/strategic.py, models/vendors.py, models/auth.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -26,7 +26,7 @@ TTL_DAYS = 39
 def _ensure_utc(dt: datetime) -> datetime:
     """Ensure a datetime is tz-aware UTC (SQLite strips tzinfo)."""
     if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -101,7 +101,7 @@ def claim_vendor(
     if not vendor:
         return None, "Vendor not found."
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = StrategicVendor(
         user_id=user_id,
         vendor_card_id=vendor_card_id,
@@ -143,7 +143,7 @@ def drop_vendor(db: Session, user_id: int, vendor_card_id: int, *, commit: bool 
     if not record:
         return False, "Vendor is not in your strategic list."
 
-    record.released_at = datetime.now(timezone.utc)
+    record.released_at = datetime.now(UTC)
     record.release_reason = "dropped"
     if commit:
         db.commit()
@@ -200,7 +200,7 @@ def record_offer(db: Session, vendor_card_id: int) -> bool:
     if not record:
         return False
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record.last_offer_at = now
     record.expires_at = now + timedelta(days=TTL_DAYS)
     db.commit()
@@ -217,7 +217,7 @@ def expire_stale(db: Session) -> int:
 
     Returns count expired.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stmt = select(StrategicVendor).where(
         StrategicVendor.expires_at < now,
         StrategicVendor.released_at.is_(None),
@@ -235,7 +235,7 @@ def expire_stale(db: Session) -> int:
 
 def get_expiring_soon(db: Session, days: int = 7) -> list[StrategicVendor]:
     """Return strategic vendors expiring within N days."""
-    cutoff = datetime.now(timezone.utc) + timedelta(days=days)
+    cutoff = datetime.now(UTC) + timedelta(days=days)
     stmt = (
         select(StrategicVendor)
         .options(
@@ -257,7 +257,7 @@ def get_vendor_status(db: Session, vendor_card_id: int) -> dict | None:
     if not record:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires = _ensure_utc(record.expires_at)
     days_left = max(0, (expires - now).days)
     return {

@@ -3,7 +3,7 @@ gated by settings.fru_crosswalk_enrich_enabled, over the FULL batch (not enriche
 and isolated from batch failures."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 from app.constants import MaterialEnrichmentStatus
@@ -35,7 +35,7 @@ def _seed_card(db, mpn: str) -> MaterialCard:
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         enrichment_status="unenriched",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

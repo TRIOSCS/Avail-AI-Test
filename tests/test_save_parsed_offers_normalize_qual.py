@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ def _make_requisition(db: Session, user: User, primary_mpn: str) -> Requisition:
         customer_name="Test Customer",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -39,7 +39,7 @@ def _make_requisition(db: Session, user: User, primary_mpn: str) -> Requisition:
             requisition_id=req.id,
             primary_mpn=primary_mpn,
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     db.commit()
@@ -93,3 +93,29 @@ def test_save_parsed_offer_visible_in_part_offers_for(client, db_session, test_u
     requirement = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).one()
     found = part_offers_for(requirement, db_session)
     assert any(o.mpn == mpn and o.normalized_mpn == normalize_mpn_key(mpn) for o in found)
+
+
+def test_save_parsed_offer_defaults_condition_to_offer_condition_new(client, db_session, test_user):
+    """P2.5: an omitted ``offers[0].condition`` form field must default to
+    OfferCondition.NEW (value-identical to the old raw "new" literal) —
+    app/routers/htmx/offers.py's save_parsed_offers form.get(...,
+    OfferCondition.NEW)."""
+    from app.constants import OfferCondition
+
+    mpn = "LM7805CT"
+    req = _make_requisition(db_session, test_user, primary_mpn=mpn)
+
+    resp = client.post(
+        f"/v2/partials/requisitions/{req.id}/save-parsed-offers",
+        data={
+            "vendor_name": "Arrow Electronics",
+            "offers[0].mpn": mpn,
+            "offers[0].qty_available": "100",
+            # condition intentionally omitted — must default, not error.
+        },
+    )
+    assert resp.status_code == 200
+
+    offer = db_session.query(Offer).filter(Offer.requisition_id == req.id).one()
+    assert offer.condition == OfferCondition.NEW
+    assert offer.condition == "new"

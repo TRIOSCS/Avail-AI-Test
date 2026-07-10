@@ -4,7 +4,7 @@
    Depends on: sightings/table.html, sightings/detail.html, Alpine.js, HTMX, SSE broker
 #}
 
-{% include "htmx/partials/shared/_macros.html" %}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 
 {# ── SSE Disconnect Banner ─────────────────────────────────── #}
 <div x-data="{
@@ -130,15 +130,12 @@
        stable container, NOT by the swapped table.html — so a group stays collapsed across
        filter swaps and reloads. table.html (filter bar + group rows) reads it by inheritance.
        Keyed per-surface ('sightings-group-collapse') so it never collides with the Sales Hub. #}
-    <div id="sightings-table" class="flex-1 flex flex-col min-h-0"
-         x-data="{ collapsed: $persist({}).as('sightings-group-collapse') }"
-         hx-get="/v2/partials/sightings"
-         hx-trigger="load"
-         hx-target="#sightings-table"
-         hx-swap="innerHTML"
-         hx-indicator="#sightings-load-spinner">
+    {# lazy_body macro structurally enforces the explicit hx-target guard
+       (see shared/_macros.html for the landmine rationale). #}
+    {% set _sightings_xdata %}x-data="{ collapsed: $persist({}).as('sightings-group-collapse') }"{% endset %}
+    {% call lazy_body('sightings-table', '/v2/partials/sightings', class_='flex-1 flex flex-col min-h-0', indicator='#sightings-load-spinner', extra_attrs=_sightings_xdata) %}
       <div id="sightings-load-spinner" class="htmx-indicator p-8 text-center text-gray-400">Loading requirements...</div>
-    </div>
+    {% endcall %}
   </div>
 
   {# ── Drag Handle (desktop only) — slim Sales-Hub treatment ─────── #}

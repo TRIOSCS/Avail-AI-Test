@@ -12,7 +12,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views, app.dependencies
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,7 +31,7 @@ def owned_company(db_session: Session, test_user: User) -> Company:
         name="Owned Corp IDOR",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -81,7 +81,7 @@ def unrelated_client(db_session: Session) -> TestClient:
         name="Stranger IDOR",
         role="buyer",
         azure_id="stranger-azure-idor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(stranger)
     db_session.commit()

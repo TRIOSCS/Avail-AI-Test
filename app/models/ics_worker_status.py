@@ -13,7 +13,7 @@ Called by: ics_worker.worker (heartbeat updates), ics_admin router (reads)
 Depends on: nothing (standalone table)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, CheckConstraint, Column, Integer, Text
 
@@ -33,6 +33,6 @@ class IcsWorkerStatus(Base):
     circuit_breaker_open = Column(Boolean, default=False)
     circuit_breaker_reason = Column(Text)
     daily_stats_json = Column(JSON)
-    updated_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (CheckConstraint("id = 1", name="ck_ics_worker_status_singleton"),)

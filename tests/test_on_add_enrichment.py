@@ -7,7 +7,7 @@ stop), the add-form modal route, and the has_validation_conflict faceted filter.
 Depends on: conftest.py (db_session, client), commodity_registry seeds.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ def _get_card(db: Session, mpn: str) -> MaterialCard:
 
 def _make_card(db: Session, normalized_mpn: str, display_mpn: str, **fields) -> MaterialCard:
     """Build, add, and flush a MaterialCard with created_at defaulted to now."""
-    fields.setdefault("created_at", datetime.now(timezone.utc))
+    fields.setdefault("created_at", datetime.now(UTC))
     card = MaterialCard(normalized_mpn=normalized_mpn, display_mpn=display_mpn, **fields)
     db.add(card)
     db.flush()
@@ -187,7 +187,7 @@ def test_readd_of_enriched_card_does_not_stamp(client, db_session: Session):
         "zztestpart66",
         "ZZTESTPART-66",
         enrichment_status="verified",
-        enriched_at=datetime.now(timezone.utc),
+        enriched_at=datetime.now(UTC),
     )
     db_session.commit()
 
@@ -285,7 +285,7 @@ def test_workspace_blocks_non_interactive_agent(db_session: Session):
         name="Agent",
         role="agent",
         azure_id="test-azure-agent-onadd",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(agent)
     db_session.commit()
@@ -393,7 +393,7 @@ def test_enrich_status_terminal_returns_286(client, db_session: Session):
         "poll-002",
         "POLL-002",
         enrichment_status="verified",
-        enriched_at=datetime.now(timezone.utc),
+        enriched_at=datetime.now(UTC),
     )
     db_session.commit()
 

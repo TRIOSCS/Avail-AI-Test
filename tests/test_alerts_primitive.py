@@ -5,7 +5,7 @@ Covers the alert_seen read-state model, record_seen idempotency, the seen-set he
 registry (per-tab sum + fail-quiet on a broken source).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -99,16 +99,16 @@ def test_seen_ref_ids_scoped_by_kind_and_user(db_session: Session, test_user: Us
 def test_recency_floor_uses_rolling_window(monkeypatch):
     monkeypatch.setattr(settings, "alert_recency_days", 30)
     monkeypatch.setattr(settings, "alerts_epoch", "")
-    now = datetime(2026, 6, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 18, tzinfo=UTC)
     assert recency_floor(now) == now - timedelta(days=30)
 
 
 def test_recency_floor_epoch_overrides_window(monkeypatch):
     monkeypatch.setattr(settings, "alert_recency_days", 30)
     monkeypatch.setattr(settings, "alerts_epoch", "2026-06-10T00:00:00+00:00")
-    now = datetime(2026, 6, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 18, tzinfo=UTC)
     # epoch (Jun 10) is later than now-30d (May 19), so the epoch wins.
-    assert recency_floor(now) == datetime(2026, 6, 10, tzinfo=timezone.utc)
+    assert recency_floor(now) == datetime(2026, 6, 10, tzinfo=UTC)
 
 
 # --- temperaments ----------------------------------------------------------

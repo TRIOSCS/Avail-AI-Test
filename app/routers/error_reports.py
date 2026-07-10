@@ -7,11 +7,11 @@ Called by: main.py (app.include_router), htmx/base.html (HTMX button)
 Depends on: models/trouble_ticket.py
 """
 
+import asyncio
 import base64
 import json
 import os
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -39,14 +39,14 @@ _upload_dir_ready = False
 
 class ErrorReportCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_LEN)
-    current_url: Optional[str] = Field(None, max_length=500)
-    screenshot: Optional[str] = Field(None, max_length=MAX_SCREENSHOT_B64_SIZE)
+    current_url: str | None = Field(None, max_length=500)
+    screenshot: str | None = Field(None, max_length=MAX_SCREENSHOT_B64_SIZE)
 
 
 class TicketUpdate(BaseModel):
-    status: Optional[TicketStatus] = None
-    resolution_notes: Optional[str] = Field(None, max_length=5000)
-    admin_notes: Optional[str] = Field(None, max_length=5000)
+    status: TicketStatus | None = None
+    resolution_notes: str | None = Field(None, max_length=5000)
+    admin_notes: str | None = Field(None, max_length=5000)
 
 
 class DiagnoseBulkBody(BaseModel):
@@ -89,7 +89,7 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
     return path
 
 
-def _coerce_ticket_type(value: Optional[str]) -> TicketType:
+def _coerce_ticket_type(value: str | None) -> TicketType:
     """Map an inbound ticket_type string to a TicketType, defaulting to BUG.
 
     Anything that is not exactly 'feature' (missing, unknown, or the legacy Report-a-
@@ -103,8 +103,8 @@ def _create_ticket(
     db: Session,
     user_id: int,
     message: str,
-    current_url: Optional[str] = None,
-    context: Optional[dict] = None,
+    current_url: str | None = None,
+    context: dict | None = None,
     ticket_type: TicketType = TicketType.BUG,
 ) -> TroubleTicket:
     """Create and persist a trouble ticket.
@@ -132,7 +132,7 @@ def _create_ticket(
         status=TicketStatus.SUBMITTED,
         risk_tier="low",
         category="other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(ticket)
     db.flush()
@@ -172,7 +172,7 @@ async def _generate_ai_summary(ticket_id: int):
 
         if summary:
             ticket.ai_summary = summary.strip()[:500]
-            ticket.updated_at = datetime.now(timezone.utc)
+            ticket.updated_at = datetime.now(UTC)
             db.commit()
             logger.debug("AI summary generated for ticket {}", ticket.ticket_number)
     except Exception:
@@ -213,7 +213,7 @@ async def submit_trouble_ticket(
     """Handle submission from trouble ticket form — accepts JSON or form data."""
     content_type = request.headers.get("content-type", "")
     screenshot_b64 = ua = viewport = error_log = network_log_raw = auto_ctx_raw = None
-    ticket_type_raw: Optional[str] = None
+    ticket_type_raw: str | None = None
 
     if "application/json" in content_type:
         try:
@@ -297,7 +297,9 @@ async def submit_trouble_ticket(
     # we must surface clearly rather than swallow (TT-0002).
     if screenshot_b64:
         try:
-            path = _save_screenshot(ticket.id, screenshot_b64)
+            # P2.6: _save_screenshot does a blocking disk write; dispatch it via
+            # asyncio.to_thread so a slow/contended disk doesn't stall the event loop.
+            path = await asyncio.to_thread(_save_screenshot, ticket.id, screenshot_b64)
             if path:
                 ticket.screenshot_path = path
                 db.commit()
@@ -325,6 +327,23 @@ async def submit_trouble_ticket(
 # ── Screenshot serving ────────────────────────────────────────────
 
 
+def _resolve_screenshot_file(path: str) -> str | None:
+    """Resolve + traversal-check a stored ticket screenshot path.
+
+    Sync (isfile/realpath hit the filesystem) — call via ``asyncio.to_thread``
+    so the event loop never blocks. Returns the resolved path, or None when
+    the file does not exist (caller falls back to legacy ``screenshot_b64``).
+    Raises HTTPException(403) on path traversal.
+    """
+    if not os.path.isfile(path):
+        return None
+    real_path = os.path.realpath(path)
+    if not real_path.startswith(os.path.realpath(UPLOAD_DIR) + os.sep):
+        logger.warning(f"Path traversal blocked: {path} resolves outside UPLOAD_DIR")
+        raise HTTPException(403, "Invalid screenshot path")
+    return real_path
+
+
 @router.get("/api/trouble-tickets/{ticket_id}/screenshot")
 async def get_ticket_screenshot(
     ticket_id: int,
@@ -339,12 +358,10 @@ async def get_ticket_screenshot(
     ticket = db.get(TroubleTicket, ticket_id)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
-    if ticket.screenshot_path and os.path.isfile(ticket.screenshot_path):
-        real_path = os.path.realpath(ticket.screenshot_path)
-        if not real_path.startswith(os.path.realpath(UPLOAD_DIR) + os.sep):
-            logger.warning(f"Path traversal blocked: {ticket.screenshot_path} resolves outside UPLOAD_DIR")
-            raise HTTPException(403, "Invalid screenshot path")
-        return FileResponse(real_path, media_type="image/png")
+    if ticket.screenshot_path:
+        real_path = await asyncio.to_thread(_resolve_screenshot_file, ticket.screenshot_path)
+        if real_path:
+            return FileResponse(real_path, media_type="image/png")
     if ticket.screenshot_b64:
         png_bytes = base64.b64decode(ticket.screenshot_b64)
         return Response(content=png_bytes, media_type="image/png")
@@ -369,7 +386,7 @@ async def create_error_report(
 @router.get("/api/error-reports")
 @router.get("/api/trouble-tickets")
 async def list_error_reports(
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_admin),
@@ -546,14 +563,14 @@ async def update_ticket(
     if body.status:
         ticket.status = body.status
         if body.status == TicketStatus.RESOLVED:
-            ticket.resolved_at = datetime.now(timezone.utc)
+            ticket.resolved_at = datetime.now(UTC)
             ticket.resolved_by_id = user.id
     if body.resolution_notes is not None:
         ticket.resolution_notes = body.resolution_notes
     if body.admin_notes is not None:
         ticket.admin_notes = body.admin_notes
 
-    ticket.updated_at = datetime.now(timezone.utc)
+    ticket.updated_at = datetime.now(UTC)
     db.commit()
 
     logger.info("Ticket {} updated to {} by user {}", ticket.ticket_number, ticket.status, user.id)
@@ -627,7 +644,7 @@ async def generate_prompt_endpoint(
     posted_notes = form.get("admin_notes")
     if posted_notes is not None:
         ticket.admin_notes = (posted_notes or "").strip() or None
-        ticket.updated_at = datetime.now(timezone.utc)
+        ticket.updated_at = datetime.now(UTC)
         db.commit()
 
     try:
@@ -688,7 +705,7 @@ async def bulk_status_endpoint(
 ):
     """Admin: bulk status change (resolve / wont_fix / in_progress / submitted)."""
     tickets = db.query(TroubleTicket).filter(TroubleTicket.id.in_(body.ticket_ids)).all()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for ticket in tickets:
         ticket.status = body.status
         ticket.updated_at = now

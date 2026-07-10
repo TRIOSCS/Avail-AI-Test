@@ -11,7 +11,7 @@ Called by: scheduler.py (background scan), routers/proactive.py (endpoints)
 Depends on: models, config, services/proactive_helpers
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def _score_recency(last_purchased_at: datetime | None) -> int:
     """Score 0-100 based on how recently the customer bought this part."""
     if not last_purchased_at:
         return 20
-    days = (datetime.now(timezone.utc) - last_purchased_at.replace(tzinfo=timezone.utc)).days
+    days = (datetime.now(UTC) - last_purchased_at.replace(tzinfo=UTC)).days
     if days <= 180:
         return 100
     if days <= 365:
@@ -272,11 +272,11 @@ def _get_watermark(db: Session) -> datetime:
         try:
             ts = datetime.fromisoformat(row.value)
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
             return ts
         except (ValueError, TypeError):
             pass
-    return datetime.now(timezone.utc) - timedelta(hours=settings.proactive_scan_interval_hours)
+    return datetime.now(UTC) - timedelta(hours=settings.proactive_scan_interval_hours)
 
 
 def _set_watermark(db: Session, ts: datetime):
@@ -560,7 +560,7 @@ def expire_old_matches(db: Session) -> int:
 
     Uses single UPDATE instead of load-then-loop. Returns count expired.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_match_expiry_days)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.proactive_match_expiry_days)
     count = (
         db.query(ProactiveMatch)
         .filter(

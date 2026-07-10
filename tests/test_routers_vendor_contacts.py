@@ -8,7 +8,7 @@ Depends on: routers/vendor_contacts.py, utils/vendor_helpers.py
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from app.models import Contact, Requisition, VendorCard, VendorContact, VendorResponse
@@ -277,7 +277,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -288,7 +288,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
         contact_type="email",
         vendor_name="Arrow Electronics",
         status="responded",
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     c2 = Contact(
         requisition_id=req.id,
@@ -296,7 +296,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
         contact_type="email",
         vendor_name="Arrow Electronics",
         status="quoted",
-        created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 2, tzinfo=UTC),
     )
     c3 = Contact(
         requisition_id=req.id,
@@ -304,7 +304,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
         contact_type="email",
         vendor_name="Arrow Electronics",
         status="sent",
-        created_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 3, tzinfo=UTC),
     )
     db_session.add_all([c1, c2, c3])
     db_session.flush()
@@ -312,7 +312,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
     vr = VendorResponse(
         contact_id=c1.id,
         vendor_name="Arrow Electronics",
-        received_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        received_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
     )
     db_session.add(vr)
     db_session.commit()

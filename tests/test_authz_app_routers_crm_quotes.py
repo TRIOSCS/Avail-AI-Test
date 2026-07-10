@@ -11,7 +11,7 @@ flip that user's role to SALES and reassign requisition/quote ownership to a
 different user (admin_user) to simulate a restricted non-owner.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -29,7 +29,7 @@ def other_owned_quote(db_session, test_requisition, admin_user, test_company):
         site_name="HQ",
         contact_email="buyer@example.com",
         contact_name="Buyer Person",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(site)
     db_session.flush()
@@ -42,7 +42,7 @@ def other_owned_quote(db_session, test_requisition, admin_user, test_company):
         line_items=[],
         status=QuoteStatus.DRAFT.value,
         created_by_id=admin_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(quote)
     db_session.commit()

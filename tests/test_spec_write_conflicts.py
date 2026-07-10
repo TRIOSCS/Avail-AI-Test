@@ -9,7 +9,7 @@ clearing via the PUT update + conflict-accept routes.
 Depends on: conftest.py (db_session, client), spec_write_service, spec_tiers.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ def _make_card(db: Session, mpn: str = "CONFLICT-001", category: str = "dram") -
         display_mpn=mpn,
         manufacturer="TestCo",
         category=category,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

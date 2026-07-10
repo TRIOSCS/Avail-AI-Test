@@ -7,7 +7,7 @@ non-owner must be unable to act on another user's requisition-scoped resource.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -36,7 +36,7 @@ def _make_contact(db, requisition_id, user_id) -> Contact:
         vendor_contact="sales@acme.example",
         subject="RFQ",
         status="sent",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(c)
     db.commit()

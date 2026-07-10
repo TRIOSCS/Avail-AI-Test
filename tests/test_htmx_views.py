@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,7 +46,7 @@ def _make_requisition(db: Session, user: User, **kw) -> Requisition:
         status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     req = Requisition(**defaults)
@@ -61,7 +61,7 @@ def _make_requirement(db: Session, req: Requisition, **kw) -> Requirement:
         primary_mpn="LM317T",
         target_qty=1000,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requirement(**defaults)
@@ -78,7 +78,7 @@ def _make_vendor_card(db: Session, **kw) -> VendorCard:
         phones=["+1-555-0100"],
         sighting_count=42,
         is_blacklisted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vc = VendorCard(**defaults)
@@ -96,7 +96,7 @@ def _make_offer(db: Session, req: Requisition, user: User, **kw) -> Offer:
         unit_price=0.50,
         entered_by_id=user.id,
         status=OfferStatus.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     o = Offer(**defaults)
@@ -109,7 +109,7 @@ def _make_company(db: Session, **kw) -> Company:
     defaults = dict(
         name="Acme Electronics",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     co = Company(**defaults)
@@ -136,7 +136,7 @@ def _make_quote(db: Session, req: Requisition, user: User, **kw) -> Quote:
         quote_number=f"Q-{req.id}-1",
         status=QuoteStatus.DRAFT,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     q = Quote(**defaults)
@@ -152,7 +152,7 @@ def _make_buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
         status=BuyPlanStatus.PENDING,
         submitted_by_id=user.id,
         total_cost=500.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     bp = BuyPlan(**defaults)
@@ -549,7 +549,7 @@ class TestRequisitionsGroupByCustomer:
 
     def test_list_sort_by_updated_at(self, client: TestClient, db_session: Session, test_user: User):
         """Sort by updated_at — updated rows first, NULLs sort last."""
-        _make_requisition(db_session, test_user, name="UPDATED-REQ", updated_at=datetime.now(timezone.utc))
+        _make_requisition(db_session, test_user, name="UPDATED-REQ", updated_at=datetime.now(UTC))
         _make_requisition(db_session, test_user, name="NEVER-UPDATED")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=updated_at&dir=desc")
@@ -960,7 +960,7 @@ class TestSearchAll:
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
         assert resp.status_code == 200
         assert 'hx-target="closest div"' not in resp.text
-        assert 'hx-post="/v2/partials/requisitions/{}/search-all"'.format(req.id) in resp.text
+        assert f'hx-post="/v2/partials/requisitions/{req.id}/search-all"' in resp.text
         assert 'hx-target="#tab-content"' in resp.text
 
     def test_search_all_refresh_banner_targets_tab_content(

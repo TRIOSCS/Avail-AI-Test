@@ -27,7 +27,7 @@ Depends on: MaterialCard, spec_tiers.set_category/tier_for, spec_write_service.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -328,7 +328,7 @@ def _tally_dry_run(
     effective_category = (effective_category or "").lower().strip()
     cache = _schema_cache_for(db, effective_category, schema_caches)
     if cache is not None:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         overlay = existing_specs  # already a copy — safe to annotate with simulated wins
         for key, value in part.specs.items():
             if spec_would_write(

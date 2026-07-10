@@ -1,4 +1,8 @@
-"""tests/test_utils_async_helpers.py — Tests for app/utils/async_helpers.py."""
+"""tests/test_utils_async_helpers.py — Tests for app/utils/async_helpers.py.
+
+safe_background_task() returns None (fire-and-forget); tests locate the scheduled task
+via the delta on the shared async_helpers._bg_tasks retention set.
+"""
 
 import asyncio
 import os
@@ -6,7 +10,15 @@ import os
 os.environ["TESTING"] = "1"
 
 
+from app.utils import async_helpers
 from app.utils.async_helpers import safe_background_task
+
+
+def _new_task(before: set) -> asyncio.Task:
+    """Return the single task added to async_helpers._bg_tasks since `before`."""
+    new_tasks = async_helpers._bg_tasks - before
+    assert len(new_tasks) == 1, f"expected exactly one new task, got {len(new_tasks)}"
+    return next(iter(new_tasks))
 
 
 class TestSafeBackgroundTask:
@@ -17,7 +29,10 @@ class TestSafeBackgroundTask:
         async def my_coro():
             called.append(1)
 
-        task = await safe_background_task(my_coro(), task_name="test", suppress_in_testing=True)
+        before = set(async_helpers._bg_tasks)
+        result = await safe_background_task(my_coro(), task_name="test", suppress_in_testing=True)
+        assert result is None
+        task = _new_task(before)
         assert isinstance(task, asyncio.Task)
         # Wait for the no-op task to complete
         await task
@@ -31,7 +46,9 @@ class TestSafeBackgroundTask:
         async def my_coro():
             result.append(42)
 
-        task = await safe_background_task(my_coro(), task_name="test", suppress_in_testing=False)
+        before = set(async_helpers._bg_tasks)
+        await safe_background_task(my_coro(), task_name="test", suppress_in_testing=False)
+        task = _new_task(before)
         await task
         assert result == [42]
 
@@ -41,10 +58,12 @@ class TestSafeBackgroundTask:
         async def bad_coro():
             raise ValueError("intentional error")
 
-        task = await safe_background_task(bad_coro(), task_name="test", suppress_in_testing=False)
+        before = set(async_helpers._bg_tasks)
+        await safe_background_task(bad_coro(), task_name="test", suppress_in_testing=False)
+        task = _new_task(before)
         # Should not raise
-        result = await task
-        assert result is None
+        outcome = await task
+        assert outcome is None
 
     async def test_task_name_set(self):
         """The task should have the specified name."""
@@ -52,7 +71,9 @@ class TestSafeBackgroundTask:
         async def my_coro():
             return None
 
-        task = await safe_background_task(my_coro(), task_name="my_named_task", suppress_in_testing=False)
+        before = set(async_helpers._bg_tasks)
+        await safe_background_task(my_coro(), task_name="my_named_task", suppress_in_testing=False)
+        task = _new_task(before)
         assert task.get_name() == "my_named_task"
         await task
 
@@ -63,16 +84,20 @@ class TestSafeBackgroundTask:
         async def my_coro():
             result.append(1)
 
-        task = await safe_background_task(my_coro(), task_name="test")
+        before = set(async_helpers._bg_tasks)
+        await safe_background_task(my_coro(), task_name="test")
+        task = _new_task(before)
         await task
         assert result == [1]
 
-    async def test_returns_asyncio_task(self):
-        """Always returns an asyncio.Task."""
+    async def test_returns_none(self):
+        """safe_background_task always returns None (fire-and-forget)."""
 
         async def my_coro():
             return 123
 
-        task = await safe_background_task(my_coro(), suppress_in_testing=True)
-        assert isinstance(task, asyncio.Task)
+        before = set(async_helpers._bg_tasks)
+        result = await safe_background_task(my_coro(), suppress_in_testing=True)
+        assert result is None
+        task = _new_task(before)
         await task

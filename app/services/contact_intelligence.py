@@ -14,7 +14,7 @@ Core functions:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import sqlalchemy.exc
@@ -58,7 +58,7 @@ def process_inbound_email_contact(
     received_at: datetime | None,
     user_id: int,
     requisition_id: int | None = None,
-) -> "VendorContact | None":
+) -> VendorContact | None:
     """Full pipeline: parse signature → match/create VendorContact → log interaction.
 
     Returns the VendorContact if one was created/updated, else None.
@@ -127,8 +127,8 @@ def process_inbound_email_contact(
         if linkedin and not vc.linkedin_url:
             vc.linkedin_url = linkedin
         vc.interaction_count = (vc.interaction_count or 0) + 1
-        vc.last_interaction_at = received_at or datetime.now(timezone.utc)
-        vc.last_seen_at = datetime.now(timezone.utc)
+        vc.last_interaction_at = received_at or datetime.now(UTC)
+        vc.last_seen_at = datetime.now(UTC)
     else:
         if not full_name:
             # Can't create contact without at least a name
@@ -146,7 +146,7 @@ def process_inbound_email_contact(
             source="email_signature",
             confidence=int((sig_data.get("confidence") or 0.5) * 100),
             interaction_count=1,
-            last_interaction_at=received_at or datetime.now(timezone.utc),
+            last_interaction_at=received_at or datetime.now(UTC),
         )
         db.add(vc)
         try:
@@ -157,7 +157,7 @@ def process_inbound_email_contact(
             return None
 
     # 4. Create ActivityLog
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activity = ActivityLog(
         user_id=user_id,
         activity_type="email_received",
@@ -236,7 +236,7 @@ def log_pipeline_event(
     quote_id: int | None = None,
     contact_email: str | None = None,
     notes: str | None = None,
-) -> "ActivityLog | None":
+) -> ActivityLog | None:
     """Log a pipeline event (rfq_sent, quote_received, po_issued, etc.).
 
     Resolves contact_email → vendor_contact_id if possible.
@@ -258,9 +258,9 @@ def log_pipeline_event(
             vendor_contact_id = vc.id
             contact_name = vc.full_name
             vc.interaction_count = (vc.interaction_count or 0) + 1
-            vc.last_interaction_at = datetime.now(timezone.utc)
+            vc.last_interaction_at = datetime.now(UTC)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activity = ActivityLog(
         user_id=user_id,
         activity_type=event_type,
@@ -321,11 +321,11 @@ def compute_contact_relationship_score(
     Returns: {relationship_score, recency_score, frequency_score,
               responsiveness_score, win_rate_score, channel_score, activity_trend}
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     # Recency: 0-7d = 100, decays linearly to 0 at 365d
     if last_interaction_at:
-        lia = last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc)
+        lia = last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or UTC)
         days_since = max((now - lia).total_seconds() / 86400, 0)
         if days_since <= RECENCY_IDEAL_DAYS:
             recency = 100.0
@@ -418,7 +418,7 @@ def compute_all_contact_scores(db: Session) -> dict:
     """
     from ..models import ActivityLog, VendorContact
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff_30d = now - timedelta(days=30)
     cutoff_60d = now - timedelta(days=60)
     cutoff_90d = now - timedelta(days=90)
@@ -576,7 +576,7 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
     if not contacts:
         return []
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     nudges = []
 
     for c in contacts:
@@ -586,14 +586,10 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
 
         days_since = None
         if c.last_interaction_at:
-            ts = (
-                c.last_interaction_at
-                if c.last_interaction_at.tzinfo
-                else c.last_interaction_at.replace(tzinfo=timezone.utc)
-            )
+            ts = c.last_interaction_at if c.last_interaction_at.tzinfo else c.last_interaction_at.replace(tzinfo=UTC)
             days_since = (now - ts).days
         elif c.last_seen_at:
-            ts = c.last_seen_at if c.last_seen_at.tzinfo else c.last_seen_at.replace(tzinfo=timezone.utc)
+            ts = c.last_seen_at if c.last_seen_at.tzinfo else c.last_seen_at.replace(tzinfo=UTC)
             days_since = (now - ts).days
 
         if days_since is None:

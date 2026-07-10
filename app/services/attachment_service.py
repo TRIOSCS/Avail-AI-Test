@@ -101,9 +101,9 @@ async def _store(
                 },
                 timeout=60,
             )
-        except Exception:
+        except Exception as e:
             logger.error("company-library attachment PUT errored url={}", url, exc_info=True)
-            raise HTTPException(502, "Couldn't save to the company library")
+            raise HTTPException(502, "Couldn't save to the company library") from e
         if r.status_code not in (200, 201):
             logger.error(
                 "company-library attachment PUT failed {} {} url={}",
@@ -114,9 +114,9 @@ async def _store(
             raise HTTPException(502, "Couldn't save to the company library")
         try:
             body = r.json()
-        except Exception:
+        except Exception as e:
             logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
-            raise HTTPException(502, "Couldn't save to the company library")
+            raise HTTPException(502, "Couldn't save to the company library") from e
         item_id = body.get("id")
         if not item_id:
             logger.error("attachment PUT response missing 'id' url={}", url)
@@ -144,9 +144,9 @@ async def _store(
             },
             timeout=30,
         )
-    except Exception:
+    except Exception as e:
         logger.error("OneDrive attachment PUT errored url={}", url, exc_info=True)
-        raise HTTPException(502, "Failed to upload to OneDrive")
+        raise HTTPException(502, "Failed to upload to OneDrive") from e
     if r.status_code == 401:
         raise HTTPException(401, "Microsoft token expired — please re-authenticate")
     if r.status_code == 403:
@@ -156,9 +156,9 @@ async def _store(
         raise HTTPException(502, "Failed to upload to OneDrive")
     try:
         body = r.json()
-    except Exception:
+    except Exception as e:
         logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
-        raise HTTPException(502, "Failed to upload to OneDrive")
+        raise HTTPException(502, "Failed to upload to OneDrive") from e
     item_id = body.get("id")
     if not item_id:
         logger.error("attachment PUT response missing 'id' url={}", url)
@@ -234,8 +234,8 @@ _DELETE_BASE: dict[str, str] = {
 
 
 def attachment_list_response(
-    request: "Request | None", *, kind: str, entity_id: int, rows: list
-) -> "Response | list[dict]":
+    request: Request | None, *, kind: str, entity_id: int, rows: list
+) -> Response | list[dict]:
     """Return the attachment list as HTML (HTMX) or JSON (back-compat).
 
     When the request carries `HX-Request`, render the shared list partial so the

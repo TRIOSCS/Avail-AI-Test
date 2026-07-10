@@ -11,7 +11,7 @@ Depends on: app.main (FastAPI app), conftest `client`/`db_session` fixtures,
             app.models.config.SystemConfig.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.constants import UserRole
 from app.models.config import SystemConfig
@@ -23,7 +23,7 @@ def _make_admin(test_user):
 
 
 def _seed(db_session, key, value):
-    db_session.add(SystemConfig(key=key, value=value, updated_at=datetime.now(timezone.utc)))
+    db_session.add(SystemConfig(key=key, value=value, updated_at=datetime.now(UTC)))
     db_session.commit()
 
 

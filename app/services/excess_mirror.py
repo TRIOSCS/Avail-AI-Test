@@ -30,7 +30,7 @@ Depends on: a request-scoped Session. Flushes so ids are set; the CALLER commits
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -305,7 +305,7 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     from .excess_service import get_excess_list
 
     excess_list = get_excess_list(db, list_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     excess_list.status = ExcessListStatus.OPEN
     excess_list.open_at = now
     excess_list.updated_at = now

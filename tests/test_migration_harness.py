@@ -21,7 +21,7 @@ def _make_upgrade(table_name):
     mirroring how real migrations reference `op` (``from alembic import op``)."""
     ns = {"sa": sa, "op": alembic_op}
     src = f"def upgrade():\n    op.create_table('{table_name}', sa.Column('id', sa.Integer, primary_key=True))\n"
-    exec(src, ns)  # noqa: S102 — controlled source, test-only
+    exec(src, ns)
     return ns["upgrade"], ns
 
 

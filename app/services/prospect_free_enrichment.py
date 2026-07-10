@@ -8,7 +8,7 @@ Called by: prospect_signals (batch enrichment), prospect_claim (on-claim enrichm
 Depends on: httpx (app.http_client), prospect_account model
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 from loguru import logger
@@ -173,7 +173,7 @@ async def enrich_from_sam_gov(prospect: ProspectAccount) -> dict | None:
             "organization_type": general.get("organizationTypeDesc"),
             "state": physical.get("stateOrProvinceCode"),
             "country": physical.get("countryCode"),
-            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -309,7 +309,7 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
         news = await enrich_from_google_news(prospect)
         if news:
             ed["recent_news"] = news
-            ed["news_retrieved_at"] = datetime.now(timezone.utc).isoformat()
+            ed["news_retrieved_at"] = datetime.now(UTC).isoformat()
             result["news_count"] = len(news)
 
             # Extract signal events from news
@@ -341,7 +341,7 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
         flag_modified(prospect, "enrichment_data")
         if prospect.readiness_signals is not None:
             flag_modified(prospect, "readiness_signals")
-        prospect.last_enriched_at = datetime.now(timezone.utc)
+        prospect.last_enriched_at = datetime.now(UTC)
         db.commit()
 
         logger.info(
@@ -382,7 +382,7 @@ async def enrich_contacts_for_prospect(prospect: ProspectAccount, db: Session, *
     last = ed.get("contacts_enriched_at")
     if not force and last:
         try:
-            if (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 86400:
+            if (datetime.now(UTC) - datetime.fromisoformat(last)).total_seconds() < 86400:
                 return {"enriched": False, "verified": 0, "unverified": 0}
         except (TypeError, ValueError):
             pass
@@ -401,7 +401,7 @@ async def enrich_contacts_for_prospect(prospect: ProspectAccount, db: Session, *
     prospect.readiness_signals = signals
 
     ed["contact_provider"] = (company or {}).get("source") or "lusha"
-    ed["contacts_enriched_at"] = datetime.now(timezone.utc).isoformat()
+    ed["contacts_enriched_at"] = datetime.now(UTC).isoformat()
     prospect.enrichment_data = ed
     flag_modified(prospect, "contacts_preview")
     flag_modified(prospect, "readiness_signals")
@@ -436,13 +436,13 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         # ── Paid enrichment (Lusha chain) — 24h skip gate lives in the helper ──
         try:
             await enrich_contacts_for_prospect(prospect, db)
-        except Exception as exc:  # noqa: BLE001 — paid step is best-effort; free data already saved
+        except Exception as exc:
             logger.warning("Paid enrichment step failed for prospect {}: {}", prospect_id, exc)
 
         try:
             warm = detect_warm_intros(prospect, db)
             one_liner = generate_one_liner(prospect, warm)
-        except Exception as exc:  # noqa: BLE001 — warm-intro is best-effort; free enrichment may have succeeded
+        except Exception as exc:
             logger.warning("Warm-intro step failed for prospect {}: {}", prospect_id, exc)
             warm, one_liner = {}, ""
 
@@ -477,9 +477,9 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
             from app.services.prospect_screening import screen_prospect
 
             await screen_prospect(prospect, db)
-        except Exception as _screen_exc:  # noqa: BLE001 — screen must not affect enrich_status
+        except Exception as _screen_exc:
             logger.warning("Screen step failed for prospect {}: {}", prospect_id, _screen_exc)
-    except Exception as exc:  # noqa: BLE001 — fire-and-forget must never propagate
+    except Exception as exc:
         logger.warning("Enrichment job failed for prospect {}: {}", prospect_id, exc)
         db.rollback()
         try:
@@ -490,7 +490,7 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
                 prospect.enrichment_data = ed
                 flag_modified(prospect, "enrichment_data")
                 db.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             db.rollback()
     finally:
         if owns_session:
@@ -585,7 +585,7 @@ async def run_contact_enrichment_batch(min_fit_score: int | None = None) -> dict
                     summary["prospects_processed"] += 1
                     summary["total_verified"] += result["verified"]
                     summary["total_contacts"] += result["verified"] + result["unverified"]
-            except Exception as e:  # noqa: BLE001 — one prospect must not abort the batch
+            except Exception as e:
                 logger.error("Contact enrichment error for prospect {}: {}", prospect_id, e)
                 db.rollback()
                 summary["errors"] += 1

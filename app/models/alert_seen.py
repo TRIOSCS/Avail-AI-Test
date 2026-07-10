@@ -9,7 +9,7 @@ Called by: models/__init__.py (re-exported for DB schema), services/alerts/*.
 Depends on: models/base.py, models/auth.py, database.py (UTCDateTime).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, ForeignKey, Index, Integer, String, UniqueConstraint
 
@@ -25,7 +25,7 @@ class AlertSeen(Base):
     # AlertKind value — offer_confirmed, inbound_customer, inbound_vendor, buyplan_action
     alert_kind = Column(String(40), nullable=False)
     ref_id = Column(Integer, nullable=False)  # the source item's id (offer.id, activity_log.id, ...)
-    seen_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    seen_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("user_id", "alert_kind", "ref_id", name="uq_alert_seen_user_kind_ref"),

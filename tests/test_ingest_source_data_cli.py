@@ -245,7 +245,7 @@ def test_main_apply_flag_forwarded():
     synthetic_report = _make_report(apply=True)
     captured: list = []
 
-    def fake_asyncio_run(coro):  # noqa: ANN001
+    def fake_asyncio_run(coro):
         # Inspect the coroutine's cr_frame locals to confirm apply=True was set.
         captured.append(coro)
         coro.close()  # prevent ResourceWarning

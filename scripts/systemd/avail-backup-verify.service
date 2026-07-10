@@ -1,0 +1,21 @@
+[Unit]
+Description=AvailAI weekly database backup verification (P1.5)
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+After=docker.service
+Requires=docker.service
+# On a nonzero exit (corrupt/missing newest backup), fire the self-contained
+# alert unit: systemd-cat -p err + wall broadcast + a durable
+# /root/backups/VERIFY_FAILED marker that deploy.sh checks on every deploy.
+# See scripts/backup-verify-alert.sh's header comment for the full rationale
+# and docs/APP_MAP_ARCHITECTURE.md's backup-scripts note.
+OnFailure=avail-backup-verify-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/availai
+ExecStart=/root/availai/scripts/verify-backup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

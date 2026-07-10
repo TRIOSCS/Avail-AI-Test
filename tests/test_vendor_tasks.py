@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,7 +59,7 @@ def vendor_card(db_session: Session) -> VendorCard:
         emails=["vendor@tasks.example"],
         phones=["+1-555-0200"],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -426,7 +426,7 @@ class TestVendorTaskDueBucketing:
     def test_due_midnight_today_renders_due_today_not_overdue(
         self, client, db_session: Session, vendor_card: VendorCard, test_user
     ):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         create_vendor_task(
             db_session,
             vendor_card_id=vendor_card.id,

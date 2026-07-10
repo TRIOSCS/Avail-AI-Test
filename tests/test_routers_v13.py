@@ -6,7 +6,7 @@ Step 2-4: Sales/ownership, routing, buyer profiles (separate steps)
 Covers: activity serialization, null handling, GET/POST activity endpoints
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -31,7 +31,7 @@ def _make_activity(**overrides):
         contact_name="Jane Vendor",
         subject="RFQ for LM317T",
         duration_seconds=None,
-        created_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=UTC),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -142,7 +142,7 @@ def test_get_vendor_activities_with_data(client, db_session, test_user, test_ven
         vendor_card_id=test_vendor_card.id,
         contact_email="sales@arrow.com",
         subject="RFQ for TPS65150",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(act)
     db_session.commit()
@@ -429,7 +429,7 @@ def test_attribute_activity_company(client, db_session, test_user, test_company)
         activity_type="email_sent",
         channel="email",
         contact_email="unknown@example.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(act)
     db_session.commit()
@@ -508,7 +508,7 @@ def test_vendor_activity_status_with_recent_activity(client, db_session, test_us
         channel="email",
         vendor_card_id=test_vendor_card.id,
         contact_email="sales@arrow.com",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(act)
     db_session.commit()

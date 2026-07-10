@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest fixtures, unittest.mock
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -25,7 +25,7 @@ class TestDaysSinceActivity:
         from app.services.ownership_service import _days_since_activity
 
         test_company.last_activity_at = None
-        result = _days_since_activity(test_company, datetime.now(timezone.utc))
+        result = _days_since_activity(test_company, datetime.now(UTC))
         assert result is None
 
     @pytest.mark.parametrize(
@@ -39,7 +39,7 @@ class TestDaysSinceActivity:
         """Correct day count; naive datetimes get UTC timezone applied."""
         from app.services.ownership_service import _days_since_activity
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_activity = now - timedelta(days=days)
         test_company.last_activity_at = last_activity.replace(tzinfo=None) if naive else last_activity
         result = _days_since_activity(test_company, now)
@@ -65,7 +65,7 @@ class TestWasWarnedToday:
             activity_type="ownership_warning",
             channel="system",
             company_id=test_company.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(warning)
         db_session.flush()
@@ -87,7 +87,7 @@ class TestSiteDaysSinceActivity:
         from app.services.ownership_service import _site_days_since_activity
 
         test_customer_site.last_activity_at = None
-        result = _site_days_since_activity(test_customer_site, datetime.now(timezone.utc))
+        result = _site_days_since_activity(test_customer_site, datetime.now(UTC))
         assert result is None
 
     @pytest.mark.parametrize(
@@ -101,7 +101,7 @@ class TestSiteDaysSinceActivity:
         """Correct day count; naive datetimes get UTC timezone applied."""
         from app.services.ownership_service import _site_days_since_activity
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_activity = now - timedelta(days=days)
         test_customer_site.last_activity_at = last_activity.replace(tzinfo=None) if naive else last_activity
         result = _site_days_since_activity(test_customer_site, now)
@@ -130,7 +130,7 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=200)
+        test_company.last_activity_at = datetime.now(UTC) - timedelta(days=200)
         test_company.is_active = True
         db_session.commit()
 
@@ -155,7 +155,7 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=85)
+        test_company.last_activity_at = datetime.now(UTC) - timedelta(days=85)
         test_company.is_active = True
         db_session.commit()
 
@@ -177,7 +177,7 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=85)
+        test_company.last_activity_at = datetime.now(UTC) - timedelta(days=85)
         test_company.is_active = True
         db_session.flush()
 
@@ -187,7 +187,7 @@ class TestRunOwnershipSweep:
             activity_type="ownership_warning",
             channel="system",
             company_id=test_company.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(warning)
         db_session.commit()
@@ -212,7 +212,7 @@ class TestRunOwnershipSweep:
 
         test_company.account_owner_id = sales_user.id
         test_company.last_activity_at = None
-        test_company.created_at = datetime.now(timezone.utc) - timedelta(days=95)
+        test_company.created_at = datetime.now(UTC) - timedelta(days=95)
         test_company.is_active = True
         db_session.commit()
 
@@ -234,7 +234,7 @@ class TestRunOwnershipSweep:
         from app.services.ownership_service import run_ownership_sweep
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=10)
+        test_company.last_activity_at = datetime.now(UTC) - timedelta(days=10)
         test_company.is_active = True
         db_session.commit()
 
@@ -332,7 +332,7 @@ class TestCheckAndClaimOpenAccount:
         from app.services.ownership_service import check_and_claim_open_account
 
         test_company.account_owner_id = None
-        test_company.ownership_cleared_at = datetime.now(timezone.utc)
+        test_company.ownership_cleared_at = datetime.now(UTC)
         db_session.commit()
 
         check_and_claim_open_account(test_company.id, sales_user.id, db_session)
@@ -374,7 +374,7 @@ class TestRunSiteOwnershipSweep:
         from app.services.ownership_service import run_site_ownership_sweep
 
         test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=31)
+        test_customer_site.last_activity_at = datetime.now(UTC) - timedelta(days=31)
         test_customer_site.is_active = True
         db_session.commit()
 
@@ -391,7 +391,7 @@ class TestRunSiteOwnershipSweep:
         from app.services.ownership_service import run_site_ownership_sweep
 
         test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=25)
+        test_customer_site.last_activity_at = datetime.now(UTC) - timedelta(days=25)
         test_customer_site.is_active = True
         db_session.commit()
 
@@ -407,7 +407,7 @@ class TestRunSiteOwnershipSweep:
 
         test_customer_site.owner_id = sales_user.id
         test_customer_site.last_activity_at = None
-        test_customer_site.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+        test_customer_site.created_at = datetime.now(UTC) - timedelta(days=40)
         test_customer_site.is_active = True
         db_session.commit()
 
@@ -422,7 +422,7 @@ class TestRunSiteOwnershipSweep:
         from app.services.ownership_service import run_site_ownership_sweep
 
         test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        test_customer_site.last_activity_at = datetime.now(UTC) - timedelta(days=5)
         test_customer_site.is_active = True
         db_session.commit()
 

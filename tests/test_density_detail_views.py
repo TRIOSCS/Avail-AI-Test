@@ -23,7 +23,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -122,9 +122,9 @@ def _seed_material(db: Session) -> MaterialCard:
         package_type="TO-220",
         rohs_status="compliant",
         search_count=3,
-        last_searched_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        last_searched_at=datetime(2026, 6, 1, tzinfo=UTC),
         enrichment_status="verified",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -183,7 +183,7 @@ class TestDossierHeroDensity:
             display_mpn="DENS555",
             manufacturer="TI",
             search_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()

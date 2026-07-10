@@ -22,7 +22,7 @@ Depends on: conftest fixtures (client, db_session, test_user, test_material_card
             app.routers.htmx.materials, app.services.material_enrich_runs.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -51,7 +51,7 @@ def _make_card(db: Session, mpn: str, *, status: str = "unenriched", enriched: b
         manufacturer="TI",
         search_count=0,
         enrichment_status=status,
-        enriched_at=datetime.now(timezone.utc) if enriched else None,
+        enriched_at=datetime.now(UTC) if enriched else None,
     )
     db.add(card)
     db.commit()

@@ -39,7 +39,7 @@ Depends on: models (ExcessOutreach, ExcessOffer, ExcessList, VendorCard, Company
             email_service, excess_service (can_post), activity_service, vendor_utils
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -468,7 +468,7 @@ async def _finalize_outreach_send(
     result_by_email: dict[str, dict] = {(r.get("vendor_email") or "").lower(): r for r in send_results}
 
     gc = GraphClient(token)
-    send_time = datetime.now(timezone.utc)
+    send_time = datetime.now(UTC)
     finalized: list[ExcessOutreach] = []
     for card, email, rows in pending:
         result = result_by_email.get((email or "").lower(), {})

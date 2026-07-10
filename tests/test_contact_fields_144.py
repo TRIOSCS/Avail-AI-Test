@@ -15,6 +15,8 @@ Depends on: app.models.crm, app.models.tags, app.routers.htmx_views, conftest.py
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
@@ -570,7 +572,7 @@ class TestEditFormReportsToSelect:
 def unrelated_client_144(db_session: Session):
     """TestClient where the authenticated user has NO ownership relation to any
     company."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.database import get_db
     from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
@@ -581,7 +583,7 @@ def unrelated_client_144(db_session: Session):
         name="Stranger 144",
         role="buyer",
         azure_id="stranger-azure-144",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(stranger)
     db_session.commit()

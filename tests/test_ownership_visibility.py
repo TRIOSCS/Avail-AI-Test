@@ -14,6 +14,7 @@ Called by: pytest
 Depends on: app.dependencies, app.services.crm_service, app.models
 """
 
+from datetime import UTC
 from unittest.mock import patch
 
 import pytest
@@ -460,7 +461,7 @@ def test_inbound_alert_site_owner_sees_company(_users_and_company, db_session):
     Phase 2 expanded visibility: reps who own a site see the account's alerts even
     if they are not the account_owner.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.constants import Channel, Direction
     from app.models.intelligence import ActivityLog
@@ -474,7 +475,7 @@ def test_inbound_alert_site_owner_sees_company(_users_and_company, db_session):
     company.account_type = "Customer"
     db_session.commit()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activity = ActivityLog(
         activity_type="email_received",
         channel=Channel.EMAIL,
@@ -495,7 +496,7 @@ def test_inbound_alert_site_owner_sees_company(_users_and_company, db_session):
 
 def test_inbound_alert_manager_sees_all(_users_and_company, db_session):
     """Manager sees inbound-customer alerts for all Customer accounts."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.constants import Channel, Direction
     from app.models.intelligence import ActivityLog
@@ -508,7 +509,7 @@ def test_inbound_alert_manager_sees_all(_users_and_company, db_session):
     company.account_type = "Customer"
     db_session.commit()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activity = ActivityLog(
         activity_type="email_received",
         channel=Channel.EMAIL,
@@ -530,7 +531,7 @@ def test_inbound_alert_manager_sees_all(_users_and_company, db_session):
 def test_inbound_alert_unrelated_rep_sees_nothing(_users_and_company, db_session):
     """An unrelated rep gets zero inbound-customer alerts for a company they don't
     manage."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.constants import Channel, Direction
     from app.models.intelligence import ActivityLog
@@ -543,7 +544,7 @@ def test_inbound_alert_unrelated_rep_sees_nothing(_users_and_company, db_session
     company.account_type = "Customer"
     db_session.commit()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         ActivityLog(
             activity_type="email_received",

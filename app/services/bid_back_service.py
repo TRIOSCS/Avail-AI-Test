@@ -18,7 +18,7 @@ Depends on: models.excess (CustomerBid/Line, ExcessList, ExcessLineItem), consta
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -307,7 +307,7 @@ async def send_bid_back(
         raise HTTPException(502, f"Bid email could not be sent ({reason})")
 
     bid.status = CustomerBidStatus.SENT
-    bid.sent_at = datetime.now(timezone.utc)
+    bid.sent_at = datetime.now(UTC)
     db.commit()
     db.refresh(bid)
     logger.info(
@@ -342,7 +342,7 @@ def record_bid_response(
         raise HTTPException(409, "Only a sent bid can be accepted or rejected")
 
     bid.status = CustomerBidStatus.ACCEPTED if accepted else CustomerBidStatus.REJECTED
-    bid.responded_at = datetime.now(timezone.utc)
+    bid.responded_at = datetime.now(UTC)
     bid.responded_by_id = owner.id
     db.commit()
     db.refresh(bid)

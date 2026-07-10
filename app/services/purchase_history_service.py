@@ -7,7 +7,7 @@ Also provides record_buyplan_purchase_history() — called by the buy-plan compl
 to feed CPH rows from verified buy-plan lines.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from loguru import logger
@@ -33,7 +33,7 @@ def upsert_purchase(
     On conflict: increments purchase_count, updates rolling avg price,
     accumulates total_quantity.
     """
-    now = purchased_at or datetime.now(timezone.utc)
+    now = purchased_at or datetime.now(UTC)
 
     # Get display MPN from material card
     card = db.get(MaterialCard, material_card_id)
@@ -113,7 +113,7 @@ def record_buyplan_purchase_history(db: Session, plan, *, refresh: bool = True) 
     company_id = site.company_id if site else None
     if not company_id:
         logger.warning("BUYPLAN_CPH: plan {} has no customer company — skipping", plan.id)
-        plan.purchase_history_recorded_at = datetime.now(timezone.utc)
+        plan.purchase_history_recorded_at = datetime.now(UTC)
         db.flush()
         return []
 
@@ -145,7 +145,7 @@ def record_buyplan_purchase_history(db: Session, plan, *, refresh: bool = True) 
         )
         affected.append(card_id)
 
-    plan.purchase_history_recorded_at = datetime.now(timezone.utc)
+    plan.purchase_history_recorded_at = datetime.now(UTC)
     db.flush()
     logger.info(
         "BUYPLAN_CPH: plan {} recorded {} parts for company {}",
@@ -187,6 +187,6 @@ def refresh_matches_for_cards(db: Session, card_ids: list[int], *, per_card_limi
         for (offer_id,) in offers:
             try:
                 created += len(find_matches_for_offer(offer_id, db))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("BUYPLAN_CPH: match refresh failed for offer {}", offer_id)
     return created

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..models import VendorCard
 from ..utils.vendor_helpers import find_vendor_card_by_name
-from ..vendor_utils import normalize_vendor_name
+from ..vendor_utils import fuzzy_dedup_scan, normalize_vendor_name
 
 FUZZY_MATCH_POOL_SIZE = 500  # Max vendors loaded for fuzzy duplicate check
 TRIGRAM_SIMILARITY_THRESHOLD = 0.3  # pg_trgm similarity threshold (0.3 ≈ 80+ rapidfuzz score)
@@ -51,26 +51,23 @@ def _fuzzy_match_pg_trgm(db: Session, norm: str) -> list[dict]:
 def _fuzzy_match_python(db: Session, norm: str) -> list[dict]:
     """Fallback O(n) fuzzy match using rapidfuzz (for SQLite / environments without
     pg_trgm)."""
-    try:
-        from rapidfuzz import fuzz
-    except ImportError:  # pragma: no cover
-        return []
-
     existing = (
         db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(FUZZY_MATCH_POOL_SIZE).all()
     )
-    matches = []
-    for row in existing:
-        score = fuzz.token_sort_ratio(norm, row.normalized_name)
-        if score >= 80:
-            matches.append(
-                {
-                    "id": row.id,
-                    "name": row.display_name,
-                    "match": "fuzzy",
-                    "score": round(score),
-                }
-            )
+    try:
+        scanned = fuzzy_dedup_scan(existing, lambda row: row.normalized_name, threshold=80, anchor_key=norm)
+    except ImportError:  # pragma: no cover
+        return []
+
+    matches = [
+        {
+            "id": row.id,
+            "name": row.display_name,
+            "match": "fuzzy",
+            "score": round(score),
+        }
+        for row, _, score in scanned
+    ]
     matches.sort(key=lambda m: m["score"], reverse=True)
     return matches[:5]
 

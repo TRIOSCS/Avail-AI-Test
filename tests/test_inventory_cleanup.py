@@ -14,12 +14,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.main import app
+from tests._route_helpers import iter_routes
 
 
 def _paths(method: str | None = None) -> set[str]:
     """Set of registered route paths, optionally filtered to a single HTTP method."""
     out: set[str] = set()
-    for route in app.routes:
+    for route in iter_routes(app.routes):
         methods = getattr(route, "methods", None) or set()
         if method is None or method in methods:
             out.add(getattr(route, "path", None))

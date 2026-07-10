@@ -19,7 +19,7 @@ app/management/backfill_oem_crosswalk.py (paced drain CLI).
 Depends on: app/constants.OemCrosswalkStatus (status vocabulary), Base, UTCDateTime.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, CheckConstraint, Column, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import validates
@@ -61,11 +61,11 @@ class OemCrosswalk(Base):
     # Drives the negative-cache retry window (no_match rows stale after 90 days).
     looked_up_at = Column(UTCDateTime, nullable=False)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     @validates("vendor")

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/buyer_leaderboard.py, tests/conftest.py
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -28,7 +28,7 @@ def _make_buyer(db: Session, email: str = "buyer@trioscs.com", role: str = "buye
         name=email.split("@")[0],
         role=role,
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -43,7 +43,7 @@ def _make_requisition(db: Session, user: User):
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -114,7 +114,7 @@ class TestComputeBuyerLeaderboardSingleBuyer:
 
     def test_buyer_with_month_offers_earns_pts_logged(self, db_session: Session):
         buyer = _make_buyer(db_session, "buyer_offers@trioscs.com")
-        month_start = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        month_start = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
         _make_offer(db_session, buyer, month_start)
         _make_offer(db_session, buyer, month_start + timedelta(days=5))
         db_session.commit()
@@ -127,7 +127,7 @@ class TestComputeBuyerLeaderboardSingleBuyer:
 
     def test_stock_list_uploads_earn_pts_stock(self, db_session: Session):
         buyer = _make_buyer(db_session, "stock_buyer@trioscs.com")
-        may_start = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        may_start = datetime(2026, 5, 1, tzinfo=UTC)
         _make_stock_hash(db_session, buyer, may_start + timedelta(days=1))
         _make_stock_hash(db_session, buyer, may_start + timedelta(days=5))
         db_session.commit()
@@ -141,9 +141,9 @@ class TestComputeBuyerLeaderboardSingleBuyer:
     def test_stock_outside_month_not_counted(self, db_session: Session):
         buyer = _make_buyer(db_session, "stock_out@trioscs.com")
         # April stock (before May)
-        _make_stock_hash(db_session, buyer, datetime(2026, 4, 20, tzinfo=timezone.utc))
+        _make_stock_hash(db_session, buyer, datetime(2026, 4, 20, tzinfo=UTC))
         # June stock (after May)
-        _make_stock_hash(db_session, buyer, datetime(2026, 6, 1, tzinfo=timezone.utc))
+        _make_stock_hash(db_session, buyer, datetime(2026, 6, 1, tzinfo=UTC))
         db_session.commit()
 
         compute_buyer_leaderboard(db_session, date(2026, 5, 1))
@@ -157,7 +157,7 @@ class TestComputeBuyerLeaderboardGracePeriod:
         """Offers from grace window that never advanced don't count."""
         buyer = _make_buyer(db_session, "grace_buyer@trioscs.com")
         # Offer created in last 7 days of April (grace window for May)
-        grace_time = datetime(2026, 4, 28, 12, 0, tzinfo=timezone.utc)
+        grace_time = datetime(2026, 4, 28, 12, 0, tzinfo=UTC)
         _make_offer(db_session, buyer, grace_time)
         db_session.commit()
 
@@ -172,7 +172,7 @@ class TestComputeBuyerLeaderboardRanking:
     def test_two_buyers_ranked_by_points(self, db_session: Session):
         b1 = _make_buyer(db_session, "high_scorer@trioscs.com")
         b2 = _make_buyer(db_session, "low_scorer@trioscs.com")
-        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 
         # b1 has 3 offers, b2 has 1
         for _ in range(3):
@@ -220,7 +220,7 @@ class TestComputeBuyerLeaderboardQuoteAndBuyPlan:
         req = _make_requisition(db_session, buyer)
 
         # Create an offer in May
-        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
         offer = _make_offer(db_session, buyer, may_start)
         offer.requisition_id = req.id
         db_session.flush()
@@ -250,7 +250,7 @@ class TestComputeBuyerLeaderboardQuoteAndBuyPlan:
         buyer = _make_buyer(db_session, "po_buyer@trioscs.com")
         req = _make_requisition(db_session, buyer)
 
-        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        may_start = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
         offer = _make_offer(db_session, buyer, may_start)
         offer.requisition_id = req.id
         db_session.flush()

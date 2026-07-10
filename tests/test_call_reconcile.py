@@ -18,7 +18,7 @@ Depends on: app/jobs/eight_by_eight_jobs.py, app/services/eight_by_eight_service
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,7 +33,7 @@ FAKE_SETTINGS = SimpleNamespace(
 )
 
 # A fixed "now" used across tests
-_CDR_TIME = datetime(2026, 3, 5, 14, 30, 0, tzinfo=timezone.utc)
+_CDR_TIME = datetime(2026, 3, 5, 14, 30, 0, tzinfo=UTC)
 
 # Use a real E.164 number that phonenumbers can parse (555 numbers are
 # reserved/invalid and normalize_e164 returns None for them).
@@ -389,10 +389,10 @@ def test_get_extension_map_removed():
 
 def test_eight_by_eight_service_importable_without_get_extension_map():
     """The service module imports cleanly and exports the expected public API."""
-    from app.services.eight_by_eight_service import (  # noqa: F401
-        _token_cache,
-        get_access_token,
-        get_cdrs,
-        normalize_cdr,
-        normalize_phone,
+    from app.services.eight_by_eight_service import (
+        _token_cache,  # noqa: F401
+        get_access_token,  # noqa: F401
+        get_cdrs,  # noqa: F401
+        normalize_cdr,  # noqa: F401
+        normalize_phone,  # noqa: F401
     )

@@ -11,7 +11,7 @@ Called by: pytest. Depends on: app.main (TestClient), real merge/delete services
 real DB so a future regression in either layer is caught).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,7 +57,7 @@ def _vendors(db, a="Acme Components", b="Acme Components Inc"):
         emails=[],
         phones=[],
         sighting_count=5,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     v2 = VendorCard(
         normalized_name=b.lower(),
@@ -65,7 +65,7 @@ def _vendors(db, a="Acme Components", b="Acme Components Inc"):
         emails=[],
         phones=[],
         sighting_count=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add_all([v1, v2])
     db.commit()
@@ -73,8 +73,8 @@ def _vendors(db, a="Acme Components", b="Acme Components Inc"):
 
 
 def _companies(db, a="Globex Corp", b="Globex Corporation"):
-    c1 = Company(name=a, is_active=True, created_at=datetime.now(timezone.utc))
-    c2 = Company(name=b, is_active=True, created_at=datetime.now(timezone.utc))
+    c1 = Company(name=a, is_active=True, created_at=datetime.now(UTC))
+    c2 = Company(name=b, is_active=True, created_at=datetime.now(UTC))
     db.add_all([c1, c2])
     db.commit()
     return c1, c2
@@ -166,7 +166,7 @@ class TestDeleteBoth:
             vendor_name="Det A",
             mpn="LM317T",
             qty_available=10,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()

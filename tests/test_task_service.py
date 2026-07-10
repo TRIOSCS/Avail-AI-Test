@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -36,7 +36,7 @@ from app.services.task_service import (
 
 
 def _future_due(hours: int = 48) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=hours)
+    return datetime.now(UTC) + timedelta(hours=hours)
 
 
 def _req_tasks(db: Session, requisition_id: int) -> list[RequisitionTask]:
@@ -69,7 +69,7 @@ class TestCreateTask:
                 requisition_id=test_requisition.id,
                 title="Bad due",
                 source="manual",
-                due_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                due_at=datetime.now(UTC) + timedelta(hours=1),
             )
 
     def test_manual_task_valid_due(self, db_session: Session, test_requisition, test_user):
@@ -91,7 +91,7 @@ class TestCreateTask:
             requisition_id=test_requisition.id,
             title="System task",
             source="system",
-            due_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            due_at=datetime.now(UTC) + timedelta(hours=1),
         )
         assert task.id is not None
 
@@ -155,7 +155,7 @@ class TestGetMyTasksDoneBounded:
     def _done_task(self, db: Session, req_id: int, user_id: int, title: str, completed_days_ago: int):
         task = create_task(db, requisition_id=req_id, title=title, source="system", assigned_to_id=user_id)
         task.status = TaskStatus.DONE
-        task.completed_at = datetime.now(timezone.utc) - timedelta(days=completed_days_ago)
+        task.completed_at = datetime.now(UTC) - timedelta(days=completed_days_ago)
         db.commit()
         db.refresh(task)
         return task
@@ -200,7 +200,7 @@ class TestGetMyTasksSummary:
             title="Overdue",
             source="system",
             assigned_to_id=test_user.id,
-            due_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            due_at=datetime.now(UTC) - timedelta(hours=2),
         )
         db_session.add(task)
         db_session.commit()
@@ -324,7 +324,7 @@ class TestAutoTaskDefaultAssignee:
             status="open",
             created_by=created_by,
             claimed_by_id=claimed_by_id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(req)
         db.commit()
