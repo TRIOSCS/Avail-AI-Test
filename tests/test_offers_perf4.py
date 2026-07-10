@@ -22,7 +22,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import event
@@ -63,7 +63,7 @@ def _req_with_substitutes(db, owner, *, substitutes, material_card_id=None) -> R
         customer_name="Acme",
         status="open",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -73,7 +73,7 @@ def _req_with_substitutes(db, owner, *, substitutes, material_card_id=None) -> R
         target_qty=100,
         material_card_id=material_card_id,
         substitutes=substitutes,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()
@@ -139,7 +139,7 @@ def test_substitute_resolution_matches_point_lookup_behavior(client, db_session,
         customer_name="Beta",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(other)
     db_session.flush()
@@ -153,7 +153,7 @@ def test_substitute_resolution_matches_point_lookup_behavior(client, db_session,
             qty_available=10,
             unit_price=Decimal("1.00"),
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o)
         db_session.flush()
@@ -171,7 +171,7 @@ def test_substitute_resolution_matches_point_lookup_behavior(client, db_session,
         qty_available=5,
         unit_price=Decimal("2.00"),
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(same_req_offer)
     db_session.commit()

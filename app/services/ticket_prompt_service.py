@@ -21,7 +21,7 @@ Called by: routers/error_reports.py (generate-prompt endpoint)
 Depends on: utils/claude_client.claude_text, constants.TicketType, models/trouble_ticket
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -122,7 +122,7 @@ async def generate_ticket_prompt(db: Session, ticket: TroubleTicket) -> str | No
         return None
 
     ticket.generated_prompt = text.strip()
-    ticket.updated_at = datetime.now(timezone.utc)
+    ticket.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Generated {} prompt for ticket {}", ticket.ticket_type, ticket.ticket_number)
     return ticket.generated_prompt

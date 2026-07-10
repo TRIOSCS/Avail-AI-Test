@@ -248,6 +248,10 @@ class TestSeedAdminUser:
 
         u = db_session.query(User).filter_by(email="ops@example.com").first()
         assert u is not None
+        # Seeded through the PASSED session with the admin role the env seed
+        # promises — visible here without the helper committing its own session.
+        assert u.role == "admin"
+        assert u.is_active is True
 
     @patch("app.startup.SessionLocal")
     def test_env_unset_seeds_nothing_and_opens_no_session(self, mock_sl):
@@ -447,28 +451,37 @@ class TestBackfillProactiveOfferQty:
 
 
 class TestCreateDefaultUserDefaultRole:
-    """Additional _create_default_user_if_env_set coverage."""
+    """Additional _create_default_user_if_env_set coverage.
 
-    def test_default_role_is_buyer(self):
+    P6.3: converted from a whole-session MagicMock (``query().filter_by().first()``
+    stubbed to always return None, so the REAL "does this email already exist" query
+    was never exercised) to the real ``db_session`` fixture — the same
+    ``patch("app.startup.SessionLocal") ... mock_sl.return_value = db_session`` pattern
+    ``TestCreateDefaultUser`` already uses. This is functionally the same scenario as
+    ``TestCreateDefaultUser.test_default_role_is_buyer_when_role_unset`` (kept
+    separately per this class's own historical grouping), now asserting against the
+    real persisted User row instead of introspecting ``mock_session.add.call_args``.
+    """
+
+    @patch("app.startup.SessionLocal")
+    def test_default_role_is_buyer(self, mock_sl, db_session):
         """Without DEFAULT_USER_ROLE, role defaults to least-privilege 'buyer', never
         'admin' (CRIT-SEC-2)."""
+        from app.models.auth import User
         from app.startup import _create_default_user_if_env_set
 
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+        mock_sl.return_value = db_session
 
         env = {
             "DEFAULT_USER_EMAIL": "default@example.com",
             "DEFAULT_USER_PASSWORD": "secret",
         }
-        with (
-            patch.dict(os.environ, env, clear=False),
-            patch("app.startup.SessionLocal", return_value=mock_session),
-        ):
+        with patch.dict(os.environ, env, clear=False):
             os.environ.pop("DEFAULT_USER_ROLE", None)
             _create_default_user_if_env_set()
 
-        created_user = mock_session.add.call_args[0][0]
+        created_user = db_session.query(User).filter_by(email="default@example.com").first()
+        assert created_user is not None
         assert created_user.role == "buyer"
 
 
@@ -711,9 +724,11 @@ class TestBackfillNormalizedMpn:
 
 
 class TestRunStartupMigrationsNonTesting:
-    """run_startup_migrations with TESTING unset -- exercises real migration path."""
+    """run_startup_migrations with TESTING unset -- exercises the FAST pre-yield path
+    only (P2.7 split the SLOW backfills/ANALYZE into run_deferred_startup_backfills,
+    covered by TestRunDeferredStartupBackfills below)."""
 
-    def test_non_testing_mode_runs_all_migrations(self):
+    def test_non_testing_mode_runs_fast_migrations_only(self):
         eng = _make_sqlite_engine()
         original = os.environ.pop("TESTING", None)
         try:
@@ -739,24 +754,270 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._seed_commodity_schemas"),
             ):
                 run_startup_migrations()
+                # FAST ops run synchronously, pre-yield.
                 m_fts.assert_called_once()
-                m_bfts.assert_called_once()
                 m_seed.assert_called_once()
-                m_site.assert_called_once()
                 m_ct.assert_called_once()
-                m_bc.assert_called_once()
-                m_analyze.assert_called_once()
-                m_bfill.assert_called_once()
-                m_so.assert_called_once()
-                m_sv.assert_called_once()
-                m_ov.assert_called_once()
-                m_pq.assert_called_once()
                 m_vinod.assert_called_once()
+                # SLOW ops moved to run_deferred_startup_backfills — NOT called here.
+                m_bfts.assert_not_called()
+                m_site.assert_not_called()
+                m_bc.assert_not_called()
+                m_analyze.assert_not_called()
+                m_bfill.assert_not_called()
+                m_so.assert_not_called()
+                m_sv.assert_not_called()
+                m_ov.assert_not_called()
+                m_pq.assert_not_called()
         finally:
             if original is not None:
                 os.environ["TESTING"] = original
             else:
                 os.environ["TESTING"] = "1"
+
+
+class TestRunDeferredStartupBackfills:
+    """run_deferred_startup_backfills — the P2.7 SLOW-op phase moved off the pre-yield
+    critical path."""
+
+    def test_testing_mode_skips_and_marks_completed(self):
+        """TESTING=1 -> no-op, but the state still flips to COMPLETED (there is nothing
+        to wait for under TESTING)."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import run_deferred_startup_backfills
+
+        assert os.environ.get("TESTING") == "1"
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
+        run_deferred_startup_backfills()
+        assert startup_mod.deferred_backfills_state == DeferredBackfillState.COMPLETED
+
+    def test_non_testing_runs_all_slow_ops_and_marks_completed(self):
+        """With TESTING unset, every SLOW op runs exactly once and the state flips to
+        COMPLETED when the phase finishes successfully."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import run_deferred_startup_backfills
+
+        eng = _make_sqlite_engine()
+        original = os.environ.pop("TESTING", None)
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
+        try:
+            with (
+                patch("app.startup.engine", eng),
+                patch("app.startup._backfill_fts") as m_bfts,
+                patch("app.startup._seed_site_contacts") as m_site,
+                patch("app.startup._backfill_company_counts") as m_bc,
+                patch("app.startup._maybe_analyze_hot_tables") as m_analyze,
+                patch("app.startup._backfill_normalized_mpn") as m_bfill,
+                patch("app.startup._backfill_sighting_offer_normalized_mpn") as m_so,
+                patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
+                patch("app.startup._backfill_offer_vendor_normalized") as m_ov,
+                patch("app.startup._backfill_proactive_offer_qty") as m_pq,
+                patch("app.startup._backfill_ticket_defaults") as m_td,
+                patch("app.startup._backfill_material_cards") as m_mc,
+                patch("app.startup._backfill_sweep_cooldown") as m_sc,
+                patch("app.startup._complete_reverted_active_plans") as m_cp,
+                patch("app.startup._warn_non_canonical_categories") as m_warn,
+            ):
+                run_deferred_startup_backfills()
+                for mock in (
+                    m_bfts,
+                    m_site,
+                    m_bc,
+                    m_analyze,
+                    m_bfill,
+                    m_so,
+                    m_sv,
+                    m_ov,
+                    m_pq,
+                    m_td,
+                    m_mc,
+                    m_sc,
+                    m_cp,
+                    m_warn,
+                ):
+                    mock.assert_called_once()
+            assert startup_mod.deferred_backfills_state == DeferredBackfillState.COMPLETED
+        finally:
+            if original is not None:
+                os.environ["TESTING"] = original
+            else:
+                os.environ["TESTING"] = "1"
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
+
+    def test_marks_failed_on_unexpected_exception(self):
+        """A bug that lets an exception escape one deferred op must flip the state to
+        FAILED (never silently report COMPLETED/ready) — the except: branch always re-
+        logs and sets FAILED before re-raising."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import run_deferred_startup_backfills
+
+        eng = _make_sqlite_engine()
+        original = os.environ.pop("TESTING", None)
+        startup_mod.deferred_backfills_state = DeferredBackfillState.RUNNING
+        try:
+            with (
+                patch("app.startup.engine", eng),
+                patch("app.startup._backfill_fts", side_effect=RuntimeError("boom")),
+            ):
+                with pytest.raises(RuntimeError, match="boom"):
+                    run_deferred_startup_backfills()
+            assert startup_mod.deferred_backfills_state == DeferredBackfillState.FAILED
+        finally:
+            if original is not None:
+                os.environ["TESTING"] = original
+            else:
+                os.environ["TESTING"] = "1"
+            startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
+
+
+class TestDeferredBackfillsReadyFlag:
+    """mark_deferred_backfills_pending / is_deferred_backfills_ready /
+    get_deferred_backfills_state — the P2.7 readiness seam GET /health/ready reads."""
+
+    def test_default_is_ready(self):
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import is_deferred_backfills_ready
+
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
+        assert is_deferred_backfills_ready() is True
+
+    def test_mark_pending_flips_not_ready(self):
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import is_deferred_backfills_ready, mark_deferred_backfills_pending
+
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED
+        mark_deferred_backfills_pending()
+        assert is_deferred_backfills_ready() is False
+        assert startup_mod.deferred_backfills_state == DeferredBackfillState.RUNNING
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED  # reset
+
+    def test_failed_state_is_not_ready(self):
+        """The bug this tri-state fixes: a crashed deferred phase must report
+        ready=False, not silently ready=True."""
+        import app.startup as startup_mod
+        from app.constants import DeferredBackfillState
+        from app.startup import get_deferred_backfills_state, is_deferred_backfills_ready
+
+        startup_mod.deferred_backfills_state = DeferredBackfillState.FAILED
+        assert is_deferred_backfills_ready() is False
+        assert get_deferred_backfills_state() == DeferredBackfillState.FAILED
+        startup_mod.deferred_backfills_state = DeferredBackfillState.COMPLETED  # reset
+
+
+class TestMaybeAnalyzeHotTables:
+    """_maybe_analyze_hot_tables — since-last-deploy ANALYZE gate (P2.7 item 3)."""
+
+    _CREATE_SYSTEM_CONFIG = (
+        "CREATE TABLE system_config (id INTEGER PRIMARY KEY, key TEXT UNIQUE, value TEXT, description TEXT)"
+    )
+
+    def test_runs_analyze_on_first_boot_and_writes_marker(self):
+        from app.startup import _maybe_analyze_hot_tables
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(self._CREATE_SYSTEM_CONFIG))
+            conn.commit()
+
+        with (
+            patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}),
+            patch("app.startup._analyze_hot_tables") as m_analyze,
+        ):
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)
+                conn.commit()
+        m_analyze.assert_called_once()
+
+        with eng.connect() as conn:
+            row = conn.execute(
+                sqltext("SELECT value FROM system_config WHERE key = 'startup_last_analyze_build'")
+            ).fetchone()
+        assert row[0] == "sha-1"
+
+    def test_skips_on_second_boot_same_build(self):
+        from app.startup import _maybe_analyze_hot_tables
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(self._CREATE_SYSTEM_CONFIG))
+            conn.commit()
+
+        with (
+            patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}),
+            patch("app.startup._analyze_hot_tables") as m_analyze,
+        ):
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)  # first boot
+                conn.commit()
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)  # second boot, same BUILD_COMMIT
+                conn.commit()
+        m_analyze.assert_called_once()
+
+    def test_reruns_after_marker_cleared(self):
+        from app.startup import _maybe_analyze_hot_tables
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(self._CREATE_SYSTEM_CONFIG))
+            conn.commit()
+
+        with (
+            patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}),
+            patch("app.startup._analyze_hot_tables") as m_analyze,
+        ):
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)
+                conn.commit()
+
+        with eng.connect() as conn:
+            conn.execute(sqltext("DELETE FROM system_config WHERE key = 'startup_last_analyze_build'"))
+            conn.commit()
+
+        with (
+            patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}),
+            patch("app.startup._analyze_hot_tables") as m_analyze,
+        ):
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)  # marker cleared -> reruns
+                conn.commit()
+        m_analyze.assert_called_once()
+
+    def test_reruns_after_new_deploy_build_commit_changes(self):
+        from app.startup import _maybe_analyze_hot_tables
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(self._CREATE_SYSTEM_CONFIG))
+            conn.commit()
+
+        with patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}):
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)
+                conn.commit()
+
+        with patch.dict(os.environ, {"BUILD_COMMIT": "sha-2"}), patch("app.startup._analyze_hot_tables") as m_analyze:
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)  # new deploy -> reruns
+                conn.commit()
+        m_analyze.assert_called_once()
+
+    def test_marker_read_failure_falls_back_to_running_analyze(self):
+        """A read error on system_config (e.g. missing table) must not block the ANALYZE
+        it's meant to gate — degrade to 'always run' rather than 'never run'."""
+        from app.startup import _maybe_analyze_hot_tables
+
+        eng = _make_sqlite_engine()  # no system_config table at all
+
+        with patch.dict(os.environ, {"BUILD_COMMIT": "sha-1"}), patch("app.startup._analyze_hot_tables") as m_analyze:
+            with eng.connect() as conn:
+                _maybe_analyze_hot_tables(conn)
+        m_analyze.assert_called_once()
 
 
 class TestBackfillSightingOfferNormalizedMpn:

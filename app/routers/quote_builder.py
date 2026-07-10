@@ -32,8 +32,8 @@ def _parse_req_ids(requisition_ids: str) -> list[int]:
     """
     try:
         ids = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(400, "Invalid requisition IDs")
+    except ValueError as e:
+        raise HTTPException(400, "Invalid requisition IDs") from e
     if not ids:
         raise HTTPException(400, "No requisitions selected")
     return ids
@@ -150,12 +150,12 @@ async def quote_builder_save_multi(
         result = save_quote_from_builder_multi(db, req_ids=req_ids, payload=payload, user=user)
     except CustomerMismatchError as e:
         # Subclass of ValueError — MUST be caught before the ValueError arm below.
-        raise HTTPException(400, e.detail)
+        raise HTTPException(400, e.detail) from e
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error("Combined quote save failed for reqs {}: {}", req_ids, e)
-        raise HTTPException(500, "Failed to save quote. Please try again.")
+        raise HTTPException(500, "Failed to save quote. Please try again.") from e
 
     return result
 
@@ -251,10 +251,10 @@ async def quote_builder_save(
     try:
         result = save_quote_from_builder(db, req_id=req_id, payload=payload, user=user)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error("Quote builder save failed for req {}: {}", req_id, e)
-        raise HTTPException(500, "Failed to save quote. Please try again.")
+        raise HTTPException(500, "Failed to save quote. Please try again.") from e
 
     return result
 
@@ -285,7 +285,7 @@ async def quote_builder_export_excel(
         )
     except Exception as e:
         logger.error("Excel export failed for quote {}: {}", quote_id, e)
-        raise HTTPException(500, "Excel export failed. Please try again.")
+        raise HTTPException(500, "Excel export failed. Please try again.") from e
 
     filename = f"{quote.quote_number}.xlsx"
     return Response(
@@ -315,10 +315,10 @@ async def quote_builder_export_pdf(
         loop = asyncio.get_running_loop()
         pdf_bytes = await loop.run_in_executor(None, generate_quote_report_pdf, quote.id, db)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error("PDF generation failed for quote {}: {}", quote_id, e)
-        raise HTTPException(500, "PDF generation failed")
+        raise HTTPException(500, "PDF generation failed") from e
 
     return Response(
         content=pdf_bytes,
@@ -463,10 +463,10 @@ async def build_quote_assemble(
     try:
         result = save_quote_from_builder(db, req_id=req_id, payload=payload, user=user)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error("Build-Quote assemble failed for req {}: {}", req_id, e)
-        raise HTTPException(500, "Failed to assemble quote. Please try again.")
+        raise HTTPException(500, "Failed to assemble quote. Please try again.") from e
 
     from ..models import Quote
 

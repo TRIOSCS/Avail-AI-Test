@@ -13,7 +13,7 @@ Depends on: file_utils (parser), models (MaterialCard/MaterialVendorHistory/Vend
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -185,7 +185,7 @@ def ingest_stock_list(
 
         mvh = db.query(MaterialVendorHistory).filter_by(material_card_id=card.id, vendor_name=norm_vendor).first()
         if mvh:
-            mvh.last_seen = datetime.now(timezone.utc)
+            mvh.last_seen = datetime.now(UTC)
             mvh.times_seen = (mvh.times_seen or 0) + 1
             if parsed.get("qty") is not None:
                 mvh.last_qty = parsed["qty"]

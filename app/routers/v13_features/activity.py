@@ -7,6 +7,9 @@ Called by: v13_features package __init__.py
 Depends on: services/activity_service, services/webhook_service
 """
 
+import hmac
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from loguru import logger
@@ -75,8 +78,8 @@ async def graph_webhook(
 
     try:
         raw = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON payload")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON payload") from e
 
     payload = GraphWebhookPayload.model_validate(raw)
 
@@ -89,9 +92,9 @@ async def graph_webhook(
 
     try:
         await handle_notification(payload_dict, db, validated=validated)
-    except Exception:
+    except Exception as e:
         logger.exception("Webhook notification processing failed")
-        raise HTTPException(500, "Processing failed")
+        raise HTTPException(500, "Processing failed") from e
     return {"status": "accepted"}
 
 
@@ -114,8 +117,8 @@ async def teams_webhook(
 
     try:
         raw = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON payload")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON payload") from e
 
     from app.services.webhook_service import handle_teams_notification, validate_notifications
 
@@ -125,9 +128,9 @@ async def teams_webhook(
 
     try:
         await handle_teams_notification(raw, db, validated=validated)
-    except Exception:
+    except Exception as e:
         logger.exception("Teams webhook notification processing failed")
-        raise HTTPException(500, "Processing failed")
+        raise HTTPException(500, "Processing failed") from e
     return {"status": "accepted"}
 
 
@@ -144,15 +147,31 @@ async def acs_webhook(
 ):
     """Azure Communication Services webhook — logs completed calls.
 
-    Validates that ACS is configured and checks for EventGrid validation events.
+    Validates that ACS is configured, authenticates the request via a shared
+    secret carried in the ``?secret=`` query param (Event Grid has no
+    clientState-style body field like Graph, so the secret travels in the
+    URL baked into the subscription's webhook endpoint — see
+    ``settings.acs_webhook_secret``), then checks for EventGrid validation
+    events.
     """
     if not settings.acs_connection_string:
         raise HTTPException(503, "ACS not configured")
 
+    # Fail closed: an unconfigured secret means we can never trust a caller,
+    # including the Event Grid subscription-validation handshake itself.
+    if not settings.acs_webhook_secret:
+        logger.warning("ACS webhook secret not configured; rejecting event")
+        raise HTTPException(403, "Webhook not authorized")
+
+    provided_secret = request.query_params.get("secret", "")
+    if not hmac.compare_digest(provided_secret, settings.acs_webhook_secret):
+        logger.warning("ACS webhook secret mismatch; rejecting event")
+        raise HTTPException(403, "Webhook not authorized")
+
     try:
         events = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON") from e
 
     # Handle EventGrid subscription validation handshake
     if isinstance(events, list) and len(events) == 1:
@@ -185,6 +204,22 @@ async def acs_webhook(
     return {"status": "accepted"}
 
 
+def _with_acs_secret(callback_url: str, secret: str) -> str:
+    """Append `?secret=<secret>` to an ACS callback URL, whether it's the built-in
+    default or an operator-configured ACS_CALLBACK_URL — robust to an existing query
+    string, and idempotent if the URL (or env value) already carries a matching `secret`
+    param, so it's never double-appended."""
+    if not secret:
+        return callback_url
+    parts = urlsplit(callback_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(k == "secret" and v == secret for k, v in query):
+        return callback_url
+    query = [(k, v) for k, v in query if k != "secret"]
+    query.append(("secret", secret))
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 @router.post("/api/calls/initiate")
 @limiter.limit("30/minute")
 async def initiate_call_endpoint(
@@ -197,18 +232,25 @@ async def initiate_call_endpoint(
 
     try:
         body = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        raise HTTPException(400, "Invalid JSON")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(400, "Invalid JSON") from e
     to_phone = body.get("to_phone")
     if not to_phone:
         raise HTTPException(422, "to_phone required")
 
     from app.services.acs_service import initiate_call
 
+    # The callback URL — whether the built-in default or an operator-configured
+    # ACS_CALLBACK_URL — must carry the ?secret= the webhook now requires, or every
+    # ACS-delivered call event on an initiated call is rejected with 403. Both paths
+    # go through the same helper so a configured URL isn't left un-augmented.
+    callback_url = settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs"
+    callback_url = _with_acs_secret(callback_url, settings.acs_webhook_secret)
+
     result = await initiate_call(
         to_phone=to_phone,
         from_phone=settings.acs_from_phone,
-        callback_url=settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs",
+        callback_url=callback_url,
         connection_string=settings.acs_connection_string,
     )
 

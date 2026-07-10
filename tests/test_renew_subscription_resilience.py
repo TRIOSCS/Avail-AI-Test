@@ -15,7 +15,7 @@ Depends on: app/services/webhook_service.py
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.models import GraphSubscription
@@ -38,7 +38,7 @@ def _make_subscription(db, user, sub_id="sub-resilience-001", client_state="stat
         subscription_id=sub_id,
         resource="/me/messages",
         change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
+        expiration_dt=datetime.now(UTC) + timedelta(hours=48),
         client_state=client_state,
     )
     db.add(sub)

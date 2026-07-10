@@ -67,7 +67,7 @@ def _dedup_vendors(db: Session) -> int:
     from .vendor_merge_service import merge_vendor_cards
 
     try:
-        import rapidfuzz  # noqa: F401  # shared helper needs it; skip cleanly if absent
+        import rapidfuzz  # shared helper needs it; skip cleanly if absent  # noqa: F401
     except ImportError:
         logger.warning("rapidfuzz not installed — skipping vendor auto-dedup")
         return 0

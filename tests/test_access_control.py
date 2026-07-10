@@ -22,6 +22,8 @@ Depends on: app.dependencies, app.constants, app.services.user_admin, app.models
             app.routers.admin.users
 """
 
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -158,7 +160,7 @@ def test_explicit_revoke_beats_permissive_default(test_user, db_session):
 
 def test_explicit_grant_above_empty_default(db_session):
     """An agent (empty defaults) gains crm only via an explicit override grant."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import User
 
@@ -166,7 +168,7 @@ def test_explicit_grant_above_empty_default(db_session):
         email="svc-agent@trioscs.com",
         name="Service Agent",
         role=UserRole.AGENT,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(agent)
     db_session.commit()
@@ -288,7 +290,7 @@ def admin_client(db_session, admin_user):
 
 
 def _make_user(db, *, email, role="buyer", name=None, is_active=True):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import User
 
@@ -297,7 +299,7 @@ def _make_user(db, *, email, role="buyer", name=None, is_active=True):
         name=name or email.split("@")[0],
         role=role,
         is_active=is_active,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()
@@ -636,7 +638,7 @@ class TestV2PageGating:
 
 
 def _make_pending_offer(db, req):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import Offer
 
@@ -647,7 +649,7 @@ def _make_pending_offer(db, req):
         mpn=req.requirements[0].primary_mpn,
         status="pending_review",
         entered_by_id=req.created_by,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.commit()

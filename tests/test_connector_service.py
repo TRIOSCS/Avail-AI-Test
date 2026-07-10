@@ -1,5 +1,5 @@
 # tests/test_connector_service.py
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.services import connector_service as cs
@@ -9,7 +9,7 @@ def _worker_row(**kw):
     """A worker-status singleton row (TbfWorkerStatus-shaped) for worker_health()."""
     base = dict(
         is_running=True,
-        last_heartbeat=datetime.now(timezone.utc),
+        last_heartbeat=datetime.now(UTC),
         last_search_at=None,
         circuit_breaker_open=False,
         circuit_breaker_reason=None,
@@ -253,7 +253,7 @@ def test_worker_backed_sources_mapping():
 
 def test_worker_health_healthy_recent_heartbeat():
     """Running worker with a fresh heartbeat and closed breaker is healthy."""
-    v = cs.worker_health(_worker_row(last_heartbeat=datetime.now(timezone.utc) - timedelta(seconds=30)))
+    v = cs.worker_health(_worker_row(last_heartbeat=datetime.now(UTC) - timedelta(seconds=30)))
     assert v["healthy"] is True
     assert v["problem"] is None
     assert v["heartbeat_age_secs"] is not None and v["heartbeat_age_secs"] < 120
@@ -262,7 +262,7 @@ def test_worker_health_healthy_recent_heartbeat():
 def test_worker_health_stale_heartbeat_unhealthy():
     """A heartbeat older than the stale threshold is unhealthy with a 'stalled'
     reason."""
-    old = datetime.now(timezone.utc) - timedelta(minutes=40)
+    old = datetime.now(UTC) - timedelta(minutes=40)
     v = cs.worker_health(_worker_row(last_heartbeat=old))
     assert v["healthy"] is False
     assert "stalled" in v["problem"].lower()
@@ -295,7 +295,7 @@ def test_worker_health_no_heartbeat_unhealthy():
 
 def test_worker_health_naive_datetime_is_treated_as_utc():
     """A naive (tz-less) heartbeat must not crash — it's coerced to UTC."""
-    naive = (datetime.now(timezone.utc) - timedelta(seconds=20)).replace(tzinfo=None)
+    naive = (datetime.now(UTC) - timedelta(seconds=20)).replace(tzinfo=None)
     v = cs.worker_health(_worker_row(last_heartbeat=naive))
     assert v["healthy"] is True
 

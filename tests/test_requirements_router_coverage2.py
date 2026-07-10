@@ -15,7 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -44,7 +44,7 @@ def _make_sighting(db: Session, req_item: Requirement, **kw) -> Sighting:
         unit_price=0.45,
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     s = Sighting(**defaults)
@@ -60,7 +60,7 @@ def _make_material_card(db: Session, mpn: str = "LM317T") -> MaterialCard:
     card = MaterialCard(
         normalized_mpn=normalize_mpn_key(mpn),
         display_mpn=mpn,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.commit()
@@ -83,7 +83,7 @@ def _make_sourcing_lead(db: Session, req: Requisition, req_item: Requirement, **
         primary_source_type="manual",
         primary_source_name="test",
         buyer_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     lead = SourcingLead(**defaults)
@@ -187,7 +187,7 @@ class TestAddRequirements:
         company = Company(
             name="DupTest Co",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(company)
         db_session.flush()
@@ -195,7 +195,7 @@ class TestAddRequirements:
         site = CustomerSite(
             company_id=company.id,
             site_name="Main Site",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(site)
         db_session.flush()
@@ -206,7 +206,7 @@ class TestAddRequirements:
             customer_site_id=site.id,
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()

@@ -20,7 +20,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -60,7 +60,7 @@ def test_company(db_session: Session, test_user) -> Company:
         industry="Electronic Components",
         is_active=True,
         account_owner_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -85,7 +85,7 @@ def test_site_contact(db_session: Session, test_customer_site: CustomerSite) -> 
 @pytest.fixture()
 def other_company(db_session: Session) -> Company:
     """A second company — used to verify IDOR guard."""
-    co = Company(name="Other Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name="Other Corp", is_active=True, created_at=datetime.now(UTC))
     db_session.add(co)
     db_session.commit()
     db_session.refresh(co)
@@ -227,7 +227,7 @@ class TestGetOpenTasksForCompany:
     def test_next_task_is_soonest(self, db_session: Session, test_company: Company, test_user):
         from datetime import timedelta
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         t_far = create_company_task(
             db_session,
             company_id=test_company.id,
@@ -494,7 +494,7 @@ class TestCompleteTaskEndpointAuthz:
             name="Other User",
             role="buyer",
             azure_id="test-azure-id-999",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(u)
         db_session.commit()

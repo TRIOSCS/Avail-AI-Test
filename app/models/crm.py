@@ -1,7 +1,7 @@
 """CRM models — Companies, Sites, and Site Contacts."""
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -107,11 +107,11 @@ class Company(Base):
     customer_enrichment_at = Column(UTCDateTime)
     customer_enrichment_status = Column(String(20))  # complete, partial, missing, stale
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Audit trail — set automatically by app/audit_listeners.py on every
@@ -151,7 +151,7 @@ class Company(Base):
         """
         from ..vendor_utils import normalize_vendor_name
 
-        self.normalized_name = normalize_vendor_name(value) or None
+        self.normalized_name = normalize_vendor_name(value) or None  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("phone")
@@ -159,7 +159,7 @@ class Company(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")
@@ -244,11 +244,11 @@ class CustomerSite(Base):
     last_outbound_at = Column(UTCDateTime)
     last_reply_at = Column(UTCDateTime)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Audit trail — set automatically by app/audit_listeners.py on every
@@ -273,7 +273,7 @@ class CustomerSite(Base):
         """Keep normalized_phone (E.164) in sync with contact_phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("contact_phone_2")
@@ -282,7 +282,7 @@ class CustomerSite(Base):
         write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone_2 = normalize_e164(value)
+        self.normalized_phone_2 = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     __table_args__ = (
@@ -344,11 +344,11 @@ class SiteContact(Base):
     enrichment_field_sources = Column(JSON)  # Per-field source tracking
     custom_fields = Column(JSONB, default=dict, server_default="{}")
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Audit trail — set automatically by app/audit_listeners.py on every
@@ -382,7 +382,7 @@ class SiteContact(Base):
         """Keep normalized_phone (E.164) in sync with phone on every write."""
         from ..utils.phone import normalize_e164
 
-        self.normalized_phone = normalize_e164(value)
+        self.normalized_phone = normalize_e164(value)  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
         return value
 
     @validates("custom_fields")
@@ -446,7 +446,7 @@ class CrmFieldHistory(Base):
     old_value = Column(Text)
     new_value = Column(Text)
     changed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     changed_by = relationship("User", foreign_keys=[changed_by_id])
 
@@ -475,7 +475,7 @@ class AccountCollaborator(Base):
     )
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(20), nullable=False, default="helper", server_default="helper")
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     company = relationship("Company", back_populates="collaborators")
     user = relationship("User", foreign_keys=[user_id])
@@ -508,7 +508,7 @@ class CompanyAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     company = relationship("Company", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -538,7 +538,7 @@ class SiteContactAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     site_contact = relationship("SiteContact", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -566,7 +566,7 @@ class SavedView(Base):
     list_key = Column(String(32), nullable=False)
     name = Column(String(80), nullable=False)
     filters = Column(JSON, nullable=False, default=dict)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         UniqueConstraint("user_id", "list_key", "name", name="uq_saved_view_user_key_name"),

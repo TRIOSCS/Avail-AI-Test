@@ -18,7 +18,7 @@ Depends on: conftest.py (db_session, test_user fixtures), app models, attachment
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -69,7 +69,7 @@ def _make_attachment_row(
         content_type="application/pdf",
         size_bytes=100,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(att)
     db.commit()

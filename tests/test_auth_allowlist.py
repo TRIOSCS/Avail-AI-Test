@@ -16,7 +16,7 @@ Called by: pytest
 Depends on: app/routers/auth.py, app/config.py, conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -93,7 +93,7 @@ def test_invited_row_adopts_azure_id_keeps_role(mock_http, auth_client, db_sessi
         role="trader",
         azure_id=None,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(invited)
     db_session.commit()
@@ -176,7 +176,7 @@ def test_disabled_user_rejected(mock_http, auth_client, db_session, monkeypatch)
         role="buyer",
         azure_id="az-disabled-001",
         is_active=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(disabled)
     db_session.commit()

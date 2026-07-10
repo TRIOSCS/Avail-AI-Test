@@ -11,7 +11,7 @@ Depends on: app.models, app.dependencies, app.database, app.scoring,
     app.search_service, ._shared.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -177,7 +177,7 @@ async def sourcing_results_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
             query = query.filter(SourcingLead.source_last_seen_at >= now - cutoffs[freshness])
@@ -338,7 +338,7 @@ async def lead_status_update(
             actor_user_id=user.id,
         )
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     if not lead:
         raise HTTPException(404, "Lead not found")
@@ -448,7 +448,7 @@ async def sourcing_workspace_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
             query = query.filter(SourcingLead.source_last_seen_at >= now - cutoffs[freshness])
@@ -543,7 +543,7 @@ async def sourcing_workspace_list_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
             query = query.filter(SourcingLead.source_last_seen_at >= now - cutoffs[freshness])

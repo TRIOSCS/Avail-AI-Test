@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,7 +63,7 @@ def seed_sources(db_session):
             total_searches=150,
             total_results=4200,
             avg_response_ms=320,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ),
         ApiSource(
             name="mouser",
@@ -74,7 +74,7 @@ def seed_sources(db_session):
             description="Search API v2",
             env_vars=["MOUSER_API_KEY"],
             credentials={},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ),
         ApiSource(
             name="arrow",
@@ -85,7 +85,7 @@ def seed_sources(db_session):
             description="Major authorized distributor",
             env_vars=[],
             credentials={},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ),
         ApiSource(
             name="netcomponents",
@@ -96,7 +96,7 @@ def seed_sources(db_session):
             description="60M+ line items from suppliers",
             env_vars=[],
             credentials={},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ),
     ]
     for s in sources:

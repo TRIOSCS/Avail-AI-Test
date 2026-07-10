@@ -4,6 +4,7 @@ from .logging_config import setup_logging
 
 setup_logging()  # Must run before any other module logs
 
+import asyncio
 import hmac
 import logging
 import os
@@ -31,6 +32,30 @@ register_audit_listeners()
 # To apply:  alembic upgrade head
 # To generate: alembic revision --autogenerate -m "description"
 # Existing DB: alembic stamp head  (mark as current without running DDL)
+
+# Sensitive-body path substrings (case-insensitive, matched against the request
+# URL) — POST/PUT bodies on these routes are wholesale-filtered when Sentry
+# ships them as a raw string rather than a parsed dict, since an opaque string
+# can't be recursed into to redact individual keys.
+_SENTRY_SENSITIVE_BODY_PATHS = ("/auth/login", "/credentials")
+
+
+def _scrub_nested_body(data, sensitive_vars: set[str]):
+    """Recursively replace sensitive-named dict keys within a request body.
+
+    Mirrors the substring, case-insensitive key match `_sentry_before_send`
+    already uses for stack-frame local scrubbing. Used to redact secrets
+    (e.g. login passwords, source API credentials) from Sentry request
+    bodies before shipping, without discarding the rest of the payload.
+    """
+    if isinstance(data, dict):
+        return {
+            k: "[Filtered]" if any(s in k.lower() for s in sensitive_vars) else _scrub_nested_body(v, sensitive_vars)
+            for k, v in data.items()
+        }
+    if isinstance(data, list):
+        return [_scrub_nested_body(item, sensitive_vars) for item in data]
+    return data
 
 
 @asynccontextmanager
@@ -60,6 +85,15 @@ async def lifespan(app):
             missing.append("AZURE_TENANT_ID")
         if missing:
             logger.warning("Missing env vars (some features disabled): {}", ", ".join(missing))
+
+        # S2b: ACS is configured but its webhook secret isn't — the webhook fails
+        # closed (403) on every event until ACS_WEBHOOK_SECRET is set, so surface
+        # that misconfiguration loudly instead of silently dropping call events.
+        if settings.acs_connection_string and not settings.acs_webhook_secret:
+            logger.warning(
+                "ACS_CONNECTION_STRING is set but ACS_WEBHOOK_SECRET is missing — "
+                "the ACS webhook will reject all events until it's configured."
+            )
 
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
@@ -96,11 +130,19 @@ async def lifespan(app):
                         if k.lower() in _SENSITIVE_HEADERS:
                             hdrs[k] = "[Filtered]"
                 qs = req.get("query_string", "")
-                if isinstance(qs, str) and "key" in qs.lower():
+                if isinstance(qs, str) and any(v in qs.lower() for v in _SENSITIVE_VARS):
                     req["query_string"] = "[Filtered]"
+                data = req.get("data")
+                if data is not None:
+                    if isinstance(data, str):
+                        url = str(req.get("url", "")).lower()
+                        if any(p in url for p in _SENTRY_SENSITIVE_BODY_PATHS):
+                            req["data"] = "[Filtered]"
+                    else:
+                        req["data"] = _scrub_nested_body(data, _SENSITIVE_VARS)
             for frame in (event.get("exception", {}) or {}).get("values", []) or []:
                 for sf in (frame.get("stacktrace", {}) or {}).get("frames", []) or []:
-                    for k in list((sf.get("vars") or {})):
+                    for k in list(sf.get("vars") or {}):
                         if any(s in k.lower() for s in _SENSITIVE_VARS):
                             sf["vars"][k] = "[Filtered]"
             return event
@@ -140,6 +182,26 @@ async def lifespan(app):
         configure_scheduler()
         scheduler.start()
         logger.info("APScheduler started")
+
+        # P2.7: launch the SLOW, idempotent startup backfills + ANALYZE as a
+        # post-yield background task instead of running them inline before /health
+        # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
+        # above already ran the FAST, order-critical ops synchronously.
+        from .services.prepayment_notifications import set_main_event_loop
+        from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
+        from .utils.async_helpers import safe_background_task
+
+        # run_deferred_startup_backfills executes on an asyncio.to_thread worker
+        # thread with no running loop of its own; register the main loop so
+        # schedule_prepayment_notify can still deliver a DO-NOT-WIRE stand-down
+        # notification if that sweep auto-completes a buy plan with a pending
+        # prepayment (see prepayment_notifications.py's cross-thread fallback).
+        set_main_event_loop(asyncio.get_running_loop())
+        mark_deferred_backfills_pending()
+        await safe_background_task(
+            asyncio.to_thread(run_deferred_startup_backfills),
+            task_name="deferred_startup_backfills",
+        )
 
     yield
 
@@ -189,7 +251,7 @@ if settings.rate_limit_enabled:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type, unused-ignore]  # slowapi handler is narrower than Starlette's protocol; slowapi absent from the hook env, so the ignore is unused there
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -274,10 +336,10 @@ class AuditUserMiddleware:
     audit columns stay NULL (correct behaviour).
     """
 
-    def __init__(self, app_inner):  # noqa: ANN001
+    def __init__(self, app_inner):
         self._app = app_inner
 
-    async def __call__(self, scope, receive, send):  # noqa: ANN001
+    async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             from .request_context import current_user_display_tz_var, current_user_id_var, resolve_display_tz
 
@@ -331,10 +393,10 @@ class ModuleAccessMiddleware:
     # so preflight/probe traffic never opens a DB session.
     _GUARDED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
-    def __init__(self, app_inner):  # noqa: ANN001
+    def __init__(self, app_inner):
         self._app = app_inner
 
-    async def __call__(self, scope, receive, send):  # noqa: ANN001
+    async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("method") not in self._GUARDED_METHODS:
             await self._app(scope, receive, send)
             return
@@ -580,7 +642,7 @@ async def request_id_middleware(request: Request, call_next):
             response.headers["Pragma"] = "no-cache"
 
         # Skip noisy paths (static files, health checks)
-        if not (path.startswith("/static") or path == "/health"):
+        if not (path.startswith("/static") or path in ("/health", "/health/ready")):
             logger.info(
                 "{method} {path} → {status} ({dur}ms)",
                 method=request.method,
@@ -696,6 +758,34 @@ async def health(
         content=payload,
         status_code=200 if payload["status"] == "ok" else 503,
     )
+
+
+@app.get("/health/ready")
+async def health_ready() -> JSONResponse:
+    """Readiness probe for the P2.7 deferred startup-backfill phase.
+
+    /health (liveness) answers as soon as the app can serve traffic — it no longer
+    waits on the slow, idempotent backfills/ANALYZE that used to run inline before
+    the lifespan yielded. This endpoint reports whether that background phase has
+    finished. It is DELIBERATELY not wired into docker-compose's healthcheck or
+    deploy.sh's wait loop — those gate on liveness only (see docker-compose.yml /
+    deploy.sh comments) so a slow deferred phase can never false-fail a deploy;
+    deploy.sh instead curls this endpoint once, after liveness passes, purely to
+    log the readiness state.
+
+    ``ready`` is True only when the phase reports COMPLETED — a crashed deferred
+    phase (state FAILED) must never be reported as ready. ``state`` carries the raw
+    tri-state (running/completed/failed) for diagnostics; ``ready`` is kept for
+    backward compatibility with deploy.sh's informational curl.
+
+    Called by: deploy.sh (post-deploy, informational only), ops/monitoring
+    Depends on: app/startup.py (is_deferred_backfills_ready, get_deferred_backfills_state)
+    """
+    from .startup import get_deferred_backfills_state, is_deferred_backfills_ready
+
+    ready = is_deferred_backfills_ready()
+    state = get_deferred_backfills_state()
+    return JSONResponse(content={"ready": ready, "state": state}, status_code=200 if ready else 503)
 
 
 # ── Router Registration ──────────────────────────────────────────────────

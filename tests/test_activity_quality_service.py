@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -42,7 +42,7 @@ class TestScoreActivityAlreadyScored:
             user_id=test_user.id,
             activity_type="phone_call",
             channel="phone",
-            quality_assessed_at=datetime.now(timezone.utc),
+            quality_assessed_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.flush()
@@ -245,7 +245,7 @@ class TestScoreUnscoredActivities:
             channel="email",
             subject="Pricing call",
             notes="Vendor sent pricing.",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.commit()
@@ -289,7 +289,7 @@ class TestScoreUnscoredActivities:
             activity_type="email_received",
             channel="email",
             subject=subject,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.commit()
@@ -316,14 +316,14 @@ class TestScoreUnscoredActivities:
             activity_type="email_received",
             channel="email",
             subject="First call",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         log2 = ActivityLog(
             user_id=test_user.id,
             activity_type="email_received",
             channel="email",
             subject="Second note",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([log1, log2])
         db_session.commit()
@@ -349,7 +349,7 @@ class TestScoreUnscoredActivities:
                 act.quality_classification = "conversation"
                 act.is_meaningful = True
                 act.summary = "A call."
-                act.quality_assessed_at = datetime.now(timezone.utc)
+                act.quality_assessed_at = datetime.now(UTC)
                 db.flush()
 
         with patch(
@@ -375,7 +375,7 @@ class TestScoreUnscoredActivitiesNewTypes:
             activity_type="sighting_added",
             channel="system",
             details={"count": 12, "sources": ["nexar", "digikey"]},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.commit()
@@ -414,7 +414,7 @@ class TestScoreUnscoredActivitiesNewTypes:
             channel="email",
             subject="RE: LM317T quote request",
             notes="Vendor confirmed 10K units in stock at $0.42 each.",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.commit()
@@ -451,7 +451,7 @@ class TestScoreActivityBumpsReplyClock:
         from app.models.crm import Company
         from app.services.activity_quality_service import score_activity
 
-        created = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
+        created = datetime(2026, 6, 17, 10, 0, tzinfo=UTC)
 
         company = Company(name="Reply Clock Co")
         db_session.add(company)
@@ -501,7 +501,7 @@ class TestScoreActivityBumpsReplyClock:
         from app.models.crm import Company
         from app.services.activity_quality_service import score_activity
 
-        created = datetime(2026, 6, 17, 11, 0, tzinfo=timezone.utc)
+        created = datetime(2026, 6, 17, 11, 0, tzinfo=UTC)
 
         company = Company(name="Noise Clock Co")
         db_session.add(company)

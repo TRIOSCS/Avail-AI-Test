@@ -3,6 +3,7 @@
 # Called by: pytest. Depends on: app.services.offer_qualification (no DB for these).
 import pytest
 
+from app.constants import OfferCondition
 from app.services.offer_qualification import (
     apply_qualification,
     compose_note,
@@ -13,6 +14,26 @@ from app.services.offer_qualification import (
     request_template,
     validate_essentials,
 )
+
+
+class TestOfferConditionEnumSites:
+    """P2.5: validate_essentials (line ~133), compose_note (line ~196), and _items_for
+    (line ~235) compare against OfferCondition.NEW rather than a raw "new" literal.
+
+    A caller passing the enum member or the raw string must behave identically (StrEnum
+    equality).
+    """
+
+    def test_validate_essentials_accepts_enum_member(self):
+        assert validate_essentials(OfferCondition.NEW, {"manufacturer": ""})
+        assert validate_essentials(OfferCondition.NEW, {"manufacturer": "TI"}) == []
+
+    def test_compose_note_accepts_enum_member(self):
+        assert compose_note(OfferCondition.NEW, {}) == "New — parts are in the original manufacturer's packaging."
+
+    def test_items_for_via_meter_accepts_enum_member(self):
+        data = {"manufacturer": "TI", "packaging": "Trays", "date_code": "2501"}
+        assert meter(OfferCondition.NEW, data, has_images=False) == (3, 3)
 
 
 @pytest.mark.parametrize(

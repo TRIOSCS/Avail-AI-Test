@@ -7,6 +7,7 @@
   Called by: resell.resell_detail (+ publish re-render).
   Depends on: shared/_macros.html, partials/resell/_lines.html, _offers.html.
 #}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 {% set el = list %}
 
 <div class="flex flex-col h-full"
@@ -110,30 +111,22 @@
       {% include "htmx/partials/resell/_lines.html" %}
     </div>
 
-    {# Offers — lazy. LANDMINE: intersect/load MUST carry an explicit hx-target
-       or it inherits #main-content's hx-target="this" and wipes the page. #}
+    {# Offers — lazy. lazy_body macro structurally enforces the explicit
+       hx-target guard (see shared/_macros.html for the landmine rationale). #}
     <div x-show="tab === 'offers'" x-cloak role="tabpanel">
-      <div id="tab-offers-{{ el.id }}"
-           hx-get="/v2/partials/resell/{{ el.id }}/offers"
-           hx-trigger="intersect once"
-           hx-target="#tab-offers-{{ el.id }}"
-           hx-swap="innerHTML">
+      {% call lazy_body('tab-offers-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/offers', trigger='intersect once') %}
         <div class="p-6 text-center text-gray-400 text-sm">Loading offers…</div>
-      </div>
+      {% endcall %}
     </div>
 
     {# Build Bid — owner-only bid-back builder, lazy-loaded. Non-owners never see
        the planning prices; the endpoint 403s and the tab shows the private notice.
-       LANDMINE: the lazy loader MUST carry an explicit hx-target. #}
+       lazy_body macro structurally enforces the explicit hx-target guard. #}
     <div x-show="tab === 'build'" x-cloak role="tabpanel">
       {% if can_see_customer %}
-      <div id="tab-build-{{ el.id }}"
-           hx-get="/v2/partials/resell/{{ el.id }}/build-bid"
-           hx-trigger="intersect once"
-           hx-target="#tab-build-{{ el.id }}"
-           hx-swap="innerHTML">
+      {% call lazy_body('tab-build-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/build-bid', trigger='intersect once') %}
         <div class="p-6 text-center text-gray-400 text-sm">Loading bid builder…</div>
-      </div>
+      {% endcall %}
       {% else %}
       <div class="mx-auto max-w-sm text-center py-10">
         <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -145,21 +138,13 @@
     {# Outreach — owner-only trader→buyer board, lazy-loaded. The "usually offered, not
        yet" nudge strip sits ABOVE the tracker (the existing nudge surface — NOT a new
        My-Day) and lazy-loads on its own so an empty strip costs nothing.
-       LANDMINE: every lazy loader carries an explicit hx-target. #}
+       lazy_body macro structurally enforces the explicit hx-target guard. #}
     {% if can_see_customer %}
     <div x-show="tab === 'outreach'" x-cloak class="space-y-4" role="tabpanel">
-      <div id="tab-not-yet-{{ el.id }}"
-           hx-get="/v2/partials/resell/{{ el.id }}/not-yet-strip"
-           hx-trigger="intersect once"
-           hx-target="#tab-not-yet-{{ el.id }}"
-           hx-swap="innerHTML"></div>
-      <div id="tab-outreach-{{ el.id }}"
-           hx-get="/v2/partials/resell/{{ el.id }}/outreach"
-           hx-trigger="intersect once"
-           hx-target="#tab-outreach-{{ el.id }}"
-           hx-swap="innerHTML">
+      {% call lazy_body('tab-not-yet-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/not-yet-strip', trigger='intersect once') %}{% endcall %}
+      {% call lazy_body('tab-outreach-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/outreach', trigger='intersect once') %}
         <div class="p-6 text-center text-gray-400 text-sm">Loading outreach…</div>
-      </div>
+      {% endcall %}
     </div>
     {% endif %}
 

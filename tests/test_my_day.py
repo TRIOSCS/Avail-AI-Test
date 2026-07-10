@@ -27,7 +27,7 @@ import re
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from freezegun import freeze_time
@@ -58,8 +58,8 @@ def _add_task(
         priority=priority,
         assigned_to_id=user_id,
         due_at=due_at,
-        completed_at=datetime.now(timezone.utc) if status == TaskStatus.DONE.value else None,
-        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC) if status == TaskStatus.DONE.value else None,
+        created_at=datetime.now(UTC),
     )
     db.add(t)
     db.commit()
@@ -80,7 +80,7 @@ def my_open_task(db_session: Session, test_user, test_company) -> RequisitionTas
         user_id=test_user.id,
         title="Follow up on quote",
         company=test_company,
-        due_at=datetime.now(timezone.utc) - timedelta(days=1),
+        due_at=datetime.now(UTC) - timedelta(days=1),
     )
 
 
@@ -92,7 +92,7 @@ def other_user_task(db_session: Session, manager_user, test_company) -> Requisit
         user_id=manager_user.id,
         title="Other user task",
         company=test_company,
-        due_at=datetime.now(timezone.utc) - timedelta(days=1),
+        due_at=datetime.now(UTC) - timedelta(days=1),
     )
 
 
@@ -105,7 +105,7 @@ def my_done_task(db_session: Session, test_user, test_company) -> RequisitionTas
         title="Already done task",
         company=test_company,
         status=TaskStatus.DONE.value,
-        due_at=datetime.now(timezone.utc) - timedelta(days=2),
+        due_at=datetime.now(UTC) - timedelta(days=2),
     )
 
 
@@ -170,8 +170,8 @@ class TestTasksPageNoFollowUpSection:
             name="Overdue Acme Inc",
             is_active=True,
             account_owner_id=test_user.id,
-            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=40),
-            created_at=datetime.now(timezone.utc),
+            last_outbound_at=datetime.now(UTC) - timedelta(days=40),
+            created_at=datetime.now(UTC),
         )
         db_session.add(co)
         db_session.commit()
@@ -191,7 +191,7 @@ class TestTasksPageGrouping:
     def test_urgency_group_headers_render(self, client: TestClient, db_session: Session, test_user, test_company):
         """Overdue / Due soon / Later / No due date headers appear for matching
         tasks."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _add_task(
             db_session, user_id=test_user.id, title="Overdue one", company=test_company, due_at=now - timedelta(days=3)
         )
@@ -222,7 +222,7 @@ class TestTasksPageDueTodayConsistency:
 
     @freeze_time("2026-06-25 18:00:00")
     def test_due_earlier_today_renders_under_due_soon(self, client: TestClient, db_session, test_user, test_company):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _add_task(
             db_session,
             user_id=test_user.id,
@@ -241,7 +241,7 @@ class TestTasksPageDueTodayConsistency:
 
     @freeze_time("2026-06-25 18:00:00")
     def test_due_today_filter_includes_earlier_today(self, client: TestClient, db_session, test_user, test_company):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         earlier = _add_task(
             db_session,
             user_id=test_user.id,
@@ -274,7 +274,7 @@ class TestTasksPageBusinessTimezone:
             user_id=test_user.id,
             title="Due June 25 Eastern",
             company=test_company,
-            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=UTC),
         )
         resp = client.get("/v2/partials/my-day", headers={"HX-Target": "tasks-results"})
         assert resp.status_code == 200
@@ -289,7 +289,7 @@ class TestTasksPageBusinessTimezone:
             user_id=test_user.id,
             title="Eastern today task",
             company=test_company,
-            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc),
+            due_at=datetime(2026, 6, 25, 0, 0, tzinfo=UTC),
         )
         resp_today = client.get("/v2/partials/my-day?due=today", headers={"HX-Target": "tasks-results"})
         assert task.title in resp_today.text
@@ -341,14 +341,14 @@ class TestTasksPageFilters:
             user_id=test_user.id,
             title="Overdue task",
             company=test_company,
-            due_at=datetime.now(timezone.utc) - timedelta(days=2),
+            due_at=datetime.now(UTC) - timedelta(days=2),
         )
         future = _add_task(
             db_session,
             user_id=test_user.id,
             title="Future task",
             company=test_company,
-            due_at=datetime.now(timezone.utc) + timedelta(days=5),
+            due_at=datetime.now(UTC) + timedelta(days=5),
         )
         resp = client.get("/v2/partials/my-day?due=overdue")
         assert overdue.title in resp.text
@@ -363,7 +363,7 @@ class TestTasksPageFilters:
             user_id=test_user.id,
             title="Upcoming task",
             company=test_company,
-            due_at=datetime.now(timezone.utc) + timedelta(days=5),
+            due_at=datetime.now(UTC) + timedelta(days=5),
         )
         resp_upcoming = client.get("/v2/partials/my-day?due=upcoming", headers={"HX-Target": "tasks-results"})
         assert resp_upcoming.status_code == 200
@@ -381,7 +381,7 @@ class TestTasksPageFilters:
             user_id=test_user.id,
             title="Has due task",
             company=test_company,
-            due_at=datetime.now(timezone.utc) + timedelta(days=3),
+            due_at=datetime.now(UTC) + timedelta(days=3),
         )
         resp = client.get("/v2/partials/my-day?due=none")
         assert no_due.title in resp.text

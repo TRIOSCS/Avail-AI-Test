@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/models/intelligence.py, tests/conftest.py (db_session fixture)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import MaterialCard
 
@@ -16,7 +16,7 @@ def test_new_card_defaults_to_unenriched(db_session):
     card = MaterialCard(
         normalized_mpn="teststatusdefault",
         display_mpn="TEST-STATUS-DEFAULT",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.flush()
@@ -82,7 +82,7 @@ def _card(db_session, mpn="LM317T"):
     c = MaterialCard(
         normalized_mpn=normalize_mpn_key(mpn),
         display_mpn=mpn,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(c)
     db_session.flush()
@@ -348,7 +348,7 @@ def test_apply_authoritative_category_displaces_decode_85(db_session):
     card.category_source = "mpn_decode"
     card.category_confidence = 0.95
     card.category_tier = 85
-    card.category_updated_at = datetime.now(timezone.utc)
+    card.category_updated_at = datetime.now(UTC)
     db_session.flush()
 
     apply_authoritative(
@@ -373,7 +373,7 @@ def test_apply_authoritative_category_loses_to_trio_and_manual(db_session):
         card.category_source = source
         card.category_confidence = 1.0
         card.category_tier = tier
-        card.category_updated_at = datetime.now(timezone.utc)
+        card.category_updated_at = datetime.now(UTC)
         db_session.flush()
 
         apply_authoritative(
@@ -438,7 +438,7 @@ def test_apply_authoritative_manufacturer_loses_to_manual_records_conflict(db_se
     card.manufacturer_source = "manual"
     card.manufacturer_confidence = 1.0
     card.manufacturer_tier = 100
-    card.manufacturer_updated_at = datetime.now(timezone.utc)
+    card.manufacturer_updated_at = datetime.now(UTC)
     db_session.flush()
 
     apply_authoritative(
@@ -770,7 +770,7 @@ def test_apply_oem_sourced_category_loses_to_decode_85(db_session):
     card.category_source = "mpn_decode"
     card.category_confidence = 0.95
     card.category_tier = 85
-    card.category_updated_at = datetime.now(timezone.utc)
+    card.category_updated_at = datetime.now(UTC)
     db_session.flush()
 
     oem = OemExtractResult(

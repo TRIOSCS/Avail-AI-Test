@@ -17,7 +17,7 @@ Depends on: app.services.crm_service.customer_contacts_list_ctx / customer_conta
     SiteContact).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -120,7 +120,7 @@ def test_cadence_filter_pages_in_sql_cost_independent_of_n(db_session: Session, 
     admin_id = admin_user.id
     _, site = _company_site(db_session)
     site_id = site.id
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for i in range(25):
         _contact(
@@ -175,7 +175,7 @@ def test_predicate_matches_python_classifier_across_edges(db_session: Session, a
     threshold."""
     _, site = _company_site(db_session)
     site_id = site.id
-    now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 
     edges = {
         "null": None,
@@ -214,7 +214,7 @@ def test_due_band_is_empty_for_contacts(db_session: Session, admin_user: User):
     assert TIER_TARGET_DAYS.get("standard") == CADENCE_RED_DAYS  # invariant the empty band relies on
     _, site = _company_site(db_session)
     site_id = site.id
-    now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
     for d in (0, 15, 30, 31, 45, 90):
         _contact(db_session, site_id, name=f"d{d}", last_outbound=now - timedelta(days=d))
     db_session.commit()
@@ -234,7 +234,7 @@ def test_ctx_matches_old_algorithm_including_duplicates_and_nulls(db_session: Se
     slice algorithm across pages, duplicate sort keys, and the empty 'due' band."""
     _, site = _company_site(db_session)
     site_id = site.id
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tie = now - timedelta(days=100)  # identical last_activity_at → id.desc() tie-break
 
     # 6 overdue: 3 with distinct activity times, 3 sharing `tie` (duplicate sort keys).
@@ -307,7 +307,7 @@ def test_contacts_csv_export_cadence_filter_matches_python(db_session: Session, 
     filter did."""
     _, site = _company_site(db_session)
     site_id = site.id
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(4):
         _contact(db_session, site_id, name=f"OD-{i}", last_outbound=now - timedelta(days=60))
     for i in range(3):

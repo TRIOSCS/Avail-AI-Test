@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/services/strategic_vendor_service.py, tests/conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -41,7 +41,7 @@ def _make_user(db: Session, email: str = "buyer@trioscs.com", role: str = "buyer
         name=email.split("@")[0],
         role=role,
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -55,7 +55,7 @@ def _make_vendor(db: Session, name: str = "Acme") -> VendorCard:
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -70,7 +70,7 @@ def _make_strategic(
     released_at=None,
     expires_at=None,
 ) -> StrategicVendor:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sv = StrategicVendor(
         user_id=user.id,
         vendor_card_id=vendor.id,
@@ -97,7 +97,7 @@ class TestEnsureUtc:
         assert result.year == 2025
 
     def test_aware_datetime_unchanged(self):
-        aware = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        aware = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         result = _ensure_utc(aware)
         assert result == aware
 
@@ -111,7 +111,7 @@ class TestGetMyStrategic:
         v1 = _make_vendor(db_session, "Alpha")
         v2 = _make_vendor(db_session, "Beta")
         _make_strategic(db_session, user, v1)
-        _make_strategic(db_session, user, v2, released_at=datetime.now(timezone.utc))
+        _make_strategic(db_session, user, v2, released_at=datetime.now(UTC))
         db_session.commit()
 
         result = get_my_strategic(db_session, user.id)
@@ -135,7 +135,7 @@ class TestActiveCount:
         v1 = _make_vendor(db_session, "V1")
         v2 = _make_vendor(db_session, "V2")
         _make_strategic(db_session, user, v1)
-        _make_strategic(db_session, user, v2, released_at=datetime.now(timezone.utc))
+        _make_strategic(db_session, user, v2, released_at=datetime.now(UTC))
         db_session.commit()
 
         assert active_count(db_session, user.id) == 1
@@ -170,7 +170,7 @@ class TestGetVendorOwner:
     def test_returns_none_after_release(self, db_session: Session):
         user = _make_user(db_session)
         vendor = _make_vendor(db_session, "Released")
-        _make_strategic(db_session, user, vendor, released_at=datetime.now(timezone.utc))
+        _make_strategic(db_session, user, vendor, released_at=datetime.now(UTC))
         db_session.commit()
 
         assert get_vendor_owner(db_session, vendor.id) is None
@@ -339,10 +339,10 @@ class TestRecordOffer:
         # expires_at and last_offer_at should be set/extended
         assert sv.last_offer_at is not None
         # expires_at should be approximately TTL_DAYS from now
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = sv.expires_at
         if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
+            expires = expires.replace(tzinfo=UTC)
         assert expires > now
 
     def test_no_strategic_record_returns_false(self, db_session: Session):
@@ -364,7 +364,7 @@ class TestExpireStale:
             db_session,
             user,
             vendor,
-            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            expires_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.commit()
 
@@ -382,7 +382,7 @@ class TestExpireStale:
             db_session,
             user,
             vendor,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
         )
         db_session.commit()
 
@@ -401,8 +401,8 @@ class TestGetExpiringSoon:
         user = _make_user(db_session)
         v1 = _make_vendor(db_session, "ExpiringSoon")
         v2 = _make_vendor(db_session, "ExpiringLater")
-        _make_strategic(db_session, user, v1, expires_at=datetime.now(timezone.utc) + timedelta(days=3))
-        _make_strategic(db_session, user, v2, expires_at=datetime.now(timezone.utc) + timedelta(days=30))
+        _make_strategic(db_session, user, v1, expires_at=datetime.now(UTC) + timedelta(days=3))
+        _make_strategic(db_session, user, v2, expires_at=datetime.now(UTC) + timedelta(days=30))
         db_session.commit()
 
         results = get_expiring_soon(db_session, days=7)
@@ -412,7 +412,7 @@ class TestGetExpiringSoon:
     def test_empty_when_none_expiring_soon(self, db_session: Session):
         user = _make_user(db_session)
         vendor = _make_vendor(db_session, "FarFuture")
-        _make_strategic(db_session, user, vendor, expires_at=datetime.now(timezone.utc) + timedelta(days=60))
+        _make_strategic(db_session, user, vendor, expires_at=datetime.now(UTC) + timedelta(days=60))
         db_session.commit()
 
         results = get_expiring_soon(db_session, days=7)

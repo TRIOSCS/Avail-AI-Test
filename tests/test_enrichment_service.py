@@ -8,12 +8,11 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.services.enrichment
 """
 
-import asyncio
 import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,7 +32,7 @@ def _make_card(db, mpn="lm317t", display="LM317T", manufacturer=None, category=N
         display_mpn=display,
         manufacturer=manufacturer,
         category=category,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -42,7 +41,7 @@ def _make_card(db, mpn="lm317t", display="LM317T", manufacturer=None, category=N
 
 def _make_brand_tag(db, name="Texas Instruments"):
     """Create a brand Tag."""
-    tag = Tag(name=name, tag_type="brand", created_at=datetime.now(timezone.utc))
+    tag = Tag(name=name, tag_type="brand", created_at=datetime.now(UTC))
     db.add(tag)
     db.flush()
     return tag
@@ -50,7 +49,7 @@ def _make_brand_tag(db, name="Texas Instruments"):
 
 def _make_commodity_tag(db, name="Capacitors"):
     """Create a commodity Tag."""
-    tag = Tag(name=name, tag_type="commodity", created_at=datetime.now(timezone.utc))
+    tag = Tag(name=name, tag_type="commodity", created_at=datetime.now(UTC))
     db.add(tag)
     db.flush()
     return tag
@@ -63,7 +62,7 @@ def _make_material_tag(db, card_id, tag_id, source="ai_classified", confidence=0
         tag_id=tag_id,
         source=source,
         confidence=confidence,
-        classified_at=datetime.now(timezone.utc),
+        classified_at=datetime.now(UTC),
     )
     db.add(mt)
     db.flush()
@@ -162,7 +161,7 @@ class TestTryConnectorConfig:
         [
             ("mouser", [{"manufacturer": "Unknown", "category": "Test"}], None),  # ignored manufacturer
             ("mouser", [], None),  # empty results
-            ("digikey", None, asyncio.TimeoutError()),  # timeout
+            ("digikey", None, TimeoutError()),  # timeout
             ("digikey", None, Exception("401 Unauthorized")),  # auth error
             ("digikey", None, Exception("429 rate limited")),  # rate limit
             ("digikey", None, Exception("Network error")),  # generic error
@@ -673,7 +672,7 @@ class TestBoostConfidenceInternal:
             customer_name="Test",
             status="open",
             created_by=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -681,7 +680,7 @@ class TestBoostConfidenceInternal:
             requisition_id=req.id,
             primary_mpn="SIGHT1",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.flush()
@@ -693,7 +692,7 @@ class TestBoostConfidenceInternal:
             manufacturer="Arrow",
             mpn_matched="SIGHT1",
             source_type="broker",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()
@@ -720,7 +719,7 @@ class TestBoostConfidenceInternal:
             customer_name="T",
             status="open",
             created_by=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -728,7 +727,7 @@ class TestBoostConfidenceInternal:
             requisition_id=req.id,
             primary_mpn="MULTI1",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.flush()
@@ -740,7 +739,7 @@ class TestBoostConfidenceInternal:
             manufacturer="Murata",
             mpn_matched="MULTI1",
             source_type="broker",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(sighting)
         db_session.commit()

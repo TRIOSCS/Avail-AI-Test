@@ -13,6 +13,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -580,7 +582,7 @@ def _set_active(db_session, name):
 @pytest.fixture()
 def admin_client_worker_healthy(db_session, admin_user):
     """Admin client with a HEALTHY NetComponents worker heartbeat seeded."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import NcWorkerStatus
 
@@ -590,8 +592,8 @@ def admin_client_worker_healthy(db_session, admin_user):
         NcWorkerStatus(
             id=1,
             is_running=True,
-            last_heartbeat=datetime.now(timezone.utc),
-            last_search_at=datetime.now(timezone.utc),
+            last_heartbeat=datetime.now(UTC),
+            last_search_at=datetime.now(UTC),
             circuit_breaker_open=False,
         )
     )
@@ -602,7 +604,7 @@ def admin_client_worker_healthy(db_session, admin_user):
 @pytest.fixture()
 def admin_client_worker_stalled(db_session, admin_user):
     """Admin client with a STALLED ICsource worker (heartbeat 40 min old)."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import IcsWorkerStatus
 
@@ -612,7 +614,7 @@ def admin_client_worker_stalled(db_session, admin_user):
         IcsWorkerStatus(
             id=1,
             is_running=True,
-            last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=40),
+            last_heartbeat=datetime.now(UTC) - timedelta(minutes=40),
             circuit_breaker_open=False,
         )
     )
@@ -805,12 +807,12 @@ def test_clay_controls_admin_only_for_non_admin_holder(connector_manager_client,
 def test_last_checked_timestamp_renders_for_tested_source(admin_client, db_session):
     """A source with a persisted last_success renders 'Last checked …' on its card (item
     1: the macro previously discarded last_success, so a re-test was zero-feedback)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import ApiSource as AS
 
     src = db_session.query(AS).filter_by(name="lusha_enrichment").first()
-    src.last_success = datetime.now(timezone.utc)
+    src.last_success = datetime.now(UTC)
     db_session.commit()
 
     html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text
@@ -820,12 +822,12 @@ def test_last_checked_timestamp_renders_for_tested_source(admin_client, db_sessi
 def test_last_checked_hidden_for_worker_backed_source(admin_client, db_session):
     """Worker-backed cards show their heartbeat/last-search line, not the API-probe
     'Last checked' — so it must be suppressed even when last_success is set."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import ApiSource as AS
 
     src = db_session.query(AS).filter_by(name="icsource").first()
-    src.last_success = datetime.now(timezone.utc)
+    src.last_success = datetime.now(UTC)
     db_session.commit()
 
     html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text

@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -199,7 +199,7 @@ class TestClaimRequisition:
 class TestUnclaimRequisition:
     def test_unclaim(self, db_session, test_requisition, test_user):
         test_requisition.claimed_by_id = test_user.id
-        test_requisition.claimed_at = datetime.now(timezone.utc)
+        test_requisition.claimed_at = datetime.now(UTC)
         db_session.commit()
 
         changed = unclaim_requisition(test_requisition, db_session, actor=test_user)

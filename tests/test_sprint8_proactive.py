@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -32,7 +32,7 @@ def proactive_match(db_session: Session, test_offer, test_requisition, test_cust
         salesperson_id=test_user.id,
         mpn="LM317T",
         status="new",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(m)
     db_session.commit()
@@ -170,7 +170,7 @@ class TestProactiveConvert:
             name="Other User",
             role="buyer",
             azure_id="other-azure-999",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other_user)
         db_session.flush()

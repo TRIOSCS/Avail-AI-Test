@@ -9,7 +9,7 @@ Called by: jobs/email_jobs.py (_job_calendar_scan)
 Depends on: utils/graph_client.py, services/activity_service.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ def _parse_graph_dt(dt_str: str | None) -> datetime | None:
     try:
         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except (ValueError, TypeError):
         return None
@@ -68,7 +68,7 @@ async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_d
 
     gc = GraphClient(token)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start_time = (now - timedelta(days=lookback_days)).isoformat()
     end_time = now.isoformat()
 

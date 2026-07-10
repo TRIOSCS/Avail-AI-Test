@@ -22,7 +22,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -538,7 +538,7 @@ class TestDetailWithOOOContact:
             email="sales@cover.com",
             source="email",
             is_ooo=True,
-            ooo_return_date=datetime(2026, 12, 1, tzinfo=timezone.utc),
+            ooo_return_date=datetime(2026, 12, 1, tzinfo=UTC),
         )
         db_session.add(contact)
         db_session.commit()

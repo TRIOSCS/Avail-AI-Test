@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -164,7 +164,7 @@ class TestUnmatchedQueueService:
             vendor_card_id=None,
             contact_email=email,
             external_id=ext_id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(a)
         db_session.flush()
@@ -293,7 +293,7 @@ class TestUnmatchedEndpoints:
                     vendor_card_id=None,
                     contact_email=f"unknown{i}@test.com",
                     external_id=f"api-test-{i}",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db_session.commit()

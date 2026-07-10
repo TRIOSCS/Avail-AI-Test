@@ -12,7 +12,7 @@ Depends on: app/services/admin_service.py, app/models/config.py, conftest.py
 """
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import SystemConfig
 from app.services import admin_service
@@ -27,7 +27,7 @@ from app.services.admin_service import (
 
 def _seed(db, key, value):
     """Seed a system_config row directly (set_config_value 404s on unknown keys)."""
-    row = SystemConfig(key=key, value=value, updated_at=datetime.now(timezone.utc))
+    row = SystemConfig(key=key, value=value, updated_at=datetime.now(UTC))
     db.add(row)
     db.flush()
     return row

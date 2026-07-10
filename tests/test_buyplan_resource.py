@@ -7,7 +7,7 @@ owned + tested by po_cancellation_service; here we assert the workflow wiring + 
 machine + escalation + claim race.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -37,7 +37,7 @@ def _make_plan(db, quote, requisition, **overrides) -> BuyPlan:
         total_revenue=200.0,
         total_margin_pct=50.0,
         ai_flags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     plan = BuyPlan(**defaults)
@@ -76,7 +76,7 @@ def _make_cut_line(db, plan, requirement, offer, buyer, **overrides) -> BuyPlanL
         buyer_id=buyer.id,
         status=BuyPlanLineStatus.VERIFIED.value,
         po_number="PO-9001",
-        po_confirmed_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        po_confirmed_at=datetime(2026, 6, 1, tzinfo=UTC),
     )
     defaults.update(overrides)
     line = BuyPlanLine(**defaults)

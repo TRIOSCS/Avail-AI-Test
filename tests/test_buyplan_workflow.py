@@ -12,7 +12,7 @@ Depends on: conftest fixtures, buyplan_workflow module
 
 import asyncio
 from collections.abc import Awaitable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -50,7 +50,7 @@ from app.services.buyplan_workflow import (
 _T = TypeVar("_T")
 
 
-def _run(coro: Awaitable[_T]) -> _T:
+def _run(coro: Awaitable[_T]) -> _T:  # noqa: UP047  # PEP 695 syntax needs py3.12+; dev/test envs still run 3.11
     """Run an async coroutine to completion on a fresh event loop."""
     loop = asyncio.new_event_loop()
     try:
@@ -70,7 +70,7 @@ def _make_plan(db: Session, user: User, quote: Quote, requisition: Requisition, 
         total_revenue=200.00,
         total_margin_pct=50.00,
         ai_flags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     plan = BuyPlan(**defaults)
@@ -207,8 +207,8 @@ class TestSubmitBuyPlan:
         edits = [{"requirement_id": req.id, "offer_id": test_offer.id, "quantity": 500}]
 
         with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
-            with patch("app.services.buyplan_workflow.assign_buyer", return_value=(test_user, "test")):
-                with patch("app.services.buyplan_workflow.score_offer", return_value=85.0):
+            with patch("app.services.buyplan_workflow.buyplan_approval.assign_buyer", return_value=(test_user, "test")):
+                with patch("app.services.buyplan_workflow.buyplan_approval.score_offer", return_value=85.0):
                     result = submit_buy_plan(plan.id, "SO-005", test_user, db_session, line_edits=edits)
 
         assert result.status == BuyPlanStatus.PENDING.value
@@ -251,7 +251,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="LGTM")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -274,7 +274,7 @@ class TestApproveBuyPlan:
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             approve_buy_plan(plan.id, "approve", manager_user, db_session)
 
         # The fold already cleared the SO gate — completion needs no verify_so call.
@@ -327,7 +327,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="ok")
 
         row = (
@@ -375,7 +375,7 @@ class TestApproveBuyPlan:
 
         overrides = [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap vendor"}]
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", manager_user, db_session, line_overrides=overrides)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -421,7 +421,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
+        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
             result = approve_buy_plan(plan.id, "approve", test_user, db_session)
 
         assert result.status == BuyPlanStatus.ACTIVE.value
@@ -455,7 +455,9 @@ class TestHaltPlan:
         """Halting a PENDING plan cancels its open engine request first (no orphan)."""
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
 
-        with patch("app.services.buyplan_workflow._cancel_open_engine_requests_for_plan") as cancel_mock:
+        with patch(
+            "app.services.buyplan_workflow.buyplan_approval._cancel_open_engine_requests_for_plan"
+        ) as cancel_mock:
             result = halt_plan(plan.id, manager_user, db_session, reason="halt it")
 
         cancel_mock.assert_called_once()
@@ -473,7 +475,9 @@ class TestHaltPlan:
         """
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
 
-        with patch("app.services.buyplan_workflow._cancel_open_engine_requests_for_plan") as cancel_mock:
+        with patch(
+            "app.services.buyplan_workflow.buyplan_approval._cancel_open_engine_requests_for_plan"
+        ) as cancel_mock:
             result = halt_plan(plan.id, manager_user, db_session, reason="halt it")
 
         cancel_mock.assert_called_once()
@@ -539,7 +543,7 @@ class TestConfirmPO:
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value)
         db_session.refresh(plan)
 
-        ship_date = datetime.now(timezone.utc) + timedelta(days=7)
+        ship_date = datetime.now(UTC) + timedelta(days=7)
         result = confirm_po(plan.id, line.id, "PO-123", ship_date, test_user, db_session)
 
         assert result.po_number == "PO-123"
@@ -549,7 +553,7 @@ class TestConfirmPO:
 
     def test_confirm_po_plan_not_found(self, db_session: Session, test_user: User):
         with pytest.raises(ValueError, match="not found"):
-            confirm_po(9999, 1, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(9999, 1, "PO-X", datetime.now(UTC), test_user, db_session)
 
     def test_confirm_po_plan_not_active(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -557,14 +561,14 @@ class TestConfirmPO:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.DRAFT.value)
         line = _make_line(db_session, plan)
         with pytest.raises(ValueError, match="Plan must be active"):
-            confirm_po(plan.id, line.id, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session)
 
     def test_confirm_po_line_not_found(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         with pytest.raises(ValueError, match="Line .* not found"):
-            confirm_po(plan.id, 9999, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(plan.id, 9999, "PO-X", datetime.now(UTC), test_user, db_session)
 
     def test_confirm_po_wrong_status(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -572,7 +576,7 @@ class TestConfirmPO:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value)
         with pytest.raises(ValueError, match="Line must be awaiting PO"):
-            confirm_po(plan.id, line.id, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session)
 
 
 # ── PO Verification ──────────────────────────────────────────────────
@@ -1154,10 +1158,10 @@ class TestCaseReport:
             total_cost=500.00,
             total_revenue=1000.00,
             total_margin_pct=50.0,
-            submitted_at=datetime.now(timezone.utc) - timedelta(days=5),
-            approved_at=datetime.now(timezone.utc) - timedelta(days=4),
-            completed_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc) - timedelta(days=7),
+            submitted_at=datetime.now(UTC) - timedelta(days=5),
+            approved_at=datetime.now(UTC) - timedelta(days=4),
+            completed_at=datetime.now(UTC),
+            created_at=datetime.now(UTC) - timedelta(days=7),
         )
         _make_line(db_session, plan, offer_id=test_offer.id, status=BuyPlanLineStatus.VERIFIED.value)
         db_session.refresh(plan)
@@ -1181,7 +1185,7 @@ class TestCaseReport:
             status=BuyPlanStatus.COMPLETED.value,
             ai_flags=[{"severity": "warning", "type": "price_outlier", "message": "Price 30% above market"}],
             so_rejection_note="First SO was wrong",
-            created_at=datetime.now(timezone.utc) - timedelta(days=3),
+            created_at=datetime.now(UTC) - timedelta(days=3),
         )
         line = _make_line(
             db_session,
@@ -1210,7 +1214,7 @@ class TestCaseReport:
             test_quote,
             test_requisition,
             status=BuyPlanStatus.COMPLETED.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         plan.quote_id = test_quote.id  # quote exists but has no customer info
         db_session.refresh(plan)
@@ -1228,7 +1232,7 @@ class TestCaseReport:
             test_requisition,
             auto_approved=True,
             approved_by_id=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         report = generate_case_report(plan, db_session)
         assert "Auto-approved" in report
@@ -1244,7 +1248,7 @@ class TestCaseReport:
             test_requisition,
             quote_id=None,
             status=BuyPlanStatus.COMPLETED.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.refresh(plan)
 
@@ -1411,7 +1415,7 @@ class TestVerifyPoRejectClearsNudge:
             plan,
             status=BuyPlanLineStatus.PENDING_VERIFY.value,
             po_number="PO-1",
-            last_nudge_at=datetime.now(timezone.utc),
+            last_nudge_at=datetime.now(UTC),
         )
         _grant_po_approver(db_session, test_user)
 
@@ -1453,7 +1457,7 @@ class TestResolveLineIssue:
             status=BuyPlanLineStatus.ISSUE.value,
             issue_type="sold_out",
             po_number="PO-STALE",
-            po_confirmed_at=datetime.now(timezone.utc),
+            po_confirmed_at=datetime.now(UTC),
         )
 
         result = resolve_line_issue(plan.id, line.id, manager_user, db_session)

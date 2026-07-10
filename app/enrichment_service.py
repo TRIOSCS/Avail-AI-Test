@@ -7,8 +7,7 @@ app.services.firmo_tiers. apply_enrichment_to_* functions are provenance-aware.
 """
 
 import re
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import httpx
 from loguru import logger
@@ -179,7 +178,18 @@ _COUNTRY_MAP = {
 
 
 def _clean_domain(domain: str) -> str:
-    """Pure string cleanup for domain: strip, lowercase, remove protocol/www."""
+    """Pure string cleanup for domain: strip, lowercase, remove protocol/www.
+
+    TODO: not yet migrated onto the shared, validated
+    app.utils.normalization.parse_website_domain (urlsplit-based; rejects junk like
+    "user@host:8080" instead of naively regexing it into a bogus domain) — this
+    function's callers accept a value that's returned by AI enrichment /
+    normalize_company_input's own logic, not raw user-typed website input, so
+    swapping the extractor here needs its own behavior verification (a stricter
+    validator could start rejecting domains this pipeline currently accepts). Out of
+    scope for the company_import_service / sightings consolidation this note
+    accompanies.
+    """
     d = domain.strip().rstrip(".").rstrip("/")
     d = re.sub(r"^https?://", "", d, flags=re.IGNORECASE)
     d = re.sub(r"^www\.", "", d, flags=re.IGNORECASE)
@@ -301,7 +311,7 @@ COMPANY_SEARCH_SYSTEM = (
 )
 
 
-async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
+async def _ai_find_company(domain: str, name: str = "") -> dict | None:
     """Look up a company using Claude + web search.
 
     Returns normalized company data.
@@ -529,7 +539,7 @@ def _apply_enrichment(obj, data: dict) -> list[str]:
         updated.append(field)
     if updated:
         obj.enrichment_provenance = store
-        obj.last_enriched_at = datetime.now(timezone.utc)
+        obj.last_enriched_at = datetime.now(UTC)
         obj.enrichment_source = data.get("source", "unknown")
     return updated
 

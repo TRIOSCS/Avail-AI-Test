@@ -64,7 +64,7 @@ class TestPinnedApprovalSection:
 class TestBadgeMerge:
     def test_approval_action_registered_under_buy_plans(self):
         """The approvals alert source now lives on the buy-plans tab (folded nav)."""
-        import app.services.alerts.sources  # noqa: F401  — import triggers registration
+        import app.services.alerts.sources  # noqa: F401
         from app.services.alerts import tab_for_kind
 
         assert tab_for_kind(AlertKind.APPROVAL_ACTION) == "buy-plans"

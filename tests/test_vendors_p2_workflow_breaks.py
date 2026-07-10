@@ -12,7 +12,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_vendor_card, test_vendor_contact)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -141,7 +141,7 @@ def vendor_with_domain(db_session: Session) -> VendorCard:
         domain="mouser.com",
         emails=["sales@mouser.com"],
         sighting_count=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()

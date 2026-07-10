@@ -13,7 +13,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +37,7 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "BC547", **kw) -
         requisition_id=req.id,
         primary_mpn=mpn,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     r = Requirement(**defaults)
@@ -62,7 +62,7 @@ def _make_task(
         created_by=user.id,
         assigned_to_id=user.id,
         source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     t = RequisitionTask(**defaults)
@@ -82,7 +82,7 @@ def _make_buy_plan(
         quote_id=quote.id,
         requisition_id=req.id,
         status="draft",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     bp = BuyPlan(**defaults)

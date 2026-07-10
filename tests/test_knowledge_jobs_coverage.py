@@ -11,14 +11,29 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.models.knowledge import KnowledgeEntry
+from app.models.offers import Offer
 from app.models.sourcing import Requisition
+from app.models.vendors import VendorCard
+
+
+@pytest.fixture
+def loguru_info():
+    """Capture loguru INFO+ messages into a list — loguru isn't bridged to stdlib
+    logging here, so pytest's ``caplog`` won't see ``logger.info(...)``."""
+    captured: list[str] = []
+    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="INFO")
+    yield captured
+    logger.remove(sink_id)
+
 
 # The five knowledge_service insight generators _job_refresh_insights calls.
 _INSIGHT_GENERATORS = (
@@ -48,8 +63,8 @@ def active_req(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -76,39 +91,62 @@ class TestRegisterKnowledgeJobs:
         assert "knowledge_expire_stale" in ids
 
 
+def _seed_knowledge_entry(db: Session, *, expires_at=None) -> KnowledgeEntry:
+    entry = KnowledgeEntry(
+        entry_type="note",
+        content="test entry",
+        source="manual",
+        expires_at=expires_at,
+        created_at=datetime.now(UTC),
+    )
+    db.add(entry)
+    db.flush()
+    return entry
+
+
 class TestJobExpireStale:
-    async def test_expire_stale_empty_db(self):
-        """_job_expire_stale runs with a mocked session returning zero entries."""
+    """P6.3: converted from a whole-session MagicMock (``query().filter().count()``
+    stubbed to a fixed number, never running the real ``expires_at`` predicate) to real
+    ``KnowledgeEntry`` rows on ``db_session`` — the counts asserted via the
+    ``loguru_info`` sink fixture are now the REAL result of the query, not whatever the
+    mock was told to return."""
+
+    async def test_expire_stale_empty_db(self, db_session: Session, loguru_info):
+        """With no KnowledgeEntry rows, both counts log as zero."""
         from app.jobs.knowledge_jobs import _job_expire_stale
 
-        mock_session = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter.return_value.count.return_value = 0
-        mock_query.count.return_value = 0
-        mock_session.query.return_value = mock_query
-        mock_session.close = MagicMock()
-
-        with patch("app.database.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", lambda: db_session):
             await _job_expire_stale()
 
-        mock_session.close.assert_called_once()
+        assert any("0 total, 0 expired" in msg for msg in loguru_info)
 
-    async def test_expire_stale_with_entries(self):
-        """Expire stale runs and logs count when entries exist."""
+    async def test_expire_stale_with_entries(self, db_session: Session, loguru_info):
+        """Expire stale logs the REAL total vs.
+
+        expired-only count.
+        """
         from app.jobs.knowledge_jobs import _job_expire_stale
 
-        mock_session = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter.return_value.count.return_value = 3
-        mock_query.count.return_value = 10
-        mock_session.query.return_value = mock_query
-        mock_session.close = MagicMock()
+        now = datetime.now(UTC)
+        _seed_knowledge_entry(db_session, expires_at=now - timedelta(days=1))  # expired
+        _seed_knowledge_entry(db_session, expires_at=now - timedelta(hours=1))  # expired
+        _seed_knowledge_entry(db_session, expires_at=now + timedelta(days=30))  # not yet
+        _seed_knowledge_entry(db_session, expires_at=None)  # never expires
+        db_session.commit()
 
-        with patch("app.database.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", lambda: db_session):
             await _job_expire_stale()
+
+        assert any("4 total, 2 expired" in msg for msg in loguru_info)
 
     async def test_expire_stale_db_error_raises(self):
-        """If DB query fails, exception is re-raised."""
+        """If DB query fails, exception is re-raised.
+
+        P6.3 disposition: KEPT as a whole-session MagicMock — this forces the query
+        itself to raise, a hard-failure path a real SQLite session can't be coerced into
+        cleanly (would need to drop the table mid-test); the assertion is on the re-
+        raise behavior, not on any query result the mock could be hiding.
+        """
         from app.jobs.knowledge_jobs import _job_expire_stale
 
         mock_session = MagicMock()
@@ -120,82 +158,99 @@ class TestJobExpireStale:
                 await _job_expire_stale()
 
 
-def _make_mock_session(req_ids=None, vendor_ids=None, company_ids=None, mpns=None):
-    """Build a mock session returning configurable query results."""
-    mock_session = MagicMock()
-    mock_session.close = MagicMock()
-    mock_session.rollback = MagicMock()
+def _seed_requisition(db: Session, user: User, name: str, *, updated_at=None) -> Requisition:
+    req = Requisition(
+        name=name,
+        customer_name="Test Co",
+        status="open",
+        created_by=user.id,
+        created_at=datetime.now(UTC),
+        updated_at=updated_at or datetime.now(UTC),
+    )
+    db.add(req)
+    db.flush()
+    return req
 
-    req_rows = [(rid,) for rid in (req_ids or [])]
-    vendor_rows = [(vid,) for vid in (vendor_ids or [])]
-    company_rows = [(cid,) for cid in (company_ids or [])]
-    mpn_rows = [(mpn,) for mpn in (mpns or [])]
 
-    call_count = [0]
-
-    def query_side_effect(*args, **kwargs):
-        mock_q = MagicMock()
-        # Chain: .filter(...).order_by(...).limit(...).all() -> rows
-        # or .filter(...).group_by(...).order_by(...).limit(...).all() -> rows
-        results = [req_rows, vendor_rows, company_rows, mpn_rows]
-        idx = call_count[0] % len(results)
-        call_count[0] += 1
-        mock_q.filter.return_value.order_by.return_value.limit.return_value.all.return_value = results[idx]
-        mock_q.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            results[idx]
+def _seed_offer_with_vendor(db: Session, vendor_card_id: int, *, created_at=None) -> Offer:
+    vendor = db.get(VendorCard, vendor_card_id)
+    if vendor is None:
+        vendor = VendorCard(
+            id=vendor_card_id, normalized_name=f"vendor{vendor_card_id}", display_name=f"V{vendor_card_id}"
         )
-        return mock_q
-
-    mock_session.query.side_effect = query_side_effect
-    return mock_session
+        db.add(vendor)
+        db.flush()
+    offer = Offer(
+        vendor_card_id=vendor_card_id,
+        vendor_name=vendor.display_name,
+        mpn="LM317T",
+        created_at=created_at or datetime.now(UTC),
+    )
+    db.add(offer)
+    db.flush()
+    return offer
 
 
 class TestJobRefreshInsights:
-    async def test_refresh_insights_empty_db(self):
+    """P6.3: the req/vendor-id-fetching tests below seed real Requisition/Offer rows on
+    ``db_session`` instead of a rotating call-count mock that handed back canned
+    ``(id,)`` tuples regardless of the real ``updated_at``/``created_at`` filter, join,
+    or group-by — so the actual SQL (not a stand-in) is what's exercised."""
+
+    async def test_refresh_insights_empty_db(self, db_session: Session):
         """With empty DB (no rows), job runs without errors."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
-        mock_session = _make_mock_session()
         with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            stack.enter_context(patch("app.database.SessionLocal", lambda: db_session))
             _patch_insight_generators(stack)
             await _job_refresh_insights()
 
-        mock_session.close.assert_called_once()
-
-    async def test_refresh_insights_with_req_ids(self):
-        """generate_insights is called for each returned req id."""
+    async def test_refresh_insights_with_req_ids(self, db_session: Session, test_user: User):
+        """generate_insights is called once per recently-active requisition, with the
+        REAL req id from a real row (not a mock-supplied id)."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
-        mock_generate = AsyncMock(return_value=[MagicMock()])
-        mock_session = _make_mock_session(req_ids=[1, 2, 3])
+        reqs = [_seed_requisition(db_session, test_user, f"KJ-REQ-{i}") for i in range(3)]
+        db_session.commit()
+        expected_ids = {r.id for r in reqs}  # captured before the job closes the session
+        seen_ids = []
+
+        async def _capture(db, req_id):
+            seen_ids.append(req_id)
+            return [MagicMock()]
+
+        mock_generate = AsyncMock(side_effect=_capture)
 
         with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            stack.enter_context(patch("app.database.SessionLocal", lambda: db_session))
             _patch_insight_generators(stack, generate_insights=mock_generate)
             await _job_refresh_insights()
 
         assert mock_generate.call_count == 3
+        assert set(seen_ids) == expected_ids
 
-    async def test_refresh_insights_req_exception_continues(self):
+    async def test_refresh_insights_req_exception_continues(self, db_session: Session, test_user: User):
         """If generate_insights raises for a req, job continues."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
+        _seed_requisition(db_session, test_user, "KJ-REQ-CRASH")
+        db_session.commit()
         mock_generate = AsyncMock(side_effect=Exception("AI failed"))
-        mock_session = _make_mock_session(req_ids=[1])
 
         with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            stack.enter_context(patch("app.database.SessionLocal", lambda: db_session))
             _patch_insight_generators(stack, generate_insights=mock_generate)
             await _job_refresh_insights()  # Should not raise
 
-    async def test_refresh_pipeline_exception_continues(self):
+        mock_generate.assert_awaited_once()
+
+    async def test_refresh_pipeline_exception_continues(self, db_session: Session):
         """If pipeline insights fail, rest of job continues."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
-        mock_session = _make_mock_session()
         with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            stack.enter_context(patch("app.database.SessionLocal", lambda: db_session))
             _patch_insight_generators(
                 stack,
                 generate_pipeline_insights=AsyncMock(side_effect=Exception("pipeline fail")),
@@ -203,7 +258,13 @@ class TestJobRefreshInsights:
             await _job_refresh_insights()  # Should not raise
 
     async def test_refresh_insights_db_error_logs_and_continues(self):
-        """DB errors within each section are caught and logged; job completes."""
+        """DB errors within each section are caught and logged; job completes.
+
+        P6.3 disposition: KEPT as a whole-session MagicMock — simulates every section's
+        own query itself raising, which (like ``test_expire_stale_db_error_raises``)
+        can't be forced cleanly against a real SQLite session; the assertion is on the
+        catch-and-continue control flow, not on any hidden query result.
+        """
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
         mock_session = MagicMock()
@@ -217,16 +278,26 @@ class TestJobRefreshInsights:
 
         mock_session.close.assert_called_once()
 
-    async def test_refresh_vendor_insights_called(self):
-        """generate_vendor_insights is called for each vendor id returned."""
+    async def test_refresh_vendor_insights_called(self, db_session: Session):
+        """generate_vendor_insights is called once per vendor with recent offers, with
+        the REAL vendor_card_id from a real Offer row."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
-        mock_vendor = AsyncMock(return_value=[MagicMock()])
-        mock_session = _make_mock_session(vendor_ids=[10, 20])
+        _seed_offer_with_vendor(db_session, 501)
+        _seed_offer_with_vendor(db_session, 502)
+        db_session.commit()
+        seen_ids = []
+
+        async def _capture(db, vendor_card_id):
+            seen_ids.append(vendor_card_id)
+            return [MagicMock()]
+
+        mock_vendor = AsyncMock(side_effect=_capture)
 
         with ExitStack() as stack:
-            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            stack.enter_context(patch("app.database.SessionLocal", lambda: db_session))
             _patch_insight_generators(stack, generate_vendor_insights=mock_vendor)
             await _job_refresh_insights()
 
         assert mock_vendor.call_count == 2
+        assert set(seen_ids) == {501, 502}

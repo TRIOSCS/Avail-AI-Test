@@ -522,10 +522,10 @@ async def proactive_send_offer(
         return template_response("htmx/partials/proactive/list.html", ctx)
 
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     except Exception as exc:
         logger.error("Proactive send failed: {}", exc)
-        raise HTTPException(500, "Send failed. Please try again or contact support.")
+        raise HTTPException(500, "Send failed. Please try again or contact support.") from exc
 
 
 # ── Sprint 8: Proactive Selling + Prospecting Completion ──
@@ -561,11 +561,11 @@ async def proactive_convert(
     except ValueError as exc:
         exc_str = str(exc).lower()
         if "already converted" in exc_str:
-            raise HTTPException(409, "This offer has already been converted.")
-        raise HTTPException(403, str(exc))
+            raise HTTPException(409, "This offer has already been converted.") from exc
+        raise HTTPException(403, str(exc)) from exc
     except Exception as exc:
         logger.error("Proactive conversion failed: {}", exc)
-        raise HTTPException(500, "Conversion failed. Please try again.")
+        raise HTTPException(500, "Conversion failed. Please try again.") from exc
 
 
 @router.get("/v2/partials/proactive/scorecard", response_class=HTMLResponse)
@@ -629,8 +629,8 @@ async def proactive_do_not_offer(
 
     try:
         cid = int(company_id)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "company_id must be an integer")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "company_id must be an integer") from e
 
     # Authz: a do-not-offer rule is scoped to a customer account, so the actor must be
     # able to manage that account — otherwise a cross-account actor could suppress offers

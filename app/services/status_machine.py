@@ -158,7 +158,7 @@ def require_valid_transition(entity_type: str, current_status: str, new_status: 
     try:
         validate_transition(entity_type, current_status, new_status)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 def validate_transition(

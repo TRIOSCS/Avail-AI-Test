@@ -7,7 +7,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, stock_list_ingest, cache, normalization, audit_service
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -63,7 +63,7 @@ def _stamp_manual_provenance(card: MaterialCard, fields: list[str]) -> None:
     """
     if not fields:
         return
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     prov = dict(card.enrichment_provenance or {})
     for field in fields:
         prov[field] = {"source": "manual", "tier": 100, "confidence": 1.0, "fetched_at": now_iso}
@@ -227,7 +227,7 @@ async def add_material(
         MaterialEnrichmentStatus.NOT_FOUND,
         MaterialEnrichmentStatus.NOT_CATALOGUED,
     ):
-        card.enrich_requested_at = datetime.now(timezone.utc)
+        card.enrich_requested_at = datetime.now(UTC)
     db.commit()
     invalidate_prefix("material_list")
 
@@ -243,8 +243,8 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
     try:
         limit = min(int(request.query_params.get("limit", "200")), 1000)
         offset = max(int(request.query_params.get("offset", "0")), 0)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "limit and offset must be integers")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "limit and offset must be integers") from e
 
     if q and len(q) < 2:
         req_id = getattr(request.state, "request_id", "unknown")
@@ -522,8 +522,8 @@ async def enrich_material(
     else:
         try:
             confidence = min(max(float(raw_confidence), 0.0), 1.0)
-        except (TypeError, ValueError):
-            raise HTTPException(422, f'"confidence" must be a number between 0 and 1, got {raw_confidence!r}.')
+        except (TypeError, ValueError) as e:
+            raise HTTPException(422, f'"confidence" must be a number between 0 and 1, got {raw_confidence!r}.') from e
     enrichment_fields = (
         "lifecycle_status",
         "package_type",
@@ -553,7 +553,7 @@ async def enrich_material(
             rejected.append("manufacturer")
     if updated:
         card.enrichment_source = source
-        card.enriched_at = datetime.now(timezone.utc)
+        card.enriched_at = datetime.now(UTC)
     db.commit()
     invalidate_prefix("material_list")
     return {
@@ -578,7 +578,7 @@ async def delete_material(card_id: int, user: User = Depends(require_admin), db:
         raise HTTPException(404, "Material not found")
     if card.deleted_at is not None:
         raise HTTPException(400, "Card is already deleted")
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     log_audit(
         db,
         material_card_id=card.id,
@@ -631,7 +631,7 @@ async def merge_material_cards(
     try:
         result = _merge_material_cards_service(db, source_id, target_id, _actor_email(user))
     except ValueError as e:
-        raise HTTPException(400 if "itself" in str(e) else 404, str(e))
+        raise HTTPException(400 if "itself" in str(e) else 404, str(e)) from e
 
     db.commit()
     invalidate_prefix("material_list")

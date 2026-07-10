@@ -10,7 +10,7 @@ Depends on: conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import engine  # noqa: F401
@@ -125,7 +125,7 @@ class TestOOODetection:
             email="away@vendor.com",
             source="email_mining",
             is_ooo=True,
-            ooo_return_date=datetime(2026, 3, 15, tzinfo=timezone.utc),
+            ooo_return_date=datetime(2026, 3, 15, tzinfo=UTC),
         )
         db_session.add(vc)
         db_session.commit()

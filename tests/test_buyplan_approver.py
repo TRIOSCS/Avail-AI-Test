@@ -20,7 +20,7 @@ Called by: pytest
 Depends on: app.routers.admin.users, app.dependencies, app.models (User, UserAdminAudit), conftest
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -48,7 +48,7 @@ def _make_user(db, *, email, role="buyer", can_approve=False, is_active=True):
         role=role,
         is_active=is_active,
         can_approve_buy_plans=can_approve,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()

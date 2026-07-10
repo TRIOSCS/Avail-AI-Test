@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -62,7 +62,7 @@ def _make_ticket(
         source=source,
         ai_summary=ai_summary,
         root_cause_group_id=root_cause_group_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(t)
     db.commit()
@@ -75,7 +75,7 @@ def _make_group(db: Session, *, title: str = "Auth Errors", suggested_fix: str |
     g = RootCauseGroup(
         title=title,
         suggested_fix=suggested_fix,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(g)
     db.commit()

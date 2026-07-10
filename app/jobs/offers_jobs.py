@@ -5,7 +5,7 @@ Depends on: app.database, app.models, app.services.proactive_matching, app.servi
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
@@ -95,7 +95,7 @@ async def _job_proactive_matching():
         new_matches = scan_result.get("matches_created", 0)
         total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == ProactiveMatchStatus.NEW).count()
         logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
         raise
@@ -115,7 +115,7 @@ async def _job_performance_tracking():
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         from ..services.avail_score_service import compute_all_avail_scores
         from ..services.buyer_leaderboard import compute_buyer_leaderboard
         from ..services.vendor_scorecard import compute_all_vendor_scorecards
@@ -158,7 +158,7 @@ async def _job_performance_tracking():
             await _run(compute_all_avail_scores, prev_month, timeout=300)
             await _run(compute_all_multiplier_scores, prev_month, timeout=300)
             await _run(compute_all_unified_scores, prev_month, timeout=300)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Performance tracking timed out")
         db.rollback()
     except Exception as e:
@@ -180,7 +180,7 @@ async def _job_proactive_offer_expiry():
 
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cutoff = datetime.now(UTC) - timedelta(days=14)
         expired_count = (
             db.query(ProactiveOffer)
             .filter(
@@ -214,7 +214,7 @@ async def _job_flag_stale_offers():
 
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cutoff = datetime.now(UTC) - timedelta(days=14)
         flagged = (
             db.query(Offer)
             .filter(
@@ -271,10 +271,10 @@ async def _job_warn_strategic_expiring():
 
         expiring = get_expiring_soon(db, days=7)
         for sv in expiring:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             expires = sv.expires_at
             if expires and expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
+                expires = expires.replace(tzinfo=UTC)
             days_left = max(0, (expires - now).days)
             vendor_name = sv.vendor_card.display_name if sv.vendor_card else "Unknown"
 

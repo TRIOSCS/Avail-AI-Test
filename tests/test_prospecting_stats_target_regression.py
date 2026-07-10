@@ -13,7 +13,7 @@ import re
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -28,7 +28,7 @@ def _make(db: Session) -> ProspectAccount:
         fit_score=70,
         readiness_score=50,
         discovery_source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(p)
     db.commit()

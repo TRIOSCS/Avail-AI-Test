@@ -1,6 +1,6 @@
 """Tests for the inbox sync status helper."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.constants import InboxSyncHealth
@@ -10,8 +10,8 @@ from app.services.activity_service import get_inbox_sync_status
 def _user(**kw):
     base = dict(
         m365_connected=True,
-        last_inbox_scan=datetime.now(timezone.utc),
-        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        last_inbox_scan=datetime.now(UTC),
+        token_expires_at=datetime.now(UTC) + timedelta(hours=1),
         access_token="t",
         m365_error_reason=None,
     )
@@ -31,12 +31,12 @@ def test_status_error_when_disconnected():
 
 
 def test_status_error_when_token_expired():
-    s = get_inbox_sync_status(None, _user(token_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+    s = get_inbox_sync_status(None, _user(token_expires_at=datetime.now(UTC) - timedelta(minutes=1)))
     assert s["health"] == InboxSyncHealth.ERROR
 
 
 def test_status_warning_when_stale():
-    old = datetime.now(timezone.utc) - timedelta(hours=6)
+    old = datetime.now(UTC) - timedelta(hours=6)
     s = get_inbox_sync_status(None, _user(last_inbox_scan=old))
     assert s["health"] == InboxSyncHealth.WARNING
     assert s["is_stale"] is True

@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -48,7 +48,7 @@ def req_with_offers(db_session: Session, test_user: User):
         customer_name="Chunk A Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -58,7 +58,7 @@ def req_with_offers(db_session: Session, test_user: User):
         primary_mpn="LM317T",
         manufacturer="TI",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()
@@ -73,7 +73,7 @@ def req_with_offers(db_session: Session, test_user: User):
             status=status,
             unit_price=price,
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
     active_hi = _offer("Arrow", 0.55, "active")
@@ -111,7 +111,7 @@ class TestBestCostFor:
             customer_name="Empty Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -119,7 +119,7 @@ class TestBestCostFor:
             requisition_id=req.id,
             primary_mpn="NOPART",
             target_qty=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -132,7 +132,7 @@ class TestBestCostFor:
             customer_name="NoPrice Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -140,7 +140,7 @@ class TestBestCostFor:
             requisition_id=req.id,
             primary_mpn="X",
             target_qty=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.flush()
@@ -153,7 +153,7 @@ class TestBestCostFor:
                 normalized_mpn="X",
                 status="active",
                 unit_price=None,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -205,7 +205,7 @@ def _seeded_quote(db_session: Session, test_user: User) -> Quote:
         customer_name="Export Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -233,7 +233,7 @@ def _seeded_quote(db_session: Session, test_user: User) -> Quote:
         total_cost=40.0,
         total_margin_pct=33.33,
         created_by_id=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(quote)
     db_session.commit()
@@ -346,7 +346,7 @@ class TestBuildQuoteTabData:
             line_items=[{"mpn": "LM317T", "sell_price": 0.99, "margin_pct": 50.0}],
             subtotal=99.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(prior)
         db_session.commit()
@@ -360,7 +360,7 @@ class TestBuildQuoteTabData:
             customer_name="Empty Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -369,7 +369,7 @@ class TestBuildQuoteTabData:
                 requisition_id=req.id,
                 primary_mpn="NOPART",
                 target_qty=5,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()

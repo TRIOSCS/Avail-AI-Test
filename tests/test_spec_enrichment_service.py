@@ -1,5 +1,6 @@
 """Tests for the structured-spec enrichment service (second-pass extraction)."""
 
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -147,11 +148,11 @@ async def test_ladder_arbitration_and_provenance_through_writer(db: Session, _sc
 
 @pytest.mark.asyncio
 async def test_skips_already_enriched_unless_forced(db: Session, _schemas):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.services.spec_enrichment_service import enrich_card_specs
 
-    card = _mc(db, "STM32F405", specs_enriched_at=datetime.now(timezone.utc))
+    card = _mc(db, "STM32F405", specs_enriched_at=datetime.now(UTC))
     with patch(
         "app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("STM32F405")
     ) as m:

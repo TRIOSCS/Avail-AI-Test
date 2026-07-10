@@ -14,7 +14,7 @@ import pytest
 
 os.environ["TESTING"] = "1"
 
-from app.file_utils import (  # noqa: E402
+from app.file_utils import (
     _looks_like_html,
     _parse_html_table,
     extract_mpns,
@@ -250,12 +250,7 @@ class TestLooksLikeHtml:
 
 
 class TestParseHtmlTable:
-    _BASIC = (
-        b"<table>"
-        b"<tr><th>mpn</th><th>qty</th></tr>"
-        b"<tr><td>ABC123</td><td>10</td></tr>"
-        b"</table>"
-    )
+    _BASIC = b"<table><tr><th>mpn</th><th>qty</th></tr><tr><td>ABC123</td><td>10</td></tr></table>"
 
     def test_basic_table_returns_rows(self):
         rows = _parse_html_table(self._BASIC)
@@ -291,23 +286,13 @@ class TestParseHtmlTable:
         assert rows[1]["mpn"] == "DEF456"
 
     def test_headers_are_lowercased(self):
-        html = (
-            b"<table>"
-            b"<tr><th>MPN</th><th>QTY</th></tr>"
-            b"<tr><td>X1</td><td>5</td></tr>"
-            b"</table>"
-        )
+        html = b"<table><tr><th>MPN</th><th>QTY</th></tr><tr><td>X1</td><td>5</td></tr></table>"
         rows = _parse_html_table(html)
         assert "mpn" in rows[0]
         assert "qty" in rows[0]
 
     def test_values_are_stripped(self):
-        html = (
-            b"<table>"
-            b"<tr><th>mpn</th></tr>"
-            b"<tr><td>  ABC  </td></tr>"
-            b"</table>"
-        )
+        html = b"<table><tr><th>mpn</th></tr><tr><td>  ABC  </td></tr></table>"
         rows = _parse_html_table(html)
         assert rows[0]["mpn"] == "ABC"
 
@@ -321,12 +306,7 @@ class TestParseHtmlTable:
         assert _parse_html_table(b"<html><body><p>No table</p></body></html>") == []
 
     def test_th_cells_used_as_headers(self):
-        html = (
-            b"<table>"
-            b"<tr><th>part number</th></tr>"
-            b"<tr><td>R100</td></tr>"
-            b"</table>"
-        )
+        html = b"<table><tr><th>part number</th></tr><tr><td>R100</td></tr></table>"
         rows = _parse_html_table(html)
         assert rows[0]["part number"] == "R100"
 
@@ -337,10 +317,7 @@ class TestParseHtmlTable:
 
 
 class TestParseTabularFileHtmlBranches:
-    _HTML = (
-        b"<table><tr><th>mpn</th><th>qty</th></tr>"
-        b"<tr><td>LM317T</td><td>100</td></tr></table>"
-    )
+    _HTML = b"<table><tr><th>mpn</th><th>qty</th></tr><tr><td>LM317T</td><td>100</td></tr></table>"
 
     def test_xlsx_extension_with_html_content(self):
         # ERP exports: .xlsx filename but the bytes are really HTML — line 79

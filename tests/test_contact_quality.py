@@ -5,7 +5,7 @@ Called by: pytest
 Depends on: conftest fixtures (db_session, test_company, test_customer_site)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -113,7 +113,7 @@ class TestDedupContacts:
             phone=None,
             title=None,
             is_active=True,
-            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
         c2 = SiteContact(
             customer_site_id=test_customer_site.id,
@@ -125,7 +125,7 @@ class TestDedupContacts:
             linkedin_url="https://linkedin.com/in/alice",
             contact_role="buyer",
             is_active=True,
-            created_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([c1, c2])
         db_session.commit()
@@ -167,7 +167,7 @@ class TestDedupContacts:
             linkedin_url="https://linkedin.com/in/frank-primary",
             contact_role="approver",
             is_active=True,
-            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
         duplicate = SiteContact(
             customer_site_id=test_customer_site.id,
@@ -179,7 +179,7 @@ class TestDedupContacts:
             linkedin_url="https://linkedin.com/in/frank-dupe",
             contact_role="buyer",
             is_active=True,
-            created_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([primary, duplicate])
         db_session.commit()
@@ -234,7 +234,7 @@ class TestDedupContacts:
             phone=None,
             title=None,
             is_active=True,
-            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
         inactive = SiteContact(
             customer_site_id=test_customer_site.id,
@@ -243,7 +243,7 @@ class TestDedupContacts:
             phone="+1-555-GHOST",
             title="Ghost",
             is_active=False,
-            created_at=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 2, 1, tzinfo=UTC),
         )
         db_session.add_all([active, inactive])
         db_session.commit()
@@ -350,7 +350,7 @@ class TestFlagStaleContacts:
             email="oldbob@example.com",
             is_active=True,
             needs_refresh=False,
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=200),
+            last_enriched_at=datetime.now(UTC) - timedelta(days=200),
         )
         db_session.add(c)
         db_session.commit()
@@ -365,7 +365,7 @@ class TestFlagStaleContacts:
             email="carol@example.com",
             is_active=True,
             needs_refresh=False,
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=10),
+            last_enriched_at=datetime.now(UTC) - timedelta(days=10),
         )
         db_session.add(c)
         db_session.commit()
@@ -410,7 +410,7 @@ class TestFlagStaleContacts:
             email="frank@example.com",
             is_active=True,
             needs_refresh=False,
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=50),
+            last_enriched_at=datetime.now(UTC) - timedelta(days=50),
         )
         db_session.add(c)
         db_session.commit()

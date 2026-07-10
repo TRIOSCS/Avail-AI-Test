@@ -12,7 +12,7 @@ app/database, app/models.ApiSource.
 import base64
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -110,7 +110,7 @@ async def register_client() -> str:
 def _persist_tokens(tok: dict) -> None:
     if not tok.get("access_token"):
         return
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(tok.get("expires_in", 3600)))
+    expires_at = datetime.now(UTC) + timedelta(seconds=int(tok.get("expires_in", 3600)))
     updates: dict[str, str | None] = {
         "CLAY_OAUTH_ACCESS_TOKEN": tok.get("access_token"),
         "CLAY_OAUTH_EXPIRES_AT": expires_at.isoformat(),
@@ -170,7 +170,7 @@ async def get_access_token() -> str | None:
     if not exp:
         return await refresh()
     try:
-        if datetime.fromisoformat(exp) - _REFRESH_BUFFER <= datetime.now(timezone.utc):
+        if datetime.fromisoformat(exp) - _REFRESH_BUFFER <= datetime.now(UTC):
             return await refresh()
     except ValueError:
         return await refresh()

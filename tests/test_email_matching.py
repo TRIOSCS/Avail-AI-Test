@@ -12,7 +12,7 @@ Called by: pytest
 Depends on: app/services/activity_service.py, app/services/activity_quality_service.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.constants import ActivityType
 from app.models import Company, CustomerSite, SiteContact, VendorCard, VendorContact
@@ -23,7 +23,7 @@ from app.services.activity_service import match_email_to_entity
 
 
 def _dt():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _company(db, name="Acme Corp", domain="acme.com"):

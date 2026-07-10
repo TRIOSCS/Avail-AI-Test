@@ -1,6 +1,6 @@
 """Intelligence models — Materials, Proactive, Activity."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -142,11 +142,11 @@ class MaterialCard(Base):
 
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     datasheets = relationship(
@@ -258,7 +258,7 @@ class MaterialCardDatasheet(Base):
     original_url = Column(Text)  # where the copy came from (provenance/audit)
     verified = Column(Boolean, nullable=False, default=False)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    captured_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    captured_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     material_card = relationship("MaterialCard", back_populates="datasheets")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -272,8 +272,8 @@ class MaterialVendorHistory(Base):
     vendor_name_normalized = Column(String(255))
     source_type = Column(String(50))
     is_authorized = Column(Boolean, default=False)
-    first_seen = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    last_seen = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    first_seen = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    last_seen = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     times_seen = Column(Integer, default=1)
     last_qty = Column(Integer)
     last_price = Column(Numeric(12, 4))
@@ -283,7 +283,7 @@ class MaterialVendorHistory(Base):
 
     source = Column(String(50), default="api_sighting")
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     material_card = relationship("MaterialCard")
 
@@ -301,7 +301,8 @@ class MaterialCardAudit(Base):
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
     # created, linked, unlinked, deleted, merged, healed, restored,
-    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py)
+    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py),
+    # category_recategorize (app/services/spec_tiers.recategorize)
     action = Column(String(50), nullable=False)
     entity_type = Column(String(50))  # requirement, sighting, offer
     entity_id = Column(Integer)
@@ -309,7 +310,7 @@ class MaterialCardAudit(Base):
     new_card_id = Column(Integer)
     normalized_mpn = Column(String(255), index=True)
     details = Column(JSON)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     created_by = Column(String(255))  # system, user email, scheduler
 
     __table_args__ = (Index("ix_mca_card_action", "material_card_id", "action"),)
@@ -339,7 +340,7 @@ class ProactiveMatch(Base):
     our_cost = Column(Numeric(12, 4))
     dismiss_reason = Column(String(255))
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     offer = relationship("Offer", foreign_keys=[offer_id])
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
@@ -381,13 +382,13 @@ class ProactiveOffer(Base):
     email_body_html = Column(Text)
     graph_message_id = Column(String(500))
     status = Column(String(20), default="sent")
-    sent_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    sent_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     converted_requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     converted_quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
     converted_at = Column(UTCDateTime)
     total_sell = Column(Numeric(12, 2))
     total_cost = Column(Numeric(12, 2))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
 
@@ -424,7 +425,7 @@ class ProactiveDoNotOffer(Base):
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reason = Column(String(255))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     company = relationship("Company", foreign_keys=[company_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
@@ -443,7 +444,7 @@ class ChangeLog(Base):
     field_name = Column(String(100), nullable=False)
     old_value = Column(Text)
     new_value = Column(Text)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     user = relationship("User", foreign_keys=[user_id])
 
@@ -504,7 +505,7 @@ class ActivityLog(Base):
     quality_assessed_at = Column(UTCDateTime)
     is_meaningful = Column(Boolean)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     user = relationship("User", foreign_keys=[user_id])
     company = relationship("Company", foreign_keys=[company_id])
@@ -607,7 +608,7 @@ class ActivityDigest(Base):
     next_step = Column(String(500))
     status_signal = Column(String(20))  # DigestStatusSignal
 
-    generated_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    generated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     basis_last_activity_at = Column(UTCDateTime)
     basis_activity_count = Column(Integer, default=0)
     cooldown_until = Column(UTCDateTime)
@@ -652,7 +653,7 @@ class MaterialCardAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     material_card = relationship("MaterialCard", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])

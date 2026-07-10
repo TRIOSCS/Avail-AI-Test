@@ -10,7 +10,7 @@ import ipaddress
 import os
 import re
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urljoin, urlparse
 
 from loguru import logger
@@ -183,7 +183,7 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             if card.datasheets:
                 return
             if card.datasheet_searched_at:
-                age = datetime.now(timezone.utc) - _as_utc(card.datasheet_searched_at)
+                age = datetime.now(UTC) - _as_utc(card.datasheet_searched_at)
                 if age < timedelta(days=CAPTURE_COOLDOWN_DAYS):
                     return
 
@@ -218,7 +218,7 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             _stamp_searched(db, card)
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db.add(
             MaterialCardDatasheet(
                 material_card_id=card.id,
@@ -246,11 +246,11 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
 
 
 def _as_utc(dt: datetime) -> datetime:
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _stamp_searched(db, card) -> None:
     if card is None:
         return  # cardless miss — no place to negative-cache (re-hunts next trigger)
-    card.datasheet_searched_at = datetime.now(timezone.utc)
+    card.datasheet_searched_at = datetime.now(UTC)
     db.commit()

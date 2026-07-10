@@ -25,7 +25,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -45,7 +45,7 @@ def _add_requirement(db: Session, req: Requisition, mpn: str) -> Requirement:
         primary_mpn=mpn,
         target_qty=25,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()

@@ -14,7 +14,7 @@ Depends on: app.template_env.templates (Jinja2 env), app.models.crm stubs
 from __future__ import annotations
 
 import types
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.template_env import templates
 
@@ -89,7 +89,7 @@ def _make_company(**kwargs):
 def _render_grouped_list(contact_rows, company=None, now_utc=None, roles=None):
     """Render the _contacts_grouped_list.html template with given data."""
     company = company or _make_company()
-    now_utc = now_utc or datetime.now(timezone.utc)
+    now_utc = now_utc or datetime.now(UTC)
     roles = roles or ("buyer", "manager", "engineer", "planner", "other")
     tpl = ENV.get_template("htmx/partials/customers/tabs/_contacts_grouped_list.html")
     return tpl.render(

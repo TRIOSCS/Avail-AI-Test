@@ -10,7 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -59,7 +59,7 @@ def req_with_item(db_session: Session, test_user: User, test_customer_site):
         # that real precondition.
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -67,7 +67,7 @@ def req_with_item(db_session: Session, test_user: User, test_customer_site):
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -85,7 +85,7 @@ class TestGetBuilderData:
             requisition_id=req.id,
             primary_mpn="LM7805",
             target_qty=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(extra)
         db_session.commit()
@@ -107,7 +107,7 @@ class TestGetBuilderData:
             status="inactive",
             unit_price=0.50,
             qty_available=1000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -122,7 +122,7 @@ class TestGetBuilderData:
         req, item = req_with_item
 
         with patch(
-            "app.routers.crm._helpers._preload_last_quoted_prices",
+            "app.services.quote_builder_service.preload_last_quoted_prices",
             side_effect=Exception("db error"),
         ):
             result = get_builder_data(req.id, db_session)
@@ -181,7 +181,7 @@ class TestSaveQuoteFromBuilder:
             status="active",
             unit_price=0.50,
             qty_available=1000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()

@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -45,7 +45,7 @@ def _build_scenario(db: Session) -> dict:
         name="Sales Rep",
         role="buyer",
         azure_id=f"az-{id(db)}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(owner)
     db.flush()
@@ -256,7 +256,7 @@ class TestPreparationPageValidPath:
             email="other@trio.com",
             role="buyer",
             azure_id="az-other",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other)
         db_session.commit()
@@ -303,7 +303,7 @@ class TestDraftForPrepare:
             email="other2@trio.com",
             role="buyer",
             azure_id="az-other2",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(other)
         db_session.commit()
@@ -701,7 +701,7 @@ class TestProactiveConvert:
             email="intruder2@trio.com",
             role="buyer",
             azure_id="az-intruder2",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(intruder)
         db_session.commit()

@@ -1,6 +1,6 @@
 """Core sourcing models — Requisitions, Requirements, Sightings."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from sqlalchemy import (
@@ -66,7 +66,7 @@ class Requisition(Base):
     outcome_reason = Column(Text)
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     deadline = Column(String(50))  # ISO date or "ASAP"
     last_searched_at = Column(UTCDateTime)
     offers_viewed_at = Column(UTCDateTime)
@@ -161,7 +161,7 @@ class Requirement(Base):
     outcome_reason = Column(Text)
     priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
     assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     last_searched_at = Column(UTCDateTime)
 
     requisition = relationship("Requisition", back_populates="requirements")
@@ -197,6 +197,10 @@ class Requirement(Base):
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
         Index("ix_requirements_sourcing_status", "sourcing_status"),
+        # Filtered on every buyer's default sightings board (routers/sightings.py:413,585)
+        # and the offers alert source (services/alerts/sources/offers.py:58-60) — no
+        # index anywhere before this (P3.1).
+        Index("ix_requirements_assigned_buyer", "assigned_buyer_id"),
         # Raw-DDL pg_trgm GIN indexes reconciled into the model so the drift gate sees them (#464).
         Index(
             "ix_requirements_normalized_mpn_trgm",
@@ -225,7 +229,7 @@ class Manufacturer(Base):
     canonical_name = Column(String(255), nullable=False, unique=True, index=True)
     aliases = Column(JSON, default=list)
     website = Column(String(500))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
 
 class Sighting(Base):
@@ -262,7 +266,7 @@ class Sighting(Base):
     source_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # NC integration: when the source data was fetched
-    source_searched_at = Column(UTCDateTime(timezone=True))
+    source_searched_at = Column(UTCDateTime)
 
     # Evidence tier — provenance tag for data trust (T1–T7)
     evidence_tier = Column(String(4))
@@ -274,7 +278,7 @@ class Sighting(Base):
     resolved_via_spec_code = Column(String(64), nullable=True)
     source_mpn = Column(String(255), nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requirement = relationship("Requirement", back_populates="sightings")
 
@@ -355,7 +359,7 @@ class RequisitionAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requisition = relationship("Requisition", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -380,7 +384,7 @@ class RequirementAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requirement = relationship("Requirement", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -408,7 +412,7 @@ class OemSpecCode(Base):
     created_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
 
@@ -453,7 +457,7 @@ class OemSpecCodePending(Base):
     discovered_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
     first_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
@@ -516,7 +520,7 @@ class OemSpecCodeBlacklist(Base):
     rejected_at = Column(
         UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
     reason = Column(Text, nullable=True)

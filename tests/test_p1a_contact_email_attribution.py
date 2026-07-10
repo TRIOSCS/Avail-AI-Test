@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: app/services/activity_service.py, app/services/cadence_service.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import Company, CustomerSite, SiteContact
 from app.services.activity_service import (
@@ -22,7 +22,7 @@ from app.services.activity_service import (
 
 
 def _make_company(db, name="CorpX", domain="corpx.com"):
-    co = Company(name=name, domain=domain, is_active=True, created_at=datetime.now(timezone.utc))
+    co = Company(name=name, domain=domain, is_active=True, created_at=datetime.now(UTC))
     db.add(co)
     db.flush()
     return co
@@ -34,7 +34,7 @@ def _make_site(db, company_id, contact_email="site@corpx.com"):
         site_name="HQ",
         is_active=True,
         contact_email=contact_email,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -131,7 +131,7 @@ class TestMatchEmailToEntityIncludesSiteContact:
             domain="acmevendor.com",
             is_blacklisted=False,
             sighting_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()

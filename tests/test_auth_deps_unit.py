@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.dependencies, app.models.User, tests.conftest (db_session)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.dependencies import (
+    can_review_qp_purchasing_section,
+    can_review_qp_sales_section,
     get_user,
     require_admin,
     require_buyer,
@@ -37,15 +39,22 @@ def _make_request(session_data: dict | None = None, headers: dict | None = None)
     return req
 
 
-def _create_user(db: Session, *, email: str = "unit@test.com", role: str = "buyer", is_active: bool = True) -> User:
-    """Insert and return a User row."""
+def _create_user(
+    db: Session, *, email: str = "unit@test.com", role: str = "buyer", is_active: bool = True, **extra
+) -> User:
+    """Insert and return a User row.
+
+    ``**extra`` sets any additional column (e.g. the
+    per-user QP review grants) without needing a bespoke helper per test.
+    """
     user = User(
         email=email,
         name=f"Unit {role.title()}",
         role=role,
         azure_id=f"azure-{email}",
         is_active=is_active,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        **extra,
     )
     db.add(user)
     db.commit()
@@ -301,7 +310,7 @@ class TestRequireFreshToken:
     async def test_valid_fresh_token_returned(self, db_session: Session):
         user = _create_user(db_session)
         user.access_token = "valid-token-abc"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        user.token_expires_at = datetime.now(UTC) + timedelta(hours=1)
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
 
@@ -313,7 +322,7 @@ class TestRequireFreshToken:
     async def test_expired_token_no_refresh_raises_401(self, db_session: Session):
         user = _create_user(db_session)
         user.access_token = "expired-token"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=5)
         user.refresh_token = None
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
@@ -330,7 +339,7 @@ class TestRequireFreshToken:
         background-only)."""
         user = _create_user(db_session)
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         user.refresh_token = "refresh-token-xyz"
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
@@ -344,7 +353,7 @@ class TestRequireFreshToken:
         """If token is truly expired (past expiry), should raise 401."""
         user = _create_user(db_session)
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        user.token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
         user.refresh_token = "refresh-token-xyz"
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
@@ -365,3 +374,93 @@ class TestRequireFreshToken:
         result = await require_fresh_token(request, db_session)
 
         assert result == "no-expiry-token"
+
+
+# ── can_review_qp_sales_section / can_review_qp_purchasing_section ──
+
+
+class TestCanReviewQpSections:
+    """Direct unit tests for the two QP section-review predicates (P6.5).
+
+    Both are pure ``User | None -> bool`` gates reading a single per-user grant
+    column (``can_approve_qp_sales`` / ``can_approve_qp_purchasing``) — reused
+    directly here as the reviewer-toggle role/permission matrix, including the
+    None/edge inputs neither had direct coverage for before this file.
+    """
+
+    # -- can_review_qp_sales_section --
+
+    def test_sales_section_true_when_grant_set(self, db_session: Session):
+        user = _create_user(db_session, email="qp-sales-yes@test.com", can_approve_qp_sales=True)
+
+        assert can_review_qp_sales_section(user) is True
+
+    def test_sales_section_false_when_grant_unset(self, db_session: Session):
+        user = _create_user(db_session, email="qp-sales-no@test.com", can_approve_qp_sales=False)
+
+        assert can_review_qp_sales_section(user) is False
+
+    def test_sales_section_false_for_admin_without_grant(self, db_session: Session):
+        """The right is a per-user grant, not role-derived — even an admin without the
+        explicit column set is denied."""
+        user = _create_user(db_session, email="qp-sales-admin@test.com", role="admin", can_approve_qp_sales=False)
+
+        assert can_review_qp_sales_section(user) is False
+
+    def test_sales_section_none_user_returns_false(self):
+        assert can_review_qp_sales_section(None) is False
+
+    def test_sales_section_purchasing_grant_alone_does_not_grant_sales(self, db_session: Session):
+        """The two grants are independent columns — holding one must not imply the
+        other."""
+        user = _create_user(
+            db_session,
+            email="qp-purchasing-only@test.com",
+            can_approve_qp_sales=False,
+            can_approve_qp_purchasing=True,
+        )
+
+        assert can_review_qp_sales_section(user) is False
+
+    # -- can_review_qp_purchasing_section --
+
+    def test_purchasing_section_true_when_grant_set(self, db_session: Session):
+        user = _create_user(db_session, email="qp-purch-yes@test.com", can_approve_qp_purchasing=True)
+
+        assert can_review_qp_purchasing_section(user) is True
+
+    def test_purchasing_section_false_when_grant_unset(self, db_session: Session):
+        user = _create_user(db_session, email="qp-purch-no@test.com", can_approve_qp_purchasing=False)
+
+        assert can_review_qp_purchasing_section(user) is False
+
+    def test_purchasing_section_false_for_buyer_without_grant(self, db_session: Session):
+        user = _create_user(db_session, email="qp-purch-buyer@test.com", role="buyer", can_approve_qp_purchasing=False)
+
+        assert can_review_qp_purchasing_section(user) is False
+
+    def test_purchasing_section_none_user_returns_false(self):
+        assert can_review_qp_purchasing_section(None) is False
+
+    def test_purchasing_section_sales_grant_alone_does_not_grant_purchasing(self, db_session: Session):
+        user = _create_user(
+            db_session,
+            email="qp-sales-only@test.com",
+            can_approve_qp_sales=True,
+            can_approve_qp_purchasing=False,
+        )
+
+        assert can_review_qp_purchasing_section(user) is False
+
+    def test_both_grants_set_both_return_true(self, db_session: Session):
+        """A user with both grants may review both sections — the two flags are
+        independent, not mutually exclusive."""
+        user = _create_user(
+            db_session,
+            email="qp-both@test.com",
+            can_approve_qp_sales=True,
+            can_approve_qp_purchasing=True,
+        )
+
+        assert can_review_qp_sales_section(user) is True
+        assert can_review_qp_purchasing_section(user) is True

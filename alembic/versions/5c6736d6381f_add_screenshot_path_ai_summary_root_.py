@@ -3,9 +3,19 @@
 Revision ID: 5c6736d6381f
 Revises: a4df7e282b71
 Create Date: 2026-03-21 02:56:41.744311
+
+Idempotent: uses column-existence / pg_constraint checks (mirroring
+d1a2b3c4e5f6_add_excess_phase4_columns.py) for the offers.excess_line_item_id
+column + FK and the trouble_tickets.{screenshot_path,ai_summary,
+root_cause_group_id} columns + FK, since both share the same duplicate-
+ancestor problem: 001_initial_schema.py (an ancestor of this revision via
+c19a184db289 -> d1a2b3c4e5f6 -> ba090b14bf74 -> 8e06fcdc5740 ->
+a4df7e282b71 -> 5c6736d6381f) already creates all of these columns/FKs as
+part of its baseline DDL, so replaying this revision on a fresh DB would
+otherwise hit DuplicateColumn / DuplicateObject.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -13,9 +23,27 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "5c6736d6381f"
-down_revision: Union[str, None] = "a4df7e282b71"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "a4df7e282b71"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def _column_exists(table: str, column: str) -> bool:
+    """Check whether a column already exists (PostgreSQL).
+
+    Scoped to ``table_schema = current_schema()`` so a same-named column on an
+    identically-named table in another schema (e.g. a search_path collision)
+    can't false-positive the guard and skip needed DDL.
+    """
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column"
+        ),
+        {"table": table, "column": column},
+    )
+    return result.scalar() is not None
 
 
 def upgrade() -> None:
@@ -31,26 +59,50 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         if_not_exists=True,
     )
-    op.add_column("offers", sa.Column("excess_line_item_id", sa.Integer(), nullable=True))
-    op.create_foreign_key(
-        "offers_excess_line_item_id_fkey",
-        "offers",
-        "excess_line_items",
-        ["excess_line_item_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.add_column("trouble_tickets", sa.Column("screenshot_path", sa.String(length=255), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("ai_summary", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("root_cause_group_id", sa.Integer(), nullable=True))
-    op.create_foreign_key(
-        "trouble_tickets_root_cause_group_id_fkey",
-        "trouble_tickets",
-        "root_cause_groups",
-        ["root_cause_group_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+
+    # Offer.excess_line_item_id
+    if not _column_exists("offers", "excess_line_item_id"):
+        op.add_column("offers", sa.Column("excess_line_item_id", sa.Integer(), nullable=True))
+    conn = op.get_bind()
+    fk_exists = conn.execute(
+        sa.text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'offers_excess_line_item_id_fkey' "
+            "AND conrelid = 'offers'::regclass"
+        )
+    ).scalar()
+    if not fk_exists:
+        op.create_foreign_key(
+            "offers_excess_line_item_id_fkey",
+            "offers",
+            "excess_line_items",
+            ["excess_line_item_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+
+    # TroubleTicket.{screenshot_path,ai_summary,root_cause_group_id}
+    if not _column_exists("trouble_tickets", "screenshot_path"):
+        op.add_column("trouble_tickets", sa.Column("screenshot_path", sa.String(length=255), nullable=True))
+    if not _column_exists("trouble_tickets", "ai_summary"):
+        op.add_column("trouble_tickets", sa.Column("ai_summary", sa.Text(), nullable=True))
+    if not _column_exists("trouble_tickets", "root_cause_group_id"):
+        op.add_column("trouble_tickets", sa.Column("root_cause_group_id", sa.Integer(), nullable=True))
+    conn = op.get_bind()
+    ticket_fk_exists = conn.execute(
+        sa.text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'trouble_tickets_root_cause_group_id_fkey' "
+            "AND conrelid = 'trouble_tickets'::regclass"
+        )
+    ).scalar()
+    if not ticket_fk_exists:
+        op.create_foreign_key(
+            "trouble_tickets_root_cause_group_id_fkey",
+            "trouble_tickets",
+            "root_cause_groups",
+            ["root_cause_group_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
     # ### end Alembic commands ###
 
 

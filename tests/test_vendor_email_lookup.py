@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -54,7 +54,7 @@ def _make_sighting(db: Session, mpn: str, vendor_name: str, **kwargs) -> Sightin
         qty_available=kwargs.get("qty_available"),
         unit_price=kwargs.get("unit_price"),
         currency=kwargs.get("currency", "USD"),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(s)
     db.commit()

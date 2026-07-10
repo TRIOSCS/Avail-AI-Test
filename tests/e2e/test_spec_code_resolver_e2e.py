@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,10 +37,10 @@ if str(_TESTS_DIR) not in sys.path:
 # Honour the project's TESTING flag so app imports skip real API setup.
 os.environ.setdefault("TESTING", "1")
 
-from app import search_service  # noqa: E402
-from app.config import settings  # noqa: E402
-from app.models import Requirement, User  # noqa: E402
-from app.models.sourcing import (  # noqa: E402
+from app import search_service
+from app.config import settings
+from app.models import Requirement, User
+from app.models.sourcing import (
     OemSpecCodePending,
     Requisition,
     Sighting,
@@ -59,7 +59,7 @@ def user(db_session):
         name="E2E User",
         role="admin",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -72,7 +72,7 @@ async def test_e2e_sprej_resolution_persists_sighting_and_pending(db_session, en
         customer_name="Acme",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -80,7 +80,7 @@ async def test_e2e_sprej_resolution_persists_sighting_and_pending(db_session, en
         requisition_id=rset.id,
         primary_mpn="SPREJ",
         target_qty=700,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()

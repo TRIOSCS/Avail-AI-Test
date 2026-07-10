@@ -12,9 +12,12 @@ What: OPTIMIZATION_PLAN_2026_06_12 §2 item 1.1. Three idempotent passes, dry-ru
            "IGBT Modules", plus ~139 provenanced cards on ~89 non-canonical
            strings). Resolvable values (CATEGORY_ALIASES / case-trim) are written
            through set_category at legacy_backfill when unprovenanced, or
-           normalized IN PLACE preserving the existing source when provenanced;
-           unresolvable values are nulled with provenance cleared. One
-           MaterialCardAudit row per changed card (action=category_cleanup).
+           normalized IN PLACE (via spec_tiers.recategorize(force=True) — the ladder
+           is bypassed since no new evidence exists, but the stale-facet purge still
+           runs) preserving the existing source when provenanced; unresolvable
+           values are nulled with provenance cleared. One MaterialCardAudit row per
+           changed card (action=category_cleanup) plus recategorize's own
+           action=category_recategorize row for the normalized_in_place branch.
         3. Stamp ``manufacturer_source='legacy_backfill'`` (conf 0.5, tier 50) on
            every card with a manufacturer but NULL maker provenance — attribution
            of EXISTING data, deliberately NOT a ladder write (no new evidence);
@@ -24,8 +27,8 @@ Usage: python -m app.management.cleanup_known_bad [--apply]
 Called by: admin manually at deploy time (after the PR carrying it ships).
 Depends on: MaterialCard / MaterialSpecFacet / MaterialCardAudit,
       category_normalizer.normalize_category, commodity_registry
-      CANONICAL_COMMODITY_KEYS, spec_tiers.set_category (+ the legacy_backfill
-      constants), audit_service.log_audit.
+      CANONICAL_COMMODITY_KEYS, spec_tiers.set_category / recategorize (+ the
+      legacy_backfill constants), audit_service.log_audit.
 """
 
 import argparse
@@ -43,6 +46,7 @@ from app.services.spec_tiers import (
     LEGACY_BACKFILL_CONFIDENCE,
     LEGACY_BACKFILL_SOURCE,
     LEGACY_BACKFILL_TIER,
+    recategorize,
     set_category,
 )
 
@@ -90,13 +94,13 @@ def delete_known_bad_facets(db: Session, *, apply: bool = False) -> dict:
                     # a mismatch means drift (some other source owns the JSONB entry).
                     if entry is not None and entry.get("source") == facet.source:
                         specs.pop(facet.spec_key, None)
-                        card.specs_structured = specs
+                        card.specs_structured = specs  # type: ignore[assignment]  # legacy Column-model ORM noise
                         tally["mirrors_dropped"] += 1
                     log_audit(
                         db,
-                        material_card_id=card.id,
+                        material_card_id=card.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         action="facet_cleanup",
-                        normalized_mpn=card.normalized_mpn,
+                        normalized_mpn=card.normalized_mpn,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         details={
                             "spec_key": facet.spec_key,
                             "value_numeric": facet.value_numeric,
@@ -137,7 +141,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
     for card in cards:
         raw = card.category
         source_before = card.category_source
-        target = normalize_category(raw)
+        target = normalize_category(raw)  # type: ignore[arg-type]  # legacy Column-model ORM noise
         if source_before is None:
             if target is not None:
                 # Unprovenanced junk that resolves to a canonical key: through the
@@ -155,22 +159,30 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
                 # Provenanced but non-canonical (e.g. a pre-alias-map vendor string):
                 # canonicalize the VALUE in place, preserving the original source/
                 # confidence/tier/updated_at — the evidence didn't change, only its
-                # spelling. Defensive mirror of set_category's stale-facet purge:
-                # facet rows keyed to the old category cell can no longer match.
+                # spelling. Routed through spec_tiers.recategorize(force=True) — the
+                # ladder is NOT consulted (no new evidence, so it must not restamp
+                # provenance), but the stale-facet purge still runs there (the single
+                # arbitration point owns it now; this script no longer assigns
+                # card.category directly).
                 mode = "normalized_in_place"
                 if apply:
-                    stale = (
+                    stale_count = (
                         db.query(MaterialSpecFacet)
                         .filter(
                             MaterialSpecFacet.material_card_id == card.id,
                             MaterialSpecFacet.category != target,
                         )
-                        .all()
+                        .count()
                     )
-                    for facet in stale:
-                        db.delete(facet)
-                        tally["stale_facets_purged"] += 1
-                    card.category = target
+                    recategorize(
+                        db,
+                        card,
+                        target,
+                        source=source_before,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+                        force=True,
+                        reason="cleanup_known_bad: cleanup_junk_categories Pass 2 (normalized_in_place)",
+                    )
+                    tally["stale_facets_purged"] += stale_count
             else:
                 # Provenanced junk that resolves nowhere: the provenance attests to a
                 # write of a value the vocabulary rejects — clear both.
@@ -182,9 +194,9 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
         if apply and mode != "skipped_ladder":
             log_audit(
                 db,
-                material_card_id=card.id,
+                material_card_id=card.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                 action="category_cleanup",
-                normalized_mpn=card.normalized_mpn,
+                normalized_mpn=card.normalized_mpn,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                 details={
                     "from": raw,
                     "to": target if mode.startswith("normalized") else None,

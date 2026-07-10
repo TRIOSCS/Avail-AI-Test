@@ -16,7 +16,7 @@ Depends on: conftest (db_session, test_user, client — authed as the owning buy
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -47,11 +47,11 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
         customer_name="AcmeCo",
         status="active",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(timezone.utc))
+    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
     db.add(rq)
     db.flush()
     q = Quote(
@@ -60,7 +60,7 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
         line_items=[],
         status="sent",
         created_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -69,7 +69,7 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
         quote_id=q.id,
         status="active",
         so_status="approved",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -96,7 +96,7 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
         buyer_id=owner.id,
         status=BuyPlanLineStatus.PENDING_VERIFY.value,
         po_number="PO-2024",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -138,7 +138,7 @@ def _seed_approver(db: Session) -> User:
         is_active=True,
         can_approve_prepayments=True,
         prepayment_approval_limit=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -327,7 +327,7 @@ def test_can_request_prepayment_false_for_restricted_non_owner(db_session: Sessi
         name="Stranger Sales",
         role=UserRole.SALES.value,
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(stranger)
     db_session.commit()

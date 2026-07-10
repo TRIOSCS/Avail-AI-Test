@@ -12,7 +12,7 @@ Called by: pytest
 Depends on: app/services/strategic_vendor_service.py, tests/conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +35,7 @@ def _make_user(db: Session, email: str = "buyer@trioscs.com") -> User:
         name=email.split("@")[0],
         role="buyer",
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -49,7 +49,7 @@ def _make_vendor(db: Session, name: str = "TestVendor") -> VendorCard:
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -57,7 +57,7 @@ def _make_vendor(db: Session, name: str = "TestVendor") -> VendorCard:
 
 
 def _make_strategic(db: Session, user: User, vendor: VendorCard) -> StrategicVendor:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sv = StrategicVendor(
         user_id=user.id,
         vendor_card_id=vendor.id,

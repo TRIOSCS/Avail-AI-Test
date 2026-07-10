@@ -20,7 +20,7 @@ Depends on: conftest (db_session), app.services.buyplan_workflow, app.services.b
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -71,7 +71,7 @@ def _make_user(
         can_approve_buy_plans=can_approve_buy_plans,
         can_approve_purchase_orders=can_approve_purchase_orders,
         purchase_order_approval_limit=purchase_order_approval_limit,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -91,7 +91,7 @@ def _make_plan(
         customer_name="POLCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -101,7 +101,7 @@ def _make_plan(
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -133,7 +133,7 @@ def _make_line(
         unit_cost=unit_cost,
         quantity=quantity,
         po_number=po_number,
-        po_confirmed_at=datetime.now(timezone.utc) if po_number else None,
+        po_confirmed_at=datetime.now(UTC) if po_number else None,
     )
     db.add(line)
     db.flush()

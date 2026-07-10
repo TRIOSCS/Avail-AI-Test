@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -46,7 +46,7 @@ def _make_response(db: Session, user: User, req: Requisition, status: str = "new
         confidence=0.6,
         scanned_by_user_id=user.id,
         status=status,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         message_id=f"msg-orphan-{id(req)}-{status}",
     )
     db.add(vr)
@@ -164,7 +164,7 @@ class TestFollowUpBadge:
             vendor_name="Arrow",
             vendor_contact="sales@arrow.com",
             status=ContactStatus.SENT.value,
-            created_at=datetime.now(timezone.utc) - timedelta(days=30),
+            created_at=datetime.now(UTC) - timedelta(days=30),
         )
         db_session.add(stale)
         db_session.commit()

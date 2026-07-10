@@ -11,7 +11,7 @@ Depends on: app/services/search_worker_base/queue_manager.py (QueueManager dedup
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ def requisition(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rset)
     db_session.flush()
@@ -47,7 +47,7 @@ def _make_sighting(requirement_id: int, normalized_mpn: str, vendor: str) -> Sig
         normalized_mpn=normalized_mpn,
         source_type=_SOURCE_TYPE,
         qty_available=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -59,7 +59,7 @@ def test_dedup_clones_only_matching_mpn_sightings(db_session, requisition):
         requisition_id=requisition.id,
         primary_mpn=_DEDUP_MPN,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_a)
     db_session.flush()
@@ -71,7 +71,7 @@ def test_dedup_clones_only_matching_mpn_sightings(db_session, requisition):
         mpn=_DEDUP_MPN,
         normalized_mpn=_DEDUP_MPN,
         status="completed",
-        last_searched_at=datetime.now(timezone.utc),
+        last_searched_at=datetime.now(UTC),
     )
     db_session.add(completed)
 
@@ -88,7 +88,7 @@ def test_dedup_clones_only_matching_mpn_sightings(db_session, requisition):
         primary_mpn=_DEDUP_MPN,
         material_card_id=card.id,
         target_qty=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_b)
     db_session.commit()
@@ -119,7 +119,7 @@ def test_dedup_clones_punctuation_variant_of_searched_mpn(db_session, requisitio
         requisition_id=requisition.id,
         primary_mpn=search_mpn,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_a)
     db_session.flush()
@@ -130,7 +130,7 @@ def test_dedup_clones_punctuation_variant_of_searched_mpn(db_session, requisitio
         mpn=search_mpn,
         normalized_mpn=search_mpn,
         status="completed",
-        last_searched_at=datetime.now(timezone.utc),
+        last_searched_at=datetime.now(UTC),
     )
     db_session.add(completed)
 
@@ -146,7 +146,7 @@ def test_dedup_clones_punctuation_variant_of_searched_mpn(db_session, requisitio
         primary_mpn=search_mpn,
         material_card_id=card.id,
         target_qty=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_b)
     db_session.commit()

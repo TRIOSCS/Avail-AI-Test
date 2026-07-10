@@ -328,8 +328,8 @@ class TestSearchRunDirect:
         mock_req.query_params = MagicMock()
         mock_req.query_params.get = lambda k, d=None: d
         with (
-            patch("app.routers.htmx_views._get_enabled_sources", return_value=[]) as _src,
-            patch("app.routers.htmx_views.template_response") as mock_tpl,
+            patch("app.routers.htmx.search_views._get_enabled_sources", return_value=[]) as _src,
+            patch("app.routers.htmx.search_views.template_response") as mock_tpl,
             patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
         ):
             mock_tpl.return_value = HTMLResponse("results shell")
@@ -369,7 +369,7 @@ class TestSearchFilterDirect:
         from app.routers.htmx_views import search_filter
 
         mock_req = _mock_get_request()
-        with patch("app.routers.htmx_views._get_cached_search_results", return_value=None):
+        with patch("app.routers.htmx.search_views._get_cached_search_results", return_value=None):
             result = await search_filter(
                 request=mock_req,
                 search_id="nonexistent-id",
@@ -410,8 +410,8 @@ class TestSearchFilterDirect:
         card_tpl = MagicMock()
         card_tpl.render.return_value = "<div>card</div>"
         with (
-            patch("app.routers.htmx_views._get_cached_search_results", return_value=cached),
-            patch("app.routers.htmx_views.template_response") as mock_tpl,
+            patch("app.routers.htmx.search_views._get_cached_search_results", return_value=cached),
+            patch("app.routers.htmx.search_views.template_response") as mock_tpl,
         ):
             mock_tpl.get_template.return_value = card_tpl
             result = await search_filter(
@@ -436,7 +436,7 @@ class TestRequisitionPickerDirect:
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request("/v2/partials/search/requisition-picker")
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+        with patch("app.routers.htmx.search_views.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("picker")
             result = await requisition_picker(
                 request=mock_req,

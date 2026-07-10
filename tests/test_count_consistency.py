@@ -15,7 +15,7 @@ Depends on: conftest.py (db_session/client), MaterialCard/MaterialSpecFacet mode
 faceted_search_service, commodity_registry seeds.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -57,7 +57,7 @@ def _card(
         enrichment_status=enrichment_status,
         datasheet_url=datasheet_url,
         deleted_at=deleted_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -104,7 +104,7 @@ def test_facet_counts_narrow_under_global_filters(db_session: Session):
 
 def test_facet_counts_exclude_deleted_cards_without_card_filters(db_session: Session):
     _card(db_session, "live1", interface="SATA")
-    _card(db_session, "gone1", interface="SATA", deleted_at=datetime.now(timezone.utc))
+    _card(db_session, "gone1", interface="SATA", deleted_at=datetime.now(UTC))
     db_session.commit()
 
     # The deleted_at guard applies even with NO active card filters.
@@ -224,7 +224,7 @@ def test_global_counts_narrow_under_spec_sub_filters(db_session: Session):
 
 def test_global_counts_still_exclude_deleted(db_session: Session):
     _card(db_session, "d1", lifecycle_status="active")
-    _card(db_session, "d2", lifecycle_status="active", deleted_at=datetime.now(timezone.utc))
+    _card(db_session, "d2", lifecycle_status="active", deleted_at=datetime.now(UTC))
     db_session.commit()
 
     counts = get_global_facet_counts(db_session, filters={"q": "d"})

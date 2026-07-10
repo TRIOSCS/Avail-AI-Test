@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -121,7 +121,7 @@ async def run(vendor: str, limit: int | None, dry_run: bool) -> int:
                 logger.info("backfill-oem-crosswalk: would resolve {} ({})", display, norm)
             return 0
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.now(UTC).strftime("%Y-%m-%d")
         web_key = f"enrichment_worker:web_calls:{today_str}"
         oem_key = f"enrichment_worker:oem_resolves:{today_str}"
 

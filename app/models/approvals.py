@@ -13,7 +13,7 @@ Depends on: models.base, app.constants (ApprovalRequestStatus,
             ApprovalGateType values, set by the service layer), models.auth (User)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -84,8 +84,8 @@ class ApprovalRequest(Base):
     resolution_note = Column(Text, nullable=True)
     expires_at = Column(UTCDateTime, nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC))
 
     # ── Relationships
     requested_by = relationship("User", foreign_keys=[requested_by_id])
@@ -125,7 +125,7 @@ class ApprovalStep(Base):
     status = Column(String(50), nullable=False, default=ApprovalRecipientStatus.PENDING)
 
     resolved_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     request = relationship("ApprovalRequest", back_populates="steps")
@@ -161,7 +161,7 @@ class ApprovalStepRecipient(Base):
     # If reassigned, tracks who took over
     reassigned_to_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     step = relationship("ApprovalStep", back_populates="recipients")
@@ -196,7 +196,7 @@ class ApprovalEvent(Base):
     event_type = Column(String(50), nullable=False)
     payload = Column(JSON, nullable=True)  # extra structured context (the comment sink)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     request = relationship("ApprovalRequest", back_populates="events")
@@ -234,7 +234,7 @@ class ApprovalOutbox(Base):
     fail_count = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     request = relationship("ApprovalRequest")

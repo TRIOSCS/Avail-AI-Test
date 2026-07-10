@@ -4,7 +4,7 @@ Called by: routers/error_reports.py (batch analyze)
 Depends on: models/base.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Column, Index, Integer, String, Text, func
 
@@ -20,5 +20,5 @@ class RootCauseGroup(Base):
     title = Column(String(200), nullable=False)
     suggested_fix = Column(Text)
     status = Column(String(30), default="open", nullable=False)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())

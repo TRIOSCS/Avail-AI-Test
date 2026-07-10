@@ -18,6 +18,8 @@ Depends on: app/routers/htmx/buy_plans (pipeline lens dispatch),
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -294,11 +296,11 @@ def test_pipeline_done_uses_archive_rows_include(
 ):
     """The Done section renders completed deals via the shared archive-rows partial;
     with more than one page it offers a Load older button hitting pipeline-archive."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.services.buyplan_hub import ARCHIVE_PAGE_SIZE
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(ARCHIVE_PAGE_SIZE + 1):
         _make_plan(
             db_session,

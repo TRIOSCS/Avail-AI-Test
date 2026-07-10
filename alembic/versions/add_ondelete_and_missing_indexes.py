@@ -8,16 +8,16 @@ Revises: restructure_substitutes_json
 Create Date: 2026-03-23
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from sqlalchemy import text
 
 from alembic import op
 
 revision: str = "add_ondelete_and_missing_indexes"
-down_revision: Union[str, None] = "restructure_substitutes_json"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "restructure_substitutes_json"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # ---------------------------------------------------------------------------

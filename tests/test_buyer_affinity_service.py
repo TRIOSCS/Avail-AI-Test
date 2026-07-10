@@ -20,7 +20,7 @@ Called by: pytest
 Depends on: app.services.buyer_affinity_service, tests.conftest
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -309,7 +309,7 @@ class TestRecomputeBuyerScore:
             )
         )
         # Outreach: 2 sent, 1 responded → response_rate 0.50.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db_session.add(
             ExcessOutreach(
                 excess_list_id=excess_list.id,
@@ -375,7 +375,7 @@ class TestOverlapWarning:
                 submitted_by=teammate.id,  # a DIFFERENT user
                 channel="email",
                 status=ExcessOutreachStatus.SENT,
-                sent_at=datetime.now(timezone.utc) - timedelta(days=3),
+                sent_at=datetime.now(UTC) - timedelta(days=3),
             )
         )
         db_session.commit()
@@ -399,7 +399,7 @@ class TestOverlapWarning:
                 submitted_by=trader.id,  # same owner → not overlap
                 channel="phone",
                 status=ExcessOutreachStatus.SENT,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -419,7 +419,7 @@ class TestOverlapWarning:
                 submitted_by=teammate.id,
                 channel="email",
                 status=ExcessOutreachStatus.SENT,
-                sent_at=datetime.now(timezone.utc) - timedelta(days=90),
+                sent_at=datetime.now(UTC) - timedelta(days=90),
             )
         )
         db_session.commit()
@@ -460,7 +460,7 @@ class TestOverlapWarning:
                     submitted_by=teammate.id,  # teammate → overlap
                     channel="email",
                     status=ExcessOutreachStatus.SENT,
-                    sent_at=datetime.now(timezone.utc) - timedelta(days=2),
+                    sent_at=datetime.now(UTC) - timedelta(days=2),
                 ),
                 ExcessOutreach(
                     excess_list_id=excess_list.id,
@@ -468,7 +468,7 @@ class TestOverlapWarning:
                     submitted_by=trader.id,  # same owner → not overlap
                     channel="phone",
                     status=ExcessOutreachStatus.SENT,
-                    sent_at=datetime.now(timezone.utc),
+                    sent_at=datetime.now(UTC),
                 ),
             ]
         )
@@ -539,7 +539,7 @@ class TestNotYetOfferedStrip:
                 submitted_by=trader.id,
                 channel="email",
                 status=ExcessOutreachStatus.SENT,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
             )
         )
         db_session.commit()

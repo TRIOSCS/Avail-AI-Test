@@ -20,7 +20,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -65,7 +65,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -79,7 +79,7 @@ def requirement_for_req(db_session: Session, requisition: Requisition) -> Requir
         requisition_id=requisition.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(r)
     db_session.commit()
@@ -193,7 +193,7 @@ class TestBuildContextExtended:
             unit_price=0.50,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -205,7 +205,7 @@ class TestBuildContextExtended:
             content="Arrow is reliable",
             vendor_card_id=test_vendor_card.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         ctx = knowledge_service.build_context(db_session, requisition_id=requisition.id)
@@ -221,7 +221,7 @@ class TestBuildContextExtended:
             status="open",
             created_by=test_user.id,
             company_id=test_company.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -233,7 +233,7 @@ class TestBuildContextExtended:
             content="Acme is a strategic account",
             company_id=test_company.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         ctx = knowledge_service.build_context(db_session, requisition_id=req.id)
@@ -257,7 +257,7 @@ class TestBuildMpnContextExtended:
             lead_time="2 weeks",
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -275,7 +275,7 @@ class TestBuildMpnContextExtended:
             unit_price=None,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -289,7 +289,7 @@ class TestBuildMpnContextExtended:
             requisition_id=requisition.id,
             primary_mpn="LM317T",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req_item)
         db_session.commit()
@@ -300,7 +300,7 @@ class TestBuildMpnContextExtended:
     def test_expired_mpn_entry_marked_outdated(self, db_session: Session, test_user: User):
         """Expired entries in MPN context are marked [OUTDATED]."""
         # Pass aware expires_at in the past; _is_expired handles naive/aware comparison.
-        past = datetime.now(timezone.utc) - timedelta(days=5)
+        past = datetime.now(UTC) - timedelta(days=5)
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -309,7 +309,7 @@ class TestBuildMpnContextExtended:
             mpn="OLDPART",
             expires_at=past,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         ctx = knowledge_service.build_mpn_context(db_session, mpn="OLDPART")
@@ -333,7 +333,7 @@ class TestBuildVendorContextExtended:
             total_responses=80,
             total_outreach=100,
             cancellation_rate=0.05,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -349,7 +349,7 @@ class TestBuildVendorContextExtended:
             normalized_name="domainvendor",
             display_name="Domain Vendor",
             domain="domainvendor.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -371,7 +371,7 @@ class TestBuildVendorContextExtended:
             lead_time="2 weeks",
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -384,7 +384,7 @@ class TestBuildVendorContextExtended:
         card = VendorCard(
             normalized_name="noprice vendor",
             display_name="No Price Vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -397,7 +397,7 @@ class TestBuildVendorContextExtended:
             unit_price=None,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -410,7 +410,7 @@ class TestBuildVendorContextExtended:
     ):
         """Expired vendor entry is marked [OUTDATED]."""
         # Pass aware expires_at in the past; _is_expired handles naive/aware comparison.
-        past = datetime.now(timezone.utc) - timedelta(days=5)
+        past = datetime.now(UTC) - timedelta(days=5)
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -419,7 +419,7 @@ class TestBuildVendorContextExtended:
             vendor_card_id=test_vendor_card.id,
             expires_at=past,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         ctx = knowledge_service.build_vendor_context(db_session, vendor_card_id=test_vendor_card.id)
@@ -434,7 +434,7 @@ class TestBuildVendorContextExtended:
 class TestBuildPipelineContextExtended:
     def test_includes_stale_deals(self, db_session: Session, test_user: User):
         """Stale active requisitions (no update in 14+ days) appear in context."""
-        stale_time = datetime.now(timezone.utc) - timedelta(days=20)
+        stale_time = datetime.now(UTC) - timedelta(days=20)
         req = Requisition(
             name="STALE-REQ-001",
             customer_name="Old Customer",
@@ -456,8 +456,8 @@ class TestBuildPipelineContextExtended:
             customer_name="Urgent Co",
             status="open",
             created_by=test_user.id,
-            deadline=datetime.now(timezone.utc) + timedelta(days=7),
-            created_at=datetime.now(timezone.utc),
+            deadline=datetime.now(UTC) + timedelta(days=7),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -473,7 +473,7 @@ class TestBuildPipelineContextExtended:
                 customer_name="Test Co",
                 status=status,
                 created_by=test_user.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(req)
         db_session.commit()
@@ -489,7 +489,7 @@ class TestBuildPipelineContextExtended:
             customer_name="Naive Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             updated_at=stale_naive,
         )
         db_session.add(req)
@@ -513,9 +513,9 @@ class TestBuildCompanyContextExtended:
             industry="Aerospace",
             account_type="enterprise",
             is_strategic=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=3),
+            last_activity_at=datetime.now(UTC) - timedelta(days=3),
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(company)
         db_session.commit()
@@ -529,7 +529,7 @@ class TestBuildCompanyContextExtended:
     def test_includes_expired_company_entries(self, db_session: Session, test_user: User, test_company: Company):
         """Expired company entries are marked [OUTDATED] in context."""
         # Pass aware expires_at in the past; _is_expired handles naive/aware comparison.
-        past = datetime.now(timezone.utc) - timedelta(days=5)
+        past = datetime.now(UTC) - timedelta(days=5)
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -538,7 +538,7 @@ class TestBuildCompanyContextExtended:
             company_id=test_company.id,
             expires_at=past,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         ctx = knowledge_service.build_company_context(db_session, company_id=test_company.id)
@@ -549,7 +549,7 @@ class TestBuildCompanyContextExtended:
         company = Company(
             name="Minimal Co",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(company)
         db_session.commit()
@@ -567,7 +567,7 @@ class TestBuildCompanyContextExtended:
             status="open",
             created_by=test_user.id,
             customer_site_id=test_customer_site.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -591,7 +591,7 @@ class TestGenerateInsightsClaudeError:
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         with patch("app.utils.claude_client.claude_structured", new=_raise_claude_error):
@@ -618,7 +618,7 @@ class TestGenerateMpnInsightsClaudeError:
             content="LM317T data",
             mpn="LM317T",
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         with patch("app.utils.claude_client.claude_structured", new=claude_stub):
@@ -647,7 +647,7 @@ class TestGenerateVendorInsightsClaudeError:
             content="Arrow note",
             vendor_card_id=test_vendor_card.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         with patch("app.utils.claude_client.claude_structured", new=claude_stub):
@@ -672,7 +672,7 @@ class TestGenerateVendorInsightsClaudeError:
             content="Arrow data",
             vendor_card_id=test_vendor_card.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "New vendor insight", "confidence": 0.9, "based_on_expired": False}]}
@@ -709,7 +709,7 @@ class TestGeneratePipelineInsightsClaudeError:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -732,7 +732,7 @@ class TestGeneratePipelineInsightsClaudeError:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -775,7 +775,7 @@ class TestGenerateCompanyInsightsClaudeError:
             content="Acme note",
             company_id=test_company.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         with patch("app.utils.claude_client.claude_structured", new=claude_stub):
@@ -798,7 +798,7 @@ class TestGenerateCompanyInsightsClaudeError:
             content="Acme note",
             company_id=test_company.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "New company insight", "confidence": 0.7, "based_on_expired": False}]}

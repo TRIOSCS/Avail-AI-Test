@@ -18,7 +18,7 @@ os.environ["TESTING"] = "1"
 import base64
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -43,7 +43,7 @@ def _make_user(db_session, *, email, azure_id, password=None, role="buyer", name
         role=role,
         azure_id=azure_id,
         password_hash=_hash_password(password) if password is not None else None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()

@@ -16,7 +16,7 @@ the owner-path tests override require_user to the trader who owns the seeded lis
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -51,7 +51,7 @@ def trader_user(db_session: Session) -> User:
         role="trader",
         azure_id="d-azure-trader",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -78,7 +78,7 @@ def draft_list(db_session: Session, trader_user: User, test_company: Company) ->
         owner_id=trader_user.id,
         status=ExcessListStatus.DRAFT,
         total_line_items=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.commit()
@@ -95,7 +95,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -181,7 +181,7 @@ def test_buyer_panel_overlap_flag(client, db_session, trader_user, teammate_user
             submitted_by=teammate_user.id,  # a TEAMMATE, not the owner
             channel="phone",
             status=ExcessOutreachStatus.SENT,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
     )
     db_session.commit()
@@ -345,7 +345,7 @@ def test_tracker_renders_rows_and_summary(client, db_session, trader_user, poste
                 submitted_by=trader_user.id,
                 channel="email",
                 status=ExcessOutreachStatus.BID,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
             ),
             ExcessOutreach(
                 excess_list_id=posted_list.id,
@@ -353,7 +353,7 @@ def test_tracker_renders_rows_and_summary(client, db_session, trader_user, poste
                 submitted_by=trader_user.id,
                 channel="phone",
                 status=ExcessOutreachStatus.SENT,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
             ),
         ]
     )

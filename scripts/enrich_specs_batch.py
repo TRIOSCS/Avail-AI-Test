@@ -16,7 +16,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -116,7 +116,7 @@ async def submit_spec_extraction(db, category: str, limit: int = 0) -> dict:
         "category": category,
         "request_map": meta_map,
         "total_cards": len(all_cards),
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "submitted_at": datetime.now(UTC).isoformat(),
     }
     meta_path = f"/tmp/specs_batch_{category}_{batch_id}.json"
     with open(meta_path, "w") as f:

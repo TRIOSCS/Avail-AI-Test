@@ -4,7 +4,7 @@ Covers: app/services/spec_write_service.py
 Depends on: conftest.py (db_session), faceted search models
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -20,7 +20,7 @@ def _make_card(db: Session, mpn: str = "TEST-001", category: str = "dram") -> Ma
         display_mpn=mpn,
         manufacturer="TestCo",
         category=category,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -372,7 +372,7 @@ def test_record_spec_card_no_category_skips(db_session: Session):
         display_mpn="NO-CAT-001",
         manufacturer="TestCo",
         category=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.flush()

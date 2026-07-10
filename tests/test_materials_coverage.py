@@ -23,7 +23,7 @@ os.environ["TESTING"] = "1"
 
 import io
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -93,7 +93,7 @@ class TestListMaterialsWithBrandAndOfferStats:
                 display_mpn=f"MC{i}COVERAGE",
                 manufacturer="TI",
                 search_count=i,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(mc)
             cards.append(mc)
@@ -149,7 +149,7 @@ class TestGetMaterialWithManufacturerInference:
             display_mpn="INFER001",
             manufacturer="",  # Empty manufacturer
             search_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -207,7 +207,7 @@ class TestGetMaterialByMpnWithManufacturerInference:
             display_mpn="INFER002",
             manufacturer=None,
             search_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -303,8 +303,8 @@ class TestDeleteMaterialAlreadyDeleted:
             display_mpn="ALREADYDEL001",
             manufacturer="Test",
             search_count=0,
-            deleted_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            deleted_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -325,8 +325,8 @@ class TestRestoreMaterial:
             display_mpn="RESTORE001",
             manufacturer="Test",
             search_count=0,
-            deleted_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            deleted_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -346,7 +346,7 @@ class TestRestoreMaterial:
             display_mpn="RESTORE002",
             manufacturer="Test",
             search_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -440,7 +440,7 @@ class TestUpdateMaterialAllFields:
             display_mpn="ENRICHSRCTEST",
             manufacturer="Test",
             search_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()
@@ -464,7 +464,7 @@ class TestUpdateMaterialAllFields:
             manufacturer="Test",
             search_count=0,
             enrichment_source="claude_agent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()

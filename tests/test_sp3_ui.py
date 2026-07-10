@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -39,7 +39,7 @@ def _make_prospect(
         domain=domain or f"co-{uid}.com",
         status=kw.pop("status", "suggested"),
         discovery_source="clay",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         enrichment_data=enrichment_data or {},
         readiness_signals={},
         trio_match_score=trio_match_score,

@@ -8,7 +8,7 @@ Called by: routers/knowledge.py, jobs/knowledge_jobs.py
 Depends on: models/knowledge.py, utils/claude_client.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ def _is_expired(expires_at: datetime | None, now: datetime) -> bool:
     if not expires_at:
         return False
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires_at = expires_at.replace(tzinfo=UTC)
     return expires_at < now
 
 
@@ -104,9 +104,7 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             vendor = item.get("vendor_name", "")
             if mpn and price:
                 facts.append(
-                    "{}: ${:.2f}".format(mpn, float(price))
-                    + (" x{}".format(qty) if qty else "")
-                    + (" from {}".format(vendor) if vendor else "")
+                    f"{mpn}: ${float(price):.2f}" + (f" x{qty}" if qty else "") + (f" from {vendor}" if vendor else "")
                 )
 
         if not facts:
@@ -121,7 +119,7 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             content=content,
             source="system",
             confidence=1.0,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=EXPIRY_PRICE_FACT),
+            expires_at=datetime.now(UTC) + timedelta(days=EXPIRY_PRICE_FACT),
             requisition_id=quote.requisition_id,
             commit=False,
         )
@@ -160,15 +158,15 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
 
         content_parts = []
         if mpn:
-            content_parts.append("MPN: {}".format(mpn))
+            content_parts.append(f"MPN: {mpn}")
         if price:
-            content_parts.append("${:.2f}".format(float(price)))
+            content_parts.append(f"${float(price):.2f}")
         if qty:
-            content_parts.append("qty {}".format(qty))
+            content_parts.append(f"qty {qty}")
         if vendor_name:
-            content_parts.append("from {}".format(vendor_name))
+            content_parts.append(f"from {vendor_name}")
         if lead_time:
-            content_parts.append("lead time: {}".format(lead_time))
+            content_parts.append(f"lead time: {lead_time}")
 
         if not content_parts:
             nested.rollback()
@@ -182,7 +180,7 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             content=content,
             source="system",
             confidence=1.0,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=EXPIRY_PRICE_FACT),
+            expires_at=datetime.now(UTC) + timedelta(days=EXPIRY_PRICE_FACT),
             mpn=mpn or None,
             vendor_card_id=getattr(offer, "vendor_card_id", None),
             requisition_id=getattr(offer, "requisition_id", None),
@@ -249,7 +247,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
     if not req:
         return ""
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sections = []
 
     # 1. Direct knowledge on this req
@@ -352,6 +350,16 @@ def build_context(db: Session, *, requisition_id: int) -> str:
     return "\n\n".join(sections)
 
 
+# Interactive (HTTP-request-scoped) callers — the four "Refresh AI insights"
+# HTMX endpoints in routers/htmx_views.py — tighten the Claude call budget so a
+# slow/overloaded API can't hold the request open for the full
+# timeout × retries worst case (P2.8). Non-interactive callers (the
+# `knowledge_jobs._job_refresh_insights` background job) get the original
+# claude_structured defaults (30s timeout, 3 attempts = up to ~96s per call).
+_INTERACTIVE_TIMEOUT_SECONDS = 25
+_INTERACTIVE_MAX_ATTEMPTS = 1
+
+
 async def _regenerate_insights(
     db: Session,
     *,
@@ -366,6 +374,7 @@ async def _regenerate_insights(
     no_results_log: str,
     generated_log: str,
     generated_args: tuple = (),
+    interactive: bool = False,
 ) -> list[KnowledgeEntry]:
     """Shared insight pipeline: replace cached insights for one scope.
 
@@ -374,6 +383,12 @@ async def _regenerate_insights(
     The single-arg ``*_log`` strings are pre-formatted (logged verbatim) so each
     caller keeps its exact wording; ``generated_log``/``failed_log`` are loguru
     templates whose runtime values (count, scope id, error) are passed as args.
+
+    ``interactive=True`` (set by the HTMX "Refresh" endpoints) tightens the
+    Claude call to a ~25s timeout with a single attempt (no retries) so the
+    request can't block for the full default 30s × 3-retry worst case. On
+    timeout/failure this returns ``[]``, and callers fall back to serving the
+    existing cached insights (``entries or get_cached_*_insights(...)``).
     """
     from app.utils.claude_client import claude_structured
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
@@ -387,6 +402,11 @@ async def _regenerate_insights(
     # rows intact rather than wiping the cache with nothing to show for it.
     old_insights = db.query(KnowledgeEntry).filter(*delete_filters).all()
 
+    claude_kwargs: dict = {}
+    if interactive:
+        claude_kwargs["timeout"] = _INTERACTIVE_TIMEOUT_SECONDS
+        claude_kwargs["max_attempts"] = _INTERACTIVE_MAX_ATTEMPTS
+
     try:
         result = await claude_structured(
             prompt=prompt,
@@ -395,6 +415,7 @@ async def _regenerate_insights(
             model_tier="smart",
             max_tokens=2048,
             thinking_budget=5000,
+            **claude_kwargs,
         )
     except ClaudeUnavailableError:
         logger.info(unavailable_log)
@@ -413,7 +434,7 @@ async def _regenerate_insights(
     db.flush()
 
     entries = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for insight in result["insights"][:5]:  # Cap at 5
         entry = create_entry(
             db,
@@ -431,8 +452,12 @@ async def _regenerate_insights(
     return entries
 
 
-async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a requisition using the context engine."""
+async def generate_insights(db: Session, requisition_id: int, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for a requisition using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_context(db, requisition_id=requisition_id)
     return await _regenerate_insights(
         db,
@@ -441,15 +466,16 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
             KnowledgeEntry.requisition_id == requisition_id,
             KnowledgeEntry.entry_type == "ai_insight",
         ),
-        prompt="Analyze this knowledge base and generate insights:\n\n{}".format(context),
+        prompt=f"Analyze this knowledge base and generate insights:\n\n{context}",
         system=INSIGHT_SYSTEM_PROMPT,
         entry_kwargs={"requisition_id": requisition_id},
-        no_context_log="No context for req {} — skipping insight generation".format(requisition_id),
+        no_context_log=f"No context for req {requisition_id} — skipping insight generation",
         unavailable_log="Claude not configured — skipping insight generation",
         failed_log="Claude AI failed for insight generation: {}",
-        no_results_log="AI insight generation returned no results for req {}".format(requisition_id),
+        no_results_log=f"AI insight generation returned no results for req {requisition_id}",
         generated_log="Generated {} insights for req {}",
         generated_args=(requisition_id,),
+        interactive=interactive,
     )
 
 
@@ -522,7 +548,7 @@ def build_mpn_context(db: Session, *, mpn: str) -> str:
     """Gather all relevant knowledge for an MPN and format for AI prompt."""
     from app.models.offers import Offer
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sections = []
 
     # 1. Knowledge entries for this MPN
@@ -555,7 +581,7 @@ def build_mpn_context(db: Session, *, mpn: str) -> str:
     if offers:
         lines = []
         for o in offers:
-            price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
+            price_str = f"${float(o.unit_price):.4f}" if o.unit_price else "N/A"
             lines.append(
                 "- {} from {} — {} qty:{} lead:{} (req #{}, {})".format(
                     o.mpn,
@@ -601,31 +627,27 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
     from app.models.offers import Offer
     from app.models.vendors import VendorCard
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sections = []
 
     vendor = db.get(VendorCard, vendor_card_id)
     if not vendor:
         return ""
 
-    sections.append("## Vendor: {} (ID {})".format(vendor.display_name, vendor.id))
+    sections.append(f"## Vendor: {vendor.display_name} (ID {vendor.id})")
     meta = []
     if vendor.domain:
-        meta.append("Domain: {}".format(vendor.domain))
+        meta.append(f"Domain: {vendor.domain}")
     if vendor.industry:
-        meta.append("Industry: {}".format(vendor.industry))
+        meta.append(f"Industry: {vendor.industry}")
     if vendor.ghost_rate is not None:
-        meta.append("Ghost rate: {:.0%}".format(vendor.ghost_rate))
+        meta.append(f"Ghost rate: {vendor.ghost_rate:.0%}")
     if vendor.total_responses is not None and vendor.total_outreach:
         meta.append(
-            "Response rate: {}/{} ({:.0%})".format(
-                vendor.total_responses,
-                vendor.total_outreach,
-                vendor.total_responses / max(vendor.total_outreach, 1),
-            )
+            f"Response rate: {vendor.total_responses}/{vendor.total_outreach} ({vendor.total_responses / max(vendor.total_outreach, 1):.0%})"
         )
     if vendor.cancellation_rate is not None:
-        meta.append("Cancellation rate: {:.0%}".format(vendor.cancellation_rate))
+        meta.append(f"Cancellation rate: {vendor.cancellation_rate:.0%}")
     if meta:
         sections.append("## Vendor stats\n" + "\n".join("- " + m for m in meta))
 
@@ -652,7 +674,7 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
     if offers:
         lines = []
         for o in offers:
-            price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
+            price_str = f"${float(o.unit_price):.4f}" if o.unit_price else "N/A"
             lines.append(
                 "- {} {} qty:{} lead:{} status={} (req #{}, {})".format(
                     o.mpn,
@@ -673,7 +695,7 @@ def build_pipeline_context(db: Session) -> str:
     """Gather pipeline-level context for AI analysis."""
     from app.models.sourcing import Requisition
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sections = []
 
     # 1. Status breakdown
@@ -684,7 +706,7 @@ def build_pipeline_context(db: Session) -> str:
     status_counts: dict[str, int] = {}
     for r in all_reqs:
         status_counts[r.status or "unknown"] = status_counts.get(r.status or "unknown", 0) + 1
-    lines = ["- {}: {}".format(s, c) for s, c in sorted(status_counts.items(), key=lambda x: -x[1])]
+    lines = [f"- {s}: {c}" for s, c in sorted(status_counts.items(), key=lambda x: -x[1])]
     sections.append("## Pipeline status breakdown (last 200 reqs)\n" + "\n".join(lines))
 
     # 2. Active reqs summary
@@ -702,11 +724,7 @@ def build_pipeline_context(db: Session) -> str:
         lines = []
         for r in active[:30]:
             age_days = (
-                (
-                    now - r.created_at.replace(tzinfo=timezone.utc)
-                    if r.created_at.tzinfo is None
-                    else now - r.created_at
-                ).days
+                (now - r.created_at.replace(tzinfo=UTC) if r.created_at.tzinfo is None else now - r.created_at).days
                 if r.created_at
                 else 0
             )
@@ -726,7 +744,7 @@ def build_pipeline_context(db: Session) -> str:
     for r in active:
         if not r.updated_at:
             continue
-        ts = r.updated_at if r.updated_at.tzinfo else r.updated_at.replace(tzinfo=timezone.utc)
+        ts = r.updated_at if r.updated_at.tzinfo else r.updated_at.replace(tzinfo=UTC)
         if ts < stale_threshold:
             stale.append(r)
     if stale:
@@ -749,7 +767,7 @@ def build_company_context(db: Session, *, company_id: int) -> str:
     from app.models.crm import Company, CustomerSite
     from app.models.sourcing import Requisition
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sections = []
 
     company = db.get(Company, company_id)
@@ -757,11 +775,11 @@ def build_company_context(db: Session, *, company_id: int) -> str:
         return ""
 
     # Company header
-    meta = ["Name: {}".format(company.name)]
+    meta = [f"Name: {company.name}"]
     if company.industry:
-        meta.append("Industry: {}".format(company.industry))
+        meta.append(f"Industry: {company.industry}")
     if company.account_type:
-        meta.append("Account type: {}".format(company.account_type))
+        meta.append(f"Account type: {company.account_type}")
     if company.is_strategic:
         meta.append("Strategic account: Yes")
     if company.last_activity_at:
@@ -838,20 +856,26 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
             KnowledgeEntry.entry_type == "ai_insight",
             KnowledgeEntry.requisition_id.is_(None),
         ),
-        prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
+        prompt=f"Analyze this knowledge base for MPN {mpn} and generate insights:\n\n{context}",
         system=MPN_INSIGHT_PROMPT,
         entry_kwargs={"mpn": mpn},
-        no_context_log="No context for MPN {} — skipping insight generation".format(mpn),
+        no_context_log=f"No context for MPN {mpn} — skipping insight generation",
         unavailable_log="Claude not configured — skipping MPN insight generation",
         failed_log="Claude AI failed for MPN insight generation: {}",
-        no_results_log="AI insight generation returned no results for MPN {}".format(mpn),
+        no_results_log=f"AI insight generation returned no results for MPN {mpn}",
         generated_log="Generated {} insights for MPN {}",
         generated_args=(mpn,),
     )
 
 
-async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a vendor using the context engine."""
+async def generate_vendor_insights(
+    db: Session, vendor_card_id: int, *, interactive: bool = False
+) -> list[KnowledgeEntry]:
+    """Generate AI insights for a vendor using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_vendor_context(db, vendor_card_id=vendor_card_id)
     return await _regenerate_insights(
         db,
@@ -860,20 +884,25 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
             KnowledgeEntry.vendor_card_id == vendor_card_id,
             KnowledgeEntry.entry_type == "ai_insight",
         ),
-        prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
+        prompt=f"Analyze this knowledge base for this vendor and generate insights:\n\n{context}",
         system=VENDOR_INSIGHT_PROMPT,
         entry_kwargs={"vendor_card_id": vendor_card_id},
-        no_context_log="No context for vendor {} — skipping insight generation".format(vendor_card_id),
+        no_context_log=f"No context for vendor {vendor_card_id} — skipping insight generation",
         unavailable_log="Claude not configured — skipping vendor insight generation",
         failed_log="Claude AI failed for vendor insight generation: {}",
-        no_results_log="AI insight generation returned no results for vendor {}".format(vendor_card_id),
+        no_results_log=f"AI insight generation returned no results for vendor {vendor_card_id}",
         generated_log="Generated {} insights for vendor {}",
         generated_args=(vendor_card_id,),
+        interactive=interactive,
     )
 
 
-async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
-    """Generate AI insights for the overall pipeline health."""
+async def generate_pipeline_insights(db: Session, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for the overall pipeline health.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_pipeline_context(db)
     return await _regenerate_insights(
         db,
@@ -883,7 +912,7 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
             KnowledgeEntry.mpn == "__pipeline__",
             KnowledgeEntry.entry_type == "ai_insight",
         ),
-        prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
+        prompt=f"Analyze this pipeline summary and generate insights:\n\n{context}",
         system=PIPELINE_INSIGHT_PROMPT,
         entry_kwargs={"mpn": "__pipeline__"},
         no_context_log="No context for pipeline — skipping insight generation",
@@ -891,11 +920,16 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
         failed_log="Claude AI failed for pipeline insight generation: {}",
         no_results_log="AI insight generation returned no results for pipeline",
         generated_log="Generated {} pipeline insights",
+        interactive=interactive,
     )
 
 
-async def generate_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a company using the context engine."""
+async def generate_company_insights(db: Session, company_id: int, *, interactive: bool = False) -> list[KnowledgeEntry]:
+    """Generate AI insights for a company using the context engine.
+
+    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
+    budget — see ``_regenerate_insights``. Defaults to False (background job).
+    """
     context = build_company_context(db, company_id=company_id)
     return await _regenerate_insights(
         db,
@@ -904,15 +938,16 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
             KnowledgeEntry.company_id == company_id,
             KnowledgeEntry.entry_type == "ai_insight",
         ),
-        prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
+        prompt=f"Analyze this knowledge base for this company and generate insights:\n\n{context}",
         system=COMPANY_INSIGHT_PROMPT,
         entry_kwargs={"company_id": company_id},
-        no_context_log="No context for company {} — skipping insight generation".format(company_id),
+        no_context_log=f"No context for company {company_id} — skipping insight generation",
         unavailable_log="Claude not configured — skipping company insight generation",
         failed_log="Claude AI failed for company insight generation: {}",
-        no_results_log="AI insight generation returned no results for company {}".format(company_id),
+        no_results_log=f"AI insight generation returned no results for company {company_id}",
         generated_log="Generated {} insights for company {}",
         generated_args=(company_id,),
+        interactive=interactive,
     )
 
 

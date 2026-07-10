@@ -23,7 +23,7 @@ from .request_context import current_user_id_var
 _AUDIT_MODELS = (Company, CustomerSite, SiteContact)
 
 
-def _stamp_created(mapper, connection, target) -> None:  # noqa: ARG001
+def _stamp_created(mapper, connection, target) -> None:
     """Set created_by_id and modified_by_id on INSERT if contextvar is set."""
     uid = current_user_id_var.get()
     if uid is None:
@@ -34,7 +34,7 @@ def _stamp_created(mapper, connection, target) -> None:  # noqa: ARG001
         target.modified_by_id = uid
 
 
-def _stamp_modified(mapper, connection, target) -> None:  # noqa: ARG001
+def _stamp_modified(mapper, connection, target) -> None:
     """Set modified_by_id on UPDATE if contextvar is set.
 
     Intentional asymmetry with _stamp_created:

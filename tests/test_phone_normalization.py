@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.utils.phone import normalize_e164
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import engine
 
 # ---------------------------------------------------------------------------
 # normalize_e164 — pure function tests (no DB required)

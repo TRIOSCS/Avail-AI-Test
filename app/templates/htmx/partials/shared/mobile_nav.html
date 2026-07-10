@@ -19,6 +19,7 @@
      @htmx:pushed-into-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
      @click.outside="moreOpen = false"
      @keydown.escape.window="moreOpen = false"
+     :data-current-view="activeNav"
      aria-label="Main navigation">
   <div class="flex items-stretch justify-center mx-auto max-w-[720px]">
     {% set nav_items = [

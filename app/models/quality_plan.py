@@ -19,7 +19,7 @@ Depends on: models.base, app.constants (QualityPlanStatus, QPOrderType, PaymentM
             models.buy_plan (BuyPlan, BuyPlanLine), models.vendors (VendorCard)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, Date, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -108,8 +108,8 @@ class QualityPlan(Base):
     # Audit
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC))
 
     # ── Relationships
     buy_plan = relationship("BuyPlan", foreign_keys=[buy_plan_id])
@@ -200,8 +200,8 @@ class Prepayment(Base):
     # Audit
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC))
 
     # ── Relationships
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
@@ -252,7 +252,7 @@ class QpSerialEntry(Base):
     customer_approved_date = Column(Date, nullable=True)
     ops_received = Column(Boolean, nullable=True)  # OPS received
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     quality_plan = relationship("QualityPlan", back_populates="serial_entries")
@@ -279,7 +279,7 @@ class QpFruLookup(Base):
     qp_id = Column(Integer, ForeignKey("quality_plans.id", ondelete="CASCADE"), nullable=False)
     fru_norm = Column(String(64), nullable=False)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     # ── Relationships
     quality_plan = relationship("QualityPlan", back_populates="fru_lookups")

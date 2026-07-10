@@ -13,7 +13,7 @@ Depends on: models.buy_plan (BuyPlan, BuyPlanLine), models.auth (User),
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -675,7 +675,7 @@ def _nudge_cutoff() -> datetime:
     nudge clock (``coalesce(last_nudge_at, plan.approved_at)``) is older than
     ``settings.buyplan_nudge_buyer_hours``. Read at call time so test overrides apply.
     """
-    return datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
+    return datetime.now(UTC) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
 
 
 def _line_overdue(line: BuyPlanLine, cutoff: datetime) -> bool:
@@ -1118,8 +1118,8 @@ def _age_hours(since: datetime | None) -> float:
     if since is None:
         return 0.0
     if since.tzinfo is None:
-        since = since.replace(tzinfo=timezone.utc)
-    return max(0.0, (datetime.now(timezone.utc) - since).total_seconds() / 3600.0)
+        since = since.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - since).total_seconds() / 3600.0)
 
 
 def _line_mpn(line: BuyPlanLine) -> str | None:

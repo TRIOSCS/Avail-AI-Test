@@ -28,7 +28,7 @@ Depends on: models.User, models.buy_plan.VerificationGroupMember, dependencies.r
             CAPABILITY_ACCESS_KEYS / UserRole / UserAuditAction)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -662,8 +662,8 @@ async def set_user_access(
 
     try:
         access_key = AccessKey(key)
-    except ValueError:
-        raise HTTPException(400, "Unknown access key")
+    except ValueError as e:
+        raise HTTPException(400, "Unknown access key") from e
     if value not in {"on", "off", "default"}:
         raise HTTPException(400, "Invalid value")
 
@@ -672,9 +672,7 @@ async def set_user_access(
         want_active = value == "on"
         member = db.query(VerificationGroupMember).filter_by(user_id=target.id).first()
         if member is None:
-            db.add(
-                VerificationGroupMember(user_id=target.id, is_active=want_active, added_at=datetime.now(timezone.utc))
-            )
+            db.add(VerificationGroupMember(user_id=target.id, is_active=want_active, added_at=datetime.now(UTC)))
         else:
             member.is_active = want_active
         effective_after = want_active

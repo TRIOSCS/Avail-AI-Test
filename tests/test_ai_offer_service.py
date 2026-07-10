@@ -23,7 +23,9 @@ from app.models import (
 )
 from app.services.ai_offer_service import (
     apply_freeform_rfq,
+    parse_offer_form_rows,
     promote_prospect_contact,
+    save_form_parsed_offers,
     save_freeform_offers,
     save_parsed_offers,
 )
@@ -284,6 +286,11 @@ class TestSaveFreeformOffers:
         db_session.commit()
 
         offer = db_session.get(Offer, result["offer_ids"][0])
+        # P2.5: default now comes from OfferCondition.NEW (value-identical to the
+        # old raw "new" literal).
+        from app.constants import OfferCondition
+
+        assert offer.condition == OfferCondition.NEW
         assert offer.condition == "new"
         assert offer.currency == "USD"
 
@@ -296,6 +303,13 @@ class TestSaveFreeformOffers:
         maybe_release_on_offer.
 
         RED before Task-7 adds offer_condition=offer.condition to the call site.
+
+        P2.5 follow-up: ``Offer._validate_condition`` now normalizes the legacy
+        "refurbished" spelling to the canonical ``OfferCondition.REFURB`` ("refurb")
+        the moment it's assigned to the ORM attribute, so what's actually forwarded
+        here is the normalized value -- `release_on_offer`'s own broad
+        `normalize_condition()` maps both "refurbished" and "refurb" to the same
+        "refurb" bucket, so this is a same-vocabulary rename, not a behavior change.
         """
         offer_in = _make_offer_input(condition="refurbished")
         save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
@@ -303,8 +317,100 @@ class TestSaveFreeformOffers:
         assert mock_release.called, "maybe_release_on_offer was not called at all"
         _args, kwargs = mock_release.call_args
         forwarded_condition = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
-        assert forwarded_condition == "refurbished", (
-            f"Expected offer_condition='refurbished' forwarded to maybe_release_on_offer "
-            f"but got: {forwarded_condition!r}. "
+        assert forwarded_condition == "refurb", (
+            f"Expected offer_condition='refurb' (OfferCondition-normalized from 'refurbished') "
+            f"forwarded to maybe_release_on_offer but got: {forwarded_condition!r}. "
             "Task-7: add offer_condition=offer.condition to the call site."
         )
+
+
+# -- TestParseOfferFormRows ---------------------------------------------------
+# P4.2: form-array parsing extracted from routers/htmx/offers.py::save_parsed_offers.
+
+
+class TestParseOfferFormRows:
+    def test_parses_sequential_offer_rows(self):
+        """offers[0].* / offers[1].* fields collect into a row dict each, stopping at
+        the first gap."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "100",
+            "offers[0].unit_price": "0.42",
+            "offers[1].mpn": "NE555P",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert len(rows) == 2
+        assert rows[0]["mpn"] == "LM317T"
+        assert rows[0]["qty_available"] == 100
+        assert rows[0]["unit_price"] == 0.42
+        assert rows[1]["mpn"] == "NE555P"
+
+    def test_no_offer_rows_returns_empty_list(self):
+        """A form with no offers[i].* fields at all returns [] — the router's signal to
+        render 'No offers to save' without calling the save function."""
+        assert parse_offer_form_rows({}, vendor_name="Acme Distribution") == []
+
+    def test_zero_string_qty_and_price_parse_to_zero_not_none(self):
+        """Regression: qty_available/moq/unit_price now go through the shared
+        app.utils.safe_int/safe_float instead of a private falsy-pre-check helper.
+        A literal "0" string (a real, if unusual, form value — e.g. an explicit
+        zero-stock row) must still parse to 0, not None — form values are always
+        `str | None`, so the string "0" is truthy and takes the int()/float() branch
+        under both the old and new implementation."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "0",
+            "offers[0].unit_price": "0",
+            "offers[0].moq": "0",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert rows[0]["qty_available"] == 0
+        assert rows[0]["unit_price"] == 0.0
+        assert rows[0]["moq"] == 0
+
+    def test_blank_qty_and_price_parse_to_none(self):
+        """An empty-string form field (left blank by the user) still parses to None, not
+        0 — unchanged from the pre-dedup private helper."""
+        form = {
+            "offers[0].mpn": "LM317T",
+            "offers[0].qty_available": "",
+            "offers[0].unit_price": "",
+            "offers[0].moq": "",
+        }
+        rows = parse_offer_form_rows(form, vendor_name="Acme Distribution")
+        assert rows[0]["qty_available"] is None
+        assert rows[0]["unit_price"] is None
+        assert rows[0]["moq"] is None
+
+
+# -- TestSaveFormParsedOffers -------------------------------------------------
+# P4.2: MPN matching, VendorCard resolution, Offer construction extracted from
+# routers/htmx/offers.py::save_parsed_offers (the HTMX form-review-then-save flow,
+# distinct from save_parsed_offers' AI PENDING_REVIEW path above — this one saves
+# straight to ACTIVE since the user already reviewed/edited the rows in the form).
+
+
+class TestSaveFormParsedOffers:
+    def test_creates_active_offer_with_exact_requirement_match(self, db_session: Session, test_requisition, test_user):
+        offers_data = parse_offer_form_rows(
+            {"offers[0].mpn": "LM317T", "offers[0].vendor_name": "Acme Distribution"}, vendor_name=""
+        )
+        saved_count = save_form_parsed_offers(db_session, test_requisition.id, "", offers_data, test_user)
+        db_session.commit()
+
+        assert saved_count == 1
+        offer = db_session.query(Offer).filter_by(requisition_id=test_requisition.id).first()
+        assert offer.status == "active"
+        assert offer.source == "ai_parsed"
+        assert offer.requirement_id is not None  # exact match on "LM317T"
+        card = db_session.get(VendorCard, offer.vendor_card_id)
+        assert card.display_name == "Acme Distribution"
+
+    def test_rows_with_no_mpn_are_skipped(self, db_session: Session, test_requisition, test_user):
+        """A row with a blank mpn is silently skipped — no Offer, no VendorCard."""
+        offers_data = parse_offer_form_rows({"offers[0].vendor_name": "Freeform Vendor"}, vendor_name="")
+        saved_count = save_form_parsed_offers(db_session, test_requisition.id, "", offers_data, test_user)
+        db_session.commit()
+
+        assert saved_count == 0
+        assert db_session.query(Offer).filter_by(requisition_id=test_requisition.id).count() == 0

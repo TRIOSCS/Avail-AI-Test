@@ -13,7 +13,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.search_service import _history_to_result, sighting_to_dict
@@ -48,7 +48,7 @@ def _make_sighting(**overrides) -> SimpleNamespace:
         "lead_time": "2 weeks",
         "evidence_tier": "T3",
         "score_components": None,
-        "created_at": datetime.now(timezone.utc) - timedelta(hours=2),
+        "created_at": datetime.now(UTC) - timedelta(hours=2),
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -56,7 +56,7 @@ def _make_sighting(**overrides) -> SimpleNamespace:
 
 def _make_history(**overrides) -> dict:
     """Build a history dict as returned by _get_material_history."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = {
         "vendor_name": "Historical Parts Co",
         "mpn_matched": "LM358N",
@@ -106,7 +106,7 @@ def test_results_have_unified_fields():
 def test_history_results_have_unified_fields():
     """Historical results from _history_to_result also carry unified fields."""
     h = _make_history()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     d = _history_to_result(h, now)
 
     assert "source_badge" in d
@@ -127,7 +127,7 @@ def test_live_results_have_no_reasoning():
 def test_history_results_have_no_reasoning():
     """Historical results have reasoning=None."""
     h = _make_history()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     d = _history_to_result(h, now)
     assert d["reasoning"] is None
 
@@ -198,9 +198,9 @@ def test_live_stock_above_historical():
 
     hist_h = _make_history(
         source_type="historical",
-        last_seen=datetime.now(timezone.utc) - timedelta(days=60),
+        last_seen=datetime.now(UTC) - timedelta(days=60),
     )
-    hist_d = _history_to_result(hist_h, datetime.now(timezone.utc))
+    hist_d = _history_to_result(hist_h, datetime.now(UTC))
 
     # Live results get mapped to 70-95 range, historical decays from 80
     # With 60-day-old history, confidence should be lower

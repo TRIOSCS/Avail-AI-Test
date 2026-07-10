@@ -5,7 +5,7 @@ loop — the oem_sourced upgrade short-circuits enrich_card and saves its web ca
 both gated by settings.oem_crosswalk_enrich_enabled."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -49,7 +49,7 @@ def _seed_card(db, mpn: str, status: str = MaterialEnrichmentStatus.UNENRICHED) 
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         enrichment_status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -62,7 +62,7 @@ def _seed_no_match_row(db, mpn: str, age_days: int, vendor: str = "hpe") -> OemC
         spare_norm=normalize_mpn_key(mpn),
         vendor=vendor,
         status=OemCrosswalkStatus.NO_MATCH,
-        looked_up_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        looked_up_at=datetime.now(UTC) - timedelta(days=age_days),
     )
     db.add(row)
     db.flush()
@@ -297,7 +297,7 @@ def test_pass_b_lenovo_upgrade_sources_from_psref(db_session):
         canonical_mpn_norm="st4000nm0035",
         canonical_manufacturer="Seagate",
         confidence=0.95,
-        looked_up_at=datetime.now(timezone.utc),
+        looked_up_at=datetime.now(UTC),
     )
     db_session.add(row)
     db_session.flush()
@@ -464,7 +464,7 @@ def test_pass_a_resolved_row_is_permanent(db_session):
         status=OemCrosswalkStatus.RESOLVED,
         canonical_mpn_raw="ST4000NM0035",
         canonical_mpn_norm="st4000nm0035",
-        looked_up_at=datetime.now(timezone.utc) - timedelta(days=400),
+        looked_up_at=datetime.now(UTC) - timedelta(days=400),
     )
     db_session.add(row)
     db_session.flush()
@@ -492,7 +492,7 @@ def test_pass_b_upgrade_saves_web_calls(db_session, monkeypatch):
         canonical_mpn_norm="st4000nm0035",
         canonical_manufacturer="Seagate",
         confidence=0.95,
-        looked_up_at=datetime.now(timezone.utc),
+        looked_up_at=datetime.now(UTC),
     )
     db_session.add(row)
     db_session.flush()

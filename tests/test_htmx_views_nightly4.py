@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -33,7 +33,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="N4 Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requisition(**defaults)
@@ -48,7 +48,7 @@ def _requirement(db: Session, req: Requisition, mpn: str = "LM317T", **kw) -> Re
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requirement(**defaults)
@@ -65,7 +65,7 @@ def _vendor(db: Session, name: str = "TestVendorN4", **kw) -> VendorCard:
         emails=[],
         phones=[],
         sighting_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = VendorCard(**defaults)
@@ -100,7 +100,7 @@ def _rfq_contact(db: Session, req: Requisition, user: User, **kw):
         vendor_name_normalized="somevendor",
         vendor_contact="vendor@example.com",
         status="sent",
-        created_at=datetime.now(timezone.utc) - timedelta(days=5),
+        created_at=datetime.now(UTC) - timedelta(days=5),
     )
     defaults.update(kw)
     obj = RfqContact(**defaults)
@@ -158,7 +158,7 @@ class TestVendorDetailPartial:
             vendor_safety_band="GREEN",
             vendor_safety_summary="Verified distributor",
             vendor_safety_flags=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(lead)
         db_session.commit()
@@ -201,7 +201,7 @@ class TestVendorTabPartial:
             vendor_safety_summary="Risk detected",
             vendor_safety_flags=["counterfeit_risk"],
             vendor_safety_score=25.0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(lead)
         db_session.commit()
@@ -227,7 +227,7 @@ class TestVendorTabPartial:
             user_id=test_user.id,
             rating=4,
             comment="Good vendor",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(review)
         db_session.commit()
@@ -267,7 +267,7 @@ class TestVendorReviews:
             user_id=test_user.id,
             rating=5,
             comment="Excellent",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(review)
         db_session.commit()
@@ -539,7 +539,7 @@ class TestCompanyTabRoutes:
             company_id=test_company.id,
             status=RequisitionStatus.OPEN,
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -622,7 +622,7 @@ class TestVendorTabOffersWithData:
             status=OfferStatus.ACTIVE,
             unit_price=1.50,
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()

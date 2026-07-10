@@ -9,7 +9,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def _prospect(db: Session, **kw) -> ProspectAccount:
         domain=f"p-{uuid.uuid4().hex[:6]}.com",
         status="suggested",
         discovery_source="clay",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kw,
     )
     db.add(p)
@@ -131,7 +131,7 @@ async def test_run_enrichment_job_paid_step_recomputes(db_session, monkeypatch):
 async def test_run_enrichment_job_24h_skip(db_session, monkeypatch):
     from app.services import prospect_free_enrichment as pfe
 
-    recent = datetime.now(timezone.utc).isoformat()
+    recent = datetime.now(UTC).isoformat()
     p = _prospect(
         db_session,
         fit_score=10,

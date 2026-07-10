@@ -15,7 +15,7 @@ Depends on: app/services/eight_by_eight_service.py,
             app/services/activity_service.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -97,14 +97,14 @@ async def _process_cdrs(db, settings) -> dict:
 
     # Load watermark
     watermark_row = db.query(SystemConfig).filter(SystemConfig.key == "8x8_last_poll").first()
-    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    since = datetime.now(UTC) - timedelta(hours=24)
     if watermark_row:
         try:
             since = datetime.fromisoformat(watermark_row.value)
         except (ValueError, TypeError):
             pass
 
-    until = datetime.now(timezone.utc)
+    until = datetime.now(UTC)
 
     # Auth + fetch
     try:
@@ -260,7 +260,7 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
     if user_id is None:
         return None
 
-    from datetime import timedelta, timezone
+    from datetime import timedelta
 
     from ..constants import ActivityType, Channel
     from ..models import ActivityLog
@@ -299,7 +299,7 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
             continue
         # Make timezone-aware for comparison
         if row_time.tzinfo is None:
-            row_time = row_time.replace(tzinfo=timezone.utc)
+            row_time = row_time.replace(tzinfo=UTC)
         if window_start <= row_time <= window_end:
             matches.append((abs((row_time - cdr_occurred_at).total_seconds()), row.id, row))
 

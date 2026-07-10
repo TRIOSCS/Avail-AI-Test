@@ -9,7 +9,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import patch
 
 import pytest
@@ -51,7 +51,7 @@ from app.services.multiplier_score_service import (
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=UTC)
 MONTH = date(2026, 2, 1)
 
 
@@ -299,9 +299,9 @@ class TestBuyerMultiplierNonStacking:
 
         req = _make_req(db_session, buyer.id)
         # Offer from Jan 28 (within 7-day grace window)
-        grace_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 28, tzinfo=timezone.utc))
+        grace_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 28, tzinfo=UTC))
         # Offer from Jan 20 (outside grace window)
-        old_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 20, tzinfo=timezone.utc))
+        old_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 20, tzinfo=UTC))
         # Put grace_offer in a quote (it advanced)
         _make_quote(db_session, req.id, site.id, buyer.id, offers=[grace_offer])
         db_session.commit()
@@ -801,9 +801,9 @@ class TestEdgeCases:
         buyer = _make_user(db_session, "Boundary Buyer", "buyer", "boundarymult")
         req = _make_req(db_session, buyer.id)
         # Jan offer (outside Feb)
-        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 10, tzinfo=timezone.utc))
+        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 10, tzinfo=UTC))
         # Feb offer (inside)
-        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 2, 10, tzinfo=timezone.utc))
+        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 2, 10, tzinfo=UTC))
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)

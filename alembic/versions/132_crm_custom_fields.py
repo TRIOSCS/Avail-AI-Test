@@ -9,7 +9,7 @@ No-per-field migration for arbitrary label:value pairs on CRM accounts and conta
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
@@ -18,9 +18,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "132_crm_custom_fields"
-down_revision: Union[str, None] = "131_tbf_search_tables"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "131_tbf_search_tables"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

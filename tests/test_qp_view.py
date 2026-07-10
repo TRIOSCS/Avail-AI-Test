@@ -12,7 +12,7 @@ Depends on: app.routers.quality_plans, conftest (client, db_session, test_user,
             test_buy_plan, test_company, test_customer_site).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ def _make_requisition(db: Session, owner_id: int) -> Requisition:
         status="active",
         customer_name="Acme Electronics",
         created_by=owner_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -43,7 +43,7 @@ def _make_quote(db: Session, requisition_id: int, site_id: int | None = None) ->
         customer_site_id=site_id,
         quote_number="QT-QP-001",
         status="sent",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()

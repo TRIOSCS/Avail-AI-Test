@@ -2,7 +2,7 @@
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -146,7 +146,7 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     old_value = row.value
     row.value = value
     row.updated_by = admin_email
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = datetime.now(UTC)
     db.commit()
     # Invalidate the in-memory cache so the next resolver read reflects this write
     # immediately rather than serving the stale value until the 5-min TTL lapses.

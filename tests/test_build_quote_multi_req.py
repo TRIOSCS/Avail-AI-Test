@@ -21,7 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -61,7 +61,7 @@ def _make_req(db: Session, user: User, site_id: int, name: str, mpn: str, price:
         status="open",
         customer_site_id=site_id,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -71,7 +71,7 @@ def _make_req(db: Session, user: User, site_id: int, name: str, mpn: str, price:
         manufacturer="TI",
         target_qty=100,
         condition="new",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.flush()
@@ -85,7 +85,7 @@ def _make_req(db: Session, user: User, site_id: int, name: str, mpn: str, price:
         unit_price=price,
         qty_available=500,
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()
@@ -107,7 +107,7 @@ def combo(db_session: Session, test_user: User, test_customer_site: CustomerSite
 @pytest.fixture()
 def other_site(db_session: Session) -> CustomerSite:
     """A customer site for a DIFFERENT company (to force a customer mismatch)."""
-    co = Company(name="Different Customer Inc", created_at=datetime.now(timezone.utc))
+    co = Company(name="Different Customer Inc", created_at=datetime.now(UTC))
     db_session.add(co)
     db_session.flush()
     site = CustomerSite(company_id=co.id, site_name="Different HQ", contact_email="buyer@different.com")
@@ -228,12 +228,10 @@ class TestCustomerConsistency:
     def test_missing_customer_site_blocks(self, client, db_session, test_user, test_customer_site):
         r1, i1, o1 = _make_req(db_session, test_user, test_customer_site.id, "MS-1", "LM317T", 0.40)
         # r2 has NO customer site.
-        r2 = Requisition(name="MS-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+        r2 = Requisition(name="MS-2", status="open", created_by=test_user.id, created_at=datetime.now(UTC))
         db_session.add(r2)
         db_session.flush()
-        i2 = Requirement(
-            requisition_id=r2.id, primary_mpn="NE555P", target_qty=10, created_at=datetime.now(timezone.utc)
-        )
+        i2 = Requirement(requisition_id=r2.id, primary_mpn="NE555P", target_qty=10, created_at=datetime.now(UTC))
         db_session.add(i2)
         db_session.flush()
         o2 = Offer(
@@ -246,7 +244,7 @@ class TestCustomerConsistency:
             unit_price=0.20,
             qty_available=10,
             entered_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(o2)
         db_session.commit()

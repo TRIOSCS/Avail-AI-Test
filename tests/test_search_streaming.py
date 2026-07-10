@@ -474,7 +474,7 @@ def test_search_filter_reads_from_cache(client, db_session):
     ]
 
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -506,7 +506,7 @@ def test_lead_detail_matches_vendor_with_suffix(client, db_session):
         },
     ]
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -523,7 +523,7 @@ def test_lead_detail_unknown_vendor_returns_not_found(client, db_session):
     """A vendor_key with no cached match still returns the 'Lead not found' message."""
     cached_results = [{"vendor_name": "Arrow Electronics", "mpn_matched": "LM317T"}]
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -538,7 +538,7 @@ def test_lead_detail_unknown_vendor_returns_not_found(client, db_session):
 def test_search_filter_expired_returns_message(client, db_session):
     """GET /v2/partials/search/filter with no cached data returns expiry message."""
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=None,
     ):
         resp = client.get(
@@ -584,7 +584,7 @@ def test_search_filter_confidence_filters(client, db_session):
     ]
 
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -746,7 +746,7 @@ def test_lead_detail_reads_from_cache(client, db_session):
     ]
 
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -760,7 +760,7 @@ def test_lead_detail_reads_from_cache(client, db_session):
 def test_lead_detail_cache_miss_returns_not_found(client, db_session):
     """Lead detail route returns friendly message when cache is empty."""
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=None,
     ):
         resp = client.get(
@@ -778,7 +778,7 @@ def test_lead_detail_cache_vendor_not_matched(client, db_session):
     ]
 
     with patch(
-        "app.routers.htmx_views._get_cached_search_results",
+        "app.routers.htmx.search_views._get_cached_search_results",
         return_value=cached_results,
     ):
         resp = client.get(
@@ -822,7 +822,7 @@ def test_full_search_flow_smoke(client, db_session):
             "qty_available": 1000,
         },
     ]
-    with patch("app.routers.htmx_views._get_cached_search_results", return_value=cached):
+    with patch("app.routers.htmx.search_views._get_cached_search_results", return_value=cached):
         resp = client.get(
             "/v2/partials/search/filter?search_id=test-123",
             headers={"HX-Request": "true"},

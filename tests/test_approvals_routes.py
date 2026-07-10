@@ -14,7 +14,7 @@ Depends on: conftest (db_session, test_user), app.routers.approvals,
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -38,7 +38,7 @@ def _make_approver(db: Session) -> User:
         role="admin",
         azure_id=f"azure-approver-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -52,7 +52,7 @@ def _make_outsider(db: Session) -> User:
         role="buyer",
         azure_id=f"azure-outsider-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -67,7 +67,7 @@ def _make_restricted(db: Session, role: str = "sales") -> User:
         role=role,
         azure_id=f"azure-restricted-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -80,7 +80,7 @@ def _make_buy_plan(db: Session, user: User) -> BuyPlan:
         customer_name="TestCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -91,7 +91,7 @@ def _make_buy_plan(db: Session, user: User) -> BuyPlan:
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()

@@ -20,7 +20,7 @@ Depends on: models.buy_plan.VerificationGroupMember, dependencies.require_admin,
             template_env.template_response, htmx_views.settings_toast
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -100,7 +100,7 @@ async def toggle_ops_member(
             )
 
     if member is None:
-        db.add(VerificationGroupMember(user_id=user_id, is_active=True, added_at=datetime.now(timezone.utc)))
+        db.add(VerificationGroupMember(user_id=user_id, is_active=True, added_at=datetime.now(UTC)))
         action = "added"
     else:
         member.is_active = not member.is_active

@@ -5,7 +5,7 @@ Depends on: conftest.py, nc_worker.ai_gate
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -33,7 +33,7 @@ def _make_queue_item(db_session, test_user, mpn, manufacturer=None, index=0):
         customer_name="Test",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -41,7 +41,7 @@ def _make_queue_item(db_session, test_user, mpn, manufacturer=None, index=0):
         requisition_id=req.id,
         primary_mpn=mpn,
         brand=manufacturer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(r)
     db_session.flush()

@@ -6,7 +6,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 
 import json
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from html.parser import HTMLParser
 
 import pytest
@@ -91,7 +91,7 @@ def _unav_record(
         normalized_mpn=key,
         reason=reason,
         note=note,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        created_at=datetime.now(UTC) - timedelta(days=age_days),
         qty_at_mark=qty_at_mark,
         requirement_id=requirement_id,
     )
@@ -2128,8 +2128,78 @@ class TestComposerVendor:
         wrapper_at = resp.text.index("rfqVendorModal(")
         assert wrapper_at < resp.text.index('id="rfq-added-vendors"')
         assert wrapper_at < resp.text.index("Find any vendor")
-        # Debounced autocomplete input per the established Alpine pattern
-        assert "@input.debounce.300ms" in resp.text
+        # P5.2: debounced autocomplete is now a server-rendered hx-get dropdown
+        # (GET /v2/partials/sightings/vendor-search) instead of a client-side fetch.
+        assert 'hx-get="/v2/partials/sightings/vendor-search"' in resp.text
+        assert "delay:300ms" in resp.text
+        # Regression: the input must actually wire the typed value to the `q` query
+        # param the endpoint reads (sightings_vendor_search's `q: str = ""`) — without
+        # hx-vals, GET vendor-search always fires with q='' and the dropdown stays
+        # empty no matter what's typed.
+        assert 'hx-vals="js:{q: event.target.value}"' in resp.text
+
+
+class TestVendorSearchDropdown:
+    """P5.2: GET /v2/partials/sightings/vendor-search — the server-rendered HTML sibling
+    of /api/autocomplete/names (vendors-only, that JSON endpoint is untouched) backing
+    the composer's "Find any vendor" dropdown."""
+
+    URL = "/v2/partials/sightings/vendor-search"
+
+    def _card(self, db_session, display, normalized=None):
+        card = VendorCard(
+            normalized_name=normalized or display.lower(),
+            display_name=display,
+            is_blacklisted=False,
+        )
+        db_session.add(card)
+        db_session.commit()
+        return card
+
+    def test_short_query_returns_no_results(self, client, db_session):
+        self._card(db_session, "Arrow Electronics")
+        resp = client.get(self.URL, params={"q": "a"})
+        assert resp.status_code == 200
+        assert "No vendors found" in resp.text
+        assert "Arrow Electronics" not in resp.text
+
+    def test_matching_query_renders_pickable_button(self, client, db_session):
+        self._card(db_session, "Arrow Electronics")
+        resp = client.get(self.URL, params={"q": "arrow"})
+        assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        # tojson-quoted, single-quote-attr @click — the CLAUDE.md landmine guard.
+        assert "@click='vsOpen = false; pickVendor(" in resp.text
+        assert '"Arrow Electronics"' in resp.text
+
+    def test_no_match_shows_empty_state(self, client, db_session):
+        resp = client.get(self.URL, params={"q": "zzznomatch"})
+        assert resp.status_code == 200
+        assert "No vendors found" in resp.text
+
+    def test_alternate_name_match_renders_pickable_button(self, client, db_session):
+        """Regression: alternate_names matches must surface here too (parity with
+        /api/autocomplete/names' second branch) — normalized_name alone misses a
+        vendor known only by a former/alias name."""
+        card = self._card(db_session, "Arrow Electronics Inc", normalized="arrow electronics inc")
+        card.alternate_names = ["Zenith Distribution"]
+        db_session.commit()
+        resp = client.get(self.URL, params={"q": "zenith"})
+        assert resp.status_code == 200
+        assert "Arrow Electronics Inc" in resp.text
+        assert "@click='vsOpen = false; pickVendor(" in resp.text
+
+    def test_primary_and_alternate_matches_are_deduped(self, client, db_session):
+        """A vendor matching BOTH normalized_name and alternate_names must not be
+        rendered twice."""
+        card = self._card(db_session, "Zenith Corp", normalized="zenith corp")
+        card.alternate_names = ["Zenith Distribution"]
+        db_session.commit()
+        resp = client.get(self.URL, params={"q": "zenith"})
+        assert resp.status_code == 200
+        # Count rendered buttons (text-content occurrence), not the JSON-quoted
+        # pickVendor(...) arg, which also contains the substring.
+        assert resp.text.count(">Zenith Corp<") == 1
 
 
 class TestSendInquiryFailureContainment:
@@ -2153,7 +2223,7 @@ class TestSendInquiryFailureContainment:
                     user_id=kwargs["user_id"],
                     contact_type="email",
                     vendor_name="Half Written",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
             inner_db.flush()
@@ -3176,7 +3246,7 @@ class TestUrgentStaleQuickFilters:
                 requirement_id=calm.id,
                 requisition_id=calm.requisition_id,
                 notes="touched",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -3332,7 +3402,7 @@ class TestOOODetection:
             email="test@good.com",
             source="email",
             is_ooo=True,
-            ooo_return_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ooo_return_date=datetime(2026, 4, 1, tzinfo=UTC),
         )
         db_session.add(contact)
         db_session.commit()

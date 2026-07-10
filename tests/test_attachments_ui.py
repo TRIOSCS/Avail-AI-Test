@@ -15,7 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -141,7 +141,7 @@ def _seed_requisition(db: Session, user_id: int) -> Requisition:
         name="REQ-UI",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.commit()
@@ -159,7 +159,7 @@ def _att_kwargs(fk_field: str, fk_id: int, user_id: int) -> dict:
         "content_type": "application/pdf",
         "size_bytes": 2048,
         "uploaded_by_id": user_id,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
 
 
@@ -189,7 +189,7 @@ class TestListEndpointContentNegotiation:
             requisition_id=req.id,
             primary_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(r)
         db_session.commit()
@@ -203,7 +203,7 @@ class TestListEndpointContentNegotiation:
             vendor_name="Acme",
             mpn="LM317T",
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -213,7 +213,7 @@ class TestListEndpointContentNegotiation:
         self._assert_html_vs_json(client, f"/api/offers/{offer.id}/attachments")
 
     def test_company(self, client, db_session, test_user):
-        co = Company(name="UICo", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc))
+        co = Company(name="UICo", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
@@ -222,11 +222,11 @@ class TestListEndpointContentNegotiation:
         self._assert_html_vs_json(client, f"/api/companies/{co.id}/attachments")
 
     def test_contact(self, client, db_session, test_user):
-        co = Company(name="UICo2", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc))
+        co = Company(name="UICo2", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(UTC))
         db_session.add(co)
         db_session.commit()
         db_session.refresh(co)
-        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True, created_at=datetime.now(timezone.utc))
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True, created_at=datetime.now(UTC))
         db_session.add(site)
         db_session.commit()
         db_session.refresh(site)
@@ -234,7 +234,7 @@ class TestListEndpointContentNegotiation:
             customer_site_id=site.id,
             full_name="Jane",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(contact)
         db_session.commit()
@@ -248,7 +248,7 @@ class TestListEndpointContentNegotiation:
             normalized_mpn="lm317t-ui",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.commit()

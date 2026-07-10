@@ -300,7 +300,7 @@ def test_index_serves_template(client):
 
 # ── Additional coverage tests ─────────────────────────────────────────
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -408,7 +408,7 @@ class TestAuthStatusExtended:
         """User with expired token shows 'expired' status."""
         test_user.refresh_token = "test-refresh"
         test_user.m365_connected = True
-        test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        test_user.token_expires_at = datetime.now(UTC) - timedelta(hours=1)
         db_session.commit()
         mock_get_user.return_value = test_user
 
@@ -440,7 +440,7 @@ class TestAuthStatusExtended:
     def test_status_with_timestamps(self, mock_get_user, client, test_user, db_session):
         """Auth status includes m365_last_healthy, last_inbox_scan,
         last_contacts_sync."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         test_user.refresh_token = "test-refresh"
         test_user.m365_connected = True
         test_user.token_expires_at = now + timedelta(hours=1)

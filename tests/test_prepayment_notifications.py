@@ -18,9 +18,10 @@ Depends on: app.services.prepayment_notifications, app.services.prepayment_servi
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -57,7 +58,7 @@ def _seed_approver(db: Session) -> User:
         is_active=True,
         can_approve_prepayments=True,
         prepayment_approval_limit=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -81,11 +82,11 @@ def _make_prepayment(
         customer_name="AcmeCo",
         status="active",
         created_by=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(timezone.utc))
+    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
     db.add(rq)
     db.flush()
     q = Quote(
@@ -94,7 +95,7 @@ def _make_prepayment(
         line_items=[],
         status="sent",
         created_by_id=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -105,7 +106,7 @@ def _make_prepayment(
         so_status="approved",
         sales_order_number="SO-999",
         submitted_by_id=requester.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -136,7 +137,7 @@ def _make_prepayment(
         buyer_id=requester.id,
         status="pending_verify",
         po_number="PO-2024",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -159,7 +160,7 @@ def _make_prepayment(
 def _set_config(db: Session, **kv: str) -> None:
     """Seed system_config rows directly (set_config_value 404s on unknown keys)."""
     for k, v in kv.items():
-        db.add(SystemConfig(key=k, value=v, updated_at=datetime.now(timezone.utc)))
+        db.add(SystemConfig(key=k, value=v, updated_at=datetime.now(UTC)))
     db.commit()
 
 
@@ -360,7 +361,7 @@ def _seed_person(db: Session, *, role: str, name: str) -> User:
         role=role,
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -378,7 +379,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         customer_name="AcmeCo",
         status="active",
         created_by=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -388,7 +389,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         line_items=[],
         status="sent",
         created_by_id=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -399,7 +400,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         so_status="approved",
         sales_order_number="SO-PAID",
         submitted_by_id=salesperson.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -416,7 +417,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         unit_cost=10.0,
         status="pending_verify",
         po_number="PO-2024",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -433,7 +434,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         paid_via="in_app",
         paid_by_label="MK",
         wire_reference="WIRE-1",
-        paid_at=datetime.now(timezone.utc),
+        paid_at=datetime.now(UTC),
     )
     db.add(pp)
     db.commit()
@@ -520,3 +521,104 @@ async def test_voided_card_says_do_not_wire(db_session: Session, approved_prepay
     db_session.commit()
     text = json.dumps(pn._card(approved_prepay, "voided", reason="rejected by approver"))
     assert "DO NOT WIRE" in text and "rejected by approver" in text
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# schedule_prepayment_notify — cross-thread fallback (the P2.7 deferred-sweep bug)
+#
+# run_deferred_startup_backfills (app/startup.py) runs the whole
+# _complete_reverted_active_plans -> check_completion -> _complete_plan ->
+# _cancel_open_prepayment_requests_for_plan chain inside asyncio.to_thread — a worker
+# thread with no running loop of its own. Before the fix, schedule_prepayment_notify's
+# get_running_loop() always missed there and coro.close()'d the DO-NOT-WIRE stand-down.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_cross_thread_dispatch_runs_notify_on_main_loop():
+    """Simulates the to_thread context: schedule_prepayment_notify called from a worker
+    thread with no running loop, but the main loop WAS registered — the notify
+    coroutine must actually execute, not be silently closed."""
+    main_loop = asyncio.get_running_loop()
+    pn.set_main_event_loop(main_loop)
+    executed = asyncio.Event()
+
+    async def _coro():
+        executed.set()
+
+    def _call_from_worker_thread():
+        pn.schedule_prepayment_notify(_coro())
+
+    try:
+        await asyncio.to_thread(_call_from_worker_thread)
+        await asyncio.wait_for(executed.wait(), timeout=2)
+        assert executed.is_set()
+    finally:
+        pn._main_event_loop = None
+
+
+@pytest.mark.asyncio
+async def test_cross_thread_dispatch_retains_task_via_hold_bg_task():
+    """The wrapped coroutine calls hold_bg_task(asyncio.current_task()) once it starts
+    running on the main loop — the strong ref must actually land in the shared _bg_tasks
+    set (not just get created and immediately GC-eligible)."""
+    from app.utils import async_helpers
+
+    main_loop = asyncio.get_running_loop()
+    pn.set_main_event_loop(main_loop)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _coro():
+        started.set()
+        await release.wait()
+
+    def _call_from_worker_thread():
+        pn.schedule_prepayment_notify(_coro())
+
+    try:
+        await asyncio.to_thread(_call_from_worker_thread)
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert any(not t.done() for t in async_helpers._bg_tasks)
+        release.set()
+    finally:
+        pn._main_event_loop = None
+
+
+def test_no_registered_main_loop_still_closes_coro_from_thread():
+    """Without a registered main loop (e.g. a boot that never reached the lifespan's
+    registration point), the no-running-loop caller still safely closes the coroutine —
+    preserves the pre-fix behavior instead of leaking it."""
+    pn._main_event_loop = None
+
+    async def _coro():
+        pass
+
+    coro = _coro()
+    with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+        pn.schedule_prepayment_notify(coro)
+
+    with pytest.raises(RuntimeError, match="cannot reuse already awaited coroutine"):
+        coro.send(None)
+
+
+def test_registered_but_stopped_main_loop_still_closes_coro():
+    """A registered loop that is no longer running (e.g. shutdown mid-flight) must not
+    be dispatched to — falls back to closing the coroutine safely."""
+    import asyncio as _asyncio
+
+    stopped_loop = _asyncio.new_event_loop()
+    pn.set_main_event_loop(stopped_loop)
+
+    async def _coro():
+        pass
+
+    coro = _coro()
+    try:
+        with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+            pn.schedule_prepayment_notify(coro)
+        with pytest.raises(RuntimeError, match="cannot reuse already awaited coroutine"):
+            coro.send(None)
+    finally:
+        pn._main_event_loop = None
+        stopped_loop.close()

@@ -1,0 +1,65 @@
+# Dockerfile.tooling — AvailAI ad-hoc tooling image (gh CLI + headless Chromium)
+#
+# What: standalone image bundling the GitHub CLI and a patchright-managed
+# Chromium, extracted OUT of the internet-facing prod image (Dockerfile) per
+# docs/CODE_AUDIT_AND_HARDENING_PLAN.md P1.4.
+#
+# Why this is safe to split out: grepping app/ found no runtime consumer of
+# either tool inside the `app` / `enrichment-worker` containers.
+#   - `gh`: the only `gh`-shelling code in the repo is dev/CI tooling
+#     (scripts/branch-cleanup.sh, scripts/worktree-guard.sh) — run by
+#     developers or CI runners directly, never invoked by app runtime code.
+#   - Chromium: the only patchright/Chromium consumers
+#     (app/services/{ics,nc,tbf}_worker/session_manager.py) run as separate
+#     host systemd units from /root/availai/.venv against system Google Chrome
+#     (scripts/setup_nc_worker.sh, scripts/setup_tbf_worker.sh) — NOT inside
+#     either docker-compose container.
+# Candidate future consumers of this image: ad-hoc `gh issue`/`gh pr` scripting,
+# or a self-heal/site-testing pass à la scripts/frprp.py. None of those run
+# automatically today — this image is manual/CI-invoked only, never part of
+# docker-compose.yml.
+#
+# Build: docker build -f Dockerfile.tooling -t availai-tooling .
+# Run:   docker run --rm -it -v "$(pwd)":/app -w /app availai-tooling bash
+#
+# Called by: nothing automatically today (manual / future CI job only)
+# Depends on: same Python base + requirements.txt as the main Dockerfile, so
+# the patchright version (and therefore the Chromium build it fetches) always
+# matches the app's pinned lockfile.
+
+FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
+
+WORKDIR /app
+
+# System deps: gcc/python3-dev to build any C-extension wheels in
+# requirements.txt (purged after pip install, matching the main Dockerfile
+# pattern); the lib* set is Chromium's runtime dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc python3-dev curl ca-certificates git \
+    libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 fonts-unifont \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin gh CLI to an EXACT release via its GitHub Releases .deb asset — not the
+# floating apt repo package the main Dockerfile used to install unpinned.
+# Bump by changing GH_CLI_VERSION only (verify the new version's release notes
+# before bumping).
+ARG GH_CLI_VERSION=2.63.0
+RUN curl -fsSL -o /tmp/gh.deb \
+      "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_amd64.deb" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/gh.deb \
+    && rm -f /tmp/gh.deb && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && { apt-get purge -y gcc python3-dev && apt-get autoremove -y || true; }
+
+# Chromium for patchright-driven ad-hoc scripts (see header comment — no
+# automated consumer exists today; this is intentionally the only place the
+# binary is installed).
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN python -m patchright install chromium
+
+CMD ["bash"]

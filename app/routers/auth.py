@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -109,7 +109,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
     # Calculate token expiry
     expires_in = tokens.get("expires_in", 3600)
-    token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
     try:
         me = await http.get(
@@ -149,7 +149,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
         # trader stays a trader).
         user.azure_id = profile.get("id")
 
-    user.last_login_at = datetime.now(timezone.utc)
+    user.last_login_at = datetime.now(UTC)
 
     # Bootstrap admin: auto-promote users in admin_emails env var
     if user.email.lower() in settings.admin_emails and user.role != UserRole.ADMIN:
@@ -341,7 +341,7 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
         status = "connected"
         if not u.m365_connected:
             status = "disconnected"
-        elif u.token_expires_at and u.token_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        elif u.token_expires_at and u.token_expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
             status = "expired"
         users_status.append(
             {

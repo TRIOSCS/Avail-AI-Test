@@ -15,7 +15,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -188,14 +188,14 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
             status="open",
             customer_site_id=test_customer_site.id,
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         r2 = Requisition(
             name="MR-2",
             status="open",
             customer_site_id=test_customer_site.id,
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([r1, r2])
         db_session.commit()

@@ -15,7 +15,7 @@ Depends on: app/services/tagging_ai_batch.py, tests/conftest.py
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,7 +32,7 @@ def _make_card(db: Session, mpn: str, manufacturer: str | None = None) -> Materi
         display_mpn=mpn,
         manufacturer=manufacturer,
         search_count=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()

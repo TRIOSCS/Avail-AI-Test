@@ -25,10 +25,10 @@ async def _render_pdf(generator: Callable[[int, Session], bytes], obj_id: int, d
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, generator, obj_id, db)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error("PDF generation failed for {} {}: {}", log_label, obj_id, e)
-        raise HTTPException(500, "PDF generation failed")
+        raise HTTPException(500, "PDF generation failed") from e
 
 
 @router.get("/api/requisitions/{requisition_id}/pdf")

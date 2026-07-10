@@ -14,7 +14,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -52,7 +52,7 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "LM317T", status
         normalized_mpn=mpn.lower(),
         target_qty=100,
         sourcing_status=status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.commit()
@@ -182,8 +182,8 @@ async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: U
         normalized_mpn="fresh_mpn",
         target_qty=100,
         sourcing_status="open",
-        last_searched_at=datetime.now(timezone.utc),  # just searched
-        created_at=datetime.now(timezone.utc),
+        last_searched_at=datetime.now(UTC),  # just searched
+        created_at=datetime.now(UTC),
     )
     db_session.add(req_item)
     db_session.commit()
@@ -491,7 +491,7 @@ async def test_mark_unavailable_success(db_session: Session, test_user: User, te
         source_type="manual",
         confidence=80,
         score=50,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(sighting)
     db_session.commit()

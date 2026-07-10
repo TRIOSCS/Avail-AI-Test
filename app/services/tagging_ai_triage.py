@@ -8,6 +8,7 @@ Called by: app.routers.tagging_admin
 Depends on: app.http_client, app.services.credential_service
 """
 
+import asyncio
 import json
 import os
 import re
@@ -224,19 +225,43 @@ async def apply_triage_results(batch_id: str) -> dict:
     if not results_url:
         return {"error": "Batch ended but no results_url"}
 
-    # Stream results to temp file
-    tmp_fd = tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False)
-    tmp_path = tmp_fd.name
-    tmp_fd.close()
+    # Stream results to temp file. Each chunk write is dispatched via asyncio.to_thread
+    # (P2.6) — triage results can be large, so writing synchronously on the event loop
+    # thread blocks every concurrent request.
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False) as tmp_fd:
+        tmp_path = tmp_fd.name
     try:
-        async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
-            with open(tmp_path, "wb") as f:
+        f = await asyncio.to_thread(open, tmp_path, "wb")
+        try:
+            async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
                 async for chunk in stream.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
+                    await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         return {"error": f"Download failed: {e}"}
 
-    db = SessionLocal()
+    # Pure sync DB work (SQLAlchemy Session is not async-safe) — runs entirely on one
+    # worker thread rather than blocking the event loop for the whole file (P2.6).
+    result = await asyncio.to_thread(_process_triage_results_file, tmp_path, SessionLocal)
+
+    logger.info(
+        f"Triage batch {batch_id} applied: {result['total_lines']} lines, "
+        f"{result['flagged']} flagged internal, {result['real_mpns']} real MPNs, {result['errors']} errors"
+    )
+    return result
+
+
+def _process_triage_results_file(tmp_path: str, session_factory) -> dict:
+    """Parse a downloaded triage-results JSONL file and flag internal parts.
+
+    Always dispatched via ``asyncio.to_thread`` from ``apply_triage_results`` (P2.6) —
+    the DB work here is synchronous SQLAlchemy, so it runs entirely on one worker
+    thread rather than blocking the event loop for the whole file.
+
+    Returns: {total_lines, flagged, real_mpns, errors}
+    """
+    db = session_factory()
     total_lines = 0
     flagged = 0
     real_mpns = 0
@@ -306,8 +331,4 @@ async def apply_triage_results(batch_id: str) -> dict:
         except OSError:
             pass
 
-    logger.info(
-        f"Triage batch {batch_id} applied: {total_lines} lines, "
-        f"{flagged} flagged internal, {real_mpns} real MPNs, {errors} errors"
-    )
     return {"total_lines": total_lines, "flagged": flagged, "real_mpns": real_mpns, "errors": errors}

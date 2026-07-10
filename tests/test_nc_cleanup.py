@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy
@@ -42,7 +42,7 @@ def test_worker_status_update(db_session):
 
     ws.is_running = True
     ws.searches_today = 42
-    ws.last_heartbeat = datetime.now(timezone.utc)
+    ws.last_heartbeat = datetime.now(UTC)
     db_session.commit()
     db_session.refresh(ws)
 

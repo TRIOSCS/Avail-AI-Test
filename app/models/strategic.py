@@ -8,7 +8,7 @@ Called by: services/strategic_vendor_service.py, routers/strategic.py
 Depends on: models/base.py, models/auth.py, models/vendors.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Column,
@@ -31,13 +31,13 @@ class StrategicVendor(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     claimed_at = Column(
-        UTCDateTime(timezone=True),
+        UTCDateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
-    last_offer_at = Column(UTCDateTime(timezone=True), nullable=True)
-    expires_at = Column(UTCDateTime(timezone=True), nullable=False)
-    released_at = Column(UTCDateTime(timezone=True), nullable=True)
+    last_offer_at = Column(UTCDateTime, nullable=True)
+    expires_at = Column(UTCDateTime, nullable=False)
+    released_at = Column(UTCDateTime, nullable=True)
     release_reason = Column(String(20), nullable=True)
 
     # Relationships

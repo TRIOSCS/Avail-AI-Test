@@ -22,7 +22,7 @@ Depends on: app.services.bid_back_service, app.models.excess, app.models.crm, te
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -75,7 +75,7 @@ def priced_list(db_session: Session, owner: User, seller_company: Company) -> Ex
         owner_id=owner.id,
         status=ExcessListStatus.COLLECTING,
         total_line_items=2,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(el)
     db_session.flush()
@@ -150,7 +150,7 @@ def test_reassemble_after_sent_resets_to_fresh_draft(db_session, owner, priced_l
     cleared)."""
     bid = _assemble(db_session, priced_list, owner)
     bid.status = CustomerBidStatus.SENT
-    bid.sent_at = datetime.now(timezone.utc)
+    bid.sent_at = datetime.now(UTC)
     db_session.commit()
 
     again = _assemble(db_session, priced_list, owner)
@@ -298,7 +298,7 @@ async def test_send_bid_back_non_owner_403(db_session, owner, other_user, seller
 def _sent_bid(db: Session, el: ExcessList, owner: User) -> CustomerBid:
     bid = _assemble(db, el, owner)
     bid.status = CustomerBidStatus.SENT
-    bid.sent_at = datetime.now(timezone.utc)
+    bid.sent_at = datetime.now(UTC)
     db.commit()
     db.refresh(bid)
     return bid

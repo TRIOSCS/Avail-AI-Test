@@ -11,7 +11,7 @@ Called by: pytest
 Depends on: app/services/vendor_score.py, app/services/po_cancellation_service.py, conftest
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -83,7 +83,7 @@ def _make_card(db, name, *, total_pos=0):
         normalized_name=name.lower(),
         display_name=name,
         total_pos=total_pos,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -91,13 +91,11 @@ def _make_card(db, name, *, total_pos=0):
 
 
 def _make_offers(db, card, name, count):
-    user = User(
-        email=f"u-{name}@t.com", name="U", role="buyer", azure_id=f"az-{name}", created_at=datetime.now(timezone.utc)
-    )
+    user = User(email=f"u-{name}@t.com", name="U", role="buyer", azure_id=f"az-{name}", created_at=datetime.now(UTC))
     db.add(user)
     db.flush()
     req = Requisition(
-        name=f"REQ-{name}", customer_name="C", status="open", created_by=user.id, created_at=datetime.now(timezone.utc)
+        name=f"REQ-{name}", customer_name="C", status="open", created_by=user.id, created_at=datetime.now(UTC)
     )
     db.add(req)
     db.flush()
@@ -113,7 +111,7 @@ def _make_offers(db, card, name, count):
                 unit_price=1.00,
                 entered_by_id=user.id,
                 status="active",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
     db.flush()
@@ -126,7 +124,7 @@ def _add_cancel(db, card, days):
             vendor_name_normalized=card.normalized_name,
             normalized_mpn="LM317T",
             po_number="PO",
-            cancelled_at=datetime.now(timezone.utc),
+            cancelled_at=datetime.now(UTC),
             days_to_cancel=days,
             reason_code=POCancellationReason.OTHER.value,
         )

@@ -6,7 +6,7 @@ Called by: pytest
 Depends on: app.models.tags, tests.conftest (db_session, test_material_card)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +17,7 @@ from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
 
 
 def _make_tag(db, name="Texas Instruments", tag_type="brand"):
-    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(timezone.utc))
+    t = Tag(name=name, tag_type=tag_type, created_at=datetime.now(UTC))
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -64,7 +64,7 @@ def test_material_tag_creation(db_session, test_material_card):
         tag_id=tag.id,
         confidence=0.95,
         source="existing_data",
-        classified_at=datetime.now(timezone.utc),
+        classified_at=datetime.now(UTC),
     )
     db_session.add(mt)
     db_session.commit()
@@ -110,8 +110,8 @@ def test_entity_tag_creation(db_session):
         interaction_count=5.0,
         total_entity_interactions=20.0,
         is_visible=True,
-        first_seen_at=datetime.now(timezone.utc),
-        last_seen_at=datetime.now(timezone.utc),
+        first_seen_at=datetime.now(UTC),
+        last_seen_at=datetime.now(UTC),
     )
     db_session.add(et)
     db_session.commit()

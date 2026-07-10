@@ -9,7 +9,7 @@ Depends on: conftest fixtures, app.services.alerts (record_seen),
             app.services.alerts.sources.offers.OfferConfirmedSource.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -36,7 +36,7 @@ def _make_offer(
 ) -> Offer:
     """Create a minimal valid offer tied to a requirement (and its requisition)."""
     if approved_at is None:
-        approved_at = datetime.now(timezone.utc)
+        approved_at = datetime.now(UTC)
     offer = Offer(
         requisition_id=requirement.requisition_id,
         requirement_id=requirement.id,
@@ -47,7 +47,7 @@ def _make_offer(
         status=status,
         qualification_status=qualification_status,
         approved_at=approved_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()
@@ -129,7 +129,7 @@ def test_offer_older_than_recency_floor_not_counted(
 ) -> None:
     """4. approved_at 60 days ago is below the (default 30-day) floor → not counted."""
     requirement = _requirement_of(db_session, test_requisition)
-    old = datetime.now(timezone.utc) - timedelta(days=60)
+    old = datetime.now(UTC) - timedelta(days=60)
     _make_offer(db_session, requirement, approved_at=old)
 
     assert source.count_for_user(db_session, test_user) == 0
@@ -182,7 +182,7 @@ def test_ownership_unassigned_created_by_other_user(
         name="REQ-OTHER-001",
         status="open",
         created_by=sales_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -191,7 +191,7 @@ def test_ownership_unassigned_created_by_other_user(
         primary_mpn="LM317T",
         target_qty=10,
         assigned_buyer_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(requirement)
     db_session.commit()

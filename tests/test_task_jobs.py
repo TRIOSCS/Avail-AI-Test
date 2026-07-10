@@ -6,7 +6,7 @@ and that the scheduler job only fires for approaching deadlines.
 Depends on: conftest.py fixtures, app/jobs/task_jobs.py, app/services/task_service.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -164,17 +164,17 @@ class TestSchedulerSelectivity:
 
     def test_deadline_within_window_would_fire(self):
         """Deadlines within 2 days should be in scope."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        deadline_dt = datetime.fromisoformat(tomorrow).replace(tzinfo=timezone.utc)
+        deadline_dt = datetime.fromisoformat(tomorrow).replace(tzinfo=UTC)
         horizon = now + timedelta(days=2)
         assert deadline_dt <= horizon
 
     def test_deadline_far_future_would_not_fire(self):
         """Deadlines 10 days away should NOT be in scope."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         far = (now + timedelta(days=10)).strftime("%Y-%m-%d")
-        deadline_dt = datetime.fromisoformat(far).replace(tzinfo=timezone.utc)
+        deadline_dt = datetime.fromisoformat(far).replace(tzinfo=UTC)
         horizon = now + timedelta(days=2)
         assert deadline_dt > horizon
 

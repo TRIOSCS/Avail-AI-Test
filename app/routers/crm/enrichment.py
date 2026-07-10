@@ -100,7 +100,7 @@ async def _run_company_enrichment(company_id: int, domain: str, name: str) -> No
             except Exception as e:
                 logger.opt(exception=e).warning("Account enrichment contact discovery failed for {}", company_id)
                 errored = ["all"]
-    except Exception:  # noqa: BLE001 — a background task must not crash the worker
+    except Exception:
         logger.exception("Account enrichment task crashed for {}", company_id)
         blocked = True
     finally:

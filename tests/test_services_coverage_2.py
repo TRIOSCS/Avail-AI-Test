@@ -21,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,7 +77,7 @@ class TestBuyerLeaderboard:
             customer_name="Test Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -90,7 +90,7 @@ class TestBuyerLeaderboard:
             unit_price=1.0,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime(2026, 3, 15, tzinfo=timezone.utc),
+            created_at=datetime(2026, 3, 15, tzinfo=UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -141,7 +141,7 @@ class TestBuyerLeaderboard:
             customer_name="Test Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -155,7 +155,7 @@ class TestBuyerLeaderboard:
             unit_price=1.0,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime(2026, 2, 25, tzinfo=timezone.utc),
+            created_at=datetime(2026, 2, 25, tzinfo=UTC),
         )
         db_session.add(grace_offer)
         db_session.commit()
@@ -312,7 +312,7 @@ class TestAutoAttribution:
             activity_type="email_received",
             channel="email",
             contact_email="match@example.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -349,7 +349,7 @@ class TestAutoAttribution:
             activity_type="email_received",
             channel="email",
             contact_email="old@example.com",
-            created_at=datetime.now(timezone.utc) - timedelta(days=45),
+            created_at=datetime.now(UTC) - timedelta(days=45),
         )
         db_session.add(old_activity)
         db_session.commit()
@@ -394,7 +394,7 @@ class TestAutoAttribution:
             contact_email="test@vendor.com",
             contact_name="Test",
             subject="Quote",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -529,7 +529,7 @@ class TestAiGate:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -537,7 +537,7 @@ class TestAiGate:
             requisition_id=req.id,
             primary_mpn="STM32F407VG",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rqmt)
         db_session.flush()
@@ -549,7 +549,7 @@ class TestAiGate:
             normalized_mpn="stm32f407vg",
             manufacturer="STMicro",
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -580,7 +580,7 @@ class TestAiGate:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -588,7 +588,7 @@ class TestAiGate:
             requisition_id=req.id,
             primary_mpn="FAIL123",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rqmt)
         db_session.flush()
@@ -599,7 +599,7 @@ class TestAiGate:
             mpn="FAIL123",
             normalized_mpn="fail123",
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -644,12 +644,12 @@ class TestStrategicVendorService:
 
         naive = datetime(2026, 1, 1)
         result = _ensure_utc(naive)
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_ensure_utc_aware(self):
         from app.services.strategic_vendor_service import _ensure_utc
 
-        aware = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        aware = datetime(2026, 1, 1, tzinfo=UTC)
         result = _ensure_utc(aware)
         assert result is aware
 
@@ -686,7 +686,7 @@ class TestStrategicVendorService:
                 normalized_name=f"vendor_{i}",
                 display_name=f"Vendor {i}",
                 sighting_count=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(vc)
             db_session.flush()
@@ -697,7 +697,7 @@ class TestStrategicVendorService:
             normalized_name="vendor_extra",
             display_name="Vendor Extra",
             sighting_count=1,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(extra)
         db_session.flush()
@@ -741,12 +741,8 @@ class TestStrategicVendorService:
     def test_replace_vendor_success(self, db_session: Session, test_user: User):
         from app.services.strategic_vendor_service import claim_vendor, replace_vendor
 
-        vc1 = VendorCard(
-            normalized_name="rep_a", display_name="Rep A", sighting_count=1, created_at=datetime.now(timezone.utc)
-        )
-        vc2 = VendorCard(
-            normalized_name="rep_b", display_name="Rep B", sighting_count=1, created_at=datetime.now(timezone.utc)
-        )
+        vc1 = VendorCard(normalized_name="rep_a", display_name="Rep A", sighting_count=1, created_at=datetime.now(UTC))
+        vc2 = VendorCard(normalized_name="rep_b", display_name="Rep B", sighting_count=1, created_at=datetime.now(UTC))
         db_session.add_all([vc1, vc2])
         db_session.flush()
 
@@ -782,8 +778,8 @@ class TestStrategicVendorService:
         sv = StrategicVendor(
             user_id=test_user.id,
             vendor_card_id=test_vendor_card.id,
-            claimed_at=datetime.now(timezone.utc) - timedelta(days=50),
-            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            claimed_at=datetime.now(UTC) - timedelta(days=50),
+            expires_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add(sv)
         db_session.commit()
@@ -806,8 +802,8 @@ class TestStrategicVendorService:
         sv = StrategicVendor(
             user_id=test_user.id,
             vendor_card_id=test_vendor_card.id,
-            claimed_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=3),
+            claimed_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=3),
         )
         db_session.add(sv)
         db_session.commit()
@@ -975,7 +971,7 @@ class TestResponseAnalytics:
             activity_type="rfq_sent",
             channel="email",
             vendor_card_id=test_vendor_card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1028,7 +1024,7 @@ class TestResponseAnalytics:
         from app.services.response_analytics import batch_update_email_health
 
         # Set last_contact_at so vendor is selected
-        test_vendor_card.last_contact_at = datetime.now(timezone.utc)
+        test_vendor_card.last_contact_at = datetime.now(UTC)
         db_session.commit()
 
         result = batch_update_email_health(db_session)
@@ -1249,7 +1245,7 @@ class TestAutoAttributionExtra:
             activity_type="call_received",
             channel="phone",
             contact_phone="+1-555-1234",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1287,7 +1283,7 @@ class TestAutoAttributionExtra:
             contact_email="unknown@example.com",
             contact_name="Unknown",
             subject="Quote Request",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1327,7 +1323,7 @@ class TestAutoAttributionExtra:
             activity_type="email_received",
             channel="email",
             contact_email="maybe@example.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1367,7 +1363,7 @@ class TestAutoAttributionExtra:
             activity_type="email_received",
             channel="email",
             contact_email="a@b.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1386,7 +1382,7 @@ class TestAutoAttributionExtra:
             activity_type="email_received",
             channel="email",
             contact_email="a@b.com",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -1461,13 +1457,13 @@ class TestAutoDedupExtra:
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
             sighting_count=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         vc2 = VendorCard(
             normalized_name="arrow electronic",
             display_name="Arrow Electronic",
             sighting_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([vc1, vc2])
         db_session.commit()
@@ -1495,13 +1491,13 @@ class TestAutoDedupExtra:
             name="Acme Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         co2 = Company(
             name="Acme Corporation",
             is_active=True,
             account_owner_id=sales_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([co1, co2])
         db_session.commit()
@@ -1527,13 +1523,13 @@ class TestAutoDedupExtra:
             name="Acme Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         co2 = Company(
             name="Acme Corporation",
             is_active=True,
             account_owner_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([co1, co2])
         db_session.commit()
@@ -1560,12 +1556,8 @@ class TestAutoDedupExtra:
         """Companies with score 92-97 go through AI confirmation."""
         from app.services.auto_dedup_service import _dedup_companies
 
-        co1 = Company(
-            name="X Corp", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc)
-        )
-        co2 = Company(
-            name="X Corporation", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc)
-        )
+        co1 = Company(name="X Corp", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(UTC))
+        co2 = Company(name="X Corporation", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(UTC))
         db_session.add_all([co1, co2])
         db_session.commit()
 
@@ -1595,13 +1587,13 @@ class TestAutoDedupExtra:
             normalized_name="texas instruments",
             display_name="Texas Instruments",
             sighting_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         vc2 = VendorCard(
             normalized_name="texas instrument",
             display_name="Texas Instrument",
             sighting_count=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([vc1, vc2])
         db_session.commit()
@@ -1624,13 +1616,13 @@ class TestAutoDedupExtra:
             normalized_name="nxp semiconductors",
             display_name="NXP Semiconductors",
             sighting_count=50,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         vc2 = VendorCard(
             normalized_name="nxp semiconductor",
             display_name="NXP Semiconductor",
             sighting_count=5,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([vc1, vc2])
         db_session.commit()
@@ -1668,7 +1660,7 @@ class TestAiGateExtra:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -1676,7 +1668,7 @@ class TestAiGateExtra:
             requisition_id=req.id,
             primary_mpn="STM32F407VG",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rqmt)
         db_session.flush()
@@ -1688,7 +1680,7 @@ class TestAiGateExtra:
             normalized_mpn="stm32f407vg",
             manufacturer="STMicro",
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -1731,7 +1723,7 @@ class TestAiGateExtra:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -1739,7 +1731,7 @@ class TestAiGateExtra:
             requisition_id=req.id,
             primary_mpn="RC0402JR",
             target_qty=1000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rqmt)
         db_session.flush()
@@ -1750,7 +1742,7 @@ class TestAiGateExtra:
             mpn="RC0402JR",
             normalized_mpn="rc0402jr",
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -1786,7 +1778,7 @@ class TestAiGateExtra:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -1794,7 +1786,7 @@ class TestAiGateExtra:
             requisition_id=req.id,
             primary_mpn="MISSING123",
             target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(rqmt)
         db_session.flush()
@@ -1805,7 +1797,7 @@ class TestAiGateExtra:
             mpn="MISSING123",
             normalized_mpn="missing123",
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         db_session.commit()
@@ -1869,12 +1861,12 @@ class TestResponseAnalyticsExtra:
             activity_type="rfq_sent",
             channel="email",
             vendor_card_id=test_vendor_card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
 
         # Add vendor responses
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vr1 = VendorResponse(
             vendor_name="Arrow",
             vendor_email="sales@arrow.com",
@@ -1905,7 +1897,7 @@ class TestResponseAnalyticsExtra:
         test_vendor_card.domain = "test.com"
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for hours in [2, 4, 6, 8]:
             vr = VendorResponse(
                 vendor_name="Test",
@@ -1961,7 +1953,7 @@ class TestResponseAnalyticsExtra:
             classification="offer",
             confidence=0.9,
             thread_summary={"thread_status": "closed"},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         ei2 = EmailIntelligence(
             message_id="msg2",
@@ -1971,7 +1963,7 @@ class TestResponseAnalyticsExtra:
             classification="offer",
             confidence=0.8,
             thread_summary={"thread_status": "open"},
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([ei1, ei2])
         db_session.commit()
@@ -1987,7 +1979,7 @@ class TestResponseAnalyticsExtra:
         test_vendor_card.domain = "fast.com"
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vr = VendorResponse(
             vendor_name="Fast",
             vendor_email="x@fast.com",
@@ -2007,7 +1999,7 @@ class TestResponseAnalyticsExtra:
         test_vendor_card.domain = "slow.com"
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vr = VendorResponse(
             vendor_name="Slow",
             vendor_email="x@slow.com",
@@ -2027,7 +2019,7 @@ class TestResponseAnalyticsExtra:
         test_vendor_card.domain = "mid.com"
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vr = VendorResponse(
             vendor_name="Mid",
             vendor_email="x@mid.com",
@@ -2060,10 +2052,10 @@ class TestResponseAnalyticsExtra:
             classification="offer",
             confidence=0.95,
             subject="Price Quote",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             needs_review=True,
             auto_applied=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(ei)
         db_session.commit()
@@ -2079,7 +2071,7 @@ class TestResponseAnalyticsExtra:
         """batch_update handles individual vendor errors gracefully."""
         from app.services.response_analytics import batch_update_email_health
 
-        test_vendor_card.last_contact_at = datetime.now(timezone.utc)
+        test_vendor_card.last_contact_at = datetime.now(UTC)
         db_session.commit()
 
         with patch("app.services.response_analytics.update_vendor_email_health", side_effect=Exception("boom")):
@@ -2094,7 +2086,7 @@ class TestResponseAnalyticsExtra:
         test_vendor_card.domain = None
         db_session.commit()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         vr = VendorResponse(
             vendor_name="Arrow Electronics",
             vendor_email=None,

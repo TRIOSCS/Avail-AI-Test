@@ -29,7 +29,7 @@ _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
-def _noop_alter_column(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_alter_column(*args, **kwargs):
     """No-op for alter_column on SQLite (no ALTER COLUMN nullability/server_default)."""
 
 

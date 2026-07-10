@@ -3,7 +3,7 @@
 Tests: get_open_pool_sites, claim_site, run_site_ownership_sweep, get_my_sites, get_sites_at_risk.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ def company(db_session: Session) -> Company:
     co = Company(
         name="Test Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(co)
     db_session.commit()
@@ -31,7 +31,7 @@ def sales(db_session: Session) -> User:
         name="Sales Rep",
         role="sales",
         azure_id="sales-az",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -46,7 +46,7 @@ def buyer(db_session: Session) -> User:
         name="Buyer Rep",
         role="buyer",
         azure_id="buyer-az",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -78,7 +78,7 @@ def owned_site(db_session: Session, company: Company, sales: User) -> CustomerSi
         site_name="Owned Site",
         is_active=True,
         owner_id=sales.id,
-        last_activity_at=datetime.now(timezone.utc) - timedelta(days=10),
+        last_activity_at=datetime.now(UTC) - timedelta(days=10),
     )
     db_session.add(site)
     db_session.commit()
@@ -105,7 +105,7 @@ class TestSiteOwnershipSweep:
             site_name="Stale Site",
             is_active=True,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=31),
+            last_activity_at=datetime.now(UTC) - timedelta(days=31),
         )
         db_session.add(stale)
         db_session.commit()
@@ -126,7 +126,7 @@ class TestSiteOwnershipSweep:
             site_name="Warning Site",
             is_active=True,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=24),
+            last_activity_at=datetime.now(UTC) - timedelta(days=24),
         )
         db_session.add(warn_site)
         db_session.commit()
@@ -165,7 +165,7 @@ class TestSiteOwnershipSweep:
             site_name="Old No Activity",
             is_active=True,
             owner_id=sales.id,
-            created_at=datetime.now(timezone.utc) - timedelta(days=35),
+            created_at=datetime.now(UTC) - timedelta(days=35),
         )
         db_session.add(old_site)
         db_session.commit()

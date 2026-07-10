@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ def _make_requisition(db, user_id, name="REQ-CELL-001"):
         customer_name="Acme Corp",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -40,7 +40,7 @@ def _make_requirement(db, requisition_id, **kwargs):
         "target_qty": 5000,
         "target_price": Decimal("1.2500"),
         "sourcing_status": "open",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(kwargs)
     item = Requirement(**defaults)

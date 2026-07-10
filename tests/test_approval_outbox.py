@@ -14,7 +14,7 @@ Depends on: conftest (db_session), app.jobs.approval_outbox,
             app.models.approvals, app.models.notification, app.models.auth
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -355,7 +355,7 @@ async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_se
     # Faithfully simulate get_valid_token's token-refresh write: mutate the user and
     # commit the SESSION mid-row, exactly as token_manager does, then return a token.
     async def _refresh_then_token(user, db):
-        user.m365_last_healthy = datetime.now(timezone.utc)
+        user.m365_last_healthy = datetime.now(UTC)
         db.commit()  # this is what closed the savepoint in production
         return "tok"
 

@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def _make_requisition(db: Session, user_id: int) -> Requisition:
         name="AI Test Req",
         status="open",
         created_by=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -41,7 +41,7 @@ def _make_requirement(db: Session, req_id: int, mpn: str = "LM317T") -> Requirem
         requisition_id=req_id,
         primary_mpn=mpn,
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req_item)
     db.flush()

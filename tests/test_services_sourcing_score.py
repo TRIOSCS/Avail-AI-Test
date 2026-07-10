@@ -19,7 +19,7 @@ Depends on: app/services/sourcing_score.py, conftest.py
 """
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -658,7 +658,7 @@ def _make_requisition(db_session: Session, user: User, name: str) -> Requisition
         customer_name="Test",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -671,7 +671,7 @@ def _make_requirement(db_session: Session, req: Requisition, mpn, qty: int = 100
         requisition_id=req.id,
         primary_mpn=mpn,
         target_qty=qty,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.flush()
@@ -724,7 +724,7 @@ class TestComputeRequisitionScores:
                 mpn_matched="DEF456",
                 qty_available=100,
                 source_type="api",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(sighting)
         db_session.commit()
@@ -750,7 +750,7 @@ class TestComputeRequisitionScores:
                     mpn_matched="FULL-MPN",
                     qty_available=100,
                     source_type="api",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -766,7 +766,7 @@ class TestComputeRequisitionScores:
                     unit_price=1.50,
                     entered_by_id=test_user.id,
                     status="active",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -779,7 +779,7 @@ class TestComputeRequisitionScores:
                     contact_type="rfq",
                     vendor_name=f"Vendor {i}",
                     status="sent",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -791,7 +791,7 @@ class TestComputeRequisitionScores:
                     vendor_name=f"Vendor {i}",
                     vendor_email=f"vendor{i}@test.com",
                     status="new",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -804,7 +804,7 @@ class TestComputeRequisitionScores:
                     channel="phone",
                     requisition_id=req.id,
                     subject=f"Call {i}",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -817,7 +817,7 @@ class TestComputeRequisitionScores:
                     channel="email",
                     requisition_id=req.id,
                     subject=f"Email {i}",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -843,7 +843,7 @@ class TestComputeRequisitionScores:
                     mpn_matched="MPN-A",
                     qty_available=100,
                     source_type="api",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -919,7 +919,7 @@ class TestComputeRequisitionScores:
                 contact_type="rfq",
                 vendor_name="Vendor A",
                 status="sent",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         # One draft RFQ (should NOT be counted)
@@ -930,7 +930,7 @@ class TestComputeRequisitionScores:
                 contact_type="rfq",
                 vendor_name="Vendor B",
                 status="draft",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -954,7 +954,7 @@ class TestComputeRequisitionScores:
                     channel="phone",
                     requisition_id=req.id,
                     subject=f"Call {i}",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -967,7 +967,7 @@ class TestComputeRequisitionScores:
                     channel="email",
                     requisition_id=req.id,
                     subject=f"Email {i}",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 
@@ -979,7 +979,7 @@ class TestComputeRequisitionScores:
                 channel="system",
                 requisition_id=req.id,
                 subject="System event",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
@@ -1008,7 +1008,7 @@ class TestComputeRequisitionScores:
                     unit_price=1.00,
                     entered_by_id=test_user.id,
                     status="active",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db_session.commit()

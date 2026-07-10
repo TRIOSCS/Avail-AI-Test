@@ -14,7 +14,7 @@ Depends on: conftest.py fixtures (db_session, test_user, client, unauthenticated
 
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -55,7 +55,7 @@ def _make_part(
         name=f"RFQ-{mpn}",
         status=req_status,
         customer_name=customer,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -66,7 +66,7 @@ def _make_part(
         target_qty=target_qty,
         target_price=1.25,
         sourcing_status=sourcing_status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -80,7 +80,7 @@ def _make_offer(db: Session, requirement: Requirement, *, vendor: str, unit_pric
         mpn=requirement.primary_mpn,
         unit_price=unit_price,
         status=OfferStatus.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.flush()
@@ -209,8 +209,8 @@ def _make_card(
         category=category,
         lifecycle_status=lifecycle,
         package_type=package,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     db.add(card)
     db.flush()
@@ -222,7 +222,7 @@ def _make_vendor_history(db: Session, card: MaterialCard, *, vendor: str, price:
         material_card_id=card.id,
         vendor_name=vendor,
         last_price=price,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mvh)
     db.flush()

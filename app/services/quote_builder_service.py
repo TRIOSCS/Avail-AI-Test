@@ -6,12 +6,14 @@ generates Excel exports. Decoupled from HTTP.
 
 Called by: app.routers.quote_builder
 Depends on: app.models (Requirement, Offer, Quote), openpyxl,
-    app.routers.crm._helpers (_preload_last_quoted_prices — pricing history lookup)
+    app.services.pricing_history (preload_last_quoted_prices)
 """
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session, joinedload
+
+from .pricing_history import preload_last_quoted_prices
 
 # Default thin-margin threshold for the Build-Quote guardrail. Matches the
 # established floor used by proactive_min_margin_pct / buyplan_min_margin_pct (10%).
@@ -213,9 +215,7 @@ def get_builder_data(
 
     # Load pricing history for all MPNs in one pass
     try:
-        from app.routers.crm._helpers import _preload_last_quoted_prices
-
-        quoted_prices = _preload_last_quoted_prices(db)
+        quoted_prices = preload_last_quoted_prices(db)
         for line in lines:
             mpn_key = (line["mpn"] or "").upper().strip()
             lq = quoted_prices.get(mpn_key)
@@ -253,7 +253,7 @@ def build_quote_tab_data(
 
     Each line carries the best-cost reference (``best_costs_for``), its ACTIVE offers (the
     cheapest flagged ``is_best``), and a seeded ``sell_price``: the last-quoted price
-    (``_preload_last_quoted_prices``) when known, else best-cost × (1 + markup). The
+    (``preload_last_quoted_prices``) when known, else best-cost × (1 + markup). The
     template/Alpine layer reads these straight through — the seed is the only smart default.
 
     Mirrors the SHAPE of ``resell._build_bid_context`` line items (a best reference + a
@@ -273,9 +273,7 @@ def build_quote_tab_data(
     best_costs = best_costs_for(db, [r.id for r in requirements])
 
     try:
-        from app.routers.crm._helpers import _preload_last_quoted_prices
-
-        last_quoted = _preload_last_quoted_prices(db)
+        last_quoted = preload_last_quoted_prices(db)
     except Exception as e:  # pragma: no cover - history is best-effort
         from loguru import logger
 

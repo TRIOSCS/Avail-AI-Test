@@ -13,7 +13,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 import html as html_mod
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -107,7 +107,7 @@ def _quote_expiry_anchor(quote: Quote) -> date:
     default, the preview, and the real outbound email would drift apart, so it lives
     here once. UTC (not date.today()) matches quote_send.py exactly.
     """
-    return quote.sent_at.date() if quote.sent_at else datetime.now(timezone.utc).date()
+    return quote.sent_at.date() if quote.sent_at else datetime.now(UTC).date()
 
 
 def _quote_valid_until(quote: Quote) -> date:
@@ -177,7 +177,7 @@ async def reopen_quote(
 
     require_valid_transition("quote", quote.status, QuoteStatus.DRAFT)
     quote.status = QuoteStatus.DRAFT
-    quote.updated_at = datetime.now(timezone.utc)
+    quote.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Quote {} reopened by {}", quote_id, user.email)
 
@@ -260,7 +260,7 @@ async def edit_terms_form(
     # min = tomorrow: the earliest date the server accepts (must be a future expiry), so
     # the picker floor matches the rule AND the user can pick a date EARLIER than the
     # current validity (shorten it) — which a min of the prefilled value would forbid.
-    min_valid_until = datetime.now(timezone.utc).date() + timedelta(days=1)
+    min_valid_until = datetime.now(UTC).date() + timedelta(days=1)
     return template_response(
         "htmx/partials/quotes/edit_form.html",
         {
@@ -314,11 +314,11 @@ async def edit_quote_metadata(
         # Must be a genuinely future expiry. Checking days<1 alone was a lie: for an
         # already-sent quote the anchor is the (past) send date, so a date in the past
         # but after sent_at passed while the message promised "a date in the future".
-        if target <= datetime.now(timezone.utc).date():
+        if target <= datetime.now(UTC).date():
             raise HTTPException(400, "Valid Until must be a date in the future.")
         quote.validity_days = _validity_days_from_valid_until(quote, target)
 
-    quote.updated_at = datetime.now(timezone.utc)
+    quote.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Quote {} metadata edited by {}", quote_id, user.email)
 
@@ -387,18 +387,18 @@ async def update_quote_line(
     if "qty" in form:
         try:
             line.qty = int(form["qty"])
-        except (ValueError, TypeError):
-            raise HTTPException(400, "qty must be an integer")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "qty must be an integer") from e
     if "cost_price" in form:
         try:
             line.cost_price = float(form["cost_price"])
-        except (ValueError, TypeError):
-            raise HTTPException(400, "cost_price must be a number")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "cost_price must be a number") from e
     if "sell_price" in form:
         try:
             line.sell_price = float(form["sell_price"])
-        except (ValueError, TypeError):
-            raise HTTPException(400, "sell_price must be a number")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, "sell_price must be a number") from e
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
         line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
     _recalc_quote_totals(db, quote)
@@ -567,7 +567,7 @@ async def quote_result_htmx(
     quote.result = result
     require_valid_transition("quote", quote.status, result)
     quote.status = result
-    quote.result_at = datetime.now(timezone.utc)
+    quote.result_at = datetime.now(UTC)
     quote.result_reason = form.get("result_reason", "")
     db.commit()
     logger.info("Quote {} marked as {} by {}", quote.quote_number, result, user.email)
@@ -675,14 +675,14 @@ async def add_offers_to_draft_quote(
     body = await request.body()
     try:
         data = _json.loads(body)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid JSON body")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "Invalid JSON body") from e
 
     try:
         offer_ids = [int(x) for x in data.get("offer_ids", []) if x]
         quote_id = int(data.get("quote_id", 0))
-    except (ValueError, TypeError):
-        raise HTTPException(400, "offer_ids must be integers and quote_id must be an integer")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "offer_ids must be integers and quote_id must be an integer") from e
 
     if not offer_ids or not quote_id:
         raise HTTPException(400, "Missing offer_ids or quote_id")
@@ -739,7 +739,7 @@ async def build_buy_plan_htmx(
     try:
         plan = build_buy_plan(quote_id, db)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     db.add(plan)
     db.commit()

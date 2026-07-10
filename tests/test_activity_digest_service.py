@@ -1,5 +1,7 @@
 """Tests for activity digest constants, service, and helpers."""
 
+from datetime import UTC
+
 import pytest
 
 from app.constants import DigestEntityType, DigestStatusSignal, InboxSyncHealth
@@ -85,7 +87,7 @@ class _LockHeldRedis:
 
 
 def _mk_activity(db, **kw):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models.intelligence import ActivityLog
     from app.models.sourcing import Requisition
@@ -105,7 +107,7 @@ def _mk_activity(db, **kw):
         company_id=kw.get("company_id"),
         notes=kw.get("notes", "note"),
         is_meaningful=True,
-        created_at=kw.get("created_at", datetime.now(timezone.utc)),
+        created_at=kw.get("created_at", datetime.now(UTC)),
     )
     db.add(a)
     db.commit()
@@ -238,7 +240,7 @@ async def test_ai_raised_exception_returns_error(db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_basis_change_regenerates_after_cooldown(db_session, monkeypatch):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.constants import DigestEntityType
     from app.models.intelligence import ActivityDigest
@@ -259,7 +261,7 @@ async def test_basis_change_regenerates_after_cooldown(db_session, monkeypatch):
     assert calls["n"] == 1
     # expire the cooldown and grow the timeline
     row = db_session.query(ActivityDigest).filter_by(entity_id=21).first()
-    row.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    row.cooldown_until = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
     _mk_activity(db_session, requisition_id=21)
     await svc.get_or_build_digest(DigestEntityType.REQUISITION, 21, db_session)
@@ -270,7 +272,7 @@ async def test_basis_change_regenerates_after_cooldown(db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lock_miss_with_existing_serves_stale(db_session, monkeypatch):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.constants import DigestEntityType
     from app.models.intelligence import ActivityDigest
@@ -291,7 +293,7 @@ async def test_lock_miss_with_existing_serves_stale(db_session, monkeypatch):
 
     # now expire cooldown, grow timeline, and make the lock unavailable
     row = db_session.query(ActivityDigest).filter_by(entity_id=22).first()
-    row.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    row.cooldown_until = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
     _mk_activity(db_session, requisition_id=22)
 

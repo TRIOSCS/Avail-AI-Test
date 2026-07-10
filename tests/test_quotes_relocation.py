@@ -6,7 +6,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _req_with_part(db_session, test_user, *, company_id=None, customer_name="Acme Corp"):
@@ -20,7 +20,7 @@ def _req_with_part(db_session, test_user, *, company_id=None, customer_name="Acm
         customer_name=customer_name,
         company_id=company_id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(reqn)
     db_session.commit()

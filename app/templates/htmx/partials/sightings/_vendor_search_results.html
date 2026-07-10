@@ -1,0 +1,15 @@
+{# _vendor_search_results.html — "Find any vendor" debounced dropdown results
+   (P5.2: replaces the client-side fetch('/api/autocomplete/names') + JS filter
+   that used to live in rfqVendorModal.searchVendors()).
+   Called by: sightings.sightings_vendor_search (GET /v2/partials/sightings/vendor-search)
+              via hx-get on the #vendor-search-input in vendor_modal.html, swapped
+              into #vendor-search-results (INSIDE the rfqVendorModal x-data scope,
+              so @click="pickVendor(...)" below resolves against it).
+   Context: vendors (list[VendorCard], already filtered/limited by the route).
+#}
+{% for v in vendors %}
+<button type="button" @click='vsOpen = false; pickVendor({{ v.display_name|tojson }})'
+        class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-accent-50 hover:text-accent-700 truncate">{{ v.display_name }}</button>
+{% else %}
+<div class="px-3 py-1.5 text-xs text-gray-400 italic">No vendors found</div>
+{% endfor %}

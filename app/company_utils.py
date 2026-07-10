@@ -42,7 +42,7 @@ def _auto_keep_rank(company: dict) -> tuple[int, int, int, int]:
     )
 
 
-def _pair_dict(a: dict, b: dict, score: int) -> dict:
+def _pair_dict(a: dict, b: dict, score: float) -> dict:
     """Build one nested candidate dict (the public shape both backends emit).
 
     auto_keep_id follows the heuristic: more sites → has owner → is strategic → older id.
@@ -157,10 +157,10 @@ def _find_company_dedup_candidates_rapidfuzz(db, threshold: int, limit: int) -> 
     Preserves the original 500-row cap (rapidfuzz is O(n^2) in Python). Used by the test
     DB, which has no pg_trgm.
     """
-    from rapidfuzz import fuzz
     from sqlalchemy import func
 
     from .models import Company, CustomerSite
+    from .vendor_utils import fuzzy_dedup_scan
 
     rows = (
         db.query(
@@ -193,16 +193,8 @@ def _find_company_dedup_candidates_rapidfuzz(db, threshold: int, limit: int) -> 
                 }
             )
 
-    candidates = []
-    for i, a in enumerate(enriched):
-        for b in enriched[i + 1 :]:
-            score = fuzz.token_sort_ratio(a["norm"], b["norm"])
-            if score >= threshold:
-                candidates.append(_pair_dict(a, b, score))
-            if len(candidates) >= limit:
-                break
-        if len(candidates) >= limit:
-            break
+    scanned = fuzzy_dedup_scan(enriched, lambda e: e["norm"], threshold=threshold, limit=limit)
+    candidates = [_pair_dict(a, b, score) for a, b, score in scanned]
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates

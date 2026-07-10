@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: app/services/vendor_scorecard.py, app/services/po_cancellation_service.py, conftest
 """
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
@@ -31,7 +31,7 @@ def _make_vendor(db: Session, *, total_pos=0) -> VendorCard:
         domain="vendor.com",
         domain_aliases=[],
         total_pos=total_pos,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vc)
     db.flush()
@@ -45,7 +45,7 @@ def _add_cancel(db: Session, vc: VendorCard, days, *, cancelled_at=None):
             vendor_name_normalized=vc.normalized_name,
             normalized_mpn="LM317T",
             po_number="PO",
-            cancelled_at=cancelled_at or datetime.now(timezone.utc),
+            cancelled_at=cancelled_at or datetime.now(UTC),
             days_to_cancel=days,
             reason_code=POCancellationReason.OTHER.value,
         )

@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from app.models.trouble_ticket import TroubleTicket
@@ -30,7 +30,7 @@ def _make_ticket(db_session, test_user, ticket_number, title, description, **kwa
         source="report_button",
         risk_tier="low",
         category="other",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **kwargs,
     )
     db_session.add(ticket)

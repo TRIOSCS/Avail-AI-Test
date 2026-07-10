@@ -21,7 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -90,7 +90,7 @@ def test_job_buyplan_nudge_buyer_line_stamped(
         quote_id=test_quote.id,
         status="active",
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=10),
+        approved_at=datetime.now(UTC) - timedelta(hours=10),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -128,7 +128,7 @@ def test_job_buyplan_nudge_buyer_returns_false_no_stamp(
         quote_id=test_quote.id,
         status="active",
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=10),
+        approved_at=datetime.now(UTC) - timedelta(hours=10),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -166,7 +166,7 @@ def test_job_buyplan_nudge_ops_line_stamped(
         quote_id=test_quote.id,
         status="active",
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        approved_at=datetime.now(UTC) - timedelta(hours=5),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -175,7 +175,7 @@ def test_job_buyplan_nudge_ops_line_stamped(
         buy_plan_id=plan.id,
         quantity=10,
         status=BuyPlanLineStatus.PENDING_VERIFY.value,
-        po_confirmed_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        po_confirmed_at=datetime.now(UTC) - timedelta(hours=5),
     )
     scheduler_db.add(line)
     scheduler_db.commit()
@@ -204,7 +204,7 @@ def test_job_buyplan_nudge_per_line_exception_does_not_crash(
         quote_id=test_quote.id,
         status="active",
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=10),
+        approved_at=datetime.now(UTC) - timedelta(hours=10),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -617,7 +617,7 @@ def test_job_buyplan_nudge_ops_per_line_exception_does_not_crash(
         quote_id=test_quote.id,
         status="active",
         submitted_by_id=test_user.id,
-        approved_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        approved_at=datetime.now(UTC) - timedelta(hours=5),
     )
     scheduler_db.add(plan)
     scheduler_db.flush()
@@ -626,7 +626,7 @@ def test_job_buyplan_nudge_ops_per_line_exception_does_not_crash(
         buy_plan_id=plan.id,
         quantity=10,
         status=BuyPlanLineStatus.PENDING_VERIFY.value,
-        po_confirmed_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        po_confirmed_at=datetime.now(UTC) - timedelta(hours=5),
     )
     scheduler_db.add(line)
     scheduler_db.commit()

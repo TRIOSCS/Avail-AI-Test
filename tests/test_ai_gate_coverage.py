@@ -11,7 +11,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,7 +33,7 @@ def _make_queue_item(mpn: str, manufacturer: str = "TI", description: str = "") 
     item.gate_decision = None
     item.gate_reason = None
     item.updated_at = None
-    item.created_at = datetime.now(timezone.utc)
+    item.created_at = datetime.now(UTC)
     return item
 
 

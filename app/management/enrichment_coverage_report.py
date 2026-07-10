@@ -23,7 +23,8 @@ Depends on: MaterialCard, MaterialSpecFacet, FruLink models; spec_tiers.SOURCE_T
 import argparse
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,7 @@ def _source_bucket(src: object) -> str:
 def _spec_source_counts(db: Session) -> dict[str, int]:
     """Count specs_structured entries per recorded source, descending."""
     dialect = db.get_bind().dialect.name
+    rows: Sequence[Any]  # Row[Any] pairs (SQL branches) or (str, int) tuples (fallback)
     if dialect == "postgresql":
         rows = db.execute(_PG_SOURCES_SQL).all()
     elif dialect == "sqlite":
@@ -255,7 +257,7 @@ def collect_metrics(db: Session) -> dict[str, Any]:
         fru_links = {"rows": int(fru_rows), "distinct_frus": int(fru_distinct)}
 
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "cards": {
             "total": int(total),
             "with_category": int(with_category),
@@ -423,9 +425,9 @@ def main(json_output: bool = False, log_file: str | None = None) -> dict[str, An
     if deltas is not None:
         output["deltas"] = deltas
     if json_output:
-        print(json.dumps(output, indent=2, default=str))  # noqa: T201 — CLI report output
+        print(json.dumps(output, indent=2, default=str))
     else:
-        print(format_report(metrics, deltas, prev_ts))  # noqa: T201 — CLI report output
+        print(format_report(metrics, deltas, prev_ts))
     return output
 
 

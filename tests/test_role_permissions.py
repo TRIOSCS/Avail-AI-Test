@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest fixtures, app.dependencies
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,7 +24,7 @@ def buyer_user(db_session: Session) -> User:
         name="RBAC Buyer",
         role="buyer",
         azure_id="test-azure-rbac-buyer",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()

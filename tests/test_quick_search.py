@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/routers/materials.py, app/search_service.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -113,7 +113,7 @@ def test_quick_search_includes_material_card(mock_fetch, client, db_session: Ses
         manufacturer="Texas Instruments",
         description="Dual Op-Amp",
         lifecycle_status="Active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.commit()
@@ -137,7 +137,7 @@ def test_quick_search_includes_vendor_history(mock_fetch, client, db_session: Se
         normalized_mpn="lm358dr",
         display_mpn="LM358DR",
         manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(card)
     db_session.flush()
@@ -147,8 +147,8 @@ def test_quick_search_includes_vendor_history(mock_fetch, client, db_session: Se
         vendor_name="Old Vendor Co",
         source_type="email_mining",
         is_authorized=False,
-        first_seen=datetime(2025, 6, 1, tzinfo=timezone.utc),
-        last_seen=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        first_seen=datetime(2025, 6, 1, tzinfo=UTC),
+        last_seen=datetime(2026, 1, 15, tzinfo=UTC),
         times_seen=4,
         last_qty=2000,
         last_price=0.38,

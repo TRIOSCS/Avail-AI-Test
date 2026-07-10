@@ -8,7 +8,7 @@ Depends on: commodity_registry.get_batch_spec_schema, spec_write_service.record_
             utils.claude_client.claude_structured.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -160,7 +160,7 @@ async def enrich_card_specs(
     for c in cards:
         by_cat.setdefault((c.category or "").lower().strip(), []).append(c)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for cat, cat_cards in by_cat.items():
         if cat not in COMMODITY_SPECS:
             stats["skipped_no_schema"] += len(cat_cards)
@@ -185,7 +185,7 @@ async def enrich_card_specs(
                     timeout=120,
                     cost_bucket="enrichment",
                 )
-            except Exception as e:  # noqa: BLE001 — isolate one category's failure
+            except Exception as e:
                 logger.warning("spec extraction failed for category {}: {}", cat, e)
                 stats["errors"] += len(chunk)
                 continue
@@ -253,7 +253,7 @@ async def enrich_card_specs(
             #     see the matching comment there).
             try:
                 db.commit()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.error("spec enrichment commit failed for {}: {}", cat, e)
                 db.rollback()
                 stats["errors"] += len(chunk)

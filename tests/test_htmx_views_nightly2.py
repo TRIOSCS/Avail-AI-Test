@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -74,7 +74,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="Nightly2 Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requisition(**defaults)
@@ -89,7 +89,7 @@ def _requirement(db: Session, req: Requisition, mpn="LM317T", **kw) -> Requireme
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requirement(**defaults)
@@ -103,7 +103,7 @@ def _material_card(db: Session, mpn="MPN-N2-001", **kw) -> MaterialCard:
         normalized_mpn=mpn,
         display_mpn=mpn,
         manufacturer="TestCo",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = MaterialCard(**defaults)
@@ -136,7 +136,7 @@ def _ticket(db: Session, user: User, **kw) -> TroubleTicket:
         title="Test Ticket",
         description="Test description",
         source=TicketSource.REPORT_BUTTON,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = TroubleTicket(**defaults)
@@ -675,7 +675,7 @@ class TestProactiveRoutes:
             website="https://testco.com",
             is_active=True,
             account_owner_id=test_user.id,  # actor must manage the account (authz gate)
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(company)
         db_session.commit()
@@ -748,14 +748,14 @@ class TestAdminRoutes:
             display_name="V1",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         v2 = VendorCard(
             normalized_name="v2_merge",
             display_name="V2",
             emails=[],
             phones=[],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([v1, v2])
         db_session.flush()
@@ -775,12 +775,12 @@ class TestAdminRoutes:
         c1 = Company(
             name="Co1",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         c2 = Company(
             name="Co2",
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([c1, c2])
         db_session.flush()

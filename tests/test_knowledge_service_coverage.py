@@ -10,8 +10,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -27,7 +27,7 @@ def requisition(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -49,6 +49,8 @@ class TestCreateEntry:
         assert entry.source == "manual"
 
     def test_creation_no_commit(self, db_session: Session, test_user: User):
+        from app.models import KnowledgeEntry
+
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -56,10 +58,13 @@ class TestCreateEntry:
             content="Fact",
             commit=False,
         )
-        assert entry.id is not None
+        assert entry.id is not None  # flushed (id assigned) ...
+        db_session.rollback()
+        # ... but NOT committed: rollback discards it, proving commit=False held.
+        assert db_session.get(KnowledgeEntry, entry.id) is None
 
     def test_creation_with_all_fields(self, db_session: Session, test_user: User, requisition: Requisition):
-        expiry = datetime.now(timezone.utc) + timedelta(days=90)
+        expiry = datetime.now(UTC) + timedelta(days=90)
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -182,14 +187,14 @@ class TestIsExpired:
     @pytest.mark.parametrize(
         ("make_expires_at", "expected"),
         [
-            pytest.param(lambda: datetime.now(timezone.utc) + timedelta(days=30), False, id="not_expired_future"),
-            pytest.param(lambda: datetime.now(timezone.utc) - timedelta(days=1), True, id="expired_past"),
+            pytest.param(lambda: datetime.now(UTC) + timedelta(days=30), False, id="not_expired_future"),
+            pytest.param(lambda: datetime.now(UTC) - timedelta(days=1), True, id="expired_past"),
             pytest.param(lambda: None, False, id="no_expiry_returns_false"),
             pytest.param(lambda: datetime.utcnow() - timedelta(hours=1), True, id="naive_datetime_handled"),
         ],
     )
     def test_is_expired(self, make_expires_at, expected):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert knowledge_service._is_expired(make_expires_at(), now) is expected
 
 
@@ -228,7 +233,7 @@ class TestBuildContext:
             requisition_id=requisition.id,
         )
         # Patch created_at directly on the object (SQLite stores naive, service uses strftime)
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_context(db_session, requisition_id=requisition.id)
         assert "LM317T" in ctx
@@ -239,7 +244,7 @@ class TestBuildContext:
         assert ctx == ""
 
     def test_expired_entries_marked_outdated(self, db_session: Session, test_user: User, requisition: Requisition):
-        past_expiry = datetime.now(timezone.utc) - timedelta(days=1)
+        past_expiry = datetime.now(UTC) - timedelta(days=1)
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -249,7 +254,7 @@ class TestBuildContext:
             requisition_id=requisition.id,
         )
         # Make created_at compatible
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_context(db_session, requisition_id=requisition.id)
         assert "[OUTDATED]" in ctx
@@ -269,7 +274,7 @@ class TestGenerateInsights:
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {
@@ -284,6 +289,56 @@ class TestGenerateInsights:
         assert len(result) == 1
         assert result[0].entry_type == "ai_insight"
 
+    async def test_generate_insights_interactive_tightens_claude_call(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        """P2.8: interactive=True must forward timeout=25 / max_attempts=1 to
+        claude_structured so the HTMX request can't block for the full default 30s x
+        3-retry worst case."""
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T at $0.50",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(UTC)
+        db_session.commit()
+
+        mock_claude = AsyncMock(return_value={"insights": [{"content": "x", "confidence": 0.9}]})
+        with patch("app.utils.claude_client.claude_structured", new=mock_claude):
+            await knowledge_service.generate_insights(db_session, requisition.id, interactive=True)
+
+        mock_claude.assert_awaited_once()
+        kwargs = mock_claude.await_args.kwargs
+        assert kwargs["timeout"] == 25
+        assert kwargs["max_attempts"] == 1
+
+    async def test_generate_insights_non_interactive_default_unchanged(
+        self, db_session: Session, test_user: User, requisition: Requisition
+    ):
+        """The background job (knowledge_jobs) calls with the default interactive=False
+        — claude_structured must NOT receive timeout/max_attempts overrides (preserves
+        the original 30s/3-attempt behavior)."""
+        entry = knowledge_service.create_entry(
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T at $0.50",
+            requisition_id=requisition.id,
+        )
+        entry.created_at = datetime.now(UTC)
+        db_session.commit()
+
+        mock_claude = AsyncMock(return_value={"insights": [{"content": "x", "confidence": 0.9}]})
+        with patch("app.utils.claude_client.claude_structured", new=mock_claude):
+            await knowledge_service.generate_insights(db_session, requisition.id)
+
+        mock_claude.assert_awaited_once()
+        kwargs = mock_claude.await_args.kwargs
+        assert "timeout" not in kwargs
+        assert "max_attempts" not in kwargs
+
     async def test_generate_insights_claude_unavailable(
         self, db_session: Session, test_user: User, requisition: Requisition
     ):
@@ -296,7 +351,7 @@ class TestGenerateInsights:
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         async def _raise(*a, **kw):
@@ -314,7 +369,7 @@ class TestGenerateInsights:
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         async def _mock_none(*a, **kw):
@@ -341,7 +396,7 @@ class TestGenerateInsights:
             content="LM317T data",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "New insight", "confidence": 0.85, "based_on_expired": False}]}
@@ -377,7 +432,7 @@ class TestGenerateInsights:
             content="LM317T data",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         async def _raise(*a, **kw):
@@ -409,7 +464,7 @@ class TestGenerateInsights:
             content="LM317T data",
             requisition_id=requisition.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         async def _mock_empty(*a, **kw):
@@ -437,7 +492,7 @@ class TestBuildMpnContext:
             content="LM317T $0.50 from Arrow",
             mpn="LM317T",
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
         assert "LM317T" in ctx
@@ -450,7 +505,7 @@ class TestBuildMpnContext:
             content="AI insight about LM317T",
             mpn="LM317T",
         )
-        insight.created_at = datetime.now(timezone.utc)
+        insight.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
         # ai_insight entries are excluded from context
@@ -470,7 +525,7 @@ class TestBuildVendorContext:
             content="Arrow reliable supplier",
             vendor_card_id=test_vendor_card.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_vendor_context(db_session, vendor_card_id=test_vendor_card.id)
         assert "Arrow reliable supplier" in ctx
@@ -487,7 +542,7 @@ class TestBuildPipelineContext:
             customer_name="Test Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()
@@ -508,7 +563,7 @@ class TestBuildCompanyContext:
             content="Acme is a strategic customer",
             company_id=test_company.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
         ctx = knowledge_service.build_company_context(db_session, company_id=test_company.id)
         assert "Acme" in ctx or "strategic" in ctx
@@ -567,7 +622,7 @@ class TestGenerateMpnInsights:
             content="LM317T $0.50",
             mpn="LM317T",
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "MPN insight", "confidence": 0.8, "based_on_expired": False}]}
@@ -593,7 +648,7 @@ class TestGenerateVendorInsights:
             content="Arrow supplier note",
             vendor_card_id=test_vendor_card.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "Vendor insight", "confidence": 0.9, "based_on_expired": False}]}
@@ -619,7 +674,7 @@ class TestGenerateCompanyInsights:
             content="Acme is a strategic customer",
             company_id=test_company.id,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         db_session.commit()
 
         mock_result = {"insights": [{"content": "Company insight", "confidence": 0.7, "based_on_expired": False}]}
@@ -643,7 +698,7 @@ class TestGeneratePipelineInsights:
             customer_name="Test Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.commit()

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/ownership_service.py, conftest.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,7 +28,7 @@ def _make_company(db, name="Test Co", owner_id=None, last_activity_at=None):
         is_active=True,
         account_owner_id=owner_id,
         last_activity_at=last_activity_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.flush()
@@ -41,7 +41,7 @@ def _make_sales_user(db, email="sales1@trioscs.com"):
         name="Sales User",
         role="sales",
         azure_id=f"azure-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -110,7 +110,7 @@ class TestRunOwnershipSweep:
         co = _make_company(
             db_session,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=200),
+            last_activity_at=datetime.now(UTC) - timedelta(days=200),
         )
         db_session.commit()
 
@@ -130,7 +130,7 @@ class TestRunOwnershipSweep:
         _make_company(
             db_session,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=85),
+            last_activity_at=datetime.now(UTC) - timedelta(days=85),
         )
         db_session.commit()
 
@@ -148,7 +148,7 @@ class TestRunOwnershipSweep:
         co = _make_company(
             db_session,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+            last_activity_at=datetime.now(UTC) - timedelta(days=35),
         )
         db_session.commit()
 
@@ -167,7 +167,7 @@ class TestRunOwnershipSweep:
         _make_company(
             db_session,
             owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_activity_at=datetime.now(UTC) - timedelta(days=5),
         )
         db_session.commit()
 
@@ -183,7 +183,7 @@ class TestRunOwnershipSweep:
         """No last_activity_at → uses created_at (95 days) → warned, not cleared."""
         sales = _make_sales_user(db_session)
         co = _make_company(db_session, owner_id=sales.id, last_activity_at=None)
-        co.created_at = datetime.now(timezone.utc) - timedelta(days=95)
+        co.created_at = datetime.now(UTC) - timedelta(days=95)
         db_session.commit()
 
         with patch("app.services.ownership_service.settings") as ms:
@@ -212,7 +212,7 @@ class TestWasWarnedToday:
             activity_type="ownership_warning",
             channel="system",
             company_id=co.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(log_entry)
         db_session.commit()
@@ -227,7 +227,7 @@ class TestWasWarnedToday:
             activity_type="ownership_warning",
             channel="system",
             company_id=co.id,
-            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+            created_at=datetime.now(UTC) - timedelta(days=1),
         )
         db_session.add(log_entry)
         db_session.commit()
@@ -350,7 +350,7 @@ class TestClaimTraderRole:
             name="Claim Trader",
             role="trader",
             azure_id="az-claim-trader",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(trader)
         db_session.flush()

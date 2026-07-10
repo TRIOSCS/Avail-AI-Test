@@ -9,7 +9,7 @@ Depends on: app/services/activity_service.py, app/services/prospect_claim.py,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -105,7 +105,7 @@ async def job_account_sweep_with_db(db: Session) -> None:
     from .prospect_claim import send_company_to_prospecting
 
     inactivity_days = settings.account_sweep_inactivity_days
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     owned_companies = db.query(Company).filter(Company.account_owner_id.is_not(None)).all()
 
@@ -525,12 +525,12 @@ def reclaim_prospect_account(
     if is_former_owner and not is_supervisor and pa.reclaim_blocked_until is not None:
         blocked_until = pa.reclaim_blocked_until
         if blocked_until.tzinfo is None:
-            blocked_until = blocked_until.replace(tzinfo=timezone.utc)
-        if blocked_until > datetime.now(timezone.utc):
+            blocked_until = blocked_until.replace(tzinfo=UTC)
+        if blocked_until > datetime.now(UTC):
             raise ValueError("This account is in a 30-day cooldown; ask a manager to reassign it.")
 
     pa.status = ProspectAccountStatus.DISMISSED
-    pa.dismissed_at = datetime.now(timezone.utc)
+    pa.dismissed_at = datetime.now(UTC)
     pa.dismissed_by = user_id
     pa.dismiss_reason = "reclaimed"
 
@@ -625,7 +625,7 @@ def reassign_account(company_id: int, to_user_id: int, by_user: User, db: Sessio
     )
     if swept_pa is not None:
         swept_pa.status = ProspectAccountStatus.DISMISSED
-        swept_pa.dismissed_at = datetime.now(timezone.utc)
+        swept_pa.dismissed_at = datetime.now(UTC)
         swept_pa.dismissed_by = by_user.id
         swept_pa.dismiss_reason = "reassigned"
         swept_pa.reclaim_blocked_until = None

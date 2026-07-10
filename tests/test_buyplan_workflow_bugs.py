@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures, app/services/buyplan_workflow.py
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -41,7 +41,7 @@ def _make_plan_with_lines(
         name="Test",
         role="sales",
         azure_id="az-test",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(user)
     db.flush()
@@ -49,7 +49,7 @@ def _make_plan_with_lines(
     company = Company(
         name="Test Corp",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(company)
     db.flush()
@@ -57,7 +57,7 @@ def _make_plan_with_lines(
     site = CustomerSite(
         company_id=company.id,
         site_name="HQ",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -67,7 +67,7 @@ def _make_plan_with_lines(
         status="won",
         created_by=user.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -77,7 +77,7 @@ def _make_plan_with_lines(
         primary_mpn="TEST-MPN",
         target_qty=100,
         target_price=1.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -88,7 +88,7 @@ def _make_plan_with_lines(
         quote_number="Q-WF-001",
         status="won",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -100,7 +100,7 @@ def _make_plan_with_lines(
         so_status=so_status,
         total_cost=total_cost,
         ai_flags=ai_flags or [],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.flush()
@@ -134,7 +134,7 @@ class TestCheckCompletionIdempotency:
             line_statuses=[BuyPlanLineStatus.VERIFIED.value],
         )
         plan.case_report = "EXISTING REPORT"
-        plan.completed_at = datetime.now(timezone.utc)
+        plan.completed_at = datetime.now(UTC)
         db_session.flush()
 
         result = check_completion(plan.id, db_session)

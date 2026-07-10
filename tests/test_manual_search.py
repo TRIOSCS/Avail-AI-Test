@@ -5,7 +5,7 @@ Depends on: conftest.py fixtures, app models
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ class TestRequirementLastSearchedAt:
         req = Requisition(name="Test RFQ", status=RequisitionStatus.OPEN, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         r = Requirement(
             requisition_id=req.id,
             primary_mpn="TEST-002",

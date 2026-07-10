@@ -3,7 +3,7 @@
 Covers: batch dismiss, prepare page, send flow, throttle creation, AI draft.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -46,7 +46,7 @@ def _setup_send_scenario(db):
         name="Sales Rep",
         role="sales",
         azure_id="s-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(owner)
     db.flush()
@@ -288,7 +288,7 @@ def test_sent_offers_grouped_by_customer(db_session):
         status="sent",
         total_sell=500,
         total_cost=300,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
     )
     db_session.add(po)
     db_session.commit()
@@ -360,7 +360,7 @@ def test_timeago_filter():
     assert _timeago(None) == "--"
 
     # Recent
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert _timeago(now - timedelta(seconds=30)) == "just now"
     assert "m ago" in _timeago(now - timedelta(minutes=15))
     assert "h ago" in _timeago(now - timedelta(hours=3))
@@ -763,7 +763,7 @@ def test_add_contact_authz_requires_owned_match(db_session):
         name="Stranger",
         role="sales",
         azure_id="x-999",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(stranger)
     db_session.commit()

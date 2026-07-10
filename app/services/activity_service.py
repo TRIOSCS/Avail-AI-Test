@@ -7,7 +7,7 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
@@ -240,12 +240,25 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 
     # ── Priority 1: SiteContact ──────────────────────────────────────────
     contacts = db.query(SiteContact).filter(SiteContact.normalized_phone == e164, SiteContact.is_active.is_(True)).all()
+    # Batch the site + company lookups (was one db.get() pair per contact) — result sets
+    # are small (matches on a single phone number) but this keeps priority 1 at 2 queries
+    # total regardless of how many contacts matched.
+    _p1_site_ids = {c.customer_site_id for c in contacts if c.customer_site_id}
+    _p1_sites_by_id = (
+        {s.id: s for s in db.query(CustomerSite).filter(CustomerSite.id.in_(_p1_site_ids)).all()}
+        if _p1_site_ids
+        else {}
+    )
+    _p1_company_ids = {s.company_id for s in _p1_sites_by_id.values() if s.company_id}
+    _p1_companies_by_id = (
+        {co.id: co for co in db.query(Company).filter(Company.id.in_(_p1_company_ids)).all()} if _p1_company_ids else {}
+    )
     for contact in contacts:
-        site = db.get(CustomerSite, contact.customer_site_id)
+        site = _p1_sites_by_id.get(contact.customer_site_id)
         company_id = site.company_id if site else None
         if company_id is None:
             continue
-        company = db.get(Company, company_id)
+        company = _p1_companies_by_id.get(company_id)
         key = ("company", company_id)
         if key not in seen:
             seen.add(key)
@@ -294,11 +307,16 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         )
         .all()
     )
+    # Batch the per-site Company lookup (was one db.get() per matching site).
+    _p3_company_ids = {s.company_id for s in sites if s.company_id}
+    _p3_companies_by_id = (
+        {co.id: co for co in db.query(Company).filter(Company.id.in_(_p3_company_ids)).all()} if _p3_company_ids else {}
+    )
     for site in sites:
         key = ("company", site.company_id)
         if key not in seen:
             seen.add(key)
-            company = db.get(Company, site.company_id)
+            company = _p3_companies_by_id.get(site.company_id)
             candidates.append(
                 {
                     "type": "company",
@@ -316,8 +334,13 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 
     # ── Priority 4: VendorContact ────────────────────────────────────────
     vcs = db.query(VendorContact).filter(VendorContact.normalized_phone == e164).all()
+    # Batch the per-contact VendorCard lookup (was one db.get() per vendor contact).
+    _p4_card_ids = {vc.vendor_card_id for vc in vcs if vc.vendor_card_id}
+    _p4_cards_by_id = (
+        {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(_p4_card_ids)).all()} if _p4_card_ids else {}
+    )
     for vc in vcs:
-        card = db.get(VendorCard, vc.vendor_card_id) if vc.vendor_card_id else None
+        card = _p4_cards_by_id.get(vc.vendor_card_id) if vc.vendor_card_id else None
         if card is None:
             continue
         key = ("vendor", card.id)
@@ -926,7 +949,7 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
     if not latest:
         return None
-    delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
+    delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)
     return delta.days
 
 
@@ -960,7 +983,7 @@ def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
     if not latest:
         return None
     if latest.tzinfo is None:
-        return latest.replace(tzinfo=timezone.utc)
+        return latest.replace(tzinfo=UTC)
     return latest
 
 
@@ -974,7 +997,7 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
 
     For companies: also updates site last_activity_at.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if match["type"] == "company":
         db.query(Company).filter(Company.id == match["id"]).update({"last_activity_at": now}, synchronize_session=False)
         # Also update the matched site's last_activity_at
@@ -1089,7 +1112,7 @@ OUTREACH_DEDUP_SECONDS = 120
 
 def bump_company_site_activity(db: Session, company_id: int | None, customer_site_id: int | None) -> None:
     """Set last_activity_at = now on a company and/or site (staleness sort feed)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if company_id:
         db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
     if customer_site_id:
@@ -1146,7 +1169,7 @@ def log_outreach_initiated(
     # subject wording can change without altering dedup semantics. WeChat has
     # no snapshot column; its subject embeds the handle and is deterministic
     # for an identical re-click, so it stands in as the value match.
-    dedup_cutoff = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
+    dedup_cutoff = datetime.now(UTC) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
     value_match = (
         getattr(ActivityLog, snapshot_col) == contact_value if snapshot_col else ActivityLog.subject == subject
     )
@@ -1289,7 +1312,7 @@ def log_vendor_call(
 
     bump_clocks_from_activity(db, record)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
@@ -1334,7 +1357,7 @@ def log_vendor_note(
     bump_clocks_from_activity(db, record)
 
     if bump_last_activity:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
             {"last_activity_at": now}, synchronize_session=False
         )
@@ -1380,7 +1403,7 @@ def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | N
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
     if not latest:
         return None
-    delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
+    delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)
     return delta.days
 
 
@@ -1394,7 +1417,7 @@ def _update_vendor_contact_stats(match: dict, db: Session):
 
 def _increment_vendor_contact(vendor_contact_id: int, db: Session):
     """Increment a VendorContact's interaction stats."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.query(VendorContact).filter(VendorContact.id == vendor_contact_id).update(
         {
             "interaction_count": func.coalesce(VendorContact.interaction_count, 0) + 1,
@@ -1466,7 +1489,7 @@ def log_activity(
         buy_plan_id=buy_plan_id,
         notes=description,
         summary=summary,
-        occurred_at=occurred_at or datetime.now(timezone.utc),
+        occurred_at=occurred_at or datetime.now(UTC),
         details=details,
         is_meaningful=True if activity_type in _RULE_MEANINGFUL_TYPES else None,
     )
@@ -1586,7 +1609,7 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
     if not activity:
         return None
 
-    activity.dismissed_at = datetime.now(timezone.utc)
+    activity.dismissed_at = datetime.now(UTC)
     db.flush()
 
     logger.info(f"Activity {activity_id} dismissed")
@@ -1604,7 +1627,7 @@ def get_inbox_sync_status(db: Session, user) -> dict:
     from app.services.admin_service import get_effective_int
     from app.services.m365_status import action_for_reason
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     connected = bool(getattr(user, "m365_connected", False))
     last_scan = getattr(user, "last_inbox_scan", None)
 

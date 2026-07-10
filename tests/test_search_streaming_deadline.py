@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ApiSource
 from app.search_service import _await_next_within_budget, stream_search_mpn
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 # ── _await_next_within_budget: the deadline helper in isolation ──────────────
 

@@ -21,7 +21,7 @@ os.environ["TESTING"] = "1"
 
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -40,7 +40,7 @@ def make_prospect(db: Session, **kw) -> ProspectAccount:
         fit_score=70,
         readiness_score=55,
         discovery_source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectAccount(**defaults)

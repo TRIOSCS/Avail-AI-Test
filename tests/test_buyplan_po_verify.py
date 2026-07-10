@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app.services.buyplan_workflow.verify_po_sent, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,7 +32,7 @@ def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition)
         requisition_id=requisition.id,
         status=BuyPlanStatus.ACTIVE.value,
         so_status="approved",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.flush()

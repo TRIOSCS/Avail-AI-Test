@@ -14,7 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -171,7 +171,7 @@ class TestSetWatermarkNewRow:
         from app.models.config import SystemConfig
         from app.services.proactive_matching import _WATERMARK_KEY, _set_watermark
 
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         _set_watermark(db_session, ts)
         row = db_session.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
         assert row is not None
@@ -227,7 +227,7 @@ class TestRunProactiveScanCapWarning:
         with patch.object(db_session, "query") as mock_query:
             mock_query.return_value = FakeQuery()
             with patch("app.services.proactive_matching._get_watermark") as mock_wm:
-                mock_wm.return_value = datetime.now(timezone.utc) - timedelta(hours=1)
+                mock_wm.return_value = datetime.now(UTC) - timedelta(hours=1)
                 with patch("app.services.proactive_matching._set_watermark"):
                     with patch("app.services.proactive_matching.find_matches_for_offer", return_value=[]):
                         result = run_proactive_scan(db_session)

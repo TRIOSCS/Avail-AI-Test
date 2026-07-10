@@ -8,6 +8,8 @@ Called by: pytest
 Depends on: app/constants.py, app/services/activity_service.py, conftest.py
 """
 
+from datetime import UTC
+
 import pytest
 
 from app.constants import ActivityType
@@ -458,9 +460,9 @@ def test_activity_tab_renders_rfq_sent_event(client, db_session, test_requisitio
 
 def test_log_call_activity_occurred_at_stamped(db_session, test_user):
     """occurred_at param is written to the row when provided."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    when = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
+    when = datetime(2026, 5, 1, 10, 0, 0, tzinfo=UTC)
     rec = log_call_activity(
         user_id=test_user.id,
         direction="outbound",
@@ -587,14 +589,14 @@ def test_log_call_activity_details_stored_on_row(db_session, test_user):
 
 def test_cadence_bump_uses_occurred_at_when_set(db_session):
     """bump_clocks_from_activity uses occurred_at (true call time) over created_at."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.constants import ActivityType, Channel, Direction
     from app.models.crm import Company
     from app.models.intelligence import ActivityLog
     from app.services.cadence_service import bump_clocks_from_activity
 
-    real_call_time = datetime(2026, 5, 1, 9, 0, 0, tzinfo=timezone.utc)
+    real_call_time = datetime(2026, 5, 1, 9, 0, 0, tzinfo=UTC)
     insert_time = real_call_time + timedelta(minutes=29)
 
     co = Company(name="Occurred Co")
@@ -621,14 +623,14 @@ def test_cadence_bump_uses_occurred_at_when_set(db_session):
 
 def test_cadence_bump_falls_back_to_created_at_when_occurred_at_none(db_session):
     """bump_clocks_from_activity falls back to created_at when occurred_at is None."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.constants import ActivityType, Channel, Direction
     from app.models.crm import Company
     from app.models.intelligence import ActivityLog
     from app.services.cadence_service import bump_clocks_from_activity
 
-    insert_time = datetime(2026, 5, 1, 10, 30, 0, tzinfo=timezone.utc)
+    insert_time = datetime(2026, 5, 1, 10, 30, 0, tzinfo=UTC)
 
     co = Company(name="Fallback Co")
     db_session.add(co)

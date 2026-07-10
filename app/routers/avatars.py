@@ -18,6 +18,7 @@ Called by: main.py (app.include_router), settings/profile.html (uploader),
 Depends on: models/auth.py (User.avatar_path), startup.py (ensure_avatar_storage)
 """
 
+import asyncio
 import json
 import os
 import uuid
@@ -81,6 +82,13 @@ def _ensure_avatar_dir() -> None:
         _avatar_dir_ready = True
 
 
+def _write_avatar_file(path: str, data: bytes) -> None:
+    """Sync file write — always dispatched via ``asyncio.to_thread`` (P2.6) so a
+    slow/contended disk doesn't block the event loop for other requests."""
+    with open(path, "wb") as f:
+        f.write(data)
+
+
 def _json_error(request: Request, status_code: int, message: str) -> JSONResponse:
     req_id = getattr(request.state, "request_id", "unknown")
     return JSONResponse(
@@ -123,8 +131,7 @@ async def upload_avatar(
     filename = f"user_{user.id}_{uuid.uuid4().hex[:8]}.{ext}"
     path = os.path.join(AVATARS_DIR, filename)
     try:
-        with open(path, "wb") as f:
-            f.write(data)
+        await asyncio.to_thread(_write_avatar_file, path, data)
     except OSError as e:
         logger.error("Avatar write failed for user {}: {}", user.id, e)
         return _json_error(request, 500, "Avatar storage is not writable. Contact support.")
@@ -151,6 +158,22 @@ async def delete_avatar(
     return _avatar_response("Profile photo removed.", None)
 
 
+def _resolve_avatar_file(filename: str) -> str | None:
+    """Resolve + traversal-check an avatar filename under AVATARS_DIR.
+
+    Sync (realpath/isfile hit the filesystem) — call via ``asyncio.to_thread``
+    so the event loop never blocks. Returns the resolved path, or None when
+    the file does not exist. Raises HTTPException(403) on path traversal.
+    """
+    real_path = os.path.realpath(os.path.join(AVATARS_DIR, filename))
+    if not real_path.startswith(os.path.realpath(AVATARS_DIR) + os.sep):
+        logger.warning("Avatar path traversal blocked: {}", filename)
+        raise HTTPException(403, "Invalid avatar path")
+    if not os.path.isfile(real_path):
+        return None
+    return real_path
+
+
 @router.get("/api/user/avatar/{filename}")
 async def serve_avatar(
     filename: str,
@@ -161,11 +184,8 @@ async def serve_avatar(
     Path-traversal guarded the same way as the screenshot serve route: the
     resolved real path must live under AVATARS_DIR.
     """
-    real_path = os.path.realpath(os.path.join(AVATARS_DIR, filename))
-    if not real_path.startswith(os.path.realpath(AVATARS_DIR) + os.sep):
-        logger.warning("Avatar path traversal blocked: {}", filename)
-        raise HTTPException(403, "Invalid avatar path")
-    if not os.path.isfile(real_path):
+    real_path = await asyncio.to_thread(_resolve_avatar_file, filename)
+    if real_path is None:
         raise HTTPException(404, "Avatar not found")
     ext = real_path.rsplit(".", 1)[-1].lower()
     return FileResponse(real_path, media_type=_EXT_MEDIA_TYPE.get(ext, "application/octet-stream"))

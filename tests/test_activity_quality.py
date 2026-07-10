@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: app.models.intelligence, app.services.activity_quality_service
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -36,7 +36,7 @@ class TestActivityQualityColumns:
 
     def test_quality_assessed_at_column(self, db_session: Session, test_user: User):
         """ActivityLog accepts quality_assessed_at timestamp."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         log = ActivityLog(
             user_id=test_user.id,
             activity_type="note",
@@ -95,7 +95,7 @@ class TestActivityQualityService:
         """Already-scored activities are skipped."""
         from app.services.activity_quality_service import score_activity
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         log = ActivityLog(
             user_id=test_user.id,
             activity_type="note",
@@ -184,7 +184,7 @@ class TestActivityTimelineEnrichment:
             quality_classification="conversation",
             is_meaningful=True,
             summary="Discussed component availability and pricing",
-            quality_assessed_at=datetime.now(timezone.utc),
+            quality_assessed_at=datetime.now(UTC),
         )
         db_session.add(log)
         db_session.commit()

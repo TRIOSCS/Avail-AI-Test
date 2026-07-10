@@ -9,6 +9,8 @@ Called by: pytest
 Depends on: app.evidence_tiers, app.models
 """
 
+from datetime import UTC
+
 import pytest
 
 from app.evidence_tiers import tier_for_parsed_offer
@@ -88,7 +90,7 @@ class TestReviewQueueModel:
         assert queue[0].parse_confidence == 0.65
 
     def test_promote_t4_to_t5(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import Offer
 
@@ -98,7 +100,7 @@ class TestReviewQueueModel:
         offer.evidence_tier = "T5"
         offer.status = "active"
         offer.promoted_by_id = user.id
-        offer.promoted_at = datetime.now(timezone.utc)
+        offer.promoted_at = datetime.now(UTC)
         db_session.commit()
 
         db_session.expire_all()

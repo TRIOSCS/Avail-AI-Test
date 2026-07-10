@@ -5,7 +5,7 @@ Depends on: app.services.forecast_service, app.models (Requisition, Requirement,
             Quote, Company, User)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def _req(db, created_by, *, status="open", value=None, company_id=None, claimed_
         opportunity_value=value,
         company_id=company_id,
         claimed_by_id=claimed_by_id,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
     )
     db.add(req)
     db.flush()

@@ -20,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.constants import OfferCondition
 from app.services.offer_qualification import normalize_offer_condition
 from app.utils.normalization import (
     normalize_date_code,
@@ -198,7 +199,7 @@ class OfferCreate(BaseModel):
     unit_price: float | None = Field(default=None, ge=0)
     lead_time: str | None = None
     date_code: str | None = None
-    condition: str = "new"
+    condition: str = OfferCondition.NEW
     packaging: str | None = None
     firmware: str | None = None
     hardware_code: str | None = None

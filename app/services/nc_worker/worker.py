@@ -17,15 +17,13 @@ import hashlib
 import signal
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # pragma: no cover
+from app.constants import SearchQueueStatus
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -77,7 +75,7 @@ def update_worker_status(db: Session, **kwargs):
     for key, value in kwargs.items():
         if hasattr(status, key):
             setattr(status, key, value)
-    status.updated_at = datetime.now(timezone.utc)
+    status.updated_at = datetime.now(UTC)
     db.commit()
 
 
@@ -88,7 +86,7 @@ def _record_heartbeat(db: Session):
     EVERY path (idle, cap-sleep, breaker-open, business-hours), not just after
     completing work. Returns early if the singleton row is absent.
     """
-    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
 
 async def run_ai_gate(db: Session):
@@ -130,7 +128,7 @@ def main():
     # Recover stale items from previous crash
     with _db_session() as db:
         recover_stale_searches(db)
-        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+        update_worker_status(db, is_running=True, last_heartbeat=datetime.now(UTC))
 
     # Start HTTP session and login
     session = NcSessionManager(config)
@@ -260,7 +258,7 @@ def main():
                     # Ensure session is valid
                     if not session.ensure_session():
                         logger.error("NC worker: session re-auth failed")
-                        mark_status(db, item, "failed", error="Session authentication failed")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error="Session authentication failed")
                         db.close()
                         _sleep(5 * 60)
                         continue
@@ -277,11 +275,11 @@ def main():
                         search_result.get("url", ""),
                     )
                     if health == "SESSION_EXPIRED":
-                        mark_status(db, item, "queued")
+                        mark_status(db, item, SearchQueueStatus.QUEUED)
                         db.close()
                         continue
                     if breaker.should_stop():
-                        mark_status(db, item, "failed", error=f"Circuit breaker: {breaker.trip_reason}")
+                        mark_status(db, item, SearchQueueStatus.FAILED, error=f"Circuit breaker: {breaker.trip_reason}")
                         db.close()
                         continue
 
@@ -316,10 +314,10 @@ def main():
 
                     update_worker_status(
                         db,
-                        last_search_at=datetime.now(timezone.utc),
+                        last_search_at=datetime.now(UTC),
                         searches_today=searches_today,
                         sightings_today=sightings_today,
-                        last_heartbeat=datetime.now(timezone.utc),
+                        last_heartbeat=datetime.now(UTC),
                     )
 
                     logger.info(
@@ -336,7 +334,7 @@ def main():
                     logger.error("NC worker: search iteration error: {}", e)
                     try:
                         if item:
-                            mark_status(db, item, "failed", error=str(e)[:500])
+                            mark_status(db, item, SearchQueueStatus.FAILED, error=str(e)[:500])
                     except Exception as mark_err:
                         logger.error("NC worker: double fault marking item failed: {}", mark_err)
                 finally:

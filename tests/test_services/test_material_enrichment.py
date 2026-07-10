@@ -5,7 +5,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -200,7 +200,7 @@ async def test_enrich_pending_cards_no_pending(db):
     from app.services.material_enrichment_service import enrich_pending_cards
 
     # Card already enriched
-    _make_card(db, "ENRICHED-1", enriched_at=datetime.now(timezone.utc))
+    _make_card(db, "ENRICHED-1", enriched_at=datetime.now(UTC))
 
     result = await enrich_pending_cards(db, limit=10)
     assert result["enriched"] == 0

@@ -15,7 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -34,7 +34,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
         customer_name="Struct Fix Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -43,7 +43,7 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
         primary_mpn="LM741CN",
         target_qty=500,
         sourcing_status="open",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -330,14 +330,14 @@ class TestCrossMpnSightingVisibility:
             customer_name="C",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         req2 = Requisition(
             name="R2",
             customer_name="C",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([req1, req2])
         db_session.flush()
@@ -353,13 +353,13 @@ class TestCrossMpnSightingVisibility:
             requisition_id=req1.id,
             primary_mpn="SHARED",
             material_card_id=card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         item2 = Requirement(
             requisition_id=req2.id,
             primary_mpn="SHARED",
             material_card_id=card.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([item1, item2])
         db_session.flush()
@@ -375,7 +375,7 @@ class TestCrossMpnSightingVisibility:
             unit_price=1.0,
             qty_available=100,
             score=50.0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -422,7 +422,7 @@ class TestPreviewInlineEmailFix:
             customer_name="Fix Co",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
@@ -431,7 +431,7 @@ class TestPreviewInlineEmailFix:
             primary_mpn="FIX123",
             target_qty=10,
             sourcing_status="open",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(item)
         card = VendorCard(

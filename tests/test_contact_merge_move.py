@@ -11,7 +11,7 @@ Depends on: app.services.contact_merge_service, app.routers.htmx_views, conftest
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -126,7 +126,7 @@ def unrelated_client(db_session: Session) -> TestClient:
         name="Stranger",
         role="buyer",
         azure_id="stranger-azure-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(stranger)
     db_session.commit()
@@ -160,7 +160,7 @@ class TestMergeContactsService:
             contact_name="Lose Me",
             subject="RFQ",
             external_id="graph-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(activity)
         db_session.commit()
@@ -247,7 +247,7 @@ class TestMergeContactsService:
             title="Follow up call",
             task_type="general",
             status="todo",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(task)
         db_session.commit()
@@ -268,7 +268,7 @@ class TestMergeContactsService:
         att = SiteContactAttachment(
             site_contact_id=loser.id,
             file_name="invoice.pdf",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(att)
         db_session.commit()

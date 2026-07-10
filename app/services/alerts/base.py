@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy.exc import IntegrityError
@@ -54,7 +54,7 @@ def _parse_epoch() -> datetime | None:
         dt = datetime.fromisoformat(raw)
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def recency_floor(now: datetime | None = None) -> datetime:
@@ -64,7 +64,7 @@ def recency_floor(now: datetime | None = None) -> datetime:
     keeps the badge from lighting up for the pre-launch backlog; the rolling window
     keeps stale items from nagging forever.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     floor = now - timedelta(days=settings.alert_recency_days)
     epoch = _parse_epoch()
     return epoch if epoch and epoch > floor else floor

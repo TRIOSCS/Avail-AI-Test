@@ -5,7 +5,7 @@ draft_email 'qual_request' kind (drafts a vendor reply asking only for the
 chosen items, including user-added custom items the AI never suggested).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -119,7 +119,7 @@ def _setup_offer_with_email(db, requisition, owner_id, *, condition="new", with_
             body="We can do 5000 pcs at $0.38.",
             classification="quote_provided",
             status="new",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db.add(vr)
         db.commit()
@@ -134,7 +134,7 @@ def _setup_offer_with_email(db, requisition, owner_id, *, condition="new", with_
         entered_by_id=owner_id,
         status="pending_review",
         vendor_response_id=(vr.id if vr else None),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.commit()
@@ -215,7 +215,7 @@ def test_send_reply_blocks_dnc_vendor(client, db_session, test_requisition, test
         body="x",
         classification="quote_provided",
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.add(

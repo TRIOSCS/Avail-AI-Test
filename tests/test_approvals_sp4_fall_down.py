@@ -21,7 +21,7 @@ Called by: pytest
 Depends on: conftest fixtures, app.services.buyplan_workflow, app.routers.htmx.buy_plans.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -37,7 +37,7 @@ from app.constants import (
     SOVerificationStatus,
     UnavailabilityReason,
 )
-from app.models import Offer, POCancellation, User  # noqa: F401 (User kept for parity/typing)
+from app.models import Offer, POCancellation, User  # noqa: F401
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.sourcing import Requisition
 from app.services.buyplan_workflow import resource_line
@@ -55,7 +55,7 @@ def _make_plan(db, quote, requisition, **overrides) -> BuyPlan:
         total_revenue=20_000.0,
         total_margin_pct=50.0,
         ai_flags=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     plan = BuyPlan(**defaults)
@@ -94,7 +94,7 @@ def _make_received_line(db, plan, requirement, offer, buyer, **overrides) -> Buy
         buyer_id=buyer.id,
         status=BuyPlanLineStatus.VERIFIED.value,
         po_number="PO-7700",
-        po_confirmed_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        po_confirmed_at=datetime(2026, 6, 1, tzinfo=UTC),
     )
     defaults.update(overrides)
     line = BuyPlanLine(**defaults)
@@ -272,7 +272,7 @@ class TestBackorderResourceRoute:
             customer_name="SalesCo",
             status="open",
             created_by=sales_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req_obj)
         db_session.flush()

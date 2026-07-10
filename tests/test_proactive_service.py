@@ -12,7 +12,7 @@ Business rules tested:
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -70,7 +70,7 @@ def _make_archived_requisition(
         status="archived",
         created_by=user.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(req)
     db.flush()
@@ -80,7 +80,7 @@ def _make_archived_requisition(
         normalized_mpn=mpn.strip().lower(),
         material_card_id=card.id,
         target_qty=target_qty,
-        created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        created_at=datetime.now(UTC) - timedelta(days=days_ago),
     )
     db.add(item)
     db.flush()
@@ -106,7 +106,7 @@ def _make_offer(
         entered_by_id=user.id,
         material_card_id=card.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.flush()
@@ -254,7 +254,7 @@ class TestSendProactiveOffer:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(source_req)
         db_session.flush()
@@ -267,7 +267,7 @@ class TestSendProactiveOffer:
             unit_price=2.00,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -557,7 +557,7 @@ class TestScorecardAndSentOffers:
             status="sent",
             total_sell=1000,
             total_cost=600,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         # Converted offer
         po2 = ProactiveOffer(
@@ -569,7 +569,7 @@ class TestScorecardAndSentOffers:
             status="converted",
             total_sell=2000,
             total_cost=1200,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         db_session.add_all([po1, po2])
         db_session.commit()
@@ -593,7 +593,7 @@ class TestScorecardAndSentOffers:
             status="sent",
             total_sell=500,
             total_cost=300,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         db_session.add(po)
         db_session.commit()
@@ -625,7 +625,7 @@ class TestScorecardAndSentOffers:
             status="sent",
             total_sell=1000,
             total_cost=600,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         # other_user's offer
         po2 = ProactiveOffer(
@@ -637,7 +637,7 @@ class TestScorecardAndSentOffers:
             status="converted",
             total_sell=5000,
             total_cost=3000,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         db_session.add_all([po1, po2])
         db_session.commit()
@@ -660,7 +660,7 @@ class TestScorecardAndSentOffers:
             status="sent",
             total_sell=250,
             total_cost=150,
-            sent_at=datetime.now(timezone.utc),
+            sent_at=datetime.now(UTC),
         )
         db_session.add(po)
         db_session.commit()
@@ -976,7 +976,7 @@ class TestQtyCapping:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(source_req)
         db_session.flush()
@@ -990,7 +990,7 @@ class TestQtyCapping:
             unit_price=2.00,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -1034,7 +1034,7 @@ class TestQtyCapping:
             customer_name="Test",
             status="open",
             created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(source_req)
         db_session.flush()
@@ -1048,7 +1048,7 @@ class TestQtyCapping:
             unit_price=5.00,
             entered_by_id=test_user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.flush()
@@ -1184,7 +1184,7 @@ class TestSevenDayWindowRemoved:
             status="new",
         )
         # Back-date the match to 10 days ago (outside old 7-day window, inside 30-day expiry)
-        ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        ten_days_ago = datetime.now(UTC) - timedelta(days=10)
         match.created_at = ten_days_ago
         db_session.commit()
 
@@ -1209,7 +1209,7 @@ class TestSevenDayWindowRemoved:
             mpn="OLD-MPN-2",
             status="new",
         )
-        ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        ten_days_ago = datetime.now(UTC) - timedelta(days=10)
         match.created_at = ten_days_ago
         db_session.commit()
 

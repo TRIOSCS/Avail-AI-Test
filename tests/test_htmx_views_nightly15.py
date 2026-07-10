@@ -18,7 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,7 +58,7 @@ def _make_contact(db: Session, req: Requisition, user: User, **kw) -> RfqContact
         vendor_name_normalized="acmedist",
         vendor_contact="acme@example.com",
         status=ContactStatus.SENT,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     c = RfqContact(**defaults)
@@ -76,7 +76,7 @@ def _make_vendor_response(db: Session, req: Requisition, **kw) -> VendorResponse
         subject="RE: RFQ",
         body="We have 500 pcs at $0.10 each.",
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vr = VendorResponse(**defaults)

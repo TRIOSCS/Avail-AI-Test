@@ -8,7 +8,7 @@ What calls it: pytest.
 Depends on: app.routers.htmx_views.add_to_requisition, conftest fixtures.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
         status=RequisitionStatus.OPEN,
         created_by=user.id,
         claimed_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -111,7 +111,7 @@ def test_add_to_requisition_existing_requirement_left_untouched(
         normalized_mpn=normalize_mpn_key("NE555P"),
         target_qty=10,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(existing)
     db_session.commit()

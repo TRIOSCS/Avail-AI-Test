@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.search_service import stream_search_mpn
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 @pytest.fixture(autouse=True)

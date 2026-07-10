@@ -136,18 +136,22 @@ def run(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
                 if fru_desc is None:
                     totals["skipped_no_desc"] += 1
                     continue
-                channel, source, confidence, description = "fru_desc", FRU_DESC_SOURCE, FRU_DESC_CONFIDENCE, fru_desc
+                channel, source, confidence, description = "fru_desc", FRU_DESC_SOURCE, FRU_DESC_CONFIDENCE, fru_desc  # type: ignore[assignment]  # legacy Column-model ORM noise
 
             if apply:
                 categorized, written = categorize_and_record(
-                    db, card, description=description, source=source, confidence=confidence
+                    db,
+                    card,
+                    description=description,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+                    source=source,
+                    confidence=confidence,
                 )
                 if categorized:
                     log_audit(
                         db,
-                        material_card_id=card.id,
+                        material_card_id=card.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         action="categorized",
-                        normalized_mpn=card.normalized_mpn,
+                        normalized_mpn=card.normalized_mpn,  # type: ignore[arg-type]  # legacy Column-model ORM noise
                         details={
                             "category": card.category,
                             "source": source,
@@ -160,10 +164,11 @@ def run(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
             else:
                 # Read-only twin: the grammar verdict is the same set_category WOULD attempt
                 # (existing category IS NULL, so the ladder always lets a canonical key win).
-                commodity = categorize_from_desc(description)
+                commodity = categorize_from_desc(description)  # type: ignore[arg-type]  # legacy Column-model ORM noise
                 categorized, written = (commodity is not None), 0
                 if categorized:
-                    card.category = commodity  # transient only — db.rollback() in main()
+                    # transient only — db.rollback() in main()
+                    card.category = commodity  # type: ignore[assignment]  # legacy Column-model ORM noise
 
             if categorized:
                 by_category[card.category] += 1

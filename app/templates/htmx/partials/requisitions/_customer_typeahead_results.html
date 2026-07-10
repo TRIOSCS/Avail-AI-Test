@@ -1,0 +1,37 @@
+{# _customer_typeahead_results.html — customer picker debounced dropdown results
+   (P5.2: replaces customerPicker()'s client-side fetch('/api/companies/typeahead')
+   preload + JS `filtered` getter).
+   Called by: requisitions.customers_typeahead_dropdown
+              (GET /v2/partials/requisitions/customer-typeahead) via hx-get on the "Search
+              customers..." input in unified_modal.html, swapped into
+              #customer-typeahead-results — INSIDE the customerPicker() x-data
+              scope, so @click="select(...)" below resolves against it.
+   Context: companies (list of {id, name, sites: [CustomerSite, ...]}, already
+            filtered/limited by the route).
+#}
+{% for company in companies %}
+<div>
+  {% if company.sites|length <= 1 %}
+  {% set site = company.sites[0] if company.sites else None %}
+  <button type="button"
+          @click='select({{ {"id": company.id, "name": company.name}|tojson }}, {{ ({"id": site.id, "site_name": site.site_name} if site else {"id": "", "site_name": "HQ"})|tojson }})'
+          class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-brand-50 hover:text-brand-700 truncate font-medium">
+    {{ company.name }}
+    {% if site %}<span class="text-xs text-gray-400 ml-1">— {{ site.site_name }}</span>{% endif %}
+  </button>
+  {% else %}
+  <div class="px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">{{ company.name }}</div>
+  {% for site in company.sites %}
+  <button type="button"
+          @click='select({{ {"id": company.id, "name": company.name}|tojson }}, {{ {"id": site.id, "site_name": site.site_name}|tojson }})'
+          class="w-full text-left px-5 py-1.5 text-sm text-gray-700 hover:bg-brand-50 hover:text-brand-700 truncate">
+    {{ site.site_name }}
+  </button>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endfor %}
+<button type="button" @click="addNew = true; open = false"
+        class="w-full text-left px-3 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-50 border-t border-gray-100">
+  + New Customer
+</button>

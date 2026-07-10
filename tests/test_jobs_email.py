@@ -11,7 +11,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -61,7 +61,7 @@ def test_contacts_sync_eligibility(scheduler_db, test_user, m365_connected, last
     test_user.refresh_token = "rt_contacts"
     test_user.access_token = "at_contacts"
     test_user.m365_connected = m365_connected
-    test_user.last_contacts_sync = None if last_sync is None else datetime.now(timezone.utc) - last_sync
+    test_user.last_contacts_sync = None if last_sync is None else datetime.now(UTC) - last_sync
     scheduler_db.commit()
 
     with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
@@ -112,7 +112,7 @@ def test_contacts_sync_timeout(scheduler_db, test_user):
             coro.close()
         except Exception:
             pass
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with (
         patch("asyncio.wait_for", side_effect=_mock_wait_for),
@@ -184,7 +184,7 @@ def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
 def test_scan_user_inbox_not_backfill(scheduler_db, test_user):
     """Non-first scan sets is_backfill=False."""
     test_user.access_token = "at_scan"
-    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.last_inbox_scan = datetime.now(UTC) - timedelta(hours=1)
     scheduler_db.commit()
 
     with (
@@ -230,7 +230,7 @@ def test_scan_user_inbox_no_valid_token(scheduler_db, test_user):
 def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
     """Exception in poll_inbox is caught and sub-operations still run."""
     test_user.access_token = "at_scan"
-    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.last_inbox_scan = datetime.now(UTC) - timedelta(hours=1)
     scheduler_db.commit()
 
     with (
@@ -255,7 +255,7 @@ def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
 def test_scan_user_inbox_does_not_advance_watermark_on_poll_failure(scheduler_db, test_user):
     """When poll_inbox raises, last_inbox_scan must NOT advance."""
     test_user.access_token = "at_scan"
-    original_scan_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    original_scan_time = datetime.now(UTC) - timedelta(hours=1)
     test_user.last_inbox_scan = original_scan_time
     scheduler_db.commit()
 
@@ -283,7 +283,7 @@ def test_scan_user_inbox_does_not_advance_watermark_on_poll_failure(scheduler_db
 def test_scan_user_inbox_advances_watermark_on_poll_success(scheduler_db, test_user):
     """When poll_inbox succeeds, last_inbox_scan must advance."""
     test_user.access_token = "at_scan"
-    original_scan_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    original_scan_time = datetime.now(UTC) - timedelta(hours=1)
     test_user.last_inbox_scan = original_scan_time
     scheduler_db.commit()
 
@@ -311,7 +311,7 @@ def test_scan_user_inbox_advances_watermark_on_poll_success(scheduler_db, test_u
 def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
     """Exceptions in sub-operations are caught individually."""
     test_user.access_token = "at_scan"
-    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.last_inbox_scan = datetime.now(UTC) - timedelta(hours=1)
     scheduler_db.commit()
 
     with (
@@ -1246,7 +1246,7 @@ def test_contact_scoring_timeout(scheduler_db):
             coro.close()
         except Exception:
             pass
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with (
         patch("app.services.contact_intelligence.compute_all_contact_scores"),
@@ -1292,8 +1292,8 @@ def test_contact_status_compute_7_to_30_day_window(scheduler_db, test_user, test
         channel="outlook",
         site_contact_id=sc.id,
         auto_logged=True,
-        occurred_at=datetime.now(timezone.utc) - timedelta(days=15),
-        created_at=datetime.now(timezone.utc) - timedelta(days=15),
+        occurred_at=datetime.now(UTC) - timedelta(days=15),
+        created_at=datetime.now(UTC) - timedelta(days=15),
     )
     scheduler_db.add(activity)
     scheduler_db.commit()
@@ -1346,8 +1346,8 @@ def test_contact_status_compute_active_recent(scheduler_db, test_user, test_comp
         channel="outlook",
         site_contact_id=sc.id,
         auto_logged=True,
-        occurred_at=datetime.now(timezone.utc) - timedelta(days=3),
-        created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        occurred_at=datetime.now(UTC) - timedelta(days=3),
+        created_at=datetime.now(UTC) - timedelta(days=3),
     )
     scheduler_db.add(activity)
     scheduler_db.commit()
@@ -1385,8 +1385,8 @@ def test_contact_status_compute_quiet_and_inactive(scheduler_db, test_user, test
         channel="outlook",
         site_contact_id=quiet_sc.id,
         auto_logged=True,
-        occurred_at=datetime.now(timezone.utc) - timedelta(days=60),
-        created_at=datetime.now(timezone.utc) - timedelta(days=60),
+        occurred_at=datetime.now(UTC) - timedelta(days=60),
+        created_at=datetime.now(UTC) - timedelta(days=60),
     )
     inactive_activity = ActivityLog(
         user_id=test_user.id,
@@ -1394,8 +1394,8 @@ def test_contact_status_compute_quiet_and_inactive(scheduler_db, test_user, test
         channel="outlook",
         site_contact_id=inactive_sc.id,
         auto_logged=True,
-        occurred_at=datetime.now(timezone.utc) - timedelta(days=120),
-        created_at=datetime.now(timezone.utc) - timedelta(days=120),
+        occurred_at=datetime.now(UTC) - timedelta(days=120),
+        created_at=datetime.now(UTC) - timedelta(days=120),
     )
     scheduler_db.add_all([quiet_activity, inactive_activity])
     scheduler_db.commit()
@@ -1419,14 +1419,14 @@ def test_contact_status_compute_no_activity_old_created(scheduler_db, test_user,
         full_name="Old No Activity",
         is_active=True,
         contact_status="new",
-        created_at=datetime.now(timezone.utc) - timedelta(days=120),
+        created_at=datetime.now(UTC) - timedelta(days=120),
     )
     new_sc = SiteContact(
         customer_site_id=test_customer_site.id,
         full_name="New No Activity",
         is_active=True,
         contact_status="new",
-        created_at=datetime.now(timezone.utc) - timedelta(days=30),
+        created_at=datetime.now(UTC) - timedelta(days=30),
     )
     scheduler_db.add_all([old_sc, new_sc])
     scheduler_db.commit()

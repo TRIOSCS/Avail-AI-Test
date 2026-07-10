@@ -21,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -41,7 +41,7 @@ def make_prospect(db: Session, **kw) -> ProspectAccount:
         fit_score=75,
         readiness_score=60,
         discovery_source="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     p = ProspectAccount(**defaults)
@@ -433,7 +433,7 @@ class TestEnrichStatus:
         # the poller stops instead of looping forever.
         from datetime import timedelta
 
-        old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        old = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
         p = make_prospect(db_session, enrichment_data={"enrich_status": "running", "enrich_started_at": old})
         resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
         assert resp.status_code == 286
@@ -454,11 +454,11 @@ class TestEnrichStaleEscapeHatch:
     def _stale_iso():
         from datetime import timedelta
 
-        return (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        return (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
 
     @staticmethod
     def _fresh_iso():
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     @staticmethod
     def _enrich_button_disabled(html: str) -> bool:

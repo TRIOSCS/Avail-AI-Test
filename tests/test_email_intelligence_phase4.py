@@ -11,7 +11,7 @@ Depends on: conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import engine  # noqa: F401
@@ -183,7 +183,7 @@ class TestSummarizeThread:
                 confidence=0.9,
                 conversation_id="conv-cached",
                 thread_summary=cached_summary,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()
@@ -255,7 +255,7 @@ class TestSummarizeThread:
                 classification="offer",
                 confidence=0.9,
                 conversation_id="conv-to-cache",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db_session.commit()

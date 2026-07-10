@@ -22,7 +22,7 @@ Called by: services/buyplan_workflow.py, routers/htmx_views.py
 Depends on: models.base, models.quotes, models.sourcing, models.offers, models.auth
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -130,11 +130,11 @@ class BuyPlan(Base):
     is_stock_sale = Column(Boolean, default=False)
 
     # ── Timestamps
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # ── Relationships
@@ -222,11 +222,11 @@ class BuyPlanLine(Base):
     manager_note = Column(Text)
 
     # ── Timestamps
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # ── Nudge tracking
@@ -279,7 +279,7 @@ class VerificationGroupMember(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    added_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    added_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     user = relationship("User", foreign_keys=[user_id])
 

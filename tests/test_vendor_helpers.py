@@ -24,7 +24,7 @@ import socket
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,7 +42,7 @@ from app.utils.vendor_helpers import (
     merge_contact_into_card,
     scrape_website_contacts,
 )
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 # ── clean_emails ─────────────────────────────────────────────────────
 
@@ -596,8 +596,8 @@ class TestCardToDict:
             response_velocity_hours=4.5,
             brand_tags=["TI", "Analog Devices"],
             commodity_tags=["Voltage Regulators"],
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            updated_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 2, 1, tzinfo=UTC),
         )
         db_session.add(card)
         db_session.commit()
@@ -613,7 +613,7 @@ class TestCardToDict:
             name="Reviewer",
             role="buyer",
             azure_id="rev-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -622,7 +622,7 @@ class TestCardToDict:
             user_id=user.id,
             rating=4,
             comment="Good vendor",
-            created_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 15, tzinfo=UTC),
         )
         db_session.add(review)
         db_session.commit()
@@ -763,7 +763,7 @@ class TestCardToDict:
             name="Rev2",
             role="buyer",
             azure_id="rev-002",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
@@ -820,12 +820,12 @@ class TestCardToDict:
             name="Temp",
             role="buyer",
             azure_id="temp-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()
 
-        ts = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
         review = VendorReview(
             vendor_card_id=card.id,
             user_id=user.id,
@@ -850,7 +850,7 @@ class TestCardToDict:
             name="U",
             role="buyer",
             azure_id="u-001",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(user)
         db_session.flush()

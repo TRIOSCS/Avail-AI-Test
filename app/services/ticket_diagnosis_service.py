@@ -16,7 +16,7 @@ Depends on: utils/claude_client.claude_structured_with_usage, models/trouble_tic
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -122,7 +122,7 @@ def _build_diagnosis_prompt(ticket: TroubleTicket) -> str:
 
 def _apply_diagnosis(ticket: TroubleTicket, result: dict, usage: dict, model_tier: str) -> None:
     """Persist a structured diagnosis onto the ticket (does not commit)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ticket.diagnosis = {
         "root_cause": result.get("root_cause"),
         "severity": result.get("severity"),

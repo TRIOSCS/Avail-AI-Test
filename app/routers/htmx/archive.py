@@ -9,10 +9,10 @@ same `htmx-views` tag).
 Called by: app/main.py (router mount); htmx_views.py re-imports
     `_build_ticket_list_context` for error_reports.analyze_tickets.
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared,
-    .companies (company_tab), .vendors (vendor_tab)
+    ._shared_tabs (company_tab, vendor_tab)
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -42,8 +42,7 @@ from ...models import (
 from ...template_env import template_response
 from .._lookup_helpers import get_vendor_card_or_404
 from ._shared import _base_ctx, _safe_int
-from .companies import company_tab
-from .vendors import vendor_tab
+from ._shared_tabs import company_tab, vendor_tab
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -227,7 +226,6 @@ async def create_account_task(
     db: Session = Depends(get_db),
 ):
     """Create a task scoped to an account; return refreshed task list."""
-    from datetime import timezone as _tz
 
     from app.services.task_service import create_company_task, get_open_tasks_for_company
 
@@ -242,7 +240,7 @@ async def create_account_task(
     if due_at.strip():
         try:
             d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
         except ValueError:
             return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_company_task(
@@ -305,7 +303,6 @@ async def create_contact_task_endpoint(
     db: Session = Depends(get_db),
 ):
     """Create a task scoped to a contact; return refreshed contact task list."""
-    from datetime import timezone as _tz
 
     from app.services.task_service import create_contact_task, get_open_tasks_for_contact
 
@@ -328,7 +325,7 @@ async def create_contact_task_endpoint(
     if due_at.strip():
         try:
             d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
         except ValueError:
             return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_contact_task(
@@ -601,7 +598,6 @@ async def edit_task_endpoint(
 
     Authz: same gate as complete/delete — assignee, creator, account owner, or admin.
     """
-    from datetime import timezone as _tz
 
     from app.services.task_service import (
         _is_crm_task_authorized,
@@ -624,7 +620,7 @@ async def edit_task_endpoint(
     if due_at.strip():
         try:
             d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
         except ValueError:
             return HTMLResponse('<p class="text-xs text-rose-600">Invalid date format.</p>')
     # Set both controlled fields directly so an empty due_at clears the existing value.
@@ -802,7 +798,6 @@ async def create_vendor_task_endpoint(
 ):
     """Create a task scoped to a vendor; return refreshed task list."""
     from datetime import date as _date
-    from datetime import timezone as _tz
 
     from app.services.task_service import create_vendor_task, get_open_tasks_for_vendor_card
 
@@ -813,7 +808,7 @@ async def create_vendor_task_endpoint(
     if due_at.strip():
         try:
             d = _date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
         except ValueError:
             return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_vendor_task(

@@ -8,13 +8,13 @@ carries the ``+00:00`` offset (the user-facing serialization contract).
 Depends on: tests/conftest.py (in-memory SQLite engine).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy as sa
 
 from app.database import UTCDateTime
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import engine
 
 _md = sa.MetaData()
 _probe = sa.Table(
@@ -63,10 +63,10 @@ def test_non_utc_aware_write_is_converted_to_utc(probe_conn):
 def test_aware_roundtrip_allows_arithmetic_with_now(probe_conn):
     """Read values support subtraction with ``datetime.now(timezone.utc)`` (no
     naive/aware TypeError)."""
-    stored = datetime.now(timezone.utc) - timedelta(hours=2)
+    stored = datetime.now(UTC) - timedelta(hours=2)
     got = _store_fetch(probe_conn, stored)
     assert got.tzinfo is not None
-    delta = datetime.now(timezone.utc) - got  # must not raise
+    delta = datetime.now(UTC) - got  # must not raise
     assert timedelta(hours=1) < delta < timedelta(hours=3)
 
 

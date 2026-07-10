@@ -13,7 +13,7 @@ Depends on: conftest fixtures, app.services.email_intelligence_service
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -43,7 +43,7 @@ class TestEmailIntelligenceModel:
             brands_detected=["Texas Instruments"],
             commodities_detected=["voltage regulators"],
             subject="Quote for LM317T",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id="conv-001",
         )
         db_session.add(record)
@@ -175,7 +175,7 @@ class TestStoreEmailIntelligence:
             user_id=test_user.id,
             sender_email="vendor@chip.com",
             subject="Quote",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id="conv-1",
             classification={"classification": "offer", "confidence": 0.9, "has_pricing": True},
             parsed_quotes={"quotes": [{"part_number": "LM317T"}]},
@@ -195,7 +195,7 @@ class TestStoreEmailIntelligence:
             user_id=test_user.id,
             sender_email="vendor@chip.com",
             subject="Maybe a quote",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             conversation_id="conv-2",
             classification={"classification": "offer", "confidence": 0.65, "has_pricing": True},
         )
@@ -251,7 +251,7 @@ class TestProcessEmailIntelligence:
                     sender_name="Sales",
                     subject="Quote Response",
                     body="We have LM317T in stock at $0.50",
-                    received_at=datetime.now(timezone.utc),
+                    received_at=datetime.now(UTC),
                     conversation_id="conv-3",
                     regex_offer_matches=3,
                 )
@@ -291,7 +291,7 @@ class TestProcessEmailIntelligence:
                     sender_name="Info",
                     subject="Hello",
                     body="Just checking in",
-                    received_at=datetime.now(timezone.utc),
+                    received_at=datetime.now(UTC),
                     conversation_id="conv-4",
                     regex_offer_matches=0,
                 )

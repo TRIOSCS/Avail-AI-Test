@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import itsdangerous
 import pytest
@@ -44,7 +44,7 @@ def _seed_so_requisition(
     caller seed a requisition whose only offer is NOT active (so it is excluded from the
     picker). Returns ``(requisition, requirement, offer)``.
     """
-    company = Company(name=f"{label} Corp", is_active=True, created_at=datetime.now(timezone.utc))
+    company = Company(name=f"{label} Corp", is_active=True, created_at=datetime.now(UTC))
     db.add(company)
     db.flush()
 
@@ -52,7 +52,7 @@ def _seed_so_requisition(
         company_id=company.id,
         site_name="HQ",
         country="US",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(site)
     db.flush()
@@ -62,7 +62,7 @@ def _seed_so_requisition(
         status="open",
         created_by=owner.id,
         customer_site_id=site.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -72,7 +72,7 @@ def _seed_so_requisition(
         primary_mpn=f"{label}-MPN-1",
         target_qty=100,
         target_price=1.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(requirement)
     db.flush()
@@ -80,7 +80,7 @@ def _seed_so_requisition(
     vendor = VendorCard(
         normalized_name=f"{label.lower()} vendor",
         display_name=f"{label} Vendor",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(vendor)
     db.flush()
@@ -95,7 +95,7 @@ def _seed_so_requisition(
         unit_price=0.50,
         status=offer_status,
         entered_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()
@@ -117,7 +117,7 @@ def so_setup(db_session: Session):
         name="SO UI Buyer",
         role="buyer",
         azure_id="az-so-ui",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(owner)
     db_session.flush()
@@ -172,7 +172,7 @@ def test_new_sales_order_picker_excludes_requisition_without_active_offers(
         name="SO UI NoOffer Buyer",
         role="buyer",
         azure_id="az-so-ui-noof",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(owner)
     db_session.flush()

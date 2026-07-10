@@ -20,7 +20,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -52,8 +52,8 @@ def _add_task(
         assigned_to_id=user_id,
         created_by=created_by if created_by is not None else user_id,
         due_at=due_at,
-        completed_at=datetime.now(timezone.utc) if status == TaskStatus.DONE.value else None,
-        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC) if status == TaskStatus.DONE.value else None,
+        created_at=datetime.now(UTC),
     )
     db.add(t)
     db.commit()
@@ -75,7 +75,7 @@ def other_user(db_session: Session) -> User:
         role="buyer",
         azure_id="test-azure-id-other-buyer",
         m365_connected=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()
@@ -183,7 +183,7 @@ class TestSnoozeService:
     def test_snooze_days_advances_by_delta(self, db_session: Session, test_user: User, test_company):
         from app.services.task_service import snooze_task
 
-        due = datetime(2026, 7, 10, 0, 0, tzinfo=timezone.utc)
+        due = datetime(2026, 7, 10, 0, 0, tzinfo=UTC)
         t = _add_task(db_session, user_id=test_user.id, company=test_company, title="Snz1", due_at=due)
         snoozed = snooze_task(db_session, t.id, days=1)
         assert abs((snoozed.due_at - due).total_seconds() - 86400) < 2
@@ -192,7 +192,7 @@ class TestSnoozeService:
         """Regression: the CRM/vendor Snooze contract (no days arg → +1 week) is unchanged."""
         from app.services.task_service import snooze_task
 
-        due = datetime(2026, 7, 10, 0, 0, tzinfo=timezone.utc)
+        due = datetime(2026, 7, 10, 0, 0, tzinfo=UTC)
         t = _add_task(db_session, user_id=test_user.id, company=test_company, title="Snz2", due_at=due)
         snoozed = snooze_task(db_session, t.id)
         assert abs((snoozed.due_at - (due + timedelta(weeks=1))).total_seconds()) < 2
@@ -203,7 +203,7 @@ class TestSnoozeRoute:
     def test_snooze_route_advances_due_at(
         self, days, client: TestClient, db_session: Session, test_user: User, test_company
     ):
-        due = datetime.now(timezone.utc) + timedelta(days=2)
+        due = datetime.now(UTC) + timedelta(days=2)
         t = _add_task(db_session, user_id=test_user.id, company=test_company, title="Snz route", due_at=due)
         resp = client.post(f"/v2/partials/my-day/tasks/{t.id}/snooze?days={days}")
         assert resp.status_code == 200
@@ -218,7 +218,7 @@ class TestSnoozeRoute:
             user_id=test_user.id,
             company=test_company,
             title="Not yours",
-            due_at=datetime.now(timezone.utc) + timedelta(days=1),
+            due_at=datetime.now(UTC) + timedelta(days=1),
         )
         resp = other_client.post(f"/v2/partials/my-day/tasks/{t.id}/snooze?days=1")
         assert resp.status_code == 403

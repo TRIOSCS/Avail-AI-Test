@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.crm import Company, CustomerSite, SiteContact
 
 
 def test_clock_and_tier_columns_persist(db_session):
-    now = datetime(2026, 6, 17, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 17, tzinfo=UTC)
     co = Company(name="Clock Co", tier="key", last_outbound_at=now, last_reply_at=now)
     db_session.add(co)
     db_session.commit()

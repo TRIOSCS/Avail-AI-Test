@@ -5,12 +5,13 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.constants import DiscoveryBatchStatus
 from app.models import Company, CustomerSite, User
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
@@ -111,7 +112,7 @@ class TestProspectAccountModel:
             domain="claimed.com",
             discovery_source="apollo",
             claimed_by=test_user.id,
-            claimed_at=datetime.now(timezone.utc),
+            claimed_at=datetime.now(UTC),
         )
         db_session.add(pa)
         db_session.commit()
@@ -229,13 +230,13 @@ class TestDiscoveryBatchModel:
             segment="aerospace",
             regions=["US"],
             search_filters={"naics": ["336412"], "employee_min": 200},
-            status="complete",
+            status=DiscoveryBatchStatus.COMPLETED,
             prospects_found=150,
             prospects_new=42,
             prospects_updated=8,
             credits_used=150,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
         db_session.add(batch)
         db_session.commit()
@@ -252,12 +253,12 @@ class TestDiscoveryBatchModel:
         b1 = DiscoveryBatch(
             batch_id="dup-batch",
             source="explorium",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         b2 = DiscoveryBatch(
             batch_id="dup-batch",
             source="apollo",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         db_session.add(b1)
         db_session.commit()
@@ -271,7 +272,7 @@ class TestDiscoveryBatchModel:
         batch = DiscoveryBatch(
             batch_id="defaults-batch",
             source="email_mining",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         db_session.add(batch)
         db_session.commit()
@@ -289,7 +290,7 @@ class TestDiscoveryBatchModel:
         batch = DiscoveryBatch(
             batch_id="linked-batch",
             source="explorium",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         db_session.add(batch)
         db_session.flush()

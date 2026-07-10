@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: app/routers/error_reports.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,7 +51,7 @@ def _add_report_button_ticket(
         description=description,
         source="report_button",
         status="submitted",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(ticket)
     db_session.commit()

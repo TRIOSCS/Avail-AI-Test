@@ -6,6 +6,8 @@ create_all builds the table but does not run migrations, so the row may be absen
 test tolerates None (row is None or id==1).
 """
 
+from datetime import UTC
+
 import pytest
 
 
@@ -113,7 +115,7 @@ def test_update_helper_sets_fields(db_session):
 def test_record_heartbeat_advances_with_closed_breaker(db_session):
     """_record_heartbeat refreshes last_heartbeat, marks is_running, and clears the
     breaker flag when the breaker is CLOSED — and returns False."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models.enrichment_worker_status import EnrichmentWorkerStatus
     from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
@@ -121,7 +123,7 @@ def test_record_heartbeat_advances_with_closed_breaker(db_session):
     from app.services.enrichment_worker.worker import _record_heartbeat
 
     # Seed the singleton with a stale heartbeat + a stale-open breaker flag.
-    stale = datetime.now(timezone.utc) - timedelta(hours=2)
+    stale = datetime.now(UTC) - timedelta(hours=2)
     db_session.add(
         EnrichmentWorkerStatus(
             id=1,
@@ -133,7 +135,7 @@ def test_record_heartbeat_advances_with_closed_breaker(db_session):
     )
     db_session.commit()
 
-    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    before = datetime.now(UTC) - timedelta(seconds=5)
     breaker = EnrichmentCircuitBreaker(EnrichmentWorkerConfig(circuit_breaker_errors=3))
 
     result = _record_heartbeat(db_session, breaker)
@@ -150,7 +152,7 @@ def test_record_heartbeat_advances_with_closed_breaker(db_session):
 def test_record_heartbeat_persists_open_breaker_and_reason(db_session):
     """With a TRIPPED breaker, _record_heartbeat persists circuit_breaker_open=True with
     the trip reason — and returns True."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models.enrichment_worker_status import EnrichmentWorkerStatus
     from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
@@ -166,7 +168,7 @@ def test_record_heartbeat_persists_open_breaker_and_reason(db_session):
         breaker.record_claude_error()
     assert breaker.should_stop()  # tripped
 
-    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    before = datetime.now(UTC) - timedelta(seconds=5)
     result = _record_heartbeat(db_session, breaker)
 
     assert result is True
@@ -328,13 +330,13 @@ def test_breaker_get_trip_info_includes_custom_fields():
 def test_select_batch_anti_spin(db_session):
     """select_batch returns unenriched + old not_found; excludes recent not_found,
     verified, is_internal_part, and deleted cards."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def mk(mpn, status, enriched=None, sc=0, internal=False, deleted=None):
         c = MaterialCard(
@@ -381,13 +383,13 @@ def test_select_batch_prioritizes_unenriched_over_not_found_recheck(db_session):
     created_at DESC tiebreaker picked the newer not_found card first and the
     200/day cap was exhausted before the old unenriched parts were ever reached).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Old, never-resolved, no demand.
     db_session.add(
         MaterialCard(
@@ -424,13 +426,13 @@ def test_select_batch_ordering(db_session):
     Migration 105 replaced the old search_count demand key with TRIO's own SFDC sourcing
     volume (sourced_qty_90d DESC NULLS LAST) — see select_batch ORDER BY.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for mpn, qty in [("low_q", 1), ("high_q", 99), ("mid_q", 10)]:
         db_session.add(
             MaterialCard(
@@ -456,13 +458,13 @@ def test_select_batch_recency_tiebreaker(db_session):
     105) — a card TRIO sourced more recently heads the next batch over an equally-
     demanded staler one; the id tiebreak keeps the order deterministic.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for mpn, sourced in [
         ("oldest", now - timedelta(days=30)),
         ("middle", now - timedelta(days=15)),
@@ -492,13 +494,13 @@ def test_select_batch_demand_beats_recency(db_session):
     last_sourced_at only breaks ties within equal sourced_qty_90d; it never overrides
     the demand-volume key (migration 105).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         MaterialCard(
             normalized_mpn="hot_stale",
@@ -553,13 +555,13 @@ def test_new_cards_are_enrichable_by_worker(db_session):
 
 def test_select_batch_respects_batch_size(db_session):
     """select_batch returns at most batch_size cards."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import MaterialCard
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(10):
         db_session.add(
             MaterialCard(
@@ -598,7 +600,7 @@ def test_run_one_batch_stamps_enriched_at_and_returns_counts(db_session, monkeyp
     """run_one_batch calls enrich_card for each card, stamps enriched_at, accumulates
     per-tier counts, and calls db.commit()."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -607,7 +609,7 @@ def test_run_one_batch_stamps_enriched_at_and_returns_counts(db_session, monkeyp
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cards = []
     statuses_to_return = [
         MaterialEnrichmentStatus.WEB_SOURCED,
@@ -675,7 +677,7 @@ def test_run_one_batch_stamps_enriched_at_and_returns_counts(db_session, monkeyp
 def test_run_one_batch_web_cap_gating(db_session, mpn, web_daily_cap, cached_count, web_disabled):
     """The web tier is disabled iff the cached daily count has reached web_daily_cap."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.models import MaterialCard
@@ -683,7 +685,7 @@ def test_run_one_batch_web_cap_gating(db_session, mpn, web_daily_cap, cached_cou
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         MaterialCard(
             normalized_mpn=mpn,
@@ -736,7 +738,7 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
     The in-process tally in web_state carries the running count forward.
     """
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -745,7 +747,7 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     returns = [
         MaterialEnrichmentStatus.VERIFIED,  # no charge (connector hit)
         MaterialEnrichmentStatus.WEB_SOURCED,  # charge
@@ -802,7 +804,7 @@ def test_run_one_batch_in_process_budget_backstop_when_cache_down(db_session):
     tally already meets the cap, the web tier is still disabled — WEB_DAILY_CAP is not
     bypassed."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -811,7 +813,7 @@ def test_run_one_batch_in_process_budget_backstop_when_cache_down(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(MaterialCard(normalized_mpn="bk", display_mpn="BK", enrichment_status="unenriched", created_at=now))
     db_session.flush()
 
@@ -841,7 +843,7 @@ def test_run_one_batch_trips_breaker_on_claude_errors(db_session):
     trips after the threshold — instead of silently marking the whole queue
     not_found."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.models import MaterialCard
@@ -850,7 +852,7 @@ def test_run_one_batch_trips_breaker_on_claude_errors(db_session):
     from app.services.enrichment_worker.worker import run_one_batch
     from app.utils.claude_errors import ClaudeRateLimitError
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(3):
         db_session.add(
             MaterialCard(normalized_mpn=f"c{i}", display_mpn=f"C{i}", enrichment_status="unenriched", created_at=now)
@@ -878,7 +880,7 @@ def test_run_one_batch_non_claude_exception_does_not_trip_breaker(db_session):
     """A non-Claude exception is logged but must NOT trip the Claude-specific breaker,
     and must not charge the web budget."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.models import MaterialCard
@@ -886,7 +888,7 @@ def test_run_one_batch_non_claude_exception_does_not_trip_breaker(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(3):
         db_session.add(
             MaterialCard(normalized_mpn=f"d{i}", display_mpn=f"D{i}", enrichment_status="unenriched", created_at=now)
@@ -922,7 +924,7 @@ def test_run_one_batch_disabled_set_persists_across_calls(db_session):
     """The caller-owned disabled set persists: a connector disabled by a prior batch stays
     disabled (passed through to enrich_card) instead of being re-tried every loop."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -931,7 +933,7 @@ def test_run_one_batch_disabled_set_persists_across_calls(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(MaterialCard(normalized_mpn="dp", display_mpn="DP", enrichment_status="unenriched", created_at=now))
     db_session.flush()
 
@@ -962,7 +964,7 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
     cap=2 and 5 cards, exactly the first 2 fire a web call and the rest see the web tier
     disabled; web_state ends at exactly the cap (no batch_size-1 overshoot)."""
     import asyncio
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from unittest.mock import patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -971,7 +973,7 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Distinct created_at so the selection order is deterministic (fast-lane: newest first).
     for i in range(5):
         db_session.add(
@@ -1017,7 +1019,7 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
 # ---------------------------------------------------------------------------
 
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from app.constants import MaterialEnrichmentStatus
 from app.services.enrichment_worker.config import EnrichmentWorkerConfig
@@ -1032,7 +1034,7 @@ def test_select_batch_not_catalogued_eligibility(db_session):
     from app.models import MaterialCard
     from app.services.enrichment_worker.worker import select_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cfg = EnrichmentWorkerConfig(batch_size=10, not_catalogued_retry_days=30)
     fresh = MaterialCard(
         display_mpn="A1",
@@ -1057,7 +1059,7 @@ def test_breaker_resets_on_claude_ok_without_web(db_session):
     """A Claude call that returns OK with zero web calls (e.g. infer_part) still resets
     the breaker and does NOT charge the web budget."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.models import MaterialCard
@@ -1065,7 +1067,7 @@ def test_breaker_resets_on_claude_ok_without_web(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(MaterialCard(normalized_mpn="e0", display_mpn="E0", enrichment_status="unenriched", created_at=now))
     db_session.flush()
 
@@ -1105,7 +1107,7 @@ def test_verified_only_does_not_reset_breaker(db_session):
     """A VERIFIED-via-connector result (no Claude call, claude_ok False, web_calls 0)
     must NOT reset the breaker — only an actual Claude success should."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import patch
 
     from app.models import MaterialCard
@@ -1113,7 +1115,7 @@ def test_verified_only_does_not_reset_breaker(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(MaterialCard(normalized_mpn="f0", display_mpn="F0", enrichment_status="unenriched", created_at=now))
     db_session.flush()
 
@@ -1163,7 +1165,7 @@ def test_run_one_batch_spec_extraction_only_real_categories(db_session, mpns, re
     ONLY the cards that landed a real category (verified/web_sourced/ai_inferred/
     oem_sourced) — never the terminal-miss ones (not_found/not_catalogued)."""
     import asyncio
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from unittest.mock import AsyncMock, patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -1172,7 +1174,7 @@ def test_run_one_batch_spec_extraction_only_real_categories(db_session, mpns, re
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Distinct created_at so selection order is deterministic (newest first):
     # the real-category card is processed before the terminal-miss one.
     real_mpn, miss_mpn = mpns
@@ -1221,7 +1223,7 @@ def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):
     """If the spec-extraction pass raises a ClaudeError, it feeds the circuit breaker
     and the batch still commits (no crash)."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import AsyncMock, patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -1231,7 +1233,7 @@ def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):
     from app.services.enrichment_worker.worker import run_one_batch
     from app.utils.claude_errors import ClaudeRateLimitError
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add(
         MaterialCard(normalized_mpn="sce", display_mpn="SCE", enrichment_status="unenriched", created_at=now)
     )
@@ -1266,7 +1268,7 @@ def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):
 def test_run_one_batch_no_spec_extraction_when_all_not_found(db_session):
     """When every card is not_found, no spec-extraction pass is triggered."""
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from unittest.mock import AsyncMock, patch
 
     from app.constants import MaterialEnrichmentStatus
@@ -1275,7 +1277,7 @@ def test_run_one_batch_no_spec_extraction_when_all_not_found(db_session):
     from app.services.enrichment_worker.config import EnrichmentWorkerConfig
     from app.services.enrichment_worker.worker import run_one_batch
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for i in range(3):
         db_session.add(
             MaterialCard(

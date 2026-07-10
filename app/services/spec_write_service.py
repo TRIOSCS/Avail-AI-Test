@@ -12,7 +12,7 @@ Depends on: CommoditySpecSchema, MaterialSpecFacet, MaterialCard, unit_normalize
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -161,7 +161,7 @@ def spec_would_write(
         source=source,
         incoming_tier=tier_for(source),
         confidence=confidence,
-        now_iso=datetime.now(timezone.utc).isoformat(),
+        now_iso=datetime.now(UTC).isoformat(),
         card_id=None,
         spec_key=spec_key,
         value=value,
@@ -220,7 +220,7 @@ def record_spec(
     # Confidence is clamped to [0, 1] at the boundary so a percent-style value (95) can
     # never be persisted and then dominate every same-tier comparison.
     confidence = min(max(float(confidence or 0.0), 0.0), 1.0)
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     incoming_tier = tier_for(source)
     new_entry = {
         "value": canonical_value if schema.data_type == "numeric" else value,

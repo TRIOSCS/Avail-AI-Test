@@ -4,7 +4,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models, database
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import and_, or_
@@ -79,7 +79,7 @@ def compute_vendor_scorecard(
     if not vc:
         return {}
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    cutoff = datetime.now(UTC) - timedelta(days=window_days)
 
     # ── 1. Response rate ──
     norm = (vc.normalized_name or "").lower()

@@ -5,7 +5,7 @@ Depends on: conftest fixtures (client, db_session), Offer/Requirement/Requisitio
 models, app.services.part_offers, the sightings offer endpoints.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -351,7 +351,7 @@ def _unav(db, vendor_norm, key, reason="sold_elsewhere", age_days=0):
         vendor_name_normalized=vendor_norm,
         normalized_mpn=key,
         reason=reason,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        created_at=datetime.now(UTC) - timedelta(days=age_days),
     )
     db.add(rec)
     db.commit()

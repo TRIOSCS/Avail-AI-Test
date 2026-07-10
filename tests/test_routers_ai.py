@@ -8,7 +8,7 @@ Covers: ai feature flag modes (off/mike_only/all), vendor history aggregation,
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -70,7 +70,7 @@ def test_build_vendor_history_with_card():
         response_velocity_hours=4.2,
     )
     last_contact = SimpleNamespace(
-        created_at=datetime(2026, 2, 10, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 10, tzinfo=UTC),
     )
 
     db = MagicMock()
@@ -450,7 +450,7 @@ def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_re
         vendor_email="scope@vendor.com",
         subject="RE: RFQ",
         body="Offering parts",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -479,7 +479,7 @@ def test_parse_response_success(ai_client, db_session):
         vendor_email="vendor@acme.com",
         subject="RE: RFQ LM317T",
         body="We can offer LM317T qty 500 at $0.45 each.",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -749,7 +749,7 @@ def test_parse_response_no_result(ai_client, db_session):
         vendor_email="empty@v.com",
         subject="No content",
         body="Out of office",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()
@@ -795,7 +795,7 @@ def test_parse_response_with_rfq_context(ai_client, db_session):
         vendor_email="ctx@v.com",
         subject="RE: RFQ",
         body="CTX-PART 100pcs at $0.95",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db_session.add(vr)
     db_session.commit()

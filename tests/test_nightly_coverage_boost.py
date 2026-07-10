@@ -16,6 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,7 +27,7 @@ from app.models import Company, Requirement, Requisition, VendorCard
 
 
 def _mk_activity(db, requisition_id=None, company_id=None):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models.intelligence import ActivityLog
     from app.models.sourcing import Requisition as Req
@@ -44,7 +45,7 @@ def _mk_activity(db, requisition_id=None, company_id=None):
         company_id=company_id,
         notes="note",
         is_meaningful=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(a)
     db.commit()
@@ -70,7 +71,7 @@ class TestActivityDigestEdgeCases:
     @pytest.mark.asyncio
     async def test_same_basis_expired_cooldown_returns_cached(self, db_session):
         """Line 170: When basis unchanged and cooldown expired, return cached digest."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.constants import DigestEntityType
         from app.models.intelligence import ActivityDigest
@@ -99,7 +100,7 @@ class TestActivityDigestEdgeCases:
 
             # Expire the cooldown WITHOUT adding activities (basis stays same)
             row = db_session.query(ActivityDigest).filter_by(entity_id=101, entity_type="requisition").first()
-            row.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=5)
+            row.cooldown_until = datetime.now(UTC) - timedelta(seconds=5)
             db_session.commit()
 
             # Same basis → should return cached immediately (line 170), no AI call

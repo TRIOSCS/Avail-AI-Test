@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/models/auth.py (User), tests/conftest.py (db_session fixture)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def test_user_has_notify_pref_columns_default_true(db_session):
@@ -18,7 +18,7 @@ def test_user_has_notify_pref_columns_default_true(db_session):
         name="N",
         role="buyer",
         azure_id="az-notify",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()

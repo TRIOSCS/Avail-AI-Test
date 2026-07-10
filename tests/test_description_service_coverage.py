@@ -12,6 +12,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -75,7 +76,7 @@ def test_collect_db_descriptions_with_material_card():
 def _make_user_in_sess(sess, suffix: str = ""):
     """Helper: create a user in a given session and return it."""
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import User
 
@@ -85,7 +86,7 @@ def _make_user_in_sess(sess, suffix: str = ""):
         name="Desc Tester",
         role="buyer",
         azure_id=f"desc-test-azure-{uid}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     sess.add(user)
     sess.flush()

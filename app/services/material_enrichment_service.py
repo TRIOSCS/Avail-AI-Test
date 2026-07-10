@@ -7,7 +7,7 @@ Called by: app/routers, app/jobs/core_jobs.py
 Depends on: app.utils.claude_client, app.services.batch_queue, app.cache.intel_cache
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -109,7 +109,7 @@ def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
     set_category(card, cat, "claude_haiku", 0.5)
     card.lifecycle_status = lifecycle
     card.enrichment_source = "claude_haiku"
-    card.enriched_at = datetime.now(timezone.utc)
+    card.enriched_at = datetime.now(UTC)
 
 
 async def enrich_material_cards(card_ids: list[int], db: Session, *, batch_size: int = 30) -> dict:

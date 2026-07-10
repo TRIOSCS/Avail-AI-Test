@@ -6,6 +6,8 @@ Called by: app/jobs/__init__.py (registered with APScheduler)
 Depends on: app/utils/graph_client.py, app/services/activity_service.py
 """
 
+from datetime import UTC
+
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
@@ -25,7 +27,7 @@ def register_teams_call_jobs(scheduler, settings):
 @_traced_job
 async def _job_sync_teams_calls():
     """Sync Teams call records for all connected users."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from ..constants import UserRole
     from ..database import SessionLocal
@@ -41,7 +43,7 @@ async def _job_sync_teams_calls():
         # Watermark
         wm_key = "teams_calls_last_poll"
         wm_row = db.query(SystemConfig).filter(SystemConfig.key == wm_key).first()
-        since = datetime.now(timezone.utc) - timedelta(days=1)
+        since = datetime.now(UTC) - timedelta(days=1)
         if wm_row and wm_row.value:
             try:
                 since = datetime.fromisoformat(wm_row.value)
@@ -116,7 +118,7 @@ async def _job_sync_teams_calls():
         if any_fetch_failed:
             logger.warning("Teams call sync: a user fetch failed — leaving watermark unadvanced to retry next run")
         else:
-            now_str = datetime.now(timezone.utc).isoformat()
+            now_str = datetime.now(UTC).isoformat()
             if wm_row:
                 wm_row.value = now_str
             else:

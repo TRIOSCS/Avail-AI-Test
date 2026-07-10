@@ -9,6 +9,7 @@ Depends on: tagging_ai_classify, app.utils.claude_client, app.http_client
 
 import asyncio
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -47,6 +48,34 @@ _BATCH_SCHEMA = {
     },
     "required": ["classifications"],
 }
+
+
+def _write_batch_meta(meta_path: str, meta: dict) -> None:
+    """Sync JSON write — always dispatched via ``asyncio.to_thread`` (P2.6: batch meta
+    can be large, so writing it on the event loop thread blocks every concurrent
+    request)."""
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+
+def _latest_backfill_meta_path() -> str:
+    """Sync glob/stat scan for the newest ``ai_backfill_meta_*.json`` in tmp — always
+    dispatched via ``asyncio.to_thread`` (directory listing + one stat per candidate hit
+    the filesystem)."""
+    tmpdir = Path(tempfile.gettempdir())
+    candidates = sorted(tmpdir.glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(candidates[0]) if candidates else str(tmpdir / "ai_backfill_meta.json")
+
+
+def _read_batch_meta(meta_path: str) -> dict:
+    """Sync JSON read — always dispatched via ``asyncio.to_thread`` (P2.6, same
+    rationale as ``_write_batch_meta``).
+
+    Raises ``FileNotFoundError`` unchanged so the
+    caller's existing except clause still applies.
+    """
+    with open(meta_path) as f:
+        return json.load(f)
 
 
 def _untagged_by_brand(db: Session) -> list:
@@ -125,15 +154,15 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
     # Persist metadata so we can process results later.
     # Use per-batch file names to avoid cross-run clobbering.
     meta_path = f"{tempfile.gettempdir()}/ai_backfill_meta_{batch_ids[0] if batch_ids else 'none'}.json"
-    with open(meta_path, "w") as f:
-        json.dump(
-            {
-                "batch_ids": batch_ids,
-                "batch_meta": batch_meta,
-                "total_mpns": len(untagged),
-            },
-            f,
-        )
+    await asyncio.to_thread(
+        _write_batch_meta,
+        meta_path,
+        {
+            "batch_ids": batch_ids,
+            "batch_meta": batch_meta,
+            "total_mpns": len(untagged),
+        },
+    )
 
     logger.info(f"Batch metadata saved to {meta_path}")
 
@@ -154,12 +183,9 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     from app.utils.claude_errors import ClaudeError as _ClaudeErr
 
     if not meta_path:
-        _tmpdir = Path(tempfile.gettempdir())
-        candidates = sorted(_tmpdir.glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        meta_path = str(candidates[0]) if candidates else str(_tmpdir / "ai_backfill_meta.json")
+        meta_path = await asyncio.to_thread(_latest_backfill_meta_path)
     try:
-        with open(meta_path) as f:
-            meta = json.load(f)
+        meta = await asyncio.to_thread(_read_batch_meta, meta_path)
     except FileNotFoundError:
         return {"status": "error", "error": "No batch metadata found. Run submit_batch_backfill first."}
 
@@ -432,23 +458,46 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
     if not results_url:
         return {"error": "Batch ended but no results_url"}
 
-    # Step 2: Stream results to temp file (avoid loading into memory)
+    # Step 2: Stream results to temp file (avoid loading into memory). Each chunk
+    # write is dispatched via asyncio.to_thread (P2.6) — results can be 500K+ lines,
+    # so writing synchronously on the event loop thread blocks every concurrent request.
     logger.info(f"Downloading batch {batch_id} results to temp file...")
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False)
-    tmp_path = tmp_file.name
-    tmp_file.close()
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False) as tmp_file:
+        tmp_path = tmp_file.name
     try:
-        async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
-            with open(tmp_path, "wb") as f:
+        f = await asyncio.to_thread(open, tmp_path, "wb")
+        try:
+            async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
                 async for chunk in stream.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
+                    await asyncio.to_thread(f.write, chunk)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         return {"error": f"Download failed: {e}"}
 
     logger.info(f"Batch results downloaded to {tmp_path}")
 
-    # Step 3: Process line by line in batches of 100
-    db = SessionLocal()
+    # Step 3: Process line by line in batches of 100 — pure sync DB work (SQLAlchemy
+    # Session is not async-safe), so the whole pass runs on one worker thread.
+    result = await asyncio.to_thread(_process_batch_results_file, tmp_path, SessionLocal)
+
+    logger.info(
+        f"Batch {batch_id} applied: {result['total_lines']} lines, {result['matched']} matched, "
+        f"{result['unknown']} unknown, {result['errors']} errors"
+    )
+    return result
+
+
+def _process_batch_results_file(tmp_path: str, session_factory) -> dict:
+    """Parse a downloaded batch-results JSONL file and apply classifications.
+
+    Always dispatched via ``asyncio.to_thread`` from ``apply_batch_results_chunked``
+    (P2.6) — the DB work here is synchronous SQLAlchemy, so it runs entirely on one
+    worker thread rather than blocking the event loop for the whole file.
+
+    Returns: {total_lines, matched, unknown, errors}
+    """
+    db = session_factory()
     total_lines = 0
     matched = 0
     unknown = 0
@@ -521,14 +570,11 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
     finally:
         db.close()
         # Clean up temp file
-        import os
-
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
 
-    logger.info(f"Batch {batch_id} applied: {total_lines} lines, {matched} matched, {unknown} unknown, {errors} errors")
     return {"total_lines": total_lines, "matched": matched, "unknown": unknown, "errors": errors}
 
 

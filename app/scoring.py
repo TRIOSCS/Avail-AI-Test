@@ -377,22 +377,21 @@ def score_unified(
             "components": {"claude_confidence": claude_confidence or 0.0},
         }
 
-    # -- AI research ------------------------------------------------------
-    if st == "ai_live_web":
-        conf = (claude_confidence or 0.0) * 100.0
-        capped = min(60.0, conf)
-        pct = int(round(max(0.0, capped)))
-        logger.debug("score_unified ai_live_web: raw={} capped={}", conf, pct)
-        return {
-            "score": round(capped, 1),
-            "source_badge": "AI Found",
-            "confidence_pct": pct,
-            "confidence_color": confidence_color(pct),
-            "components": {
-                "claude_confidence": claude_confidence or 0.0,
-                "capped_at": 60,
-            },
-        }
+    # -- AI research (only remaining source_type after the guard above) ----
+    conf = (claude_confidence or 0.0) * 100.0
+    capped = min(60.0, conf)
+    pct = int(round(max(0.0, capped)))
+    logger.debug("score_unified ai_live_web: raw={} capped={}", conf, pct)
+    return {
+        "score": round(capped, 1),
+        "source_badge": "AI Found",
+        "confidence_pct": pct,
+        "confidence_color": confidence_color(pct),
+        "components": {
+            "claude_confidence": claude_confidence or 0.0,
+            "capped_at": 60,
+        },
+    }
 
     # Unreachable: the guard above routes every source_type that is not one of
     # the three special types into the live-API branch, and each special type

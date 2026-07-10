@@ -31,7 +31,7 @@ os.environ["TESTING"] = "1"
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,7 +54,7 @@ def _make_req(db: Session, user: User, name: str | None = None) -> Requisition:
         customer_name="TestCo",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -62,7 +62,7 @@ def _make_req(db: Session, user: User, name: str | None = None) -> Requisition:
         requisition_id=req.id,
         primary_mpn="BC547",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.commit()
@@ -137,7 +137,7 @@ def _make_vendor_response(db: Session, req: Requisition) -> VendorResponse:
         subject="RE: RFQ",
         body="We have 1000 units available",
         status="new",
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
         message_id=f"msg-{uuid.uuid4().hex}",
     )
     db.add(vr)

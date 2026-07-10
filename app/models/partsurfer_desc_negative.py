@@ -29,7 +29,7 @@ writer), app/services/enrichment_worker/worker.py (the desc pass consults/record
 Depends on: app/database.UTCDateTime, Base.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, Column, Index, Integer, String, UniqueConstraint
 
@@ -57,11 +57,11 @@ class PartsurferDescNegative(Base):
     looked_up_at = Column(UTCDateTime, nullable=False)
     retry_after = Column(UTCDateTime, nullable=False)
 
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         UTCDateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     __table_args__ = (

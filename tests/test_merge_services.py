@@ -8,7 +8,7 @@ Depends on: conftest fixtures, app.models, app.services.vendor_merge_service,
             app.services.company_merge_service
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def _make_user(db: Session, email: str = "merge@test.com") -> User:
         name="Merge Tester",
         role="buyer",
         azure_id=f"az-{email}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -47,7 +47,7 @@ def _make_company(db: Session, name: str, **kw) -> Company:
         website=f"https://{name.lower().replace(' ', '')}.com",
         industry="Electronics",
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     co = Company(**defaults)
@@ -61,7 +61,7 @@ def _make_vendor(db: Session, display_name: str, **kw) -> VendorCard:
         normalized_name=display_name.lower(),
         display_name=display_name,
         sighting_count=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     vc = VendorCard(**defaults)
@@ -171,12 +171,12 @@ class TestVendorMergeService:
             customer_name="Test",
             status="open",
             created_by=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(req)
         db_session.flush()
         requirement = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T", target_qty=100, created_at=datetime.now(timezone.utc)
+            requisition_id=req.id, primary_mpn="LM317T", target_qty=100, created_at=datetime.now(UTC)
         )
         db_session.add(requirement)
         db_session.flush()
@@ -190,7 +190,7 @@ class TestVendorMergeService:
             unit_price=0.50,
             status="active",
             entered_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(offer)
         db_session.commit()
@@ -404,7 +404,7 @@ class TestCompanyMergeService:
             activity_type="email_sent",
             channel="email",
             company_id=remove.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(act)
         db_session.commit()
@@ -437,8 +437,8 @@ class TestCompanyMergeService:
         """Merge should keep the most recent last_activity_at."""
         from app.services.company_merge_service import merge_companies
 
-        early = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        late = datetime(2025, 6, 15, tzinfo=timezone.utc)
+        early = datetime(2024, 1, 1, tzinfo=UTC)
+        late = datetime(2025, 6, 15, tzinfo=UTC)
 
         keep = _make_company(db_session, "Keep", last_activity_at=early)
         remove = _make_company(db_session, "Remove", last_activity_at=late)

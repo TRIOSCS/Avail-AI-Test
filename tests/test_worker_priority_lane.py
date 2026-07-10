@@ -9,7 +9,7 @@ Depends on: conftest.py (db_session), enrichment worker config/breaker.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from app.constants import MaterialEnrichmentStatus
@@ -18,7 +18,7 @@ from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBrea
 from app.services.enrichment_worker.config import EnrichmentWorkerConfig
 from app.services.enrichment_worker.worker import run_one_batch, select_batch
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def _mk(db, mpn, *, sc=0, requested=None, status="unenriched", created=NOW, enriched=None, qty=None, sourced=None):

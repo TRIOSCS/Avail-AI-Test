@@ -600,6 +600,43 @@ class PendingBatchStatus(StrEnum):
     FAILED = "failed"
 
 
+class DiscoveryBatchStatus(StrEnum):
+    """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run) audit
+    records — app.services.prospect_scheduler.job_discover_prospects is the sole writer.
+
+    FAILED is not currently written (an unhandled exception leaves the row at RUNNING
+    and is only surfaced via the job's log/return value) but is reserved here to match
+    the PendingBatchStatus run-lifecycle convention.
+    """
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class SearchQueueStatus(StrEnum):
+    """Status lifecycle for the browser-driven search queue tables (NcSearchQueue,
+    IcsSearchQueue, TbfSearchQueue — see
+    app/services/search_worker_base/{queue_manager,ai_gate}.py and the
+    nc_worker/ics_worker/tbf_worker wrappers, which are the sole readers/writers).
+
+    Lifecycle: PENDING (enqueued, awaiting AI-gate classification) -> QUEUED
+    (gate approved for search, or reclaimed after a stale/failed attempt) ->
+    SEARCHING (claimed by a worker) -> COMPLETED (results recorded) or
+    GATED_OUT (AI gate decided not worth searching) or FAILED (worker gave up
+    after retries/circuit-breaker trip). Values are DB-persisted (SQLAlchemy
+    ``String`` columns, not native DB enums) — they must equal the pre-enum
+    string literals exactly; no data migration is needed.
+    """
+
+    PENDING = "pending"
+    QUEUED = "queued"
+    SEARCHING = "searching"
+    COMPLETED = "completed"
+    GATED_OUT = "gated_out"
+    FAILED = "failed"
+
+
 class ApiSourceStatus(StrEnum):
     """ApiSource.status — managed by health_monitor.ping_source.
 
@@ -1196,3 +1233,18 @@ class QPOrderType(StrEnum):
     """
 
     NEW = "new"
+
+
+class DeferredBackfillState(StrEnum):
+    """In-memory readiness state of the P2.7 deferred startup-backfill phase.
+
+    Not persisted — tracked as a process-local module variable in app/startup.py and
+    surfaced via GET /health/ready. RUNNING is set right before the background task is
+    scheduled; COMPLETED/FAILED are set when it finishes. Defaults to COMPLETED so a
+    boot that never schedules the deferred phase (TESTING=1) doesn't need special-
+    casing in readers.
+    """
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"

@@ -6,7 +6,7 @@
   crashed worker's in-flight item is recovered without a restart.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -25,7 +25,7 @@ def requisition(db_session, test_user):
         customer_name="Acme",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(r)
     db_session.flush()
@@ -38,7 +38,7 @@ def requirement(db_session, requisition):
         requisition_id=requisition.id,
         primary_mpn="LM317",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.commit()
@@ -53,8 +53,8 @@ def _row(db, requirement, requisition, *, status="queued", priority=3, mpn="LM31
         normalized_mpn=mpn,
         status=status,
         priority=priority,
-        created_at=datetime.now(timezone.utc),
-        updated_at=updated_at or datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=updated_at or datetime.now(UTC),
     )
     db.add(row)
     db.commit()
@@ -89,7 +89,7 @@ def test_reclaim_resets_stuck_but_keeps_fresh(db_session, requirement, requisiti
         requisition,
         status="searching",
         mpn="STUCK",
-        updated_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+        updated_at=datetime.now(UTC) - timedelta(minutes=45),
     )
     fresh = _row(db_session, requirement, requisition, status="searching", mpn="FRESH")
     n = reclaim_stuck_searches(db_session)  # default 30m timeout
@@ -108,7 +108,7 @@ def test_claim_auto_reclaims_then_claims(db_session, requirement, requisition):
         requisition,
         status="searching",
         mpn="STUCK",
-        updated_at=datetime.now(timezone.utc) - timedelta(minutes=60),
+        updated_at=datetime.now(UTC) - timedelta(minutes=60),
     )
     claimed = claim_next_queued_item(db_session)
     assert claimed is not None
@@ -122,7 +122,7 @@ def test_reclaim_honors_custom_timeout(db_session, requirement, requisition):
         requirement,
         requisition,
         status="searching",
-        updated_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        updated_at=datetime.now(UTC) - timedelta(minutes=10),
     )
     assert reclaim_stuck_searches(db_session, max_age_minutes=30) == 0  # 10m < 30m
     assert reclaim_stuck_searches(db_session, max_age_minutes=5) == 1  # 10m > 5m

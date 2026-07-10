@@ -6,7 +6,7 @@ and a seen offer does not. (The glide/observe/seen JS behaviour is browser-only 
 covered separately by the Playwright spec.)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.constants import AlertKind, OfferStatus, QualificationStatus
 from app.models.offers import Offer
@@ -28,8 +28,8 @@ def _make_confirmed_offer(db, requirement: Requirement) -> Offer:
         unit_price=0.50,
         status=OfferStatus.APPROVED,
         qualification_status=QualificationStatus.COMPLETE,
-        approved_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()

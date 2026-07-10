@@ -39,6 +39,7 @@ Depends on: app.database (SessionLocal), app.config (settings.admin_emails),
 
 from __future__ import annotations
 
+import asyncio
 import html as html_mod
 from decimal import Decimal
 
@@ -58,7 +59,7 @@ from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipi
 from ..models.quality_plan import Prepayment
 from ..services.admin_service import get_config_values
 from ..services.teams_notifications import post_teams_channel_card
-from ..utils.async_helpers import safe_background_task
+from ..utils.async_helpers import hold_bg_task, safe_background_task
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localtime
 
 _CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_webhook"]
@@ -104,22 +105,75 @@ async def run_prepayment_notify_bg(coro_fn, prepayment_id: int) -> None:
     await safe_background_task(_run(), task_name="prepayment_notification", suppress_in_testing=True)
 
 
+# The main FastAPI event loop, registered via set_main_event_loop() during the
+# lifespan. Needed because the P2.7 deferred-startup-backfill sweep
+# (run_deferred_startup_backfills, see app/startup.py) runs the entire
+# _complete_reverted_active_plans -> check_completion -> _complete_plan ->
+# _cancel_open_prepayment_requests_for_plan call chain inside asyncio.to_thread — a
+# worker thread with NO running loop of its own — so schedule_prepayment_notify's
+# get_running_loop() check would otherwise always miss and silently drop the
+# DO-NOT-WIRE stand-down notification for plans auto-completed at startup.
+_main_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Register the main event loop for schedule_prepayment_notify's cross-thread
+    fallback.
+
+    Called by: app.main lifespan, immediately before dispatching
+    run_deferred_startup_backfills via asyncio.to_thread.
+    """
+    global _main_event_loop
+    _main_event_loop = loop
+
+
 def schedule_prepayment_notify(coro) -> None:
     """Loop-aware fire-and-forget for a prepayment-notify coroutine from a SYNC caller.
 
     ``run_prepayment_notify_bg(...)`` returns a coroutine; a sync service (mark-paid,
     teardown void) cannot ``await`` it. If an event loop is running (the async request that
-    drove the transition) schedule it as a fire-and-forget task; otherwise (a sync/CLI/test
-    caller) close the coroutine cleanly so nothing dangles and no dispatch is attempted.
+    drove the transition) schedule it as a fire-and-forget task on it. Otherwise — most
+    notably the P2.7 deferred-startup-backfill sweep, which runs on a plain
+    ``asyncio.to_thread`` worker thread with no loop of its own — fall back to the
+    registered main event loop (see ``set_main_event_loop``) via
+    ``asyncio.run_coroutine_threadsafe``, so the notification still runs as a task on the
+    main loop instead of being silently dropped. If neither a running loop nor a
+    registered main loop is available (bare sync/CLI/test caller, or a boot that never
+    reached the lifespan's registration point), close the coroutine cleanly so nothing
+    dangles and no dispatch is attempted.
     """
-    import asyncio
-
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        coro.close()
+        main_loop = _main_event_loop
+        if main_loop is not None and main_loop.is_running():
+            _dispatch_to_main_loop(coro, main_loop)
+        else:
+            coro.close()
     else:
-        loop.create_task(coro)
+        hold_bg_task(loop.create_task(coro))
+
+
+def _dispatch_to_main_loop(coro, loop: asyncio.AbstractEventLoop) -> None:
+    """Run *coro* as a task on *loop* from a different (non-loop) thread.
+
+    ``asyncio.run_coroutine_threadsafe`` only hands back a ``concurrent.futures.Future``
+    — not the underlying ``asyncio.Task`` — so ``hold_bg_task``'s strong-ref retention
+    can't be applied from the calling (worker) thread directly. *coro* is wrapped so the
+    retention, and error isolation equivalent to ``safe_background_task``, both happen on
+    the loop's own thread once the wrapped coroutine actually starts running there.
+    """
+
+    async def _wrapped():
+        task = asyncio.current_task()
+        if task is not None:
+            hold_bg_task(task)
+        try:
+            await coro
+        except Exception:
+            logger.exception("Cross-thread prepayment notification failed")
+
+    asyncio.run_coroutine_threadsafe(_wrapped(), loop)
 
 
 # ── Public notify functions ──────────────────────────────────────────

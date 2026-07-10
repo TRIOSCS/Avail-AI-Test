@@ -15,7 +15,7 @@ Depends on: app.jobs.maintenance_jobs, app.services.contact_merge_service,
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
@@ -64,9 +64,7 @@ def test_dedup_preserves_loser_attachment_reassigned_to_keeper(db_session: Sessi
     """The loser's attachment must survive dedup and be reassigned to the keeper, not
     cascade-deleted."""
     keeper, loser = _dupe_pair(db_session)
-    att = SiteContactAttachment(
-        site_contact_id=loser.id, file_name="invoice.pdf", created_at=datetime.now(timezone.utc)
-    )
+    att = SiteContactAttachment(site_contact_id=loser.id, file_name="invoice.pdf", created_at=datetime.now(UTC))
     db_session.add(att)
     db_session.commit()
     att_id, keeper_id, loser_id = att.id, keeper.id, loser.id
@@ -92,7 +90,7 @@ def test_dedup_preserves_loser_task_reassigned_to_keeper(db_session: Session, _b
         title="Follow up call",
         task_type="general",
         status="todo",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(task)
     db_session.commit()

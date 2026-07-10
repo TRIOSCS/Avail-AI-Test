@@ -14,7 +14,7 @@ Depends on: conftest (db_session), app.services.approvals.queue,
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -48,7 +48,7 @@ def _user(db: Session, *, name: str = "Approver", **toggles) -> User:
         name=name,
         role="admin",
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         **toggles,
     )
     db.add(u)
@@ -62,7 +62,7 @@ def _bp(db: Session, user: User, *, customer: str = "TestCo") -> BuyPlan:
         customer_name=customer,
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -72,7 +72,7 @@ def _bp(db: Session, user: User, *, customer: str = "TestCo") -> BuyPlan:
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -207,7 +207,7 @@ def test_row_vm_carries_subject_type_and_id(db_session: Session) -> None:
 def test_pending_vs_resolved_split(db_session: Session) -> None:
     me = _user(db_session)
     bp = _bp(db_session, me)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pending = _seed(
         db_session,
         ApprovalGateType.BUY_PLAN,
@@ -239,7 +239,7 @@ def test_pending_vs_resolved_split(db_session: Session) -> None:
 def test_resolved_capped_at_10_and_coalesce_ordered(db_session: Session) -> None:
     me = _user(db_session)
     bp = _bp(db_session, me)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     approved_ids = []
     for i in range(12):
         ar = _seed(
@@ -496,7 +496,7 @@ def test_pending_capped_oldest_first(db_session, monkeypatch) -> None:
     monkeypatch.setattr(queue_mod, "PENDING_CAP", 2)
     me = _user(db_session)
     bp = _bp(db_session, me)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     oldest = _seed(
         db_session,
         ApprovalGateType.BUY_PLAN,

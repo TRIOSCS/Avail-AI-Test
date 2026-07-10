@@ -7,7 +7,7 @@ Covers:
 - TT-043: log_call_activity populates subject field
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ class TestCallActivitySubject:
         c = Company(
             name=name,
             is_active=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(c)
         db.flush()
@@ -41,7 +41,7 @@ class TestCallActivitySubject:
             company_id=company_id,
             site_name="HQ",
             contact_phone=phone,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(s)
         db.flush()

@@ -92,6 +92,7 @@ def test_submit_ticket_form_encoded(client):
         )
 
     assert resp.status_code == 200
+    assert "submitted" in resp.text.lower() or "TT-" in resp.text
 
 
 def test_submit_ticket_form_missing_message(client):
@@ -140,6 +141,7 @@ def test_submit_ticket_optional_fields_return_200(client, body):
     resp = _post_json(client, body)
 
     assert resp.status_code == 200
+    assert "submitted" in resp.text.lower() or "TT-" in resp.text
 
 
 def test_submit_ticket_with_screenshot(client):
@@ -153,7 +155,7 @@ def test_submit_ticket_with_screenshot(client):
             "app.routers.error_reports._generate_ai_summary",
             new_callable=AsyncMock,
         ),
-        patch("app.routers.error_reports._save_screenshot", return_value="/tmp/TT-1.png"),
+        patch("app.routers.error_reports._save_screenshot", return_value="/tmp/TT-1.png") as mock_save,
     ):
         resp = client.post(
             "/api/trouble-tickets/submit",
@@ -165,6 +167,37 @@ def test_submit_ticket_with_screenshot(client):
         )
 
     assert resp.status_code == 200
+    assert "submitted" in resp.text.lower() or "TT-" in resp.text
+    mock_save.assert_called_once()
+    assert mock_save.call_args.args[1] == small_png
+
+
+def test_submit_ticket_screenshot_write_failure_returns_500(client):
+    """P2.6: _save_screenshot now runs via asyncio.to_thread — an OSError raised on that
+    worker thread must still propagate back to the route's (PermissionError, OSError)
+    except clause (TT-0002), not be swallowed."""
+    import base64
+
+    small_png = base64.b64encode(b"\x89PNG\r\n" + b"\x00" * 50).decode()
+
+    with (
+        patch(
+            "app.routers.error_reports._generate_ai_summary",
+            new_callable=AsyncMock,
+        ),
+        patch("app.routers.error_reports._save_screenshot", side_effect=OSError("disk full")),
+    ):
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            json={
+                "description": "Screenshot attached",
+                "screenshot": small_png,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert resp.status_code == 500
+    assert "not writable" in resp.json()["error"]
 
 
 def test_submit_ticket_db_error_returns_500(client):

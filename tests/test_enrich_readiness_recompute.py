@@ -9,7 +9,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
@@ -32,7 +32,7 @@ def _cold_prospect_with_event_signals(db: Session) -> ProspectAccount:
             "hiring": {"type": "procurement"},
         },
         discovery_source="clay",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(p)
     db.commit()

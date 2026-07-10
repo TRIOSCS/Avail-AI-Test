@@ -5,7 +5,7 @@ A. Discovery → scoring → enrichment → claim → briefing
 B. Edge cases: dedup, concurrent claims, JSONB null handling, malformed data
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -246,7 +246,7 @@ class TestDismissFlow:
 
         p.status = "dismissed"
         p.dismissed_by = user.id
-        p.dismissed_at = datetime.now(timezone.utc)
+        p.dismissed_at = datetime.now(UTC)
         p.dismiss_reason = "not a fit"
         db_session.commit()
 
@@ -287,8 +287,8 @@ class TestExpireResurfaceFlow:
             domain="cyclecorp.com",
             readiness_score=30,
             readiness_signals={},
-            created_at=datetime.now(timezone.utc) - timedelta(days=120),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=90),
+            created_at=datetime.now(UTC) - timedelta(days=120),
+            last_enriched_at=datetime.now(UTC) - timedelta(days=90),
         )
 
         # Run expire
@@ -301,7 +301,7 @@ class TestExpireResurfaceFlow:
         # Simulate fresh signals arriving
         p.readiness_signals = {"intent": {"strength": "strong"}}
         p.readiness_score = 55
-        p.last_enriched_at = datetime.now(timezone.utc) - timedelta(days=5)
+        p.last_enriched_at = datetime.now(UTC) - timedelta(days=5)
         db_session.commit()
 
         # Run again — should resurface

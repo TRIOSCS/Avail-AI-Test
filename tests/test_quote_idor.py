@@ -12,7 +12,7 @@ Depends on: tests/conftest.py fixtures, app.main app
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -52,7 +52,7 @@ def _make_sales_user(db_session, email: str, azure_id: str) -> User:
         name=email.split("@")[0],
         role="sales",
         azure_id=azure_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(user)
     db_session.commit()
@@ -68,7 +68,7 @@ def _make_req_with_quote(db_session, owner: User, site: CustomerSite, tag: str) 
         status="open",
         customer_site_id=site.id,
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -83,7 +83,7 @@ def _make_req_with_quote(db_session, owner: User, site: CustomerSite, tag: str) 
         total_cost=0.0,
         total_margin_pct=0.0,
         created_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(quote)
     db_session.commit()
@@ -109,7 +109,7 @@ def test_sales_cannot_reach_other_sales_users_quote(db_session, test_customer_si
         unit_price=0.50,
         entered_by_id=user_b.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(offer_b)
     db_session.commit()

@@ -12,13 +12,14 @@ Proactive alerts:
   - Notifies admin users when a source transitions live → error
   - Warns when quota usage exceeds 80% or 95% of monthly_quota
 
-Depends on: app.models.config (ApiSource, ApiUsageLog), app.routers.sources (_get_connector_for_source)
+Depends on: app.models.config (ApiSource, ApiUsageLog), app.services.connector_registry
+    (get_connector_for_source)
 Called by: app.scheduler (health_check_ping, health_check_deep jobs)
 """
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from ..connectors.errors import (
 from ..connectors.sources import run_health_probe
 from ..constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
 from ..models.config import ApiSource, ApiUsageLog
+from .connector_registry import get_connector_for_source
 
 # Quota warning thresholds (percentage of monthly_quota)
 QUOTA_WARN_THRESHOLD = 80
@@ -147,10 +149,8 @@ def _get_connector(source: ApiSource, db: Session):
 
     Returns None if unavailable.
     """
-    from ..routers.sources import _get_connector_for_source
-
     try:
-        return _get_connector_for_source(source.name, db)
+        return get_connector_for_source(source.name, db)
     except Exception:
         logger.error("Failed to create connector for source '{}'", source.name, exc_info=True)
         return None
@@ -207,7 +207,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
     Updates source status, last_ping_at, last_error fields. Returns dict with success,
     elapsed_ms, error keys.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_status = source.status
     connector = _get_connector(source, db)
 
@@ -267,7 +267,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
     Writes an ApiUsageLog entry for every test. Updates source timing fields. Returns
     dict with success, results_count, elapsed_ms, error keys.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_status = source.status
     connector = _get_connector(source, db)
 

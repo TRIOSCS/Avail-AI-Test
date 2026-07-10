@@ -13,7 +13,7 @@ os.environ["TESTING"] = "1"
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -33,7 +33,7 @@ def ticket(db_session: Session, test_user: User) -> TroubleTicket:
         description="Something is broken",
         current_page="/v2/vendors",
         status="submitted",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(t)
     db_session.commit()

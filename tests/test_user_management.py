@@ -16,7 +16,7 @@ Called by: pytest
 Depends on: app.routers.admin.users, app.models (User, UserAdminAudit), conftest
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,7 +38,7 @@ def _make_user(db, *, email, role="buyer", name=None, is_active=True, azure_id=N
         is_active=is_active,
         azure_id=azure_id,
         last_login_at=last_login_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.commit()
@@ -94,9 +94,7 @@ class TestUsersContext:
         _make_user(db_session, email=_AGENT_EMAIL, role="agent")
         disabled = _make_user(db_session, email="off@trioscs.com", is_active=False)
         invited = _make_user(db_session, email="inv@trioscs.com")  # active, no azure_id, no login
-        active = _make_user(
-            db_session, email="on@trioscs.com", azure_id="az-1", last_login_at=datetime.now(timezone.utc)
-        )
+        active = _make_user(db_session, email="on@trioscs.com", azure_id="az-1", last_login_at=datetime.now(UTC))
 
         ctx = users_context(db_session)
         emails = [r["user"].email for r in ctx["rows"]]
@@ -584,14 +582,14 @@ def test_users_audit_template_renders():
     target = SimpleNamespace(name=None, email="target@trioscs.com")
     rows = [
         {
-            "when": datetime.now(timezone.utc),
+            "when": datetime.now(UTC),
             "actor": actor,
             "target": target,
             "action": UserAuditAction.ROLE_CHANGE,
             "detail": {"from": "buyer", "to": "trader"},
         },
         {
-            "when": datetime.now(timezone.utc),
+            "when": datetime.now(UTC),
             "actor": None,
             "target": None,
             "action": UserAuditAction.INVITE,

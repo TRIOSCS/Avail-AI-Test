@@ -18,7 +18,7 @@ Usage:
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -133,7 +133,7 @@ def _meter_usage(bucket: str, model_tier: str, usage: dict) -> None:
     try:
         from app.cache import intel_cache
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         prefix = f"claude_usage:{bucket}:{model_tier}"
         server_tool = usage.get("server_tool_use") or {}
         counters = {
@@ -163,6 +163,7 @@ async def claude_structured(
     timeout: int = 30,
     thinking_budget: int | None = None,
     cost_bucket: str | None = None,
+    max_attempts: int = 3,
 ) -> dict | None:
     """Call Claude with guaranteed-valid JSON output (Structured Outputs).
 
@@ -176,6 +177,12 @@ async def claude_structured(
         timeout: Request timeout seconds
         thinking_budget: If set, enable extended thinking with this token budget.
             Requires SMART tier (Sonnet). Increases max_tokens automatically.
+        max_attempts: Retry budget for transient errors (429/503/connect/timeout).
+            Defaults to 3 (unchanged behavior for existing callers). Interactive
+            HTTP-request-scoped callers (e.g. the AI-insights refresh endpoints,
+            P2.8) pass a tightened ``timeout`` + ``max_attempts=1`` so a slow
+            Claude call can't hold an HTMX request open for the full
+            timeout × retries worst case.
 
     Returns:
         Parsed dict conforming to schema, or None on failure
@@ -197,6 +204,7 @@ async def claude_structured(
         timeout=timeout,
         thinking_budget=thinking_budget,
         cost_bucket=cost_bucket,
+        max_attempts=max_attempts,
     )
     return result
 
@@ -212,6 +220,7 @@ async def claude_structured_with_usage(
     timeout: int = 30,
     thinking_budget: int | None = None,
     cost_bucket: str | None = None,
+    max_attempts: int = 3,
 ) -> tuple[dict | None, dict]:
     """Like :func:`claude_structured`, but also returns the raw token-usage dict.
 
@@ -220,6 +229,9 @@ async def claude_structured_with_usage(
     Callers that need to record spend (e.g. trouble-ticket diagnosis) use this;
     the plain :func:`claude_structured` wrapper preserves the original return
     contract for the 30+ existing callers.
+
+    ``max_attempts`` defaults to 3 (unchanged behavior). See
+    :func:`claude_structured`'s docstring for the interactive-caller use case.
     """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
@@ -250,7 +262,7 @@ async def claude_structured_with_usage(
     body["tools"] = [_structured_output_tool(schema)]
     body["tool_choice"] = {"type": "tool", "name": _STRUCTURED_OUTPUT_TOOL_NAME}
 
-    max_attempts = 3
+    max_attempts = max(1, max_attempts)
     for attempt in range(1, max_attempts + 1):
         try:
             with sentry_sdk.start_span(
@@ -647,7 +659,7 @@ async def claude_batch_results(
             return None
 
         # Parse JSONL results
-        parsed = {}
+        parsed: dict = {}
         for line in results_resp.text.strip().split("\n"):
             if not line.strip():
                 continue

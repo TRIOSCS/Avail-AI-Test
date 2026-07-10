@@ -20,7 +20,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context, op
 from app.config import Settings
-from app.models import Base  # noqa: F401 — imports all models via Base.metadata
+from app.models import Base
 
 
 # ── Idempotent op wrappers ─────────────────────────────────────────────

@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -71,7 +71,7 @@ def req_and_item(db_session: Session, test_user: User, test_customer_site):
         # that real precondition.
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -82,7 +82,7 @@ def req_and_item(db_session: Session, test_user: User, test_customer_site):
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=100,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -250,7 +250,7 @@ class TestSaveQuoteRevision:
             total_cost=250.0,
             total_margin_pct=50.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(old_quote)
         db_session.commit()
@@ -281,7 +281,7 @@ class TestSaveQuoteRevision:
             total_cost=50.0,
             total_margin_pct=50.0,
             created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(old_quote)
         db_session.commit()
@@ -329,7 +329,7 @@ class TestGetBuilderDataActiveOffer:
             status="active",
             unit_price=0.55,
             qty_available=500,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         inactive = Offer(
             requisition_id=req.id,
@@ -340,7 +340,7 @@ class TestGetBuilderDataActiveOffer:
             status="inactive",
             unit_price=0.60,
             qty_available=200,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add_all([active, inactive])
         db_session.commit()
@@ -365,7 +365,7 @@ class TestGetBuilderDataActiveOffer:
             }
         }
 
-        with patch("app.routers.crm._helpers._preload_last_quoted_prices", return_value=mock_prices):
+        with patch("app.services.quote_builder_service.preload_last_quoted_prices", return_value=mock_prices):
             result = get_builder_data(req.id, db_session)
 
         ph = result[0]["pricing_history"]

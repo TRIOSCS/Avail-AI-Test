@@ -4,7 +4,7 @@ Called by: the search history endpoint and the materials detail router.
 Depends on: MaterialCard, Offer, Sighting, Requirement, CustomerPartHistory, MaterialPriceSnapshot.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ def _make_card(db: Session, norm="lm317t", display="LM317T", mfr="TI") -> Materi
 
 
 def _make_user(db: Session, email="b1@trioscs.com", name="Buyer One") -> User:
-    u = User(email=email, name=name, role="buyer", azure_id=f"az-{email}", created_at=datetime.now(timezone.utc))
+    u = User(email=email, name=name, role="buyer", azure_id=f"az-{email}", created_at=datetime.now(UTC))
     db.add(u)
     db.commit()
     db.refresh(u)
@@ -56,7 +56,7 @@ def _make_offer(db: Session, card, req, user, status="active", vendor="Avnet") -
         unit_price=Decimal("4.10"),
         status=status,
         entered_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(o)
     db.commit()
@@ -76,7 +76,7 @@ def test_no_card_returns_not_found(db_session: Session):
 
 def test_soft_deleted_card_is_not_found(db_session: Session):
     card = _make_card(db_session)
-    card.deleted_at = datetime.now(timezone.utc)
+    card.deleted_at = datetime.now(UTC)
     db_session.commit()
     assert get_part_history(db_session, "lm317t").found is False
 
@@ -200,7 +200,7 @@ def test_price_trend_none_when_no_snapshots(db_session: Session):
 def test_price_trend_scoped_to_latest_currency(db_session: Session):
     """Min/max are scoped to the most-recent snapshot's currency, not mixed."""
     card = _make_card(db_session)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     # Older EUR snapshot (would skew an unscoped min/max); newest two are USD.
     db_session.add(
         MaterialPriceSnapshot(
@@ -257,7 +257,7 @@ def test_buyers_excludes_offers_with_null_entered_by(db_session: Session):
         unit_price=Decimal("1.0"),
         status="active",
         entered_by_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(o)
     db_session.commit()

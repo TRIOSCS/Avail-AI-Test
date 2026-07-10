@@ -6,7 +6,7 @@ Verifies:
 3. Backfill covers existing rows
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func
@@ -34,7 +34,7 @@ def user(db_session: Session) -> User:
         name="Buyer",
         role="buyer",
         azure_id="az-vnorm-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(u)
     db_session.commit()

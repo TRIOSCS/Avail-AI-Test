@@ -17,7 +17,7 @@ log_email_activity, app.models (Quote, Requisition, CustomerSite, SiteContact).
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import func
@@ -146,7 +146,7 @@ async def send_quote_email(
     # 5. Advance quote + EVERY contributing requisition's status.
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
-    quote.sent_at = datetime.now(timezone.utc)
+    quote.sent_at = datetime.now(UTC)
 
     from .activity_service import log_email_activity
     from .quote_requisitions import requisition_ids_for_quote
@@ -208,7 +208,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     DARK = "#282c30"
 
     validity = quote.validity_days or 7
-    now_ts = quote.sent_at or datetime.now(timezone.utc)
+    now_ts = quote.sent_at or datetime.now(UTC)
     expires = now_ts + timedelta(days=validity)
     expires_str = format_localdate(expires, "%B %d, %Y", tz=DEFAULT_DISPLAY_TZ)
     date_str = format_localdate(now_ts, "%B %d, %Y", tz=DEFAULT_DISPLAY_TZ)

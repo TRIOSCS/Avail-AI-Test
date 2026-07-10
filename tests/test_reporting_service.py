@@ -7,13 +7,13 @@ Called by: pytest
 Depends on: app.services.reporting_service, app.models, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────

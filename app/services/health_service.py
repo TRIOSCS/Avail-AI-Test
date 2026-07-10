@@ -4,7 +4,7 @@ Called by: main.py health endpoint
 Depends on: config.py settings
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from loguru import logger
@@ -29,8 +29,8 @@ def check_backup_freshness() -> str:
             raw = raw[:-1] + "+00:00"
         backup_time = datetime.fromisoformat(raw)
         if backup_time.tzinfo is None:
-            backup_time = backup_time.replace(tzinfo=timezone.utc)
-        age = datetime.now(timezone.utc) - backup_time
+            backup_time = backup_time.replace(tzinfo=UTC)
+        age = datetime.now(UTC) - backup_time
         if age < timedelta(hours=settings.backup_max_age_hours):
             return "ok"
         return "stale"

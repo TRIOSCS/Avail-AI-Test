@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 import app.routers.htmx.settings as st
 import app.routers.sources as rs
 from app.models import ApiSource
-from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+from tests.conftest import engine  # noqa: F401
 
 
 def _mk_active_source(db, name):

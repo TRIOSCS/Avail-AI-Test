@@ -7,7 +7,7 @@ Verifies:
 4. Cached responses returned on repeat calls
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -123,7 +123,7 @@ class TestMaterialListCache:
             display_mpn="NE555P",
             manufacturer="Texas Instruments",
             search_count=10,
-            last_searched_at=datetime.now(timezone.utc),
+            last_searched_at=datetime.now(UTC),
         )
         db_session.add(mc)
         db_session.commit()

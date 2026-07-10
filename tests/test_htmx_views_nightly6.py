@@ -17,7 +17,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -74,7 +74,7 @@ def _make_material_card(db: Session, mpn: str = "LM317T", crosses=None) -> Mater
         manufacturer="Texas Instruments",
         category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
         cross_references=crosses,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(mc)
     db.commit()
@@ -91,7 +91,7 @@ def _make_offer(db: Session, req: Requisition, user: User, mpn: str = "LM317T") 
         unit_price=0.75,
         entered_by_id=user.id,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(offer)
     db.commit()
@@ -113,7 +113,7 @@ def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
         customer_name="N6 Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -123,7 +123,7 @@ def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
         quote_number=f"Q-N6-{uuid.uuid4().hex[:6]}",
         status="draft",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -132,7 +132,7 @@ def _make_owned_buy_plan(db: Session, user: User) -> BuyPlan:
         quote_id=quote.id,
         requisition_id=req.id,
         status=BuyPlanStatus.DRAFT.value,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(plan)
     db.commit()
@@ -144,7 +144,7 @@ def _make_company(db: Session, name: str = "Acme Corp") -> Company:
     co = Company(
         name=name,
         is_active=True,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(co)
     db.commit()
@@ -178,7 +178,7 @@ def _make_proactive_match(
         mpn=mpn,
         match_score=80,
         status=ProactiveMatchStatus.NEW,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(pm)
     db.commit()
@@ -444,7 +444,7 @@ class TestAdminRoutes:
             emails=[],
             phones=[],
             sighting_count=0,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(vc2)
         db_session.commit()

@@ -13,7 +13,7 @@ Depends on: app.utils.claude_client.claude_structured, app.cache.intel_cache,
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ _CAP_KEY_PREFIX = "ai_screen:daily:"
 
 
 def _cap_key() -> str:
-    return _CAP_KEY_PREFIX + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return _CAP_KEY_PREFIX + datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 # ── JSON Schema for claude_structured ───────────────────────────────────────
@@ -314,7 +314,7 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
                 "evidence": [],
                 "confidence": 0,
                 "model": "none",
-                "screened_at": datetime.now(timezone.utc).isoformat(),
+                "screened_at": datetime.now(UTC).isoformat(),
                 "needs_more_enrichment": True,
             }
             ed["ai_screen"] = verdict_dict
@@ -339,7 +339,7 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
         if verdict == "pass" and trio_score < settings.ai_screen_min_match:
             verdict = "screened_out"
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         verdict_dict = {
             "trio_match_score": trio_score,
             "opportunity_score": opp_score,
@@ -381,6 +381,6 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
         )
         return verdict_dict
 
-    except Exception as exc:  # noqa: BLE001 — fire-and-forget; never propagate
+    except Exception as exc:
         logger.warning("AI screen failed for prospect {}: {}", prospect.id, exc)
         return {"verdict": "error", "rationale": str(exc)}

@@ -6,7 +6,7 @@ flipping the test user's role and reassigning ownership to another user, then as
 mutating endpoints return 404.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ def _other_requirement(db_session, admin_user):
         customer_name="Other Co",
         status="open",
         created_by=admin_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -40,7 +40,7 @@ def _other_requirement(db_session, admin_user):
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()

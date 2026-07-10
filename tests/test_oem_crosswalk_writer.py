@@ -8,7 +8,7 @@ Resolution payloads mirror the recorded fixtures in tests/fixtures/oem_crosswalk
 """
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
@@ -73,7 +73,7 @@ def _row(
         confidence=confidence,
         source_url=f"https://{domain}/Search.aspx?SearchText={spare}",
         source_domain=domain,
-        looked_up_at=datetime.now(timezone.utc),
+        looked_up_at=datetime.now(UTC),
     )
     db.add(row)
     db.flush()

@@ -11,11 +11,12 @@ Depends on: llm_router, queue model
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import SearchQueueStatus
 from app.utils.normalization import normalize_mpn_key
 
 # Cooldown after API failure to avoid hammering a broken endpoint
@@ -177,7 +178,7 @@ class AIGate:
 
         model = self.queue_model
         order_by = self._order_by if self._order_by is not None else [model.created_at.asc()]
-        pending = db.query(model).filter(model.status == "pending").order_by(*order_by).limit(30).all()
+        pending = db.query(model).filter(model.status == SearchQueueStatus.PENDING).order_by(*order_by).limit(30).all()
 
         if not pending:
             return
@@ -192,8 +193,8 @@ class AIGate:
                 item.commodity_class = commodity
                 item.gate_decision = decision
                 item.gate_reason = f"[cached] {reason}"
-                item.status = "queued" if decision == "search" else "gated_out"
-                item.updated_at = datetime.now(timezone.utc)
+                item.status = SearchQueueStatus.QUEUED if decision == "search" else SearchQueueStatus.GATED_OUT
+                item.updated_at = datetime.now(UTC)
                 logger.debug("AI gate cache hit: {} -> {}", item.mpn, decision)
             else:
                 uncached.append(item)
@@ -218,8 +219,8 @@ class AIGate:
                         item.commodity_class = "unknown"
                         item.gate_decision = "search"
                         item.gate_reason = "AI gate unavailable — defaulting to search"
-                        item.status = "queued"
-                        item.updated_at = datetime.now(timezone.utc)
+                        item.status = SearchQueueStatus.QUEUED
+                        item.updated_at = datetime.now(UTC)
                     break  # Stop processing further batches during this cycle
 
                 # Build a lookup by MPN. Skip elements with no usable 'mpn' — indexing
@@ -241,8 +242,8 @@ class AIGate:
                         item.commodity_class = "unknown"
                         item.gate_decision = "search"
                         item.gate_reason = "AI gate: no classification returned — defaulting to search"
-                        item.status = "queued"
-                        item.updated_at = datetime.now(timezone.utc)
+                        item.status = SearchQueueStatus.QUEUED
+                        item.updated_at = datetime.now(UTC)
                         continue
 
                     decision = "search" if classification[self.search_field] else "skip"
@@ -252,8 +253,8 @@ class AIGate:
                     item.commodity_class = commodity
                     item.gate_decision = decision
                     item.gate_reason = reason
-                    item.status = "queued" if decision == "search" else "gated_out"
-                    item.updated_at = datetime.now(timezone.utc)
+                    item.status = SearchQueueStatus.QUEUED if decision == "search" else SearchQueueStatus.GATED_OUT
+                    item.updated_at = datetime.now(UTC)
 
                     # Cache the classification
                     cache_key = self._cache_key(item)

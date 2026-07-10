@@ -6,7 +6,7 @@ cache kept fresh by bump_clocks_from_activity() (real-time) and these
 functions (nightly self-healing backstop).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -46,9 +46,9 @@ def bump_clocks_from_activity(db: Session, activity: ActivityLog) -> None:
         field = "last_reply_at"
     else:
         return
-    when = activity.occurred_at or activity.created_at or datetime.now(timezone.utc)
+    when = activity.occurred_at or activity.created_at or datetime.now(UTC)
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
+        when = when.replace(tzinfo=UTC)
     for model, fk in _CLOCK_TARGETS:
         _advance(db, model, getattr(activity, fk), field, when)
 

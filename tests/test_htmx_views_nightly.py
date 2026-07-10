@@ -12,7 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,7 +41,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
         customer_name="Nightly Corp",
         status=RequisitionStatus.OPEN,
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requisition(**defaults)
@@ -56,7 +56,7 @@ def _requirement(db: Session, req: Requisition, mpn="LM317T", **kw) -> Requireme
         primary_mpn=mpn,
         target_qty=100,
         sourcing_status=SourcingStatus.OPEN,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Requirement(**defaults)
@@ -71,7 +71,7 @@ def _vendor(db: Session, name="Test Vendor", **kw) -> VendorCard:
         display_name=name,
         emails=[],
         phones=[],
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = VendorCard(**defaults)
@@ -89,7 +89,7 @@ def _offer(db: Session, req: Requisition, vendor: VendorCard, **kw) -> Offer:
         qty_available=500,
         unit_price=0.25,
         status=OfferStatus.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Offer(**defaults)
@@ -106,7 +106,7 @@ def _quote(db: Session, req: Requisition, user: User, **kw) -> Quote:
         quote_number=f"Q-{uuid.uuid4().hex[:8].upper()}",
         status=QuoteStatus.DRAFT,
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = Quote(**defaults)
@@ -136,7 +136,7 @@ def _material_card(db: Session, mpn="TEST-MPN-001", **kw) -> MaterialCard:
         normalized_mpn=mpn,
         display_mpn=mpn,
         manufacturer="TestCo",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = MaterialCard(**defaults)
@@ -181,7 +181,7 @@ def _prospect(db: Session, domain="example.com", **kw) -> ProspectAccount:
         status="suggested",
         fit_score=60,
         readiness_score=55,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     defaults.update(kw)
     obj = ProspectAccount(**defaults)

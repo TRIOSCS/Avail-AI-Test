@@ -16,7 +16,7 @@ Depends on: claude_client, ai_email_parser, models/email_intelligence
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -133,7 +133,7 @@ def store_email_intelligence(
     conversation_id: str | None,
     classification: dict,
     parsed_quotes: dict | None = None,
-) -> "EmailIntelligence":
+) -> EmailIntelligence:
     """Persist AI classification result to email_intelligence table.
 
     Args:
@@ -186,7 +186,7 @@ def store_email_intelligence(
         conversation_id=conversation_id,
         auto_applied=auto_applied,
         needs_review=needs_review,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(record)
     db.flush()
@@ -631,7 +631,7 @@ async def extract_durable_facts(
         from app.services.knowledge_service import create_entry
 
         created = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         seven_days_ago = now - timedelta(days=7)
 
         for fact in result["facts"]:

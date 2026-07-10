@@ -25,11 +25,18 @@ jobs:
     # nightly too) — don't burn ~12 runner-minutes re-running it every night.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Suite has grown to ~13.8k tests; locally it runs in ~2.5 min, but the
-    # 2-vCPU GitHub runner takes longer. 15-min was being exceeded before the
-    # suite could finish (~32% complete at the 15-min mark). 25 leaves room for
-    # the suite to grow without immediate re-tuning.
+    # P2.3 (docs/CODE_AUDIT_AND_HARDENING_PLAN.md): the 22.7k-test suite needed
+    # ~24 min on a 2-vCPU runner and the timeout had been re-tuned three times
+    # as the suite grew (15 → 25 → 40). Sharded into a 2-way matrix via
+    # scripts/ci_shard.py (deterministic sorted-file round-robin — see that
+    # script's header) so each shard carries ~half the pytest wall-clock;
+    # 25 min = ~12 min of test-running headroom plus the one-time setup/gate
+    # cost that shard 0 alone still pays (see the per-step `if:` gates below).
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     services:
       postgres:
         image: postgres:16
@@ -84,11 +91,15 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Verify requirements lockfiles are in sync
-        # requirements*.txt are COMPILED from requirements*.in via pip-tools (pinned
-        # in requirements-dev.txt). Recompile WITHOUT --upgrade — existing pins are
-        # kept, so a fresh PyPI release never counts as drift — and fail if the
-        # committed lock changed, i.e. a .in was edited without recompiling, or a
-        # .txt was hand-edited. Keeps installs reproducible.
+        # Environment-consistency check, not a per-test-shard concern — runs
+        # once (shard 0) so a lockfile drift fails the run without being
+        # checked twice. requirements*.txt are COMPILED from requirements*.in
+        # via pip-tools (pinned in requirements-dev.txt). Recompile WITHOUT
+        # --upgrade — existing pins are kept, so a fresh PyPI release never
+        # counts as drift — and fail if the committed lock changed, i.e. a
+        # .in was edited without recompiling, or a .txt was hand-edited.
+        # Keeps installs reproducible.
+        if: matrix.shard == 0
         run: |
           pip-compile --no-header --no-strip-extras --quiet requirements.in
           pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
@@ -99,12 +110,17 @@ jobs:
           echo "Lockfiles in sync with .in sources."
 
       - name: Install frontend dependencies
+        if: matrix.shard == 0
         run: npm ci
 
       - name: Run pre-commit checks (files changed vs base)
         # Scope to files this branch changed, not --all-files, so pre-existing
         # drift in untouched files never blocks a PR. $GITHUB_BASE_REF is a
         # built-in env var (PR base branch; empty on push) — no template input.
+        # P2.3: runs on shard 0 ONLY — pre-commit hooks are per-repo, not
+        # per-test-file, so running them again on shard 1 would just be the
+        # same hooks against the same diff a second time.
+        if: matrix.shard == 0
         run: |
           if [ -n "$GITHUB_BASE_REF" ]; then
             git fetch -q origin "$GITHUB_BASE_REF"
@@ -116,9 +132,27 @@ jobs:
           pre-commit run --from-ref "$base" --to-ref HEAD --show-diff-on-failure
 
       - name: Lint with ruff
+        if: matrix.shard == 0
         run: ruff check app/ tests/
 
+      - name: Assertion-theater lint (ratchet vs baseline)
+        # P2.4: scripts/lint_assertion_theater.py flags a test whose ONLY
+        # assertion is a bare `status_code == 200` / `is not None` check.
+        # Ratchet model: scripts/assertion_theater_baseline.txt pins the
+        # pre-existing offenders (P6.1 backfill burns it down); only NEW
+        # violations fail. Whole-tree scan — changed-files scoping proved
+        # useless the moment a mechanical sweep touched every test file.
+        # To shrink the baseline after fixing tests:
+        #   python scripts/lint_assertion_theater.py tests \
+        #     --baseline scripts/assertion_theater_baseline.txt --write-baseline
+        # Shard 0 only (same rationale as pre-commit).
+        if: matrix.shard == 0
+        run: |
+          python scripts/lint_assertion_theater.py tests \
+            --baseline scripts/assertion_theater_baseline.txt
+
       - name: No raw DDL outside Alembic
+        if: matrix.shard == 0
         run: |
           # Fail if app/ code executes raw DDL (schema-altering statements).
           # Only alembic/versions/ files may use DDL.
@@ -142,6 +176,7 @@ jobs:
           echo "No raw DDL found outside Alembic — OK"
 
       - name: Validate Alembic migrations
+        if: matrix.shard == 0
         env:
           TESTING: "1"
           PYTHONPATH: ${{ github.workspace }}
@@ -160,6 +195,7 @@ jobs:
           "
 
       - name: Alembic upgrade + schema-drift gate (fresh DB)
+        if: matrix.shard == 0
         env:
           DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
           SECRET_KEY: ci-secret-key
@@ -182,6 +218,7 @@ jobs:
           python scripts/check_schema_matches_models.py
 
       - name: Alembic single-step downgrade smoke test (no cascade)
+        if: matrix.shard == 0
         env:
           DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
           SECRET_KEY: ci-secret-key
@@ -198,25 +235,34 @@ jobs:
           alembic upgrade head
 
       - name: Frontend build
+        if: matrix.shard == 0
         run: npm run build
 
       - name: Frontend tests
+        if: matrix.shard == 0
         run: npm run test:frontend
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (shard ${{ matrix.shard }})
         env:
           TESTING: "1"
           PYTHONPATH: ${{ github.workspace }}
+          # Unique coverage DATA file per shard (not a report) so parallel
+          # matrix jobs never clobber each other; the coverage-report job
+          # below combines both into one gated report. -n auto (xdist) still
+          # applies within THIS shard's file subset via pytest.ini's addopts.
+          COVERAGE_FILE: .coverage.${{ matrix.shard }}
         # -q not -v: ~21k tests at -v stream megabytes of log the 2-vCPU runner
-        # has to flush (a measurable slice of the ~9m step); failures still show
-        # full detail via --tb=short. --cov-report=term (not term-missing): the
-        # per-line miss dump belongs in coverage.xml, not thousands of log lines.
-        # fail-under=85: actual coverage sits ~94%; the old 50 could never fire.
+        # has to flush; failures still show full detail via --tb=short.
+        # --cov-report= (no report here): a partial shard's line coverage is
+        # meaningless in isolation (a file fully covered by the OTHER shard's
+        # tests looks "uncovered" here) — --cov-fail-under is enforced once,
+        # post-merge, in the coverage-report job.
         run: |
-          pytest tests/ -q --tb=short \
-            --cov=app --cov-report=term --cov-report=xml:coverage.xml \
-            --cov-fail-under=85 \
-            --junitxml=test-results.xml
+          FILES=$(python scripts/ci_shard.py ${{ matrix.shard }} 2)
+          echo "Shard ${{ matrix.shard }} running $(echo "$FILES" | wc -w) file(s)."
+          pytest $FILES -q --tb=short \
+            --cov=app --cov-report= \
+            --junitxml=test-results-${{ matrix.shard }}.xml
 
       - name: Redis integration tests
         # Exercises the REAL redis-py client against the `redis` service above —
@@ -225,23 +271,135 @@ jobs:
         # redis-py-breaking change (the redis-py 8.0 / #227 scenario) before it
         # ships. Uses INTEGRATION_REDIS_URL because conftest.py blanks REDIS_URL
         # for test isolation; -o addopts="" drops the suite-wide xdist/ignore opts.
+        # Shard 0 only — this is a fixed, single-file integration check, not
+        # part of the sharded unit-test split.
+        if: matrix.shard == 0
         env:
           INTEGRATION_REDIS_URL: redis://localhost:6379/0
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest tests/integration/test_redis_integration.py -v -o addopts=""
 
-      - name: Upload test results
+      - name: Upload test results (shard ${{ matrix.shard }})
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results
+          # Shard-scoped artifact name — P2.3 requires this so the two
+          # matrix jobs' results never clobber each other.
+          name: test-results-${{ matrix.shard }}
           # Debugging artifacts go stale in days; the default 90-day retention
           # just accumulates storage.
           retention-days: 14
           path: |
-            test-results.xml
-            coverage.xml
+            test-results-${{ matrix.shard }}.xml
+
+      - name: Upload coverage data (shard ${{ matrix.shard }})
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-${{ matrix.shard }}
+          retention-days: 14
+          path: .coverage.${{ matrix.shard }}
+          # Coverage data files are dotfiles; upload-artifact silently skips
+          # hidden files by default, which orphans the coverage-report job.
+          include-hidden-files: true
+
+  coverage-report:
+    # P2.3 follow-up: merges the per-shard coverage DATA files (uploaded as
+    # shard-scoped artifacts above, so nothing clobbers) back into ONE report
+    # so --cov-fail-under=85 still evaluates against the WHOLE suite, not
+    # each half in isolation. Runs even if a shard failed its pytest step
+    # (`always()`) so the coverage gate itself still reports accurately, but
+    # is a no-op (skipped download -> combine fails loudly) if a shard never
+    # produced its data file.
+    needs: test
+    # Skip (not fail) when the shards were cancelled — a superseding push
+    # cancels in-progress shards via the concurrency group, and a combine
+    # against artifacts that were never uploaded is pure noise, not signal.
+    if: always() && needs.test.result != 'cancelled' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install coverage (pinned lock version)
+        run: pip install "coverage[toml]==7.14.1"
+
+      - name: Download shard 0 coverage data
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-data-0
+
+      - name: Download shard 1 coverage data
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-data-1
+
+      - name: Combine + enforce coverage gate
+        run: |
+          coverage combine .coverage.0 .coverage.1
+          coverage xml -o coverage.xml
+          coverage report --fail-under=85
+
+      - name: Upload merged coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-merged
+          retention-days: 14
+          path: coverage.xml
+
+  docker-build:
+    # P2.2 (docs/CODE_AUDIT_AND_HARDENING_PLAN.md): `docker build` was never
+    # exercised in CI before this job — the first-ever build of a release
+    # image was the production deploy itself (deploy.yml calls `docker
+    # compose build` against the release tag). This job builds BOTH
+    # Dockerfiles as a required PR gate: the prod image (app /
+    # enrichment-worker, same `Dockerfile` deploy.sh uses) and
+    # Dockerfile.tooling (P1.4's split-out gh+Chromium image), so the latter
+    # can't rot un-noticed since nothing in docker-compose.yml ever builds it.
+    # BUILD_COMMIT mirrors deploy.sh's own cache-bust arg (short sha + unix
+    # time) purely so this job exercises the exact same Dockerfile ARG path
+    # production uses; nothing here is pushed or tagged anywhere.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute BUILD_COMMIT (mirrors deploy.sh)
+        run: echo "BUILD_COMMIT=$(git rev-parse --short HEAD)-$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Build production image (Dockerfile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          build-args: |
+            BUILD_COMMIT=${{ env.BUILD_COMMIT }}
+          # GHA-hosted layer cache, scoped per-Dockerfile so the tooling
+          # build below doesn't evict this one's cache or vice versa.
+          cache-from: type=gha,scope=app-image
+          cache-to: type=gha,mode=max,scope=app-image
+
+      - name: Build tooling image (Dockerfile.tooling)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.tooling
+          push: false
+          cache-from: type=gha,scope=tooling-image
+          cache-to: type=gha,mode=max,scope=tooling-image
 
   postgres-paths:
     # PG-only code paths — pg_trgm similarity(), the FTS `search_vector @@

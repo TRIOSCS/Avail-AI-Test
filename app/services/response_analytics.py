@@ -14,7 +14,7 @@ Called by: scheduler.py (planned), routers/emails.py (dashboard)
 Depends on: models (VendorCard, VendorResponse, EmailIntelligence, ActivityLog)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from statistics import median
 
 from loguru import logger
@@ -55,7 +55,7 @@ def compute_vendor_response_metrics(db: Session, vendor_card_id: int, lookback_d
     if not vendor:
         return _empty_metrics()
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
     # Count outbound RFQs to this vendor
     outreach_count = (
@@ -274,7 +274,7 @@ def update_vendor_email_health(db: Session, vendor_card_id: int, lookback_days: 
     health = compute_email_health_score(db, vendor_card_id, lookback_days)
 
     vendor.email_health_score = health["email_health_score"]
-    vendor.email_health_computed_at = datetime.now(timezone.utc)
+    vendor.email_health_computed_at = datetime.now(UTC)
     vendor.response_rate = health["metrics"]["response_rate"]
     vendor.quote_quality_rate = health["metrics"]["quote_quality_rate"]
 
@@ -294,7 +294,7 @@ def batch_update_email_health(db: Session, lookback_days: int = 90, limit: int =
     """
     from app.models import VendorCard
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
     vendors = (
         db.query(VendorCard.id)
@@ -345,7 +345,7 @@ def get_email_intelligence_dashboard(db: Session, user_id: int, days: int = 7) -
     """
     from app.models import EmailIntelligence, VendorCard, VendorContact
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
 
     # Emails scanned in window
     emails_scanned = (

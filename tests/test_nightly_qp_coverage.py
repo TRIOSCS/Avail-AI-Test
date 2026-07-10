@@ -10,7 +10,7 @@ test_user), test_c2a_gates helpers
 
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,8 +88,8 @@ class TestSectionApproved:
         from unittest.mock import MagicMock
 
         qp = MagicMock(spec=QualityPlan)
-        qp.sales_section_reviewed_at = datetime.now(timezone.utc) if sales_reviewed else None
-        qp.purchasing_section_reviewed_at = datetime.now(timezone.utc) if purchasing_reviewed else None
+        qp.sales_section_reviewed_at = datetime.now(UTC) if sales_reviewed else None
+        qp.purchasing_section_reviewed_at = datetime.now(UTC) if purchasing_reviewed else None
         return qp
 
     def test_sales_order_not_reviewed(self):
@@ -133,7 +133,7 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         customer_name="NQPCo",
         status="active",
         created_by=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -144,7 +144,7 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
         line_items=[],
         status="sent",
         created_by_id=owner.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()
@@ -260,7 +260,7 @@ class TestQpRouteErrorPaths:
     def test_patch_sales_when_already_reviewed_is_noop(self, _qp_client, db_session: Session):
         """PATCH on a reviewed (locked) section must not overwrite data."""
         client, _user, qp = _qp_client
-        qp.sales_section_reviewed_at = datetime.now(timezone.utc)
+        qp.sales_section_reviewed_at = datetime.now(UTC)
         db_session.commit()
         r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "IGNORED"})
         assert r.status_code == 200

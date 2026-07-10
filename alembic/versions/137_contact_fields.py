@@ -17,7 +17,7 @@ Backfills first_name/last_name from existing full_name by splitting on the first
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy import text
@@ -25,9 +25,9 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "137_contact_fields"
-down_revision: Union[str, None] = "136_company_links"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "136_company_links"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

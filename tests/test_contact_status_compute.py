@@ -11,7 +11,7 @@ Covers:
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -37,7 +37,7 @@ class TestContactStatusCompute:
             full_name=name,
             contact_status=status,
             is_active=True,
-            created_at=datetime.now(timezone.utc) - timedelta(days=created_days_ago),
+            created_at=datetime.now(UTC) - timedelta(days=created_days_ago),
         )
         db.add(sc)
         db.flush()
@@ -49,17 +49,17 @@ class TestContactStatusCompute:
             activity_type="email_sent",
             channel="email",
             site_contact_id=contact_id,
-            created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+            created_at=datetime.now(UTC) - timedelta(days=days_ago),
         )
         db.add(al)
         db.flush()
         return al
 
     def _make_site(self, db):
-        co = Company(name="Test Co", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name="Test Co", is_active=True, created_at=datetime.now(UTC))
         db.add(co)
         db.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc))
+        site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(UTC))
         db.add(site)
         db.flush()
         return site

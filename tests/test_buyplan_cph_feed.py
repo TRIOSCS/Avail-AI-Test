@@ -3,7 +3,7 @@
 Called by: pytest. Depends on: buyplan_workflow, purchase_history_service.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
@@ -60,7 +60,7 @@ def _completed_plan(db, *, line_specs, so="SO-1"):
         status=BuyPlanStatus.COMPLETED.value,
         so_status=SOVerificationStatus.APPROVED.value,
         sales_order_number=so,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     db.add(plan)
     db.flush()

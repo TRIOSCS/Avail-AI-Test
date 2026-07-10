@@ -74,12 +74,16 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-    </svg>
-    <p class="mt-3 text-sm font-medium text-gray-600">No email intelligence records found</p>
-    <p class="text-xs text-gray-400 mt-1">Emails are scanned automatically by the background scheduler.</p>
-  </div>
+  {% with
+    message="No email intelligence records found",
+    message_class="mt-3 text-sm font-medium text-gray-600",
+    description="Emails are scanned automatically by the background scheduler.",
+    description_class="text-xs text-gray-400 mt-1",
+    wrapper_class="bg-white rounded-lg border border-brand-200 p-6 sm:p-8 text-center",
+    icon_class="mx-auto h-12 w-12 text-gray-300",
+    icon_path="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+  %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+  {% endwith %}
   {% endif %}
 </div>

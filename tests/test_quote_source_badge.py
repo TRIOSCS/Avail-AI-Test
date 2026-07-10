@@ -11,19 +11,21 @@ import pytest
 
 os.environ["TESTING"] = "1"
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_TEMPLATE_DIR = os.path.join(_REPO_ROOT, "app", "templates")
+from app.template_env import templates
 
 
 @pytest.fixture(scope="module")
-def jinja_env():
-    env = Environment(
-        loader=FileSystemLoader(_TEMPLATE_DIR),
-        autoescape=True,
-    )
-    return env
+def jinja_env() -> Environment:
+    # P5.1: quotes/detail.html now imports shared/_macros.html (for the
+    # lazy_body macro) — that file's other macros use custom filters
+    # (|timeago, etc.) that Jinja validates at import/compile time, not just
+    # call time, so a bare Environment(loader=FileSystemLoader(...)) with no
+    # filters registered fails to even compile the template. Reuse the app's
+    # real singleton template environment (app.template_env.templates.env) so
+    # this test always has the same filters/globals production rendering does.
+    return templates.env
 
 
 class _FakeQuote:

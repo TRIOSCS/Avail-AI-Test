@@ -1,14 +1,34 @@
 #!/bin/bash
 # ================================================================
-#  AvailAI — One-Shot Deploy Script
+#  AvailAI — First-Time Server Bootstrap Script (P1.6)
+#
+#  IMPORTANT: this is NOT the deploy script. It is a one-shot
+#  provisioner for a brand-new, empty Ubuntu 24.04 DigitalOcean
+#  droplet: installs Docker, clones the repo, collects .env/Caddy
+#  settings interactively, and does an initial `docker compose down`
+#  + `up -d --build`.
+#
+#  For every deploy AFTER the server already exists, use the
+#  repo-root deploy script instead: `./deploy.sh` (commit + push +
+#  rebuild + health-check + verify — see CLAUDE.md). Running THIS
+#  script against an already-provisioned server will prompt to
+#  overwrite .env/Caddyfile and run `docker compose down`, which
+#  takes prod offline — do not confuse the two.
+#
+#  Renamed from scripts/deploy.sh (P1.6): two files both named
+#  "deploy.sh" (this one, and the real repo-root ./deploy.sh) with
+#  wildly different behavior was an operator-mixup hazard — an
+#  accidental invocation of this script against a live prod server
+#  takes it down via `docker compose down`.
+#
 #  Run this on a fresh Ubuntu 24.04 DigitalOcean droplet.
 #
 #  Usage:
 #    ssh root@YOUR_SERVER_IP
-#    curl -sSL https://raw.githubusercontent.com/YOUR_USER/availai/main/scripts/deploy.sh | bash
+#    curl -sSL https://raw.githubusercontent.com/YOUR_USER/availai/main/scripts/bootstrap-server.sh | bash
 #
 #    OR if you already cloned the repo:
-#    bash scripts/deploy.sh
+#    bash scripts/bootstrap-server.sh
 # ================================================================
 set -e
 
@@ -20,7 +40,7 @@ NC='\033[0m'
 
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  AvailAI — Deployment Script${NC}"
+echo -e "${BLUE}  AvailAI — Server Bootstrap Script${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -232,7 +252,7 @@ if docker compose ps | grep -q "running"; then
     echo -e "    View logs:      ${GREEN}docker compose logs -f app${NC}"
     echo -e "    Restart:        ${GREEN}docker compose restart${NC}"
     echo -e "    Stop:           ${GREEN}docker compose down${NC}"
-    echo -e "    Update code:    ${GREEN}cd /root/availai && git pull && docker compose up -d --build${NC}"
+    echo -e "    Deploy updates: ${GREEN}./deploy.sh${NC}  (repo-root — NOT this script)"
     echo ""
 else
     echo ""

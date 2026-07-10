@@ -468,7 +468,14 @@ async def scrape_website_contacts(url: str) -> dict:
         url = "https://" + url
     url = url.rstrip("/")
 
-    # Extract domain for cache key
+    # Extract domain for cache key.
+    # TODO: not yet migrated onto the shared, validated
+    # app.utils.normalization.parse_website_domain — this is a cache-key derivation
+    # only (never persisted, never surfaced as a validated domain to the user), and
+    # its blanket .replace("www.", "") has a different (accepted) risk profile than a
+    # user-facing save path; migrating needs its own verification of the cache-key
+    # stability this function's 7-day TTL depends on. Out of scope for the
+    # company_import_service / sightings consolidation this note accompanies.
     try:
         domain = url.split("//", 1)[1].split("/")[0].lower().replace("www.", "")
     except IndexError:

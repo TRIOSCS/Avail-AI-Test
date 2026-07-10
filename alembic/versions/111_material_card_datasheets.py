@@ -1,6 +1,6 @@
 """material_card_datasheets table + datasheet stamp columns on material_cards."""
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 
@@ -8,8 +8,8 @@ from alembic import op
 
 revision = "111_material_card_datasheets"
 down_revision = "110_crm_cadence_clocks"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

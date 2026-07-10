@@ -94,7 +94,7 @@ async def run(*, commit: bool, limit, max_web_calls: int, csv_path: str, db=None
                 )
                 if consecutive_claude_errors >= 5:
                     aborted = True
-            except Exception as e:  # noqa: BLE001 — a single bad card must not abort the run
+            except Exception as e:
                 consecutive_claude_errors = 0
                 logger.warning("BACKFILL: {} failed: {}", card.display_mpn, type(e).__name__)
                 status = "error"

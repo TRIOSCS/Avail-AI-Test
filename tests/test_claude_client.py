@@ -719,6 +719,41 @@ class TestClaudeStructuredAdditional:
         body = mock_http.post.call_args.kwargs["json"]
         assert body["model"] == MODELS["fast"]
 
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_max_attempts_default_unchanged(self, mock_http, mock_cred):
+        """Default max_attempts=3 preserves the pre-P2.8 retry budget for every existing
+        caller that doesn't pass the new kwarg."""
+        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+
+        with pytest.raises(ClaudeRateLimitError):
+            await claude_structured("test", {"type": "object"})
+        assert mock_http.post.await_count == 3
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_max_attempts_one_no_retry(self, mock_http, mock_cred):
+        """P2.8: interactive callers pass max_attempts=1 — a single 429 raises
+        immediately with no retry/backoff sleep (keeps the HTTP request short)."""
+        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+
+        with pytest.raises(ClaudeRateLimitError):
+            await claude_structured("test", {"type": "object"}, max_attempts=1)
+        assert mock_http.post.await_count == 1
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_interactive_timeout_and_max_attempts_forwarded_to_post(self, mock_http, mock_cred):
+        """Timeout + max_attempts both reach the underlying http.post call."""
+        mock_http.post = AsyncMock(return_value=_tool_use_response({"ok": True}))
+
+        result = await claude_structured("test", {"type": "object"}, timeout=25, max_attempts=1)
+        assert result == {"ok": True}
+        assert mock_http.post.call_args.kwargs["timeout"] == 25
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  claude_text — additional coverage (tools, system, model tiers)

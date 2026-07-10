@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func
@@ -114,9 +114,9 @@ def _ladder_set(
     incoming = {
         "tier": tier_for(source),
         "confidence": min(max(float(confidence or 0.0), 0.0), 1.0),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
-    prior = overlay.get(key)
+    prior = overlay.get(key)  # type: ignore[arg-type]  # legacy Column-model ORM noise
     if prior is None:
         # First touch: the write=False twin runs the full ladder against the card's
         # REAL columns (incl. the legacy-NULL-provenance floor).
@@ -126,7 +126,7 @@ def _ladder_set(
         # apply mode would compare against the written provenance.
         won = resolve(prior, incoming)
     if won:
-        overlay[key] = {**incoming, "value": normalize_brand_name(db, str(value))}
+        overlay[key] = {**incoming, "value": normalize_brand_name(db, str(value))}  # type: ignore[index]  # legacy Column-model ORM noise
     return won
 
 
@@ -152,7 +152,14 @@ def _pass_b1(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
         tally["scanned"] += 1
         try:
             won = _ladder_set(
-                db, card, "brand", card.manufacturer, "legacy_backfill", 0.5, apply=apply, overlay=overlay
+                db,
+                card,
+                "brand",
+                card.manufacturer,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+                "legacy_backfill",
+                0.5,
+                apply=apply,
+                overlay=overlay,
             )
         except Exception:
             tally["failed"] += 1
@@ -272,7 +279,7 @@ def _final_state(db: Session, card: MaterialCard, attr: str, *, apply: bool, ove
     """(value, source, tier) a card ends with — overlay-aware so the dry-run report
     shows the post---apply state."""
     if not apply:
-        entry = overlay.get((card.id, attr))
+        entry = overlay.get((card.id, attr))  # type: ignore[arg-type]  # legacy Column-model ORM noise
         if entry is not None:
             # Simulated win: source is implied by the tier; report the overlay value.
             return entry["value"], f"(simulated, tier {entry['tier']})", entry["tier"]

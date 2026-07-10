@@ -18,7 +18,7 @@ Depends on: conftest (db_session), app.routers.approvals, app.models.approvals,
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -42,7 +42,7 @@ def _make_user(db: Session, *, can_approve: bool = True) -> User:
         role="admin",
         azure_id=f"azure-bridge-{uuid.uuid4().hex[:8]}",
         can_approve_buy_plans=can_approve,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -55,7 +55,7 @@ def _make_buy_plan(db: Session, user: User, *, status: str = "pending") -> BuyPl
         customer_name="BridgeCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
@@ -66,7 +66,7 @@ def _make_buy_plan(db: Session, user: User, *, status: str = "pending") -> BuyPl
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(quote)
     db.flush()

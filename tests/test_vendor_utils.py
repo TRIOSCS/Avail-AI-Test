@@ -1,12 +1,14 @@
 """Tests for app.vendor_utils — vendor name normalization, merging, and fuzzy
 matching."""
 
+from datetime import UTC
 from unittest.mock import MagicMock
 
 import pytest
 
 from app.vendor_utils import (
     find_vendor_dedup_candidates,
+    fuzzy_dedup_scan,
     fuzzy_match_vendor,
     merge_emails_into_card,
     merge_phones_into_card,
@@ -228,12 +230,77 @@ class TestFuzzyMatchVendor:
         assert len(results) <= 1  # empty/whitespace candidates should be skipped
 
 
+# ── fuzzy_dedup_scan ──────────────────────────────────────────────────
+
+
+class TestFuzzyDedupScan:
+    """P4.4: the shared rapidfuzz scan behind vendor_duplicates._fuzzy_match_python
+    (anchor mode) and company_utils._find_company_dedup_candidates_rapidfuzz (pairwise
+    mode)."""
+
+    def test_empty_rows_pairwise_mode(self):
+        assert fuzzy_dedup_scan([], lambda r: r) == []
+
+    def test_empty_rows_anchor_mode(self):
+        assert fuzzy_dedup_scan([], lambda r: r, anchor_key="anything") == []
+
+    def test_pairwise_threshold_boundary_included_at_exact_score(self):
+        from rapidfuzz import fuzz
+
+        rows = ["arrow electronics", "arrow electronic"]
+        score = fuzz.token_sort_ratio(rows[0], rows[1])
+
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=score)
+        assert results == [(rows[0], rows[1], score)]
+
+    def test_pairwise_threshold_boundary_excluded_just_above_score(self):
+        from rapidfuzz import fuzz
+
+        rows = ["arrow electronics", "arrow electronic"]
+        score = fuzz.token_sort_ratio(rows[0], rows[1])
+
+        assert fuzzy_dedup_scan(rows, lambda r: r, threshold=score + 0.01) == []
+
+    def test_pairwise_zero_threshold_scans_every_pair(self):
+        rows = ["a", "b", "c", "d"]  # single-char rows never score >= any real threshold
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=0)
+        assert len(results) == 6  # C(4, 2) unordered pairs, all pass threshold=0
+
+    def test_pairwise_cap_stops_scan_early(self):
+        rows = [f"arrow electronics variant {i}" for i in range(10)]
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=50, limit=3)
+        assert len(results) == 3
+
+    def test_pairwise_no_limit_does_not_truncate(self):
+        rows = [f"arrow electronics variant {i}" for i in range(10)]
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=50)
+        assert len(results) > 3  # every matching pair collected, no cap applied
+
+    def test_anchor_mode_returns_row_none_score_tuples(self):
+        rows = ["Arrow Electronics", "Totally Unrelated Company Name"]
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=80, anchor_key="Arrow Electronics")
+        assert len(results) == 1
+        row, other, score = results[0]
+        assert row == "Arrow Electronics"
+        assert other is None
+        assert score >= 80
+
+    def test_anchor_mode_ignores_limit_scans_every_row(self):
+        rows = [f"Arrow Electronics {i}" for i in range(10)]
+        results = fuzzy_dedup_scan(rows, lambda r: r, threshold=50, limit=2, anchor_key="Arrow Electronics")
+        assert len(results) == 10  # caller sorts/truncates afterward; scan itself never caps
+
+    def test_anchor_mode_below_threshold_excluded(self):
+        rows = ["Totally Unrelated Company Name"]
+        assert fuzzy_dedup_scan(rows, lambda r: r, threshold=80, anchor_key="Arrow Electronics") == []
+
+
 # ── find_vendor_dedup_candidates ─────────────────────────────────────
 
 
 class TestFindVendorDedupCandidates:
     def test_finds_similar_vendors(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -242,19 +309,19 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=100,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electronic",
                 display_name="Arrow Electronic",
                 sighting_count=5,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="mouser electronics",
                 display_name="Mouser Electronics",
                 sighting_count=50,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -272,7 +339,7 @@ class TestFindVendorDedupCandidates:
         assert "sightings" in pair["vendor_a"]
 
     def test_no_duplicates_when_all_distinct(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -281,13 +348,13 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="texas instruments",
                 display_name="Texas Instruments",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -297,7 +364,7 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_respects_limit(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -308,7 +375,7 @@ class TestFindVendorDedupCandidates:
                     normalized_name=f"test vendor {i}",
                     display_name=f"Test Vendor {i}",
                     sighting_count=10,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db_session.commit()
@@ -321,7 +388,7 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_results_sorted_by_score(self, db_session):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -330,19 +397,19 @@ class TestFindVendorDedupCandidates:
                 normalized_name="arrow electronics",
                 display_name="Arrow Electronics",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electronic",
                 display_name="Arrow Electronic",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="arrow electro",
                 display_name="Arrow Electro",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -356,7 +423,7 @@ class TestFindVendorDedupCandidates:
         """Line 195: when a pair has already been seen, it is skipped."""
         # This tests the `continue` on line 195 — pairs are deduplicated
         # by checking (min_id, max_id) tuples
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VendorCard
 
@@ -366,13 +433,13 @@ class TestFindVendorDedupCandidates:
                 normalized_name="test company alpha",
                 display_name="Test Company Alpha",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
             VendorCard(
                 normalized_name="test company alpha inc",
                 display_name="Test Company Alpha Inc",
                 sighting_count=10,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             ),
         ]
         db_session.add_all(cards)
@@ -465,9 +532,13 @@ class TestEnrichWithVendorCards:
 
         results = _make_results([_make_sighting("BrandNew Vendor Inc")])
         self._enrich(results, db_session)
-        # A new VendorCard should have been created
+        # A new VendorCard should have been created, normalized, and linked back to
+        # the sighting's rendered vendor_card summary.
         card = db_session.query(VendorCard).filter(VendorCard.display_name == "BrandNew Vendor Inc").first()
         assert card is not None
+        assert card.normalized_name == "brandnew vendor"
+        assert card.sighting_count == 1
+        assert results["ABC123"]["sightings"][0]["vendor_card"]["card_id"] == card.id
 
     def test_blacklisted_vendor_filtered_out(self, db_session):
         self._make_card(db_session, "bad vendor", "Bad Vendor", is_blacklisted=True)

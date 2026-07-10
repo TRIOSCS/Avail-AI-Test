@@ -8,7 +8,7 @@ Handles what happens when a salesperson claims a prospect:
 5. Enrichment status polling
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func
@@ -128,9 +128,6 @@ def _link_or_create_company(prospect: ProspectAccount, owner_id: int, db: Sessio
     default_site = CustomerSite(company_id=company.id, site_name="HQ")
     db.add(default_site)
     db.flush()
-    from app.cache.decorators import invalidate_prefix
-
-    invalidate_prefix("companies_typeahead")
     prospect.company_id = company.id
     return "new_company", None
 
@@ -145,7 +142,6 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     Returns: {prospect_id, company_id, company_name, status, path, warning}
     Raises: ValueError for invalid state transitions or cooldown block.
     """
-    from datetime import timezone as _tz
 
     from ..dependencies import is_manager_or_admin
 
@@ -169,8 +165,8 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
         blocked_until = prospect.reclaim_blocked_until
         if blocked_until is not None:
             if blocked_until.tzinfo is None:
-                blocked_until = blocked_until.replace(tzinfo=_tz.utc)
-            if blocked_until > datetime.now(_tz.utc):
+                blocked_until = blocked_until.replace(tzinfo=UTC)
+            if blocked_until > datetime.now(UTC):
                 raise ValueError("This account is in a 30-day cooldown; ask a manager to reassign it.")
 
     if _active_account_count(db, user_id) >= ACCOUNT_CAP:
@@ -184,7 +180,7 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     # Update prospect status
     prospect.status = ProspectAccountStatus.CLAIMED
     prospect.claimed_by = user_id
-    prospect.claimed_at = datetime.now(timezone.utc)
+    prospect.claimed_at = datetime.now(UTC)
 
     # Set enrichment status to pending
     ed = dict(prospect.enrichment_data or {})
@@ -258,7 +254,7 @@ def assign_prospect(prospect_id: int, to_user_id: int, by_user: User, db: Sessio
 
     prospect.status = ProspectAccountStatus.CLAIMED
     prospect.claimed_by = to_user_id
-    prospect.claimed_at = datetime.now(timezone.utc)
+    prospect.claimed_at = datetime.now(UTC)
     # A manager assignment ends any sweep cooldown — the account has left the pool.
     prospect.reclaim_blocked_until = None
     ed = dict(prospect.enrichment_data or {})
@@ -354,7 +350,7 @@ def dismiss_prospect(prospect_id: int, user_id: int, db: Session, *, reason: str
 
     prospect.status = ProspectAccountStatus.DISMISSED
     prospect.dismissed_by = user_id
-    prospect.dismissed_at = datetime.now(timezone.utc)
+    prospect.dismissed_at = datetime.now(UTC)
     prospect.dismiss_reason = (reason or "other").strip()[:255]
     db.commit()
 
@@ -414,7 +410,7 @@ def mark_prospect_converted(prospect_id: int, user_id: int, db: Session) -> bool
 
     prospect.status = ProspectAccountStatus.CONVERTED
     ed = dict(prospect.enrichment_data or {})
-    ed["converted_at"] = datetime.now(timezone.utc).isoformat()
+    ed["converted_at"] = datetime.now(UTC).isoformat()
     ed["converted_by"] = user_id
     prospect.enrichment_data = ed
     db.commit()
@@ -458,7 +454,7 @@ def send_company_to_prospecting(
 
     try:
         company.account_owner_id = None
-        company.ownership_cleared_at = datetime.now(timezone.utc)
+        company.ownership_cleared_at = datetime.now(UTC)
 
         prospect_id: int | None = None
         pool_prospect: ProspectAccount | None = None
@@ -739,17 +735,17 @@ async def trigger_deep_enrichment_bg(prospect_id: int) -> None:
         ed["contacts_created"] = contacts_created
         if briefing:
             ed["briefing"] = briefing
-        ed["deep_enrichment_at"] = datetime.now(timezone.utc).isoformat()
+        ed["deep_enrichment_at"] = datetime.now(UTC).isoformat()
         prospect.enrichment_data = ed
-        prospect.last_enriched_at = datetime.now(timezone.utc)
+        prospect.last_enriched_at = datetime.now(UTC)
         db.commit()
 
         # Also update the Company's deep_enrichment_at
         if prospect.company_id:
             company = db.get(Company, prospect.company_id)
             if company:
-                company.deep_enrichment_at = datetime.now(timezone.utc)
-                company.last_enriched_at = datetime.now(timezone.utc)
+                company.deep_enrichment_at = datetime.now(UTC)
+                company.last_enriched_at = datetime.now(UTC)
                 db.commit()
 
         logger.info(

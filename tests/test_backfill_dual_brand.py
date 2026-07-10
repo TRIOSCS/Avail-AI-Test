@@ -13,6 +13,8 @@ Depends on: conftest.py (db_session), MaterialCard + FruLink + Manufacturer mode
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from sqlalchemy.orm import Session
 
 from app.constants import FruLinkKind
@@ -157,7 +159,7 @@ def test_b1_trims_whitespace_before_the_oem_membership_test(db_session: Session)
 def test_backfill_skips_soft_deleted_cards(db_session: Session):
     # Facet queries exclude deleted cards, so the backfill must neither write to them
     # nor count them in the operator's go/no-go tallies — across all three passes.
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _seed_manufacturers(db_session)
     card = _card(
@@ -165,7 +167,7 @@ def test_backfill_skips_soft_deleted_cards(db_session: Session):
         "DEL0001",
         manufacturer="IBM",
         description="HDD, 4TB 7.2K SAS, Seagate",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
     )
     _mfg_link(db_session, "del0001", "Seagate")
 

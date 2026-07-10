@@ -122,13 +122,54 @@ jobs:
             fi
 
             echo "ERROR: app not healthy — rolling back code + DB to $PREV"
+
+            # P1.3: take a safety dump of the DB as it stands right now — BEFORE
+            # we overwrite it with the pre-deploy backup below — so whatever got
+            # written during this deploy's failed window (migrations that did
+            # run, any user writes against the new schema) isn't just discarded.
+            # Mirrors scripts/restore.sh's pre-restore safety-dump pattern
+            # (dump-before-destructive-op, best-effort, loud logging) using this
+            # workflow's own `avail_*.sql` naming so it's swept by the existing
+            # retention cleanup like any other dump here.
+            RTS=$(date +%Y%m%d_%H%M%S)
+            SAFETY_DUMP="/root/backups/avail_prerollback_${RTS}.sql"
+            if docker compose exec -T db pg_dump --clean --if-exists -U availai availai \
+                 > "$SAFETY_DUMP" 2>/dev/null && [ -s "$SAFETY_DUMP" ]; then
+              echo "Pre-rollback safety dump: ${SAFETY_DUMP} ($(du -h "$SAFETY_DUMP" | cut -f1)) — this preserves the DB exactly as the failed deploy left it."
+            else
+              echo "WARNING: pre-rollback safety dump failed or is empty — the current DB state (any writes made during the failed deploy window) will NOT be recoverable once the restore below runs."
+              rm -f "$SAFETY_DUMP" 2>/dev/null || true
+              SAFETY_DUMP=""
+            fi
+
             git reset --hard "$PREV"
             docker compose build --build-arg BUILD_COMMIT="rb-$(date +%s)" app enrichment-worker
-            docker compose up -d
+            # Scoped to app + enrichment-worker + caddy (matches the build above,
+            # plus caddy) — NOT a bare `docker compose up -d`. `git reset --hard`
+            # just rewound docker-compose.yml AND the Caddyfile to $PREV; caddy's
+            # config is part of deploys (Caddyfile mount, no build step of its own),
+            # so it must revert alongside the code or a deploy that changed caddy
+            # config but failed leaves caddy running the broken config. db/redis/
+            # db-backup stay excluded (stateful services, config rarely deploy-
+            # coupled) — exactly the blast-radius P1.3 flagged.
+            docker compose up -d app enrichment-worker caddy
+            # NOTE: whether the failed deploy actually ran/committed a forward
+            # migration isn't observable from this script (that decision lives
+            # inside docker-entrypoint.sh, several process boundaries away), so
+            # this restore stays unconditional rather than guessing. The safety
+            # dump above is what makes that an acceptable default: nothing is
+            # unrecoverable, just downgraded to "restore it by hand if needed."
             if docker compose exec -T db psql -U availai -d availai < /root/backups/avail_${TS}.sql; then
-              echo "Database restore completed"
+              echo "Database restore completed (pre-deploy state from avail_${TS}.sql)"
+              if [ -n "$SAFETY_DUMP" ]; then
+                echo "NOTICE: any DB writes made between deploy start and this rollback were just discarded from the live database."
+                echo "NOTICE: they are recoverable from the pre-rollback safety dump: ${SAFETY_DUMP}"
+              fi
             else
               echo "CRITICAL: Database restore failed"
+              if [ -n "$SAFETY_DUMP" ]; then
+                echo "NOTICE: pre-rollback safety dump is still available at: ${SAFETY_DUMP}"
+              fi
             fi
             sleep 10
             if [ "$(container_health)" = healthy ]; then

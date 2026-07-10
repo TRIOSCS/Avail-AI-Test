@@ -54,15 +54,15 @@ _mod138 = _load("138_general_tasks.py")
 # ---------------------------------------------------------------------------
 
 
-def _noop_fk(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_fk(*args, **kwargs):
     """No-op replacement for create_foreign_key on SQLite."""
 
 
-def _noop_constraint(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_constraint(*args, **kwargs):
     """No-op replacement for drop_constraint / create_check_constraint on SQLite."""
 
 
-def _noop_alter_column(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+def _noop_alter_column(*args, **kwargs):
     """No-op replacement for alter_column nullability changes on SQLite.
 
     SQLite does not support ALTER TABLE ... ALTER COLUMN ... DROP/SET NOT NULL.

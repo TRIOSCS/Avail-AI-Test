@@ -1,0 +1,10 @@
+[Unit]
+Description=AvailAI backup-verify failure alert (OnFailure= target of avail-backup-verify.service, P1.5)
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/availai
+ExecStart=/root/availai/scripts/backup-verify-alert.sh
+StandardOutput=journal
+StandardError=journal

@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures (db_session), app models
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_part_unavailability import VendorPartUnavailability
@@ -68,7 +68,7 @@ def _make_record(db_session, condition, vendor_norm="good vendor", mpn_norm="tes
         normalized_mpn=mpn_norm,
         condition=condition,
         reason="sold_elsewhere",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(rec)
     return rec

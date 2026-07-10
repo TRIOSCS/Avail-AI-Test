@@ -10,7 +10,7 @@ test_user, test_company)
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,13 +45,13 @@ class TestHoursUntil:
         assert _hours_until(None) is None
 
     def test_future_close_at_positive(self):
-        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        future = datetime.now(UTC) + timedelta(hours=2)
         result = _hours_until(future)
         assert result is not None
         assert 1.9 < result < 2.1
 
     def test_past_close_at_negative(self):
-        past = datetime.now(timezone.utc) - timedelta(hours=3)
+        past = datetime.now(UTC) - timedelta(hours=3)
         result = _hours_until(past)
         assert result is not None
         assert -3.1 < result < -2.9
@@ -141,7 +141,7 @@ def _make_list(db: Session, owner: User, company: Company, status: str = ExcessL
         owner_id=owner.id,
         status=status,
         total_line_items=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(el)
     db.flush()
@@ -158,7 +158,7 @@ def _make_line(db: Session, el: ExcessList, mpn: str = "LM317T") -> ExcessLineIt
         part_number=mpn,
         quantity=10,
         status="available",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(item)
     db.flush()

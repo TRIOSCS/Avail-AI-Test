@@ -7,7 +7,7 @@ Called by: services/proactive_matching.py, services/proactive_service.py, router
 Depends on: models/intelligence.py, config.py
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from ..models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
 def _throttle_cutoff(days: int | None) -> datetime:
     """Earliest last_offered_at that still counts as throttled (now - throttle window)."""
     throttle_days = days or settings.proactive_throttle_days
-    return datetime.now(timezone.utc) - timedelta(days=throttle_days)
+    return datetime.now(UTC) - timedelta(days=throttle_days)
 
 
 def is_do_not_offer(db: Session, mpn: str, company_id: int) -> bool:

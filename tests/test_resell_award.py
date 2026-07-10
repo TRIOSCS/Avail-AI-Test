@@ -18,6 +18,7 @@ Depends on: app.services.excess_service, app.routers.resell, tests.conftest
 
 from __future__ import annotations
 
+from datetime import UTC
 from decimal import Decimal
 
 import pytest
@@ -461,10 +462,10 @@ class TestUnawardOfferService:
     ):
         """A closed (close_at stamped) list that was awarded steps back to bid_out on
         unaward, not to the pre-close collecting."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         excess_list.status = ExcessListStatus.BID_OUT
-        excess_list.close_at = datetime.now(timezone.utc)
+        excess_list.close_at = datetime.now(UTC)
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )

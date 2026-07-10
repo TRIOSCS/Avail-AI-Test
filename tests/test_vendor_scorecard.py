@@ -4,7 +4,7 @@ Called by: pytest
 Depends on: conftest fixtures, unittest.mock
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def _make_vendor(db: Session, **overrides) -> VendorCard:
         "sighting_count": 0,
         "domain": "vendor.com",
         "domain_aliases": [],
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     vc = VendorCard(**defaults)
@@ -49,7 +49,7 @@ def _make_user(db: Session) -> User:
         name="SC Test",
         role="buyer",
         azure_id="sc-test-001",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
@@ -62,7 +62,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
         customer_name="Test Customer",
         status="open",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(r)
     db.flush()
@@ -79,7 +79,7 @@ def _add_contacts(db: Session, vc: VendorCard, user: User, req: Requisition, cou
                 contact_type="email",
                 vendor_name=vc.display_name,
                 vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
     db.flush()
@@ -98,7 +98,7 @@ def _add_offers(db: Session, vc: VendorCard, user: User, req: Requisition, count
             unit_price=0.50,
             entered_by_id=user.id,
             status="active",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(o)
         db.flush()
@@ -190,7 +190,7 @@ class TestComputeVendorScorecard:
             vr = VendorResponse(
                 vendor_email=f"sales{i}@vendor.com",
                 status="parsed",
-                received_at=datetime.now(timezone.utc),
+                received_at=datetime.now(UTC),
             )
             db_session.add(vr)
         db_session.flush()
@@ -235,7 +235,7 @@ class TestComputeVendorScorecard:
                 vendor_card_id=vc.id,
                 user_id=user.id,
                 rating=rating,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db_session.add(r)
         db_session.flush()
@@ -255,7 +255,7 @@ class TestComputeVendorScorecard:
         vr = VendorResponse(
             vendor_email="auto@vendor.com",
             status="noise",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()
@@ -274,7 +274,7 @@ class TestComputeVendorScorecard:
         vr = VendorResponse(
             vendor_email="reply@vendor.co.uk",
             status="parsed",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
         db_session.add(vr)
         db_session.flush()

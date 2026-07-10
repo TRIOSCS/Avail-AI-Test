@@ -11,7 +11,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ def basic_req(db_session: Session, test_user: User) -> Requisition:
         customer_name="Test Co",
         status="open",
         created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(req)
     db_session.flush()
@@ -38,7 +38,7 @@ def basic_req(db_session: Session, test_user: User) -> Requisition:
         requisition_id=req.id,
         primary_mpn="LM317T",
         target_qty=10,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(item)
     db_session.commit()
@@ -58,7 +58,7 @@ class TestQueryDbForPartEdgeCases:
             normalized_mpn="LM317T",
             mpn_matched="LM317T",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -81,7 +81,7 @@ class TestQueryDbForPartEdgeCases:
             normalized_mpn="LM317T",
             mpn_matched="LM317T",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
         db_session.commit()
@@ -106,7 +106,7 @@ class TestQueryDbForPartEdgeCases:
             normalized_mpn="LM317T",
             mpn_matched="LM317T",
             source_type="api",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(s)
 
@@ -115,7 +115,7 @@ class TestQueryDbForPartEdgeCases:
             normalized_mpn="LM317T",
             display_mpn="LM317T",
             manufacturer="TI",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(card)
         db_session.flush()
@@ -123,7 +123,7 @@ class TestQueryDbForPartEdgeCases:
             material_card_id=card.id,
             vendor_name="Arrow Electronics",
             times_seen=3,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db_session.add(hist)
         db_session.commit()

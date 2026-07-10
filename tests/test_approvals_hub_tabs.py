@@ -18,7 +18,7 @@ Depends on: conftest (db_session, test_user), app.routers.htmx.{approvals_hub,bu
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -82,11 +82,11 @@ def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement
         customer_name="AcmeCo",
         status="active",
         created_by=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(req)
     db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(timezone.utc))
+    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
     db.add(rq)
     db.flush()
     q = Quote(
@@ -95,7 +95,7 @@ def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement
         line_items=[],
         status="sent",
         created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(q)
     db.flush()
@@ -112,7 +112,7 @@ def _plan(db: Session, req: Requisition, q: Quote, *, status: str) -> BuyPlan:
         total_cost=1000.0,
         total_revenue=2000.0,
         total_margin_pct=50.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(bp)
     db.flush()
@@ -145,7 +145,7 @@ def _pending_verify_line(db: Session, bp: BuyPlan, rq: Requirement, user: User) 
         buyer_id=user.id,
         status=BuyPlanLineStatus.PENDING_VERIFY.value,
         po_number="PO-9",
-        po_confirmed_at=datetime.now(timezone.utc),
+        po_confirmed_at=datetime.now(UTC),
     )
     db.add(line)
     db.flush()
@@ -390,7 +390,7 @@ def _resolved_prepay_request(
     to *pp_status* (paid/void) so the Prepayment tab's Recently-resolved section
     reflects the closure state."""
     ar, pp, _line = _rich_prepay_request(db, bp, rq, user)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ar.status = ApprovalRequestStatus.APPROVED.value
     ar.resolved_at = now
     recip = db.query(ApprovalStepRecipient).join(ApprovalStep).filter(ApprovalStep.request_id == ar.id).one()
@@ -561,7 +561,7 @@ def test_prepayment_resolved_row_is_self_documenting(hub_client: TestClient, db_
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     ar, _pp, _line = _rich_prepay_request(db_session, bp, rq, test_user)
     # Approve it directly (flip request + recipient decision) so it lands in Recently-resolved.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ar.status = ApprovalRequestStatus.APPROVED.value
     ar.resolved_at = now
     recip = db_session.query(ApprovalStepRecipient).join(ApprovalStep).filter(ApprovalStep.request_id == ar.id).one()
@@ -646,7 +646,7 @@ def _other_user(db: Session) -> User:
         name="Other Owner",
         role="sales",
         azure_id=f"az-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(u)
     db.flush()
