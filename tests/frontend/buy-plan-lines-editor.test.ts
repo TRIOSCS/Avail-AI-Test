@@ -61,6 +61,7 @@ function row(overrides: Record<string, any> = {}) {
     description: 'Resistor 10k',
     offerId: '',
     vendorName: null,
+    unitCost: null,
     qty: '',
     sell: '',
     locked: false,
@@ -121,6 +122,46 @@ describe('buyPlanLinesEditor (real factory)', () => {
       expect(m.rowState(row({ lineId: null, offerId: '1', qty: '0' })).hasQty).toBe(false);
       expect(m.rowState(row({ lineId: null, offerId: '1', qty: '-1' })).hasQty).toBe(false);
     });
+
+    it('a fractional qty (e.g. 2.5) on an otherwise-complete row is invalid, not complete', () => {
+      const m = makeEditor();
+      const state = m.rowState(row({ lineId: 4, offerId: '9', qty: '2.5' }));
+      expect(state.hasQty).toBe(false);
+      expect(state.hasOffer).toBe(true);
+      expect(state.complete).toBe(false);
+      expect(state.skip).toBe(false); // has an offer, so it's not an untouched scratch row
+    });
+
+    it('a whole-number qty passed as a numeric (not string) value is still valid', () => {
+      const m = makeEditor();
+      expect(m.rowState(row({ lineId: 4, offerId: '9', qty: 3 })).hasQty).toBe(true);
+    });
+
+    it("a row whose CURRENT offer id is stale (not in the active offers map) still classifies as complete — rowState doesn't consult offersByReq", () => {
+      const m = makeEditor(1, [], { 100: [{ id: 77, vendorName: 'New Vendor', unitPrice: 1.5 }] });
+      const staleRow = row({ lineId: 9, requirementId: 100, offerId: '55', qty: '4', vendorName: 'Old Vendor', unitCost: 2.75 });
+      expect(m.rowState(staleRow)).toMatchObject({ hasOffer: true, hasQty: true, complete: true, skip: false });
+    });
+  });
+
+  describe('unitCostFor() — falls back to the row seed when the offer is not in the active map', () => {
+    it('prefers the ACTIVE offer price when the row offer is in offersByReq', () => {
+      const m = makeEditor(1, [], { 100: [{ id: 77, vendorName: 'Vendor A', unitPrice: 1.25 }] });
+      const r = row({ requirementId: 100, offerId: '77', unitCost: 9.99 });
+      expect(m.unitCostFor(r)).toBe(1.25);
+    });
+
+    it('falls back to row.unitCost when the offer id has no match in offersByReq (locked or stale offer)', () => {
+      const m = makeEditor(1, [], { 100: [{ id: 77, vendorName: 'Vendor A', unitPrice: 1.25 }] });
+      const lockedRow = row({ requirementId: 100, offerId: '999', locked: true, unitCost: 4.5 });
+      expect(m.unitCostFor(lockedRow)).toBe(4.5);
+    });
+
+    it('returns null when neither the active map nor the row seed has a cost', () => {
+      const m = makeEditor(1, [], {});
+      const r = row({ requirementId: 100, offerId: '999', unitCost: null });
+      expect(m.unitCostFor(r)).toBeNull();
+    });
   });
 
   describe('invalidRows / canSave gating', () => {
@@ -132,6 +173,12 @@ describe('buyPlanLinesEditor (real factory)', () => {
 
     it('flags a non-locked row with qty < 1 as invalid', () => {
       const m = makeEditor(1, [row({ lineId: 1, offerId: '9', qty: '0' })]);
+      expect(m.invalidRows).toHaveLength(1);
+      expect(m.canSave).toBe(false);
+    });
+
+    it('flags a non-locked row with a fractional qty as invalid — client-side, before any 400 round-trip', () => {
+      const m = makeEditor(1, [row({ lineId: 1, offerId: '9', qty: '2.5' })]);
       expect(m.invalidRows).toHaveLength(1);
       expect(m.canSave).toBe(false);
     });
@@ -209,6 +256,14 @@ describe('buyPlanLinesEditor (real factory)', () => {
       expect(payload.lines[0]).not.toHaveProperty('line_id');
     });
 
+    it('a row whose current offer is stale (not in the active offers map) still posts that SAME unchanged offer id — a no-op resend, never dropped or blanked', () => {
+      const m = makeEditor(1, [
+        row({ lineId: 9, requirementId: 100, offerId: '55', qty: '4', vendorName: 'Old Vendor', unitCost: 2.75 }),
+      ], { 100: [{ id: 77, vendorName: 'New Vendor', unitPrice: 1.5 }] });
+      const payload = m.buildPayload();
+      expect(payload.lines).toEqual([{ line_id: 9, quantity: 4, unit_sell: null, offer_id: 55 }]);
+    });
+
     it('known_line_ids equals the mount-snapshot ids — including a later soft-removed line and a locked line — and ignores a new unsaved row', () => {
       const m = makeEditor(1, [
         row({ lineId: 1, offerId: '9', qty: '5' }),
@@ -248,16 +303,21 @@ describe('buyPlanLinesEditor (real factory)', () => {
     });
   });
 
-  describe('addVendorRow / addLineFromPicker', () => {
+  describe('addVendorRow / addLineFromPicker (single offer-render path — #5)', () => {
     it('addVendorRow pushes a correctly-shaped blank scratch row for the given part', () => {
       const m = makeEditor(1, []);
       m.addVendorRow(300, 'XYZ999', 'Capacitor');
       expect(m.rows).toHaveLength(1);
       expect(m.rows[0]).toMatchObject({
         lineId: null, requirementId: 300, mpn: 'XYZ999', description: 'Capacitor',
-        offerId: '', qty: '', sell: '', locked: false, removed: false,
+        offerId: '', unitCost: null, qty: '', sell: '', locked: false, removed: false,
       });
       expect(m.rows[0]._uid).toBeTruthy();
+    });
+
+    it('the old dataset-driven onPickerOfferChange handler is gone — the bottom picker is now a plain part-select driving newPart.reqId directly', () => {
+      const m = makeEditor(1, []);
+      expect(m.onPickerOfferChange).toBeUndefined();
     });
 
     it('addLineFromPicker no-ops when offer, requirement, or qty is missing', () => {
@@ -267,15 +327,24 @@ describe('buyPlanLinesEditor (real factory)', () => {
       expect(m.rows).toHaveLength(0);
     });
 
-    it('addLineFromPicker pushes a fully-shaped new row from the addableParts lookup and resets the picker', () => {
-      const m = makeEditor(1, [], {}, [{ id: 300, mpn: 'XYZ999', description: 'Capacitor' }]);
+    it('addLineFromPicker pushes a fully-shaped new row from newPart.reqId set directly by the part <select> (x-model), via the addableParts lookup, and resets the picker', () => {
+      // Mirrors the new template flow: the part <select x-model="newPart.reqId"> sets
+      // reqId directly (no dataset extraction), then the offer <select> sourced from
+      // offersFor(newPart.reqId) sets newPart.offerId.
+      const m = makeEditor(1, [], { 300: [{ id: 11, vendorName: 'Vendor A', unitPrice: 1.1 }] }, [
+        { id: 300, mpn: 'XYZ999', description: 'Capacitor' },
+      ]);
       m.showAddLine = true;
-      m.newPart = { reqId: '300', offerId: '11', qty: '5', sell: '2.5' };
+      m.newPart.reqId = '300'; // set by the part <select>'s x-model
+      expect(m.offersFor(m.newPart.reqId)).toEqual([{ id: 11, vendorName: 'Vendor A', unitPrice: 1.1 }]);
+      m.newPart.offerId = '11'; // set by the offer <select>'s x-model
+      m.newPart.qty = '5';
+      m.newPart.sell = '2.5';
       m.addLineFromPicker();
       expect(m.rows).toHaveLength(1);
       expect(m.rows[0]).toMatchObject({
         lineId: null, requirementId: 300, mpn: 'XYZ999', description: 'Capacitor',
-        offerId: '11', qty: '5', sell: '2.5', locked: false, removed: false,
+        offerId: '11', unitCost: null, qty: '5', sell: '2.5', locked: false, removed: false,
       });
       expect(m.newPart).toEqual({ reqId: '', offerId: '', qty: '', sell: '' });
       expect(m.showAddLine).toBe(false);

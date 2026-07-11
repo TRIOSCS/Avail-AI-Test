@@ -61,6 +61,7 @@
       'description': desc,
       'offerId': line.offer_id,
       'vendorName': line.offer.vendor_name if line.offer else None,
+      'unitCost': (line.unit_cost|float) if line.unit_cost is not none else None,
       'qty': line.quantity,
       'sell': (line.unit_sell|float) if line.unit_sell is not none else None,
       'locked': line.has_cut_po,
@@ -78,9 +79,10 @@
       }) %}
     {% endfor %}
   {% endfor %}
-  {# Requirements that have at least one active offer — the single "addable" universe,
-     computed once and reused by both the addable_parts seed (below) and the bottom
-     "+ Add line" part picker (its own {% if can_edit_lines %} block further down). #}
+  {# Requirements that have at least one active offer — feeds the addable_parts seed
+     below, which is the SINGLE addable universe both the inline "+ Add vendor" and the
+     bottom "+ Add line" picker read client-side via addableParts/offersFor (#5 — no
+     more server-rendered optgroups duplicating this list). #}
   {% set reqs_with_offers = plan_requirements | selectattr('id', 'in', offers_by_requirement.keys()) | list %}
   {% set addable_parts = [] %}
   {% for req in reqs_with_offers %}
@@ -154,10 +156,12 @@
             </td>
             {# Qty #}
             <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
-            {# Unit Cost — derived from the offer (read-only; changes with the vendor) #}
-            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
-            {# Sell #}
-            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell else '-' }}</td>
+            {# Unit Cost — derived from the offer (read-only; changes with the vendor).
+               `is not none` (not truthiness) so a real stored 0.0 renders as $0.0000,
+               not '-' (falsy-zero display bug — a raw 0.0 is a legitimate value). #}
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost is not none else '-' }}</td>
+            {# Sell — same `is not none` fix as Unit Cost above. #}
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell is not none else '-' }}</td>
             {# Status + PO# + prepayment badge (#11) #}
             <td>
               {{ line_status_pill(line) }}
@@ -308,6 +312,14 @@
                     <select x-model="row.offerId" aria-label="Vendor offer" :disabled="row.removed"
                             class="input input-sm w-full max-w-[180px]">
                       <option value="">Select vendor…</option>
+                      {# The row's CURRENT offer may no longer be in the active offers list (sold
+                         out / superseded) — render it as a truthful extra option so the select
+                         never silently blanks out. x-model matches it by value, so it's selected
+                         automatically; leaving it untouched still posts the SAME (unchanged)
+                         offer id, which the server tolerates by design (no-op resend). #}
+                      <template x-if="row.offerId && !offersFor(row.requirementId).some((o) => String(o.id) === String(row.offerId))">
+                        <option :value="row.offerId" x-text="(row.vendorName || 'Unknown vendor') + ' — ' + fmtMoney(row.unitCost) + ' (no longer active)'"></option>
+                      </template>
                       <template x-for="o in offersFor(row.requirementId)" :key="o.id">
                         <option :value="o.id" x-text="o.vendorName + ' — ' + fmtMoney(o.unitPrice)"></option>
                       </template>
@@ -357,41 +369,50 @@
         {% endif %}
       </table>
     </div>
-    {# Bottom "+ Add line" — whole new part via a grouped optgroup select (mirrors the
-       old add-line panel), only in edit mode. #}
+    {# Bottom "+ Add line" — whole new part via a part select + an offer select, only in
+       edit mode. Single offer-render path (#5): both this picker and the inline
+       "+ Add vendor" affordance now read the SAME client-side addableParts/offersFor —
+       no more server-rendered optgroups + data-req/onPickerOfferChange round-trip that
+       could drift from the Alpine-driven vendor selects elsewhere in this table. #}
     {% if can_edit_lines %}
     <div class="px-4 py-3 border-t border-line-base bg-gray-50" x-show="editMode" x-cloak>
       <button type="button" x-show="!showAddLine" @click="showAddLine = true" class="btn btn-secondary btn-sm">+ Add line</button>
       <div x-show="showAddLine" x-cloak>
-        {% if reqs_with_offers %}
-        <div class="flex flex-wrap items-end gap-2">
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Part · vendor offer</label>
-            <select x-model="newPart.offerId" @change="onPickerOfferChange($event)" class="input input-sm w-64">
-              <option value="">Select an offer…</option>
-              {% for req in reqs_with_offers %}
-              <optgroup label="{{ req.primary_mpn or ('REQ ' ~ req.id) }}">
-                {% for o in offers_by_requirement.get(req.id, []) %}
-                <option value="{{ o.id }}" data-req="{{ req.id }}">{{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price|float) if o.unit_price else '0.0000' }}</option>
-                {% endfor %}
-              </optgroup>
-              {% endfor %}
-            </select>
+        <template x-if="addableParts.length > 0">
+          <div class="flex flex-wrap items-end gap-2">
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Part</label>
+              <select x-model="newPart.reqId" @change="newPart.offerId = ''" class="input input-sm w-48">
+                <option value="">Select a part…</option>
+                <template x-for="p in addableParts" :key="p.id">
+                  <option :value="p.id" x-text="p.mpn || ('REQ ' + p.id)"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Vendor offer</label>
+              <select x-model="newPart.offerId" :disabled="!newPart.reqId" class="input input-sm w-56">
+                <option value="">Select an offer…</option>
+                <template x-for="o in offersFor(newPart.reqId)" :key="o.id">
+                  <option :value="o.id" x-text="o.vendorName + ' — ' + fmtMoney(o.unitPrice)"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Qty</label>
+              <input x-model.number="newPart.qty" type="number" min="1" class="input input-sm w-24 text-right">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Sell</label>
+              <input x-model.number="newPart.sell" type="number" step="any" min="0" placeholder="Sell" class="input input-sm w-24 text-right">
+            </div>
+            <button type="button" @click="addLineFromPicker()" class="btn btn-primary btn-sm">Add</button>
+            <button type="button" @click="showAddLine = false; newPart = { reqId: '', offerId: '', qty: '', sell: '' }" class="btn btn-secondary btn-sm">Cancel</button>
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Qty</label>
-            <input x-model.number="newPart.qty" type="number" min="1" class="input input-sm w-24 text-right">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Sell</label>
-            <input x-model.number="newPart.sell" type="number" step="any" min="0" placeholder="Sell" class="input input-sm w-24 text-right">
-          </div>
-          <button type="button" @click="addLineFromPicker()" class="btn btn-primary btn-sm">Add</button>
-          <button type="button" @click="showAddLine = false; newPart = { reqId: '', offerId: '', qty: '', sell: '' }" class="btn btn-secondary btn-sm">Cancel</button>
-        </div>
-        {% else %}
-        <p class="text-sm text-gray-500">No parts with active vendor offers are available to add.</p>
-        {% endif %}
+        </template>
+        <template x-if="addableParts.length === 0">
+          <p class="text-sm text-gray-500">No parts with active vendor offers are available to add.</p>
+        </template>
       </div>
     </div>
     {% endif %}

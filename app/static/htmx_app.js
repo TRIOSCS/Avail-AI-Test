@@ -3268,8 +3268,13 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
  * Depends on: Alpine.js, htmx (htmx.ajax posts the bulk payload).
  *
  * `rows` entries: { _uid, lineId, requirementId, mpn, description, offerId,
- * vendorName, qty, sell, locked, removed }. `lineId === null` marks a
- * not-yet-saved new line (split-vendor add or the bottom part picker).
+ * vendorName, unitCost, qty, sell, locked, removed }. `lineId === null` marks a
+ * not-yet-saved new line (split-vendor add or the bottom part picker). `vendorName`/
+ * `unitCost` are the row's CURRENT offer display data (from the server line at mount)
+ * — used as a fallback when that offer isn't in the ACTIVE `offersByReq` map (a
+ * locked/PO-cut row, or a non-locked row whose offer went stale/sold-out): the vendor
+ * select renders it as an extra "(no longer active)" option instead of blanking out,
+ * and `unitCostFor` falls back to it instead of showing '-' for a real stored cost.
  * `locked` mirrors the server's PO-cut gate (po_confirmed_at set or status !=
  * 'awaiting_po') — locked rows only allow editing `sell`.
  *
@@ -3324,9 +3329,13 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
 
   offersFor(reqId) { return this.offersByReq[reqId] || []; },
 
+  // Falls back to the row's own seeded unitCost when the row's offer isn't in the
+  // ACTIVE offers map (locked/PO-cut rows, or a stale/sold-out offer still selected on
+  // a non-locked row) — otherwise a real stored cost silently renders as '-'/null.
   unitCostFor(row) {
     const offer = this.offersFor(row.requirementId).find((o) => String(o.id) === String(row.offerId));
-    return offer ? offer.unitPrice : null;
+    if (offer) return offer.unitPrice;
+    return row.unitCost !== undefined ? row.unitCost : null;
   },
 
   fmtMoney(v) {
@@ -3344,6 +3353,7 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
       description,
       offerId: '',
       vendorName: null,
+      unitCost: null,
       qty: '',
       sell: '',
       locked: false,
@@ -3351,13 +3361,10 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
     });
   },
 
-  // Bottom "+ Add line" part picker — mirrors the old grouped optgroup select,
-  // reading the requirement id off the chosen <option>'s data-req attribute.
-  onPickerOfferChange(event) {
-    const opt = event.target.selectedOptions[0];
-    this.newPart.reqId = opt ? (opt.dataset.req || '') : '';
-  },
-
+  // Bottom "+ Add line" part picker (#5 — single offer-render path): a part <select>
+  // (x-model="newPart.reqId") followed by an offer <select> over offersFor(newPart.reqId)
+  // — the SAME client-side addableParts/offersFor the inline "+ Add vendor" affordance
+  // reads, so there is only one place the addable universe is computed.
   addLineFromPicker() {
     if (!this.newPart.offerId || !this.newPart.reqId || !this.newPart.qty) return;
     const part = this.addableParts.find((p) => String(p.id) === String(this.newPart.reqId));
@@ -3370,6 +3377,7 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
       description: part ? part.description : '',
       offerId: this.newPart.offerId,
       vendorName: null,
+      unitCost: null,
       qty: this.newPart.qty,
       sell: this.newPart.sell,
       locked: false,
@@ -3395,14 +3403,17 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
   // Single definition of "complete" vs "skippable scratch" for a row — consumed by
   // both `invalidRows` (Save-enablement) and `buildPayload` (what actually gets
   // posted), so the two can never disagree about which rows count.
-  //   - complete: has both an offer and qty >= 1 (locked rows don't need this —
-  //     callers gate on `r.locked` themselves before checking it).
+  //   - complete: has both an offer and a whole-number qty >= 1 (locked rows don't
+  //     need this — callers gate on `r.locked` themselves before checking it).
   //   - skip: an untouched new scratch row (freshly pushed by "+ Add vendor"/the
   //     bottom picker, not yet filled in) — silently ignored rather than invalid.
   rowState(r) {
     const isNew = !r.lineId;
     const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
-    const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
+    // A fractional qty (e.g. 2.5) must invalidate the row client-side rather than
+    // 400ing the whole bulk save server-side — the server keeps its own guard as the
+    // backstop (the error-toast path still covers any client/server disagreement).
+    const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1 && Number.isInteger(Number(r.qty));
     return { isNew, hasOffer, hasQty, complete: hasOffer && hasQty, skip: isNew && !hasOffer && !hasQty };
   },
 
