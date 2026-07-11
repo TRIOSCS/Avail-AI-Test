@@ -29,6 +29,7 @@ from app.dependencies import require_user
 from app.main import app
 from app.models import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
+from app.services.buyplan_notifications import notify_completed
 from tests.conftest import _buyplan_line as _line
 from tests.conftest import _buyplan_offer as _offer
 from tests.conftest import _buyplan_plan as _plan
@@ -736,6 +737,10 @@ def test_route_bulk_edit_completing_save_notifies_exactly_once(
             )
     assert resp.status_code == 200
     mock_notify.assert_called_once()
+    assert mock_notify.await_args.args[0] is notify_completed
+    assert mock_notify.await_args.args[1] == plan.id
+    db_session.expire_all()
+    assert db_session.get(BuyPlan, plan.id).status == BuyPlanStatus.COMPLETED.value
 
 
 def test_route_bulk_edit_non_completing_save_never_notifies(
@@ -753,6 +758,10 @@ def test_route_bulk_edit_non_completing_save_never_notifies(
             )
     assert resp.status_code == 200
     mock_notify.assert_not_called()
+    db_session.expire_all()
+    refreshed = db_session.get(BuyPlan, plan.id)
+    assert refreshed.status == BuyPlanStatus.ACTIVE.value
+    assert float(db_session.get(BuyPlanLine, line.id).unit_sell) == 9.0
 
 
 def test_route_remove_completing_removal_notifies_exactly_once(
@@ -767,6 +776,11 @@ def test_route_remove_completing_removal_notifies_exactly_once(
             resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{open_line.id}/remove")
     assert resp.status_code == 200
     mock_notify.assert_called_once()
+    assert mock_notify.await_args.args[0] is notify_completed
+    assert mock_notify.await_args.args[1] == plan.id
+    db_session.expire_all()
+    assert db_session.get(BuyPlan, plan.id).status == BuyPlanStatus.COMPLETED.value
+    assert db_session.get(BuyPlanLine, open_line.id) is None
 
 
 def test_route_remove_non_completing_removal_never_notifies(
