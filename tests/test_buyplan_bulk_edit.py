@@ -19,6 +19,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -398,6 +399,200 @@ def test_bulk_edit_foreign_offer_rejected_on_vendor_change(db_session, test_user
     payload = [{"line_id": line.id, "offer_id": foreign_offer.id}]
     with pytest.raises(ValueError, match="requisition"):
         bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+# ══ Fix 1/9 — offer must also match the requirement/part and be ACTIVE ═
+
+
+def test_bulk_edit_wrong_part_offer_rejected_on_add(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    other_req = _req(db_session, test_user)
+    other_requirement = _requirement_of(db_session, other_req)
+    # Right requisition, but tagged for a DIFFERENT part.
+    wrong_part_offer = _offer(db_session, test_requisition, test_user, requirement_id=other_requirement.id)
+
+    payload = [{"requirement_id": requirement.id, "offer_id": wrong_part_offer.id, "quantity": 10}]
+    with pytest.raises(ValueError, match="part"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+def test_bulk_edit_wrong_part_offer_rejected_on_vendor_change(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00, requirement_id=requirement.id)
+    other_req = _req(db_session, test_user)
+    other_requirement = _requirement_of(db_session, other_req)
+    wrong_part_offer = _offer(db_session, test_requisition, test_user, requirement_id=other_requirement.id)
+
+    payload = [{"line_id": line.id, "offer_id": wrong_part_offer.id}]
+    with pytest.raises(ValueError, match="part"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+def test_bulk_edit_non_active_offer_rejected_on_add(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    sold_offer = _offer(
+        db_session, test_requisition, test_user, requirement_id=requirement.id, status=OfferStatus.SOLD.value
+    )
+
+    payload = [{"requirement_id": requirement.id, "offer_id": sold_offer.id, "quantity": 10}]
+    with pytest.raises(ValueError, match="not active"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+def test_bulk_edit_non_active_offer_rejected_on_vendor_change(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00, requirement_id=requirement.id)
+    sold_offer = _offer(
+        db_session, test_requisition, test_user, requirement_id=requirement.id, status=OfferStatus.SOLD.value
+    )
+
+    payload = [{"line_id": line.id, "offer_id": sold_offer.id}]
+    with pytest.raises(ValueError, match="not active"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+def test_bulk_edit_unchanged_resend_of_now_sold_offer_still_succeeds(db_session, test_user, test_requisition):
+    """The offer-attachability revalidation NEVER runs on a no-op resend — a line's
+    already-attached offer may have legitimately gone SOLD since it was cut, and
+    resending the SAME unchanged offer_id must stay a no-op success regardless."""
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    offer = _offer(db_session, test_requisition, test_user, requirement_id=requirement.id)
+    line = _line(
+        db_session, plan, quantity=100, unit_cost=0.40, unit_sell=2.00, offer_id=offer.id, requirement_id=requirement.id
+    )
+
+    offer.status = OfferStatus.SOLD.value
+    db_session.commit()
+
+    payload = [{"line_id": line.id, "offer_id": offer.id, "unit_sell": 3.00}]
+    bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+
+    assert line.offer_id == offer.id
+    assert float(line.unit_sell) == 3.00
+
+
+# ══ Fix 2 — falsy-zero unit_cost/unit_sell and stale ai_score ══════════
+
+
+def test_bulk_edit_zero_price_offer_keeps_unit_cost_zero_on_add(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    free_offer = _offer(db_session, test_requisition, test_user, requirement_id=requirement.id, unit_price=0.0)
+
+    payload = [{"requirement_id": requirement.id, "offer_id": free_offer.id, "quantity": 100, "unit_sell": 5.00}]
+    plan = bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+    db_session.commit()
+    db_session.refresh(plan)
+
+    new_line = plan.lines[0]
+    assert float(new_line.unit_cost) == 0.0  # a real $0 cost, NOT None
+    assert float(plan.total_cost) == 0.0
+    assert float(plan.total_revenue) == 500.0  # 5.00 * 100
+
+
+def test_bulk_edit_vendor_change_to_zero_price_offer_keeps_unit_cost_zero(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00, requirement_id=requirement.id)
+    free_offer = _offer(db_session, test_requisition, test_user, requirement_id=requirement.id, unit_price=0.0)
+
+    bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "offer_id": free_offer.id}], test_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+
+    assert line.offer_id == free_offer.id
+    assert float(line.unit_cost) == 0.0
+
+
+def test_bulk_edit_vendor_change_recomputes_ai_score(db_session, test_user, test_requisition):
+    from app.services.buyplan_scoring import score_offer
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    line = _line(
+        db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00, requirement_id=requirement.id, ai_score=0.0
+    )
+    new_offer = _offer(db_session, test_requisition, test_user, requirement_id=requirement.id, unit_price=0.30)
+
+    bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "offer_id": new_offer.id}], test_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+    db_session.refresh(new_offer)
+
+    expected_score = score_offer(new_offer, requirement, new_offer.vendor_card)
+    assert line.ai_score == pytest.approx(expected_score)
+
+
+# ══ Fix 4 — offer_id/quantity key-presence (explicit null is an error) ═
+
+
+def test_bulk_edit_explicit_null_offer_id_rejected(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan)
+
+    with pytest.raises(ValueError, match="must not be null"):
+        bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "offer_id": None}], test_user, db_session)
+
+
+def test_bulk_edit_explicit_null_quantity_rejected(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan)
+
+    with pytest.raises(ValueError, match="must not be null"):
+        bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "quantity": None}], test_user, db_session)
+
+
+# ══ Fix 5 — known_line_ids coerced to set[int] at service depth ════════
+
+
+def test_bulk_edit_known_line_ids_rejects_bool(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan)
+
+    with pytest.raises(ValueError, match="known_line_ids"):
+        bulk_edit_buy_plan_lines(
+            plan.id, [{"line_id": line.id, "unit_sell": 1.0}], test_user, db_session, known_line_ids=[True]
+        )
+
+
+def test_bulk_edit_known_line_ids_rejects_non_int(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan)
+
+    with pytest.raises(ValueError, match="known_line_ids"):
+        bulk_edit_buy_plan_lines(
+            plan.id, [{"line_id": line.id, "unit_sell": 1.0}], test_user, db_session, known_line_ids=["abc"]
+        )
 
 
 # ══ Route-level ══════════════════════════════════════════════════════
