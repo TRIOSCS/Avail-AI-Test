@@ -332,12 +332,12 @@ jobs:
         run: pip install "coverage[toml]==7.14.1"
 
       - name: Download shard 0 coverage data
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-data-0
 
       - name: Download shard 1 coverage data
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: coverage-data-1
 
@@ -374,13 +374,13 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Compute BUILD_COMMIT (mirrors deploy.sh)
         run: echo "BUILD_COMMIT=$(git rev-parse --short HEAD)-$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Build production image (Dockerfile)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -393,7 +393,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=app-image
 
       - name: Build tooling image (Dockerfile.tooling)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.tooling
