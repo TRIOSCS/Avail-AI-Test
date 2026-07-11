@@ -17,6 +17,9 @@ Follow these steps exactly:
    - From a branch (no commit/push): `cd /root/availai && ./deploy.sh --no-commit`
 3. If deploy.sh fails, report the failing step verbatim — do not fall back to raw
    `docker compose` commands
-4. Confirm health independently: `curl -s http://localhost:8000/api/health | python3 -m json.tool`
+4. Confirm health independently (the app port is not published to the host, so curl from
+   inside the container):
+   `docker compose exec -T app curl -s http://localhost:8000/health | python3 -m json.tool`
+   — expect `status/db/redis: ok` and a `build_commit` matching the just-deployed sha
 5. Check logs for startup errors: `docker compose logs --tail=30 app`
 6. Report: deployment status, version + build tag from the health endpoint, any warnings
