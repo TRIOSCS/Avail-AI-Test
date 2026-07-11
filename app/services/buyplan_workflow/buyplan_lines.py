@@ -14,16 +14,22 @@ Depends on: buyplan_scoring (assign_buyer, score_offer), buyplan_approval
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from loguru import logger
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import UserRole
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 from ..buyplan_scoring import assign_buyer, score_offer
-from .buyplan_approval import _can_halt, _cancel_open_prepayment_requests_for_plan, _recalculate_financials
+from .buyplan_approval import (
+    _can_halt,
+    _cancel_open_prepayment_requests_for_plan,
+    _recalculate_financials,
+    check_completion,
+)
 
 # ── Workflow: Re-source (PO cancelled → open claim pool) ─────────────
 
@@ -377,14 +383,9 @@ def _line_margin_pct(unit_sell: float | None, unit_cost: float | None) -> float 
 
 
 def _has_cut_po(line: BuyPlanLine) -> bool:
-    """True once a line has left AWAITING_PO (a PO is cut / verified / flagged /
-    cancelled).
-
-    Vendor/qty/removal edits on such a line would corrupt live purchasing state, so they
-    are refused (the header sell price can still be corrected — it does not touch the
-    PO).
-    """
-    return line.po_confirmed_at is not None or line.status != BuyPlanLineStatus.AWAITING_PO.value
+    """Delegate to :attr:`BuyPlanLine.has_cut_po` — the model owns the single source of
+    truth (also read directly by the whole-plan-editor template's locked-row seed)."""
+    return line.has_cut_po
 
 
 def _ensure_offer_on_requisition(offer: Offer, requisition_id: int | None) -> None:
@@ -408,12 +409,142 @@ def _require_int_quantity(value: object) -> int:
     if isinstance(value, int):
         return value
     try:
-        as_float = float(value)  # type: ignore[arg-type]
+        as_float = float(value)
     except (TypeError, ValueError) as e:
         raise ValueError("Quantity must be a whole number.") from e
     if not as_float.is_integer():
         raise ValueError("Quantity must be a whole number.")
     return int(as_float)
+
+
+# Sentinel distinguishing "kwarg not passed" (field untouched) from "kwarg passed as
+# None" (field explicitly cleared) — plain ``None`` defaults can't express both, which
+# is exactly the bug that let ``unit_sell`` never be clearable pre-refactor.
+_UNSET: Any = object()
+
+
+def _resolve_offer(db: Session, offer_id: int, offer_lookup: dict[int, Offer] | None) -> Offer | None:
+    """Look up an offer by id — via a pre-batched dict when the caller supplies one
+    (bulk save's one-query offer preload), else a plain ``db.get`` (single-line
+    callers)."""
+    if offer_lookup is not None:
+        return offer_lookup.get(offer_id)
+    return db.get(Offer, offer_id)
+
+
+def _apply_line_edit(
+    line: BuyPlanLine,
+    plan: BuyPlan,
+    db: Session,
+    *,
+    offer_id: Any = _UNSET,
+    quantity: Any = _UNSET,
+    unit_sell: Any = _UNSET,
+    offer_lookup: dict[int, Offer] | None = None,
+) -> None:
+    """Apply qty/offer/sell edits to *line*, shared by :func:`edit_buy_plan_line` and
+    the bulk "save all" edit path.
+
+    Each kwarg defaults to the ``_UNSET`` sentinel (field untouched) rather than
+    ``None``, so ``unit_sell=None`` is distinguishable from "not passed" — the only way
+    to express "clear the sell price":
+      - ``offer_id`` / ``quantity``: a value EQUAL to the line's CURRENT value is always
+        a no-op that never trips :func:`_has_cut_po` (so a resend of an untouched row
+        can't 400 the whole save just because a PO was cut on it between form-load and
+        save). An ACTUAL change is refused once :func:`_has_cut_po` is true; otherwise
+        an offer change re-derives ``unit_cost``/buyer via
+        :func:`_ensure_offer_on_requisition` + :func:`assign_buyer`, and a quantity
+        change is validated via :func:`_require_int_quantity` (rejects fractional
+        values) and must be positive.
+      - ``unit_sell``: never gated by :func:`_has_cut_po` (it never touches the PO).
+        ``None`` clears it; any other value sets it.
+    Recomputes ``line.margin_pct`` at the end. No commit/flush/recalc — caller's job.
+    """
+    if offer_id is not _UNSET:
+        offer_id_int = int(offer_id)
+        if offer_id_int != line.offer_id:
+            if _has_cut_po(line):
+                raise ValueError("Cannot change the vendor after a PO is cut on this line.")
+            offer = _resolve_offer(db, offer_id_int, offer_lookup)
+            if not offer:
+                raise ValueError(f"Offer {offer_id} not found")
+            _ensure_offer_on_requisition(offer, plan.requisition_id)
+            line.offer_id = offer.id
+            line.unit_cost = float(offer.unit_price) if offer.unit_price else None
+            buyer, reason = assign_buyer(offer, offer.vendor_card, db)
+            line.buyer_id = buyer.id if buyer else None
+            line.assignment_reason = reason
+
+    if quantity is not _UNSET:
+        quantity_int = _require_int_quantity(quantity)
+        if quantity_int != line.quantity:
+            if _has_cut_po(line):
+                raise ValueError("Cannot change the quantity after a PO is cut on this line.")
+            if quantity_int <= 0:
+                raise ValueError("Quantity must be a positive whole number.")
+            line.quantity = quantity_int
+
+    if unit_sell is not _UNSET:
+        line.unit_sell = float(unit_sell) if unit_sell is not None else None
+
+    line.margin_pct = _line_margin_pct(
+        float(line.unit_sell) if line.unit_sell is not None else None,
+        float(line.unit_cost) if line.unit_cost is not None else None,
+    )
+
+
+def _build_new_line(
+    plan: BuyPlan,
+    requirement_id: object,
+    offer_id: object,
+    quantity: object,
+    unit_sell: object,
+    db: Session,
+    *,
+    offer_lookup: dict[int, Offer] | None = None,
+) -> BuyPlanLine:
+    """Validate + construct a new AWAITING_PO line — no gating, no ``plan.lines``
+    append, no recalc (caller's job). Shared by :func:`add_buy_plan_line` and the bulk
+    "save all" add path.
+
+    Quantity goes through :func:`_require_int_quantity` (rejects a fractional value
+    like ``3.5`` instead of truncating it) and must be positive. The requirement must
+    belong to *plan*'s requisition; the offer must exist AND belong to the same
+    requisition (:func:`_ensure_offer_on_requisition`). Sell falls back to the
+    requirement's ``target_price`` when *unit_sell* is ``None``.
+    """
+    quantity_int = _require_int_quantity(quantity) if quantity is not None else 0
+    if quantity_int <= 0:
+        raise ValueError("Quantity must be a positive whole number.")
+
+    requirement = db.get(Requirement, int(requirement_id)) if requirement_id is not None else None
+    if not requirement or requirement.requisition_id != plan.requisition_id:
+        raise ValueError("That part is not on this plan's requisition.")
+
+    offer = _resolve_offer(db, int(offer_id), offer_lookup) if offer_id is not None else None
+    if not offer:
+        raise ValueError(f"Offer {offer_id} not found")
+    _ensure_offer_on_requisition(offer, plan.requisition_id)
+
+    unit_cost = float(offer.unit_price) if offer.unit_price else None
+    resolved_sell = (
+        float(unit_sell)  # type: ignore[arg-type]
+        if unit_sell is not None
+        else (float(requirement.target_price) if requirement.target_price else None)
+    )
+    buyer, reason = assign_buyer(offer, offer.vendor_card, db)
+    return BuyPlanLine(
+        requirement_id=requirement.id,
+        offer_id=offer.id,
+        quantity=quantity_int,
+        unit_cost=unit_cost,
+        unit_sell=resolved_sell,
+        margin_pct=_line_margin_pct(resolved_sell, unit_cost),
+        ai_score=score_offer(offer, requirement, offer.vendor_card),
+        buyer_id=buyer.id if buyer else None,
+        assignment_reason=reason,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
+    )
 
 
 def add_buy_plan_line(
@@ -428,49 +559,15 @@ def add_buy_plan_line(
 ) -> BuyPlan:
     """Add a new line (vendor offer + qty + sell) and recompute the header rollups.
 
-    Gated by :func:`can_edit_buy_plan_lines`. The requirement must belong to the plan's
-    requisition and the offer must exist AND belong to the same requisition. Caller
-    commits.
+    Gated by :func:`can_edit_buy_plan_lines`; validation + construction delegate to
+    :func:`_build_new_line` (shared with the bulk "save all" add path). Caller commits.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     _ensure_can_edit_lines(user, plan)
 
-    if not quantity or quantity <= 0:
-        raise ValueError("Quantity must be a positive whole number.")
-
-    requirement = db.get(Requirement, requirement_id)
-    if not requirement or requirement.requisition_id != plan.requisition_id:
-        raise ValueError("That part is not on this plan's requisition.")
-
-    offer = db.get(Offer, offer_id)
-    if not offer:
-        raise ValueError(f"Offer {offer_id} not found")
-    _ensure_offer_on_requisition(offer, plan.requisition_id)
-
-    unit_cost = float(offer.unit_price) if offer.unit_price else None
-    resolved_sell = (
-        float(unit_sell)
-        if unit_sell is not None
-        else (float(requirement.target_price) if requirement.target_price else None)
-    )
-    buyer, reason = assign_buyer(offer, offer.vendor_card, db)
-
-    plan.lines.append(
-        BuyPlanLine(
-            requirement_id=requirement.id,
-            offer_id=offer.id,
-            quantity=quantity,
-            unit_cost=unit_cost,
-            unit_sell=resolved_sell,
-            margin_pct=_line_margin_pct(resolved_sell, unit_cost),
-            ai_score=score_offer(offer, requirement, offer.vendor_card),
-            buyer_id=buyer.id if buyer else None,
-            assignment_reason=reason,
-            status=BuyPlanLineStatus.AWAITING_PO.value,
-        )
-    )
+    plan.lines.append(_build_new_line(plan, requirement_id, offer_id, quantity, unit_sell, db))
     _recalculate_financials(plan)
     db.flush()
     logger.info("Buy plan {} line added by {} (req {}, offer {})", plan_id, user.email, requirement_id, offer_id)
@@ -489,9 +586,15 @@ def edit_buy_plan_line(
 ) -> BuyPlan:
     """Edit a line's qty / sell price / vendor(offer) and recompute the header rollups.
 
-    Gated by :func:`can_edit_buy_plan_lines`. Vendor and qty changes are refused once a PO
-    is cut on the line (would corrupt live purchasing); the sell price stays editable. Caller
-    commits.
+    Gated by :func:`can_edit_buy_plan_lines`; the per-field rules delegate to
+    :func:`_apply_line_edit` (shared with the bulk "save all" edit path), which upgrades
+    this function to the SAME no-op-before-guard semantics as bulk: resending a line's
+    CURRENT qty/offer is always a no-op that never trips the cut-PO guard (previously
+    ANY non-None qty/offer 400'd once a PO was cut, even a resend of the unchanged
+    value). Signature stays backward-compatible for existing callers: ``None`` still
+    means "unchanged" for all three kwargs (mapped internally to the "field untouched"
+    sentinel), so this legacy entry point still can't CLEAR unit_sell — only bulk's JSON
+    key-presence contract can do that. Caller commits.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
@@ -502,32 +605,13 @@ def edit_buy_plan_line(
     if not line:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
 
-    if offer_id is not None:
-        if _has_cut_po(line):
-            raise ValueError("Cannot change the vendor after a PO is cut on this line.")
-        offer = db.get(Offer, offer_id)
-        if not offer:
-            raise ValueError(f"Offer {offer_id} not found")
-        _ensure_offer_on_requisition(offer, plan.requisition_id)
-        line.offer_id = offer.id
-        line.unit_cost = float(offer.unit_price) if offer.unit_price else None
-        buyer, reason = assign_buyer(offer, offer.vendor_card, db)
-        line.buyer_id = buyer.id if buyer else None
-        line.assignment_reason = reason
-
-    if quantity is not None:
-        if _has_cut_po(line):
-            raise ValueError("Cannot change the quantity after a PO is cut on this line.")
-        if quantity <= 0:
-            raise ValueError("Quantity must be a positive whole number.")
-        line.quantity = quantity
-
-    if unit_sell is not None:
-        line.unit_sell = float(unit_sell)
-
-    line.margin_pct = _line_margin_pct(
-        float(line.unit_sell) if line.unit_sell is not None else None,
-        float(line.unit_cost) if line.unit_cost is not None else None,
+    _apply_line_edit(
+        line,
+        plan,
+        db,
+        offer_id=offer_id if offer_id is not None else _UNSET,
+        quantity=quantity if quantity is not None else _UNSET,
+        unit_sell=unit_sell if unit_sell is not None else _UNSET,
     )
     _recalculate_financials(plan)
     db.flush()
