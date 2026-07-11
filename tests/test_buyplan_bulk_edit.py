@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.constants import BuyPlanLineStatus, BuyPlanStatus
 from app.dependencies import require_user
 from app.main import app
-from app.models import Requirement, Requisition, User
+from app.models import Offer, Requirement, Requisition, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 
 
@@ -105,6 +105,25 @@ def _line(db: Session, plan: BuyPlan, **ov) -> BuyPlanLine:
     db.commit()
     db.refresh(line)
     return line
+
+
+def _offer(db: Session, requisition: Requisition, entered_by: User, **ov) -> Offer:
+    defaults = dict(
+        requisition_id=requisition.id,
+        vendor_name="Foreign Vendor",
+        mpn="LM317T",
+        qty_available=1000,
+        unit_price=0.40,
+        entered_by_id=entered_by.id,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    defaults.update(ov)
+    offer = Offer(**defaults)
+    db.add(offer)
+    db.commit()
+    db.refresh(offer)
+    return offer
 
 
 # ══ Service-level ══════════════════════════════════════════════════════

@@ -1259,12 +1259,19 @@ async def buy_plan_bulk_lines_partial(
     """Save the entire plan's lines (edited qty/sell/vendor, added lines, removed
     lines) in one POST (epic I "save all").
 
-    Form field ``payload`` is a JSON object ``{"lines": [...]}`` (the Alpine editor
-    posts it via an htmx ``hx-vals`` JSON blob). Role×status gate and per-line rules
-    are enforced in the service (PermissionError → 403); malformed JSON, a bad shape,
-    or bad line data → 400.
+    Form field ``payload`` is a JSON object ``{"lines": [...], "known_line_ids": [...]}``
+    (the Alpine editor posts it via an htmx ``hx-vals`` JSON blob). ``known_line_ids``
+    (optional; a list of ints) is every line id the client's form actually rendered —
+    it scopes removal-by-omission so a line added by someone else after the form loaded
+    is left untouched instead of silently deleted; omitted entirely falls back to the
+    legacy (unscoped) removal-by-omission behavior. Role×status gate and per-line rules
+    are enforced in the service (PermissionError → 403); malformed JSON, a bad shape, or
+    bad line data → 400. Removing the last open line can leave every remaining line
+    terminal, so a completion check runs right after — same pattern as verify-po
+    (~line 980) — so an ACTIVE plan can't get stranded short of COMPLETED.
     """
-    from ...services.buyplan_workflow import bulk_edit_buy_plan_lines
+    from ...services.buyplan_notifications import notify_completed, run_notify_bg
+    from ...services.buyplan_workflow import bulk_edit_buy_plan_lines, check_completion
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
@@ -1279,9 +1286,18 @@ async def buy_plan_bulk_lines_partial(
     if not isinstance(parsed, dict) or not isinstance(parsed.get("lines"), list):
         raise HTTPException(400, 'Lines payload must be a JSON object shaped {"lines": [...]}.')
 
+    known_line_ids = parsed.get("known_line_ids")
+    if known_line_ids is not None:
+        if not isinstance(known_line_ids, list) or not all(isinstance(i, int) for i in known_line_ids):
+            raise HTTPException(400, "known_line_ids must be a list of whole-number line ids.")
+
     try:
-        bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db)
+        bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db, known_line_ids=known_line_ids)
         db.commit()
+        updated = check_completion(plan_id, db)
+        if updated and updated.status == BuyPlanStatus.COMPLETED:
+            db.commit()
+            await run_notify_bg(notify_completed, plan_id)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
