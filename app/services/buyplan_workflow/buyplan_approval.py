@@ -832,21 +832,27 @@ def _recalculate_financials(plan: BuyPlan):
     Per-line gates use ``is not None`` (not bare truthiness) so a genuine ``0.0``
     unit_cost/unit_sell (e.g. a free-sample line) is included in the sum rather than
     silently skipped — matches the same "0 is a real value, not falsy" fix applied to
-    the line-level writers in ``buyplan_lines.py``. Note this is a defensive/consistency
-    fix, not a behavior change: a truly-zero line contributes exactly 0 to the running
-    total either way the gate is written, so no existing caller's computed total_cost/
-    total_revenue/total_margin_pct changes.
+    the line-level writers in ``buyplan_lines.py``. The plan-level ``total_cost``/
+    ``total_revenue`` collapse to ``None`` only when NO line ever contributed a real
+    (non-None) value — tracked via ``has_cost``/``has_revenue`` rather than the running
+    total's own truthiness, so a plan whose lines are ALL genuinely $0 (e.g. every line
+    free-sample) reports ``0.0`` ("$0.00", a real fact) instead of ``None`` ("no data",
+    which would be wrong — the data IS there, it's just zero).
     """
     total_cost = 0.0
     total_revenue = 0.0
+    has_cost = False
+    has_revenue = False
     for line in plan.lines:
         if line.unit_cost is not None and line.quantity:
             total_cost += float(line.unit_cost) * line.quantity
+            has_cost = True
         if line.unit_sell is not None and line.quantity:
             total_revenue += float(line.unit_sell) * line.quantity
+            has_revenue = True
 
-    plan.total_cost = round(total_cost, 2) if total_cost else None
-    plan.total_revenue = round(total_revenue, 2) if total_revenue else None
+    plan.total_cost = round(total_cost, 2) if has_cost else None
+    plan.total_revenue = round(total_revenue, 2) if has_revenue else None
     if total_revenue > 0:
         plan.total_margin_pct = round(((total_revenue - total_cost) / total_revenue) * 100, 2)
     else:

@@ -714,3 +714,72 @@ def test_route_remove_line_completes_active_plan_when_last_open_line_removed(
     db_session.expire_all()
     assert db_session.get(BuyPlan, plan.id).status == BuyPlanStatus.COMPLETED.value
     assert db_session.get(BuyPlanLine, verified.id) is not None
+
+
+# ══ Fix 6 — notify_completed fires EXACTLY ONCE, driven by the service's
+#    own check_completion call (never re-derived by a second scan) ═════
+
+
+def test_route_bulk_edit_completing_save_notifies_exactly_once(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    verified = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.VERIFIED.value)
+    open_line = _line(db_session, plan, quantity=50, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    payload = {"lines": [], "known_line_ids": [verified.id, open_line.id]}
+    with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+        with _acting_as(manager_user):
+            resp = client.post(
+                f"/v2/partials/buy-plans/{plan.id}/lines/bulk",
+                data={"payload": json.dumps(payload)},
+            )
+    assert resp.status_code == 200
+    mock_notify.assert_called_once()
+
+
+def test_route_bulk_edit_non_completing_save_never_notifies(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    line = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    payload = {"lines": [{"line_id": line.id, "unit_sell": 9.0}], "known_line_ids": [line.id]}
+    with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+        with _acting_as(manager_user):
+            resp = client.post(
+                f"/v2/partials/buy-plans/{plan.id}/lines/bulk",
+                data={"payload": json.dumps(payload)},
+            )
+    assert resp.status_code == 200
+    mock_notify.assert_not_called()
+
+
+def test_route_remove_completing_removal_notifies_exactly_once(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.VERIFIED.value)
+    open_line = _line(db_session, plan, quantity=50, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+        with _acting_as(manager_user):
+            resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{open_line.id}/remove")
+    assert resp.status_code == 200
+    mock_notify.assert_called_once()
+
+
+def test_route_remove_non_completing_removal_never_notifies(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    keep = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.AWAITING_PO.value)
+    drop = _line(db_session, plan, quantity=50, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+        with _acting_as(manager_user):
+            resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{drop.id}/remove")
+    assert resp.status_code == 200
+    mock_notify.assert_not_called()
+    db_session.expire_all()
+    assert db_session.get(BuyPlanLine, keep.id) is not None
