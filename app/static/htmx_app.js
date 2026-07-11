@@ -3258,6 +3258,185 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
   },
 }));
 
+/**
+ * buyPlanLinesEditor — whole-table "Edit plan" mode for the buy-plan line-items
+ * table. Replaces the old per-row Edit/Remove toggles + bottom Add-line panel
+ * with one editMode flag, a client-side `rows` array (seeded from the server),
+ * and a single "Save all" POST.
+ *
+ * Called by: partials/buy_plans/_detail_lines.html (x-data on the Line Items card).
+ * Depends on: Alpine.js, htmx (htmx.ajax posts the bulk payload).
+ *
+ * `rows` entries: { _uid, lineId, requirementId, mpn, description, offerId,
+ * vendorName, qty, sell, locked, removed }. `lineId === null` marks a
+ * not-yet-saved new line (split-vendor add or the bottom part picker).
+ * `locked` mirrors the server's PO-cut gate (po_confirmed_at set or status !=
+ * 'awaiting_po') — locked rows only allow editing `sell`.
+ *
+ * Save posts POST /v2/partials/buy-plans/{bpId}/lines/bulk with
+ * {payload: JSON.stringify({lines: [...]})}. Removed rows are simply omitted
+ * (removal-by-omission); locked rows send only {line_id, unit_sell} so the
+ * server never sees a forbidden field on a cut-PO line.
+ */
+Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) => ({
+  bpId,
+  offersByReq: offersByReq || {},
+  addableParts: addableParts || [],
+  rows: seedRows || [],
+  origRows: [],
+  editMode: false,
+  saving: false,
+  showAddLine: false,
+  newPart: { reqId: '', offerId: '', qty: '', sell: '' },
+  _uidCounter: 0,
+
+  init() {
+    this._uidCounter = this.rows.length;
+    this.origRows = JSON.parse(JSON.stringify(this.rows));
+  },
+
+  enterEdit() { this.editMode = true; },
+
+  cancelEdit() {
+    this.rows = JSON.parse(JSON.stringify(this.origRows));
+    this.newPart = { reqId: '', offerId: '', qty: '', sell: '' };
+    this.showAddLine = false;
+    this.editMode = false;
+  },
+
+  // Rows grouped by requirement, in first-appearance order — drives the
+  // per-part "+ Add vendor" affordance after each part's row block.
+  get groupedRows() {
+    const order = [];
+    const map = {};
+    for (const r of this.rows) {
+      if (!map[r.requirementId]) {
+        map[r.requirementId] = { requirementId: r.requirementId, mpn: r.mpn, description: r.description, rows: [] };
+        order.push(map[r.requirementId]);
+      }
+      map[r.requirementId].rows.push(r);
+    }
+    return order;
+  },
+
+  offersFor(reqId) { return this.offersByReq[reqId] || []; },
+
+  unitCostFor(row) {
+    const offer = this.offersFor(row.requirementId).find((o) => String(o.id) === String(row.offerId));
+    return offer ? offer.unitPrice : null;
+  },
+
+  fmtMoney(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  },
+
+  addVendorRow(reqId, mpn, description) {
+    this._uidCounter += 1;
+    this.rows.push({
+      _uid: 'new-' + this._uidCounter,
+      lineId: null,
+      requirementId: reqId,
+      mpn,
+      description,
+      offerId: '',
+      vendorName: null,
+      qty: '',
+      sell: '',
+      locked: false,
+      removed: false,
+    });
+  },
+
+  // Bottom "+ Add line" part picker — mirrors the old grouped optgroup select,
+  // reading the requirement id off the chosen <option>'s data-req attribute.
+  onPickerOfferChange(event) {
+    const opt = event.target.selectedOptions[0];
+    this.newPart.reqId = opt ? (opt.dataset.req || '') : '';
+  },
+
+  addLineFromPicker() {
+    if (!this.newPart.offerId || !this.newPart.reqId || !this.newPart.qty) return;
+    const part = this.addableParts.find((p) => String(p.id) === String(this.newPart.reqId));
+    this._uidCounter += 1;
+    this.rows.push({
+      _uid: 'new-' + this._uidCounter,
+      lineId: null,
+      requirementId: Number(this.newPart.reqId),
+      mpn: part ? part.mpn : null,
+      description: part ? part.description : '',
+      offerId: this.newPart.offerId,
+      vendorName: null,
+      qty: this.newPart.qty,
+      sell: this.newPart.sell,
+      locked: false,
+      removed: false,
+    });
+    this.newPart = { reqId: '', offerId: '', qty: '', sell: '' };
+    this.showAddLine = false;
+  },
+
+  removeRow(row) {
+    // An unsaved new row has no server-side line to preserve — drop it outright.
+    // A persisted row is soft-removed (kept, struck-through, Undo-able) so Save
+    // can omit it by id instead of racing a separate delete request.
+    if (!row.lineId) {
+      this.rows = this.rows.filter((r) => r !== row);
+    } else {
+      row.removed = true;
+    }
+  },
+
+  undoRemove(row) { row.removed = false; },
+
+  // Non-removed, non-locked rows must carry both an offer and qty >= 1 before
+  // Save is allowed — EXCEPT an untouched blank scratch row (freshly pushed by
+  // "+ Add vendor", not yet filled in), which is silently skipped instead.
+  get invalidRows() {
+    return this.rows.filter((r) => {
+      if (r.removed || r.locked) return false;
+      const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
+      const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
+      const isNew = !r.lineId;
+      if (isNew && !hasOffer && !hasQty) return false;
+      return !(hasOffer && hasQty);
+    });
+  },
+
+  get canSave() { return !this.saving && this.invalidRows.length === 0; },
+
+  buildPayload() {
+    const lines = [];
+    for (const r of this.rows) {
+      if (r.removed) continue;
+      const isNew = !r.lineId;
+      const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
+      const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
+      if (isNew && !hasOffer && !hasQty) continue; // untouched scratch row
+      const sellVal = (r.sell === '' || r.sell === null || r.sell === undefined) ? null : Number(r.sell);
+      if (r.locked) {
+        lines.push({ line_id: r.lineId, unit_sell: sellVal });
+      } else if (isNew) {
+        lines.push({ requirement_id: r.requirementId, offer_id: Number(r.offerId), quantity: Number(r.qty), unit_sell: sellVal });
+      } else {
+        lines.push({ line_id: r.lineId, quantity: Number(r.qty), unit_sell: sellVal, offer_id: Number(r.offerId) });
+      }
+    }
+    return { lines };
+  },
+
+  saveAll() {
+    if (!this.canSave) return;
+    this.saving = true;
+    htmx.ajax('POST', `/v2/partials/buy-plans/${this.bpId}/lines/bulk`, {
+      target: '#main-content',
+      swap: 'innerHTML',
+      indicator: '#main-content',
+      values: { payload: JSON.stringify(this.buildPayload()) },
+    }).finally(() => { this.saving = false; });
+  },
+}));
+
 /* ────────────────────────────────────────────────────────────────────────
    Cross-app tab alerts — in-tab spotlight for new / actionable rows.
 

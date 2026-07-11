@@ -9,8 +9,8 @@ package along its audited seams:
     and auto-completion (one module: every transition shares the same engine-
     request/prepayment teardown helpers).
   - `buyplan_po` — buyer PO confirmation + approver PO verification (sync scan).
-  - `buyplan_lines` — claim/flag/resolve, re-source, and the add/edit/remove/SO#
-    line-editing API.
+  - `buyplan_lines` — claim/flag/resolve, re-source, and the add/edit/remove/bulk-
+    save/SO# line-editing API.
   - `buyplan_reports` — favoritism detection + case-report generation.
 
 This `__init__.py` re-exports every public name AND every internal name that
@@ -59,6 +59,7 @@ from .buyplan_lines import (
     _line_margin_pct,
     _owns_plan,
     add_buy_plan_line,
+    bulk_edit_buy_plan_lines,
     can_edit_buy_plan_lines,
     claim_line,
     edit_buy_plan_line,
@@ -105,6 +106,7 @@ __all__ = [
     "_run_reject_side_effects",
     "add_buy_plan_line",
     "approve_buy_plan",
+    "bulk_edit_buy_plan_lines",
     "can_edit_buy_plan_lines",
     "cancel_buy_plan",
     "check_completion",

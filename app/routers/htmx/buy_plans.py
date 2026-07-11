@@ -1242,6 +1242,47 @@ async def buy_plan_remove_line_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/bulk", response_class=HTMLResponse)
+async def buy_plan_bulk_lines_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save the entire plan's lines (edited qty/sell/vendor, added lines, removed
+    lines) in one POST (epic I "save all").
+
+    Form field ``payload`` is a JSON object ``{"lines": [...]}`` (the Alpine editor
+    posts it via an htmx ``hx-vals`` JSON blob). Role×status gate and per-line rules
+    are enforced in the service (PermissionError → 403); malformed JSON, a bad shape,
+    or bad line data → 400.
+    """
+    from ...services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
+    get_buyplan_for_user(db, user, plan_id)
+
+    form = await request.form()
+    raw_payload = form.get("payload")
+    try:
+        parsed = json.loads(str(raw_payload))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "Malformed lines payload — expected JSON.") from e
+
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("lines"), list):
+        raise HTTPException(400, 'Lines payload must be a JSON object shaped {"lines": [...]}.')
+
+    try:
+        bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
