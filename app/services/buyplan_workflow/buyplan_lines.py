@@ -436,7 +436,9 @@ def _coerce_known_line_ids(known_line_ids: list[int] | None) -> set[int] | None:
     ``set[int]`` for an O(1) membership check on every removal-by-omission candidate,
     rejecting any non-int element — INCLUDING bools, since ``bool`` is a subclass of
     ``int`` in Python and a bare ``isinstance(x, int)`` would silently accept ``True``/
-    ``False`` as line ids. This function is the service's contract for the shape of
+    ``False`` as line ids.
+
+    This function is the service's contract for the shape of
     ``known_line_ids``; the route only checks it's a list (or absent) before handing it
     off here.
     """
