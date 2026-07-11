@@ -1754,6 +1754,31 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
+**Line editing (epic I — add/edit/remove, `buyplan_lines.py`).** Role×status gate
+(`can_edit_buy_plan_lines`, enforced server-side by `_ensure_can_edit_lines` in every
+mutating call, NOT just the template): draft/pending → plan owner (via `Requisition
+.created_by`) or a manager; active/inbound/halted → manager-only (sales locked out
+post-approval); completed/cancelled → locked for everyone. `add_buy_plan_line` (POST
+`.../lines/add`) requires the requirement to belong to the plan's requisition and derives
+`unit_cost`/buyer via `assign_buyer`. `edit_buy_plan_line` (POST `.../lines/{id}/edit`)
+and `remove_buy_plan_line` (POST `.../lines/{id}/remove`) both refuse a vendor/qty
+change or removal once `_has_cut_po(line)` is true (PO confirmed or status has left
+`awaiting_po`) — the sell price stays editable regardless (it never touches the PO).
+Each mutator recomputes the header rollups via `_recalculate_financials` and returns the
+refreshed `buy_plan_detail_partial` into `#main-content`.
+
+`bulk_edit_buy_plan_lines` (POST `.../lines/bulk`) is the "save all" counterpart driving
+the whole-table Alpine editor (`buyPlanLinesEditor`, `htmx_app.js`; "Edit plan" toggle →
+per-row inline edit/add/remove → "Save all"). Form field `payload` is JSON
+`{"lines": [...]}`: an entry with `line_id` edits that line (same per-field cut-PO
+guard as `edit_buy_plan_line`); an entry without `line_id` adds a new line (same
+validation as `add_buy_plan_line`); any existing, non-PO-cut line whose id is NOT in the
+payload is removed (removal-by-omission — the same guard as `remove_buy_plan_line`,
+applied implicitly instead of an explicit call); a PO-cut line simply omitted from the
+payload is left untouched, never implicitly removed. Same role×status gate, same
+recompute-and-re-render tail. Malformed JSON or a wrong shape (`{"lines": [...]}`
+required) → 400 before the service is even called.
+
 ### 6e. Re-source (fall-down → open claim pool → urgent buyer backfill)
 
 `buyplan_workflow.resource_line` (`app/services/buyplan_workflow/buyplan_lines.py`) is the

@@ -16,6 +16,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
@@ -27,8 +28,6 @@ from app.dependencies import require_user
 from app.main import app
 from app.models import Requirement, Requisition, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
-
-from contextlib import contextmanager
 
 
 @contextmanager
@@ -229,9 +228,7 @@ def test_bulk_edit_vendor_change_on_po_cut_line_rejected(db_session, manager_use
     line = _line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
 
     with pytest.raises(ValueError, match="vendor"):
-        bulk_edit_buy_plan_lines(
-            plan.id, [{"line_id": line.id, "offer_id": test_offer.id}], manager_user, db_session
-        )
+        bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "offer_id": test_offer.id}], manager_user, db_session)
 
 
 def test_bulk_edit_qty_zero_rejected(db_session, test_user, test_requisition):
