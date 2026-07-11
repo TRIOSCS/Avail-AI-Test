@@ -342,11 +342,26 @@ describe('buyPlanLinesEditor (real factory)', () => {
     });
 
     it('resets saving when the htmx.ajax promise rejects (e.g. a 400)', async () => {
-      (htmx.ajax as any).mockRejectedValueOnce(new Error('bad request'));
-      const m = makeEditor(1, [row({ lineId: 1, offerId: '9', qty: '5' })]);
-      m.saveAll();
-      expect(m.saving).toBe(true);
-      await vi.waitFor(() => expect(m.saving).toBe(false));
+      // saveAll() intentionally only chains `.finally()` (fire-and-forget, same as every
+      // other imperative htmx.ajax() call site in this codebase) — it never swallows the
+      // rejection, so `.finally()`'s own derived promise is left unconsumed by design
+      // (nothing awaits saveAll() from the template either). That's expected in
+      // production (the browser just logs it) but Node's test runner reports it as an
+      // "unhandled rejection" — swallow that ONE expected rejection here so it doesn't
+      // pollute the test run, without touching saveAll() itself.
+      const swallowExpectedRejection = (err: unknown) => {
+        if (!(err instanceof Error) || err.message !== 'bad request') throw err;
+      };
+      process.once('unhandledRejection', swallowExpectedRejection);
+      try {
+        (htmx.ajax as any).mockRejectedValueOnce(new Error('bad request'));
+        const m = makeEditor(1, [row({ lineId: 1, offerId: '9', qty: '5' })]);
+        m.saveAll();
+        expect(m.saving).toBe(true);
+        await vi.waitFor(() => expect(m.saving).toBe(false));
+      } finally {
+        process.removeListener('unhandledRejection', swallowExpectedRejection);
+      }
     });
 
     it('does nothing when canSave is false (invalid row present)', () => {
