@@ -94,8 +94,11 @@ fi
 log "Upload complete"
 
 # ─── Verify upload ───────────────────────────────────────────────────────────
+# `aws s3 ls <key>` PREFIX-matches, so listing the dump also returns its
+# .sha256 sibling (uploaded above) — filter to the exact key or REMOTE_SIZE
+# becomes two concatenated sizes and the comparison always "mismatches".
 REMOTE_SIZE=$(aws s3 ls "s3://${DO_SPACES_BUCKET}/db-backups/${FILENAME}" \
-    --endpoint-url "$ENDPOINT" 2>/dev/null | awk '{print $3}')
+    --endpoint-url "$ENDPOINT" 2>/dev/null | awk -v f="$FILENAME" '$4 == f {print $3}')
 LOCAL_SIZE=$(stat -c%s "$BACKUP_FILE" 2>/dev/null || stat -f%z "$BACKUP_FILE")
 
 if [ "$REMOTE_SIZE" != "$LOCAL_SIZE" ]; then
