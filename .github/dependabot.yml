@@ -47,6 +47,14 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
+    ignore:
+      # Tailwind v4 is a deliberate migration, not a routine bump: the PostCSS plugin
+      # moved to @tailwindcss/postcss and config becomes CSS-first, so the major breaks
+      # `vite build` (see PR #711). Dev-dep by manifest, but its output ships to prod
+      # via the built CSS bundle. Tracked in the master backlog; remove this once the
+      # v4 migration lands.
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         dependency-type: development
