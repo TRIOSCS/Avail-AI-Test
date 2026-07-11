@@ -1265,8 +1265,8 @@ async def buy_plan_bulk_lines_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Save the entire plan's lines (edited qty/sell/vendor, added lines, removed
-    lines) in one POST (epic I "save all").
+    """Save the entire plan's lines (edited qty/sell/vendor, added lines, removed lines)
+    in one POST (epic I "save all").
 
     Form field ``payload`` is a JSON object ``{"lines": [...], "known_line_ids": [...]}``
     (the Alpine editor posts it via an htmx ``hx-vals`` JSON blob). ``known_line_ids``
