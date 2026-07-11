@@ -431,6 +431,25 @@ def _require_int_quantity(value: object) -> int:
     return int(as_float)
 
 
+def _coerce_known_line_ids(known_line_ids: list[int] | None) -> set[int] | None:
+    """Coerce ``bulk_edit_buy_plan_lines``'s optional ``known_line_ids`` to a
+    ``set[int]`` for an O(1) membership check on every removal-by-omission candidate,
+    rejecting any non-int element — INCLUDING bools, since ``bool`` is a subclass of
+    ``int`` in Python and a bare ``isinstance(x, int)`` would silently accept ``True``/
+    ``False`` as line ids. This function is the service's contract for the shape of
+    ``known_line_ids``; the route only checks it's a list (or absent) before handing it
+    off here.
+    """
+    if known_line_ids is None:
+        return None
+    coerced: set[int] = set()
+    for raw_id in known_line_ids:
+        if isinstance(raw_id, bool) or not isinstance(raw_id, int):
+            raise ValueError("known_line_ids must contain only whole-number line ids.")
+        coerced.add(raw_id)
+    return coerced
+
+
 # Sentinel distinguishing "kwarg not passed" (field untouched) from "kwarg passed as
 # None" (field explicitly cleared) — plain ``None`` defaults can't express both, which
 # is exactly the bug that let ``unit_sell`` never be clearable pre-refactor.
@@ -654,19 +673,27 @@ def bulk_edit_buy_plan_lines(
     :func:`_apply_line_edit` helper (also used by :func:`edit_buy_plan_line`) and new-
     line validation/construction lives in :func:`_build_new_line` (also used by
     :func:`add_buy_plan_line`), so there is exactly one place each rule is encoded:
-      - an entry with ``line_id`` edits that existing line. Vendor/qty changes are
-        refused once :func:`_has_cut_po` is true — UNLESS the submitted value equals the
-        line's current value, which is always a no-op (never trips the guard); this
-        keeps a resend of an untouched row from 400ing the whole save just because a PO
-        was cut on it between form-load and save. An actual offer change re-derives
-        unit_cost and re-runs :func:`assign_buyer`; the new offer must belong to the
-        plan's requisition (:func:`_ensure_offer_on_requisition`). Sell price uses
-        key-presence semantics: ``"unit_sell"`` absent from the entry leaves it
-        unchanged; present with JSON ``null`` clears it; present with a number sets it.
+      - an entry with ``line_id`` edits that existing line. ``offer_id`` and ``quantity``
+        use KEY-PRESENCE semantics like ``unit_sell``: the key absent leaves the field
+        unchanged; the key present maps its value straight through to
+        :func:`_apply_line_edit` — EXCEPT an explicit JSON ``null`` for ``offer_id`` or
+        ``quantity`` specifically, which is always a ValueError ("must not be null")
+        rather than being silently treated as unchanged (the current frontend never
+        sends this; it exists to fail loudly on a malformed/future client instead of
+        quietly no-op'ing a field the caller clearly meant to touch). Vendor/qty changes
+        are refused once :func:`_has_cut_po` is true — UNLESS the submitted value equals
+        the line's current value, which is always a no-op (never trips the guard, and
+        never re-validates the attached offer either — see
+        :func:`_ensure_offer_attachable`'s docstring); this keeps a resend of an
+        untouched row from 400ing the whole save just because a PO was cut on it (or its
+        offer went SOLD) between form-load and save. Sell price keeps its own
+        already-key-presence semantics: ``"unit_sell"`` absent leaves it unchanged;
+        present with JSON ``null`` clears it; present with a number sets it.
       - an entry without ``line_id`` adds a new line (requirement must belong to the
-        plan's requisition; offer must exist AND belong to the same requisition; qty
-        must be a positive whole number — a fractional qty like ``3.5`` is rejected, not
-        truncated), same as :func:`add_buy_plan_line`;
+        plan's requisition; offer must exist AND be attachable to it — same requisition,
+        same requirement/part, ACTIVE status; qty must be a positive whole number — a
+        fractional qty like ``3.5`` is rejected, not truncated), same as
+        :func:`add_buy_plan_line`;
       - any existing, non-PO-cut line whose id does NOT appear in the payload is
         removed (same PO-cut guard as :func:`remove_buy_plan_line`, applied by omission
         instead of an explicit call) — a PO-cut line left out of the payload is simply
@@ -676,6 +703,9 @@ def bulk_edit_buy_plan_lines(
         *known_line_ids*) is left untouched instead of being silently deleted.
         *known_line_ids* omitted (``None``) falls back to the legacy behavior above (the
         route always sends it; this is a backward-compat contract, not a UI choice).
+        Coerced to ``set[int]`` up front (bools rejected — ``bool`` is a subclass of
+        ``int`` in Python) so every element is type-safe and membership checks are O(1);
+        this function owns that validation contract, not the route.
 
     Every offer any entry references is preloaded in ONE batch query up front (a real
     editor save can touch a dozen+ lines/vendors) instead of a ``db.get()`` per entry.
@@ -683,14 +713,18 @@ def bulk_edit_buy_plan_lines(
     Gated by :func:`can_edit_buy_plan_lines`. Auto-completes at service depth via
     :func:`check_completion` after recalc/flush (mirrors ``verify_po`` in
     ``buyplan_po.py``) — removing the last open line can leave every remaining line
-    terminal, so this prevents an ACTIVE plan getting stranded short of COMPLETED.
-    Caller commits; a mid-loop ValueError leaves nothing committed (the router never
-    calls db.commit() after an exception).
+    terminal, so this prevents an ACTIVE plan getting stranded short of COMPLETED. The
+    caller reads the RETURNED plan's ``.status`` (before its own commit) to learn
+    whether THIS call completed it, rather than re-deriving that fact with a second
+    ``check_completion`` scan. Caller commits; a mid-loop ValueError leaves nothing
+    committed (the router never calls db.commit() after an exception).
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     _ensure_can_edit_lines(user, plan)
+
+    known_ids = _coerce_known_line_ids(known_line_ids)
 
     existing_by_id = {ln.id: ln for ln in plan.lines}
     seen_ids: set[int] = set()
@@ -725,16 +759,32 @@ def bulk_edit_buy_plan_lines(
                     raise ValueError(f"Line {line_id} not found in plan {plan_id}")
                 seen_ids.add(line_id)
 
-                offer_id = entry.get("offer_id")
-                quantity = entry.get("quantity")
-                unit_sell = entry.get("unit_sell") if "unit_sell" in entry else _UNSET
+                # Key-presence semantics for offer_id/quantity (matching unit_sell):
+                # absent -> _UNSET (unchanged); present -> pass the value through UNLESS
+                # it's an explicit null, which is a hard error (never silently-unchanged
+                # — that was the whole point of introducing the _UNSET sentinel).
+                if "offer_id" in entry:
+                    if entry["offer_id"] is None:
+                        raise ValueError("offer_id must not be null.")
+                    offer_id_kw: Any = entry["offer_id"]
+                else:
+                    offer_id_kw = _UNSET
+
+                if "quantity" in entry:
+                    if entry["quantity"] is None:
+                        raise ValueError("quantity must not be null.")
+                    quantity_kw: Any = entry["quantity"]
+                else:
+                    quantity_kw = _UNSET
+
+                unit_sell_kw = entry.get("unit_sell") if "unit_sell" in entry else _UNSET
                 _apply_line_edit(
                     line,
                     plan,
                     db,
-                    offer_id=offer_id if offer_id is not None else _UNSET,
-                    quantity=quantity if quantity is not None else _UNSET,
-                    unit_sell=unit_sell,
+                    offer_id=offer_id_kw,
+                    quantity=quantity_kw,
+                    unit_sell=unit_sell_kw,
                     offer_lookup=offer_lookup,
                 )
             else:
@@ -752,15 +802,15 @@ def bulk_edit_buy_plan_lines(
             raise ValueError(f"Malformed line payload: {e}") from e
 
     # Removal by omission: an existing, non-PO-cut line not referenced by line_id in the
-    # payload is dropped — UNLESS known_line_ids was given and the line's id isn't in
-    # it, meaning the client never saw this line (added concurrently by someone else
-    # after the form loaded) and it must be left alone. A PO-cut line omitted from the
-    # payload is always left alone regardless — it can only leave the plan via the
-    # explicit re-source / PO-cancellation flow.
+    # payload is dropped — UNLESS known_ids was given and the line's id isn't in it,
+    # meaning the client never saw this line (added concurrently by someone else after
+    # the form loaded) and it must be left alone. A PO-cut line omitted from the payload
+    # is always left alone regardless — it can only leave the plan via the explicit
+    # re-source / PO-cancellation flow.
     for line in list(existing_by_id.values()):
         if line.id in seen_ids or _has_cut_po(line):
             continue
-        if known_line_ids is not None and line.id not in known_line_ids:
+        if known_ids is not None and line.id not in known_ids:
             continue
         plan.lines.remove(line)
 

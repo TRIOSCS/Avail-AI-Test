@@ -827,13 +827,22 @@ def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
 
 
 def _recalculate_financials(plan: BuyPlan):
-    """Recompute plan-level cost, revenue, margin from lines."""
+    """Recompute plan-level cost, revenue, margin from lines.
+
+    Per-line gates use ``is not None`` (not bare truthiness) so a genuine ``0.0``
+    unit_cost/unit_sell (e.g. a free-sample line) is included in the sum rather than
+    silently skipped — matches the same "0 is a real value, not falsy" fix applied to
+    the line-level writers in ``buyplan_lines.py``. Note this is a defensive/consistency
+    fix, not a behavior change: a truly-zero line contributes exactly 0 to the running
+    total either way the gate is written, so no existing caller's computed total_cost/
+    total_revenue/total_margin_pct changes.
+    """
     total_cost = 0.0
     total_revenue = 0.0
     for line in plan.lines:
-        if line.unit_cost and line.quantity:
+        if line.unit_cost is not None and line.quantity:
             total_cost += float(line.unit_cost) * line.quantity
-        if line.unit_sell and line.quantity:
+        if line.unit_sell is not None and line.quantity:
             total_revenue += float(line.unit_sell) * line.quantity
 
     plan.total_cost = round(total_cost, 2) if total_cost else None
