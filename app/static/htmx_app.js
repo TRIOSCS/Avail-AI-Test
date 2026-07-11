@@ -3456,7 +3456,7 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
   // concurrently) and is turned away by the guard below regardless of whether the
   // DOM's `:disabled="!canSave"` binding has repainted yet. `data-loading-disable`
   // (htmx-ext-loading-states) only disables elements tied to the request's triggering
-  // element; a plain-object htmx.ajax() call like this one has no such element, so it
+  // element; a programmatic ajax call like this one has no such element, so it
   // is NOT relied on here — this explicit `saving` flag is the real guard. Reset in
   // .finally() so a failed (e.g. 400) response doesn't strand the button disabled; a
   // successful save re-renders #main-content, which discards this component entirely.
