@@ -8,7 +8,9 @@ all in a single POST.
 
 Called by: pytest
 Depends on: conftest fixtures (client, test_user, sales_user, manager_user,
-    test_requisition, test_offer), FastAPI TestClient.
+    test_requisition, test_offer, and the shared buy-plan line-editing factories
+    _buyplan_req/_buyplan_requirement_of/_buyplan_plan/_buyplan_line/_buyplan_offer —
+    also consumed by test_buy_plan_epic.py), FastAPI TestClient.
 """
 
 import json
@@ -17,17 +19,20 @@ import os
 os.environ["TESTING"] = "1"
 
 from contextlib import contextmanager
-from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanLineStatus, BuyPlanStatus
+from app.constants import BuyPlanLineStatus, BuyPlanStatus, OfferStatus
 from app.dependencies import require_user
 from app.main import app
-from app.models import Offer, Requirement, Requisition, User
+from app.models import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
+from tests.conftest import _buyplan_line as _line
+from tests.conftest import _buyplan_offer as _offer
+from tests.conftest import _buyplan_plan as _plan
+from tests.conftest import _buyplan_req as _req
+from tests.conftest import _buyplan_requirement_of as _requirement_of
 
 
 @contextmanager
@@ -42,88 +47,6 @@ def _acting_as(user: User):
             app.dependency_overrides[require_user] = prior
         else:
             app.dependency_overrides.pop(require_user, None)
-
-
-def _req(db: Session, owner: User, *, customer: str = "Acme Electronics") -> Requisition:
-    req = Requisition(
-        name="REQ-BULK",
-        customer_name=customer,
-        status="open",
-        created_by=owner.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(req)
-    db.flush()
-    db.add(
-        Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            target_qty=1000,
-            target_price=0.75,
-            created_at=datetime.now(UTC),
-        )
-    )
-    db.commit()
-    db.refresh(req)
-    return req
-
-
-def _requirement_of(db: Session, req: Requisition) -> Requirement:
-    return db.query(Requirement).filter(Requirement.requisition_id == req.id).first()
-
-
-def _plan(db: Session, req: Requisition, *, status=BuyPlanStatus.DRAFT.value, **ov) -> BuyPlan:
-    defaults = dict(
-        requisition_id=req.id,
-        status=status,
-        so_status="pending",
-        total_cost=100.00,
-        total_revenue=200.00,
-        total_margin_pct=50.00,
-        ai_flags=[],
-        created_at=datetime.now(UTC),
-    )
-    defaults.update(ov)
-    plan = BuyPlan(**defaults)
-    db.add(plan)
-    db.commit()
-    db.refresh(plan)
-    return plan
-
-
-def _line(db: Session, plan: BuyPlan, **ov) -> BuyPlanLine:
-    defaults = dict(
-        buy_plan_id=plan.id,
-        quantity=100,
-        unit_cost=1.00,
-        unit_sell=2.00,
-        status=BuyPlanLineStatus.AWAITING_PO.value,
-    )
-    defaults.update(ov)
-    line = BuyPlanLine(**defaults)
-    db.add(line)
-    db.commit()
-    db.refresh(line)
-    return line
-
-
-def _offer(db: Session, requisition: Requisition, entered_by: User, **ov) -> Offer:
-    defaults = dict(
-        requisition_id=requisition.id,
-        vendor_name="Foreign Vendor",
-        mpn="LM317T",
-        qty_available=1000,
-        unit_price=0.40,
-        entered_by_id=entered_by.id,
-        status="active",
-        created_at=datetime.now(UTC),
-    )
-    defaults.update(ov)
-    offer = Offer(**defaults)
-    db.add(offer)
-    db.commit()
-    db.refresh(offer)
-    return offer
 
 
 # ══ Service-level ══════════════════════════════════════════════════════
@@ -157,7 +80,10 @@ def test_bulk_edit_vendor_change_recomputes_cost(db_session, test_user, test_req
     from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
 
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
-    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+    requirement = _requirement_of(db_session, test_requisition)
+    test_offer.requirement_id = requirement.id
+    db_session.commit()
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00, requirement_id=requirement.id)
 
     bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "offer_id": test_offer.id}], test_user, db_session)
     db_session.commit()
@@ -173,6 +99,8 @@ def test_bulk_edit_adds_new_line_with_buyer_assignment(db_session, test_user, te
 
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
     requirement = _requirement_of(db_session, test_requisition)
+    test_offer.requirement_id = requirement.id
+    db_session.commit()
 
     payload = [
         {"requirement_id": requirement.id, "offer_id": test_offer.id, "quantity": 1000, "unit_sell": 0.60},
