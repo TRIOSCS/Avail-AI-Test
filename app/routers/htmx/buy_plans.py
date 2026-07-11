@@ -115,24 +115,27 @@ def _parse_optional_float(raw: str | None) -> float | None:
         raise HTTPException(400, "Expected a number.") from e
 
 
-async def _notify_if_completed(plan_id: int, db: Session) -> None:
-    """Fire the completion notification if *plan_id* just auto-completed.
+async def _notify_if_completed(plan_id: int, just_completed: bool) -> None:
+    """Fire the completion notification exactly once, driven by a caller-computed
+    *just_completed* flag — NEVER by re-deriving it via a second ``check_completion``
+    call.
 
-    The auto-complete DECISION now lives at service depth — ``verify_po``,
+    The auto-complete DECISION lives entirely at service depth: ``verify_po``,
     ``remove_buy_plan_line``, and ``bulk_edit_buy_plan_lines`` each call
-    ``check_completion`` themselves right after mutating line state. This shared route
-    tail just re-checks status (cheap no-op the vast majority of the time) to decide
-    whether to fire the ``notify_completed`` side effect — kept a route concern, not a
-    service one. Used identically by the verify-po, remove-line, and bulk-save-lines
-    routes.
+    ``check_completion`` themselves right after mutating line state, so by the time
+    control returns to the route the plan/line object already carries the answer in its
+    (still in-session, pre-commit) ``.status``. Callers capture *just_completed* from
+    that status BEFORE ``db.commit()`` (so an expired attribute after commit can't force
+    a surprise re-fetch) and pass it here AFTER commit — re-scanning the plan's lines a
+    second time here would be redundant work and, worse, a second opportunity to invoke
+    completion side effects if the "already complete" short-circuit were ever weakened.
+    Used identically by the verify-po, remove-line, and bulk-save-lines routes.
     """
+    if not just_completed:
+        return
     from ...services.buyplan_notifications import notify_completed, run_notify_bg
-    from ...services.buyplan_workflow import check_completion
 
-    updated = check_completion(plan_id, db)
-    if updated and updated.status == BuyPlanStatus.COMPLETED:
-        db.commit()
-        await run_notify_bg(notify_completed, plan_id)
+    await run_notify_bg(notify_completed, plan_id)
 
 
 _APPROVALS_TABS = ("my_queue", "pipeline")
@@ -1169,8 +1172,15 @@ async def buy_plan_add_line_partial(
     """
     from ...services.buyplan_workflow import add_buy_plan_line
 
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Same
+    # loader options as add_buy_plan_line's own db.get() so the ownership pre-check's
+    # load isn't silently wasted — a bare Session.get() on a PK already in the identity
+    # map does NOT retroactively apply new loader options, so without this the service's
+    # joinedload(BuyPlan.lines)/joinedload(BuyPlan.requisition) would do nothing and
+    # plan.lines/plan.requisition would lazy-load one row at a time instead.
+    get_buyplan_for_user(
+        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
+    )
 
     form = await request.form()
     try:
@@ -1207,8 +1217,11 @@ async def buy_plan_edit_line_partial(
     """
     from ...services.buyplan_workflow import edit_buy_plan_line
 
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
+    # edit_buy_plan_line's own loader options (see buy_plan_add_line_partial for why).
+    get_buyplan_for_user(
+        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
+    )
 
     form = await request.form()
     quantity = _parse_optional_int(form.get("quantity"))
@@ -1238,18 +1251,23 @@ async def buy_plan_remove_line_partial(
 
     Role×status gate in the service (PermissionError → 403); removing a cut-PO line →
     400. ``remove_buy_plan_line`` already auto-completes at service depth (removing the
-    plan's last open line can leave every remaining line terminal); this route's
-    ``_notify_if_completed`` just re-checks to decide whether to fire the notification.
+    plan's last open line can leave every remaining line terminal); the returned plan's
+    ``.status`` is read BEFORE commit to drive ``_notify_if_completed`` without re-
+    deriving the fact via a second ``check_completion`` scan.
     """
     from ...services.buyplan_workflow import remove_buy_plan_line
 
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
+    # remove_buy_plan_line's own loader options (see buy_plan_add_line_partial).
+    get_buyplan_for_user(
+        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
+    )
 
     try:
-        remove_buy_plan_line(plan_id, line_id, user, db)
+        updated = remove_buy_plan_line(plan_id, line_id, user, db)
+        just_completed = updated.status == BuyPlanStatus.COMPLETED.value
         db.commit()
-        await _notify_if_completed(plan_id, db)
+        await _notify_if_completed(plan_id, just_completed)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
