@@ -1754,6 +1754,52 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
+**Line editing (epic I — add/edit/remove, `buyplan_lines.py`).** Role×status gate
+(`can_edit_buy_plan_lines`, enforced server-side by `_ensure_can_edit_lines` in every
+mutating call, NOT just the template): draft/pending → plan owner (via `Requisition
+.created_by`) or a manager; active/inbound/halted → manager-only (sales locked out
+post-approval); completed/cancelled → locked for everyone. `add_buy_plan_line` (POST
+`.../lines/add`) requires the requirement to belong to the plan's requisition, the offer
+to belong to the SAME requisition (`_ensure_offer_on_requisition` — mirrors the detail-
+render's vendor-picker filter, `Offer.requisition_id == bp.requisition_id`, so nothing
+outside the picker's own universe can be posted), and derives `unit_cost`/buyer via
+`assign_buyer`. `edit_buy_plan_line` (POST `.../lines/{id}/edit`) and
+`remove_buy_plan_line` (POST `.../lines/{id}/remove`) both refuse a vendor/qty change or
+removal once `_has_cut_po(line)` is true (PO confirmed or status has left
+`awaiting_po`) — the sell price stays editable regardless (it never touches the PO). Each
+mutator recomputes the header rollups via `_recalculate_financials` and returns the
+refreshed `buy_plan_detail_partial` into `#main-content`; `remove_buy_plan_line`'s route
+also runs `check_completion` right after commit (removing the plan's last open line can
+leave every remaining line terminal — same auto-complete call the verify-po route makes).
+
+`bulk_edit_buy_plan_lines` (POST `.../lines/bulk`) is the "save all" counterpart driving
+the whole-table Alpine editor (`buyPlanLinesEditor`, `htmx_app.js`; "Edit plan" toggle →
+per-row inline edit/add/remove → "Save all"). Form field `payload` is JSON
+`{"lines": [...], "known_line_ids": [...]}`:
+  - an entry with `line_id` edits that line — offer/qty changes are refused once
+    `_has_cut_po(line)` is true UNLESS the submitted value equals the line's CURRENT
+    value (a no-op resend never trips the guard, so a PO cut on an untouched row between
+    form-load and save can't 400 the whole save); an actual offer change re-derives
+    `unit_cost`/buyer and must pass `_ensure_offer_on_requisition`; `unit_sell` uses
+    key-presence semantics (`"unit_sell"` absent → unchanged; present + JSON `null` →
+    cleared; present + a number → set);
+  - an entry without `line_id` adds a new line — same validation as `add_buy_plan_line`,
+    plus qty must be a whole number (a fractional value like `3.5` is rejected, not
+    truncated);
+  - any existing, non-PO-cut line whose id is NOT in the payload is removed (removal-by-
+    omission — the same guard as `remove_buy_plan_line`, applied implicitly). When
+    `known_line_ids` (every line id the client's form actually rendered) is given,
+    removal-by-omission is further scoped to ids IN that set, so a line another user
+    added after the form loaded — present on the plan but never in `known_line_ids` — is
+    left untouched instead of silently deleted; `known_line_ids` omitted falls back to
+    the unscoped legacy behavior (a route backward-compat contract; the UI always sends
+    it). A PO-cut line omitted from the payload is always left untouched regardless.
+
+Same role×status gate, same recompute-and-re-render tail, same post-commit
+`check_completion` call as the single-line remove route. Malformed JSON, a wrong shape
+(`{"lines": [...]}` required), or a non-list-of-ints `known_line_ids` → 400 before the
+service is even called.
+
 ### 6e. Re-source (fall-down → open claim pool → urgent buyer backfill)
 
 `buyplan_workflow.resource_line` (`app/services/buyplan_workflow/buyplan_lines.py`) is the

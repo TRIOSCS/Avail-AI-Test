@@ -1,11 +1,29 @@
 {#
-  _detail_lines.html — Buy-plan simplified line-items table (Part · Description · Vendor · Qty ·
-  Unit Cost · Status · Action) with the per-line PO/verify/re-source/reject/claim affordances.
-  Included by: htmx/partials/buy_plans/detail.html (in place of the old "SIMPLIFIED LINE ITEMS
-  TABLE" section).
-  Inherits context (default `with context` include): reads `lines`, `bp`, `user`, `can_resource`
-  (context), `can_approve_purchase_orders` (Jinja global), and the `part_description` filter.
-  Imports `status_badge`, `user_avatar` from shared/_macros.html; defines a local
+  _detail_lines.html — Buy-plan line-items table (Part · Description · Vendor · Qty ·
+  Unit Cost · Sell · Status · Action) with the per-line PO/verify/re-source/reject/claim
+  affordances, PLUS a whole-table "Edit plan" mode.
+
+  Two renderings share the card:
+  - Display mode (default): the original server-rendered Jinja loop over `lines` — status
+    pills, PO/verify/re-source/reject/claim/prepayment affordances, empty state — unchanged.
+    Hidden (x-show) while editMode is active when can_edit_lines.
+  - Edit mode: a single Alpine component (`buyPlanLinesEditor`, registered in
+    htmx_app.js) drives a client-side `rows` array seeded from the server. Vendor/qty/sell
+    become editable per non-locked (non-PO-cut) row; locked rows show vendor+qty read-only
+    with a "PO cut" hint and only allow editing sell. Rows are grouped by part with a
+    "+ Add vendor" affordance per group (split-vendor lines) plus a bottom "+ Add line"
+    part picker. Remove soft-deletes existing lines (struck + Undo) and hard-deletes
+    unsaved new rows. "Save all" posts the whole `rows` array in one bulk request;
+    "Cancel" re-seeds from the untouched server snapshot. Replaces the old per-row
+    Edit/Remove/Save/Cancel buttons and the old bottom Add-line collapsible panel.
+
+  Included by: htmx/partials/buy_plans/detail.html (in place of the old "SIMPLIFIED LINE
+  ITEMS TABLE" section).
+  Inherits context (default `with context` include): reads `lines`, `bp`, `user`,
+  `can_edit_lines`, `offers_by_requirement`, `plan_requirements`, `prepay_state`,
+  `can_resource`, `can_supervise`, `can_verify_po_line`, `can_request_prepayment`
+  (context), `can_approve_purchase_orders` (Jinja global), and the `part_description`
+  filter. Imports `status_badge`, `user_avatar` from shared/_macros.html; defines a local
   `line_status_pill(line)` macro for the Status cell.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, user_avatar %}
@@ -27,13 +45,77 @@
               {% endif %}
 {% endmacro %}
 
-  {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
+  {# ── Edit-mode seeds (only built when the viewer can actually edit lines) ──
+     `seed_rows` mirrors the `rows` shape the Alpine component owns; `offers_map` and
+     `addable_parts` are read-only lookups it never mutates. Built here (once) instead of
+     inline in the x-data attribute so the |tojson calls stay simple expressions. #}
+  {% if can_edit_lines %}
+  {% set seed_rows = [] %}
+  {% for line in lines %}
+    {% set desc = line.requirement|part_description if line.requirement else '' %}
+    {% set _ = seed_rows.append({
+      '_uid': 'line-' ~ line.id,
+      'lineId': line.id,
+      'requirementId': line.requirement_id,
+      'mpn': line.requirement.primary_mpn if line.requirement else None,
+      'description': desc,
+      'offerId': line.offer_id,
+      'vendorName': line.offer.vendor_name if line.offer else None,
+      'unitCost': (line.unit_cost|float) if line.unit_cost is not none else None,
+      'qty': line.quantity,
+      'sell': (line.unit_sell|float) if line.unit_sell is not none else None,
+      'locked': line.has_cut_po,
+      'removed': False,
+    }) %}
+  {% endfor %}
+  {% set offers_map = {} %}
+  {% for req_id, req_offers in offers_by_requirement.items() %}
+    {% set _ = offers_map.update({ req_id: [] }) %}
+    {% for o in req_offers %}
+      {% set _ = offers_map[req_id].append({
+        'id': o.id,
+        'vendorName': o.vendor_name,
+        'unitPrice': (o.unit_price|float) if o.unit_price is not none else None,
+      }) %}
+    {% endfor %}
+  {% endfor %}
+  {# Requirements that have at least one active offer — feeds the addable_parts seed
+     below, which is the SINGLE addable universe both the inline "+ Add vendor" and the
+     bottom "+ Add line" picker read client-side via addableParts/offersFor (#5 — no
+     more server-rendered optgroups duplicating this list). #}
+  {% set reqs_with_offers = plan_requirements | selectattr('id', 'in', offers_by_requirement.keys()) | list %}
+  {% set addable_parts = [] %}
+  {% for req in reqs_with_offers %}
+    {% set req_desc = req|part_description if req else '' %}
+    {% set _ = addable_parts.append({'id': req.id, 'mpn': req.primary_mpn, 'description': req_desc}) %}
+  {% endfor %}
+  {% endif %}
+
   {# Finding #1: convert to data-table, drop per-cell px-4 py-3 and per-th font-medium text-gray-500 uppercase #}
-  <div class="bg-white rounded-lg shadow-card overflow-hidden border border-line-base mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-line-base">
+  <div class="bg-white rounded-lg shadow-card overflow-hidden border border-line-base mb-6"
+       {% if can_edit_lines %}
+       x-data='buyPlanLinesEditor({{ bp.id }}, {{ seed_rows|tojson }}, {{ offers_map|tojson }}, {{ addable_parts|tojson }})'
+       {% endif %}>
+    <div class="px-4 py-3 bg-gray-50 border-b border-line-base flex items-center justify-between flex-wrap gap-2">
       <h2 class="h2">Line Items
         <span class="ml-1 text-sm font-normal text-gray-600">({{ lines|length }})</span>
       </h2>
+      {# Whole-table edit toggle (replaces the old per-row Edit buttons + bottom Add-line
+         panel). Save all/Cancel appear only while editMode is active. #}
+      {% if can_edit_lines %}
+      <div class="flex items-center gap-2">
+        <button type="button" x-show="!editMode" @click="enterEdit()" class="btn btn-secondary btn-sm">Edit plan</button>
+        <template x-if="editMode">
+          <div class="flex items-center gap-2">
+            <span x-show="invalidRows.length > 0" x-cloak class="text-xs text-rose-600">Fill vendor + qty on every row before saving.</span>
+            <button type="button" @click="cancelEdit()" class="btn btn-secondary btn-sm">Cancel</button>
+            <button type="button" :disabled="!canSave" data-loading-disable
+                    @click="saveAll()"
+                    class="btn btn-primary btn-sm disabled:opacity-50 disabled:cursor-not-allowed">Save all</button>
+          </div>
+        </template>
+      </div>
+      {% endif %}
     </div>
     <div class="overflow-x-auto">
       <table class="data-table w-full">
@@ -49,12 +131,10 @@
             <th class="text-left">Action</th>
           </tr>
         </thead>
-        <tbody>
+        {# ── DISPLAY tbody — unchanged rendering, hidden while editMode is on ── #}
+        <tbody {% if can_edit_lines %}x-show="!editMode"{% endif %}>
           {% for line in lines %}
-          {# ``editing`` (epic I) toggles the per-line inline editors (vendor/qty/sell) + the
-             Save/Cancel controls; $refs on the row's inputs are read by Save. Only meaningful
-             when can_edit_lines — the inputs render only then. #}
-          <tr id="bp-line-{{ line.id }}" class="transition-colors" x-data="{ editing: false }">
+          <tr id="bp-line-{{ line.id }}" class="transition-colors">
             {# Part (MPN) #}
             <td class="font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
@@ -64,45 +144,24 @@
             <td class="text-gray-600 truncate max-w-[200px]" title="{{ desc }}">
               {{ desc or '-' }}
             </td>
-            {# Vendor + buyer (assignee) below — editable offer picker when in edit mode #}
+            {# Vendor + buyer (assignee) below #}
             <td>
-              <div x-show="!editing">
-                <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
-                {% if line.buyer %}
-                <div class="flex items-center gap-1.5 mt-0.5">
-                  {{ user_avatar(line.buyer) }}
-                  <span class="text-secondary">{{ line.buyer.name }}</span>
-                </div>
-                {% endif %}
+              <div class="text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
+              {% if line.buyer %}
+              <div class="flex items-center gap-1.5 mt-0.5">
+                {{ user_avatar(line.buyer) }}
+                <span class="text-secondary">{{ line.buyer.name }}</span>
               </div>
-              {% if can_edit_lines %}
-              <select x-show="editing" x-cloak x-ref="offer" aria-label="Vendor offer"
-                      class="input input-sm w-full max-w-[180px]">
-                <option value="">— keep {{ line.offer.vendor_name if line.offer else 'current' }} —</option>
-                {% for o in offers_by_requirement.get(line.requirement_id, []) %}
-                <option value="{{ o.id }}">{{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price|float) if o.unit_price else '0.0000' }}</option>
-                {% endfor %}
-              </select>
               {% endif %}
             </td>
-            {# Qty — editable when in edit mode #}
-            <td class="text-right text-gray-600">
-              <span x-show="!editing">{{ '{:,}'.format(line.quantity) }}</span>
-              {% if can_edit_lines %}
-              <input x-show="editing" x-cloak x-ref="qty" aria-label="Quantity" type="number" min="1"
-                     value="{{ line.quantity }}" class="input input-sm w-20 text-right">
-              {% endif %}
-            </td>
-            {# Unit Cost — derived from the offer (read-only; changes with the vendor) #}
-            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
-            {# Sell — editable when in edit mode #}
-            <td class="text-right text-gray-600">
-              <span x-show="!editing">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell else '-' }}</span>
-              {% if can_edit_lines %}
-              <input x-show="editing" x-cloak x-ref="sell" aria-label="Unit sell" type="number" step="any" min="0"
-                     value="{{ line.unit_sell|float if line.unit_sell is not none else '' }}" class="input input-sm w-24 text-right">
-              {% endif %}
-            </td>
+            {# Qty #}
+            <td class="text-right text-gray-600">{{ '{:,}'.format(line.quantity) }}</td>
+            {# Unit Cost — derived from the offer (read-only; changes with the vendor).
+               `is not none` (not truthiness) so a real stored 0.0 renders as $0.0000,
+               not '-' (falsy-zero display bug — a raw 0.0 is a legitimate value). #}
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost is not none else '-' }}</td>
+            {# Sell — same `is not none` fix as Unit Cost above. #}
+            <td class="text-right text-gray-600">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell is not none else '-' }}</td>
             {# Status + PO# + prepayment badge (#11) #}
             <td>
               {{ line_status_pill(line) }}
@@ -111,24 +170,6 @@
             </td>
             {# Action — Finding #4: bespoke bg-emerald/rose buttons → .btn family #}
             <td>
-              {# Line editing (epic I): Edit/Remove when idle, Save/Cancel while editing. Save
-                 posts only the three editable fields; the server re-gates + recomputes header
-                 totals. Gated by can_edit_lines (the SAME server predicate the POSTs enforce). #}
-              {% if can_edit_lines %}
-              <div class="mb-1.5 flex flex-wrap gap-1">
-                <button type="button" x-show="!editing" @click="editing = true" class="btn btn-secondary btn-sm">Edit</button>
-                <button type="button" x-show="!editing"
-                        hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/remove"
-                        hx-target="#main-content" hx-swap="innerHTML"
-                        hx-confirm="Remove this line from the plan?"
-                        data-loading-disable
-                        class="btn btn-danger btn-sm">Remove</button>
-                <button type="button" x-show="editing" x-cloak data-loading-disable
-                        @click="htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/edit', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {quantity: $refs.qty.value, unit_sell: $refs.sell.value, offer_id: $refs.offer.value}}); editing = false"
-                        class="btn btn-primary btn-sm">Save</button>
-                <button type="button" x-show="editing" x-cloak @click="editing = false" class="btn btn-secondary btn-sm">Cancel</button>
-              </div>
-              {% endif %}
               {% if bp.status == 'active' %}
                 {% if line.status == 'awaiting_po' %}
                   <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
@@ -250,50 +291,128 @@
           </tr>
           {% endif %}
         </tbody>
+        {# ── EDIT tbody — whole-plan edit mode (epic I rework). Entirely Alpine-driven:
+           rows come from the `rows` array, grouped by part so a "+ Add vendor" row can
+           follow each part's block (split-vendor lines). ── #}
+        {% if can_edit_lines %}
+        <tbody x-show="editMode" x-cloak>
+          <template x-for="group in groupedRows" :key="group.requirementId">
+            <template x-for="row in group.rows" :key="row._uid">
+              <tr :class="row.removed && 'opacity-40'">
+                <td class="font-mono font-medium text-gray-900" x-text="row.mpn || '-'"></td>
+                <td class="text-gray-600 truncate max-w-[200px]" x-text="row.description || '-'"></td>
+                <td>
+                  <template x-if="row.locked">
+                    <div>
+                      <div class="text-gray-900" x-text="row.vendorName || '-'"></div>
+                      <div class="text-xs text-amber-600 font-medium mt-0.5">PO cut</div>
+                    </div>
+                  </template>
+                  <template x-if="!row.locked">
+                    <select x-model="row.offerId" aria-label="Vendor offer" :disabled="row.removed"
+                            class="input input-sm w-full max-w-[180px]">
+                      <option value="">Select vendor…</option>
+                      {# The row's CURRENT offer may no longer be in the active offers list (sold
+                         out / superseded) — render it as a truthful extra option so the select
+                         never silently blanks out. x-model matches it by value, so it's selected
+                         automatically; leaving it untouched still posts the SAME (unchanged)
+                         offer id, which the server tolerates by design (no-op resend). #}
+                      <template x-if="row.offerId && !offersFor(row.requirementId).some((o) => String(o.id) === String(row.offerId))">
+                        <option :value="row.offerId" x-text="(row.vendorName || 'Unknown vendor') + ' — ' + fmtMoney(row.unitCost) + ' (no longer active)'"></option>
+                      </template>
+                      <template x-for="o in offersFor(row.requirementId)" :key="o.id">
+                        <option :value="o.id" x-text="o.vendorName + ' — ' + fmtMoney(o.unitPrice)"></option>
+                      </template>
+                    </select>
+                  </template>
+                </td>
+                <td class="text-right text-gray-600">
+                  <template x-if="row.locked">
+                    <span x-text="row.qty"></span>
+                  </template>
+                  <template x-if="!row.locked">
+                    <input type="number" min="1" x-model.number="row.qty" :disabled="row.removed"
+                           aria-label="Quantity" class="input input-sm w-20 text-right">
+                  </template>
+                </td>
+                <td class="text-right text-gray-600" x-text="fmtMoney(unitCostFor(row))"></td>
+                <td class="text-right text-gray-600">
+                  <input type="number" step="any" min="0" x-model.number="row.sell" :disabled="row.removed"
+                         aria-label="Unit sell" class="input input-sm w-24 text-right">
+                </td>
+                <td class="text-xs text-gray-500">
+                  <span x-show="row.locked">Locked (PO cut)</span>
+                  <span x-show="row.removed" x-cloak class="text-rose-500">Removed</span>
+                </td>
+                <td>
+                  <template x-if="row.removed">
+                    <button type="button" @click="undoRemove(row)" class="btn btn-secondary btn-sm">Undo</button>
+                  </template>
+                  <template x-if="!row.removed && !row.locked">
+                    <button type="button" @click="removeRow(row)" class="btn btn-danger btn-sm">Remove</button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </template>
+          {# One "+ Add vendor" row per part group — split-vendor sourcing. #}
+          <template x-for="group in groupedRows" :key="'add-' + group.requirementId">
+            <tr x-show="offersFor(group.requirementId).length > 0" x-cloak>
+              <td colspan="8" class="py-1.5">
+                <button type="button"
+                        @click="addVendorRow(group.requirementId, group.mpn, group.description)"
+                        class="text-xs text-brand-500 hover:text-brand-600 font-medium">+ Add vendor</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+        {% endif %}
       </table>
     </div>
-    {# Add line (epic I) — pick a part's active vendor offer + qty + sell. The offer's option
-       carries data-req so the requirement id is set without a dependent second select. The
-       server re-gates + recomputes the header totals. #}
+    {# Bottom "+ Add line" — whole new part via a part select + an offer select, only in
+       edit mode. Single offer-render path (#5): both this picker and the inline
+       "+ Add vendor" affordance now read the SAME client-side addableParts/offersFor —
+       no more server-rendered optgroups + data-req/onPickerOfferChange round-trip that
+       could drift from the Alpine-driven vendor selects elsewhere in this table. #}
     {% if can_edit_lines %}
-    <div class="px-4 py-3 border-t border-line-base bg-gray-50"
-         x-data="{ open: false, reqId: '', offerId: '', qty: '', sell: '' }">
-      <button type="button" x-show="!open" @click="open = true" class="btn btn-secondary btn-sm">+ Add line</button>
-      <div x-show="open" x-cloak>
-        {% set _addable = plan_requirements | selectattr('id', 'in', offers_by_requirement.keys()) | list %}
-        {% if _addable %}
-        <div class="flex flex-wrap items-end gap-2">
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Part · vendor offer</label>
-            <select x-model="offerId"
-                    @change="reqId = ($event.target.selectedOptions[0] && $event.target.selectedOptions[0].dataset.req) || ''"
-                    class="input input-sm w-64">
-              <option value="">Select an offer…</option>
-              {% for req in _addable %}
-              <optgroup label="{{ req.primary_mpn or ('REQ ' ~ req.id) }}">
-                {% for o in offers_by_requirement.get(req.id, []) %}
-                <option value="{{ o.id }}" data-req="{{ req.id }}">{{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price|float) if o.unit_price else '0.0000' }}</option>
-                {% endfor %}
-              </optgroup>
-              {% endfor %}
-            </select>
+    <div class="px-4 py-3 border-t border-line-base bg-gray-50" x-show="editMode" x-cloak>
+      <button type="button" x-show="!showAddLine" @click="showAddLine = true" class="btn btn-secondary btn-sm">+ Add line</button>
+      <div x-show="showAddLine" x-cloak>
+        <template x-if="addableParts.length > 0">
+          <div class="flex flex-wrap items-end gap-2">
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Part</label>
+              <select x-model="newPart.reqId" @change="newPart.offerId = ''" class="input input-sm w-48">
+                <option value="">Select a part…</option>
+                <template x-for="p in addableParts" :key="p.id">
+                  <option :value="p.id" x-text="p.mpn || ('REQ ' + p.id)"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Vendor offer</label>
+              <select x-model="newPart.offerId" :disabled="!newPart.reqId" class="input input-sm w-56">
+                <option value="">Select an offer…</option>
+                <template x-for="o in offersFor(newPart.reqId)" :key="o.id">
+                  <option :value="o.id" x-text="o.vendorName + ' — ' + fmtMoney(o.unitPrice)"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Qty</label>
+              <input x-model.number="newPart.qty" type="number" min="1" class="input input-sm w-24 text-right">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Sell</label>
+              <input x-model.number="newPart.sell" type="number" step="any" min="0" placeholder="Sell" class="input input-sm w-24 text-right">
+            </div>
+            <button type="button" @click="addLineFromPicker()" class="btn btn-primary btn-sm">Add</button>
+            <button type="button" @click="showAddLine = false; newPart = { reqId: '', offerId: '', qty: '', sell: '' }" class="btn btn-secondary btn-sm">Cancel</button>
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Qty</label>
-            <input x-model="qty" type="number" min="1" class="input input-sm w-24 text-right">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-0.5">Sell</label>
-            <input x-model="sell" type="number" step="any" min="0" placeholder="Sell" class="input input-sm w-24 text-right">
-          </div>
-          <button type="button" data-loading-disable
-                  @click="offerId && reqId && qty && (htmx.ajax('POST', '/v2/partials/buy-plans/{{ bp.id }}/lines/add', {target: '#main-content', swap: 'innerHTML', indicator: '#main-content', values: {requirement_id: reqId, offer_id: offerId, quantity: qty, unit_sell: sell}}), open = false)"
-                  class="btn btn-primary btn-sm">Add</button>
-          <button type="button" @click="open = false" class="btn btn-secondary btn-sm">Cancel</button>
-        </div>
-        {% else %}
-        <p class="text-sm text-gray-500">No parts with active vendor offers are available to add.</p>
-        {% endif %}
+        </template>
+        <template x-if="addableParts.length === 0">
+          <p class="text-sm text-gray-500">No parts with active vendor offers are available to add.</p>
+        </template>
       </div>
     </div>
     {% endif %}
