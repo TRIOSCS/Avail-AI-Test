@@ -18,10 +18,15 @@ log "Retention: ${BACKUP_RETENTION_DAYS:-30} days local, ${SPACES_RETENTION_DAYS
 log "Running initial backup..."
 /scripts/backup.sh
 
-# Upload to Spaces if configured
+# Upload to Spaces if configured. Guarded like the in-loop call below: under
+# `set -e` an unguarded failure here would kill the entrypoint and (with
+# restart: always) crash-loop the whole backup service over a transient
+# Spaces/network error at container start.
 if [ -n "${DO_SPACES_KEY:-}" ]; then
     log "Uploading to DigitalOcean Spaces..."
-    /scripts/backup-to-spaces.sh
+    if ! /scripts/backup-to-spaces.sh; then
+        log "WARNING: initial off-site upload failed — local backup exists; will retry next cycle"
+    fi
 else
     log "DO_SPACES_KEY not set — skipping off-site upload"
 fi

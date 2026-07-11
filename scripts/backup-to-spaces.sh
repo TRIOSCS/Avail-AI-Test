@@ -36,6 +36,14 @@ if [ -z "${DO_SPACES_KEY:-}" ] || [ -z "${DO_SPACES_SECRET:-}" ] || [ -z "${DO_S
     exit 0
 fi
 
+# The db-backup container is stock postgres:16-alpine, which does not ship the
+# aws CLI this script depends on — bootstrap it on first use. apk state does not
+# survive a container recreate, hence install-if-missing rather than assume.
+if ! command -v aws >/dev/null 2>&1; then
+    log "aws CLI not found — installing via apk..."
+    apk add --no-cache aws-cli >/dev/null 2>&1 || die "apk add aws-cli failed (offline?); cannot upload off-site"
+fi
+
 # Find latest backup
 if [ -f "${BACKUP_DIR}/LATEST" ]; then
     BACKUP_FILE=$(cat "${BACKUP_DIR}/LATEST")
