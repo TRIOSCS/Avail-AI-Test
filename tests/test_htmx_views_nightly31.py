@@ -20,6 +20,7 @@ Depends on: conftest.py fixtures (client, db_session, test_user, admin_user, man
             test_company), app.routers.htmx_views
 """
 
+import json
 import os
 
 os.environ["TESTING"] = "1"
@@ -105,6 +106,8 @@ class TestV2PageTroubleTickets:
         with patch("app.routers.htmx_views.get_user", return_value=admin_user):
             resp = client.get("/v2/trouble-tickets")
         assert resp.status_code == 200
+        # base_page shell lazy-loads the admin workspace partial on page load.
+        assert 'hx-get="/v2/partials/trouble-tickets/workspace"' in resp.text
 
 
 # ── v2_page: module access redirect / deny-all (lines 211-216) ───────────────
@@ -163,6 +166,8 @@ class TestV2PageMyDay:
         with patch("app.routers.htmx_views.get_user", return_value=test_user):
             resp = client.get("/v2/my-day")
         assert resp.status_code == 200
+        # base_page shell lazy-loads the my-day partial on page load.
+        assert 'hx-get="/v2/partials/my-day"' in resp.text
 
 
 # ── v2_page: search partial URL (current file lines 235-239) ─────────────────
@@ -176,6 +181,8 @@ class TestV2PageSearch:
         with patch("app.routers.htmx_views.get_user", return_value=test_user):
             resp = client.get("/v2/search?mpn=LM317T")
         assert resp.status_code == 200
+        # The ?mpn= deep-link must ride along into the lazy-loaded partial URL.
+        assert 'hx-get="/v2/partials/search?mpn=LM317T"' in resp.text
 
     def test_search_results_partial_returns_200(self, client: TestClient):
         """Lines 352-356: /v2/partials/search/results uses require_user (overridden)."""
@@ -187,6 +194,10 @@ class TestV2PageSearch:
         ):
             resp = client.get("/v2/partials/search/results?q=LM317T")
         assert resp.status_code == 200
+        # Empty fast_search result renders the no-results state with the query echoed
+        # into the pre-filled refine input.
+        assert "No results found" in resp.text
+        assert 'value="LM317T"' in resp.text
 
 
 # ── v2_page: customers/{id}?tab= partial URL injection (line 297) ─────────────
@@ -202,6 +213,8 @@ class TestV2PageCustomerDetailTab:
         with patch("app.routers.htmx_views.get_user", return_value=test_user):
             resp = client.get(f"/v2/customers/{test_company.id}?tab=quotes")
         assert resp.status_code == 200
+        # The ?tab= deep-link must be appended to the detail partial URL.
+        assert f'hx-get="/v2/partials/customers/{test_company.id}?tab=quotes"' in resp.text
 
 
 # ── Requisition activity digest (lines 388-396) ───────────────────────────────
@@ -222,6 +235,9 @@ class TestRequisitionActivityDigest:
         ):
             resp = client.get(f"/v2/partials/requisitions/{req.id}/activity-digest", headers=HX)
         assert resp.status_code == 200
+        # 'insufficient' digest state renders the empty-state copy inside the card.
+        assert "activity-digest-card" in resp.text
+        assert "Not enough activity to summarize yet." in resp.text
 
     def test_digest_unknown_req_returns_404(self, client: TestClient):
         """get_requisition_or_404 raises 404 for unknown req_id."""
@@ -244,6 +260,9 @@ class TestCustomerActivityDigest:
         ):
             resp = client.get(f"/v2/partials/customers/{test_company.id}/activity-digest", headers=HX)
         assert resp.status_code == 200
+        # 'insufficient' digest state renders the empty-state copy inside the card.
+        assert "activity-digest-card" in resp.text
+        assert "Not enough activity to summarize yet." in resp.text
 
     def test_digest_unknown_company_returns_404(self, client: TestClient):
         """Line 411: HTTPException(404) when company_id not in DB."""
@@ -280,6 +299,7 @@ class TestRequisitionsBulkAction:
         client: TestClient,
         db_session: Session,
         test_user: User,
+        admin_user: User,
     ):
         """Lines 436-466: buyer+is_manager_or_admin patch covers full assign path."""
         req = _req(db_session, test_user)
@@ -294,9 +314,12 @@ class TestRequisitionsBulkAction:
         ):
             resp = client.post(
                 "/v2/partials/requisitions/bulk/assign",
-                data={"ids": str(req.id), "owner_id": str(test_user.id)},
+                data={"ids": str(req.id), "owner_id": str(admin_user.id)},
             )
         assert resp.status_code == 200
+        assert "<div>ok</div>" in resp.text  # refreshed list partial is returned
+        db_session.refresh(req)
+        assert req.created_by == admin_user.id  # ownership actually reassigned + committed
 
 
 # ── Inline edit cell – invalid-field and not-found branches ──────────────────
@@ -352,8 +375,13 @@ class TestRequisitionInlineSave:
                 f"/v2/partials/requisitions/{req.id}/inline",
                 data={"field": "status", "value": "closed"},
             )
-        # ValueError is caught; endpoint returns the row partial (200)
+        # ValueError is caught; endpoint returns the row partial (200) with the
+        # error message threaded into the showToast HX-Trigger.
         assert resp.status_code == 200
+        assert "N31-REQ" in resp.text  # row partial re-rendered
+        assert json.loads(resp.headers["HX-Trigger"])["showToast"]["message"] == "Cannot transition"
+        db_session.refresh(req)
+        assert req.status == RequisitionStatus.OPEN  # failed transition left status untouched
 
     def test_owner_field_by_buyer_returns_403(self, client: TestClient, db_session: Session, test_user: User):
         """Line 556: buyer (non-manager) trying to change owner → HTTPException 403."""

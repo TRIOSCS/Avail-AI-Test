@@ -129,8 +129,13 @@ class TestBatchDismissWithMatchIds:
         assert match.status == "dismissed"
         assert match.dismiss_reason == "batch_dismiss"
 
-    async def test_empty_match_ids_skips_update(self, ac):
-        """Empty match_ids list → skips the bulk-update block, still returns 200."""
+    async def test_empty_match_ids_skips_update(
+        self, ac, db_session, test_user, test_requisition, test_offer, test_customer_site
+    ):
+        """Empty match_ids list → skips the bulk-update block; existing matches
+        untouched."""
+        match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
+
         with (
             patch("app.services.proactive_service.get_matches_for_user", return_value=_EMPTY_MATCHES),
             patch("app.routers.htmx.proactive.template_response", return_value=_html_ok()),
@@ -138,6 +143,9 @@ class TestBatchDismissWithMatchIds:
             resp = await ac.post("/v2/partials/proactive/batch-dismiss", data={})
 
         assert resp.status_code == 200
+        db_session.refresh(match)
+        assert match.status == "new"
+        assert match.dismiss_reason is None
 
 
 # ── Lines 156-178, 203, 215: prepare page happy path ─────────────────
@@ -491,6 +499,8 @@ class TestDoNotOffer:
 
     async def test_accepts_customer_site_id_as_company_id_fallback(self, ac, db_session, test_user, test_company):
         """customer_site_id form field is accepted when company_id is absent."""
+        from app.models.intelligence import ProactiveDoNotOffer
+
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -501,6 +511,10 @@ class TestDoNotOffer:
             )
 
         assert resp.status_code == 200
+        assert b"<tr" in resp.content
+        dno = db_session.query(ProactiveDoNotOffer).filter_by(mpn="LM7805").one()
+        assert dno.company_id == test_company.id  # fallback field became the company linkage
+        assert dno.created_by_id == test_user.id
 
     async def test_invalid_company_id_returns_400(self, ac):
         """Lines 669-670: non-integer company_id → 400."""
@@ -686,8 +700,12 @@ class TestDirectBatchDismiss:
         assert m1.status == "dismissed"
         assert m2.status == "dismissed"
 
-    async def test_empty_match_ids_does_not_update(self, db_session, test_user):
+    async def test_empty_match_ids_does_not_update(
+        self, db_session, test_user, test_requisition, test_offer, test_customer_site
+    ):
         from app.routers.htmx.proactive import proactive_batch_dismiss
+
+        match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
 
         with (
             patch("app.services.proactive_service.get_matches_for_user", return_value=_EMPTY_MATCHES),
@@ -696,6 +714,9 @@ class TestDirectBatchDismiss:
             resp = await proactive_batch_dismiss(_post_req({}), user=test_user, db=db_session)
 
         assert resp.status_code == 200
+        db_session.refresh(match)
+        assert match.status == "new"
+        assert match.dismiss_reason is None
 
 
 # ── Direct: proactive_prepare_page (lines 156-178, 203, 215) ─────────────────
@@ -1137,12 +1158,13 @@ class TestDirectDoNotOffer:
         assert db_session.query(ProactiveDoNotOffer).filter_by(mpn="BC547").first() is None
 
     async def test_customer_site_id_field_accepted(self, db_session, test_user, test_company):
+        from app.models.intelligence import ProactiveDoNotOffer
         from app.routers.htmx.proactive import proactive_do_not_offer
 
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
-        with patch("app.services.proactive_helpers.is_do_not_offer", return_value=True):
+        with patch("app.services.proactive_helpers.is_do_not_offer", return_value=False):
             resp = await proactive_do_not_offer(
                 _post_req({"mpn": "NE555", "customer_site_id": str(test_company.id)}),
                 user=test_user,
@@ -1150,6 +1172,9 @@ class TestDirectDoNotOffer:
             )
 
         assert resp.status_code == 200
+        dno = db_session.query(ProactiveDoNotOffer).filter_by(mpn="NE555").one()
+        assert dno.company_id == test_company.id  # customer_site_id fallback became the company linkage
+        assert dno.created_by_id == test_user.id
 
     async def test_missing_mpn_raises_400(self, db_session, test_user):
         from fastapi import HTTPException

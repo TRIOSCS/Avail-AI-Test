@@ -182,9 +182,15 @@ class TestVendorContactsPartial:
         assert ctx["sort"] == "score"
 
     def test_unknown_sort_key_falls_back_to_name(self, gaps2_client, db_session):
-        """Line 184: unknown sort key → default VendorContact.full_name column."""
+        """Line 184: unknown sort key → default VendorContact.full_name column.
+
+        Name order (Alpha < Zulu) is deliberately the REVERSE of both insertion/id
+        order and email order, so the positional assertion below only passes if
+        the fallback actually sorts by full_name.
+        """
         card = _active_card(db_session, "FallbackVendor")
-        _contact(db_session, card, "fb@fallback.com", "FB Contact")
+        _contact(db_session, card, "aaa@fallback.com", "Zulu Fallback")
+        _contact(db_session, card, "zzz@fallback.com", "Alpha Fallback")
         db_session.commit()
 
         with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
@@ -192,6 +198,10 @@ class TestVendorContactsPartial:
             resp = gaps2_client.get("/v2/partials/vendor-contacts?sort=unknown_col")
 
         assert resp.status_code == 200
+        ctx = mock_tpl.call_args[0][1]
+        assert ctx["sort"] == "unknown_col"
+        names = [c.full_name for c in ctx["contacts"] if c.full_name.endswith("Fallback")]
+        assert names == ["Alpha Fallback", "Zulu Fallback"]
 
     def test_pagination_limit_and_offset(self, gaps2_client, db_session):
         """Lines 187-188: limit/offset are passed to the query and reflected in ctx."""
