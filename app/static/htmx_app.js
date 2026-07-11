@@ -3274,9 +3274,12 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
  * 'awaiting_po') — locked rows only allow editing `sell`.
  *
  * Save posts POST /v2/partials/buy-plans/{bpId}/lines/bulk with
- * {payload: JSON.stringify({lines: [...]})}. Removed rows are simply omitted
- * (removal-by-omission); locked rows send only {line_id, unit_sell} so the
- * server never sees a forbidden field on a cut-PO line.
+ * {payload: JSON.stringify({lines: [...], known_line_ids: [...]})}. Removed rows are
+ * simply omitted from `lines` (removal-by-omission, scoped to `known_line_ids` — see
+ * `knownLineIds` below); locked rows send only {line_id, unit_sell} so the server
+ * never sees a forbidden field on a cut-PO line. `unit_sell` is always sent (null
+ * when the Sell input is blank) since the server treats a present-but-null value as
+ * "clear it" and an absent key as "leave unchanged".
  */
 Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) => ({
   bpId,
@@ -3405,6 +3408,16 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
 
   get canSave() { return !this.saving && this.invalidRows.length === 0; },
 
+  // known_line_ids echoes every existing line id the form had AT MOUNT (from the
+  // untouched origRows snapshot, not the live/edited `rows` array) — including
+  // locked lines and lines the user soft-removed in this session. The server only
+  // removes-by-omission a line whose id appears in known_line_ids, so a line another
+  // user added concurrently (never in this snapshot, so never "known") can't be
+  // silently deleted by this save.
+  get knownLineIds() {
+    return this.origRows.filter((r) => r.lineId !== null && r.lineId !== undefined).map((r) => r.lineId);
+  },
+
   buildPayload() {
     const lines = [];
     for (const r of this.rows) {
@@ -3413,6 +3426,9 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
       const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
       const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
       if (isNew && !hasOffer && !hasQty) continue; // untouched scratch row
+      // unit_sell uses key-presence semantics server-side (key present + null =
+      // clear the sell; key absent = leave unchanged) — always send the key, with
+      // null when the input is blank, so blanking Sell explicitly clears it.
       const sellVal = (r.sell === '' || r.sell === null || r.sell === undefined) ? null : Number(r.sell);
       if (r.locked) {
         lines.push({ line_id: r.lineId, unit_sell: sellVal });
@@ -3422,9 +3438,19 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
         lines.push({ line_id: r.lineId, quantity: Number(r.qty), unit_sell: sellVal, offer_id: Number(r.offerId) });
       }
     }
-    return { lines };
+    return { lines, known_line_ids: this.knownLineIds };
   },
 
+  // Double-submit guard: `canSave` folds in `!this.saving`, so setting `saving = true`
+  // BEFORE the htmx.ajax call synchronously flips `canSave` to false — a rapid second
+  // click re-invokes saveAll() (click events are processed one at a time, not
+  // concurrently) and is turned away by the guard below regardless of whether the
+  // DOM's `:disabled="!canSave"` binding has repainted yet. `data-loading-disable`
+  // (htmx-ext-loading-states) only disables elements tied to the request's triggering
+  // element; a plain-object htmx.ajax() call like this one has no such element, so it
+  // is NOT relied on here — this explicit `saving` flag is the real guard. Reset in
+  // .finally() so a failed (e.g. 400) response doesn't strand the button disabled; a
+  // successful save re-renders #main-content, which discards this component entirely.
   saveAll() {
     if (!this.canSave) return;
     this.saving = true;

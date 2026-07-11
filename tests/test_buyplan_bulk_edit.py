@@ -292,6 +292,186 @@ def test_bulk_edit_unknown_line_id_rejected(db_session, test_user, test_requisit
         bulk_edit_buy_plan_lines(plan.id, [{"line_id": 999999, "unit_sell": 1.0}], test_user, db_session)
 
 
+# ══ Fix 1 — removal scoped to known_line_ids ══════════════════════════
+
+
+def test_bulk_edit_concurrent_line_absent_from_known_ids_survives(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    seen = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+    # Added by someone else AFTER the client's form loaded — never in known_line_ids.
+    concurrent = _line(db_session, plan, quantity=50, unit_cost=4.00, unit_sell=6.00)
+
+    payload = [{"line_id": seen.id, "unit_sell": 3.00}]
+    plan = bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session, known_line_ids=[seen.id])
+    db_session.commit()
+    db_session.refresh(plan)
+
+    line_ids = {ln.id for ln in plan.lines}
+    assert seen.id in line_ids
+    assert concurrent.id in line_ids  # NOT removed — client never saw it
+
+
+def test_bulk_edit_known_line_ids_absent_uses_legacy_removal(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    seen = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+    other = _line(db_session, plan, quantity=50, unit_cost=4.00, unit_sell=6.00)
+
+    payload = [{"line_id": seen.id, "unit_sell": 3.00}]
+    # No known_line_ids kwarg at all -> legacy unscoped removal-by-omission.
+    plan = bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+    db_session.commit()
+    db_session.refresh(plan)
+
+    assert [ln.id for ln in plan.lines] == [seen.id]
+    assert other.id not in [ln.id for ln in plan.lines]
+
+
+def test_bulk_edit_known_line_ids_scopes_editable_omission_removal(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    seen = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+    known_but_dropped = _line(db_session, plan, quantity=50, unit_cost=4.00, unit_sell=6.00)
+
+    payload = [{"line_id": seen.id, "unit_sell": 3.00}]
+    plan = bulk_edit_buy_plan_lines(
+        plan.id, payload, test_user, db_session, known_line_ids=[seen.id, known_but_dropped.id]
+    )
+    db_session.commit()
+    db_session.refresh(plan)
+
+    # known_but_dropped WAS in known_line_ids and is omitted from the payload -> removed.
+    assert [ln.id for ln in plan.lines] == [seen.id]
+
+
+# ══ Fix 2a — unit_sell key-presence semantics ═════════════════════════
+
+
+def test_bulk_edit_unit_sell_null_clears(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+
+    bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "unit_sell": None}], test_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+
+    assert line.unit_sell is None
+    assert line.margin_pct is None
+
+
+def test_bulk_edit_unit_sell_absent_leaves_unchanged(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+
+    # unit_sell key entirely absent -> unchanged (only qty changes).
+    bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "quantity": 150}], test_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+
+    assert line.quantity == 150
+    assert float(line.unit_sell) == 2.00
+
+
+# ══ Fix 2b — unchanged qty/offer on a PO-cut line is a no-op ══════════
+
+
+def test_bulk_edit_unchanged_qty_offer_on_po_cut_line_is_noop(db_session, manager_user, test_requisition, test_offer):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(
+        db_session,
+        plan,
+        quantity=100,
+        unit_cost=0.50,
+        unit_sell=2.00,
+        offer_id=test_offer.id,
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
+    )
+
+    # Resending the SAME quantity and SAME offer_id must not trip the cut-PO guard —
+    # only the sell price (which is always editable) actually changes.
+    payload = [{"line_id": line.id, "quantity": 100, "offer_id": test_offer.id, "unit_sell": 3.00}]
+    bulk_edit_buy_plan_lines(plan.id, payload, manager_user, db_session)
+    db_session.commit()
+    db_session.refresh(line)
+
+    assert line.quantity == 100
+    assert line.offer_id == test_offer.id
+    assert float(line.unit_sell) == 3.00
+
+
+def test_bulk_edit_actual_qty_change_on_po_cut_line_still_rejected(db_session, manager_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.PENDING_VERIFY.value)
+
+    with pytest.raises(ValueError, match="quantity"):
+        bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "quantity": 101}], manager_user, db_session)
+
+
+# ══ Fix 2c — fractional quantity rejected ══════════════════════════════
+
+
+def test_bulk_edit_fractional_quantity_rejected_on_edit(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan, quantity=100)
+
+    with pytest.raises(ValueError, match="whole number"):
+        bulk_edit_buy_plan_lines(plan.id, [{"line_id": line.id, "quantity": 3.5}], test_user, db_session)
+
+
+def test_bulk_edit_fractional_quantity_rejected_on_add(db_session, test_user, test_requisition, test_offer):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+
+    payload = [{"requirement_id": requirement.id, "offer_id": test_offer.id, "quantity": 12.5}]
+    with pytest.raises(ValueError, match="whole number"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+# ══ Fix 4 — offer must belong to the plan's requisition ════════════════
+
+
+def test_bulk_edit_foreign_offer_rejected_on_add(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    requirement = _requirement_of(db_session, test_requisition)
+    other_req = _req(db_session, test_user)
+    foreign_offer = _offer(db_session, other_req, test_user)
+
+    payload = [{"requirement_id": requirement.id, "offer_id": foreign_offer.id, "quantity": 10}]
+    with pytest.raises(ValueError, match="requisition"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
+def test_bulk_edit_foreign_offer_rejected_on_vendor_change(db_session, test_user, test_requisition):
+    from app.services.buyplan_workflow import bulk_edit_buy_plan_lines
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)
+    other_req = _req(db_session, test_user)
+    foreign_offer = _offer(db_session, other_req, test_user)
+
+    payload = [{"line_id": line.id, "offer_id": foreign_offer.id}]
+    with pytest.raises(ValueError, match="requisition"):
+        bulk_edit_buy_plan_lines(plan.id, payload, test_user, db_session)
+
+
 # ══ Route-level ══════════════════════════════════════════════════════
 
 
@@ -360,3 +540,54 @@ def test_route_bulk_edit_sales_on_active_plan_403(client: TestClient, db_session
             data={"payload": json.dumps(payload)},
         )
     assert resp.status_code == 403
+
+
+def test_route_bulk_edit_known_line_ids_wrong_type_400(client: TestClient, db_session, test_requisition):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
+    line = _line(db_session, plan)
+
+    payload = {"lines": [{"line_id": line.id, "unit_sell": 9.0}], "known_line_ids": ["not-an-int"]}
+    resp = client.post(
+        f"/v2/partials/buy-plans/{plan.id}/lines/bulk",
+        data={"payload": json.dumps(payload)},
+    )
+    assert resp.status_code == 400
+
+
+# ══ Fix 3 — auto-completion after removing the last open line ═════════
+
+
+def test_route_bulk_edit_removing_last_open_line_completes_active_plan(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    # ACTIVE-plan line edits are manager-only, so act as manager_user.
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    verified = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.VERIFIED.value)
+    open_line = _line(db_session, plan, quantity=50, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    # Omit open_line from both the payload and known_line_ids -> removed by omission,
+    # leaving only the already-VERIFIED line -> plan should auto-complete.
+    payload = {"lines": [], "known_line_ids": [verified.id, open_line.id]}
+    with _acting_as(manager_user):
+        resp = client.post(
+            f"/v2/partials/buy-plans/{plan.id}/lines/bulk",
+            data={"payload": json.dumps(payload)},
+        )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(BuyPlan, plan.id).status == BuyPlanStatus.COMPLETED.value
+
+
+def test_route_remove_line_completes_active_plan_when_last_open_line_removed(
+    client: TestClient, db_session, manager_user, test_requisition
+):
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    verified = _line(db_session, plan, quantity=100, status=BuyPlanLineStatus.VERIFIED.value)
+    open_line = _line(db_session, plan, quantity=50, status=BuyPlanLineStatus.AWAITING_PO.value)
+
+    with _acting_as(manager_user):
+        resp = client.post(f"/v2/partials/buy-plans/{plan.id}/lines/{open_line.id}/remove")
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(BuyPlan, plan.id).status == BuyPlanStatus.COMPLETED.value
+    assert db_session.get(BuyPlanLine, verified.id) is not None
