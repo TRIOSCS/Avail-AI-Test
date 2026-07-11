@@ -63,7 +63,7 @@
       'vendorName': line.offer.vendor_name if line.offer else None,
       'qty': line.quantity,
       'sell': (line.unit_sell|float) if line.unit_sell is not none else None,
-      'locked': (line.po_confirmed_at is not none) or (line.status != 'awaiting_po'),
+      'locked': line.has_cut_po,
       'removed': False,
     }) %}
   {% endfor %}
@@ -78,8 +78,12 @@
       }) %}
     {% endfor %}
   {% endfor %}
+  {# Requirements that have at least one active offer — the single "addable" universe,
+     computed once and reused by both the addable_parts seed (below) and the bottom
+     "+ Add line" part picker (its own {% if can_edit_lines %} block further down). #}
+  {% set reqs_with_offers = plan_requirements | selectattr('id', 'in', offers_by_requirement.keys()) | list %}
   {% set addable_parts = [] %}
-  {% for req in plan_requirements if req.id in offers_by_requirement %}
+  {% for req in reqs_with_offers %}
     {% set req_desc = req|part_description if req else '' %}
     {% set _ = addable_parts.append({'id': req.id, 'mpn': req.primary_mpn, 'description': req_desc}) %}
   {% endfor %}
@@ -359,14 +363,13 @@
     <div class="px-4 py-3 border-t border-line-base bg-gray-50" x-show="editMode" x-cloak>
       <button type="button" x-show="!showAddLine" @click="showAddLine = true" class="btn btn-secondary btn-sm">+ Add line</button>
       <div x-show="showAddLine" x-cloak>
-        {% set _addable = plan_requirements | selectattr('id', 'in', offers_by_requirement.keys()) | list %}
-        {% if _addable %}
+        {% if reqs_with_offers %}
         <div class="flex flex-wrap items-end gap-2">
           <div>
             <label class="block text-xs text-gray-500 mb-0.5">Part · vendor offer</label>
             <select x-model="newPart.offerId" @change="onPickerOfferChange($event)" class="input input-sm w-64">
               <option value="">Select an offer…</option>
-              {% for req in _addable %}
+              {% for req in reqs_with_offers %}
               <optgroup label="{{ req.primary_mpn or ('REQ ' ~ req.id) }}">
                 {% for o in offers_by_requirement.get(req.id, []) %}
                 <option value="{{ o.id }}" data-req="{{ req.id }}">{{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price|float) if o.unit_price else '0.0000' }}</option>

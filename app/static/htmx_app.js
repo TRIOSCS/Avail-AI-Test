@@ -3392,17 +3392,28 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
 
   undoRemove(row) { row.removed = false; },
 
+  // Single definition of "complete" vs "skippable scratch" for a row — consumed by
+  // both `invalidRows` (Save-enablement) and `buildPayload` (what actually gets
+  // posted), so the two can never disagree about which rows count.
+  //   - complete: has both an offer and qty >= 1 (locked rows don't need this —
+  //     callers gate on `r.locked` themselves before checking it).
+  //   - skip: an untouched new scratch row (freshly pushed by "+ Add vendor"/the
+  //     bottom picker, not yet filled in) — silently ignored rather than invalid.
+  rowState(r) {
+    const isNew = !r.lineId;
+    const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
+    const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
+    return { isNew, hasOffer, hasQty, complete: hasOffer && hasQty, skip: isNew && !hasOffer && !hasQty };
+  },
+
   // Non-removed, non-locked rows must carry both an offer and qty >= 1 before
-  // Save is allowed — EXCEPT an untouched blank scratch row (freshly pushed by
-  // "+ Add vendor", not yet filled in), which is silently skipped instead.
+  // Save is allowed — EXCEPT an untouched blank scratch row, which is silently
+  // skipped instead (see `rowState`).
   get invalidRows() {
     return this.rows.filter((r) => {
       if (r.removed || r.locked) return false;
-      const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
-      const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
-      const isNew = !r.lineId;
-      if (isNew && !hasOffer && !hasQty) return false;
-      return !(hasOffer && hasQty);
+      const { skip, complete } = this.rowState(r);
+      return !skip && !complete;
     });
   },
 
@@ -3422,10 +3433,8 @@ Alpine.data('buyPlanLinesEditor', (bpId, seedRows, offersByReq, addableParts) =>
     const lines = [];
     for (const r of this.rows) {
       if (r.removed) continue;
-      const isNew = !r.lineId;
-      const hasOffer = r.offerId !== '' && r.offerId !== null && r.offerId !== undefined;
-      const hasQty = r.qty !== '' && r.qty !== null && Number(r.qty) >= 1;
-      if (isNew && !hasOffer && !hasQty) continue; // untouched scratch row
+      const { isNew, skip } = this.rowState(r);
+      if (skip) continue;
       // unit_sell uses key-presence semantics server-side (key present + null =
       // clear the sell; key absent = leave unchanged) — always send the key, with
       // null when the input is blank, so blanking Sell explicitly clears it.
