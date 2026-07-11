@@ -387,6 +387,35 @@ def _has_cut_po(line: BuyPlanLine) -> bool:
     return line.po_confirmed_at is not None or line.status != BuyPlanLineStatus.AWAITING_PO.value
 
 
+def _ensure_offer_on_requisition(offer: Offer, requisition_id: int | None) -> None:
+    """Reject an offer that isn't scoped to the plan's requisition.
+
+    Mirrors the detail-render's vendor-picker filter (``Offer.requisition_id ==
+    bp.requisition_id`` in ``buy_plan_detail_partial``, app/routers/htmx/buy_plans.py)
+    so the server enforces the exact same universe the picker/add-form ever shows — an
+    offer from a different requisition (or an unsolicited inbound offer with no
+    requisition at all) is refused, not just hidden from the UI.
+    """
+    if offer.requisition_id != requisition_id:
+        raise ValueError("That offer is not on this plan's requisition.")
+
+
+def _require_int_quantity(value: object) -> int:
+    """Coerce a JSON quantity value to a whole number, rejecting a fractional value
+    (e.g. ``3.5``) instead of silently truncating it via ``int()``."""
+    if isinstance(value, bool):
+        raise ValueError("Quantity must be a whole number.")
+    if isinstance(value, int):
+        return value
+    try:
+        as_float = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as e:
+        raise ValueError("Quantity must be a whole number.") from e
+    if not as_float.is_integer():
+        raise ValueError("Quantity must be a whole number.")
+    return int(as_float)
+
+
 def add_buy_plan_line(
     plan_id: int,
     requirement_id: int,
@@ -400,7 +429,8 @@ def add_buy_plan_line(
     """Add a new line (vendor offer + qty + sell) and recompute the header rollups.
 
     Gated by :func:`can_edit_buy_plan_lines`. The requirement must belong to the plan's
-    requisition and the offer must exist. Caller commits.
+    requisition and the offer must exist AND belong to the same requisition. Caller
+    commits.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
@@ -417,6 +447,7 @@ def add_buy_plan_line(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise ValueError(f"Offer {offer_id} not found")
+    _ensure_offer_on_requisition(offer, plan.requisition_id)
 
     unit_cost = float(offer.unit_price) if offer.unit_price else None
     resolved_sell = (
@@ -477,6 +508,7 @@ def edit_buy_plan_line(
         offer = db.get(Offer, offer_id)
         if not offer:
             raise ValueError(f"Offer {offer_id} not found")
+        _ensure_offer_on_requisition(offer, plan.requisition_id)
         line.offer_id = offer.id
         line.unit_cost = float(offer.unit_price) if offer.unit_price else None
         buyer, reason = assign_buyer(offer, offer.vendor_card, db)
@@ -503,22 +535,41 @@ def edit_buy_plan_line(
     return plan
 
 
-def bulk_edit_buy_plan_lines(plan_id: int, lines_payload: list[dict], user: User, db: Session) -> BuyPlan:
+def bulk_edit_buy_plan_lines(
+    plan_id: int,
+    lines_payload: list[dict],
+    user: User,
+    db: Session,
+    *,
+    known_line_ids: list[int] | None = None,
+) -> BuyPlan:
     """Save an entire plan's lines in one shot — edits, adds, and removal-by-omission.
 
     The "save all" counterpart to :func:`add_buy_plan_line` / :func:`edit_buy_plan_line` /
     :func:`remove_buy_plan_line`, reusing their exact per-field rules rather than
     duplicating them:
-      - an entry with ``line_id`` edits that existing line (qty/offer refused once
-        :func:`_has_cut_po`; sell always editable; an offer change re-derives unit_cost
-        and re-runs :func:`assign_buyer`, same as :func:`edit_buy_plan_line`);
+      - an entry with ``line_id`` edits that existing line. Vendor/qty changes are
+        refused once :func:`_has_cut_po` is true — UNLESS the submitted value equals the
+        line's current value, which is always a no-op (never trips the guard); this
+        keeps a resend of an untouched row from 400ing the whole save just because a PO
+        was cut on it between form-load and save. An actual offer change re-derives
+        unit_cost and re-runs :func:`assign_buyer`; the new offer must belong to the
+        plan's requisition (:func:`_ensure_offer_on_requisition`). Sell price uses
+        key-presence semantics: ``"unit_sell"`` absent from the entry leaves it
+        unchanged; present with JSON ``null`` clears it; present with a number sets it.
       - an entry without ``line_id`` adds a new line (requirement must belong to the
-        plan's requisition; offer must exist; qty must be positive), same as
-        :func:`add_buy_plan_line`;
+        plan's requisition; offer must exist AND belong to the same requisition; qty
+        must be a positive whole number — a fractional qty like ``3.5`` is rejected, not
+        truncated), same as :func:`add_buy_plan_line`;
       - any existing, non-PO-cut line whose id does NOT appear in the payload is
         removed (same PO-cut guard as :func:`remove_buy_plan_line`, applied by omission
         instead of an explicit call) — a PO-cut line left out of the payload is simply
-        left untouched, never implicitly removed.
+        left untouched, never implicitly removed. When *known_line_ids* is given,
+        removal-by-omission is further scoped to ids IN that set: a line added by
+        someone else after the client's form loaded (present on the plan, but never in
+        *known_line_ids*) is left untouched instead of being silently deleted.
+        *known_line_ids* omitted (``None``) falls back to the legacy behavior above (the
+        route always sends it; this is a backward-compat contract, not a UI choice).
 
     Gated by :func:`can_edit_buy_plan_lines`. Caller commits; a mid-loop ValueError
     leaves nothing committed (the router never calls db.commit() after an exception).
@@ -546,29 +597,36 @@ def bulk_edit_buy_plan_lines(plan_id: int, lines_payload: list[dict], user: User
 
                 offer_id = entry.get("offer_id")
                 if offer_id is not None:
-                    if _has_cut_po(line):
-                        raise ValueError("Cannot change the vendor after a PO is cut on this line.")
-                    offer = db.get(Offer, int(offer_id))
-                    if not offer:
-                        raise ValueError(f"Offer {offer_id} not found")
-                    line.offer_id = offer.id
-                    line.unit_cost = float(offer.unit_price) if offer.unit_price else None
-                    buyer, reason = assign_buyer(offer, offer.vendor_card, db)
-                    line.buyer_id = buyer.id if buyer else None
-                    line.assignment_reason = reason
+                    offer_id_int = int(offer_id)
+                    if offer_id_int != line.offer_id:
+                        if _has_cut_po(line):
+                            raise ValueError("Cannot change the vendor after a PO is cut on this line.")
+                        offer = db.get(Offer, offer_id_int)
+                        if not offer:
+                            raise ValueError(f"Offer {offer_id} not found")
+                        _ensure_offer_on_requisition(offer, plan.requisition_id)
+                        line.offer_id = offer.id
+                        line.unit_cost = float(offer.unit_price) if offer.unit_price else None
+                        buyer, reason = assign_buyer(offer, offer.vendor_card, db)
+                        line.buyer_id = buyer.id if buyer else None
+                        line.assignment_reason = reason
 
-                quantity = entry.get("quantity")
-                if quantity is not None:
-                    if _has_cut_po(line):
-                        raise ValueError("Cannot change the quantity after a PO is cut on this line.")
-                    quantity = int(quantity)
-                    if quantity <= 0:
-                        raise ValueError("Quantity must be a positive whole number.")
-                    line.quantity = quantity
+                raw_quantity = entry.get("quantity")
+                if raw_quantity is not None:
+                    quantity = _require_int_quantity(raw_quantity)
+                    if quantity != line.quantity:
+                        if _has_cut_po(line):
+                            raise ValueError("Cannot change the quantity after a PO is cut on this line.")
+                        if quantity <= 0:
+                            raise ValueError("Quantity must be a positive whole number.")
+                        line.quantity = quantity
 
-                unit_sell = entry.get("unit_sell")
-                if unit_sell is not None:
-                    line.unit_sell = float(unit_sell)
+                # Key-presence semantics: absent -> unchanged; present + null -> clear;
+                # present + number -> set. (Unlike offer/quantity, sell is never gated
+                # by _has_cut_po — it never touches the PO.)
+                if "unit_sell" in entry:
+                    raw_sell = entry.get("unit_sell")
+                    line.unit_sell = float(raw_sell) if raw_sell is not None else None
 
                 line.margin_pct = _line_margin_pct(
                     float(line.unit_sell) if line.unit_sell is not None else None,
@@ -577,7 +635,8 @@ def bulk_edit_buy_plan_lines(plan_id: int, lines_payload: list[dict], user: User
             else:
                 requirement_id = entry.get("requirement_id")
                 offer_id = entry.get("offer_id")
-                quantity = int(entry.get("quantity") or 0)
+                raw_quantity = entry.get("quantity")
+                quantity = _require_int_quantity(raw_quantity) if raw_quantity is not None else 0
                 if quantity <= 0:
                     raise ValueError("Quantity must be a positive whole number.")
 
@@ -588,6 +647,7 @@ def bulk_edit_buy_plan_lines(plan_id: int, lines_payload: list[dict], user: User
                 offer = db.get(Offer, int(offer_id)) if offer_id is not None else None
                 if not offer:
                     raise ValueError(f"Offer {offer_id} not found")
+                _ensure_offer_on_requisition(offer, plan.requisition_id)
 
                 unit_sell = entry.get("unit_sell")
                 unit_cost = float(offer.unit_price) if offer.unit_price else None
@@ -615,11 +675,17 @@ def bulk_edit_buy_plan_lines(plan_id: int, lines_payload: list[dict], user: User
         touched += 1
 
     # Removal by omission: an existing, non-PO-cut line not referenced by line_id in the
-    # payload is dropped. A PO-cut line omitted from the payload is left alone — it can
-    # only leave the plan via the explicit re-source / PO-cancellation flow.
+    # payload is dropped — UNLESS known_line_ids was given and the line's id isn't in
+    # it, meaning the client never saw this line (added concurrently by someone else
+    # after the form loaded) and it must be left alone. A PO-cut line omitted from the
+    # payload is always left alone regardless — it can only leave the plan via the
+    # explicit re-source / PO-cancellation flow.
     for line in list(existing_by_id.values()):
-        if line.id not in seen_ids and not _has_cut_po(line):
-            plan.lines.remove(line)
+        if line.id in seen_ids or _has_cut_po(line):
+            continue
+        if known_line_ids is not None and line.id not in known_line_ids:
+            continue
+        plan.lines.remove(line)
 
     _recalculate_financials(plan)
     db.flush()

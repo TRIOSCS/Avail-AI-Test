@@ -1224,9 +1224,12 @@ async def buy_plan_remove_line_partial(
     """Remove a line from an editable plan (epic I).
 
     Role×status gate in the service (PermissionError → 403); removing a cut-PO line →
-    400.
+    400. Removing the plan's last open line can leave every remaining line terminal, so
+    a completion check runs right after — same pattern as verify-po (~line 980) — so an
+    ACTIVE plan can't get stranded short of COMPLETED.
     """
-    from ...services.buyplan_workflow import remove_buy_plan_line
+    from ...services.buyplan_notifications import notify_completed, run_notify_bg
+    from ...services.buyplan_workflow import check_completion, remove_buy_plan_line
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
@@ -1234,6 +1237,10 @@ async def buy_plan_remove_line_partial(
     try:
         remove_buy_plan_line(plan_id, line_id, user, db)
         db.commit()
+        updated = check_completion(plan_id, db)
+        if updated and updated.status == BuyPlanStatus.COMPLETED:
+            db.commit()
+            await run_notify_bg(notify_completed, plan_id)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
