@@ -250,7 +250,7 @@ class BuyPlanLine(Base):
         (it never touches the PO). Single source of truth for both the service gate and
         the whole-plan-editor template's per-row "locked" state.
         """
-        return self.po_confirmed_at is not None or self.status != BuyPlanLineStatus.AWAITING_PO.value
+        return bool(self.po_confirmed_at is not None or self.status != BuyPlanLineStatus.AWAITING_PO.value)
 
     @validates("status")
     def _validate_status(self, _key, value):

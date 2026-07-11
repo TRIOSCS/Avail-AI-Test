@@ -115,6 +115,26 @@ def _parse_optional_float(raw: str | None) -> float | None:
         raise HTTPException(400, "Expected a number.") from e
 
 
+async def _notify_if_completed(plan_id: int, db: Session) -> None:
+    """Fire the completion notification if *plan_id* just auto-completed.
+
+    The auto-complete DECISION now lives at service depth — ``verify_po``,
+    ``remove_buy_plan_line``, and ``bulk_edit_buy_plan_lines`` each call
+    ``check_completion`` themselves right after mutating line state. This shared route
+    tail just re-checks status (cheap no-op the vast majority of the time) to decide
+    whether to fire the ``notify_completed`` side effect — kept a route concern, not a
+    service one. Used identically by the verify-po, remove-line, and bulk-save-lines
+    routes.
+    """
+    from ...services.buyplan_notifications import notify_completed, run_notify_bg
+    from ...services.buyplan_workflow import check_completion
+
+    updated = check_completion(plan_id, db)
+    if updated and updated.status == BuyPlanStatus.COMPLETED:
+        db.commit()
+        await run_notify_bg(notify_completed, plan_id)
+
+
 _APPROVALS_TABS = ("my_queue", "pipeline")
 
 
@@ -960,12 +980,8 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ...services.buyplan_notifications import (
-        notify_completed,
-        notify_po_rejected,
-        run_notify_bg,
-    )
-    from ...services.buyplan_workflow import check_completion, verify_po
+    from ...services.buyplan_notifications import notify_po_rejected, run_notify_bg
+    from ...services.buyplan_workflow import verify_po
 
     form = await request.form()
     action = form.get("action", "approve")
@@ -977,10 +993,7 @@ async def buy_plan_verify_po_partial(
         db.commit()
         if action == "reject":
             await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
-        updated = check_completion(plan_id, db)
-        if updated and updated.status == BuyPlanStatus.COMPLETED:
-            db.commit()
-            await run_notify_bg(notify_completed, plan_id)
+        await _notify_if_completed(plan_id, db)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e)) from e
 
@@ -1224,12 +1237,11 @@ async def buy_plan_remove_line_partial(
     """Remove a line from an editable plan (epic I).
 
     Role×status gate in the service (PermissionError → 403); removing a cut-PO line →
-    400. Removing the plan's last open line can leave every remaining line terminal, so
-    a completion check runs right after — same pattern as verify-po (~line 980) — so an
-    ACTIVE plan can't get stranded short of COMPLETED.
+    400. ``remove_buy_plan_line`` already auto-completes at service depth (removing the
+    plan's last open line can leave every remaining line terminal); this route's
+    ``_notify_if_completed`` just re-checks to decide whether to fire the notification.
     """
-    from ...services.buyplan_notifications import notify_completed, run_notify_bg
-    from ...services.buyplan_workflow import check_completion, remove_buy_plan_line
+    from ...services.buyplan_workflow import remove_buy_plan_line
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
@@ -1237,10 +1249,7 @@ async def buy_plan_remove_line_partial(
     try:
         remove_buy_plan_line(plan_id, line_id, user, db)
         db.commit()
-        updated = check_completion(plan_id, db)
-        if updated and updated.status == BuyPlanStatus.COMPLETED:
-            db.commit()
-            await run_notify_bg(notify_completed, plan_id)
+        await _notify_if_completed(plan_id, db)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
@@ -1266,12 +1275,12 @@ async def buy_plan_bulk_lines_partial(
     is left untouched instead of silently deleted; omitted entirely falls back to the
     legacy (unscoped) removal-by-omission behavior. Role×status gate and per-line rules
     are enforced in the service (PermissionError → 403); malformed JSON, a bad shape, or
-    bad line data → 400. Removing the last open line can leave every remaining line
-    terminal, so a completion check runs right after — same pattern as verify-po
-    (~line 980) — so an ACTIVE plan can't get stranded short of COMPLETED.
+    bad line data → 400. ``bulk_edit_buy_plan_lines`` already auto-completes at service
+    depth (removing the last open line can leave every remaining line terminal); this
+    route's ``_notify_if_completed`` just re-checks to decide whether to fire the
+    notification.
     """
-    from ...services.buyplan_notifications import notify_completed, run_notify_bg
-    from ...services.buyplan_workflow import bulk_edit_buy_plan_lines, check_completion
+    from ...services.buyplan_workflow import bulk_edit_buy_plan_lines
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
@@ -1294,10 +1303,7 @@ async def buy_plan_bulk_lines_partial(
     try:
         bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db, known_line_ids=known_line_ids)
         db.commit()
-        updated = check_completion(plan_id, db)
-        if updated and updated.status == BuyPlanStatus.COMPLETED:
-            db.commit()
-            await run_notify_bg(notify_completed, plan_id)
+        await _notify_if_completed(plan_id, db)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
