@@ -326,8 +326,9 @@ def test_edit_endpoint_terminal_forbidden(client, db_session, sales_user, manage
 
 
 def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_user, test_requisition, test_offer):
-    """Manager viewing an ACTIVE plan sees the editable line UI (cells, vendor picker,
-    add form) render end-to-end without a Jinja error."""
+    """Manager viewing an ACTIVE plan sees the whole-plan editable line UI (Edit plan
+    toggle, the bulk-save endpoint reference, add-line/add-vendor affordances) render
+    end-to-end without a Jinja error."""
     # Anchor the offer to the plan's requirement so it appears in the vendor picker + add form.
     requirement = _requirement_of(db_session, test_requisition)
     test_offer.requirement_id = requirement.id
@@ -340,9 +341,11 @@ def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_
         resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
     assert resp.status_code == 200
     body = resp.text
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/add" in body  # add-line form present
+    assert f"buyPlanLinesEditor({plan.id}," in body  # whole-plan editor seeded with this plan id
+    assert "Edit plan" in body  # whole-table edit toggle (replaces per-row Edit)
+    assert "Save all" in body
     assert "+ Add line" in body
-    assert "/remove" in body  # per-line remove control
+    assert "+ Add vendor" in body  # split-vendor add, one per part group
     assert test_offer.vendor_name in body  # offer surfaced in the vendor picker
 
 
