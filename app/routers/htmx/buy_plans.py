@@ -1183,9 +1183,7 @@ async def buy_plan_add_line_partial(
     # map does NOT retroactively apply new loader options, so without this the service's
     # joinedload(BuyPlan.lines)/joinedload(BuyPlan.requisition) would do nothing and
     # plan.lines/plan.requisition would lazy-load one row at a time instead.
-    get_buyplan_for_user(
-        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
-    )
+    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
     try:
@@ -1224,9 +1222,7 @@ async def buy_plan_edit_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # edit_buy_plan_line's own loader options (see buy_plan_add_line_partial for why).
-    get_buyplan_for_user(
-        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
-    )
+    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
     quantity = _parse_optional_int(form.get("quantity"))
@@ -1264,9 +1260,7 @@ async def buy_plan_remove_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # remove_buy_plan_line's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(
-        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
-    )
+    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     try:
         updated = remove_buy_plan_line(plan_id, line_id, user, db)
@@ -1310,9 +1304,7 @@ async def buy_plan_bulk_lines_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # bulk_edit_buy_plan_lines's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(
-        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
-    )
+    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
     raw_payload = form.get("payload")
