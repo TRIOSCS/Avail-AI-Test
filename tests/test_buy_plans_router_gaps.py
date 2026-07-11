@@ -477,24 +477,25 @@ def test_resource_missing_reason_code(client, buy_plan):
 
 
 def test_verify_po_completion_triggers_notify(po_approver_client, buy_plan):
-    """check_completion returns COMPLETED plan → commit + notify_completed (lines
-    881-884)."""
+    """verify_po's own internal (approve-only) check_completion call already decides
+    completion by the time it returns the line — the route reads that off
+    ``line.buy_plan.status`` (an identity-map hit, not a second completion scan) to
+    decide whether to notify (lines 881-884)."""
     from app.constants import BuyPlanStatus
 
-    completed_plan = MagicMock()
-    completed_plan.status = BuyPlanStatus.COMPLETED
+    completed_line = MagicMock()
+    completed_line.buy_plan.status = BuyPlanStatus.COMPLETED.value
 
-    with patch("app.services.buyplan_workflow.verify_po"):
-        with patch("app.services.buyplan_workflow.check_completion", return_value=completed_plan):
-            with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
-                with patch(
-                    "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                    new=AsyncMock(return_value=_ok_html()),
-                ):
-                    resp = po_approver_client.post(
-                        f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/verify-po",
-                        data={"action": "approve"},
-                    )
+    with patch("app.services.buyplan_workflow.verify_po", return_value=completed_line):
+        with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+            with patch(
+                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                new=AsyncMock(return_value=_ok_html()),
+            ):
+                resp = po_approver_client.post(
+                    f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/verify-po",
+                    data={"action": "approve"},
+                )
     assert resp.status_code == 200
     mock_notify.assert_called()
 
