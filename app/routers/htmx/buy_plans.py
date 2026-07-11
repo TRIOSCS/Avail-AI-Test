@@ -992,11 +992,16 @@ async def buy_plan_verify_po_partial(
     hub_scope = form.get("hub_scope", "all")
 
     try:
-        verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
+        line = verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
+        # verify_po's own internal (approve-only) check_completion call already mutated
+        # the SAME identity-mapped BuyPlan object `line.buy_plan` resolves to (verify_po
+        # loaded it via db.get(BuyPlan, plan_id) itself) — reading .status off it here
+        # is a free identity-map hit, NOT a second completion scan.
+        just_completed = line.buy_plan is not None and line.buy_plan.status == BuyPlanStatus.COMPLETED.value
         db.commit()
         if action == "reject":
             await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
-        await _notify_if_completed(plan_id, db)
+        await _notify_if_completed(plan_id, just_completed)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e)) from e
 
@@ -1293,15 +1298,21 @@ async def buy_plan_bulk_lines_partial(
     is left untouched instead of silently deleted; omitted entirely falls back to the
     legacy (unscoped) removal-by-omission behavior. Role×status gate and per-line rules
     are enforced in the service (PermissionError → 403); malformed JSON, a bad shape, or
-    bad line data → 400. ``bulk_edit_buy_plan_lines`` already auto-completes at service
-    depth (removing the last open line can leave every remaining line terminal); this
-    route's ``_notify_if_completed`` just re-checks to decide whether to fire the
-    notification.
+    bad line data → 400. ``known_line_ids`` element-level validation (whole numbers,
+    bools rejected) lives in the SERVICE now (``bulk_edit_buy_plan_lines`` owns the
+    contract) — this route only checks the outer shape (a list, if present).
+    ``bulk_edit_buy_plan_lines`` already auto-completes at service depth (removing the
+    last open line can leave every remaining line terminal); the returned plan's
+    ``.status`` is read BEFORE commit to drive ``_notify_if_completed`` without re-
+    deriving the fact via a second ``check_completion`` scan.
     """
     from ...services.buyplan_workflow import bulk_edit_buy_plan_lines
 
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
+    # bulk_edit_buy_plan_lines's own loader options (see buy_plan_add_line_partial).
+    get_buyplan_for_user(
+        db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)]
+    )
 
     form = await request.form()
     raw_payload = form.get("payload")
@@ -1314,14 +1325,14 @@ async def buy_plan_bulk_lines_partial(
         raise HTTPException(400, 'Lines payload must be a JSON object shaped {"lines": [...]}.')
 
     known_line_ids = parsed.get("known_line_ids")
-    if known_line_ids is not None:
-        if not isinstance(known_line_ids, list) or not all(isinstance(i, int) for i in known_line_ids):
-            raise HTTPException(400, "known_line_ids must be a list of whole-number line ids.")
+    if known_line_ids is not None and not isinstance(known_line_ids, list):
+        raise HTTPException(400, "known_line_ids must be a list of whole-number line ids.")
 
     try:
-        bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db, known_line_ids=known_line_ids)
+        updated = bulk_edit_buy_plan_lines(plan_id, parsed["lines"], user, db, known_line_ids=known_line_ids)
+        just_completed = updated.status == BuyPlanStatus.COMPLETED.value
         db.commit()
-        await _notify_if_completed(plan_id, db)
+        await _notify_if_completed(plan_id, just_completed)
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:

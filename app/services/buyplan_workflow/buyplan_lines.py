@@ -20,7 +20,7 @@ from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import UserRole
+from ...constants import OfferStatus, UserRole
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 from ..buyplan_scoring import assign_buyer, score_offer
@@ -388,17 +388,31 @@ def _has_cut_po(line: BuyPlanLine) -> bool:
     return line.has_cut_po
 
 
-def _ensure_offer_on_requisition(offer: Offer, requisition_id: int | None) -> None:
-    """Reject an offer that isn't scoped to the plan's requisition.
+def _ensure_offer_attachable(offer: Offer, plan: BuyPlan, requirement_id: int | None) -> None:
+    """Reject an offer that isn't in the exact universe the vendor picker/add-form ever
+    shows for *requirement_id* on *plan*.
 
-    Mirrors the detail-render's vendor-picker filter (``Offer.requisition_id ==
-    bp.requisition_id`` in ``buy_plan_detail_partial``, app/routers/htmx/buy_plans.py)
-    so the server enforces the exact same universe the picker/add-form ever shows — an
-    offer from a different requisition (or an unsolicited inbound offer with no
-    requisition at all) is refused, not just hidden from the UI.
+    Mirrors ALL THREE filters ``buy_plan_detail_partial`` applies (app/routers/htmx/
+    buy_plans.py): same requisition (``Offer.requisition_id == bp.requisition_id``),
+    same part (the picker groups active offers into ``offers_by_requirement[
+    off.requirement_id]``, so an offer never appears under a requirement it isn't
+    ``requirement_id``-tagged for), and ACTIVE status (``Offer.status ==
+    OfferStatus.ACTIVE.value`` — the picker query filters this explicitly). An offer
+    from a different requisition/part, or one that has since gone SOLD/EXPIRED/etc., is
+    refused, not just hidden from the UI.
+
+    Only call this when an offer is being ATTACHED — a new line (:func:`_build_new_line`)
+    or an ACTUAL offer CHANGE on an existing line (:func:`_apply_line_edit`'s "changed"
+    branch). NEVER call it for a no-op resend of a line's CURRENT offer_id — that offer
+    may have legitimately gone SOLD since the line was cut, and re-sending the SAME
+    unchanged offer_id must stay a no-op regardless (both callers already gate this way).
     """
-    if offer.requisition_id != requisition_id:
+    if offer.requisition_id != plan.requisition_id:
         raise ValueError("That offer is not on this plan's requisition.")
+    if offer.requirement_id != requirement_id:
+        raise ValueError("That offer is not for this line's part.")
+    if offer.status != OfferStatus.ACTIVE.value:
+        raise ValueError(f"That offer is not active (status: {offer.status}).")
 
 
 def _require_int_quantity(value: object) -> int:
@@ -449,13 +463,14 @@ def _apply_line_edit(
     ``None``, so ``unit_sell=None`` is distinguishable from "not passed" — the only way
     to express "clear the sell price":
       - ``offer_id`` / ``quantity``: a value EQUAL to the line's CURRENT value is always
-        a no-op that never trips :func:`_has_cut_po` (so a resend of an untouched row
-        can't 400 the whole save just because a PO was cut on it between form-load and
-        save). An ACTUAL change is refused once :func:`_has_cut_po` is true; otherwise
-        an offer change re-derives ``unit_cost``/buyer via
-        :func:`_ensure_offer_on_requisition` + :func:`assign_buyer`, and a quantity
-        change is validated via :func:`_require_int_quantity` (rejects fractional
-        values) and must be positive.
+        a no-op that never trips :func:`_has_cut_po` NOR :func:`_ensure_offer_attachable`
+        (so a resend of an untouched row can't 400 the whole save just because a PO was
+        cut on it — or the attached offer went SOLD — between form-load and save). An
+        ACTUAL change is refused once :func:`_has_cut_po` is true; otherwise an offer
+        change re-derives ``unit_cost``/``ai_score``/buyer via
+        :func:`_ensure_offer_attachable` + :func:`score_offer` + :func:`assign_buyer`,
+        and a quantity change is validated via :func:`_require_int_quantity` (rejects
+        fractional values) and must be positive.
       - ``unit_sell``: never gated by :func:`_has_cut_po` (it never touches the PO).
         ``None`` clears it; any other value sets it.
     Recomputes ``line.margin_pct`` at the end. No commit/flush/recalc — caller's job.
@@ -468,9 +483,13 @@ def _apply_line_edit(
             offer = _resolve_offer(db, offer_id_int, offer_lookup)
             if not offer:
                 raise ValueError(f"Offer {offer_id} not found")
-            _ensure_offer_on_requisition(offer, plan.requisition_id)
+            _ensure_offer_attachable(offer, plan, line.requirement_id)
             line.offer_id = offer.id
-            line.unit_cost = float(offer.unit_price) if offer.unit_price else None
+            line.unit_cost = float(offer.unit_price) if offer.unit_price is not None else None
+            # Stale-score fix: an offer swap must re-score the line against the NEW
+            # offer, same as a fresh add via _build_new_line — otherwise ai_score keeps
+            # scoring the line against a vendor it no longer points at.
+            line.ai_score = score_offer(offer, line.requirement, offer.vendor_card)
             buyer, reason = assign_buyer(offer, offer.vendor_card, db)
             line.buyer_id = buyer.id if buyer else None
             line.assignment_reason = reason
@@ -509,9 +528,10 @@ def _build_new_line(
 
     Quantity goes through :func:`_require_int_quantity` (rejects a fractional value
     like ``3.5`` instead of truncating it) and must be positive. The requirement must
-    belong to *plan*'s requisition; the offer must exist AND belong to the same
-    requisition (:func:`_ensure_offer_on_requisition`). Sell falls back to the
-    requirement's ``target_price`` when *unit_sell* is ``None``.
+    belong to *plan*'s requisition; the offer must exist AND be attachable to it
+    (:func:`_ensure_offer_attachable` — same requisition, same requirement/part, ACTIVE
+    status). Sell falls back to the requirement's ``target_price`` when *unit_sell* is
+    ``None``.
     """
     quantity_int = _require_int_quantity(quantity) if quantity is not None else 0
     if quantity_int <= 0:
@@ -524,9 +544,9 @@ def _build_new_line(
     offer = _resolve_offer(db, int(offer_id), offer_lookup) if offer_id is not None else None
     if not offer:
         raise ValueError(f"Offer {offer_id} not found")
-    _ensure_offer_on_requisition(offer, plan.requisition_id)
+    _ensure_offer_attachable(offer, plan, requirement.id)
 
-    unit_cost = float(offer.unit_price) if offer.unit_price else None
+    unit_cost = float(offer.unit_price) if offer.unit_price is not None else None
     resolved_sell = (
         float(unit_sell)
         if unit_sell is not None
