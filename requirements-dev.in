@@ -10,9 +10,9 @@ pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
 pytest-xdist>=3.8.0
-responses>=0.26.1
+responses>=0.26.2
 freezegun>=1.5.5
-schemathesis>=4.21.10
+schemathesis>=4.22.4
 nest_asyncio>=1.6.0
 
 # E2E / Playwright
@@ -25,10 +25,10 @@ itsdangerous>=2.1.0
 pybreaker>=1.4.1
 
 # Linting
-ruff>=0.15.20
+ruff>=0.15.21
 
 # Type checking
-mypy>=2.1.0
+mypy>=2.2.0
 sqlalchemy[mypy]>=2.0.51
 types-redis>=4.6.0.20241004
 
