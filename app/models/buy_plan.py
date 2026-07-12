@@ -239,6 +239,19 @@ class BuyPlanLine(Base):
     buyer = relationship("User", foreign_keys=[buyer_id])
     po_verified_by = relationship("User", foreign_keys=[po_verified_by_id])
 
+    @property
+    def has_cut_po(self) -> bool:
+        """True once this line has left AWAITING_PO (a PO is cut / verified / flagged /
+        cancelled).
+
+        Vendor/qty/removal edits on such a line would corrupt live purchasing state, so
+        the line-editing service (``app/services/buyplan_workflow/buyplan_lines.py``)
+        refuses them once this is true — the header sell price can still be corrected
+        (it never touches the PO). Single source of truth for both the service gate and
+        the whole-plan-editor template's per-row "locked" state.
+        """
+        return bool(self.po_confirmed_at is not None or self.status != BuyPlanLineStatus.AWAITING_PO.value)
+
     @validates("status")
     def _validate_status(self, _key, value):
         valid = {e.value for e in BuyPlanLineStatus}

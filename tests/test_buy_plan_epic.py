@@ -13,7 +13,9 @@ Covers the money-governing buy-plan/sales-order workflow additions:
 
 Called by: pytest
 Depends on: conftest fixtures (client, test_user, sales_user, manager_user, admin_user,
-    test_requisition, test_offer), FastAPI TestClient.
+    test_requisition, test_offer, and the shared buy-plan line-editing factories
+    _buyplan_req/_buyplan_requirement_of/_buyplan_plan/_buyplan_line — also consumed by
+    test_buyplan_bulk_edit.py), FastAPI TestClient.
 """
 
 import os
@@ -25,13 +27,16 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus
 from app.dependencies import require_user
 from app.main import app
-from app.models import Requirement, Requisition, User
+from app.models import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
+from tests.conftest import _buyplan_line as _line
+from tests.conftest import _buyplan_plan as _plan
+from tests.conftest import _buyplan_req as _req
+from tests.conftest import _buyplan_requirement_of as _requirement_of
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -48,70 +53,6 @@ def _acting_as(user: User):
             app.dependency_overrides[require_user] = prior
         else:
             app.dependency_overrides.pop(require_user, None)
-
-
-def _req(db: Session, owner: User, *, customer: str = "Acme Electronics") -> Requisition:
-    """A requisition (owned by *owner*) with one requirement."""
-    req = Requisition(
-        name="REQ-EPIC",
-        customer_name=customer,
-        status="open",
-        created_by=owner.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(req)
-    db.flush()
-    db.add(
-        Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            target_qty=1000,
-            target_price=0.75,
-            created_at=datetime.now(UTC),
-        )
-    )
-    db.commit()
-    db.refresh(req)
-    return req
-
-
-def _requirement_of(db: Session, req: Requisition) -> Requirement:
-    return db.query(Requirement).filter(Requirement.requisition_id == req.id).first()
-
-
-def _plan(db: Session, req: Requisition, *, status=BuyPlanStatus.DRAFT.value, **ov) -> BuyPlan:
-    defaults = dict(
-        requisition_id=req.id,
-        status=status,
-        so_status="pending",
-        total_cost=100.00,
-        total_revenue=200.00,
-        total_margin_pct=50.00,
-        ai_flags=[],
-        created_at=datetime.now(UTC),
-    )
-    defaults.update(ov)
-    plan = BuyPlan(**defaults)
-    db.add(plan)
-    db.commit()
-    db.refresh(plan)
-    return plan
-
-
-def _line(db: Session, plan: BuyPlan, **ov) -> BuyPlanLine:
-    defaults = dict(
-        buy_plan_id=plan.id,
-        quantity=100,
-        unit_cost=1.00,
-        unit_sell=2.00,
-        status=BuyPlanLineStatus.AWAITING_PO.value,
-    )
-    defaults.update(ov)
-    line = BuyPlanLine(**defaults)
-    db.add(line)
-    db.commit()
-    db.refresh(line)
-    return line
 
 
 # ══ G — list fields ══════════════════════════════════════════════════
@@ -216,6 +157,10 @@ def test_add_line_recomputes_header(db_session, test_user, test_requisition, tes
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
     _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)  # cost 100, rev 200
     requirement = _requirement_of(db_session, test_requisition)
+    # Attaching an offer now also validates requirement_id + ACTIVE status (mirrors the
+    # vendor picker) — anchor test_offer to the target requirement.
+    test_offer.requirement_id = requirement.id
+    db_session.commit()
 
     # test_offer: unit_price 0.50; add 1000 @ sell 0.50 → cost 500, rev 500.
     add_buy_plan_line(plan.id, requirement.id, test_offer.id, 1000, test_user, db_session, unit_sell=0.50)
@@ -326,8 +271,9 @@ def test_edit_endpoint_terminal_forbidden(client, db_session, sales_user, manage
 
 
 def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_user, test_requisition, test_offer):
-    """Manager viewing an ACTIVE plan sees the editable line UI (cells, vendor picker,
-    add form) render end-to-end without a Jinja error."""
+    """Manager viewing an ACTIVE plan sees the whole-plan editable line UI (Edit plan
+    toggle, the bulk-save endpoint reference, add-line/add-vendor affordances) render
+    end-to-end without a Jinja error."""
     # Anchor the offer to the plan's requirement so it appears in the vendor picker + add form.
     requirement = _requirement_of(db_session, test_requisition)
     test_offer.requirement_id = requirement.id
@@ -340,9 +286,11 @@ def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_
         resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
     assert resp.status_code == 200
     body = resp.text
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/add" in body  # add-line form present
+    assert f"buyPlanLinesEditor({plan.id}," in body  # whole-plan editor seeded with this plan id
+    assert "Edit plan" in body  # whole-table edit toggle (replaces per-row Edit)
+    assert "Save all" in body
     assert "+ Add line" in body
-    assert "/remove" in body  # per-line remove control
+    assert "+ Add vendor" in body  # split-vendor add, one per part group
     assert test_offer.vendor_name in body  # offer surfaced in the vendor picker
 
 

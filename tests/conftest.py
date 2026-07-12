@@ -819,6 +819,109 @@ def test_offer(
     return o
 
 
+# ── Buy-plan line-editing factories (shared by test_buy_plan_epic.py and
+#    test_buyplan_bulk_edit.py — plain callables, not fixtures, since every test needs
+#    several differently-parameterized instances rather than one injected value) ──────
+
+
+def _buyplan_req(db: Session, owner: User, *, customer: str = "Acme Electronics") -> Requisition:
+    """A requisition (owned by *owner*) with one requirement."""
+    req = Requisition(
+        name="REQ-EPIC",
+        customer_name=customer,
+        status="open",
+        created_by=owner.id,
+        created_at=datetime.now(UTC),
+    )
+    db.add(req)
+    db.flush()
+    db.add(
+        Requirement(
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            target_qty=1000,
+            target_price=0.75,
+            created_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+def _buyplan_requirement_of(db: Session, req: Requisition) -> Requirement:
+    """The single Requirement :func:`_buyplan_req` created for *req*."""
+    return db.query(Requirement).filter(Requirement.requisition_id == req.id).first()
+
+
+def _buyplan_plan(db: Session, req: Requisition, *, status: str | None = None, **overrides):  # -> BuyPlan
+    """A BuyPlan on *req* (local import; type annotation omitted to satisfy ruff
+    F821)."""
+    from app.constants import BuyPlanStatus
+    from app.models.buy_plan import BuyPlan
+
+    defaults = dict(
+        requisition_id=req.id,
+        status=status or BuyPlanStatus.DRAFT.value,
+        so_status="pending",
+        total_cost=100.00,
+        total_revenue=200.00,
+        total_margin_pct=50.00,
+        ai_flags=[],
+        created_at=datetime.now(UTC),
+    )
+    defaults.update(overrides)
+    plan = BuyPlan(**defaults)
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def _buyplan_line(db: Session, plan, **overrides):  # plan: BuyPlan -> BuyPlanLine
+    """A BuyPlanLine on *plan* (local import; type annotations omitted to satisfy ruff
+    F821)."""
+    from app.constants import BuyPlanLineStatus
+    from app.models.buy_plan import BuyPlanLine
+
+    defaults = dict(
+        buy_plan_id=plan.id,
+        quantity=100,
+        unit_cost=1.00,
+        unit_sell=2.00,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
+    )
+    defaults.update(overrides)
+    line = BuyPlanLine(**defaults)
+    db.add(line)
+    db.commit()
+    db.refresh(line)
+    return line
+
+
+def _buyplan_offer(db: Session, requisition: Requisition, entered_by: User, **overrides) -> Offer:
+    """An ADDITIONAL offer scoped to *requisition* — distinct from the ``test_offer``
+    fixture (always scoped to ``test_requisition``), for cross-requisition / cross-
+    status attach-rejection scenarios that need an offer NOT on the plan-under-test's
+    requisition."""
+    defaults = dict(
+        requisition_id=requisition.id,
+        vendor_name="Secondary Vendor",
+        mpn="LM317T",
+        qty_available=1000,
+        unit_price=0.40,
+        entered_by_id=entered_by.id,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    defaults.update(overrides)
+    offer = Offer(**defaults)
+    db.add(offer)
+    db.commit()
+    db.refresh(offer)
+    return offer
+
+
 @pytest.fixture()
 def test_vendor_contact(db_session: Session, test_vendor_card: VendorCard) -> VendorContact:
     """A structured vendor contact linked to the test vendor card."""
