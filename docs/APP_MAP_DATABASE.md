@@ -248,6 +248,8 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 > **Migration 108 (`108_offer_qualification`)** — adds the 3 columns + `ix_offers_qualification_status` index; also migrates legacy `condition = 'used'` → `'pulls'` (one-way data change, not reversed on downgrade).
 
 > **Migration 157 (`157_qp_approvals`)** — adds 6 new nullable columns to `offers`: `is_primary` (Boolean default false), `sourcing_type` (String 50; `SourcingType` enum), `vendor_rating` (Numeric 3,1), `terms` (JSON), `location` (String 255), `specifics` (Text). See also `###Approvals Engine & QP` section below.
+>
+> **Migration 188 (`188_canonical_offers_excess_fk`)** — converges the FK on `offers.excess_line_item_id -> excess_line_items` onto its single canonical name `offers_excess_line_item_id_fkey` (the PostgreSQL default the unnamed model `ForeignKey` produces). Migration `d1a2b3c4e5f6`'s replay guard checked `pg_constraint` for its OWN name `fk_offers_excess_line_item_id` — which baseline 001 never creates — so a fresh-chain replay left TWO identical FKs on the column (invisible to the drift gate: alembic compares FKs by signature, not name). 188 drops the stray when both exist, RENAMEs it when it's the only one, and no-ops otherwise; the `d1a2b3c4e5f6`/`5c6736d6381f` guards are now COLUMN-scoped so the duplicate can't be recreated. PostgreSQL-only (dialect-guarded no-op on SQLite); irreversible cleanup → documented no-op downgrade.
 
 **`quotes`** — Formal quotes sent to customers
 | Column | Type | Notes |

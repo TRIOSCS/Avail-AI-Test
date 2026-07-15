@@ -6,6 +6,11 @@ ondelete SET NULL) with index.
 
 Idempotent: uses IF NOT EXISTS / column existence checks since these columns
 may already exist from a prior run of the original d1a2b3c4e5f6 migration.
+The offers FK guard is COLUMN-scoped (any FK covering excess_line_item_id ->
+excess_line_items counts, regardless of name): the original name-scoped guard
+missed the baseline's PostgreSQL-default 'offers_excess_line_item_id_fkey'
+and duplicated the FK on fresh-DB replays — see
+188_canonical_offers_excess_fk for the full history and the cleanup.
 
 Revision ID: d1a2b3c4e5f6
 Revises: c19a184db289
@@ -64,14 +69,27 @@ def upgrade() -> None:
             "offers",
             sa.Column("excess_line_item_id", sa.Integer(), nullable=True),
         )
-    # FK — check via pg_constraint
+    # FK — COLUMN-scoped pg_constraint check: skip when ANY foreign key already
+    # covers offers.excess_line_item_id -> excess_line_items, whatever its name.
+    # The original name-scoped guard (conname = 'fk_offers_excess_line_item_id')
+    # missed the baseline's 'offers_excess_line_item_id_fkey' (001 creates this FK
+    # under PostgreSQL's default name), so a fresh-DB chain replay created a
+    # duplicate second FK on the column; 188_canonical_offers_excess_fk removes
+    # the stray, and this guard stops replays from ever recreating it.
     conn = op.get_bind()
     fk_exists = conn.execute(
-        sa.text("SELECT 1 FROM pg_constraint WHERE conname = 'fk_offers_excess_line_item_id'")
+        sa.text(
+            "SELECT 1 FROM pg_constraint con "
+            "WHERE con.contype = 'f' "
+            "AND con.conrelid = to_regclass('offers') "
+            "AND con.confrelid = to_regclass('excess_line_items') "
+            "AND con.conkey = ARRAY[(SELECT attnum FROM pg_attribute "
+            "WHERE attrelid = con.conrelid AND attname = 'excess_line_item_id')]::smallint[]"
+        )
     ).scalar()
     if not fk_exists:
         op.create_foreign_key(
-            "fk_offers_excess_line_item_id",
+            "offers_excess_line_item_id_fkey",
             "offers",
             "excess_line_items",
             ["excess_line_item_id"],
@@ -88,7 +106,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_offers_excess_line_item", table_name="offers", if_exists=True)
-    op.drop_constraint("fk_offers_excess_line_item_id", "offers", type_="foreignkey")
+    # env.py's drop_constraint wrapper skips a missing name, and the raw
+    # DROP COLUMN below cascades any FK still covering the column — so this
+    # drop is safe whichever of the historical FK names a database carries.
+    op.drop_constraint("offers_excess_line_item_id_fkey", "offers", type_="foreignkey")
     op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS excess_line_item_id")
 
     op.drop_index(
