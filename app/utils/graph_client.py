@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import os
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from loguru import logger
@@ -23,6 +24,22 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 class GraphSyncStateExpired(Exception):
     """Raised when Graph API returns 410 — the delta token is stale and must be
     discarded."""
+
+
+class GraphAPIError(Exception):
+    """Raised when a paged request (delta_query / get_all_pages) hits an error page.
+
+    _request_with_retry returns ``{"error": <status>, "detail": ...}`` dicts for
+    non-retryable failures (401/4xx/max_retries) — a contract webhook_service
+    branches on, so it stays. Pagination helpers must NOT treat those dicts as
+    empty pages (that silently ends the round and lets callers persist a token
+    past unfetched data), so they raise this instead.
+    """
+
+    def __init__(self, status: int | str, detail: str = ""):
+        self.status = status
+        self.detail = detail
+        super().__init__(f"Graph API error {status}: {detail}")
 
 
 # H1: Immutable IDs — prevents ID changes when messages are moved between folders
@@ -72,7 +89,9 @@ class GraphClient:
     ) -> list[dict]:
         """GET with auto-pagination.
 
-        Returns flat list of items.
+        Returns a flat list of items, truncated to max_items. An error page
+        ({"error": ...} from the retry layer) raises GraphAPIError instead of
+        silently returning the short list fetched so far.
         """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         items: list[dict] = []
@@ -80,6 +99,8 @@ class GraphClient:
             data = await self._request_with_retry(
                 "GET", url, params=params if GRAPH_BASE in url else None, timeout=timeout
             )
+            if "error" in data:
+                raise GraphAPIError(data["error"], str(data.get("detail", "")))
             items.extend(data.get("value", []))
             url = data.get("@odata.nextLink")
             params = None  # nextLink has params baked in
@@ -128,37 +149,81 @@ class GraphClient:
         params: dict | None = None,
         max_items: int = 1000,
         timeout: int = 30,
+        max_page_size: int | None = None,
+        initial_lookback_days: int | None = None,
     ) -> tuple[list[dict], str | None]:
-        """Run a Delta Query. Returns (items, new_delta_token).
+        """Run a Delta Query. Returns (items, new_state_token).
 
-        If delta_token is None, performs a full sync and returns the initial token. On
-        subsequent calls, only returns changes since the last token.
+        If delta_token is None, performs a full sync from ``path``; otherwise it
+        resumes from the stored token URL (a deltaLink OR a mid-round nextLink —
+        both are opaque, durable Graph URLs and are interchangeable here).
+
+        Contract — fetched items are NEVER dropped:
+        - Round completes → (all items, deltaLink).
+        - max_items reached mid-round → stop paging and return (all items fetched
+          so far, current nextLink). The nextLink is the resumable state: persist
+          it exactly like a deltaLink and the next call finishes the round.
+          Because whole pages are returned, len(items) may exceed max_items by up
+          to one page — max_items is a paging budget, not a slice.
+        - Error page ({"error": ...} from the retry layer) → raise GraphAPIError;
+          no token is returned, so sync state cannot advance past unfetched data.
+
+        Initial full-sync rounds (delta_token=None) enumerate the ENTIRE
+        collection — because the nextLink is resumable state, successive calls
+        WILL drain it all. For message folders that means the whole mailbox
+        history, so callers MUST bound it with initial_lookback_days: it adds
+        ``$filter=receivedDateTime ge {ts}`` to the initial request — the only
+        $filter Graph supports on message deltas — and Graph bakes the filter
+        into every nextLink/deltaLink it returns, so the bound sticks for the
+        life of the sync state (a filtered round also returns at most 5,000
+        messages, per Graph docs). Ignored when resuming from a token. Leave it
+        None for non-message deltas (e.g. /me/contacts/delta) — they don't
+        support this filter and are finite collections anyway.
+
+        max_page_size sets "Prefer: odata.maxpagesize" (the documented page-size
+        control for delta queries), preserving the ImmutableId preference (H1).
         """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         if delta_token:
-            # Use the stored delta link directly
+            # Use the stored state URL (deltaLink or nextLink) directly
             url = delta_token
             params = None
+        elif initial_lookback_days:
+            since = (datetime.now(UTC) - timedelta(days=initial_lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            params = {**(params or {}), "$filter": f"receivedDateTime ge {since}"}
+
+        headers: dict[str, str] | None = None
+        if max_page_size:
+            # Prefer values combine — keep IdType="ImmutableId" (H1) alongside.
+            headers = {"Prefer": f"{IMMUTABLE_ID_HEADER['Prefer']}, odata.maxpagesize={max_page_size}"}
 
         items: list[dict] = []
-        new_token: str | None = None
-
-        while url and len(items) < max_items:
-            data = await self._request_with_retry(
-                "GET", url, params=params if not delta_token else None, timeout=timeout
-            )
+        while True:
+            data = await self._request_with_retry("GET", url, params=params, timeout=timeout, headers=headers)
+            if "error" in data:
+                raise GraphAPIError(data["error"], str(data.get("detail", "")))
             items.extend(data.get("value", []))
 
-            # Check for delta link (means we've consumed all changes)
-            new_token = data.get("@odata.deltaLink")
-            if new_token:
-                break
+            # Delta link → round complete, all changes consumed
+            delta_link: str | None = data.get("@odata.deltaLink")
+            if delta_link:
+                return items, delta_link
 
-            # More pages of changes
-            url = data.get("@odata.nextLink")
-            params = None
+            next_link: str | None = data.get("@odata.nextLink")
+            if not next_link:
+                # Defensive: Graph ends every delta round with a deltaLink, so a
+                # link-less page is an anomaly — return None so the caller keeps
+                # its previous token rather than persisting bogus state.
+                logger.warning(f"Delta page had neither deltaLink nor nextLink: {url[:120]}")
+                return items, None
 
-        return items[:max_items], new_token
+            if len(items) >= max_items:
+                # Per-run budget reached — the nextLink is durable, resumable
+                # state; the next run picks up the round exactly here.
+                return items, next_link
+
+            url = next_link
+            params = None  # nextLink has params baked in
 
     # ── Internal retry logic ────────────────────────────────────────
 
@@ -169,8 +234,13 @@ class GraphClient:
         params: dict | None = None,
         json_data: dict | None = None,
         timeout: int = 30,
+        headers: dict[str, str] | None = None,
     ) -> dict:
         """Execute HTTP request with retry logic.
+
+        headers, when given, are merged OVER the constructor-level base headers
+        for this request only (a per-request "Prefer" replaces the base one, so
+        callers overriding it must re-include IdType="ImmutableId").
 
         Retry strategy:
         - 429 (rate limit): always retry, honor Retry-After header (use max of
@@ -182,15 +252,16 @@ class GraphClient:
         - 410 (delta token expired): raise GraphSyncStateExpired immediately.
         """
         last_error: Exception | None = None
+        request_headers = self._base_headers if headers is None else {**self._base_headers, **headers}
 
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if method == "GET":
-                    resp = await http.get(url, params=params, headers=self._base_headers, timeout=timeout)
+                    resp = await http.get(url, params=params, headers=request_headers, timeout=timeout)
                 elif method == "PATCH":
-                    resp = await http.patch(url, json=json_data, headers=self._base_headers, timeout=timeout)
+                    resp = await http.patch(url, json=json_data, headers=request_headers, timeout=timeout)
                 else:
-                    resp = await http.post(url, json=json_data, headers=self._base_headers, timeout=timeout)
+                    resp = await http.post(url, json=json_data, headers=request_headers, timeout=timeout)
 
                 # Success
                 if resp.status_code in (200, 201):

@@ -1307,6 +1307,32 @@ email_service.poll_inbox()
     +---> graph_client.py --> Graph API: GET inbox messages
     |       (delta query incremental sync when available; top-50 fallback —
     |        ALL messages fetched, matching happens locally below)
+    |       delta_query contract: fetched items are NEVER dropped — when the
+    |       per-run max_items budget is hit mid-round it stops paging and
+    |       returns the current @odata.nextLink as the resumable state token
+    |       (persisted into SyncState.delta_token exactly like a deltaLink;
+    |       both are opaque Graph URLs, so backlogs > cap drain across runs
+    |       instead of stalling). Because the nextLink is resumable, an
+    |       UNBOUNDED initial round would drain the whole mailbox history —
+    |       so message-delta call sites pass initial_lookback_days, which adds
+    |       "$filter=receivedDateTime ge {ts}" (the only $filter Graph supports
+    |       on message deltas; baked by Graph into every subsequent link, max
+    |       5,000 msgs per filtered round) to the first request: poll_inbox and
+    |       scan_sent_folder use settings.inbox_backfill_days; EmailMiner
+    |       scan_inbox/scan_sent_items use their own lookback_days (same window
+    |       as their search fallbacks). /me/contacts/delta stays unbounded —
+    |       the filter is unsupported there and an address book is finite.
+    |       Page size via "Prefer: odata.maxpagesize" (max_page_size param,
+    |       keeps IdType="ImmutableId"). An {"error": ...} page raises typed
+    |       GraphAPIError (also from get_all_pages) instead of reading as an
+    |       empty page — callers log + fail the run and the token is NOT
+    |       advanced. poll_inbox failure ladder: 410/GraphSyncStateExpired is
+    |       the ONLY case that clears the token (then full-scan fallback);
+    |       GraphAPIError keeps the token and falls back (401/403 re-raise);
+    |       any other exception (transient/network) keeps the token and
+    |       re-raises so the poll is recorded as FAILED — and the top-50
+    |       fallback itself raises GraphAPIError on an {"error": ...} body
+    |       instead of reporting a successful empty poll.
     |
     +---> reply matching (first tier that hits wins; exact before fuzzy):
     |       Tier 1: graph_conversation_id (global, exact) — matches ALL
@@ -3600,7 +3626,8 @@ selection the calendar/inbox jobs use — resolves a token via
 `token_manager.get_valid_token(user, db)`, builds `GraphClient(token)`, and calls
 `prospect_discovery_email.run_email_mining_batch(...)`. `mine_unknown_domains` lists the
 inbox via `GraphClient.get_all_pages("/me/mailFolders/inbox/messages", params={$filter,
-$select, $orderby, $top})`, which auto-paginates and returns a flat list of message dicts.
+$select, $orderby, $top})`, which auto-paginates and returns a flat list of message dicts
+(an `{"error": ...}` page raises typed `GraphAPIError` instead of reading as empty).
 No mailbox or no token ⇒ the branch logs a warning and skips (email_count stays 0); the
 surrounding `except` keeps the scheduler resilient. (There is no `get_graph_client()`
 factory and `GraphClient` has no `list_messages` — both were dead references, now fixed.)

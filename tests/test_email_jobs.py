@@ -966,6 +966,35 @@ class TestScanSentFolder:
             assert sync_state.delta_token is None or sync_state.delta_token == "new-token"
 
     @pytest.mark.asyncio
+    async def test_scan_initial_sync_bounded_by_backfill_lookback(self):
+        """The initial SentItems delta round (and the post-410 resync) must be bounded
+        to the backfill window — the resumable-nextLink contract would otherwise drain
+        the entire folder history across runs."""
+        from app.config import settings
+        from app.jobs.email_jobs import scan_sent_folder
+        from app.utils.graph_client import GraphSyncStateExpired
+
+        user = MagicMock()
+        user.id = 1
+        user.email = "buyer@trioscs.com"
+        sync_state = MagicMock()
+        sync_state.delta_token = "old"
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = sync_state
+
+        gc_mock = MagicMock()
+        gc_mock.delta_query = AsyncMock(side_effect=[GraphSyncStateExpired("expired"), ([], "new-token")])
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            await scan_sent_folder(user, mock_db)
+
+        for call in gc_mock.delta_query.call_args_list:
+            assert call.kwargs["initial_lookback_days"] == settings.inbox_backfill_days
+
+    @pytest.mark.asyncio
     async def test_scan_with_attachments(self):
         from app.jobs.email_jobs import scan_sent_folder
 

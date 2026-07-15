@@ -602,8 +602,9 @@ async def poll_inbox(
 
     Returns list of new responses found (already saved to DB).
     """
+    from app.config import settings
     from app.models import SyncState
-    from app.utils.graph_client import GraphClient
+    from app.utils.graph_client import GraphAPIError, GraphClient, GraphSyncStateExpired
 
     gc = GraphClient(token)
 
@@ -630,6 +631,11 @@ async def poll_inbox(
                     "$top": "50",
                 },
                 max_items=200,
+                max_page_size=50,
+                # Bound the initial full-sync round (and thus the whole resumable
+                # drain) to the standard first-time backfill window instead of the
+                # entire mailbox history.
+                initial_lookback_days=settings.inbox_backfill_days,
             )
             messages = items
             used_delta = True
@@ -648,17 +654,35 @@ async def poll_inbox(
                     )
                     db.add(sync)
                 db.flush()
-        except Exception as e:
-            err_str = str(e).lower()
-            if "401" in err_str or "403" in err_str or "unauthorized" in err_str:
-                logger.error(f"Inbox auth failure (not falling back): {e}")
-                raise
-            logger.warning(f"Delta query failed, falling back to full scan: {e}")
+        except GraphSyncStateExpired as e:
+            # 410 — Graph itself says the stored token is invalid. This is the
+            # ONLY condition under which clearing it is correct; the fallback
+            # full scan covers this poll and the next delta round starts fresh.
+            logger.warning(f"Inbox delta token expired (410) — clearing and falling back: {e}")
             if sync and sync.delta_token:
                 sync.delta_token = None
                 db.flush()
             messages = []
             used_delta = False
+        except GraphAPIError as e:
+            # Typed error page mid-round — delta_query did NOT return a token, so
+            # the stored one still points at the unfetched data and the next poll
+            # resumes incrementally. Do NOT clear it; auth failures bubble up so
+            # the caller marks the poll failed (no silent success).
+            if e.status in (401, 403):
+                logger.error(f"Inbox auth failure (not falling back): {e}")
+                raise
+            logger.warning(f"Inbox delta hit Graph error page (token kept), falling back to full scan: {e}")
+            messages = []
+            used_delta = False
+        except Exception as e:
+            # Transient/network error (e.g. httpx.ReadTimeout re-raised by the
+            # retry layer). The stored token is still valid — clearing it would
+            # force a full re-enumeration of the backfill window — so keep it and
+            # surface a failed poll (the same outage would break the fallback
+            # scan too).
+            logger.error(f"Inbox delta failed (token kept): {e}")
+            raise
 
     # ── Fallback: traditional top-50 fetch ──
     if not messages and not used_delta:
@@ -671,6 +695,11 @@ async def poll_inbox(
                     "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
                 },
             )
+            if data and "error" in data:
+                # The retry layer signals exhausted retries / non-retryable 4xx
+                # as an {"error": ...} dict — a hard Graph outage must surface
+                # as a failed poll, not a successful empty one.
+                raise GraphAPIError(data["error"], str(data.get("detail", "")))
             messages = data.get("value", []) if data else []
         except Exception as e:
             logger.error(f"Inbox poll failed: {e}")
