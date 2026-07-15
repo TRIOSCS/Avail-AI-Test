@@ -126,7 +126,7 @@ patchright==1.61.2
     # via -r requirements.in
 phonenumbers==9.0.34
     # via -r requirements.in
-pillow==12.2.0
+pillow==12.3.0
     # via weasyprint
 prometheus-client==0.25.0
     # via -r requirements.in
@@ -170,7 +170,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.64.0
+sentry-sdk[fastapi]==2.65.0
     # via -r requirements.in
 slowapi==0.1.10
     # via -r requirements.in
