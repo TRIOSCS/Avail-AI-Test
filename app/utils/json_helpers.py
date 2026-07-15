@@ -17,7 +17,8 @@ def dumps(obj, *, sort_keys: bool = False, default=None) -> str:
     compatibility with Redis and SQL.
     """
     option = orjson.OPT_SORT_KEYS if sort_keys else 0
-    return orjson.dumps(obj, option=option, default=default).decode()
+    payload: str = orjson.dumps(obj, option=option, default=default).decode()
+    return payload
 
 
 def loads(s):

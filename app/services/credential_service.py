@@ -59,7 +59,8 @@ def encrypt_value(plaintext: str) -> str:
     Returns a base64 Fernet token string.
     """
     f = _get_fernet()
-    return f.encrypt(plaintext.encode()).decode()
+    token: str = f.encrypt(plaintext.encode()).decode()
+    return token
 
 
 def decrypt_value(ciphertext: str) -> str:
@@ -68,7 +69,8 @@ def decrypt_value(ciphertext: str) -> str:
     Returns the original plaintext.
     """
     f = _get_fernet()
-    return f.decrypt(ciphertext.encode()).decode()
+    plain: str = f.decrypt(ciphertext.encode()).decode()
+    return plain
 
 
 def _try_decrypt(encrypted: str | None, var_name: str) -> str | None:

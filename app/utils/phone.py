@@ -43,6 +43,7 @@ def normalize_e164(raw: object, default_region: str = "US") -> str | None:
         parsed = phonenumbers.parse(raw, default_region)
         if not phonenumbers.is_valid_number(parsed):
             return None
-        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        e164: str = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        return e164
     except Exception:
         return None

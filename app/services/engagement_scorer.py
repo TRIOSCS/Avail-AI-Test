@@ -57,7 +57,7 @@ def compute_engagement_score(
     avg_velocity_hours: float | None,
     last_contact_at: datetime | None,
     now: datetime | None = None,
-) -> dict:
+) -> dict[str, float | None]:
     """Compute engagement score from raw metrics.
 
     Returns:

@@ -28,7 +28,7 @@ async def get_presence(email: str, gc) -> str | None:
             f"/users/{email}/presence",
             params={"$select": "availability"},
         )
-        status = data.get("availability", "Offline")
+        status: str = data.get("availability", "Offline")  # Graph JSON boundary
 
         # LRU eviction: remove oldest 20% when at capacity (avoid cache stampede)
         if len(_presence_cache) >= _CACHE_MAX:

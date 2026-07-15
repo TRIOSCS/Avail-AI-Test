@@ -154,7 +154,8 @@ class AIGate:
                 timeout=30,
             )
             if result and "classifications" in result:
-                return result["classifications"]
+                classifications: list[dict] = result["classifications"]  # LLM JSON boundary
+                return classifications
             logger.warning("AI gate: unexpected response format: {}", result)
             return None
         except Exception as e:

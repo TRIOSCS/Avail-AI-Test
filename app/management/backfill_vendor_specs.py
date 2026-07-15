@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from typing import TypedDict
 
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from app.cache import intel_cache
 from app.models import MaterialCard
@@ -84,7 +85,7 @@ _COMMIT_EVERY = 25
 _DRY_RUN_LOG_LIMIT = 50  # cap per-candidate dry-run logging (the backlog is ~737k rows)
 
 
-def select_candidates(db, limit: int | None) -> list[MaterialCard]:
+def select_candidates(db: Session, limit: int | None) -> list[MaterialCard]:
     """Return uncategorized cards demand-first (``sourced_qty_90d DESC NULLS LAST,
     id``).
 

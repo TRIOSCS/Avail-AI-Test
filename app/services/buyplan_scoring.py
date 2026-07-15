@@ -42,7 +42,8 @@ def _country_to_region(country: str | None) -> str | None:
     if not country:
         return None
     maps = _get_routing_maps()
-    return maps.get("country_region_map", {}).get(country.strip().lower())
+    region: str | None = maps.get("country_region_map", {}).get(country.strip().lower())  # JSON config boundary
+    return region
 
 
 # ── Offer Scoring ───────────────────────────────────────────────────

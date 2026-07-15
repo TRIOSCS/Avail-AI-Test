@@ -475,7 +475,7 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
                     "$select": "id,conversationId,subject,toRecipients",
                 },
             )
-            msgs = data.get("value", []) if data else []
+            msgs: list[dict] = data.get("value", []) if data else []  # Graph JSON boundary
             scanned = len(msgs)
             for m in msgs:
                 if m.get("subject", "").strip() != subject.strip():

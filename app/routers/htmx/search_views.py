@@ -274,7 +274,8 @@ def _get_cached_search_results(search_id: str) -> list[dict] | None:
         if rc:
             data = rc.get(f"search:{search_id}:results")
             if data:
-                return json.loads(data)
+                results: list[dict] = json.loads(data)  # Redis stores the results JSON array
+                return results
     except Exception:
         logger.warning("Redis cache lookup failed for search", exc_info=True)
     return None

@@ -19,7 +19,7 @@ Usage:
 import asyncio
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import sentry_sdk
@@ -481,7 +481,8 @@ def safe_json_parse(text: str) -> dict | list | None:
 
     # Try direct parse
     try:
-        return json.loads(cleaned)
+        # cast: json.loads is untyped Any; the prompt contract is a JSON object/array.
+        return cast("dict | list", json.loads(cleaned))
     except json.JSONDecodeError:
         pass
 
@@ -491,7 +492,8 @@ def safe_json_parse(text: str) -> dict | list | None:
         end = cleaned.rfind(end_char)
         if start != -1 and end > start:
             try:
-                return json.loads(cleaned[start : end + 1])
+                # cast: json.loads is untyped Any; braces/brackets guarantee object/array.
+                return cast("dict | list", json.loads(cleaned[start : end + 1]))
             except json.JSONDecodeError:
                 continue
 
@@ -584,7 +586,7 @@ async def claude_batch_submit(
             raise ClaudeError(f"Batch API submit error: {resp.status_code}")
 
         data = resp.json()
-        batch_id = data.get("id")
+        batch_id: str | None = data.get("id")  # Batch API JSON boundary
         count = data.get("request_counts", {}).get("processing", len(requests))
         logger.info(f"Batch submitted: {batch_id} ({count} requests)")
         return batch_id

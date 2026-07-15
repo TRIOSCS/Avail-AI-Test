@@ -7,6 +7,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from typing import cast
 from urllib.parse import quote_plus
 
 import httpx
@@ -303,7 +304,8 @@ async def run_health_probe(connector, part_number: str) -> list[dict]:
     """
     if isinstance(connector, BaseConnector):
         return await connector.health_probe(part_number)
-    return await connector.search(part_number)
+    results: list[dict] = await connector.search(part_number)  # duck-typed keyless test connectors
+    return results
 
 
 def _parse_retry_after(response: httpx.Response) -> float:
@@ -436,7 +438,8 @@ class NexarConnector(BaseConnector):
             _invalidate_token(self._token_cache_key())  # drop cached bearer, re-mint, retry once
             r = await post()
         r.raise_for_status()
-        return r.json()
+        # cast: httpx .json() is untyped; this API returns a JSON object.
+        return cast(dict, r.json())
 
     async def _rest_search(self, part_number: str) -> list[dict] | None:
         """Try Octopart REST v4 /parts/search — returns full seller data.

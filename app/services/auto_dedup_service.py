@@ -19,7 +19,9 @@ Depends on: vendor_merge_service, company_merge_service, company_utils, claude_c
 """
 
 import asyncio
+from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -27,7 +29,7 @@ from sqlalchemy.orm import Session
 from ..models import VendorCard
 
 
-def _run_coro_sync(coro) -> bool:
+def _run_coro_sync[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run an async coroutine from sync code, even if an event loop is active."""
     try:
         asyncio.get_running_loop()
@@ -247,4 +249,5 @@ async def _ask_claude_merge(prompt: str) -> bool:
 
     if not result:
         return False
-    return result.get("same_entity", False) and result.get("confidence", 0) >= 0.85
+    # bool(): result is a parsed-JSON dict (Any values), so the and-chain is untyped.
+    return bool(result.get("same_entity", False) and result.get("confidence", 0) >= 0.85)

@@ -11,6 +11,8 @@ Called by: app.services.quote_builder_service (Build-Quote tab + builder-modal l
 Depends on: app.models (Quote)
 """
 
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
 from ..models import Quote
@@ -19,7 +21,7 @@ from ..models import Quote
 PRICED_STATUSES = ["sent", "won", "lost"]
 
 
-def _iso(dt) -> str | None:
+def _iso(dt: datetime | None) -> str | None:
     """Return a datetime as an ISO string, or None if unset."""
     return dt.isoformat() if dt else None
 

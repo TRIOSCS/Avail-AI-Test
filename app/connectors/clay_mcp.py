@@ -156,7 +156,8 @@ def _content_text(result: dict) -> str:
     """Return the first text block from an MCP result's content array, or ''."""
     for block in result.get("content") or []:
         if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
-            return block["text"]
+            text: str = block["text"]  # MCP JSON boundary: text blocks carry str text
+            return text
     return ""
 
 

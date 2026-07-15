@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import os
+from typing import cast
 
 from loguru import logger
 
@@ -115,7 +116,8 @@ class GraphClient:
         data = await self.get_json(path, params=params)
         if isinstance(data, dict) and "error" in data:
             raise RuntimeError(f"Graph API error searching sent messages: {data}")
-        return data.get("value", [])
+        messages: list[dict] = data.get("value", [])  # Graph JSON boundary
+        return messages
 
     # ── H8: Delta Query ─────────────────────────────────────────────
 
@@ -192,7 +194,8 @@ class GraphClient:
 
                 # Success
                 if resp.status_code in (200, 201):
-                    return resp.json()
+                    # cast: httpx .json() is untyped; Graph API bodies are JSON objects.
+                    return cast(dict, resp.json())
                 if resp.status_code == 202:
                     return {}  # Accepted (e.g., sendMail)
                 if resp.status_code == 204:

@@ -66,7 +66,8 @@ def _best_quote_status(quotes) -> str | None:
     has none — the value shown in the list's Quotes column."""
     if not quotes:
         return None
-    return min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
+    status: str | None = min(quotes, key=lambda qt: _QUOTE_STATUS_PRIORITY.get(qt.status, 5)).status
+    return status
 
 
 def _parse_xlsx_rows(content: bytes) -> str:

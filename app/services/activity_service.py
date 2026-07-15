@@ -946,7 +946,9 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
 
     None if no activity ever.
     """
-    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    latest: datetime | None = (
+        db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    )
     if not latest:
         return None
     delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)
@@ -972,7 +974,7 @@ def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
 
     Called by: app/services/prospect_reclamation.py
     """
-    latest = (
+    latest: datetime | None = (
         db.query(func.max(ActivityLog.created_at))
         .filter(
             ActivityLog.company_id == company_id,
@@ -1400,7 +1402,9 @@ def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | N
 
     None if no activity ever.
     """
-    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
+    latest: datetime | None = (
+        db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
+    )
     if not latest:
         return None
     delta = datetime.now(UTC) - latest.replace(tzinfo=UTC)

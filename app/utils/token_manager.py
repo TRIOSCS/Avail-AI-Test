@@ -32,7 +32,8 @@ async def get_valid_token(user, db) -> str | None:
     # Check if current token is still valid (with 5-min buffer)
     if user.access_token and user.token_expires_at:
         if datetime.now(UTC) < _utc(user.token_expires_at) - timedelta(minutes=5):
-            return user.access_token
+            current_token: str = user.access_token  # EncryptedText column decrypts to str
+            return current_token
 
     # Token expired or near-expiry — refresh it
     token = await refresh_user_token(user, db)

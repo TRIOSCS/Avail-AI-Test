@@ -12,6 +12,7 @@ import math
 import os
 import random
 from datetime import datetime
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -28,9 +29,11 @@ class SearchScheduler:
         self.searches_since_break = 0
         self.break_threshold = random.randint(8, 15)
 
-    def _attr(self, suffix: str):
-        """Get a prefixed config attribute."""
-        return getattr(self.config, f"{self.prefix}_{suffix}")
+    def _attr(self, suffix: str) -> float:
+        """Get a prefixed numeric config attribute."""
+        # cast: the worker configs (IcsConfig/NcConfig/TbfConfig) share no base class,
+        # so this prefixed getattr is untyped; all *_SECONDS attrs are numeric.
+        return cast(float, getattr(self.config, f"{self.prefix}_{suffix}"))
 
     def is_business_hours(self) -> bool:
         """Check if current time (Eastern) is within work window.

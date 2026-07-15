@@ -558,7 +558,7 @@ async def _resolve_teams_user_email(user_id_guid: str, gc) -> str | None:
             f"/users/{user_id_guid}",
             params={"$select": "mail,userPrincipalName"},
         )
-        email = user_data.get("mail") or user_data.get("userPrincipalName")
+        email: str | None = user_data.get("mail") or user_data.get("userPrincipalName")  # Graph JSON boundary
         if email:
             if len(_teams_user_email_cache) >= _TEAMS_CACHE_MAX:
                 _teams_user_email_cache.clear()
@@ -695,13 +695,13 @@ def _extract_email(recipient: dict | None) -> str | None:
     """Extract email from Graph recipient structure."""
     if not recipient:
         return None
-    addr = recipient.get("emailAddress", {})
-    return addr.get("address")
+    address: str | None = recipient.get("emailAddress", {}).get("address")  # Graph JSON boundary
+    return address
 
 
 def _extract_name(recipient: dict | None) -> str | None:
     """Extract display name from Graph recipient structure."""
     if not recipient:
         return None
-    addr = recipient.get("emailAddress", {})
-    return addr.get("name")
+    name: str | None = recipient.get("emailAddress", {}).get("name")  # Graph JSON boundary
+    return name

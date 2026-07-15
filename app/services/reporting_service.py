@@ -78,10 +78,10 @@ def coverage_report(db: Session) -> dict:
         rep_buckets[rep_name][state] += 1
 
     def _coverage_pct(bucket: dict) -> float:
-        total = bucket["total"]
+        total: int = bucket["total"]  # buckets mix str labels and int counts
         if total == 0:
             return 0.0
-        touched = bucket["on_target"] + bucket["due"]
+        touched: int = bucket["on_target"] + bucket["due"]
         return round(touched / total * 100, 1)
 
     by_tier = []

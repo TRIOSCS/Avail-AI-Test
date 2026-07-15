@@ -9,6 +9,7 @@ Depends on: CommoditySpecSchema model
 
 import json
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -138,7 +139,8 @@ _SEEDS_PATH = Path(__file__).resolve().parent.parent / "data" / "commodity_seeds
 def _load_commodity_seeds() -> dict[str, list[dict]]:
     """Load commodity spec seed data from JSON file."""
     with open(_SEEDS_PATH) as f:
-        return json.load(f)
+        # cast: json.load is untyped Any; commodity_seeds.json is {commodity: [specs]}.
+        return cast(dict[str, list[dict]], json.load(f))
 
 
 COMMODITY_SPEC_SEEDS: dict[str, list[dict]] = _load_commodity_seeds()

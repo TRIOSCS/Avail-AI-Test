@@ -1723,10 +1723,14 @@ def _offer_broker_label(offer: ExcessOffer) -> str:
     Mirrors the ``_broker_label`` macro's owner branch (company → vendor card → id
     fallback). Only ever called from the owner-gated export, so it never anonymizes.
     """
+    # Typed locals: both relationship chains are legacy untyped reads.
+    label: str
     if offer.offerer_company:
-        return offer.offerer_company.name
+        label = offer.offerer_company.name
+        return label
     if offer.offerer_vendor_card:
-        return offer.offerer_vendor_card.display_name
+        label = offer.offerer_vendor_card.display_name
+        return label
     return f"Broker #{offer.id}"
 
 

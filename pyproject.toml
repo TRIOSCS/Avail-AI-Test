@@ -19,12 +19,18 @@ skips = ["B101"]  # allow assert in non-test code (used in type narrowing)
 python_version = "3.13"
 ignore_missing_imports = true
 # no_strict_optional matches the old CI flag (mypy.ini era). Tracked debt: turning
-# strict Optional checking on is part of the P0.5 burn-down.
+# strict Optional checking on is part of the P0.5 burn-down. Flipping it to false
+# measured 36 errors on 2026-07-15 (union-attr:15 assignment:11 operator:6
+# return-value:2 unused-ignore:1 arg-type:1); worst modules: search_service:20,
+# management.cleanup_known_bad:5, utils.graph_client:2,
+# models.vendor_part_unavailability:2, then 1 each in normalization_helpers,
+# seed_sample_data, rotate_encryption_salt, logging_config, worker_liveness_jobs,
+# email_service, connectors.explorium.
 no_strict_optional = true
-# warn_return_any was ON in the deleted mypy.ini. Re-enabling it today surfaces
-# ~98 no-any-return errors (measured 2026-07 under the CI flags above). Left OFF
-# as recorded debt — burn down under P0.5, then flip to true.
-warn_return_any = false
+# warn_return_any was ON in the deleted mypy.ini, briefly disabled as recorded
+# debt (PR #714), and re-enabled 2026-07-15 after clearing all ~98 no-any-return
+# errors. Keep it on — new code must not return Any from a typed signature.
+warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_redundant_casts = true

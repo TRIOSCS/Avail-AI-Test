@@ -129,7 +129,9 @@ def _tally(counts: _Counts, model: str, created: bool) -> None:
     bucket["created" if created else "skipped"] += 1
 
 
-def get_or_create(db: Session, counts: _Counts, model: type, defaults: dict[str, Any], **key: Any) -> tuple[Any, bool]:
+def get_or_create[M](
+    db: Session, counts: _Counts, model: type[M], defaults: dict[str, Any], **key: Any
+) -> tuple[M, bool]:
     """Find a row by its natural key; create with *defaults* only when missing.
 
     Returns ``(row, created)``. Never UPDATEs an existing row, so re-runs are a

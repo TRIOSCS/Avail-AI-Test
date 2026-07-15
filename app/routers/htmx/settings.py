@@ -18,7 +18,7 @@ import json
 import os
 import time
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -379,7 +379,7 @@ async def toggle_resource_alert(
     return response
 
 
-def _render_data_ops(request: Request, user: User, db: Session):
+def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     """Render the Data Ops tab partial — vendor/company dedup suggestions.
 
     Each scan is guarded independently. A scan that RAISES sets a per-scan

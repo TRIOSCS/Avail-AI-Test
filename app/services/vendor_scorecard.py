@@ -216,14 +216,14 @@ def compute_vendor_scorecard(
 
 
 def _compute_composite(
-    response_rate,
-    quote_conversion=None,
-    po_conversion=None,
-    avg_review_rating=None,
-) -> float:
-    """Weighted average of available metrics."""
-    metrics = []
-    weights = []
+    response_rate: float | None,
+    quote_conversion: float | None = None,
+    po_conversion: float | None = None,
+    avg_review_rating: float | None = None,
+) -> float | None:
+    """Weighted average of available metrics (None when no metrics are available)."""
+    metrics: list[float] = []
+    weights: list[float] = []
 
     if response_rate is not None:
         metrics.append(min(1.0, response_rate))

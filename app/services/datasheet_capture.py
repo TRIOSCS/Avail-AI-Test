@@ -94,7 +94,8 @@ async def download_pdf(url: str) -> bytes | None:
         ctype = (resp.headers.get("content-type") or "").lower()
         if not (content[:5] == b"%PDF-" or "application/pdf" in ctype):
             return None
-        return content
+        pdf: bytes = content
+        return pdf
     logger.warning("datasheet download exceeded max redirects url={}", url)
     return None
 

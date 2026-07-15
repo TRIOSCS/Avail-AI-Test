@@ -605,7 +605,8 @@ def _primary_email(card: VendorCard) -> str | None:
     """First usable email on a vendor card (the buyer's send address), or None."""
     for e in card.emails or []:
         if e and "@" in e:
-            return e.strip()
+            email: str = e.strip()  # JSON column holds str emails
+            return email
     return None
 
 

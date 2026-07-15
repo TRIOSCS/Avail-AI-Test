@@ -100,7 +100,7 @@ async def register_client() -> str:
     if resp.status_code not in (200, 201):
         logger.error("Clay DCR failed: {}", resp.status_code)
         raise RuntimeError(f"Clay client registration failed: {resp.status_code}")
-    cid = resp.json().get("client_id")
+    cid: str | None = resp.json().get("client_id")  # Clay DCR JSON boundary
     if not cid:
         raise RuntimeError("Clay DCR response missing client_id")
     _store({"CLAY_OAUTH_CLIENT_ID": cid})

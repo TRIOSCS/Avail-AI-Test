@@ -76,14 +76,14 @@ def promote_prospect_contact(db: Session, contact_id: int, user_id: int) -> dict
     }
 
 
-def _promote_prospect_to_contact(
+def _promote_prospect_to_contact[ContactT: (VendorContact, SiteContact)](
     db: Session,
     pc: ProspectContact,
-    model_class: type,
+    model_class: type[ContactT],
     fk_field: str,
     fk_value: int,
     extra_fields: dict | None = None,
-) -> VendorContact | SiteContact:
+) -> ContactT:
     """Generic helper: promote a prospect to VendorContact or SiteContact.
 
     Deduplicates by email within the FK scope. Backfills empty name/title/phone

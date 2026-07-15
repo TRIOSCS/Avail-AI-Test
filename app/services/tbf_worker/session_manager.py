@@ -123,7 +123,8 @@ class TbfSessionManager:
         logged-OUT company label — and was a false positive.)
         """
         try:
-            return await self._page.locator(LOGGED_IN_MARKER).count() > 0
+            marker_count: int = await self._page.locator(LOGGED_IN_MARKER).count()
+            return marker_count > 0
         except Exception as e:
             logger.warning("TBF session health check failed: {}", e)
             return False

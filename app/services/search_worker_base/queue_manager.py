@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import RequisitionStatus, SearchQueueStatus
 from app.models import Requirement, Sighting
+from app.models.base import Base
 from app.models.sourcing import Requisition
 from app.services.vendor_unavailability import apply_to_fresh_sightings
 from app.utils.normalization import normalize_mpn_key
@@ -31,7 +32,10 @@ from .mpn_normalizer import strip_packaging_suffixes
 _ACTIVE_STATUSES = set(RequisitionStatus.OPEN_PIPELINE)
 
 
-class QueueManager:
+# QM is the queue model this manager instance operates on (IcsSearchQueue,
+# NcSearchQueue, TbfSearchQueue) — makes enqueue/get/claim return the concrete row
+# type. Bound to the declarative Base so mypy accepts the **kwargs constructor.
+class QueueManager[QM: Base]:
     """Parameterized queue manager for any search worker.
 
     Args:
@@ -48,7 +52,7 @@ class QueueManager:
 
     def __init__(
         self,
-        queue_model: type,
+        queue_model: type[QM],
         source_type: str,
         dedup_window_days: int = 7,
         log_prefix: str = "WORKER",
@@ -91,7 +95,7 @@ class QueueManager:
         db: Session,
         override_mpn: str | None = None,
         resolved_via_spec_code: str | None = None,
-    ):
+    ) -> QM | None:
         """Queue a requirement for browser-driven search.
 
         When ``override_mpn`` is None (default), the worker reads
@@ -267,7 +271,7 @@ class QueueManager:
     # crashed/killed worker and are reclaimed back to "queued".
     STUCK_SEARCH_TIMEOUT_MINUTES = 30
 
-    def get_next_queued_item(self, db: Session):
+    def get_next_queued_item(self, db: Session) -> QM | None:
         """Get the next queued item — priority ASC (lowest first), then newest first.
 
         NOTE: read-only (does not claim). Prefer ``claim_next_queued_item`` in the
@@ -301,7 +305,7 @@ class QueueManager:
             logger.warning("{} reclaimed {} stuck 'searching' item(s) -> 'queued'", self.log_prefix, len(stuck))
         return len(stuck)
 
-    def claim_next_queued_item(self, db: Session):
+    def claim_next_queued_item(self, db: Session) -> QM | None:
         """Atomically claim the next queued item.
 
         Selects the next 'queued' row and marks it 'searching' in one short
