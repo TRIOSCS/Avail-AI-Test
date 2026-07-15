@@ -490,33 +490,37 @@ class TestAdminRoutes:
         assert resp.status_code == 403
 
     def test_api_health_returns_200(self, admin_client, db_session):
-        """GET /v2/partials/admin/api-health → 200.
-
-        The route catches ImportError when connector_health doesn't exist and returns a
-        fallback dict, so no mocking needed.
-        """
+        """GET /v2/partials/admin/api-health with no api_sources rows → 200 with the
+        genuine empty state (connector_health service returns an empty dashboard)."""
         resp = admin_client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
+        assert "Connector Health" in resp.text
+        assert "No connector data available." in resp.text
 
-    def test_api_health_with_health_service_mocked(self, admin_client, db_session):
-        """When connector_health module exists and returns data → 200 with
-        connectors."""
-        import sys
-        import types
+    def test_api_health_renders_seeded_source(self, admin_client, db_session):
+        """A seeded api_sources row renders as a real connector row (name + status
+        badge) via app.services.connector_health.get_health_dashboard."""
+        from app.models import ApiSource
 
-        # Inject a fake connector_health module so the import succeeds
-        fake_mod = types.ModuleType("app.services.connector_health")
-        fake_mod.get_health_dashboard = lambda db: {
-            "connectors": [{"name": "digikey", "status": "ok"}],
-            "overall_status": "healthy",
-        }
-        sys.modules["app.services.connector_health"] = fake_mod
-        try:
-            resp = admin_client.get("/v2/partials/admin/api-health")
-        finally:
-            sys.modules.pop("app.services.connector_health", None)
+        db_session.add(
+            ApiSource(
+                name="digikey",
+                display_name="DigiKey",
+                category="distributor",
+                source_type="api",
+                status="live",
+                is_active=True,
+                avg_response_ms=120,
+                total_searches=10,
+            )
+        )
+        db_session.commit()
 
+        resp = admin_client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
+        assert "DigiKey" in resp.text
+        assert "Live" in resp.text
+        assert "No connector data available." not in resp.text
 
     def test_company_merge_success(self, admin_client, db_session):
         """Company merge with mocked service → success HTML."""

@@ -240,7 +240,8 @@ def get_facet_counts(
         )
         if only_spec_key is not None:
             q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
-        return q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_numeric).all()
+        rows: list = q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_numeric).all()
+        return rows
 
     # Pass 1: every facet narrowed by ALL active filters — correct for facets the user has NOT
     # filtered on (they should reflect the full current narrowing).

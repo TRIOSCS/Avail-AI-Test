@@ -7,6 +7,8 @@
   Toggles + the interval PUT to /api/admin/config/{key} (hx-swap="none") and the
   shared showToast fires on success. Internal job-state watermark rows are shown
   read-only in a collapsed disclosure — never as editable controls.
+  Also lazy-loads the read-only Connector Health panel
+  (GET /v2/partials/admin/api-health — same admin-only gate as this tab).
   Receives: system_settings (list of {key,value,type,label,help,restart,min}),
             job_state (list of read-only {key,value,updated_at} rows).
   Called by: htmx_views.py settings_system_tab endpoint.
@@ -106,6 +108,22 @@
         {% endif %}
       </div>
       {% endfor %}
+    </div>
+  </div>
+
+  {# Connector Health — read-only diagnostics, same require_admin gate as this tab.
+     hx-target="this" avoids inheriting <main#main-content hx-target="this">;
+     hx-push-url="false" because hx-push-url is inherited from the tab nav and a
+     background loader must never rewrite the URL. #}
+  <div hx-get="/v2/partials/admin/api-health"
+       hx-target="this"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       hx-push-url="false"
+       hx-indicator="#api-health-spinner"
+       class="mb-6">
+    <div id="api-health-spinner" class="htmx-indicator flex items-center justify-center py-4">
+      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
     </div>
   </div>
 

@@ -709,6 +709,29 @@ def test_api_health_dashboard_usage_log(admin_client, db_session):
     assert log_src["recent_failures"] == 1
 
 
+def test_api_health_dashboard_reports_effective_status(admin_client, db_session):
+    """Dashboard `status` applies the shared auto-degrade heuristic, so it can never
+    disagree with /api/admin/connector-health or the HTMX health partial about the same
+    connector."""
+    src = ApiSource(
+        name="heuristic_test",
+        display_name="Heuristic Test",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+        total_searches=10,
+        error_count_24h=8,
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = admin_client.get("/api/admin/api-health/dashboard")
+    assert resp.status_code == 200
+    test_src = next(s for s in resp.json()["sources"] if s["name"] == "heuristic_test")
+    assert test_src["status"] == "degraded"
+
+
 # ── Proactive Notification Tests ──────────────────────────────────
 
 

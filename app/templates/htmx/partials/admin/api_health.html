@@ -1,19 +1,40 @@
 {# api_health.html — Connector health dashboard.
-   Receives: health (dict with connectors list).
-   Called by: htmx_views.py admin_api_health route.
-   Depends on: Tailwind CSS.
+   Receives: health (HealthDashboard dict: connectors list + overall_status) built by
+   app/services/connector_health.py get_health_dashboard().
+   Called by: app/routers/htmx/settings.py admin_api_health route (lazy-loaded by the
+   settings System tab, settings/system.html).
+   Depends on: Tailwind CSS, timeago filter (app/template_env.py).
 #}
 <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-  <h3 class="text-sm font-semibold text-gray-900 mb-3">Connector Health</h3>
+  {% set overall_colors = {'healthy': 'bg-emerald-50 text-emerald-600 border-emerald-200', 'degraded': 'bg-amber-50 text-amber-600 border-amber-200', 'down': 'bg-rose-50 text-rose-500 border-rose-200'} %}
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-semibold text-gray-900">Connector Health</h3>
+    <span class="badge {{ overall_colors.get(health.get('overall_status', ''), 'bg-gray-50 text-gray-600 border-gray-200') }}">
+      {{ health.get('overall_status', 'unknown')|title }}
+    </span>
+  </div>
 
   {% if health.get('connectors') %}
   <div class="space-y-2">
     {% for c in health.connectors %}
-    <div class="flex items-center justify-between px-3 py-2 rounded border border-gray-100">
-      <span class="text-sm font-medium text-gray-900">{{ c.get('name', 'Unknown') }}</span>
-      {% set status_colors = {'healthy': 'bg-emerald-50 text-emerald-600 border-emerald-200', 'degraded': 'bg-amber-50 text-amber-600 border-amber-200', 'down': 'bg-rose-50 text-rose-500 border-rose-200'} %}
-      <span class="badge {{ status_colors.get(c.get('status', ''), 'bg-gray-50 text-gray-600 border-gray-200') }}">
-        {{ c.get('status', 'unknown')|title }}
+    <div class="flex items-center justify-between gap-4 px-3 py-2 rounded border border-gray-100">
+      <div class="min-w-0">
+        <span class="text-sm font-medium text-gray-900">{{ c.name }}</span>
+        <p class="text-xs text-slate-400">
+          {% if c.last_success %}Last success {{ c.last_success|timeago }}{% else %}No successful check yet{% endif %}
+          {% if c.avg_response_ms %}&middot; {{ c.avg_response_ms }} ms avg{% endif %}
+          {% if c.total_searches %}&middot; {{ c.total_searches }} searches{% endif %}
+          {% if c.error_count_24h %}&middot; {{ c.error_count_24h }} errors (24h){% endif %}
+        </p>
+        {% if c.last_error %}
+        <p class="text-xs text-rose-500 truncate" title="{{ c.last_error }}">
+          {{ c.last_error }}{% if c.last_error_at %} ({{ c.last_error_at|timeago }}){% endif %}
+        </p>
+        {% endif %}
+      </div>
+      {% set status_colors = {'live': 'bg-emerald-50 text-emerald-600 border-emerald-200', 'degraded': 'bg-amber-50 text-amber-600 border-amber-200', 'error': 'bg-rose-50 text-rose-500 border-rose-200'} %}
+      <span class="badge flex-shrink-0 {{ status_colors.get(c.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">
+        {{ c.status|title }}
       </span>
     </div>
     {% endfor %}
