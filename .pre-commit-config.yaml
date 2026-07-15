@@ -41,7 +41,7 @@ repos:
   # isolated hook venv sees the same types as a full-dep run. Bump these pins
   # together with the requirements lockfiles.
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.1.0
+    rev: v2.3.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --no-strict-optional, --config-file=pyproject.toml, app/]
