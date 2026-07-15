@@ -14,8 +14,9 @@ Core functions:
 
 from __future__ import annotations
 
+from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy.exc
 from loguru import logger
@@ -204,7 +205,7 @@ def _run_sync_or_return_empty(async_fn, *args):
         return {}
 
 
-def _run_coro_blocking(coro, *, timeout: float):
+def _run_coro_blocking[T](coro: Coroutine[Any, Any, T], *, timeout: float) -> T:
     """Run an async coroutine to completion from sync code, blocking for the result.
 
     When a loop is already running (scheduler/async context), `asyncio.run` would

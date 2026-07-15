@@ -262,7 +262,7 @@ def get_my_tasks(
     ).all()
 
 
-def get_my_tasks_summary(db: Session, user_id: int) -> dict:
+def get_my_tasks_summary(db: Session, user_id: int) -> dict[str, int]:
     """Get task counts for sidebar badge: assigned_to_me, waiting_on, overdue."""
     now = datetime.now(UTC)
     assigned_to_me = (

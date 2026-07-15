@@ -435,8 +435,8 @@ def _clean_scalar(value: Any) -> str | None:
     """Collapse whitespace and blank values to None."""
     if value is None:
         return None
-    value = " ".join(str(value).split()).strip()
-    return value or None
+    cleaned = " ".join(str(value).split()).strip()
+    return cleaned or None
 
 
 def _row_mpn(row: dict[str, Any]) -> str:

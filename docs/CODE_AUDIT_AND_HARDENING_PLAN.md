@@ -82,9 +82,14 @@ These are confirmed defects shipping today, not style issues.
   service globs that were verified clean (`tags`, `avatars`, `error_reports`,
   `category_normalizer`, `buyplan_naming`, `enrichment_credit_guard`, `spec_tiers`) are
   carved back out to full checking via trailing empty-disable overrides.
-  Also not yet enabled globally: `warn_return_any` (~98 `no-any-return` measured 2026-07
-  under the CI flags; from the old `mypy.ini` wish-list — see the debt comment in
-  `pyproject.toml`). Dangerous codes stay live everywhere: `unused-coroutine`,
+  `warn_return_any` is enabled globally (2026-07-15): the ~98 `no-any-return` errors it
+  surfaced (plus 9 more only visible in the leaner pre-commit hook env) were cleared —
+  precise return/param annotations, generics for the parameterized helpers
+  (`QueueManager`, seed `get_or_create`, contact promotion), typed locals at legacy
+  Column/relationship reads, and documented `cast()`s at genuine third-party JSON
+  boundaries. `no_strict_optional` remains the last global debt flag (36 errors
+  measured 2026-07-15; see the debt comment in `pyproject.toml`).
+  Dangerous codes stay live everywhere: `unused-coroutine`,
   `unused-awaitable`, `call-arg`, `no-redef`, `name-defined`, `unused-ignore`, `return`.
   Note: since P2.9 the pre-commit hook env runs the same mypy 2.1.0 with the key typed
   deps pinned in `additional_dependencies`, so the two envs agree almost everywhere;

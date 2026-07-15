@@ -230,7 +230,7 @@ def _classify_mpn(mpn: str, manufacturer: str | None, api_key: str) -> str | Non
             # claude_client's ~30s timeout.
             timeout=30,
         )
-        category = message.content[0].text.strip()
+        category: str = message.content[0].text.strip()  # anthropic SDK boundary
         logger.info("L3: classified MPN={} as category={}", mpn, category)
         return category
     except Exception:

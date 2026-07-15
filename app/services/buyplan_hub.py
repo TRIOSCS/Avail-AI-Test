@@ -81,14 +81,19 @@ def _customer_name(plan: BuyPlan) -> str | None:
     then req.customer_site → company.name.
     Returns ``None`` when neither source has a customer name.
     """
+    # Typed locals: the relationship chains below are legacy untyped reads.
+    name: str | None
     if plan.quote and plan.quote.customer_site and plan.quote.customer_site.company:
-        return plan.quote.customer_site.company.name
+        name = plan.quote.customer_site.company.name
+        return name
     req = plan.requisition
     if req:
         if req.customer_name:
-            return req.customer_name
+            name = req.customer_name
+            return name
         if req.customer_site and req.customer_site.company:
-            return req.customer_site.company.name
+            name = req.customer_site.company.name
+            return name
     return None
 
 
@@ -390,7 +395,8 @@ def _primary_mpn(plan: BuyPlan) -> str | None:
             continue
         req = ln.requirement
         if req and req.primary_mpn:
-            return req.primary_mpn
+            mpn: str = req.primary_mpn  # legacy relationship read is untyped
+            return mpn
     return None
 
 
@@ -1128,10 +1134,14 @@ def _line_mpn(line: BuyPlanLine) -> str | None:
     Both relationships are eager-loaded by the ``_LINE_PLAN_LOADS`` chain (no N+1); the
     requirement fallback covers RESOURCING-pool lines whose offer fell down.
     """
+    # Typed locals: both relationship chains are legacy untyped reads.
+    mpn: str | None
     if line.offer and line.offer.mpn:
-        return line.offer.mpn
+        mpn = line.offer.mpn
+        return mpn
     if line.requirement and line.requirement.primary_mpn:
-        return line.requirement.primary_mpn
+        mpn = line.requirement.primary_mpn
+        return mpn
     return None
 
 

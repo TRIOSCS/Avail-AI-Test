@@ -218,7 +218,7 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
         stats["updated"] += 1
 
 
-def _schema_cache_for(db: Session, category: str | None, schema_caches: dict) -> dict | None:
+def _schema_cache_for(db: Session, category: str | None, schema_caches: dict[str, dict]) -> dict | None:
     """Lazily load (and cache) the commodity schema for *category*."""
     category = (category or "").lower().strip()
     if not category:

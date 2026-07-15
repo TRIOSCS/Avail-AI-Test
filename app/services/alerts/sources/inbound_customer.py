@@ -21,7 +21,7 @@ Depends on: services/alerts/base.AlertSource, models/intelligence.ActivityLog,
 from __future__ import annotations
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from app.constants import AlertKind, Channel, Direction
 from app.dependencies import is_manager_or_admin
@@ -48,7 +48,7 @@ class InboundCustomerSource(AlertSource):
     kind = AlertKind.INBOUND_CUSTOMER
     temperament = Temperament.FYI
 
-    def _eligible_query(self, db: Session, user: User):
+    def _eligible_query(self, db: Session, user: User) -> Query[ActivityLog]:
         """Inbound, recent, mine, undismissed, unseen activity — ordered oldest-first.
 
         Joins ActivityLog.company_id → Company and applies Phase 2 ownership visibility:

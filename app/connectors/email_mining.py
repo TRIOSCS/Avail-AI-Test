@@ -194,7 +194,8 @@ class EmailMiner:
     def _get_delta_token(self, folder: str) -> str | None:
         """Retrieve stored delta token for incremental sync (H8)."""
         sync = self._get_sync_state(folder)
-        return sync.delta_token if sync else None
+        token: str | None = sync.delta_token if sync else None  # legacy Column read is untyped
+        return token
 
     def _save_delta_token(self, folder: str, token: str):
         """Persist new delta token after sync (H8)."""

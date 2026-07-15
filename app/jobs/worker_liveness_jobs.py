@@ -33,7 +33,7 @@ def register_worker_liveness_jobs(scheduler, settings):
     )
 
 
-def _as_utc(dt):
+def _as_utc(dt: datetime | None) -> datetime | None:
     """Coerce a (possibly naive) datetime to UTC-aware — ICS stores naive, NC aware."""
     if dt is None:
         return None

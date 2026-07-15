@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -75,7 +76,8 @@ def _read_batch_meta(meta_path: str) -> dict:
     caller's existing except clause still applies.
     """
     with open(meta_path) as f:
-        return json.load(f)
+        # cast: json.load is untyped Any; _write_batch_meta stores a JSON object.
+        return cast(dict, json.load(f))
 
 
 def _untagged_by_brand(db: Session) -> list:

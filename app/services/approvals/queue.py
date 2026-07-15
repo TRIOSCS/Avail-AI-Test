@@ -486,11 +486,13 @@ def _beneficiary(pp: Prepayment) -> str:
     """
     vc = pp.vendor_card
     if vc is not None and vc.legal_name:
-        return vc.legal_name
+        legal: str = vc.legal_name  # legacy relationship read is untyped
+        return legal
     if pp.vendor_name:
         return pp.vendor_name
     if vc is not None and vc.display_name:
-        return vc.display_name
+        display: str = vc.display_name  # legacy relationship read is untyped
+        return display
     return "—"
 
 

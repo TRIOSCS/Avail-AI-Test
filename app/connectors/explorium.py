@@ -84,7 +84,8 @@ async def _match_business_id(domain: str, name: str, api_key: str) -> str | None
         {"businesses_to_match": [{"name": name, "domain": domain}]},
     )
     matched = (_data(resp) or {}).get("matched_businesses") or []
-    return (matched[0].get("business_id") if matched else None) or None
+    business_id: str | None = (matched[0].get("business_id") if matched else None) or None  # Explorium JSON boundary
+    return business_id
 
 
 async def enrich_company(domain: str, name: str, api_key: str) -> dict | None:

@@ -149,8 +149,8 @@ async def _call_normalizer(parts: list[str]) -> list[dict] | None:
         return result
     if isinstance(result, dict):
         for key in ("parts", "results", "normalized"):
-            if isinstance(result.get(key), list):
-                return result[key]
+            if isinstance((items := result.get(key)), list):
+                return items
 
     logger.warning("Unexpected normalizer response format: {}", type(result).__name__)
     return None

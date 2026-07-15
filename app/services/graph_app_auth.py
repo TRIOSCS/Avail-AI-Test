@@ -46,7 +46,7 @@ async def get_app_graph_token() -> str | None:
         logger.warning("app-only Graph token failed: {} {}", r.status_code, r.text[:200])
         return None
     body = r.json()
-    token = body.get("access_token")
+    token: str | None = body.get("access_token")  # OAuth JSON boundary
     if not token:
         return None
     _TOKEN_CACHE["token"] = token

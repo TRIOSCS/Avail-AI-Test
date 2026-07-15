@@ -259,13 +259,13 @@ def _cross_validate(result: dict, rfq_context: dict | list) -> None:
 
 def should_auto_apply(result: dict) -> bool:
     """Check if parsed result is confident enough to auto-create draft offers."""
-    conf = result.get("confidence", 0)
+    conf: float = result.get("confidence", 0)  # parsed-JSON boundary
     return conf >= CONFIDENCE_AUTO
 
 
 def should_flag_review(result: dict) -> bool:
     """Check if parsed result needs human review."""
-    conf = result.get("confidence", 0)
+    conf: float = result.get("confidence", 0)  # parsed-JSON boundary
     return CONFIDENCE_REVIEW <= conf < CONFIDENCE_AUTO
 
 

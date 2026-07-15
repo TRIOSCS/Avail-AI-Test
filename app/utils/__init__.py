@@ -1,7 +1,9 @@
 """Shared utility helpers used across connectors and services."""
 
+from typing import Any
 
-def safe_int(v):
+
+def safe_int(v: Any) -> int | None:
     """Safely convert a value to int, returning None on failure."""
     if v is None:
         return None
@@ -11,7 +13,7 @@ def safe_int(v):
         return None
 
 
-def safe_float(v):
+def safe_float(v: Any) -> float | None:
     """Safely convert a value to float, returning None on failure."""
     if v is None:
         return None

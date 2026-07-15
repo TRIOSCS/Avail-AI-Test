@@ -206,7 +206,8 @@ def _is_conflict_for(conflict: dict, key: str, source: str) -> bool:
     entry per ``(spec key, contributing source)``, so newest evidence replaces and a
     same-source corroboration drops the stale entry.
     """
-    return conflict.get("key") == key and (conflict.get("evidence") or {}).get("source") == source
+    # bool(): conflict is a JSON blob (Any values), so == comparisons are untyped.
+    return bool(conflict.get("key") == key and (conflict.get("evidence") or {}).get("source") == source)
 
 
 def _drop_same_source_conflicts(card: "MaterialCard", key: str, source: str) -> None:

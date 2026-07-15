@@ -116,7 +116,8 @@ def _quote_valid_until(quote: Quote) -> date:
     The Quote model has NO valid_until column — validity_days is the single source of
     truth (also read by quote_send.py, crm/_helpers.py, quote_report.html).
     """
-    return _quote_expiry_anchor(quote) + timedelta(days=quote.validity_days or 7)
+    valid_days: int = quote.validity_days or 7  # legacy Column read is untyped
+    return _quote_expiry_anchor(quote) + timedelta(days=valid_days)
 
 
 def _validity_days_from_valid_until(quote: Quote, target: date) -> int:

@@ -58,7 +58,7 @@ def page_response(context: dict[str, Any]) -> Response:
 # ── Shared Helpers ─────────────────────────────────────────────────────
 
 
-def _elapsed_seconds(dt) -> float | None:
+def _elapsed_seconds(dt: datetime | str | None) -> float | None:
     """Compute seconds elapsed since dt.
 
     Handles str, naive, and aware datetimes.
@@ -134,7 +134,8 @@ def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "\u2014") -
     if isinstance(value, str):
         return value
     try:
-        return value.strftime(fmt)
+        formatted: str = value.strftime(fmt)  # Jinja filter: value is untyped by design
+        return formatted
     except (AttributeError, TypeError):
         return default
 
@@ -224,7 +225,7 @@ def _sanitize_html_filter(value: str) -> str:
         return ""
     import nh3
 
-    return nh3.clean(
+    sanitized: str = nh3.clean(
         value,
         tags={
             "p",
@@ -264,6 +265,7 @@ def _sanitize_html_filter(value: str) -> str:
         url_schemes={"http", "https", "mailto"},
         link_rel="noopener noreferrer",
     )
+    return sanitized
 
 
 templates.env.filters["sanitize_html"] = _sanitize_html_filter
@@ -332,11 +334,11 @@ def _part_description(obj) -> str:
     # MaterialCard is the canonical source of truth
     card = getattr(obj, "material_card", None)
     if card:
-        card_desc = getattr(card, "description", None)
+        card_desc: str | None = getattr(card, "description", None)
         if card_desc and len(card_desc.strip()) >= 3:
             return card_desc.strip()
     # Fallback to the object's own description field
-    own_desc = getattr(obj, "description", None)
+    own_desc: str | None = getattr(obj, "description", None)
     if own_desc and len(own_desc.strip()) >= 3:
         return own_desc.strip()
     return ""

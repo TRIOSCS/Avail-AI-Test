@@ -86,7 +86,7 @@ def detect_encoding(content: bytes) -> str | None:
         results = from_bytes(content)
         best = results.best()
         if best:
-            encoding = best.encoding
+            encoding: str = best.encoding
             logger.debug(f"Detected encoding: {encoding}")
             return encoding
     except ImportError:

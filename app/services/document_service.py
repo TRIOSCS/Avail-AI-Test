@@ -1,6 +1,7 @@
 """PDF document generation using WeasyPrint."""
 
 from datetime import UTC, datetime
+from typing import cast
 
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session
@@ -21,7 +22,8 @@ def _render_pdf(template_name: str, **context) -> bytes:
         generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         **context,
     )
-    return HTML(string=html).write_pdf()
+    # cast: weasyprint is untyped; write_pdf() without a target returns the PDF bytes.
+    return cast(bytes, HTML(string=html).write_pdf())
 
 
 def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:

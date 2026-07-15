@@ -16,7 +16,7 @@ Depends on: services/alerts/base.AlertSource, models/offers.Offer,
 from __future__ import annotations
 
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from app.constants import AlertKind, OfferStatus, QualificationStatus
 from app.models.auth import User
@@ -33,7 +33,7 @@ class OfferConfirmedSource(AlertSource):
     kind = AlertKind.OFFER_CONFIRMED
     temperament = Temperament.FYI
 
-    def _eligible_query(self, db: Session, user: User):
+    def _eligible_query(self, db: Session, user: User) -> Query[Offer]:
         """Confirmed, qualified, recent, mine, unseen offers — ordered oldest-first.
 
         Ownership ("mine") joins each Offer → its Requirement → that Requirement's

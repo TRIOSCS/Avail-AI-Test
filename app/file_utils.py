@@ -7,6 +7,7 @@ Used by:
 
 import csv
 import io
+from typing import Any
 
 from loguru import logger
 
@@ -217,8 +218,13 @@ LEAD_TIME_HEADERS = {"lead_time", "lead time", "leadtime", "lt", "delivery", "av
 CURRENCY_HEADERS = {"currency", "curr", "ccy"}
 
 
-def _first_header_value(norm: dict, headers: set) -> str | None:
-    """Return the first non-empty value in *norm* whose key is in *headers*."""
+def _first_header_value(norm: dict, headers: set) -> Any:
+    """Return the first non-empty RAW cell value in *norm* whose key is in *headers*.
+
+    Spreadsheet cells are heterogeneous (str/int/float/Decimal), so this deliberately
+    returns the untyped value — callers coerce via ``str()`` / ``normalize_*``.
+    Returns None when no header matches.
+    """
     for h in headers:
         if h in norm and norm[h]:
             return norm[h]

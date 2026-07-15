@@ -86,4 +86,5 @@ async def fetch_datasheet_bytes(drive_id: str, item_id: str) -> bytes | None:
         return None
     if r.status_code != 200 or not r.content:
         return None
-    return r.content
+    pdf: bytes = r.content
+    return pdf

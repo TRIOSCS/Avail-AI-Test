@@ -85,7 +85,8 @@ def get_cached(cache_key: str) -> dict | None:
         try:
             data = r.get(_rkey(cache_key))
             if data:
-                return json.loads(data)
+                # cast: json.loads is untyped Any; set_cached stores JSON objects here.
+                return cast(dict, json.loads(data))
             return None
         except Exception as e:
             logger.warning("Redis read error for {}: {}", cache_key, e)
@@ -103,7 +104,8 @@ def get_cached(cache_key: str) -> dict | None:
             ).fetchone()
 
             if row:
-                return row[0]  # JSONB column returns as dict
+                # cast: Row indexing is untyped; the JSONB column deserializes to dict.
+                return cast(dict, row[0])
     except Exception as e:
         logger.warning("Cache read error for {}: {}", cache_key, e)
     return None

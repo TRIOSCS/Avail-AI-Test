@@ -319,13 +319,14 @@ def _resolve_approval(db: Session, prepayment_id: int) -> tuple[str | None, obje
 def _beneficiary(prepayment: Prepayment) -> str:
     """Banks need the legal name (finding #14): legal_name → snapshot → display_name."""
     vc = prepayment.vendor_card
-    legal = getattr(vc, "legal_name", None) if vc is not None else None
+    legal: str | None = getattr(vc, "legal_name", None) if vc is not None else None
     if legal:
         return legal
     if prepayment.vendor_name:
         return prepayment.vendor_name
     if vc is not None and vc.display_name:
-        return vc.display_name
+        display: str = vc.display_name  # legacy relationship read is untyped
+        return display
     return "—"
 
 

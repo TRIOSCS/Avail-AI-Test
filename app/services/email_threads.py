@@ -207,7 +207,8 @@ def _extract_direction(from_email: str) -> str:
 
 def _sender_address(msg: dict) -> str:
     """Extract the sender email address from a Graph API message."""
-    return msg.get("from", {}).get("emailAddress", {}).get("address", "")
+    address: str = msg.get("from", {}).get("emailAddress", {}).get("address", "")  # Graph JSON boundary
+    return address
 
 
 def _recipient_addresses(msg: dict) -> list[str]:

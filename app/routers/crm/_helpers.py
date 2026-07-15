@@ -1,6 +1,6 @@
 """Shared helpers for CRM sub-routers."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,7 @@ from ...services.pricing_history import quote_date_iso as _quote_date_iso  # noq
 from ...services.quote_send import _build_quote_email_html  # noqa: F401
 
 
-def _iso(dt) -> str | None:
+def _iso(dt: datetime | None) -> str | None:
     """Return a datetime as an ISO string, or None if unset."""
     return dt.isoformat() if dt else None
 

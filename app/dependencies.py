@@ -380,7 +380,7 @@ def can_verify_po_line(user: User | None, line) -> bool:
     """
     if not can_approve_purchase_orders(user):
         return False
-    limit = getattr(user, "purchase_order_approval_limit", None)
+    limit: float | None = getattr(user, "purchase_order_approval_limit", None)
     if limit is None:
         return True
     from .services.buyplan_workflow import _line_amount

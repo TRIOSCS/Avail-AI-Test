@@ -16,6 +16,7 @@ Depends on: app/config.py, httpx
 import re
 import time
 from datetime import UTC, datetime
+from typing import TypedDict
 
 import httpx
 from loguru import logger
@@ -26,7 +27,14 @@ BASE_URL = "https://api.8x8.com/analytics/work/v1"
 
 # Module-level OAuth token cache.
 # _token_cache["token"] is reused until _token_cache["expires_at"] - 60s.
-_token_cache: dict = {}
+
+
+class _TokenCache(TypedDict, total=False):
+    token: str
+    expires_at: float
+
+
+_token_cache: _TokenCache = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -89,7 +97,7 @@ async def get_access_token(settings) -> str:
         raise ValueError(f"8x8 auth failed: HTTP {resp.status_code}")
 
     body = resp.json()
-    token = body.get("access_token") or body.get("token")
+    token: str | None = body.get("access_token") or body.get("token")  # 8x8 JSON boundary
     if not token:
         logger.error(f"8x8 auth response missing token: {list(body.keys())}")
         raise ValueError("8x8 auth response missing access_token")
