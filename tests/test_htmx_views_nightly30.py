@@ -12,6 +12,7 @@ Called by: pytest autodiscovery
 Depends on: conftest.py fixtures (client, db_session, test_user, test_company, etc.)
 """
 
+import json
 import os
 
 os.environ["TESTING"] = "1"
@@ -96,19 +97,21 @@ def _make_ticket(db: Session, user: User) -> TroubleTicket:
     return t
 
 
-def _make_sourcing_lead(db: Session, requirement: Requirement) -> "SourcingLead":  # noqa: F821
+def _make_sourcing_lead(
+    db: Session, requirement: Requirement, vendor_name: str = "Arrow Electronics", **overrides
+) -> "SourcingLead":  # noqa: F821
     import uuid
 
     from app.models.sourcing_lead import SourcingLead
 
-    lead = SourcingLead(
+    fields = dict(
         lead_id=str(uuid.uuid4()),
         requirement_id=requirement.id,
         requisition_id=requirement.requisition_id,
         part_number_requested="LM317T",
         part_number_matched="LM317T",
-        vendor_name="Arrow Electronics",
-        vendor_name_normalized="arrow electronics",
+        vendor_name=vendor_name,
+        vendor_name_normalized=vendor_name.lower(),
         primary_source_type="api",
         primary_source_name="brokerbin",
         confidence_score=0.8,
@@ -118,6 +121,8 @@ def _make_sourcing_lead(db: Session, requirement: Requirement) -> "SourcingLead"
         vendor_safety_score=0.9,
         buyer_status="new",
     )
+    fields.update(overrides)
+    lead = SourcingLead(**fields)
     db.add(lead)
     db.commit()
     db.refresh(lead)
@@ -139,6 +144,8 @@ class TestProactiveListPartial:
     def test_list_matches_tab(self, mock_get, client: TestClient):
         resp = client.get("/v2/partials/proactive", headers=HX)
         assert resp.status_code == 200
+        assert '<h1 class="h2">Proactive</h1>' in resp.text
+        assert "No proactive matches yet" in resp.text
 
     @patch("app.services.proactive_service.get_sent_offers", return_value=[])
     @patch(
@@ -148,6 +155,8 @@ class TestProactiveListPartial:
     def test_list_sent_tab(self, mock_get, mock_sent, client: TestClient):
         resp = client.get("/v2/partials/proactive?tab=sent", headers=HX)
         assert resp.status_code == 200
+        assert '<h1 class="h2">Proactive</h1>' in resp.text
+        mock_sent.assert_called_once()  # tab=sent actually loads the sent offers
 
 
 class TestProactiveRefresh:
@@ -161,6 +170,8 @@ class TestProactiveRefresh:
     def test_refresh_triggers_scan(self, mock_scan, mock_get, client: TestClient):
         resp = client.post("/v2/partials/proactive/refresh", headers=HX)
         assert resp.status_code == 200
+        mock_scan.assert_called_once()
+        assert '<h1 class="h2">Proactive</h1>' in resp.text  # refreshed list re-renders
 
 
 class TestProactiveBatchDismiss:
@@ -173,6 +184,8 @@ class TestProactiveBatchDismiss:
     def test_dismiss_no_ids(self, mock_get, client: TestClient):
         resp = client.post("/v2/partials/proactive/batch-dismiss", data={}, headers=HX)
         assert resp.status_code == 200
+        # Nothing dismissed — the list re-renders on its empty state.
+        assert "No proactive matches yet" in resp.text
 
     @patch(
         "app.services.proactive_service.get_matches_for_user",
@@ -206,6 +219,10 @@ class TestProactiveBatchDismiss:
             headers=HX,
         )
         assert resp.status_code == 200
+        db_session.expire_all()
+        dismissed = db_session.get(ProactiveMatch, match.id)
+        assert dismissed.status == "dismissed"
+        assert dismissed.dismiss_reason == "batch_dismiss"
 
 
 class TestProactivePrepare:
@@ -247,6 +264,9 @@ class TestProactivePrepare:
             headers=HX,
         )
         assert resp.status_code == 200
+        # Prepare page renders the contact picker + the selected match's part.
+        assert "Send To" in resp.text
+        assert "LM317T" in resp.text
 
 
 class TestProactiveSendOffer:
@@ -296,6 +316,9 @@ class TestProactiveSendOffer:
             headers=HX,
         )
         assert resp.status_code == 200
+        mock_send.assert_awaited_once()
+        # Success banner reflects the (mocked) empty send result.
+        assert "Offer sent to 0 contact(s) (0 parts)." in resp.text
 
     @patch(
         "app.services.proactive_service.send_proactive_offer",
@@ -323,27 +346,36 @@ class TestTroubleTicketWorkspace:
     def test_workspace_renders(self, client: TestClient):
         resp = client.get("/v2/partials/trouble-tickets/workspace", headers=HX)
         assert resp.status_code == 200
+        assert 'hx-post="/api/trouble-tickets/analyze"' in resp.text
+        assert "Analyze" in resp.text
 
 
 class TestTroubleTicketList:
     """GET /v2/partials/trouble-tickets/list."""
 
-    def test_list_all(self, client: TestClient):
+    def test_list_all(self, client: TestClient, db_session: Session, test_user: User):
+        _make_ticket(db_session, test_user)
         resp = client.get("/v2/partials/trouble-tickets/list", headers=HX)
         assert resp.status_code == 200
+        assert "Test ticket" in resp.text
 
-    def test_list_filter_open(self, client: TestClient):
+    def test_list_filter_open(self, client: TestClient, db_session: Session, test_user: User):
+        _make_ticket(db_session, test_user)  # SUBMITTED counts as open
         resp = client.get("/v2/partials/trouble-tickets/list?status=open", headers=HX)
         assert resp.status_code == 200
+        assert "Test ticket" in resp.text
 
     def test_list_filter_resolved(self, client: TestClient, db_session: Session, test_user: User):
-        _make_ticket(db_session, test_user)
+        _make_ticket(db_session, test_user)  # SUBMITTED — must NOT show under resolved
         resp = client.get("/v2/partials/trouble-tickets/list?status=resolved", headers=HX)
         assert resp.status_code == 200
+        assert "Test ticket" not in resp.text
 
-    def test_list_filter_arbitrary_status(self, client: TestClient):
+    def test_list_filter_arbitrary_status(self, client: TestClient, db_session: Session, test_user: User):
+        _make_ticket(db_session, test_user)
         resp = client.get("/v2/partials/trouble-tickets/list?status=submitted", headers=HX)
         assert resp.status_code == 200
+        assert "Test ticket" in resp.text  # exact-status match
 
 
 class TestTroubleTicketDetail:
@@ -357,6 +389,8 @@ class TestTroubleTicketDetail:
         ticket = _make_ticket(db_session, test_user)
         resp = client.get(f"/v2/partials/trouble-tickets/{ticket.id}", headers=HX)
         assert resp.status_code == 200
+        assert "TKT-0001" in resp.text  # detail headline is the ticket number
+        assert "Something broke" in resp.text
 
 
 class TestAccountTasks:
@@ -366,6 +400,7 @@ class TestAccountTasks:
     def test_tasks_list(self, mock_tasks, client: TestClient, test_company: Company):
         resp = client.get(f"/v2/partials/customers/{test_company.id}/tasks", headers=HX)
         assert resp.status_code == 200
+        assert "No open tasks." in resp.text
 
     def test_tasks_list_404(self, client: TestClient):
         resp = client.get("/v2/partials/customers/99999/tasks", headers=HX)
@@ -374,16 +409,14 @@ class TestAccountTasks:
     def test_task_add_form(self, client: TestClient, test_company: Company):
         resp = client.get(f"/v2/partials/customers/{test_company.id}/tasks/add-form", headers=HX)
         assert resp.status_code == 200
+        assert f"/v2/partials/customers/{test_company.id}/tasks" in resp.text
+        assert 'name="title"' in resp.text
 
     def test_task_add_form_404(self, client: TestClient):
         resp = client.get("/v2/partials/customers/99999/tasks/add-form", headers=HX)
         assert resp.status_code == 404
 
-    @patch("app.services.task_service.get_open_tasks_for_company", return_value=[])
-    @patch("app.services.task_service.create_company_task")
-    def test_create_task(
-        self, mock_create, mock_tasks, client: TestClient, db_session: Session, test_company: Company, test_user: User
-    ):
+    def test_create_task(self, client: TestClient, db_session: Session, test_company: Company, test_user: User):
         test_company.account_owner_id = test_user.id
         db_session.commit()
         resp = client.post(
@@ -392,6 +425,10 @@ class TestAccountTasks:
             headers=HX,
         )
         assert resp.status_code == 200
+        assert "Call back" in resp.text  # refreshed task list shows the new task
+        task = db_session.query(RequisitionTask).filter_by(company_id=test_company.id).one()
+        assert task.title == "Call back"
+        assert task.created_by == test_user.id
 
     def test_create_task_empty_title(
         self, client: TestClient, db_session: Session, test_company: Company, test_user: User
@@ -435,6 +472,10 @@ class TestTaskActions:
         task = _make_task(db_session, test_user, test_company)
         resp = client.post(f"/v2/partials/tasks/{task.id}/complete", headers=HX)
         assert resp.status_code == 200
+        db_session.expire_all()
+        done = db_session.get(RequisitionTask, task.id)
+        assert done.status == "done"
+        assert done.completed_at is not None
 
     def test_complete_task_404(self, client: TestClient):
         resp = client.post("/v2/partials/tasks/99999/complete", headers=HX)
@@ -444,6 +485,8 @@ class TestTaskActions:
         task = _make_task(db_session, test_user, test_company)
         resp = client.delete(f"/v2/partials/tasks/{task.id}", headers=HX)
         assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(RequisitionTask, task.id) is None
 
     def test_delete_task_404(self, client: TestClient):
         resp = client.delete("/v2/partials/tasks/99999", headers=HX)
@@ -462,6 +505,8 @@ class TestSourcingResultsPartial:
         req = test_requisition.requirements[0]
         resp = client.get(f"/v2/partials/sourcing/{req.id}", headers=HX)
         assert resp.status_code == 200
+        assert "0 leads found" in resp.text
+        assert "No leads found for this part" in resp.text
 
     def test_results_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/sourcing/99999", headers=HX)
@@ -475,26 +520,47 @@ class TestSourcingResultsPartial:
             headers=HX,
         )
         assert resp.status_code == 200
+        # The high-band lead survives the confidence filter.
+        assert "1 lead found" in resp.text
+        assert "Arrow Electronics" in resp.text
 
-    def test_results_sort_safest(self, client: TestClient, test_requisition: Requisition):
+    def test_results_sort_safest(self, client: TestClient, test_requisition: Requisition, db_session: Session):
         req = test_requisition.requirements[0]
+        _make_sourcing_lead(db_session, req)
         resp = client.get(f"/v2/partials/sourcing/{req.id}?sort=safest", headers=HX)
         assert resp.status_code == 200
+        assert "1 lead found" in resp.text
+        assert "Arrow Electronics" in resp.text
 
-    def test_results_sort_contact(self, client: TestClient, test_requisition: Requisition):
+    def test_results_sort_contact(self, client: TestClient, test_requisition: Requisition, db_session: Session):
         req = test_requisition.requirements[0]
+        _make_sourcing_lead(db_session, req)
         resp = client.get(f"/v2/partials/sourcing/{req.id}?sort=contact", headers=HX)
         assert resp.status_code == 200
+        assert "1 lead found" in resp.text
+        assert "Arrow Electronics" in resp.text
 
-    def test_results_corroborated_filter(self, client: TestClient, test_requisition: Requisition):
+    def test_results_corroborated_filter(self, client: TestClient, test_requisition: Requisition, db_session: Session):
         req = test_requisition.requirements[0]
+        _make_sourcing_lead(db_session, req, corroborated=True)
+        _make_sourcing_lead(db_session, req, vendor_name="Beta Components", corroborated=False)
         resp = client.get(f"/v2/partials/sourcing/{req.id}?corroborated=yes", headers=HX)
         assert resp.status_code == 200
+        assert "1 lead found" in resp.text
+        assert "Arrow Electronics" in resp.text
+        assert "Beta Components" not in resp.text
 
-    def test_results_contactability_filter(self, client: TestClient, test_requisition: Requisition):
+    def test_results_contactability_filter(
+        self, client: TestClient, test_requisition: Requisition, db_session: Session
+    ):
         req = test_requisition.requirements[0]
+        _make_sourcing_lead(db_session, req, contact_email="sales@arrow.com")
+        _make_sourcing_lead(db_session, req, vendor_name="Beta Components")
         resp = client.get(f"/v2/partials/sourcing/{req.id}?contactability=has_email", headers=HX)
         assert resp.status_code == 200
+        assert "1 lead found" in resp.text
+        assert "Arrow Electronics" in resp.text
+        assert "Beta Components" not in resp.text
 
 
 class TestLeadDetail:
@@ -509,6 +575,8 @@ class TestLeadDetail:
         lead = _make_sourcing_lead(db_session, req)
         resp = client.get(f"/v2/partials/sourcing/leads/{lead.id}", headers=HX)
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "LM317T" in resp.text
 
 
 class TestLeadStatusUpdate:
@@ -536,6 +604,11 @@ class TestLeadStatusUpdate:
             headers=HX,
         )
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text  # re-rendered lead fragment
+        db_session.expire_all()
+        from app.models.sourcing_lead import SourcingLead
+
+        assert db_session.get(SourcingLead, lead.id).buyer_status == "contacted"
 
 
 class TestSourcingLeadPanel:
@@ -550,6 +623,8 @@ class TestSourcingLeadPanel:
         lead = _make_sourcing_lead(db_session, req)
         resp = client.get(f"/v2/partials/sourcing/leads/{lead.id}/panel", headers=HX)
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert f'id="lead-row-{lead.id}"' in resp.text  # OOB row highlight update
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -563,21 +638,29 @@ class TestProspectingList:
     def test_list_empty(self, client: TestClient):
         resp = client.get("/v2/partials/prospecting", headers=HX)
         assert resp.status_code == 200
+        assert "No prospects found" in resp.text
 
     def test_list_with_status_filter(self, client: TestClient, db_session: Session):
         _make_prospect(db_session)
+        _make_prospect(db_session, name="GoneCorp", status="dismissed")
         resp = client.get("/v2/partials/prospecting?status=suggested&sort=fit_desc", headers=HX)
         assert resp.status_code == 200
+        assert "TestCorp" in resp.text
+        assert "GoneCorp" not in resp.text
 
     def test_list_buyer_ready_sort(self, client: TestClient, db_session: Session):
         _make_prospect(db_session)
         resp = client.get("/v2/partials/prospecting?sort=buyer_ready_desc", headers=HX)
         assert resp.status_code == 200
+        assert "TestCorp" in resp.text
 
     def test_list_with_query(self, client: TestClient, db_session: Session):
         _make_prospect(db_session, name="Acme Corp")
+        _make_prospect(db_session, name="Unrelated Inc")
         resp = client.get("/v2/partials/prospecting?q=Acme&sort=recent_desc", headers=HX)
         assert resp.status_code == 200
+        assert "Acme Corp" in resp.text
+        assert "Unrelated Inc" not in resp.text
 
 
 class TestProspectingDetail:
@@ -591,17 +674,22 @@ class TestProspectingDetail:
         p = _make_prospect(db_session)
         resp = client.get(f"/v2/partials/prospecting/{p.id}", headers=HX)
         assert resp.status_code == 200
+        assert '<h1 class="h1">TestCorp</h1>' in resp.text
 
 
 class TestProspectingClaim:
     """POST /v2/partials/prospecting/{prospect_id}/claim."""
 
     @patch("app.services.prospect_claim.trigger_deep_enrichment_bg", new_callable=AsyncMock)
-    @patch("app.services.prospect_claim.claim_prospect")
-    def test_claim_success(self, mock_claim, mock_enrich, client: TestClient, db_session: Session):
+    @patch("app.services.prospect_claim.claim_prospect", return_value={"warning": None})
+    def test_claim_success(self, mock_claim, mock_enrich, client: TestClient, db_session: Session, test_user: User):
         p = _make_prospect(db_session)
         resp = client.post(f"/v2/partials/prospecting/{p.id}/claim", data={}, headers=HX)
         assert resp.status_code == 200
+        mock_claim.assert_called_once_with(p.id, test_user.id, db_session)
+        mock_enrich.assert_called_once_with(p.id)  # deep enrichment kicked off
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
+        assert toast == {"message": "Claimed TestCorp", "type": "success"}
 
     def test_claim_not_found(self, client: TestClient):
         with patch("app.services.prospect_claim.claim_prospect", side_effect=LookupError):
@@ -614,6 +702,9 @@ class TestProspectingClaim:
         p = _make_prospect(db_session)
         resp = client.post(f"/v2/partials/prospecting/{p.id}/claim", data={}, headers=HX)
         assert resp.status_code == 200  # Shows error in UI, not 4xx
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
+        assert toast == {"message": "already claimed", "type": "error"}
+        mock_enrich.assert_not_called()  # failed claim must not spawn enrichment
 
 
 class TestProspectingDismiss:
@@ -642,16 +733,22 @@ class TestProspectingDismiss:
             headers=HX,
         )
         assert resp.status_code == 200  # Error shown in UI
+        assert json.loads(resp.headers["HX-Trigger"])["showToast"]["type"] == "error"
+        db_session.refresh(p)
+        assert p.status == "claimed"  # a claimed prospect is NOT dismissible
 
 
 class TestProspectingRelease:
     """POST /v2/partials/prospecting/{prospect_id}/release."""
 
     @patch("app.services.prospect_claim.release_prospect")
-    def test_release(self, mock_release, client: TestClient, db_session: Session):
+    def test_release(self, mock_release, client: TestClient, db_session: Session, test_user: User):
         p = _make_prospect(db_session, status="claimed")
         resp = client.post(f"/v2/partials/prospecting/{p.id}/release", data={}, headers=HX)
         assert resp.status_code == 200
+        mock_release.assert_called_once_with(p.id, test_user.id, db_session, is_admin=False)
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
+        assert toast == {"message": "Released TestCorp back to the pool", "type": "success"}
 
     def test_release_not_found(self, client: TestClient):
         with patch("app.services.prospect_claim.release_prospect", side_effect=LookupError):
@@ -663,6 +760,8 @@ class TestProspectingRelease:
         p = _make_prospect(db_session, status="claimed")
         resp = client.post(f"/v2/partials/prospecting/{p.id}/release", data={}, headers=HX)
         assert resp.status_code == 200
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
+        assert toast == {"message": "not allowed", "type": "error"}
 
 
 class TestProspectingEnrich:
@@ -673,13 +772,20 @@ class TestProspectingEnrich:
         p = _make_prospect(db_session)
         resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich", data={}, headers=HX)
         assert resp.status_code == 200
+        mock_run.assert_called_once_with(p.id)  # background job spawned
+        assert 'hx-trigger="every 2s"' in resp.text  # running-state poller returned
+        db_session.refresh(p)
+        assert p.enrichment_data["enrich_status"] == "running"
 
-    def test_enrich_already_running(self, client: TestClient, db_session: Session):
+    @patch("app.services.prospect_free_enrichment.run_enrichment_job", new_callable=AsyncMock)
+    def test_enrich_already_running(self, mock_run, client: TestClient, db_session: Session):
         p = _make_prospect(db_session)
-        p.enrichment_data = {"enrich_status": "running"}
+        p.enrichment_data = {"enrich_status": "running", "enrich_started_at": "2099-01-01T00:00:00"}
         db_session.commit()
         resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich", data={}, headers=HX)
         assert resp.status_code == 200
+        mock_run.assert_not_called()  # a genuinely in-flight job must not be restarted
+        assert 'hx-trigger="every 2s"' in resp.text
 
     def test_enrich_not_found(self, client: TestClient):
         resp = client.post("/v2/partials/prospecting/99999/enrich", data={}, headers=HX)
@@ -700,7 +806,8 @@ class TestProspectingEnrichStatus:
         p.enrichment_data = {"enrich_status": "running", "enrich_started_at": "2099-01-01T00:00:00"}
         db_session.commit()
         resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status", headers=HX)
-        assert resp.status_code == 200
+        assert resp.status_code == 200  # 200 (not 286) keeps the htmx poll alive
+        assert 'hx-trigger="every 2s"' in resp.text
 
     def test_status_not_found_returns_286(self, client: TestClient):
         resp = client.get("/v2/partials/prospecting/99999/enrich-status", headers=HX)
@@ -718,10 +825,18 @@ class TestBuyPlanListViews:
     def test_buy_plans_list(self, client: TestClient):
         resp = client.get("/v2/partials/buy-plans", headers=HX)
         assert resp.status_code == 200
+        # Personal hub shell: both lens tabs + lazy body target.
+        assert "My Queue" in resp.text
+        assert "Pipeline" in resp.text
+        assert 'hx-target="#bp-hub-body"' in resp.text
 
     def test_approvals_list(self, client: TestClient):
         resp = client.get("/v2/partials/approvals", headers=HX)
         assert resp.status_code == 200
+        # Org-wide decide console: all three gate tabs render.
+        assert "Buy Plans / Sales Orders" in resp.text
+        assert "PO Approval" in resp.text
+        assert "Prepayment" in resp.text
 
 
 class TestBuyPlanDetail:
@@ -734,6 +849,7 @@ class TestBuyPlanDetail:
     def test_detail_found(self, client: TestClient, test_buy_plan):
         resp = client.get(f"/v2/partials/buy-plans/{test_buy_plan.id}", headers=HX)
         assert resp.status_code == 200
+        assert f"Buy Plan #{test_buy_plan.id}" in resp.text
 
 
 class TestBuyPlanSubmit:
@@ -771,6 +887,10 @@ class TestVendorOwnership:
     def test_ownership(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/ownership", headers=HX)
         assert resp.status_code == 200
+        # Unclaimed vendor → open-pool badge with the Claim button.
+        assert f"vendor-ownership-{test_vendor_card.id}" in resp.text
+        assert "Claim Strategic" in resp.text
+        assert f"/v2/partials/vendors/{test_vendor_card.id}/claim" in resp.text
 
     def test_ownership_404(self, client: TestClient):
         resp = client.get("/v2/partials/vendors/99999/ownership", headers=HX)
@@ -783,26 +903,42 @@ class TestVendorReviews:
     def test_list_reviews(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/reviews", headers=HX)
         assert resp.status_code == 200
+        assert "No reviews yet. Be the first to review this vendor." in resp.text
 
     def test_list_reviews_404(self, client: TestClient):
         resp = client.get("/v2/partials/vendors/99999/reviews", headers=HX)
         assert resp.status_code == 404
 
-    def test_create_review(self, client: TestClient, test_vendor_card: VendorCard):
+    def test_create_review(
+        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard, test_user: User
+    ):
+        from app.models import VendorReview
+
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
-            data={"rating": "4", "body": "Good service"},
+            data={"rating": "4", "comment": "Good service"},
             headers=HX,
         )
         assert resp.status_code == 200
+        assert "Good service" in resp.text  # refreshed reviews list shows the comment
+        review = db_session.query(VendorReview).filter_by(vendor_card_id=test_vendor_card.id).one()
+        assert review.rating == 4
+        assert review.comment == "Good service"
+        assert review.user_id == test_user.id
 
 
 class TestVendorClaimRelease:
     """Vendor claim/release/archive/unarchive."""
 
-    def test_claim(self, client: TestClient, test_vendor_card: VendorCard):
+    def test_claim(self, client: TestClient, test_vendor_card: VendorCard, db_session: Session, test_user: User):
+        from app.models.strategic import StrategicVendor
+
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/claim", headers=HX)
         assert resp.status_code == 200
+        assert "Strategic — Test Buyer" in resp.text  # claimed badge with owner name
+        record = db_session.query(StrategicVendor).filter_by(vendor_card_id=test_vendor_card.id).one()
+        assert record.user_id == test_user.id
+        assert record.released_at is None
 
     def test_claim_404(self, client: TestClient):
         resp = client.post("/v2/partials/vendors/99999/claim", headers=HX)
@@ -820,13 +956,22 @@ class TestVendorClaimRelease:
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/release", headers=HX)
         assert resp.status_code == 200
+        assert "Claim Strategic" in resp.text  # badge back to open pool
+        db_session.expire_all()
+        assert db_session.get(StrategicVendor, sv.id).released_at is not None
 
-    def test_archive_vendor(self, client: TestClient, test_vendor_card: VendorCard):
+    def test_archive_vendor(self, client: TestClient, test_vendor_card: VendorCard, db_session: Session):
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/archive", headers=HX)
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text  # refreshed detail still renders
+        db_session.expire_all()
+        assert db_session.get(VendorCard, test_vendor_card.id).is_active is False
 
     def test_unarchive_vendor(self, client: TestClient, test_vendor_card: VendorCard, db_session: Session):
-        test_vendor_card.is_archived = True
+        test_vendor_card.is_active = False
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/unarchive", headers=HX)
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        db_session.expire_all()
+        assert db_session.get(VendorCard, test_vendor_card.id).is_active is True

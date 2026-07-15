@@ -9,8 +9,10 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
+import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +28,7 @@ from app.constants import (
 )
 from app.models import (
     BuyPlan,
+    ChangeLog,
     Company,
     CustomerSite,
     Offer,
@@ -176,49 +179,80 @@ def _assert_lazy_load_targets_self(html: str, hx_get: str) -> None:
 
 
 class TestV2FullPages:
-    """Test the multi-decorated v2_page handler for all entry URLs."""
+    """Test the multi-decorated v2_page handler for all entry URLs.
+
+    v2_page authenticates via get_user (session), not require_user — patch it so the
+    shell renders instead of the login page. Each entry URL must wire #main-content's
+    lazy-load to the RIGHT module partial (base_page.html hx-get).
+    """
 
     @pytest.mark.parametrize(
-        "url",
+        "url, expected_partial",
         [
-            "/v2",
-            "/v2/requisitions",
-            "/v2/search",
-            "/v2/vendors",
-            "/v2/customers",
-            "/v2/buy-plans",
-            "/v2/resell",
-            "/v2/quotes",
-            "/v2/settings",
-            "/v2/prospecting",
-            "/v2/proactive",
-            "/v2/materials",
-            "/v2/follow-ups",
-            "/v2/sightings",
-            "/v2/trouble-tickets",
+            ("/v2", "/v2/partials/parts/workspace"),
+            ("/v2/requisitions", "/v2/partials/parts/workspace"),
+            ("/v2/search", "/v2/partials/search"),
+            ("/v2/vendors", "/v2/partials/vendors"),
+            ("/v2/customers", "/v2/partials/customers"),
+            ("/v2/buy-plans", "/v2/partials/buy-plans"),
+            ("/v2/resell", "/v2/partials/resell/workspace"),
+            ("/v2/quotes", "/v2/partials/parts/workspace"),  # 307 → /v2/requisitions
+            ("/v2/settings", "/v2/partials/settings"),
+            ("/v2/prospecting", "/v2/partials/prospecting"),
+            ("/v2/proactive", "/v2/partials/proactive"),
+            ("/v2/materials", "/v2/partials/materials"),
+            ("/v2/follow-ups", "/v2/partials/follow-ups"),
+            ("/v2/sightings", "/v2/partials/sightings/workspace"),
         ],
     )
-    def test_v2_page(self, client: TestClient, url: str):
-        resp = client.get(url)
+    def test_v2_page(self, client: TestClient, test_user: User, url: str, expected_partial: str):
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            resp = client.get(url)
         assert resp.status_code == 200
+        assert f'hx-get="{expected_partial}"' in resp.text
+
+    def test_v2_page_trouble_tickets_admin_only(self, client: TestClient, db_session: Session, test_user: User):
+        """/v2/trouble-tickets 403s for non-admins; admins get the workspace shell."""
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            denied = client.get("/v2/trouble-tickets")
+        assert denied.status_code == 403
+        test_user.role = "admin"
+        db_session.commit()
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            resp = client.get("/v2/trouble-tickets")
+        assert resp.status_code == 200
+        assert 'hx-get="/v2/partials/trouble-tickets/workspace"' in resp.text
+
+    def test_v2_page_unauthenticated_renders_login(self, client: TestClient):
+        """Without a session user the shell route serves the login page, not the app."""
+        resp = client.get("/v2")
+        assert resp.status_code == 200
+        assert "/auth/login" in resp.text
+        assert 'hx-get="/v2/partials/parts/workspace"' not in resp.text
 
     def test_v2_requisitions_detail(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        resp = client.get(f"/v2/requisitions/{req.id}")
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            resp = client.get(f"/v2/requisitions/{req.id}")
         assert resp.status_code == 200
+        assert f'hx-get="/v2/partials/requisitions/{req.id}"' in resp.text
 
-    def test_v2_vendors_detail(self, client: TestClient, db_session: Session):
+    def test_v2_vendors_detail(self, client: TestClient, db_session: Session, test_user: User):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/vendors/{vc.id}")
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            resp = client.get(f"/v2/vendors/{vc.id}")
         assert resp.status_code == 200
+        assert f'hx-get="/v2/partials/vendors/{vc.id}"' in resp.text
 
-    def test_v2_customers_detail(self, client: TestClient, db_session: Session):
+    def test_v2_customers_detail(self, client: TestClient, db_session: Session, test_user: User):
         co = _make_company(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/customers/{co.id}")
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            resp = client.get(f"/v2/customers/{co.id}")
         assert resp.status_code == 200
+        assert f'hx-get="/v2/partials/customers/{co.id}"' in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -300,26 +334,45 @@ class TestGlobalSearch:
     """Test the global search endpoints."""
 
     def test_global_search_empty(self, client: TestClient):
+        """An empty query renders NO dropdown content (the outer query-length guard)."""
         resp = client.get("/v2/partials/search/global?q=")
         assert resp.status_code == 200
+        assert resp.text.strip() == ""
 
-    def test_global_search_with_query(self, client: TestClient):
+    def test_global_search_with_query(self, client: TestClient, db_session: Session):
+        _make_vendor_card(db_session, display_name="Arrow Electronics")
+        _make_vendor_card(
+            db_session,
+            normalized_name="digikey",
+            display_name="Digi-Key",
+            emails=["sales@digikey.com"],
+            phones=[],
+        )
+        db_session.commit()
         resp = client.get("/v2/partials/search/global?q=arrow")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "Digi-Key" not in resp.text
 
     def test_ai_search_endpoint(self, client: TestClient):
         mock_result = {"best_match": None, "groups": {}, "total_count": 0}
         with patch("app.services.global_search_service.ai_search", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post("/v2/partials/search/ai", data={"q": "test search"})
             assert resp.status_code == 200
+            assert 'No results for "<strong class="text-gray-600">test search</strong>"' in resp.text
 
     def test_search_results_page_empty(self, client: TestClient):
         resp = client.get("/v2/partials/search/results?q=")
         assert resp.status_code == 200
+        assert "No results found" in resp.text
 
-    def test_search_results_page_with_query(self, client: TestClient):
-        resp = client.get("/v2/partials/search/results?q=test")
+    def test_search_results_page_with_query(self, client: TestClient, db_session: Session):
+        _make_vendor_card(db_session, display_name="Arrow Electronics")
+        db_session.commit()
+        resp = client.get("/v2/partials/search/results?q=arrow")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "No results found" not in resp.text
 
     def test_global_search_renders_material_and_sighting_groups(
         self, client: TestClient, db_session: Session, test_user: User
@@ -370,6 +423,9 @@ class TestPartsWorkspace:
     def test_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/parts/workspace")
         assert resp.status_code == 200
+        # Split-panel shell: Sales Hub eyebrow + lazy-loaded parts list.
+        assert "Sales Hub" in resp.text
+        assert 'hx-get="/v2/partials/parts"' in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -385,55 +441,77 @@ class TestRequisitionsListPartial:
         db_session.commit()
         resp = client.get("/v2/partials/requisitions")
         assert resp.status_code == 200
+        assert "REQ-TEST" in resp.text
+        assert "Acme" in resp.text
 
     def test_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
         _make_requisition(db_session, test_user, name="RFQ-ARROW-001")
+        _make_requisition(db_session, test_user, name="RFQ-OTHER-002")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?q=arrow")
         assert resp.status_code == 200
+        assert "RFQ-ARROW-001" in resp.text
+        assert "RFQ-OTHER-002" not in resp.text
 
     def test_list_with_status_filter(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user, status=RequisitionStatus.OPEN)
+        _make_requisition(db_session, test_user, name="OPEN-REQ", status=RequisitionStatus.OPEN)
+        _make_requisition(db_session, test_user, name="WON-REQ", status=RequisitionStatus.WON)
         db_session.commit()
-        resp = client.get("/v2/partials/requisitions?status=active")
+        resp = client.get("/v2/partials/requisitions?status=open")
         assert resp.status_code == 200
+        assert "OPEN-REQ" in resp.text
+        assert "WON-REQ" not in resp.text
 
-    def test_list_with_owner_filter(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user)
+    def test_list_with_owner_filter(self, client: TestClient, db_session: Session, test_user: User, admin_user: User):
+        _make_requisition(db_session, test_user, name="MINE-REQ")
+        _make_requisition(db_session, admin_user, name="THEIRS-REQ", created_by=admin_user.id, claimed_by_id=None)
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions?owner={test_user.id}")
         assert resp.status_code == 200
+        assert "MINE-REQ" in resp.text
+        assert "THEIRS-REQ" not in resp.text
 
     def test_list_with_urgency_filter(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user, urgency="hot")
+        _make_requisition(db_session, test_user, name="HOT-REQ", urgency="hot")
+        _make_requisition(db_session, test_user, name="CALM-REQ", urgency="normal")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?urgency=hot")
         assert resp.status_code == 200
+        assert "HOT-REQ" in resp.text
+        assert "CALM-REQ" not in resp.text
 
     def test_list_with_date_filters(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user)
+        _make_requisition(db_session, test_user, name="IN-RANGE-REQ")
+        _make_requisition(db_session, test_user, name="OLD-REQ", created_at=datetime(2019, 6, 1, tzinfo=UTC))
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?date_from=2020-01-01&date_to=2030-12-31")
         assert resp.status_code == 200
+        assert "IN-RANGE-REQ" in resp.text
+        assert "OLD-REQ" not in resp.text
 
     def test_list_with_invalid_date(self, client: TestClient, db_session: Session, test_user: User):
+        """Unparseable dates degrade to no date filter — the row still renders."""
         _make_requisition(db_session, test_user)
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?date_from=bad&date_to=bad")
         assert resp.status_code == 200
+        assert "REQ-TEST" in resp.text
 
     def test_list_sort_by_name_asc(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user, name="AAA")
-        _make_requisition(db_session, test_user, name="ZZZ")
+        _make_requisition(db_session, test_user, name="AAA-REQ")
+        _make_requisition(db_session, test_user, name="ZZZ-REQ")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=name&dir=asc")
         assert resp.status_code == 200
+        assert resp.text.index("AAA-REQ") < resp.text.index("ZZZ-REQ")
 
     def test_list_sort_desc(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user)
+        _make_requisition(db_session, test_user, name="OLDER-REQ", created_at=datetime(2024, 1, 1, tzinfo=UTC))
+        _make_requisition(db_session, test_user, name="NEWER-REQ", created_at=datetime(2025, 1, 1, tzinfo=UTC))
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=created_at&dir=desc")
         assert resp.status_code == 200
+        assert resp.text.index("NEWER-REQ") < resp.text.index("OLDER-REQ")
 
     def test_list_sort_by_req_count(self, client: TestClient, db_session: Session, test_user: User):
         """Sort by parts count (correlated subquery)."""
@@ -558,10 +636,13 @@ class TestRequisitionsGroupByCustomer:
 
     def test_list_sort_invalid_key_falls_back(self, client: TestClient, db_session: Session, test_user: User):
         """Invalid sort key falls back to created_at without crashing."""
-        _make_requisition(db_session, test_user)
+        _make_requisition(db_session, test_user, name="OLDER-REQ", created_at=datetime(2024, 1, 1, tzinfo=UTC))
+        _make_requisition(db_session, test_user, name="NEWER-REQ", created_at=datetime(2025, 1, 1, tzinfo=UTC))
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=bogus&dir=desc")
         assert resp.status_code == 200
+        # Fallback ordering is created_at desc — newest row renders first.
+        assert resp.text.index("NEWER-REQ") < resp.text.index("OLDER-REQ")
 
     def test_list_sort_invalid_dir_returns_422(self, client: TestClient, db_session: Session, test_user: User):
         """Invalid dir value is rejected by FastAPI Literal validation."""
@@ -581,16 +662,27 @@ class TestRequisitionsGroupByCustomer:
 
     def test_list_pagination(self, client: TestClient, db_session: Session, test_user: User):
         for i in range(5):
-            _make_requisition(db_session, test_user, name=f"REQ-{i}")
+            _make_requisition(
+                db_session, test_user, name=f"PAGEREQ-{i}", created_at=datetime(2025, 1, i + 1, tzinfo=UTC)
+            )
         db_session.commit()
+        # Default order is created_at desc → page 2 (limit=2 offset=2) is PAGEREQ-2, PAGEREQ-1.
         resp = client.get("/v2/partials/requisitions?limit=2&offset=2")
         assert resp.status_code == 200
+        assert "PAGEREQ-2" in resp.text
+        assert "PAGEREQ-1" in resp.text
+        for skipped in ("PAGEREQ-4", "PAGEREQ-3", "PAGEREQ-0"):
+            assert skipped not in resp.text
 
     def test_list_search_match_reason_customer(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user, customer_name="Acme Corp")
+        _make_requisition(db_session, test_user, name="CUSTMATCH-REQ", customer_name="Acme Corp")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?q=acme")
         assert resp.status_code == 200
+        assert "CUSTMATCH-REQ" in resp.text
+        # Search scope indicator counts the hit under Customers.
+        assert "Matched:" in resp.text
+        assert '<span class="tabular-nums">1</span> Customers' in resp.text
 
     def test_list_search_match_reason_part(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user, name="RFQ-99", customer_name="NotThis")
@@ -598,31 +690,42 @@ class TestRequisitionsGroupByCustomer:
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?q=LM317T")
         assert resp.status_code == 200
+        assert "RFQ-99" in resp.text
+        assert '<span class="tabular-nums">1</span> Parts' in resp.text
 
 
 class TestRequisitionCreateForm:
-    """Test the create/import form endpoints."""
+    """Test the create/import form endpoints (both serve the unified modal)."""
 
     def test_create_form(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/create-form")
         assert resp.status_code == 200
+        assert "New Requisition" in resp.text
+        assert 'hx-post="/v2/partials/requisitions/import-save"' in resp.text
 
     def test_import_form(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/import-form")
         assert resp.status_code == 200
+        assert "New Requisition" in resp.text
+        assert 'hx-post="/v2/partials/requisitions/import-save"' in resp.text
 
 
 class TestRequisitionCreate:
     """Test creating a requisition via POST."""
 
-    def test_create_basic(self, client: TestClient):
+    def test_create_basic(self, client: TestClient, db_session: Session, test_user: User):
         resp = client.post(
             "/v2/partials/requisitions/create",
             data={"name": "Test Req", "customer_name": "Acme", "urgency": "normal", "parts_text": ""},
         )
         assert resp.status_code == 200
+        assert "Test Req" in resp.text
+        created = db_session.query(Requisition).filter_by(name="Test Req").one()
+        assert created.customer_name == "Acme"
+        assert created.created_by == test_user.id
+        assert created.status == RequisitionStatus.OPEN
 
-    def test_create_with_parts(self, client: TestClient):
+    def test_create_with_parts(self, client: TestClient, db_session: Session):
         resp = client.post(
             "/v2/partials/requisitions/create",
             data={
@@ -633,8 +736,13 @@ class TestRequisitionCreate:
             },
         )
         assert resp.status_code == 200
+        assert "Test Req Parts" in resp.text
+        created = db_session.query(Requisition).filter_by(name="Test Req Parts").one()
+        by_mpn = {r.primary_mpn: r.target_qty for r in created.requirements}
+        assert by_mpn == {"LM317T": 1000, "NE555P": 500}
 
-    def test_create_with_invalid_qty(self, client: TestClient):
+    def test_create_with_invalid_qty(self, client: TestClient, db_session: Session):
+        """An unparseable qty degrades to 1 — the part is still created."""
         resp = client.post(
             "/v2/partials/requisitions/create",
             data={
@@ -643,6 +751,8 @@ class TestRequisitionCreate:
             },
         )
         assert resp.status_code == 200
+        created = db_session.query(Requisition).filter_by(name="Test Req Bad Qty").one()
+        assert [(r.primary_mpn, r.target_qty) for r in created.requirements] == [("LM317T", 1)]
 
 
 class TestRequisitionDetail:
@@ -654,6 +764,8 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}")
         assert resp.status_code == 200
+        assert "REQ-TEST" in resp.text
+        assert 'id="tab-content"' in resp.text
         _assert_lazy_load_targets_self(resp.text, f"/v2/partials/requisitions/{req.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
@@ -666,6 +778,8 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/parts")
         assert resp.status_code == 200
+        assert 'id="parts-tbody"' in resp.text
+        assert "LM317T" in resp.text
 
     def test_tab_offers(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -673,6 +787,9 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "LM317T" in resp.text
+        assert "No offers received yet" not in resp.text
 
     def test_tab_offers_empty_shows_search_cta(self, client: TestClient, db_session: Session, test_user: User):
         """Empty offers tab points to sourcing (Search all sources → Parts tab) instead
@@ -728,19 +845,27 @@ class TestRequisitionInlineEdit:
         assert resp.status_code == 404
 
     @pytest.mark.parametrize(
-        "field, value, context",
+        "field, value, context, attr, expected",
         [
-            ("name", "New Name", "row"),
-            ("urgency", "hot", "row"),
-            ("deadline", "2026-04-01", "row"),
-            ("deadline", "", "row"),  # clear deadline
-            ("name", "Renamed", "header"),
-            ("name", "Renamed Tab", "tab"),
+            ("name", "New Name", "row", "name", "New Name"),
+            ("urgency", "hot", "row", "urgency", "hot"),
+            ("deadline", "2026-04-01", "row", "deadline", "2026-04-01"),
+            ("deadline", "", "row", "deadline", None),  # clear deadline
+            ("name", "Renamed", "header", "name", "Renamed"),
+            ("name", "Renamed Tab", "tab", "name", "Renamed Tab"),
         ],
         ids=["name_row", "urgency_row", "deadline_row", "deadline_clear", "name_header", "name_tab"],
     )
     def test_inline_save(
-        self, client: TestClient, db_session: Session, test_user: User, field: str, value: str, context: str
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        field: str,
+        value: str,
+        context: str,
+        attr: str,
+        expected,
     ):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
@@ -749,27 +874,46 @@ class TestRequisitionInlineEdit:
             data={"field": field, "value": value, "context": context},
         )
         assert resp.status_code == 200
+        assert "showToast" in resp.headers.get("HX-Trigger", "")
+        db_session.expire_all()
+        assert getattr(db_session.get(Requisition, req.id), attr) == expected
+        # Row/header contexts re-render the fragment; tab responds empty (trigger-only).
+        if context == "tab":
+            assert resp.text == ""
+        elif field == "urgency":
+            # Urgency renders as icon/color, not text — assert the row re-rendered.
+            assert f'id="req-row-{req.id}"' in resp.text
+        elif expected:
+            assert str(expected) in resp.text
 
-    def test_inline_save_owner(self, client: TestClient, db_session: Session, test_user: User):
+    def test_inline_save_owner(self, client: TestClient, db_session: Session, test_user: User, admin_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
         test_user.role = UserRole.MANAGER
         db_session.commit()
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "owner", "value": str(test_user.id), "context": "row"},
+            data={"field": "owner", "value": str(admin_user.id), "context": "row"},
         )
         assert resp.status_code == 200
+        assert "Owner reassigned" in resp.headers.get("HX-Trigger", "")
+        db_session.expire_all()
+        assert db_session.get(Requisition, req.id).created_by == admin_user.id
 
     def test_inline_save_status(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        with patch("app.services.requisition_state.transition"):
+        with patch("app.services.requisition_state.transition") as mock_transition:
             resp = client.patch(
                 f"/v2/partials/requisitions/{req.id}/inline",
                 data={"field": "status", "value": "open", "context": "row"},
             )
             assert resp.status_code == 200
+        mock_transition.assert_called_once()
+        assert mock_transition.call_args.args[1] == "open"
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]["message"]
+        assert toast == "Status → open"
+        assert "REQ-TEST" in resp.text  # re-rendered row
 
     def test_inline_save_not_found(self, client: TestClient):
         resp = client.patch(
@@ -785,24 +929,32 @@ class TestRequisitionRowActions:
     def test_action_claim(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user, claimed_by_id=None)
         db_session.commit()
-        with patch("app.services.requirement_status.claim_requisition"):
-            resp = client.post(f"/v2/partials/requisitions/{req.id}/action/claim", data={})
-            assert resp.status_code == 200
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/action/claim", data={})
+        assert resp.status_code == 200
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]["message"]
+        assert toast == "Claimed 'REQ-TEST'"
+        db_session.expire_all()
+        assert db_session.get(Requisition, req.id).claimed_by_id == test_user.id
 
     def test_action_unclaim(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        with patch("app.services.requirement_status.unclaim_requisition"):
-            resp = client.post(f"/v2/partials/requisitions/{req.id}/action/unclaim", data={})
-            assert resp.status_code == 200
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/action/unclaim", data={})
+        assert resp.status_code == 200
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]["message"]
+        assert toast == "Unclaimed 'REQ-TEST'"
+        db_session.expire_all()
+        assert db_session.get(Requisition, req.id).claimed_by_id is None
 
     def test_action_clone(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        mock_new = MagicMock(id=999)
-        with patch("app.services.requisition_service.clone_requisition", return_value=mock_new):
-            resp = client.post(f"/v2/partials/requisitions/{req.id}/action/clone", data={})
-            assert resp.status_code == 200
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/action/clone", data={})
+        assert resp.status_code == 200
+        clones = db_session.query(Requisition).filter(Requisition.id != req.id).all()
+        assert len(clones) == 1
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]["message"]
+        assert toast == f"Cloned → REQ-{clones[0].id:03d}"
 
     def test_action_invalid(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -815,29 +967,37 @@ class TestRequisitionRowActions:
         assert resp.status_code == 404
 
     def test_action_return_format_detail(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
+        """Return=detail responds with an empty body — only the toast trigger fires."""
+        req = _make_requisition(db_session, test_user, claimed_by_id=None)
         db_session.commit()
-        with patch("app.services.requirement_status.claim_requisition"):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/action/claim",
-                data={"return": "detail"},
-            )
-            assert resp.status_code == 200
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/action/claim",
+            data={"return": "detail"},
+        )
+        assert resp.status_code == 200
+        assert resp.text == ""
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]["message"]
+        assert toast == "Claimed 'REQ-TEST'"
+        db_session.expire_all()
+        assert db_session.get(Requisition, req.id).claimed_by_id == test_user.id
 
 
 class TestRequisitionBulkActions:
     """Test bulk actions on requisitions."""
 
-    def test_bulk_assign(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_assign(self, client: TestClient, db_session: Session, test_user: User, admin_user: User):
         r1 = _make_requisition(db_session, test_user)
         db_session.commit()
         test_user.role = UserRole.MANAGER
         db_session.commit()
         resp = client.post(
             "/v2/partials/requisitions/bulk/assign",
-            data={"ids": str(r1.id), "owner_id": str(test_user.id)},
+            data={"ids": str(r1.id), "owner_id": str(admin_user.id)},
         )
         assert resp.status_code == 200
+        assert "REQ-TEST" in resp.text  # refreshed list renders the row
+        db_session.expire_all()
+        assert db_session.get(Requisition, r1.id).created_by == admin_user.id
 
     def test_bulk_no_ids(self, client: TestClient):
         resp = client.post("/v2/partials/requisitions/bulk/assign", data={"ids": ""})
@@ -873,6 +1033,12 @@ class TestAddRequirement:
             },
         )
         assert resp.status_code == 200
+        assert "<tr" in resp.text
+        assert "NE555P" in resp.text
+        created = db_session.query(Requirement).filter_by(requisition_id=req.id).one()
+        assert created.primary_mpn == "NE555P"
+        assert created.manufacturer == "Texas Instruments"
+        assert created.target_qty == 100
 
     def test_add_requirement_missing_manufacturer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -941,6 +1107,9 @@ class TestSearchAll:
         db_session.commit()
         resp = client.post(f"/v2/partials/requisitions/{req.id}/search-all")
         assert resp.status_code == 200
+        # Re-rendered parts tab with the auto-refresh banner + the part row.
+        assert "Searching all sources" in resp.text
+        assert "LM317T" in resp.text
 
     def test_search_all_no_requirements(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1004,13 +1173,16 @@ class TestRequisitionImport:
         mock_result = {"requirements": [{"primary_mpn": "LM317T", "target_qty": 100}], "name": "AI Name"}
         with patch(
             "app.routers.htmx.requisitions.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
-        ):
+        ) as mock_parse:
             resp = client.post(
                 "/v2/partials/requisitions/import-parse",
                 data={"name": "Import", "raw_text": "LM317T 100pcs"},
                 files={"file": ("", b"", "application/octet-stream")},
             )
             assert resp.status_code == 200
+            # The AI parser is invoked with the pasted text and the modal re-renders.
+            mock_parse.assert_awaited_once_with("LM317T 100pcs")
+            assert "New Requisition" in resp.text
 
     def test_import_parse_json_mode(self, client: TestClient):
         mock_result = {
@@ -1038,7 +1210,7 @@ class TestRequisitionImport:
         assert resp.status_code == 200
         assert "No valid parts" in resp.text
 
-    def test_import_save_with_parts(self, client: TestClient):
+    def test_import_save_with_parts(self, client: TestClient, db_session: Session):
         resp = client.post(
             "/v2/partials/requisitions/import-save",
             data={
@@ -1067,6 +1239,13 @@ class TestRequisitionImport:
             },
         )
         assert resp.status_code == 200
+        # Success snippet closes the modal + toasts, and triggers a list refresh.
+        assert "Requisition created with 1 parts" in resp.text
+        assert resp.headers.get("HX-Trigger") == "reqListRefresh"
+        created = db_session.query(Requisition).filter_by(name="Import Test").one()
+        assert created.customer_name == "Acme"
+        line = db_session.query(Requirement).filter_by(requisition_id=created.id).one()
+        assert (line.primary_mpn, line.target_qty, line.manufacturer) == ("LM317T", 100, "TI")
 
 
 class TestParseEmailOffer:
@@ -1077,12 +1256,16 @@ class TestParseEmailOffer:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/parse-email-form")
         assert resp.status_code == 200
+        assert "Parse Vendor Email" in resp.text
+        assert f'hx-post="/v2/partials/requisitions/{req.id}/parse-email"' in resp.text
 
     def test_paste_offer_form(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/paste-offer-form")
         assert resp.status_code == 200
+        assert "Paste Vendor Offer" in resp.text
+        assert f'hx-post="/v2/partials/requisitions/{req.id}/parse-offer"' in resp.text
 
     def test_parse_email_empty_body(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1098,7 +1281,7 @@ class TestParseEmailOffer:
         req = _make_requisition(db_session, test_user)
         db_session.commit()
         mock_result = {
-            "quotes": [{"mpn": "LM317T", "qty": 100, "price": 0.5}],
+            "quotes": [{"part_number": "LM317T", "quantity_available": 100, "unit_price": 0.5, "confidence": 0.9}],
             "overall_confidence": 0.95,
             "email_type": "quote",
         }
@@ -1108,6 +1291,9 @@ class TestParseEmailOffer:
                 data={"email_body": "We can offer LM317T at $0.50", "vendor_name": "Arrow"},
             )
             assert resp.status_code == 200
+            assert "Parsed 1 offer from Quote email" in resp.text
+            assert "95% confidence" in resp.text
+            assert 'value="LM317T"' in resp.text  # editable card prefilled
 
     def test_parse_email_no_result(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1118,6 +1304,9 @@ class TestParseEmailOffer:
                 data={"email_body": "Hello", "vendor_name": "Arrow"},
             )
             assert resp.status_code == 200
+            # A None parse renders the zero-offers state, not an error.
+            assert "Parsed 0 offers from Unclear email" in resp.text
+            assert "0% confidence" in resp.text
 
     def test_parse_email_exception(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1157,6 +1346,9 @@ class TestParseEmailOffer:
                 data={"raw_text": "LM317T 100pcs $0.50"},
             )
             assert resp.status_code == 200
+            assert "Parsed 1 offer from pasted text" in resp.text
+            assert "LM317T" in resp.text
+            assert f'hx-post="/v2/partials/requisitions/{req.id}/save-parsed-offers"' in resp.text
 
     def test_parse_offer_exception(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1193,6 +1385,11 @@ class TestSaveParsedOffers:
             },
         )
         assert resp.status_code == 200
+        assert "1 offer saved to this requisition." in resp.text
+        saved = db_session.query(Offer).filter_by(requisition_id=req.id).one()
+        assert (saved.vendor_name, saved.mpn) == ("Arrow", "LM317T")
+        assert saved.qty_available == 1000
+        assert saved.unit_price == 0.50
 
     def test_save_parsed_offers_no_data(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1231,6 +1428,11 @@ class TestCreateQuoteFromOffers:
             data={"offer_ids": str(offer.id)},
         )
         assert resp.status_code == 200
+        quote = db_session.query(Quote).filter_by(requisition_id=req.id).one()
+        assert quote.quote_number == f"Q-{req.id}-1"
+        assert quote.created_by_id == test_user.id
+        assert quote.line_items and quote.line_items[0]["mpn"] == "LM317T"
+        assert quote.quote_number in resp.text  # quote detail rendered
 
 
 class TestDeleteRequirement:
@@ -1242,6 +1444,9 @@ class TestDeleteRequirement:
         db_session.commit()
         resp = client.delete(f"/v2/partials/requisitions/{req.id}/requirements/{item.id}")
         assert resp.status_code == 200
+        assert resp.text == ""  # htmx removes the row via empty swap
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id) is None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1257,24 +1462,33 @@ class TestVendorsList:
         db_session.commit()
         resp = client.get("/v2/partials/vendors")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
 
     def test_list_with_search(self, client: TestClient, db_session: Session):
         _make_vendor_card(db_session, display_name="Arrow Electronics")
+        _make_vendor_card(db_session, normalized_name="digikey", display_name="Digi-Key")
         db_session.commit()
         resp = client.get("/v2/partials/vendors?q=arrow")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "Digi-Key" not in resp.text
 
     def test_list_show_blacklisted(self, client: TestClient, db_session: Session):
-        _make_vendor_card(db_session, is_blacklisted=True)
+        _make_vendor_card(db_session, display_name="Bad Vendor Inc", is_blacklisted=True)
         db_session.commit()
-        resp = client.get("/v2/partials/vendors?hide_blacklisted=false")
-        assert resp.status_code == 200
+        hidden = client.get("/v2/partials/vendors")
+        shown = client.get("/v2/partials/vendors?hide_blacklisted=false")
+        assert shown.status_code == 200
+        assert "Bad Vendor Inc" in shown.text
+        assert "Bad Vendor Inc" not in hidden.text
 
     def test_list_sort_by_name(self, client: TestClient, db_session: Session):
-        _make_vendor_card(db_session)
+        _make_vendor_card(db_session, normalized_name="zeta", display_name="Zeta Components")
+        _make_vendor_card(db_session, normalized_name="alpha", display_name="Alpha Parts")
         db_session.commit()
         resp = client.get("/v2/partials/vendors?sort=display_name&dir=asc")
         assert resp.status_code == 200
+        assert resp.text.index("Alpha Parts") < resp.text.index("Zeta Components")
 
 
 class TestVendorDetail:
@@ -1285,6 +1499,7 @@ class TestVendorDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/vendors/{vc.id}")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
         _assert_lazy_load_targets_self(resp.text, f"/v2/partials/vendors/{vc.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
@@ -1319,6 +1534,8 @@ class TestVendorEdit:
         db_session.commit()
         resp = client.get(f"/v2/partials/vendors/{vc.id}/edit-form")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text  # prefilled current name
+        assert f"/v2/partials/vendors/{vc.id}/edit" in resp.text
 
     def test_edit_save(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
@@ -1328,12 +1545,20 @@ class TestVendorEdit:
             data={"display_name": "Updated Name", "website": "https://new.com"},
         )
         assert resp.status_code == 200
+        assert "Updated Name" in resp.text  # refreshed detail
+        db_session.expire_all()
+        vendor = db_session.get(VendorCard, vc.id)
+        assert vendor.display_name == "Updated Name"
+        assert vendor.website == "https://new.com"
 
     def test_toggle_blacklist(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session, is_blacklisted=False)
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{vc.id}/toggle-blacklist")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text  # refreshed detail
+        db_session.expire_all()
+        assert db_session.get(VendorCard, vc.id).is_blacklisted is True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1365,12 +1590,16 @@ class TestCustomersList:
         db_session.commit()
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
+        assert "Acme Electronics" in resp.text
 
     def test_list_with_search(self, client: TestClient, db_session: Session):
         _make_company(db_session, name="Acme Electronics")
+        _make_company(db_session, name="Beta Industrial")
         db_session.commit()
         resp = client.get("/v2/partials/customers?search=acme")
         assert resp.status_code == 200
+        assert "Acme Electronics" in resp.text
+        assert "Beta Industrial" not in resp.text
 
 
 @pytest.fixture()
@@ -1398,6 +1627,7 @@ class TestCustomerDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
+        assert "Acme Electronics" in resp.text
         _assert_lazy_load_targets_self(resp.text, f"/v2/partials/customers/{co.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
@@ -1411,13 +1641,22 @@ class TestCustomerCRUD:
     def test_create_form(self, client: TestClient):
         resp = client.get("/v2/partials/customers/create-form")
         assert resp.status_code == 200
+        assert "Create Company" in resp.text
+        assert 'hx-post="/v2/partials/customers/create"' in resp.text
 
-    def test_create_company(self, client: TestClient):
+    def test_create_company(self, client: TestClient, db_session: Session):
         resp = client.post(
             "/v2/partials/customers/create",
             data={"name": "New Corp", "website": "https://newcorp.com"},
         )
         assert resp.status_code == 200
+        assert "New Corp" in resp.text  # detail panel for the new account
+        assert resp.headers.get("HX-Trigger") == "cdmListRefresh"
+        created = db_session.query(Company).filter_by(name="New Corp").one()
+        assert created.website == "https://newcorp.com"
+        # A default HQ site is auto-created alongside the company.
+        site = db_session.query(CustomerSite).filter_by(company_id=created.id).one()
+        assert site.site_name == "HQ"
 
     def test_create_company_no_name(self, client: TestClient):
         resp = client.post("/v2/partials/customers/create", data={"name": ""})
@@ -1435,16 +1674,20 @@ class TestCustomerCRUD:
         assert resp.text == ""
 
     def test_typeahead_valid(self, client: TestClient, db_session: Session):
-        _make_company(db_session, name="Acme Corp")
+        co = _make_company(db_session, name="Acme Corp")
+        _make_company(db_session, name="Unrelated Ltd")
         db_session.commit()
         resp = client.get("/v2/partials/customers/typeahead?q=acme")
         assert resp.status_code == 200
+        assert f'<option value="{co.id}">Acme Corp</option>' in resp.text
+        assert "Unrelated Ltd" not in resp.text
 
     def test_check_duplicate(self, client: TestClient, db_session: Session):
-        _make_company(db_session, name="Dup Check Inc")
+        co = _make_company(db_session, name="Dup Check Inc")
         db_session.commit()
         resp = client.get("/v2/partials/customers/check-duplicate?name=Dup+Check+Inc")
         assert resp.status_code == 200
+        assert f'A company named "Dup Check Inc" already exists (ID {co.id})' in resp.text
 
 
 class TestCustomerQuickCreate:
@@ -1524,8 +1767,11 @@ class TestSettings:
     """Test settings partials."""
 
     def test_settings_index(self, client: TestClient):
+        """A buyer lacks MANAGE_CONNECTORS — the default tab falls back to Profile."""
         resp = client.get("/v2/partials/settings")
         assert resp.status_code == 200
+        assert "x-data=\"{ tab: 'profile' }\"" in resp.text
+        assert 'hx-get="/v2/partials/settings/profile"' in resp.text
 
     def test_settings_sources(self, client: TestClient):
         # Sources tab retired → unified Connectors tab; old URL 302-redirects.
@@ -1539,14 +1785,21 @@ class TestSettings:
         with patch("app.services.admin_service.get_all_config", return_value={}):
             resp = client.get("/v2/partials/settings/system")
             assert resp.status_code == 200
+            assert "System Settings" in resp.text
 
-    def test_settings_profile(self, client: TestClient):
+    def test_settings_profile(self, client: TestClient, test_user: User):
         resp = client.get("/v2/partials/settings/profile")
         assert resp.status_code == 200
+        assert "Test Buyer" in resp.text
+        assert test_user.email in resp.text
 
-    def test_toggle_8x8(self, client: TestClient):
+    def test_toggle_8x8(self, client: TestClient, db_session: Session, test_user: User):
+        assert not test_user.eight_by_eight_enabled
         resp = client.post("/api/user/toggle-8x8")
         assert resp.status_code == 200
+        assert resp.headers["HX-Trigger"] == '{"showToast": "8x8 click-to-call enabled"}'
+        db_session.expire_all()
+        assert db_session.get(User, test_user.id).eight_by_eight_enabled is True
 
     def test_settings_data_ops(self, client: TestClient, test_user: User, db_session: Session):
         test_user.role = "admin"
@@ -1555,6 +1808,8 @@ class TestSettings:
             with patch("app.company_utils.find_company_dedup_candidates", return_value=[]):
                 resp = client.get("/v2/partials/settings/data-ops")
                 assert resp.status_code == 200
+                # Empty scans render the clean-dataset empty states, not error blocks.
+                assert "No duplicate vendors found at the current threshold." in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1573,6 +1828,10 @@ class TestBuyPlans:
     def test_list(self, client: TestClient, query: str):
         resp = client.get(f"/v2/partials/buy-plans{query}")
         assert resp.status_code == 200
+        # Hub shell: both lens tabs render and the body lazy-loads into #bp-hub-body.
+        assert "My Queue" in resp.text
+        assert "Pipeline" in resp.text
+        assert 'hx-target="#bp-hub-body"' in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1590,9 +1849,12 @@ class TestOfferEndpoints:
 
     def test_add_offer_form(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
+        _make_requirement(db_session, req, primary_mpn="LM317T")
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
         assert resp.status_code == 200
+        assert f'hx-post="/v2/partials/requisitions/{req.id}/add-offer"' in resp.text
+        assert "LM317T" in resp.text  # requirement selectable on the form
 
     def test_add_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1608,6 +1870,13 @@ class TestOfferEndpoints:
             },
         )
         assert resp.status_code == 200
+        assert "Arrow" in resp.text  # refreshed offers tab shows the new offer
+        offer = db_session.query(Offer).filter_by(requisition_id=req.id).one()
+        assert (offer.vendor_name, offer.mpn) == ("Arrow", "LM317T")
+        assert offer.qty_available == 500
+        assert float(offer.unit_price) == 0.55
+        assert offer.source == "manual"
+        assert offer.entered_by_id == test_user.id
 
     def test_edit_offer_form(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1615,6 +1884,8 @@ class TestOfferEndpoints:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/edit-form")
         assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text  # prefilled with current values
+        assert f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/edit" in resp.text
 
     def test_edit_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1625,6 +1896,16 @@ class TestOfferEndpoints:
             data={"vendor_name": "Arrow", "mpn": "LM317T", "qty_available": "999", "unit_price": "0.60"},
         )
         assert resp.status_code == 200
+        db_session.expire_all()
+        edited = db_session.get(Offer, offer.id)
+        assert edited.qty_available == 999
+        assert float(edited.unit_price) == 0.60
+        assert edited.updated_by_id == test_user.id
+        # Field-level audit trail is written for each change.
+        changed_fields = {
+            c.field_name for c in db_session.query(ChangeLog).filter_by(entity_type="offer", entity_id=offer.id)
+        }
+        assert {"qty_available", "unit_price"} <= changed_fields
 
     def test_delete_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1632,6 +1913,9 @@ class TestOfferEndpoints:
         db_session.commit()
         resp = client.delete(f"/v2/partials/requisitions/{req.id}/offers/{offer.id}")
         assert resp.status_code == 200
+        assert "No offers received yet" in resp.text  # tab re-renders empty
+        db_session.expire_all()
+        assert db_session.get(Offer, offer.id) is None
 
     def test_review_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1642,6 +1926,11 @@ class TestOfferEndpoints:
             data={"action": "approve"},
         )
         assert resp.status_code == 200
+        db_session.expire_all()
+        approved = db_session.get(Offer, offer.id)
+        assert approved.status == OfferStatus.APPROVED
+        assert approved.approved_by_id == test_user.id
+        assert approved.approved_at is not None
 
     def test_reconfirm_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1649,6 +1938,12 @@ class TestOfferEndpoints:
         db_session.commit()
         resp = client.post(f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/reconfirm")
         assert resp.status_code == 200
+        db_session.expire_all()
+        reconfirmed = db_session.get(Offer, offer.id)
+        assert reconfirmed.reconfirm_count == 1
+        assert reconfirmed.reconfirmed_at is not None
+        assert reconfirmed.expires_at is not None
+        assert reconfirmed.is_stale is False
 
     def test_mark_offer_sold(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1659,6 +1954,10 @@ class TestOfferEndpoints:
             data={},
         )
         assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Offer, offer.id).status == OfferStatus.SOLD
+        log = db_session.query(ChangeLog).filter_by(entity_type="offer", entity_id=offer.id, field_name="status").one()
+        assert log.new_value == "sold"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1672,12 +1971,17 @@ class TestMaterials:
     def test_materials_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/materials/workspace")
         assert resp.status_code == 200
+        assert 'id="materials-workspace"' in resp.text
+        assert "All Materials" in resp.text
 
     def test_materials_faceted(self, client: TestClient):
         with patch("app.services.faceted_search_service.search_materials_faceted", return_value=([], 0)):
             with patch("app.services.faceted_search_service.get_facet_counts", return_value={}):
                 resp = client.get("/v2/partials/materials/faceted")
                 assert resp.status_code == 200
+                # Result-count strip renders the (mocked) zero total.
+                assert '<span class="text-sm font-semibold text-gray-700 tabular-nums">0</span>' in resp.text
+                assert "results" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1691,11 +1995,29 @@ class TestTroubleTickets:
     def test_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/trouble-tickets/workspace")
         assert resp.status_code == 200
+        assert 'hx-post="/api/trouble-tickets/analyze"' in resp.text
+        assert "Analyze" in resp.text
 
     @pytest.mark.parametrize("query", ["", "?status=open"], ids=["all", "status"])
-    def test_list(self, client: TestClient, query: str):
+    def test_list(self, client: TestClient, db_session: Session, test_user: User, query: str):
+        from app.constants import TicketSource, TicketStatus
+        from app.models.trouble_ticket import TroubleTicket
+
+        db_session.add(
+            TroubleTicket(
+                ticket_number="TT-0001",
+                submitted_by=test_user.id,
+                status=TicketStatus.SUBMITTED,
+                source=TicketSource.REPORT_BUTTON,
+                title="Broken save button",
+                description="Clicking save does nothing",
+            )
+        )
+        db_session.commit()
         resp = client.get(f"/v2/partials/trouble-tickets/list{query}")
         assert resp.status_code == 200
+        # A submitted report_button ticket shows under both All and Open.
+        assert "Broken save button" in resp.text
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/trouble-tickets/999999")
@@ -1713,10 +2035,15 @@ class TestProspecting:
     def test_list(self, client: TestClient):
         resp = client.get("/v2/partials/prospecting")
         assert resp.status_code == 200
+        assert "No prospects found" in resp.text  # empty pool renders the empty state
 
     def test_stats(self, client: TestClient):
         resp = client.get("/v2/partials/prospecting/stats")
         assert resp.status_code == 200
+        # KPI tiles render with zero counts on an empty pool.
+        assert "Suggested" in resp.text
+        assert "Buyer-ready" in resp.text
+        assert "Call now" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1730,14 +2057,30 @@ class TestProactive:
     def test_list(self, client: TestClient):
         resp = client.get("/v2/partials/proactive")
         assert resp.status_code == 200
+        assert '<h1 class="h2">Proactive</h1>' in resp.text
+        assert "AI-matched vendor stock to customer purchase history" in resp.text
 
     def test_scorecard(self, client: TestClient):
         resp = client.get("/v2/partials/proactive/scorecard")
         assert resp.status_code == 200
+        assert "Proactive Scorecard" in resp.text
+        assert "Sent" in resp.text
 
-    def test_badge(self, client: TestClient):
+    def test_badge(self, client: TestClient, db_session: Session, test_user: User):
+        # No NEW matches → empty badge.
+        empty = client.get("/v2/partials/proactive/badge")
+        assert empty.status_code == 200
+        assert empty.text == ""
+        # A NEW match for this user renders the count pill.
+        from app.models import ProactiveMatch
+
+        req = _make_requisition(db_session, test_user)
+        offer = _make_offer(db_session, req, test_user)
+        db_session.add(ProactiveMatch(offer_id=offer.id, mpn="LM317T", salesperson_id=test_user.id, status="new"))
+        db_session.commit()
         resp = client.get("/v2/partials/proactive/badge")
         assert resp.status_code == 200
+        assert ">1</span>" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1754,15 +2097,21 @@ class TestInsights:
         with patch("app.services.knowledge_service.get_cached_insights", return_value=None):
             resp = client.get(f"/v2/partials/requisitions/{req.id}/insights")
             assert resp.status_code == 200
+            assert "No insights yet." in resp.text
+            assert f'hx-post="/v2/partials/requisitions/{req.id}/insights/refresh"' in resp.text
 
     def test_requisition_insights_refresh(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_insights") as mock_gen:
-            with patch("app.services.knowledge_service.get_cached_insights", return_value=None):
-                resp = client.post(f"/v2/partials/requisitions/{req.id}/insights/refresh")
-                assert resp.status_code == 200
-                mock_gen.assert_awaited_once()
+        entry = SimpleNamespace(confidence=0.9, content="Requisition insight body", expires_at=None)
+        with patch(
+            "app.services.knowledge_service.generate_insights", new_callable=AsyncMock, return_value=[entry]
+        ) as mock_gen:
+            resp = client.post(f"/v2/partials/requisitions/{req.id}/insights/refresh")
+            assert resp.status_code == 200
+            mock_gen.assert_awaited_once()
+        assert "Requisition insight body" in resp.text
+        assert "No insights yet." not in resp.text
 
     def test_vendor_insights(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
@@ -1770,15 +2119,20 @@ class TestInsights:
         with patch("app.services.knowledge_service.get_cached_vendor_insights", return_value=None):
             resp = client.get(f"/v2/partials/vendors/{vc.id}/insights")
             assert resp.status_code == 200
+            assert "No insights yet." in resp.text
+            assert f'hx-post="/v2/partials/vendors/{vc.id}/insights/refresh"' in resp.text
 
     def test_vendor_insights_refresh(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_vendor_insights") as mock_gen:
-            with patch("app.services.knowledge_service.get_cached_vendor_insights", return_value=None):
-                resp = client.post(f"/v2/partials/vendors/{vc.id}/insights/refresh")
-                assert resp.status_code == 200
-                mock_gen.assert_awaited_once()
+        entry = SimpleNamespace(confidence=0.9, content="Vendor insight body", expires_at=None)
+        with patch(
+            "app.services.knowledge_service.generate_vendor_insights", new_callable=AsyncMock, return_value=[entry]
+        ) as mock_gen:
+            resp = client.post(f"/v2/partials/vendors/{vc.id}/insights/refresh")
+            assert resp.status_code == 200
+            mock_gen.assert_awaited_once()
+        assert "Vendor insight body" in resp.text
 
     def test_company_insights(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
@@ -1786,34 +2140,45 @@ class TestInsights:
         with patch("app.services.knowledge_service.get_cached_company_insights", return_value=None):
             resp = client.get(f"/v2/partials/customers/{co.id}/insights")
             assert resp.status_code == 200
+            assert "No insights yet." in resp.text
+            assert f'hx-post="/v2/partials/customers/{co.id}/insights/refresh"' in resp.text
 
     def test_company_insights_refresh(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
         db_session.commit()
-        with patch("app.services.knowledge_service.generate_company_insights") as mock_gen:
-            with patch("app.services.knowledge_service.get_cached_company_insights", return_value=None):
-                resp = client.post(f"/v2/partials/customers/{co.id}/insights/refresh")
-                assert resp.status_code == 200
-                mock_gen.assert_awaited_once()
+        entry = SimpleNamespace(confidence=0.9, content="Company insight body", expires_at=None)
+        with patch(
+            "app.services.knowledge_service.generate_company_insights", new_callable=AsyncMock, return_value=[entry]
+        ) as mock_gen:
+            resp = client.post(f"/v2/partials/customers/{co.id}/insights/refresh")
+            assert resp.status_code == 200
+            mock_gen.assert_awaited_once()
+        assert "Company insight body" in resp.text
 
     def test_dashboard_partial_pipeline_loader_targets_self(self, client: TestClient):
         """Pipeline lazy-load must set hx-target so it does not inherit <main hx-
         target="this">."""
         resp = client.get("/v2/partials/dashboard")
         assert resp.status_code == 200
+        assert "Loading pipeline insights..." in resp.text
         _assert_lazy_load_targets_self(resp.text, "/v2/partials/dashboard/pipeline-insights")
 
     def test_pipeline_insights(self, client: TestClient):
         with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
             resp = client.get("/v2/partials/dashboard/pipeline-insights")
             assert resp.status_code == 200
+            assert "No insights yet." in resp.text
+            assert 'hx-post="/v2/partials/dashboard/pipeline-insights/refresh"' in resp.text
 
     def test_pipeline_insights_refresh(self, client: TestClient):
-        with patch("app.services.knowledge_service.generate_pipeline_insights") as mock_gen:
-            with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
-                resp = client.post("/v2/partials/dashboard/pipeline-insights/refresh")
-                assert resp.status_code == 200
-                mock_gen.assert_awaited_once()
+        entry = SimpleNamespace(confidence=0.9, content="Pipeline insight body", expires_at=None)
+        with patch(
+            "app.services.knowledge_service.generate_pipeline_insights", new_callable=AsyncMock, return_value=[entry]
+        ) as mock_gen:
+            resp = client.post("/v2/partials/dashboard/pipeline-insights/refresh")
+            assert resp.status_code == 200
+            mock_gen.assert_awaited_once()
+        assert "Pipeline insight body" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1830,39 +2195,59 @@ class TestPartsList:
         db_session.commit()
         resp = client.get("/v2/partials/parts")
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
 
     def test_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         _make_requirement(db_session, req, primary_mpn="LM317T")
+        _make_requirement(db_session, req, primary_mpn="NE555P")
         db_session.commit()
         resp = client.get("/v2/partials/parts?q=LM317T")
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
+        assert "NE555P" not in resp.text
 
     def test_list_with_status_filter(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
-        _make_requirement(db_session, req)
+        _make_requirement(db_session, req, primary_mpn="LM317T", sourcing_status=SourcingStatus.OPEN)
+        _make_requirement(db_session, req, primary_mpn="NE555P", sourcing_status=SourcingStatus.WON)
         db_session.commit()
         resp = client.get("/v2/partials/parts?status=open")
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
+        assert "NE555P" not in resp.text
 
     def test_list_sort(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
-        _make_requirement(db_session, req)
+        _make_requirement(db_session, req, primary_mpn="ZZZ999")
+        _make_requirement(db_session, req, primary_mpn="AAA111")
         db_session.commit()
         resp = client.get("/v2/partials/parts?sort=mpn&dir=asc")
         assert resp.status_code == 200
+        assert resp.text.index("AAA111") < resp.text.index("ZZZ999")
 
 
 class TestPartTabs:
     """Test part-level tab endpoints."""
 
-    @pytest.mark.parametrize("tab", ["offers", "sourcing", "req-details", "activity", "comms", "notes"])
-    def test_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str):
+    @pytest.mark.parametrize(
+        "tab, marker",
+        [
+            ("offers", "0 offers"),
+            ("sourcing", "0 vendors"),
+            ("req-details", 'id="req-details-fields"'),
+            ("activity", "0 events"),
+            ("comms", "New task or note..."),
+            ("notes", "Sales Notes"),
+        ],
+    )
+    def test_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str, marker: str):
         req = _make_requisition(db_session, test_user)
         item = _make_requirement(db_session, req)
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/tab/{tab}")
         assert resp.status_code == 200
+        assert marker in resp.text
 
 
 class TestPartHeader:
@@ -1874,6 +2259,8 @@ class TestPartHeader:
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/header")
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
+        assert f"/v2/partials/parts/{item.id}/header/edit/substitutes" in resp.text
 
     def test_header_edit_mpn(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1881,6 +2268,8 @@ class TestPartHeader:
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/brand")
         assert resp.status_code == 200
+        assert 'name="value"' in resp.text
+        assert f"/v2/partials/parts/{item.id}/header" in resp.text
 
     def test_header_save(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1891,6 +2280,9 @@ class TestPartHeader:
             data={"field": "brand", "value": "Texas Instruments"},
         )
         assert resp.status_code == 200
+        assert json.loads(resp.headers["HX-Trigger"]) == {"part-updated": {"id": item.id}}
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).brand == "Texas Instruments"
 
 
 class TestPartCellEdit:
@@ -1902,6 +2294,9 @@ class TestPartCellEdit:
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/cell/edit/target_qty")
         assert resp.status_code == 200
+        # Edit input prefilled with the current qty, saving back to the cell PATCH.
+        assert 'value="1000"' in resp.text
+        assert f'hx-patch="/v2/partials/parts/{item.id}/cell"' in resp.text
 
     def test_cell_display(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1909,6 +2304,7 @@ class TestPartCellEdit:
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/cell/display/target_qty")
         assert resp.status_code == 200
+        assert "1,000" in resp.text  # formatted current value
 
     def test_cell_save(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1919,6 +2315,9 @@ class TestPartCellEdit:
             data={"field": "target_qty", "value": "500"},
         )
         assert resp.status_code == 200
+        assert "500" in resp.text  # display cell re-renders with the new value
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).target_qty == 500
 
 
 class TestPartSpecEdit:
@@ -1930,6 +2329,8 @@ class TestPartSpecEdit:
         db_session.commit()
         resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/condition")
         assert resp.status_code == 200
+        assert f'hx-patch="/v2/partials/parts/{item.id}/save-spec"' in resp.text
+        assert '<input type="hidden" name="field" value="condition">' in resp.text
 
     def test_spec_save(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1940,6 +2341,9 @@ class TestPartSpecEdit:
             data={"field": "condition", "value": "new"},
         )
         assert resp.status_code == 200
+        assert ">new</span>" in resp.text  # spec_display fragment with the saved value
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).condition == "new"
 
 
 class TestPartNotes:
@@ -1951,15 +2355,20 @@ class TestPartNotes:
         db_session.commit()
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/notes",
-            data={"notes": "This is a test note"},
+            data={"sale_notes": "This is a test note"},
         )
         assert resp.status_code == 200
+        assert "This is a test note" in resp.text  # notes tab re-renders with the note
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).sale_notes == "This is a test note"
 
 
 class TestPartTasks:
     """Test part task create, done, reopen."""
 
     def test_create_task(self, client: TestClient, db_session: Session, test_user: User):
+        from app.models import RequisitionTask
+
         req = _make_requisition(db_session, test_user)
         item = _make_requirement(db_session, req)
         db_session.commit()
@@ -1968,6 +2377,10 @@ class TestPartTasks:
             data={"title": "Test task", "priority": "1"},
         )
         assert resp.status_code == 200
+        assert "Test task" in resp.text  # refreshed comms tab lists the task
+        task = db_session.query(RequisitionTask).filter_by(requirement_id=item.id).one()
+        assert task.title == "Test task"
+        assert task.created_by == test_user.id
 
 
 class TestPartArchive:
@@ -1979,6 +2392,9 @@ class TestPartArchive:
         db_session.commit()
         resp = client.patch(f"/v2/partials/parts/{item.id}/archive")
         assert resp.status_code == 200
+        assert json.loads(resp.headers["HX-Trigger"]) == {"part-archived": {"id": item.id}}
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
 
     def test_unarchive_part(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1986,6 +2402,9 @@ class TestPartArchive:
         db_session.commit()
         resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
         assert resp.status_code == 200
+        assert "LM317T" in resp.text  # restored part is back in the default list
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
 
     def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -1996,6 +2415,8 @@ class TestPartArchive:
             json={"requirement_ids": [item.id], "requisition_ids": []},
         )
         assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
 
     def test_bulk_unarchive(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -2006,6 +2427,9 @@ class TestPartArchive:
             json={"requirement_ids": [item.id], "requisition_ids": []},
         )
         assert resp.status_code == 200
+        assert "LM317T" in resp.text  # restored part renders in the refreshed list
+        db_session.expire_all()
+        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2016,11 +2440,23 @@ class TestPartArchive:
 class TestKnowledge:
     """Test knowledge list and create."""
 
-    def test_list(self, client: TestClient):
+    def test_list(self, client: TestClient, db_session: Session, test_user: User):
+        from app.models.knowledge import KnowledgeEntry
+
+        db_session.add(
+            KnowledgeEntry(
+                entry_type="note", content="Existing knowledge item", source="manual", created_by=test_user.id
+            )
+        )
+        db_session.commit()
         resp = client.get("/v2/partials/knowledge")
         assert resp.status_code == 200
+        assert "Knowledge Base" in resp.text
+        assert "Existing knowledge item" in resp.text
 
-    def test_create(self, client: TestClient):
+    def test_create(self, client: TestClient, db_session: Session, test_user: User):
+        from app.models.knowledge import KnowledgeEntry
+
         resp = client.post(
             "/v2/partials/knowledge",
             data={
@@ -2029,6 +2465,11 @@ class TestKnowledge:
             },
         )
         assert resp.status_code == 200
+        assert "Some knowledge content" in resp.text  # refreshed list shows the entry
+        entry = db_session.query(KnowledgeEntry).one()
+        assert entry.content == "Some knowledge content"
+        assert entry.entry_type == "note"
+        assert entry.created_by == test_user.id
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2040,8 +2481,12 @@ class TestAdminEndpoints:
     """Test admin-level endpoints (merge, import, api health)."""
 
     def test_api_health(self, client: TestClient):
+        """No app.services.connector_health module exists — the route's guarded import
+        always falls back to the empty dashboard, which must still render cleanly."""
         resp = client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
+        assert "Connector Health" in resp.text
+        assert "No connector data available." in resp.text
 
     def test_vendor_merge(self, client: TestClient, db_session: Session, test_user: User):
         test_user.role = "admin"
@@ -2050,12 +2495,14 @@ class TestAdminEndpoints:
         v2 = _make_vendor_card(db_session, normalized_name="vendor_b", display_name="Vendor B")
         db_session.commit()
         with patch("app.services.vendor_merge_service.merge_vendor_cards") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Vendor A", "reassigned": 0}
+            mock_merge.return_value = {"kept": v1.id, "reassigned": 3}
             resp = client.post(
                 "/v2/partials/admin/vendor-merge",
                 data={"keep_id": str(v1.id), "remove_id": str(v2.id)},
             )
             assert resp.status_code == 200
+        mock_merge.assert_called_once_with(v1.id, v2.id, db_session)
+        assert "Merged into Vendor A. 3 records reassigned." in resp.headers.get("HX-Trigger", "")
 
     def test_company_merge(self, client: TestClient, db_session: Session, test_user: User):
         test_user.role = "admin"
@@ -2064,12 +2511,14 @@ class TestAdminEndpoints:
         c2 = _make_company(db_session, name="Company B")
         db_session.commit()
         with patch("app.services.company_merge_service.merge_companies") as mock_merge:
-            mock_merge.return_value = {"kept_name": "Company A"}
+            mock_merge.return_value = {"kept": c1.id}
             resp = client.post(
                 "/v2/partials/admin/company-merge",
                 data={"keep_id": str(c1.id), "remove_id": str(c2.id)},
             )
             assert resp.status_code == 200
+        mock_merge.assert_called_once_with(c1.id, c2.id, db_session)
+        assert "Merged into Company A." in resp.headers.get("HX-Trigger", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2083,6 +2532,8 @@ class TestFollowUps:
     def test_list(self, client: TestClient):
         resp = client.get("/v2/partials/follow-ups")
         assert resp.status_code == 200
+        # Empty queue renders the zero-count summary line.
+        assert '<span class="font-medium text-amber-600">0</span> contacts' in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2096,6 +2547,9 @@ class TestSightingsWorkspace:
     def test_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/sightings/workspace")
         assert resp.status_code == 200
+        # Split-panel shell: lazy-loaded board table + detail panel target.
+        assert 'id="sightings-table"' in resp.text
+        assert "'/v2/partials/sightings/' + id + '/detail'" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2106,6 +2560,14 @@ class TestSightingsWorkspace:
 class TestOfferReviewQueue:
     """Test offer review queue."""
 
-    def test_review_queue(self, client: TestClient):
+    def test_review_queue(self, client: TestClient, db_session: Session, test_user: User):
+        req = _make_requisition(db_session, test_user)
+        _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
+        _make_offer(db_session, req, test_user, mpn="NE555P", status=OfferStatus.ACTIVE)
+        db_session.commit()
         resp = client.get("/v2/partials/offers/review-queue")
         assert resp.status_code == 200
+        # Only PENDING_REVIEW offers appear in the queue.
+        assert '<span class="font-medium text-amber-600">1</span> offer' in resp.text
+        assert "LM317T" in resp.text
+        assert "NE555P" not in resp.text
