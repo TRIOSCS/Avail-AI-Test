@@ -28,7 +28,7 @@ pybreaker>=1.4.1
 ruff>=0.15.21
 
 # Type checking
-mypy>=2.2.0
+mypy>=2.3.0
 sqlalchemy[mypy]>=2.0.51
 types-redis>=4.6.0.20241004
 
