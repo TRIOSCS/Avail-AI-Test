@@ -65,9 +65,19 @@ class SourcengineConnector(BaseConnector):
         #      would also crash the ``data.get`` calls below, so bail out cleanly.
         #   2. The body IS an object but carries NONE of the recognized offer keys
         #      (offers/results/data) — the envelope has changed.
-        # FLAG (Phase-4 audit): the connector's SEARCH_URL (/v1/search) no longer matches
-        # the currently-documented endpoint (/app/api/search/parts/searchpart); a LIVE
-        # Sourcengine call is required to confirm the real endpoint + response shape.
+        # VALIDATED 2026-07-15 (closes the Phase-4 audit FLAG): live probes with the
+        # configured key found the ENTIRE official API host dead — every path on
+        # https://api.sourcengine.com (including this connector's /v1/search and the
+        # documented GET /app/api/search/parts/searchpart) returns Cloudflare 530 /
+        # error 1016 (origin DNS failure), and the webapp-side path on sourcengine.com
+        # sits behind a Cloudflare browser challenge (not server-usable). Docs
+        # (dev.sourcengine.com) confirm base URL api.sourcengine.com + Bearer auth —
+        # matching this connector's auth — but tokens come from a Sourcengine account
+        # manager. The api_sources row is 'disabled'/is_active=false on the live DB
+        # (zero successes ever), so this connector is inert. Reviving it requires
+        # working access from the account manager, then re-pointing SEARCH_URL at the
+        # documented searchpart path and validating the (currently unknowable)
+        # response shape against _OFFER_KEYS.
         if not isinstance(data, dict):
             logger.warning(
                 "Sourcengine: 200 response for {} was not a JSON object ({}) — response shape may have drifted",
