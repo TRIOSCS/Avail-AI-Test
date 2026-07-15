@@ -63,11 +63,20 @@ def upgrade() -> None:
     # Offer.excess_line_item_id
     if not _column_exists("offers", "excess_line_item_id"):
         op.add_column("offers", sa.Column("excess_line_item_id", sa.Integer(), nullable=True))
+    # COLUMN-scoped FK guard (any FK covering the column counts, regardless of
+    # name): a name-scoped check would recreate a duplicate FK on a database
+    # whose constraint carries the other historical name
+    # ('fk_offers_excess_line_item_id' from the original d1a2b3c4e5f6) — see
+    # 188_canonical_offers_excess_fk.
     conn = op.get_bind()
     fk_exists = conn.execute(
         sa.text(
-            "SELECT 1 FROM pg_constraint WHERE conname = 'offers_excess_line_item_id_fkey' "
-            "AND conrelid = 'offers'::regclass"
+            "SELECT 1 FROM pg_constraint con "
+            "WHERE con.contype = 'f' "
+            "AND con.conrelid = to_regclass('offers') "
+            "AND con.confrelid = to_regclass('excess_line_items') "
+            "AND con.conkey = ARRAY[(SELECT attnum FROM pg_attribute "
+            "WHERE attrelid = con.conrelid AND attname = 'excess_line_item_id')]::smallint[]"
         )
     ).scalar()
     if not fk_exists:

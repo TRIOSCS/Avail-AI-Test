@@ -31,10 +31,11 @@ def parse_website_domain(website: str) -> str:
     Extracted from app.routers.sightings._parse_website_domain (originally the only
     validated extractor in the codebase — see that module's history) so
     app.services.company_import_service can share it instead of its own narrower
-    regex-based ``_company_domain``. app.enrichment_service._clean_domain and
-    app.utils.vendor_helpers.scrape_website_contacts's inline extractor are legacy
-    siblings not yet migrated onto this helper (each has its own behavior nuance —
-    see the TODO at their call sites).
+    regex-based ``_company_domain``. app.utils.vendor_helpers.scrape_website_contacts
+    consolidated onto this helper too (cache-key site; unparseable input falls back
+    to the raw string so junk keys stay distinct). app.enrichment_service._clean_domain
+    deliberately stays on its own looser cleanup — measured divergence with persisted
+    blast radius; see its docstring and tests/test_domain_extractor_consolidation.py.
     """
     raw = website.strip()
     try:

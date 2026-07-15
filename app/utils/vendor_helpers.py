@@ -28,6 +28,7 @@ from ..services.vendor_analysis_service import _analyze_vendor_materials
 from ..shared_constants import JUNK_DOMAINS as _JUNK_DOMAINS
 from ..shared_constants import JUNK_EMAIL_PREFIXES as _JUNK_EMAILS
 from ..vendor_utils import fuzzy_score_vendor, normalize_vendor_name
+from .normalization import parse_website_domain
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -462,24 +463,26 @@ async def scrape_website_contacts(url: str) -> dict:
     """
     from ..cache.intel_cache import get_cached, set_cached
 
-    # Normalize URL for cache key
+    # Normalize URL for fetching (pages_to_try below)
     raw_url = url
     if not url.startswith("http"):
         url = "https://" + url
     url = url.rstrip("/")
 
-    # Extract domain for cache key.
-    # TODO: not yet migrated onto the shared, validated
-    # app.utils.normalization.parse_website_domain — this is a cache-key derivation
-    # only (never persisted, never surfaced as a validated domain to the user), and
-    # its blanket .replace("www.", "") has a different (accepted) risk profile than a
-    # user-facing save path; migrating needs its own verification of the cache-key
-    # stability this function's 7-day TTL depends on. Out of scope for the
-    # company_import_service / sightings consolidation this note accompanies.
-    try:
-        domain = url.split("//", 1)[1].split("/")[0].lower().replace("www.", "")
-    except IndexError:
-        domain = raw_url.lower()
+    # Domain for the cache key — the shared, validated extractor, consolidated from
+    # the historical inline split/replace (characterization corpus:
+    # tests/test_domain_extractor_consolidation.py). The corpus showed every
+    # divergence between the two was a key-quality bug in the inline version: its
+    # blanket .replace("www.", "") mangled hosts containing the substring
+    # ("sub.www.acme.com" -> key "sub.acme.com"), an uppercase scheme collapsed
+    # every such URL onto the single key "scrape:https:", and userinfo / ports /
+    # no-path query strings leaked into keys. Unparseable input falls back to the
+    # raw string lowered — matching the old fallback — so distinct junk inputs keep
+    # distinct keys instead of all colliding on "scrape:". The key is never
+    # persisted or surfaced; the switch costs at most one 7-day cache-miss wave on
+    # the divergent key classes (a re-scrape is up to 3 HTTP GETs, fully
+    # recomputable).
+    domain = parse_website_domain(raw_url) or raw_url.lower()
     cache_key = f"scrape:{domain}"
 
     # Check cache first

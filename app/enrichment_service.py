@@ -180,15 +180,26 @@ _COUNTRY_MAP = {
 def _clean_domain(domain: str) -> str:
     """Pure string cleanup for domain: strip, lowercase, remove protocol/www.
 
-    TODO: not yet migrated onto the shared, validated
-    app.utils.normalization.parse_website_domain (urlsplit-based; rejects junk like
-    "user@host:8080" instead of naively regexing it into a bogus domain) — this
-    function's callers accept a value that's returned by AI enrichment /
-    normalize_company_input's own logic, not raw user-typed website input, so
-    swapping the extractor here needs its own behavior verification (a stricter
-    validator could start rejecting domains this pipeline currently accepts). Out of
-    scope for the company_import_service / sightings consolidation this note
-    accompanies.
+    Deliberately NOT migrated onto the shared, validated
+    app.utils.normalization.parse_website_domain — measured divergence (2026-07-15
+    characterization corpus, pinned in tests/test_domain_extractor_consolidation.py:
+    19 of 44 representative inputs differ) with real blast radius:
+
+    - Junk tokens pass through here but are REJECTED to "" by the shared extractor
+      ("unknown" -> "unknown" vs ""; "N/A" -> "n" vs ""; "example" -> "example" vs
+      ""). This function's output feeds provider lookups (normalize_company_input)
+      AND normalize_company_output's out["domain"] — i.e. what gets applied to the
+      enriched record — so flipping acceptance to rejection changes persisted
+      enrichment output, not just a transient value.
+    - Ports/userinfo are kept here, stripped there ("example.com:8080" vs
+      "example.com"; "user@example.com" vs "example.com").
+    - Trailing dot: stripped here, KEPT there ("example.com." -> "example.com" vs
+      "example.com.") — the shared extractor is strictly worse for that input.
+
+    Callers hand this AI-enrichment / normalize_company_input-derived values, not
+    raw user-typed website input, so the looser acceptance is the contract. Migrate
+    only with a deliberate decision on the junk-rejection + trailing-dot behavior,
+    and re-run the characterization corpus.
     """
     d = domain.strip().rstrip(".").rstrip("/")
     d = re.sub(r"^https?://", "", d, flags=re.IGNORECASE)
