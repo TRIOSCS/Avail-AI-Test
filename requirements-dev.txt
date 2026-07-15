@@ -130,7 +130,7 @@ mdurl==0.1.2
     # via markdown-it-py
 msgpack==1.2.1
     # via cachecontrol
-mypy==2.2.0
+mypy==2.3.0
     # via
     #   -r requirements-dev.in
     #   sqlalchemy
