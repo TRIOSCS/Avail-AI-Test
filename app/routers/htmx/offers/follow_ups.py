@@ -335,13 +335,13 @@ async def send_batch_follow_up(
     return resp
 
 
-@router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
-async def follow_up_badge(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return follow-up count badge for nav sidebar."""
+def follow_up_count(db: Session, user: User) -> int:
+    """Count stale RFQ contacts due for follow-up, scoped to what this user may act on.
+
+    The single source of truth for the follow-up count: the nav badge AND any other
+    surface that wants the number (e.g. the Sightings workspace quick-link) call this so
+    they never drift from the queue/batch predicate (see ``_build_follow_ups_ctx``).
+    """
     threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
         RfqContact.contact_type == "email",
@@ -352,7 +352,17 @@ async def follow_up_badge(
     # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
     if user.role in RESTRICTED_ROLES:
         q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
-    count = q.scalar() or 0
+    return q.scalar() or 0
+
+
+@router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
+async def follow_up_badge(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return follow-up count badge for nav sidebar."""
+    count = follow_up_count(db, user)
     if count > 0:
         return HTMLResponse(
             f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-amber-500 rounded-full">{count}</span>'

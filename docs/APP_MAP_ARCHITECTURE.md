@@ -78,7 +78,19 @@ FastAPI Middleware Stack (in order):
     │       fetched fresh, not heuristically cached stale). Guard is the response
     │       content-type ONLY (starts "text/html"), so JSON, SSE (text/event-stream), and
     │       file downloads (Content-Disposition) are untouched and streaming bodies unread.
-    └── 7. API Version Middleware (/api/v1/* -> /api/*)
+    ├── 7. API Version Middleware (/api/v1/* -> /api/*)
+    └── 8. SlowAPIMiddleware (INNERMOST — added first, in the `if settings.rate_limit_enabled`
+    │       block ~main.py:250, so it wraps closest to the route handler). This is what
+    │       actually ENFORCES the per-IP global default `rate_limit_default` (600/min,
+    │       config.py) on every route lacking its own `@limiter.limit`; without it the
+    │       decorators still work but the default is never applied. key_func is
+    │       get_remote_address — correct because uvicorn runs `--proxy-headers
+    │       --forwarded-allow-ips` (docker-compose) and fixes scope["client"] to the real
+    │       client IP before any Starlette middleware runs. Exempt (`@limiter.exempt`): the
+    │       two SSE streams (/api/events/stream, /v2/partials/search/stream — a throttled
+    │       stream would be killed) and infra probes (/health, /health/ready, /metrics).
+    │       @limiter.limit-decorated routes and static Mounts are auto-exempt. Only present
+    │       when rate_limit_enabled (config default True; tests set it False).
     │
     ▼
 Router (27 router modules)
@@ -163,6 +175,16 @@ capabilities a user is granted).
     OAuth login by an unknown email (no pre-provisioned row) is rejected at the callback
     unless the email is in `ADMIN_EMAILS`. See APP_MAP_INTERACTIONS for the allowlist +
     invite-adoption flow.
+  - **Password-login fail-boot guard** — `ENABLE_PASSWORD_LOGIN=true` (the local password
+    form, an auth bypass relative to Azure SSO) now **hard-fails boot** on any real
+    (non-`TESTING`) start unless the operator acknowledges the risk with
+    `ALLOW_PASSWORD_LOGIN_RISK=true`. The guard lives in `app/startup.py`
+    (`run_startup_migrations`, before the TESTING short-circuit) and reads `os.getenv` at
+    runtime via `auth.password_login_env_enabled` / `auth.password_login_risk_acknowledged`
+    (not the import-frozen `settings.*`). With the ack it logs a CRITICAL "bypass
+    acknowledged" line and boots; without it, it raises `RuntimeError`. `deploy.sh` mirrors
+    this as a Step 1.5 preflight (exit 5) so a missing ack fails fast instead of timing out
+    the health check. Staging sets the ack; leave it false everywhere else.
 
 ## Frontend Architecture
 
@@ -367,7 +389,14 @@ After this final split, `htmx_views.py` retains only the cross-cutting surface: 
 full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace shell
 (`GET /v2/partials/parts/workspace`), the vendor stock-list import
 (`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
-(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). It no longer defines any
+(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). `v2_page` also owns the canonical
+full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2/follow-ups`
+(→ `/v2/partials/follow-ups`) and `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
+`offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
+(`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
+once, off the table-refresh path). The Buy Plans hub (`/v2/buy-plans`) is likewise reachable
+from a **"My Buy Plans"** link on the Approvals Buy-Plans tab (`approvals/_tab_buy_plan.html`).
+It no longer defines any
 `/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,
 or requisition bulk/inline-edit — those now live in the 5 modules above.
 
@@ -420,7 +449,7 @@ authoritative reference. Static-analysis tests in
 | Resell | 11 | partials/resell/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/resell.py`) |
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
-| Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope) |
+| Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope). `list.html` (the workspace shell) carries a top **quick-links** bar with count-badged entry points to the offer-review queue + follow-up queue (both nav-swap `#main-content`, pushing their canonical URLs). |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
 | Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |

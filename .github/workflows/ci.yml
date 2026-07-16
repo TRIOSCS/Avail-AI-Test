@@ -151,6 +151,22 @@ jobs:
           python scripts/lint_assertion_theater.py tests \
             --baseline scripts/assertion_theater_baseline.txt
 
+      - name: Legacy SQLAlchemy Query-API ratchet (down-only)
+        # DOWN-only ratchet: fails if the count of legacy SQLAlchemy 1.x
+        # `<session>.query(` sites under app/ rises above the committed baseline
+        # (tests/query_api_baseline.json). Grandfathers the ~1,561 existing sites
+        # while blocking every NEW one — new code must use 2.0 style (db.get(),
+        # db.scalars(select(...)), db.execute(select(...))). Mirrored by the
+        # `query-api-ratchet` pre-commit hook and tests/test_query_api_ratchet.py;
+        # this dedicated step gives the ratchet an explicit, named CI gate (like
+        # the assertion-theater lint above) independent of test-sharding.
+        # To lower the baseline after intentionally REMOVING sites:
+        #   python -m scripts.query_api_baseline --write
+        # Shard 0 only (same rationale as pre-commit).
+        if: matrix.shard == 0
+        run: |
+          python -m scripts.query_api_baseline --check
+
       - name: No raw DDL outside Alembic
         if: matrix.shard == 0
         run: |

@@ -60,8 +60,21 @@ class Settings(BaseSettings):
     expose_api_docs: bool = False
 
     # --- Rate limiting ---
-    rate_limit_default: str = "120/minute"
+    # Global per-IP default applied by SlowAPIMiddleware to every route that lacks its
+    # own @limiter.limit. 600/minute (10 req/s sustained) is sized for an htmx-heavy
+    # admin session: several 2s status pollers (30 req/min each), 3s outreach/datasheet
+    # pollers (20/min), plus badges and the per-navigation partial fan-out routinely put
+    # a single active tab well past 120/min — the old default would 429 the user's OWN
+    # UI. 600/min absorbs that headroom while still capping abuse from one IP. Streaming
+    # (SSE) and infra (/health,/metrics) endpoints are @limiter.exempt (see app/main.py).
+    rate_limit_default: str = "600/minute"
     rate_limit_enabled: bool = True
+
+    # Explicit acknowledgement that ENABLE_PASSWORD_LOGIN (an auth bypass) is
+    # intentional on a non-prod env. Boot refuses password login without this.
+    # The boot guard reads os.getenv at runtime (auth.password_login_risk_
+    # acknowledged); this field documents the var and lets Settings load it.
+    allow_password_login_risk: bool = False
 
     # --- Cross-app alerts ---
     alert_recency_days: int = 30  # FYI alerts only count items newer than this

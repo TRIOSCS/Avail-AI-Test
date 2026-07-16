@@ -106,7 +106,7 @@ All secrets via `.env` (never committed). Key groups:
 
 ```bash
 # Azure OAuth
-AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_REDIRECT_URI
+AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID  # OAuth callback URL derived from APP_URL
 
 # Database
 DATABASE_URL=postgresql://availai:availai@db:5432/availai

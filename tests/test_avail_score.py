@@ -9,7 +9,6 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
@@ -665,75 +664,12 @@ class TestGetAvailScores:
                 assert f"{prefix}{i}_raw" in entry
 
 
-# ── API Endpoint Tests ──────────────────────────────────────────────
-
-
-@contextmanager
-def _api_client(db_session, current_user):
-    """Build a TestClient with get_db + require_user overridden, cleaning up after."""
-    from fastapi.testclient import TestClient
-
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[require_user] = lambda: current_user
-    try:
-        yield TestClient(app)
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
-
-
-@pytest.mark.skipif(
-    os.environ.get("MVP_MODE", "true").lower() == "true",
-    reason="post-MVP Performance module (MVP_MODE-gated by design)",
-)
-class TestAvailScoreAPI:
-    def test_get_avail_scores_buyer(self, db_session):
-        """GET /api/performance/avail-scores?role=buyer returns data."""
-        buyer = _make_user(db_session, "API Buyer", "buyer", "apibuyer")
-        db_session.commit()
-        compute_all_avail_scores(db_session, MONTH)
-
-        with _api_client(db_session, buyer) as client:
-            resp = client.get("/api/performance/avail-scores?role=buyer&month=2026-02")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["role"] == "buyer"
-        assert len(data["entries"]) == 1
-
-    def test_get_avail_scores_sales(self, db_session):
-        """GET /api/performance/avail-scores?role=sales returns data."""
-        sales = _make_user(db_session, "API Sales", "sales", "apisales")
-        db_session.commit()
-        compute_all_avail_scores(db_session, MONTH)
-
-        with _api_client(db_session, sales) as client:
-            resp = client.get("/api/performance/avail-scores?role=sales&month=2026-02")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["role"] == "sales"
-        assert len(data["entries"]) >= 1
-
-    def test_invalid_role_rejected(self, db_session):
-        """Invalid role returns 422."""
-        user = _make_user(db_session, "Bad Role", "buyer", "badrole")
-        db_session.commit()
-
-        with _api_client(db_session, user) as client:
-            resp = client.get("/api/performance/avail-scores?role=invalid")
-        assert resp.status_code == 422
-
-    def test_refresh_requires_admin(self, db_session):
-        """POST refresh requires admin role."""
-        buyer = _make_user(db_session, "NonAdmin", "buyer", "nonadmin")
-        db_session.commit()
-
-        with _api_client(db_session, buyer) as client:
-            resp = client.post("/api/performance/avail-scores/refresh")
-        assert resp.status_code == 403
+# NOTE: the /api/performance/* HTTP surface (avail-scores / multiplier-scores /
+# bonus-winners) was removed with app/routers/performance.py in the dead-code cleanup
+# (commit 5ea26ba0). The scoring services below remain live (nightly jobs compute and
+# persist snapshots), so the service-level tests above/below are the real coverage. The
+# former TestAvailScoreAPI class exercised the deleted endpoints and was silently hidden
+# by an MVP_MODE-defaulted skip; it has been removed rather than left as a dead skip.
 
 
 # ── Edge cases ──────────────────────────────────────────────────────

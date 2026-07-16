@@ -219,6 +219,7 @@ class TestV2FullPages:
             ("/v2/proactive", "/v2/partials/proactive"),
             ("/v2/materials", "/v2/partials/materials"),
             ("/v2/follow-ups", "/v2/partials/follow-ups"),
+            ("/v2/offers/review-queue", "/v2/partials/offers/review-queue"),
             ("/v2/sightings", "/v2/partials/sightings/workspace"),
         ],
     )
