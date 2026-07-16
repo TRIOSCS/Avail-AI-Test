@@ -33,7 +33,7 @@ app.availai.net {
 		# CSP moved to FastAPI middleware (app/main.py) for per-request nonce support
 	}
 
-	@blocked path /metrics
+	@blocked path /metrics /docs /redoc /openapi.json
 	handle @blocked {
 		respond 403
 	}

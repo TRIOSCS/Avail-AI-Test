@@ -41,6 +41,11 @@ Browser (HTMX + Alpine.js)
     │  HTTP GET/POST (HTML partials or JSON)
     ▼
 Caddy (reverse proxy, TLS termination, static files)
+    │       Edge `@blocked` matcher returns 403 for /metrics, /docs, /redoc,
+    │       /openapi.json (Caddyfile). Defense-in-depth on top of the app-layer
+    │       gate: FastAPI registers the Swagger/ReDoc/OpenAPI routes only when
+    │       `EXPOSE_API_DOCS=true` (settings.expose_api_docs, default False), so
+    │       by default those three paths 404 at the app even without Caddy.
     │
     ▼
 FastAPI Middleware Stack (in order):
