@@ -270,7 +270,8 @@ class TestEnrichMaterial:
         updated_fields omits it (a 200 with the field listed would be a silent lie)."""
         resp = client.post(
             f"/api/materials/{test_material_card.id}/enrich",
-            json={"category": "Voltage Regulator"},
+            # off-vocab (voltage regulator became a 189 alias)
+            json={"category": "Not A Commodity"},
         )
         assert resp.status_code == 200
         assert resp.json()["updated_fields"] == []

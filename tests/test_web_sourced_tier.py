@@ -170,7 +170,7 @@ def test_apply_web_sourced_off_vocab_category_rejected(db_session):
         status="web_sourced",
         description="Adj voltage regulator",
         manufacturer="Texas Instruments",
-        category="Voltage Regulator",
+        category="Not A Commodity",  # off-vocab (voltage regulator became a 189 alias)
         confidence=0.97,
         source_urls=["https://www.ti.com/product/LM317"],
         source_domains=["www.ti.com"],
