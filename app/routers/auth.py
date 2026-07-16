@@ -151,8 +151,14 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
     user.last_login_at = datetime.now(UTC)
 
-    # Bootstrap admin: auto-promote users in admin_emails env var
-    if user.email.lower() in settings.admin_emails and user.role != UserRole.ADMIN:
+    # Bootstrap admin: auto-promote users in admin_emails env var — unless they were
+    # explicitly demoted via the admin Users tab (admin_bootstrap_opted_out latched),
+    # in which case honor the demotion instead of silently re-promoting them.
+    if (
+        user.email.lower() in settings.admin_emails
+        and user.role != UserRole.ADMIN
+        and not user.admin_bootstrap_opted_out
+    ):
         user.role = UserRole.ADMIN
         logger.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
 

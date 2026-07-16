@@ -230,6 +230,46 @@ def test_callback_auto_admin_promotion(mock_http, auth_client, db_session, monke
     assert user.role == "admin"
 
 
+@patch("app.routers.auth.http")
+def test_callback_demoted_admin_not_re_promoted(mock_http, auth_client, db_session, monkeypatch):
+    """A demoted ADMIN_EMAILS user with admin_bootstrap_opted_out=True is NOT re-
+    promoted on their next login — the login bootstrap honors the opt-out latch."""
+    state = _get_oauth_state(auth_client)
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "admin_emails", ["demoted@trioscs.com"])
+
+    # Seed the post-demote state directly: a bootstrap-admin email that has been demoted
+    # to trader with the opt-out flag latched.
+    seeded = User(
+        email="demoted@trioscs.com",
+        name="Demoted User",
+        role="trader",
+        azure_id="az-demoted",
+        admin_bootstrap_opted_out=True,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(seeded)
+    db_session.commit()
+
+    mock_http.post = AsyncMock(return_value=_mock_token_response())
+    mock_http.get = AsyncMock(
+        return_value=_mock_graph_me(
+            email="demoted@trioscs.com",
+            name="Demoted User",
+            azure_id="az-demoted",
+        )
+    )
+
+    auth_client.get(f"/auth/callback?code=test-code&state={state}", follow_redirects=False)
+
+    user = db_session.query(User).filter_by(email="demoted@trioscs.com").first()
+    assert user is not None
+    assert user.role != "admin"
+    assert user.role == "trader"
+    assert user.admin_bootstrap_opted_out is True
+
+
 # ── Logout ───────────────────────────────────────────────────────────
 
 

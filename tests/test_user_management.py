@@ -204,6 +204,30 @@ class TestChangeRole:
         db_session.refresh(admin_user)
         assert admin_user.role == UserRole.ADMIN
 
+    def test_demoting_admin_latches_optout_and_repromote_clears_it(self, admin_client, db_session, admin_user):
+        """Demoting a bootstrap admin latches admin_bootstrap_opted_out=True (so the
+        login bootstrap won't re-promote them); re-promoting to admin clears it.
+
+        admin_user (the acting admin) is a second active admin, so the last-admin guard
+        does not block demoting `boot`.
+        """
+        boot = _make_user(db_session, email="boot@trioscs.com", role="admin", azure_id="az-boot")
+        assert boot.admin_bootstrap_opted_out is False
+
+        # Demote admin -> trader: latches the opt-out.
+        r = admin_client.post(f"/api/admin/users/{boot.id}/role", data={"role": "trader"})
+        assert r.status_code == 200
+        db_session.refresh(boot)
+        assert boot.role == UserRole.TRADER
+        assert boot.admin_bootstrap_opted_out is True
+
+        # Re-promote trader -> admin: clears the opt-out.
+        r = admin_client.post(f"/api/admin/users/{boot.id}/role", data={"role": "admin"})
+        assert r.status_code == 200
+        db_session.refresh(boot)
+        assert boot.role == UserRole.ADMIN
+        assert boot.admin_bootstrap_opted_out is False
+
 
 # ── Set manager (reports_to) ─────────────────────────────────────────
 
