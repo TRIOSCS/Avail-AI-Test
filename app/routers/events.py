@@ -12,12 +12,14 @@ from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import require_user
+from app.rate_limit import limiter
 from app.services.sse_broker import broker
 
 router = APIRouter(tags=["events"])
 
 
 @router.get("/api/events/stream")
+@limiter.exempt
 async def event_stream(request: Request, user=Depends(require_user)):
     """SSE endpoint — one connection per user session.
 

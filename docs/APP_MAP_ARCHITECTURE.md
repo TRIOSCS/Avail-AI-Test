@@ -73,7 +73,19 @@ FastAPI Middleware Stack (in order):
     │       fetched fresh, not heuristically cached stale). Guard is the response
     │       content-type ONLY (starts "text/html"), so JSON, SSE (text/event-stream), and
     │       file downloads (Content-Disposition) are untouched and streaming bodies unread.
-    └── 7. API Version Middleware (/api/v1/* -> /api/*)
+    ├── 7. API Version Middleware (/api/v1/* -> /api/*)
+    └── 8. SlowAPIMiddleware (INNERMOST — added first, in the `if settings.rate_limit_enabled`
+    │       block ~main.py:250, so it wraps closest to the route handler). This is what
+    │       actually ENFORCES the per-IP global default `rate_limit_default` (600/min,
+    │       config.py) on every route lacking its own `@limiter.limit`; without it the
+    │       decorators still work but the default is never applied. key_func is
+    │       get_remote_address — correct because uvicorn runs `--proxy-headers
+    │       --forwarded-allow-ips` (docker-compose) and fixes scope["client"] to the real
+    │       client IP before any Starlette middleware runs. Exempt (`@limiter.exempt`): the
+    │       two SSE streams (/api/events/stream, /v2/partials/search/stream — a throttled
+    │       stream would be killed) and infra probes (/health, /health/ready, /metrics).
+    │       @limiter.limit-decorated routes and static Mounts are auto-exempt. Only present
+    │       when rate_limit_enabled (config default True; tests set it False).
     │
     ▼
 Router (27 router modules)
