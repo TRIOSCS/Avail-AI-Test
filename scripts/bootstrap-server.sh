@@ -175,11 +175,6 @@ DATABASE_URL=postgresql://availai:availai@db:5432/availai
 
 # Security
 SECRET_KEY=${SECRET_KEY}
-
-# Behavior
-OUTREACH_COOLDOWN_DAYS=30
-POLL_INTERVAL_MINUTES=5
-AUTO_SIGHTING_CONFIDENCE=0.7
 EOF
 
     echo -e "  ${GREEN}✓ .env created${NC}"
