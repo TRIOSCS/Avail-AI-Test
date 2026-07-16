@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "191_companies_account_type_index"
-down_revision: str | None = "189_category_residue_backfill"
+down_revision: str | None = "190_admin_bootstrap_optout"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

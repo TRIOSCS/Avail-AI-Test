@@ -665,109 +665,12 @@ class TestGetMultiplierScores:
         assert "offers_total" in entry["breakdown"]
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  API ENDPOINT TESTS
-# ══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.skipif(
-    os.environ.get("MVP_MODE", "true").lower() == "true",
-    reason="post-MVP Performance module (MVP_MODE-gated by design)",
-)
-class TestMultiplierAPI:
-    def test_get_multiplier_scores_buyer(self, db_session):
-        """GET /api/performance/multiplier-scores?role=buyer returns data."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        buyer = _make_user(db_session, "API Buyer", "buyer", "apibuyermult")
-        db_session.commit()
-        compute_all_multiplier_scores(db_session, MONTH)
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: buyer
-        try:
-            client = TestClient(app)
-
-            resp = client.get("/api/performance/multiplier-scores?role=buyer&month=2026-02")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["role"] == "buyer"
-            assert len(data["entries"]) >= 1
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-
-    def test_get_bonus_winners(self, db_session):
-        """GET /api/performance/bonus-winners returns data."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        buyer = _make_user(db_session, "BW Buyer", "buyer", "bwbuyer")
-        db_session.commit()
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: buyer
-        try:
-            client = TestClient(app)
-
-            resp = client.get("/api/performance/bonus-winners?role=buyer&month=2026-02")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "winners" in data
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-
-    def test_invalid_role_rejected(self, db_session):
-        """Invalid role returns 422."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        user = _make_user(db_session, "Bad Role", "buyer", "badrolemult")
-        db_session.commit()
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: user
-        try:
-            client = TestClient(app)
-
-            resp = client.get("/api/performance/multiplier-scores?role=invalid")
-            assert resp.status_code == 422
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-
-    def test_refresh_requires_admin(self, db_session):
-        """POST refresh requires admin role."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        buyer = _make_user(db_session, "NonAdmin", "buyer", "nonadminmult")
-        db_session.commit()
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: buyer
-        try:
-            client = TestClient(app)
-
-            resp = client.post("/api/performance/multiplier-scores/refresh")
-            assert resp.status_code == 403
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
+# NOTE: the /api/performance/* HTTP surface (multiplier-scores / bonus-winners) was
+# removed with app/routers/performance.py in the dead-code cleanup (commit 5ea26ba0). The
+# scoring services exercised above remain live (nightly jobs compute and persist
+# snapshots). The former TestMultiplierAPI class hit the deleted endpoints and was
+# silently hidden by an MVP_MODE-defaulted skip; it has been removed rather than left as a
+# dead skip.
 
 
 # ══════════════════════════════════════════════════════════════════════

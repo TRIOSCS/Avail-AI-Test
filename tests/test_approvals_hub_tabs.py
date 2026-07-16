@@ -230,6 +230,20 @@ def test_buy_plan_tab_lists_pending(hub_client: TestClient, db_session: Session,
     assert "Approve" in r.text  # inline decide affordance for an eligible recipient
 
 
+def test_buy_plan_tab_links_to_personal_hub(hub_client: TestClient):
+    """The Approvals Buy-Plans tab surfaces a 'My Buy Plans' entry point to the personal
+    hub at /v2/buy-plans — the org-wide decide console's only click-through to the per-
+    user My Queue / Pipeline hub.
+
+    Renders even with no pending rows.
+    """
+    r = hub_client.get("/v2/partials/approvals/buy-plan")
+    assert r.status_code == 200
+    assert "My Buy Plans" in r.text
+    # Personal hub, NOT the ?new=1 origination picker.
+    assert 'hx-get="/v2/partials/buy-plans" hx-target="#main-content" hx-push-url="/v2/buy-plans"' in r.text
+
+
 def test_po_approval_tab_has_three_action_row(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)

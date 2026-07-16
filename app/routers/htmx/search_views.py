@@ -25,6 +25,7 @@ from ...constants import AccessKey, ApiSourceStatus, SourcingStatus
 from ...database import get_db
 from ...dependencies import require_access, require_requisition_access, require_user
 from ...models import ApiSource, Requirement, Requisition, Sighting, SourcingLead, User
+from ...rate_limit import limiter
 from ...scoring import classify_lead, explain_lead, score_unified
 from ...services.sighting_ingest import sighting_from_row
 from ...services.vendor_unavailability import apply_to_fresh_sightings
@@ -225,6 +226,7 @@ async def search_run(
 
 
 @router.get("/v2/partials/search/stream")
+@limiter.exempt
 async def search_stream(
     request: Request,
     search_id: str = Query(...),
