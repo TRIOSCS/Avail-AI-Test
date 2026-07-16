@@ -244,6 +244,17 @@ def password_login_env_enabled() -> bool:
     return os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
 
 
+def password_login_risk_acknowledged() -> bool:
+    """True iff ALLOW_PASSWORD_LOGIN_RISK is set truthy in the environment.
+
+    Explicit operator acknowledgement that the ENABLE_PASSWORD_LOGIN auth bypass
+    is intended on this (non-production) environment. Read at call time — exactly
+    like ``password_login_env_enabled`` — NOT via config.py's import-time
+    Settings, so the boot guard and its tests can toggle it per-process.
+    """
+    return os.getenv("ALLOW_PASSWORD_LOGIN_RISK", "false").lower() == "true"
+
+
 def _password_login_enabled() -> bool:
     """Return True when local/test password login should be allowed.
 

@@ -170,6 +170,16 @@ capabilities a user is granted).
     OAuth login by an unknown email (no pre-provisioned row) is rejected at the callback
     unless the email is in `ADMIN_EMAILS`. See APP_MAP_INTERACTIONS for the allowlist +
     invite-adoption flow.
+  - **Password-login fail-boot guard** — `ENABLE_PASSWORD_LOGIN=true` (the local password
+    form, an auth bypass relative to Azure SSO) now **hard-fails boot** on any real
+    (non-`TESTING`) start unless the operator acknowledges the risk with
+    `ALLOW_PASSWORD_LOGIN_RISK=true`. The guard lives in `app/startup.py`
+    (`run_startup_migrations`, before the TESTING short-circuit) and reads `os.getenv` at
+    runtime via `auth.password_login_env_enabled` / `auth.password_login_risk_acknowledged`
+    (not the import-frozen `settings.*`). With the ack it logs a CRITICAL "bypass
+    acknowledged" line and boots; without it, it raises `RuntimeError`. `deploy.sh` mirrors
+    this as a Step 1.5 preflight (exit 5) so a missing ack fails fast instead of timing out
+    the health check. Staging sets the ack; leave it false everywhere else.
 
 ## Frontend Architecture
 
