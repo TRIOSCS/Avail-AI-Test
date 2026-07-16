@@ -251,6 +251,35 @@ def test_tag_material_card_conflict_does_not_rollback_session(db_session, test_m
 # ── recalculate_entity_tag_visibility ──────────────────────────────────
 
 
+def test_visibility_silent_noop_when_thresholds_unseeded(db_session):
+    """Regression: an empty tag_threshold_config silently suppresses ALL AI tags.
+
+    This is the live-DB failure mode the startup seed (_seed_tag_threshold_config)
+    fixes: when no threshold row exists for the entity_type, every brand/commodity
+    EntityTag fails the gate and is marked invisible regardless of how dominant it is —
+    the whole tag-visibility feature does nothing. Seeding the thresholds restores it.
+    """
+    # Deliberately do NOT seed thresholds.
+    tag = _make_tag(db_session, "Murata", "brand")
+    et = EntityTag(entity_type="vendor_card", entity_id=1, tag_id=tag.id, interaction_count=1000.0)
+    db_session.add(et)
+    db_session.commit()
+
+    recalculate_entity_tag_visibility("vendor_card", 1, db_session)
+    db_session.commit()
+
+    db_session.refresh(et)
+    assert et.is_visible is False  # unseeded thresholds → invisible even at count=1000
+
+    # Now seed the thresholds (as the startup seed does on the live DB) and recompute.
+    _seed_thresholds(db_session)
+    recalculate_entity_tag_visibility("vendor_card", 1, db_session)
+    db_session.commit()
+
+    db_session.refresh(et)
+    assert et.is_visible is True  # threshold present → the tag surfaces
+
+
 def test_visibility_both_gates_pass(db_session):
     _seed_thresholds(db_session)
     tag = _make_tag(db_session, "Murata", "brand")

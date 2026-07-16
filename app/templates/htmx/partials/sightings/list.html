@@ -32,13 +32,51 @@
   </div>
 </div>
 
+{# ── Workspace quick-links ────────────────────────────────────
+   Entry points to the two buyer queues that have no bottom-nav tab of their own —
+   the offer review queue and the cross-requisition follow-up queue. Each nav-swaps
+   #main-content (not the table) and pushes its own canonical URL so a refresh/bookmark
+   lands on the same page; the pending count rides along (computed once in
+   sightings_workspace, off the hot table-refresh path). #}
+<div id="sightings-quicklinks"
+     class="flex-shrink-0 flex items-center gap-2 flex-wrap px-3 py-2 border-b border-gray-100 bg-white">
+  <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mr-1">Queues</span>
+  <a href="/v2/offers/review-queue"
+     hx-get="/v2/partials/offers/review-queue"
+     hx-target="#main-content"
+     hx-push-url="/v2/offers/review-queue"
+     class="btn btn-sm btn-secondary inline-flex items-center gap-1.5"
+     title="Verify AI-parsed offers awaiting human review">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    Review Queue
+    {% if review_count %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[11px] font-semibold">{{ review_count }}</span>{% endif %}
+  </a>
+  <a href="/v2/follow-ups"
+     hx-get="/v2/partials/follow-ups"
+     hx-target="#main-content"
+     hx-push-url="/v2/follow-ups"
+     class="btn btn-sm btn-secondary inline-flex items-center gap-1.5"
+     title="Chase stale RFQ replies across requisitions">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    </svg>
+    Follow-ups
+    {% if follow_up_count %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[11px] font-semibold">{{ follow_up_count }}</span>{% endif %}
+  </a>
+</div>
+
 {# Row click is read-only: selectReq() does GET /detail to render the cached panel.
    The only way to fire a connector search is the per-row refresh icon (table.html)
    or the Search button in the detail panel header (_macros.html::search_button);
    both POST /v2/.../refresh, gated by the 48h per-MPN cooldown in search_requirement.
    NOTE: keep prose comments OUT of the x-data attribute below — a literal double-quote
-   inside the double-quoted x-data attribute truncates it and breaks Alpine init. #}
-<div class="h-[calc(100vh-90px)] flex flex-col lg:flex-row"
+   inside the double-quoted x-data attribute truncates it and breaks Alpine init.
+   The quick-links bar (flex-shrink-0) + this split panel (flex-1) share the
+   calc(100vh-90px) column, so the workspace keeps its original viewport footprint. #}
+<div class="flex flex-col h-[calc(100vh-90px)]">
+<div class="flex-1 min-h-0 flex flex-col lg:flex-row"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('sightings-split') || '0.50'),
        dragging: false,
@@ -200,4 +238,5 @@
     <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade"
          hx-indicator="#sightings-detail-skeleton"></div>
   </div>
+</div>
 </div>

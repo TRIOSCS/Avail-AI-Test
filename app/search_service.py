@@ -95,6 +95,46 @@ def _median(values: list[float]) -> float | None:
     return s[len(s) // 2]
 
 
+def compute_market_baseline(rows: list[dict]) -> dict:
+    """Compute a read-only franchise-price summary from already-fetched market rows.
+
+    Restricted to rows where ``is_authorized is True`` (franchise / authorized
+    distributor). Uses ``_median`` for the upper-median price calculation.
+
+    Args:
+        rows: List of market-row dicts (same schema as cached_rows / vendor_card.html).
+              Each may carry ``unit_price`` (float|None), ``qty_available`` (int|None),
+              and ``is_authorized`` (bool, default False).
+
+    Returns:
+        A dict with keys:
+          - ``has_authorized``: bool — True if any authorized row exists.
+          - ``median_price``:   float|None — median of authorized unit_prices (non-None,
+                                >0 only); None when no such prices exist.
+          - ``total_stock``:    int|None — sum of authorized qty_available values (non-
+                                None only); None when no authorized row has a known qty.
+          - ``sources``:        int — count of authorized rows.
+
+    No DB access, no side-effects. Safe to call with an empty or all-non-authorized list.
+    """
+    auth_rows = [r for r in rows if r.get("is_authorized")]
+    if not auth_rows:
+        return {"has_authorized": False, "median_price": None, "total_stock": None, "sources": 0}
+
+    prices = [r["unit_price"] for r in auth_rows if r.get("unit_price") and r["unit_price"] > 0]
+    median_price = _median(prices)
+
+    known_qtys = [r["qty_available"] for r in auth_rows if r.get("qty_available") is not None]
+    total_stock: int | None = sum(known_qtys) if known_qtys else None
+
+    return {
+        "has_authorized": True,
+        "median_price": median_price,
+        "total_stock": total_stock,
+        "sources": len(auth_rows),
+    }
+
+
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes

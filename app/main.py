@@ -240,6 +240,9 @@ app = FastAPI(
     version=APP_VERSION,
     openapi_tags=OPENAPI_TAGS,
     lifespan=lifespan,
+    docs_url="/docs" if settings.expose_api_docs else None,
+    redoc_url="/redoc" if settings.expose_api_docs else None,
+    openapi_url="/openapi.json" if settings.expose_api_docs else None,
 )
 
 # Rate limiting (slowapi)
@@ -249,8 +252,14 @@ app.state.limiter = limiter
 if settings.rate_limit_enabled:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type, unused-ignore]  # slowapi handler is narrower than Starlette's protocol; slowapi absent from the hook env, so the ignore is unused there
+    # Register the middleware that actually enforces the Limiter's default_limits on
+    # every request. Without it the @limiter.limit decorators still work but the global
+    # per-IP default is never applied. The SSE streams and infra probes below are
+    # @limiter.exempt so the default neither counts nor kills them.
+    app.add_middleware(SlowAPIMiddleware)
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -555,6 +564,7 @@ app.add_middleware(PrometheusMiddleware)
 
 
 @app.get("/metrics", include_in_schema=False, dependencies=[Depends(_metrics_auth)])
+@limiter.exempt
 async def metrics_endpoint() -> Response:
     body, content_type = render_metrics()
     return Response(content=body, media_type=content_type)
@@ -686,6 +696,7 @@ async def root_sw():
 
 
 @app.get("/health")
+@limiter.exempt
 async def health(
     request: Request,
     db: Session = Depends(get_db),
@@ -760,6 +771,7 @@ async def health(
 
 
 @app.get("/health/ready")
+@limiter.exempt
 async def health_ready() -> JSONResponse:
     """Readiness probe for the P2.7 deferred startup-backfill phase.
 

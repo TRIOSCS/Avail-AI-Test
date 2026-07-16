@@ -4,8 +4,10 @@ Called by: pytest
 Depends on: app.startup, app.models (ApiSource, IcsWorkerStatus, NcWorkerStatus)
 """
 
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 from app.constants import ApiSourceStatus
 
@@ -106,6 +108,78 @@ def test_startup_seeds_nc_worker_status_singleton(db_session: Session):
     db_session.commit()
     count = db_session.query(NcWorkerStatus).count()
     assert count == 1
+
+
+def _sqlite_engine_with_threshold_table():
+    """Fresh SQLite engine with only the tag_threshold_config table (from the model)."""
+    from app.models.tags import TagThresholdConfig
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    TagThresholdConfig.__table__.create(eng)
+    return eng
+
+
+def test_seed_tag_threshold_config_seeds_six_rows():
+    """The seed inserts the 6 canonical (entity_type, tag_type) threshold rows."""
+    from app.startup import TAG_THRESHOLD_SEEDS, _seed_tag_threshold_config
+
+    eng = _sqlite_engine_with_threshold_table()
+    with eng.connect() as conn:
+        _seed_tag_threshold_config(conn)
+        rows = conn.execute(
+            text("SELECT entity_type, tag_type, min_count, min_percentage FROM tag_threshold_config ORDER BY 1, 2")
+        ).fetchall()
+
+    assert len(rows) == len(TAG_THRESHOLD_SEEDS) == 6
+    seeded = {(r[0], r[1]): (r[2], r[3]) for r in rows}
+    assert seeded == {(et, tt): (mc, mp) for et, tt, mc, mp in TAG_THRESHOLD_SEEDS}
+    # Guard against the exact live bug: every propagated entity_type must be covered.
+    assert {"vendor_card", "customer_site", "company"} <= {et for et, _tt, _mc, _mp in TAG_THRESHOLD_SEEDS}
+
+
+def test_seed_tag_threshold_config_is_idempotent():
+    """Re-running the seed (or running it against an already-seeded table) is a no-
+    op."""
+    from app.startup import _seed_tag_threshold_config
+
+    eng = _sqlite_engine_with_threshold_table()
+    with eng.connect() as conn:
+        _seed_tag_threshold_config(conn)
+        _seed_tag_threshold_config(conn)
+        count = conn.execute(text("SELECT COUNT(*) FROM tag_threshold_config")).scalar()
+    assert count == 6
+
+
+def test_seed_tag_threshold_config_preserves_operator_overrides():
+    """A row an operator already tuned is left untouched (ON CONFLICT DO NOTHING)."""
+    from app.startup import _seed_tag_threshold_config
+
+    eng = _sqlite_engine_with_threshold_table()
+    with eng.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO tag_threshold_config (entity_type, tag_type, min_count, min_percentage) "
+                "VALUES ('vendor_card', 'brand', 99, 0.99)"
+            )
+        )
+        conn.commit()
+        _seed_tag_threshold_config(conn)
+        row = conn.execute(
+            text(
+                "SELECT min_count, min_percentage FROM tag_threshold_config "
+                "WHERE entity_type='vendor_card' AND tag_type='brand'"
+            )
+        ).fetchone()
+    assert row == (99, 0.99)
+
+
+def test_seed_tag_threshold_config_fails_gracefully_when_table_missing():
+    """No tag_threshold_config table (bare DB) → _exec swallows the error, no raise."""
+    from app.startup import _seed_tag_threshold_config
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with eng.connect() as conn:
+        _seed_tag_threshold_config(conn)  # must not raise
 
 
 def test_seed_browser_workers_swallows_db_error(monkeypatch):

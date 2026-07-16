@@ -40,6 +40,12 @@ class User(Base):
     access_overrides = Column(JSON, default=dict)
     invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Latches True when an ADMIN_EMAILS bootstrap admin is explicitly demoted via the
+    # admin Users tab (change_user_role). The login bootstrap in routers/auth.py skips
+    # re-promotion while this is set, so a demoted admin stays demoted across logins.
+    # Cleared when an admin re-promotes them to admin.
+    admin_bootstrap_opted_out = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+
     # Per-rep manager / supervisor. When set, account-park alerts (and future manager-
     # routed notifications) target THIS user's specific manager instead of fanning out to
     # every MANAGER/ADMIN; when NULL the all-managers fallback is preserved. Self-

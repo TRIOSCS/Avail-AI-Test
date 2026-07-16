@@ -87,6 +87,17 @@ def test_error_response_format(client):
     assert "request_id" in data
 
 
+# ── API-docs exposure lockdown ────────────────────────────────────────
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_api_docs_disabled_by_default(client, path):
+    """Swagger UI, ReDoc, and the raw OpenAPI schema are not exposed by default
+    (expose_api_docs=False) — FastAPI never registers the routes, so they 404."""
+    resp = client.get(path)
+    assert resp.status_code == 404
+
+
 # ── Cache-Control no-store tests ──────────────────────────────────────
 
 
