@@ -1,0 +1,54 @@
+{#
+  approvals/workspace.html — Approvals Workspace shell (4-tab split-view surface).
+  One page replacing TRIO's four-tool approval stack (specs/approvals-workspace.md):
+  Sales Orders · Buy Plans · Purchase Orders · Prepayments — all four are lenses on the
+  same pipeline rooted at the sales order (the buy plan shares its single manager
+  approval). Tab pills carry per-VIEWER "waiting on you" badges (not org-wide counts);
+  the body lazy-loads the active tab partial into #ws-body.
+  Receives: active_tab (workspace tab key), tabs (tuple), tab_labels (dict),
+            counts (dict tab key -> waiting-on-you count).
+  Called by: htmx/approvals_hub.py approvals_hub_shell (GET /v2/partials/approvals).
+  Depends on: HTMX, Alpine.js, Tailwind (accent/brand palette); the per-tab bodies
+              _ws_tab_sales_orders / _ws_tab_buy_plans / _ws_tab_purchase_orders /
+              _ws_tab_prepayments (lazy-loaded into #ws-body).
+#}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
+<title hx-swap-oob="true">Approvals — AvailAI</title>
+
+<div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
+
+  {# ── Tab switcher ──
+     Highlight is Alpine-reactive (:class on tab) so the active pill updates the instant
+     a tab is clicked — before the server swap returns. Badge = items waiting on the
+     viewer (their pending decisions / worklist), so an empty badge means "nothing needs
+     you here". Active state uses accent-600 (single-accent rule). #}
+  <div class="flex flex-wrap items-center gap-2 mb-5">
+    {% for key in tabs %}
+    {% set c = counts.get(key, 0) %}
+    <button hx-get="/v2/partials/approvals?tab={{ key }}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            hx-push-url="/v2/approvals?tab={{ key }}"
+            @click="tab = '{{ key }}'"
+            :class="tab === '{{ key }}'
+                    ? 'bg-accent-600 text-white shadow-sm'
+                    : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+            class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors inline-flex items-center gap-1.5">
+      {{ tab_labels[key] }}
+      {% if c %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white/25 text-[11px] font-semibold">{{ c }}</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+
+  {# ── Lazy body ── (lazy_body macro structurally enforces the explicit
+     hx-target guard — see shared/_macros.html for the landmine rationale) #}
+  {% call lazy_body('ws-body', '/v2/partials/approvals/' ~ active_tab) %}
+    <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
+      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
+                stroke-dasharray="31.4" stroke-dashoffset="10"/>
+      </svg>
+      <span>Loading…</span>
+    </div>
+  {% endcall %}
+</div>

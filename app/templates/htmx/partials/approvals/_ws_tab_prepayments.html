@@ -1,0 +1,110 @@
+{#
+  approvals/_ws_tab_prepayments.html — Workspace "Prepayments" tab body (split view).
+  The Teams "Prepayment Approval" replacement: advance payments with the amount and
+  payee ALWAYS on the face (spec §8). LEFT: pending requests (decision queue, oldest
+  first — the engine queue is already created_at ASC) then recently resolved; search;
+  All/Mine; age chips. RIGHT: plan-detail pane in place (a card opens its plan).
+  Decide ("OK to pay") / method dropdown land in Phase 2.
+  Receives: pending_rows / resolved_rows (list[queue.RowVM]), prepay_ages
+            (dict row.id -> hours), scope, tab, export_tab, role_ctx booleans.
+  Called by: htmx/approvals_hub.py render_ws_tab_body ('prepayments').
+  Depends on: HTMX, Alpine.js, Tailwind; _ws_macros.
+#}
+{% from "htmx/partials/approvals/_ws_macros.html" import copy_chip, age_chip, ws_scope_toggle, ws_search_box, group_label %}
+
+<div class="flex flex-col lg:flex-row gap-4 items-stretch"
+     x-data="{ q: '', sel: null, mobileOpen: false }">
+
+  {# ── LEFT: prepayment queues ────────────────────────────────────── #}
+  <div class="w-full lg:w-[380px] lg:flex-shrink-0 space-y-3"
+       :class="mobileOpen ? 'hidden lg:block' : ''">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="h2">Prepayments <span class="text-sm font-normal text-gray-500">({{ pending_rows | length }})</span></h2>
+      {{ ws_scope_toggle(tab, scope) }}
+    </div>
+
+    {{ ws_search_box('Search — payee · SO# · PO#') }}
+
+    <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+      {{ group_label('Awaiting a decision — oldest first') }}
+      {% for row in pending_rows %}
+      {% set detail_url = row.subject_href or ('/v2/partials/buy-plans/' ~ row.plan_id if row.plan_id else '') %}
+      {% set haystack = ((row.beneficiary or row.subject_label or '') ~ ' ' ~ (row.so_number or '') ~ ' ' ~ (row.po_number or '')) | lower %}
+      <div data-search="{{ haystack }}"
+           x-show="!q || $el.dataset.search.includes(q.toLowerCase())"
+           @click="sel = {{ row.id }}; mobileOpen = true"
+           :class="sel === {{ row.id }} ? 'border-l-[3px] border-l-accent-500 bg-brand-50/60' : 'border-l-[3px] border-l-transparent'"
+           {% if detail_url %}hx-get="{{ detail_url }}" hx-target="#ws-pane" hx-swap="innerHTML" hx-push-url="false"{% endif %}
+           class="px-3 py-2.5 cursor-pointer hover:bg-brand-50/60 transition-colors"
+           tabindex="0" role="link" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()">
+        <div class="flex items-start justify-between gap-2">
+          {# Amount + payee always visible — this is the surface where cash is authorised. #}
+          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.beneficiary or row.subject_label }}</div>
+          {{ age_chip(prepay_ages.get(row.id, 0)) }}
+        </div>
+        <div class="text-sm font-semibold text-gray-900 tabular-nums mt-0.5">
+          ${{ '{:,.2f}'.format(row.amount | float) if row.amount is not none else '—' }}
+          <span class="text-xs font-normal text-gray-500">{{ row.currency }}</span>
+        </div>
+        <div class="text-tertiary truncate mt-0.5 flex items-center gap-1.5 flex-wrap">
+          {% if row.so_number %}{{ copy_chip('SO', row.so_number) }}{% endif %}
+          {% if row.po_number %}{{ copy_chip('PO', row.po_number) }}{% endif %}
+          <span>· requested by {{ row.requester_name }}</span>
+        </div>
+        <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          {% if row.payment_method %}<span class="badge-mini bg-blue-50 text-blue-700">{{ row.payment_method | upper }}</span>{% endif %}
+          <span class="badge-mini {% if row.test_report_sent %}bg-emerald-50 text-emerald-600{% else %}bg-amber-50 text-amber-700{% endif %}">
+            test report {{ 'sent' if row.test_report_sent else 'not sent' }}
+          </span>
+          {% if row.can_act %}<span class="badge-mini bg-amber-50 text-amber-700">Your decision</span>{% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="px-4 py-6 text-center text-sm text-brand-400">No vendor prepayments awaiting approval.</div>
+      {% endfor %}
+
+      {% if resolved_rows %}
+      {{ group_label('Recently resolved') }}
+      {% for row in resolved_rows %}
+      {% set haystack = ((row.beneficiary or row.subject_label or '') ~ ' ' ~ (row.so_number or '') ~ ' ' ~ (row.po_number or '')) | lower %}
+      <div data-search="{{ haystack }}"
+           x-show="!q || $el.dataset.search.includes(q.toLowerCase())"
+           class="px-3 py-2 text-xs">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-medium text-gray-700 truncate">{{ row.beneficiary or row.subject_label }}</span>
+          <span class="badge-mini {% if row.prepay_status == 'paid' %}bg-emerald-50 text-emerald-600{% elif row.prepay_status == 'void' %}bg-gray-50 text-gray-400{% elif row.status == 'approved' %}bg-emerald-50 text-emerald-600{% else %}bg-rose-50 text-rose-500{% endif %}">
+            {{ row.prepay_status or row.status }}
+          </span>
+        </div>
+        <div class="text-tertiary mt-0.5 tabular-nums flex items-center gap-1.5 flex-wrap">
+          ${{ '{:,.2f}'.format(row.amount | float) if row.amount is not none else '—' }}
+          {% if row.po_number %}· {{ copy_chip('PO', row.po_number) }}{% endif %}
+          {% if row.wire_reference %}· wire {{ row.wire_reference }}{% endif %}
+          {% if row.decided_by %}· by {{ row.decided_by }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+
+    <div class="flex justify-end">
+      <a hx-boost="false" href="/v2/partials/approvals/{{ export_tab }}/export?scope={{ scope }}"
+         class="text-xs text-brand-500 hover:text-accent-600" title="Download the resolved-prepayment audit feed as a CSV file">Export CSV</a>
+    </div>
+  </div>
+
+  {# ── RIGHT: detail pane ──────────────────────────────────────────── #}
+  <div class="min-w-0 flex-1 flex-col" :class="mobileOpen ? 'flex' : 'hidden lg:flex'">
+    <button x-show="mobileOpen" x-cloak @click="mobileOpen = false; sel = null"
+            class="lg:hidden flex items-center gap-1 px-3 py-2 text-xs font-medium text-accent-600">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      Back to list
+    </button>
+    <div id="ws-pane" class="flex-1 min-w-0">
+      <div class="bg-white rounded-lg border border-line-base shadow-card px-6 py-16 text-center text-sm text-brand-400 flex flex-col items-center gap-2">
+        <svg class="w-8 h-8 text-brand-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        Select a prepayment to open its plan here.
+      </div>
+    </div>
+  </div>
+</div>

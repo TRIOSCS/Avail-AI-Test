@@ -1,41 +1,48 @@
-"""routers/htmx/approvals_hub.py — Approvals hub (3-tab decide surface, HTMX + Alpine).
+"""routers/htmx/approvals_hub.py — Approvals Workspace shell + tab dispatch (HTMX +
+Alpine).
 
-The clean, org-wide "browse + decide + history, per gate type" console at /v2/approvals —
-one tab per surviving approval gate:
-  - Buy Plan   → BUY_PLAN engine gate   (services/approvals/queue helpers)
-  - PO Approval→ per-line PENDING_VERIFY (services/approvals/po_queue — NOT engine-backed)
-  - Prepayment → PREPAYMENT engine gate (services/approvals/queue helpers)
+/v2/approvals is the four-tab Approvals Workspace (specs/approvals-workspace.md):
+Sales Orders / Buy Plans / Purchase Orders / Prepayments — one page replacing TRIO's
+Teams approval forms, QP workbooks, and Planner boards. The shell renders four tab
+pills with per-viewer "waiting on you" badges; each tab body is a split-view partial
+(_ws_tab_*.html) built from services/approvals_workspace view models.
 
-Distinct from the Buy Plans hub (routers/htmx/buy_plans.py), which owns the personal
-My Queue / Pipeline surfaces at /v2/buy-plans. Origination ("New Buy Plan") is NOT here —
-it is deal creation, not a decide action.
-
-``render_tab_body`` is shared: the tab GET route and the buy_plans.py decide handlers
-(verify-po / resource / approve / prepay-decide, origin=approvals_hub) both call it so a
-one-click decision re-renders the refreshed tab in place.
+The pre-workspace 3-tab console bodies (buy-plan / po-approval / prepayment) remain
+served by the same {tab} route until Phase 6 cutover: the buy_plans.py decide handlers
+(verify-po / resource / approve / prepay-decide, origin=approvals_hub) still re-render
+them via ``render_tab_body``, and legacy ?tab= deep links map to their workspace home.
 
 Called by: app/main.py (router mount).
 Depends on: app.dependencies, app.database, app.services.approvals.{queue,po_queue},
-    ._shared (_base_ctx), app.template_env.
+    app.services.approvals_workspace, ._shared (_base_ctx), app.template_env.
 """
 
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ...constants import AccessKey, ApprovalGateType, BuyPlanLineStatus
+from ...constants import AccessKey, ApprovalGateType
 from ...database import get_db
 from ...dependencies import require_access, require_user
-from ...models import BuyPlanLine, User
+from ...models import User
 from ...services.approvals.po_queue import build_po_queue_view
 from ...services.approvals.queue import (
     buy_plan_tracking_rows,
-    pending_count_for_gate,
     pending_rows_for_gate,
     resolved_rows_for_gate,
+)
+from ...services.approvals_workspace import (
+    EXPORT_TAB_MAP,
+    WORKSPACE_TAB_LABELS,
+    WORKSPACE_TABS,
+    plan_rows,
+    po_tab,
+    prepayment_rows,
+    resolve_workspace_tab,
+    role_ctx,
+    waiting_counts,
 )
 from ...template_env import template_response
 from ...utils.csv_export import stream_csv
@@ -43,18 +50,10 @@ from ._shared import _base_ctx
 
 router = APIRouter(tags=["htmx-views"])
 
-# tab key (dash-cased URL segment) → order. One per surviving gate type.
+# Legacy 3-tab console keys (kept until Phase 6 cutover — the decide handlers'
+# origin=approvals_hub branch still re-renders these bodies).
 _TABS = ("buy-plan", "po-approval", "prepayment")
 DEFAULT_TAB = "buy-plan"
-
-
-def _po_pending_count(db: Session) -> int:
-    """Org-wide count of PENDING_VERIFY lines (the PO Approval pill)."""
-    return int(
-        db.execute(
-            select(func.count(BuyPlanLine.id)).where(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
-        ).scalar_one()
-    )
 
 
 @router.get("/v2/partials/approvals", response_class=HTMLResponse)
@@ -64,21 +63,24 @@ async def approvals_hub_shell(
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
-    """Return the Approvals hub shell (3-pill tab switcher + a lazy body).
+    """Return the Approvals Workspace shell (4-pill tab switcher + a lazy body).
 
-    The shell renders the Buy Plan / PO Approval / Prepayment pills (with org-wide pending
-    counts) + a lazy body that loads the active tab partial into ``#ap-hub-body``. Row data
-    is fetched by the body, not here. ``?tab=`` threads a deep-link / pushed tab URL.
+    The shell renders the Sales Orders / Buy Plans / Purchase Orders / Prepayments pills
+    with per-viewer "waiting on you" badge counts + a lazy body that loads the active tab
+    partial into ``#ws-body``. Row data is fetched by the body, not here. ``?tab=``
+    threads a deep-link / pushed tab URL; legacy 3-tab keys map to their workspace home.
     """
-    active_tab = tab if tab in _TABS else DEFAULT_TAB
-    counts = {
-        "buy-plan": pending_count_for_gate(db, ApprovalGateType.BUY_PLAN),
-        "po-approval": _po_pending_count(db),
-        "prepayment": pending_count_for_gate(db, ApprovalGateType.PREPAYMENT),
-    }
+    active_tab = resolve_workspace_tab(tab)
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"active_tab": active_tab, "counts": counts})
-    return template_response("htmx/partials/approvals/approvals_hub.html", ctx)
+    ctx.update(
+        {
+            "active_tab": active_tab,
+            "tabs": WORKSPACE_TABS,
+            "tab_labels": WORKSPACE_TAB_LABELS,
+            "counts": waiting_counts(db, user),
+        }
+    )
+    return template_response("htmx/partials/approvals/workspace.html", ctx)
 
 
 @router.get("/v2/partials/approvals/{tab}", response_class=HTMLResponse)
@@ -89,16 +91,55 @@ async def approvals_hub_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render one Approvals hub tab body into ``#ap-hub-body``.
+    """Render one Approvals tab body.
 
-    ``tab`` is one of buy-plan / po-approval / prepayment; any other value 404s. ``scope``
-    is the SEE-ALL / SEE-MINE toggle (default ``all`` — the full org-wide queue). The
-    two-segment prepay-decide POST (buy_plans.py) does not collide with this one-segment
-    GET converter.
+    Workspace keys (sales-orders / buy-plans / purchase-orders / prepayments) render the
+    split-view ``_ws_tab_*`` bodies into ``#ws-body``; legacy 3-tab keys still render the
+    old console bodies into ``#ap-hub-body`` (the decide handlers' origin=approvals_hub
+    branch depends on them until Phase 6). Any other value 404s. ``scope`` is the
+    All / Mine toggle (default ``all``). The two-segment prepay-decide POST
+    (buy_plans.py) does not collide with this one-segment GET converter.
     """
+    if tab in WORKSPACE_TABS:
+        return render_ws_tab_body(request, user, db, tab, scope)
     if tab not in _TABS:
         raise HTTPException(404, "Unknown approvals tab")
     return render_tab_body(request, user, db, tab, scope)
+
+
+def render_ws_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
+    """Build + render one workspace tab body (shared by the tab GET now and, from Phase
+    2 on, the decide handlers' origin=workspace re-render branches)."""
+    scope = "mine" if scope == "mine" else "all"
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(role_ctx(user))
+    ctx.update({"scope": scope, "tab": tab, "export_tab": EXPORT_TAB_MAP[tab], "user": user})
+
+    if tab in ("sales-orders", "buy-plans"):
+        ctx["rows"] = plan_rows(db, user, scope=scope)
+        template = (
+            "htmx/partials/approvals/_ws_tab_sales_orders.html"
+            if tab == "sales-orders"
+            else "htmx/partials/approvals/_ws_tab_buy_plans.html"
+        )
+        return template_response(template, ctx)
+
+    if tab == "purchase-orders":
+        from ...services.prepayment_service import prepayment_state_for_lines
+
+        po = po_tab(db, user, scope=scope)
+        ctx.update(
+            {
+                "po": po,
+                "prepay_state": prepayment_state_for_lines(db, [row.line.id for row in po.queue.pending]),
+            }
+        )
+        return template_response("htmx/partials/approvals/_ws_tab_purchase_orders.html", ctx)
+
+    # prepayments
+    pending, resolved, ages = prepayment_rows(db, user, scope=scope)
+    ctx.update({"pending_rows": pending, "resolved_rows": resolved, "prepay_ages": ages})
+    return template_response("htmx/partials/approvals/_ws_tab_prepayments.html", ctx)
 
 
 def _fmt_dt(dt: datetime | None) -> str:

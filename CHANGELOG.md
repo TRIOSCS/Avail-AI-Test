@@ -2,6 +2,18 @@
 
 All notable changes to the project are logged here.
 
+## 2026-07-16 — Approvals Workspace Phase 1: four-tab shell
+
+### Features
+- **Approvals Workspace shell (`/v2/approvals`)**: the hub now renders four tabs — Sales Orders · Buy Plans · Purchase Orders · Prepayments (specs/approvals-workspace.md) — each a split-view body with a searchable left work list (live-work default, Show-finished toggle, All/Mine scope, age chip on every row, decision queues oldest-first, "Needs your approval" grouped first) and an in-place detail pane (row click loads the plan detail; full pane anatomy lands in Phase 2). Every SO#/PO# renders as a one-tap copy chip with a "Copied ✓" flash. Panes stack on mobile with a back-to-list button (lg breakpoint, per codebase convention).
+- **Per-viewer tab badges**: pill counts are now "waiting on YOU" (decidable approvals via recipient slots, dollar-limit-aware PO verifies, the buyer's own cut-PO worklist + claim pool, own drafts) instead of org-wide pending totals — `services/approvals_workspace.waiting_counts`.
+- **New files**: `app/services/approvals_workspace.py` (view models composing the untouched existing read models), `approvals/workspace.html`, `_ws_tab_*.html` ×4, `_ws_macros.html`.
+- Legacy 3-tab console bodies stay live at their old tab keys (decide handlers' `origin=approvals_hub` re-renders) until Phase 6 cutover; legacy `?tab=` deep links map to their workspace home.
+
+### Tests
+- `test_approvals_workspace_shell.py` (17 tests): shell for manager + buyer, legacy-key mapping, all four tab bodies, legacy bodies still render, copy chips, badge parity with the old hub's counts for an unlimited manager, non-approver zero-badges, oldest-first decision ordering.
+- Updated the three legacy 3-tab shell assertions to the four-tab workspace.
+
 ## 2026-04-17 — Search “Details” did not open lead drawer
 
 ### Bug Fixes

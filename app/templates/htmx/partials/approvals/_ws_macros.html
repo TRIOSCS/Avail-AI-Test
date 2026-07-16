@@ -1,0 +1,62 @@
+{#
+  approvals/_ws_macros.html — shared macros for the Approvals Workspace tab bodies.
+  copy_chip     — one-tap Acctivate-number copy chip (SO#/PO#) with a "Copied ✓" flash.
+                  Wherever an SO# or PO# renders in the workspace, it renders as this.
+  age_chip      — row/card age pill; spec thresholds 3d amber / 7d red (§6).
+  ws_scope_toggle — All/Mine segmented toggle reloading THIS tab body (#ws-body).
+  ws_search_box — client-side list filter input (binds the split root's `q`).
+  group_label   — uppercase left-list section header ("Needs your approval" etc.).
+  Called by: _ws_tab_sales_orders / _ws_tab_buy_plans / _ws_tab_purchase_orders /
+             _ws_tab_prepayments.
+  Depends on: Alpine.js (x-data/@click), HTMX (toggle GETs), Tailwind.
+#}
+
+{# One-tap copy chip for Acctivate numbers. data-value carries the number so no quoting
+   can break the Alpine expression; @click.stop keeps the row's open-detail click intact.
+   navigator.clipboard needs a secure context — the chip still renders (and flashes) on
+   http, matching the codebase's copy affordances. #}
+{% macro copy_chip(prefix, number) -%}
+{%- if number -%}
+<button type="button" x-data="{ copied: false }" data-value="{{ number }}"
+        @click.stop="navigator.clipboard && navigator.clipboard.writeText($el.dataset.value); copied = true; setTimeout(() => copied = false, 900)"
+        class="inline-flex items-center gap-0.5 font-mono text-[inherit] font-semibold text-gray-700 hover:text-accent-600 border-b border-dashed border-brand-300 cursor-pointer whitespace-nowrap align-baseline"
+        title="Copy {{ number }} for Acctivate">
+  <span x-show="!copied">{{ prefix }} {{ number }}<span class="text-brand-300 text-[0.72em] ml-0.5">⧉</span></span>
+  <span x-show="copied" x-cloak class="text-accent-600">Copied ✓</span>
+</button>
+{%- endif -%}
+{%- endmacro %}
+
+{# Age pill: green (default) → amber at 3d → red at 7d (spec §6 aging thresholds). #}
+{% macro age_chip(hours) -%}
+<span class="badge-mini tabular-nums flex-shrink-0 {% if hours >= 168 %}bg-rose-50 text-rose-600{% elif hours >= 72 %}bg-amber-50 text-amber-700{% else %}bg-gray-50 text-gray-500{% endif %}"
+      title="Age">
+  {%- if hours < 1 -%}&lt;1h{%- elif hours < 24 -%}{{ hours | int }}h{%- else -%}{{ (hours / 24) | int }}d{%- endif -%}
+</span>
+{%- endmacro %}
+
+{# All / Mine segmented toggle — reloads this workspace tab body at the chosen scope.
+   Mirrors buy_plans/_macros.scope_toggle but targets #ws-body. #}
+{% macro ws_scope_toggle(tab_key, scope) -%}
+<div x-data="{ sc: '{{ scope }}' }" class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+  {% for val, label in [('all', 'All'), ('mine', 'Mine')] %}
+  <button hx-get="/v2/partials/approvals/{{ tab_key }}?scope={{ val }}"
+          hx-target="#ws-body" hx-swap="innerHTML" hx-push-url="false"
+          @click="sc = '{{ val }}'"
+          :class="sc === '{{ val }}' ? 'bg-accent-500 text-white shadow-sm' : 'text-brand-600 hover:text-brand-800'"
+          class="px-3 py-1 rounded-full transition-colors">{{ label }}</button>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{# Client-side search input — binds the split root's `q`; rows filter via their
+   data-search haystack (customer code · SO# · part number, spec §5). #}
+{% macro ws_search_box(placeholder) -%}
+<input type="search" x-model="q" placeholder="{{ placeholder }}"
+       class="input input-sm w-full" autocomplete="off">
+{%- endmacro %}
+
+{# Uppercase left-list section header. #}
+{% macro group_label(text) -%}
+<div class="px-1 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-brand-400">{{ text }}</div>
+{%- endmacro %}

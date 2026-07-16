@@ -1,0 +1,135 @@
+{#
+  approvals/_ws_tab_purchase_orders.html — Workspace "Purchase Orders" tab body (split view).
+  The Teams-TPO replacement lens over per-line PO execution (NOT engine-backed —
+  backend statuses stay pending_verify/verified; the UI vocabulary is Approve /
+  Approved / Pending approval, spec §5). LEFT sections:
+    - "Awaiting approval" — org-wide PENDING_VERIFY queue, oldest first;
+    - "My assigned lines" — the viewer's cut-PO worklist (PO cutters);
+    - "Re-sourcing pool"  — open claimable lines (PO cutters).
+  RIGHT: plan-detail pane in place (a line's row opens its plan). Decide/confirm forms
+  land in Phase 2.
+  Receives: po (approvals_workspace.WsPoTab), prepay_state (dict line_id->state),
+            scope, tab, export_tab, role_ctx booleans, user.
+  Called by: htmx/approvals_hub.py render_ws_tab_body ('purchase-orders').
+  Depends on: HTMX, Alpine.js, Tailwind; _ws_macros; can_verify_po_line Jinja global.
+#}
+{% from "htmx/partials/approvals/_ws_macros.html" import copy_chip, age_chip, ws_scope_toggle, ws_search_box, group_label %}
+
+<div class="flex flex-col lg:flex-row gap-4 items-stretch"
+     x-data="{ q: '', sel: null, mobileOpen: false }">
+
+  {# ── LEFT: PO worklists ─────────────────────────────────────────── #}
+  <div class="w-full lg:w-[380px] lg:flex-shrink-0 space-y-3"
+       :class="mobileOpen ? 'hidden lg:block' : ''">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="h2">Purchase Orders <span class="text-sm font-normal text-gray-500">({{ po.queue.pending_count }})</span></h2>
+      {{ ws_scope_toggle(tab, scope) }}
+    </div>
+
+    {{ ws_search_box('Search — customer · part · vendor · PO#') }}
+
+    <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+      {# ── Pending approval queue (org-wide, oldest first) ── #}
+      {{ group_label('Awaiting approval — oldest first') }}
+      {% for row in po.queue.pending %}
+      {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan.id %}
+      {% set haystack = ((row.customer_name or '') ~ ' ' ~ (row.primary_mpn or '') ~ ' ' ~ (row.vendor_name or '') ~ ' ' ~ (row.po_number or '')) | lower %}
+      <div data-search="{{ haystack }}"
+           x-show="!q || $el.dataset.search.includes(q.toLowerCase())"
+           @click="sel = 'v{{ row.line.id }}'; mobileOpen = true"
+           :class="sel === 'v{{ row.line.id }}' ? 'border-l-[3px] border-l-accent-500 bg-brand-50/60' : 'border-l-[3px] border-l-transparent'"
+           hx-get="{{ detail_url }}" hx-target="#ws-pane" hx-swap="innerHTML" hx-push-url="false"
+           class="px-3 py-2.5 cursor-pointer hover:bg-brand-50/60 transition-colors"
+           tabindex="0" role="link" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.primary_mpn or ('Line #' ~ row.line.id) }}</div>
+          {{ age_chip(row.age_hours) }}
+        </div>
+        <div class="text-tertiary truncate mt-0.5">
+          {{ row.vendor_name or '—' }}{% if row.customer_name %} · {{ row.customer_name }}{% endif %}
+        </div>
+        <div class="flex items-center gap-2 mt-1 text-xs tabular-nums text-gray-600 flex-wrap">
+          {% if row.po_number %}{{ copy_chip('PO', row.po_number) }}{% endif %}
+          <span>${{ '{:,.0f}'.format(row.amount) }}</span>
+          <span class="badge-mini bg-amber-50 text-amber-700">Pending approval</span>
+          {% if prepay_state.get(row.line.id) %}<span class="badge-mini bg-blue-50 text-blue-700">prepay {{ prepay_state.get(row.line.id) }}</span>{% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="px-4 py-6 text-center text-sm text-brand-400">No purchase orders awaiting approval.</div>
+      {% endfor %}
+
+      {# ── My assigned lines (the buyer's cut-PO worklist) ── #}
+      {% if can_cut_po %}
+      {{ group_label('My assigned lines — cut the PO in Acctivate') }}
+      {% for row in po.my_lines %}
+      {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan_id %}
+      <div data-search="{{ row.search_blob }}"
+           x-show="!q || $el.dataset.search.includes(q.toLowerCase())"
+           @click="sel = 'm{{ row.line_id }}'; mobileOpen = true"
+           :class="sel === 'm{{ row.line_id }}' ? 'border-l-[3px] border-l-accent-500 bg-brand-50/60' : 'border-l-[3px] border-l-transparent'"
+           hx-get="{{ detail_url }}" hx-target="#ws-pane" hx-swap="innerHTML" hx-push-url="false"
+           class="px-3 py-2.5 cursor-pointer hover:bg-brand-50/60 transition-colors"
+           tabindex="0" role="link" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.primary_mpn or ('Line #' ~ row.line_id) }}</div>
+          {{ age_chip(row.age_hours) }}
+        </div>
+        <div class="text-tertiary truncate mt-0.5">{{ row.vendor_name or '—' }}{% if row.customer_name %} · {{ row.customer_name }}{% endif %}</div>
+        <div class="flex items-center gap-2 mt-1 text-xs tabular-nums text-gray-600">
+          <span>${{ '{:,.0f}'.format(row.amount) }}</span>
+          <span class="badge-mini bg-sky-50 text-sky-700">Awaiting PO</span>
+        </div>
+      </div>
+      {% else %}
+      <div class="px-4 py-3 text-center text-xs text-brand-400">No lines waiting on you.</div>
+      {% endfor %}
+
+      {# ── Re-sourcing pool (claimable) ── #}
+      {% if po.pool %}
+      {{ group_label('Re-sourcing pool — claimable') }}
+      {% for row in po.pool %}
+      {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan_id %}
+      <div data-search="{{ row.search_blob }}"
+           x-show="!q || $el.dataset.search.includes(q.toLowerCase())"
+           @click="sel = 'p{{ row.line_id }}'; mobileOpen = true"
+           :class="sel === 'p{{ row.line_id }}' ? 'border-l-[3px] border-l-accent-500 bg-brand-50/60' : 'border-l-[3px] border-l-transparent'"
+           hx-get="{{ detail_url }}" hx-target="#ws-pane" hx-swap="innerHTML" hx-push-url="false"
+           class="px-3 py-2.5 cursor-pointer hover:bg-brand-50/60 transition-colors bg-rose-50/30"
+           tabindex="0" role="link" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.primary_mpn or ('Line #' ~ row.line_id) }}</div>
+          {{ age_chip(row.age_hours) }}
+        </div>
+        <div class="text-tertiary truncate mt-0.5">Vendor fell through — back in the claim pool{% if row.customer_name %} · {{ row.customer_name }}{% endif %}</div>
+        <div class="flex items-center gap-2 mt-1 text-xs tabular-nums text-gray-600">
+          <span>${{ '{:,.0f}'.format(row.amount) }}</span>
+          <span class="badge-mini bg-rose-50 text-rose-600">Re-sourcing</span>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="flex justify-end">
+      <a hx-boost="false" href="/v2/partials/approvals/{{ export_tab }}/export?scope={{ scope }}"
+         class="text-xs text-brand-500 hover:text-accent-600" title="Download the resolved-PO history as a CSV file">Export CSV</a>
+    </div>
+  </div>
+
+  {# ── RIGHT: detail pane ──────────────────────────────────────────── #}
+  <div class="min-w-0 flex-1 flex-col" :class="mobileOpen ? 'flex' : 'hidden lg:flex'">
+    <button x-show="mobileOpen" x-cloak @click="mobileOpen = false; sel = null"
+            class="lg:hidden flex items-center gap-1 px-3 py-2 text-xs font-medium text-accent-600">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      Back to list
+    </button>
+    <div id="ws-pane" class="flex-1 min-w-0">
+      <div class="bg-white rounded-lg border border-line-base shadow-card px-6 py-16 text-center text-sm text-brand-400 flex flex-col items-center gap-2">
+        <svg class="w-8 h-8 text-brand-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        Select a line to open its plan here.
+      </div>
+    </div>
+  </div>
+</div>

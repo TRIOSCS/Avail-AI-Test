@@ -833,10 +833,11 @@ class TestBuyPlanListViews:
     def test_approvals_list(self, client: TestClient):
         resp = client.get("/v2/partials/approvals", headers=HX)
         assert resp.status_code == 200
-        # Org-wide decide console: all three gate tabs render.
-        assert "Buy Plans / Sales Orders" in resp.text
-        assert "PO Approval" in resp.text
-        assert "Prepayment" in resp.text
+        # Approvals Workspace: all four tabs render.
+        assert "Sales Orders" in resp.text
+        assert "Buy Plans" in resp.text
+        assert "Purchase Orders" in resp.text
+        assert "Prepayments" in resp.text
 
 
 class TestBuyPlanDetail:

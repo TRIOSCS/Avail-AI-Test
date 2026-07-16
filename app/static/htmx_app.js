@@ -1150,12 +1150,17 @@ htmx.on('htmx:afterSwap', function(evt) {
     // picker here, whose :checked/@change checkboxes bind to the surrounding prepare
     // x-data scope and whose new row carries an x-init auto-select; without re-init the
     // checkboxes go inert and the new contact never selects (Send stays disabled).
+    // ws-body / ws-pane — the Approvals Workspace tab bodies and detail pane are
+    // swapped regions full of x-data components (search filter, copy chips, split
+    // state); without re-init their directives go inert after a scope/tab re-render.
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
         if (
             t.id === 'lead-drawer-content' ||
             t.id === 'rfq-affinity-section' ||
             t.id === 'settings-content' ||
-            t.id === 'proactive-contact-list'
+            t.id === 'proactive-contact-list' ||
+            t.id === 'ws-body' ||
+            t.id === 'ws-pane'
         ) {
             Alpine.initTree(t);
         }

@@ -201,17 +201,18 @@ def _pending_prepay_request(db: Session, bp: BuyPlan, user: User) -> tuple[Appro
 # ── Shell + tab rendering ────────────────────────────────────────────────
 
 
-def test_shell_renders_three_tabs(hub_client: TestClient):
+def test_shell_renders_four_workspace_tabs(hub_client: TestClient):
+    """Phase 1 workspace rebuild: /v2/approvals is the four-tab workspace shell."""
     r = hub_client.get("/v2/partials/approvals")
     assert r.status_code == 200
-    for key in ("buy-plan", "po-approval", "prepayment"):
+    for key in ("sales-orders", "buy-plans", "purchase-orders", "prepayments"):
         assert f"?tab={key}" in r.text
-    assert 'hx-target="#ap-hub-body"' in r.text
+    assert 'hx-target="#ws-body"' in r.text
 
 
-def test_shell_defaults_to_buy_plan_tab(hub_client: TestClient):
+def test_shell_defaults_to_sales_orders_tab(hub_client: TestClient):
     r = hub_client.get("/v2/partials/approvals")
-    assert "/v2/partials/approvals/buy-plan" in r.text  # lazy body loads buy-plan by default
+    assert "/v2/partials/approvals/sales-orders" in r.text  # lazy body default
 
 
 def test_unknown_tab_404s(hub_client: TestClient):

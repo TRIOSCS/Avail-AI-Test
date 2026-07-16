@@ -1,0 +1,102 @@
+{#
+  approvals/_ws_tab_sales_orders.html — Workspace "Sales Orders" tab body (split view).
+  LEFT: the work list — "Needs your approval" first (oldest on top) for eligible
+  approvers, then everything else; live-work default (completed/cancelled behind the
+  Show-finished toggle); client-side search (customer code · SO# · part); All/Mine;
+  age chip on every row. RIGHT: detail pane — a row click loads the plan detail
+  partial in place (Phase 2 replaces this with the full SO pane anatomy).
+  Receives: rows (list[approvals_workspace.WsPlanRow]), scope, tab, export_tab,
+            is_manager_admin/can_cut_po/is_sales_tier (role_ctx booleans).
+  Called by: htmx/approvals_hub.py render_ws_tab_body ('sales-orders').
+  Depends on: HTMX, Alpine.js, Tailwind; _ws_macros (copy_chip/age_chip/toggles);
+              shared status_badge macro.
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/approvals/_ws_macros.html" import copy_chip, age_chip, ws_scope_toggle, ws_search_box, group_label %}
+
+{% set decidable = rows | selectattr('can_decide') | list %}
+{% set tracking = rows | rejectattr('can_decide') | list %}
+
+<div class="flex flex-col lg:flex-row gap-4 items-stretch"
+     x-data="{ q: '', showDone: false, sel: null, mobileOpen: false }">
+
+  {# ── LEFT: work list ─────────────────────────────────────────────── #}
+  <div class="w-full lg:w-[380px] lg:flex-shrink-0 space-y-3"
+       :class="mobileOpen ? 'hidden lg:block' : ''">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="h2">Sales Orders <span class="text-sm font-normal text-gray-500">({{ rows | length }})</span></h2>
+      <div class="flex items-center gap-2">
+        {# New sales order — the existing origination picker (order type lands here in Phase 2). #}
+        <a hx-get="/v2/partials/buy-plans?new=1" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+           class="btn-primary btn-sm inline-flex items-center gap-1 cursor-pointer" title="Start a new sales order">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          New
+        </a>
+        {{ ws_scope_toggle(tab, scope) }}
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      {{ ws_search_box('Search — customer · SO# · part') }}
+      <label class="inline-flex items-center gap-1.5 text-xs text-brand-600 whitespace-nowrap cursor-pointer">
+        <input type="checkbox" x-model="showDone" class="rounded border-brand-300">
+        Show finished
+      </label>
+    </div>
+
+    {% if rows %}
+    <div class="bg-white rounded-lg border border-line-base shadow-card divide-y divide-line-subtle overflow-hidden">
+      {% if decidable %}{{ group_label('Needs your approval') }}{% endif %}
+      {% for row in decidable + tracking %}
+      {% if not row.can_decide and loop.index0 == decidable | length and decidable %}{{ group_label('Everything else') }}{% endif %}
+      {% set detail_url = '/v2/partials/buy-plans/' ~ row.plan_id %}
+      <div data-search="{{ row.search_blob }}" data-live="{{ '1' if row.is_live else '0' }}"
+           x-show="(!q || $el.dataset.search.includes(q.toLowerCase())) && (showDone || $el.dataset.live === '1')"
+           @click="sel = {{ row.plan_id }}; mobileOpen = true"
+           :class="sel === {{ row.plan_id }} ? 'border-l-[3px] border-l-accent-500 bg-brand-50/60' : 'border-l-[3px] border-l-transparent'"
+           hx-get="{{ detail_url }}" hx-target="#ws-pane" hx-swap="innerHTML" hx-push-url="false"
+           class="px-3 py-2.5 cursor-pointer hover:bg-brand-50/60 transition-colors"
+           tabindex="0" role="link" @keydown.enter.prevent="$el.click()" @keydown.space.prevent="$el.click()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold text-gray-900 truncate">{{ row.customer_name or ('Plan #' ~ row.plan_id) }}</div>
+          {{ age_chip(row.age_hours) }}
+        </div>
+        <div class="text-tertiary truncate mt-0.5">
+          {% if row.so_number %}{{ copy_chip('SO', row.so_number) }} · {% endif -%}
+          Plan #{{ row.plan_id }} · {{ row.part_count }} part{{ 's' if row.part_count != 1 }}
+          {%- if row.amount is not none %} · <span class="tabular-nums">${{ '{:,.0f}'.format(row.amount | float) }}</span>{% endif %}
+        </div>
+        <div class="flex items-center gap-1.5 mt-1.5">
+          {{ status_badge(row.status) }}
+          {% if row.can_decide %}<span class="badge-mini bg-amber-50 text-amber-700">Your decision</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg border border-line-base shadow-card px-4 py-8 text-center text-sm text-brand-400">
+      {% if scope == 'mine' %}You have no sales orders yet — start one with New.{% else %}No sales orders yet.{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="flex justify-end">
+      <a hx-boost="false" href="/v2/partials/approvals/{{ export_tab }}/export?scope={{ scope }}"
+         class="text-xs text-brand-500 hover:text-accent-600" title="Download this list as a CSV file">Export CSV</a>
+    </div>
+  </div>
+
+  {# ── RIGHT: detail pane ──────────────────────────────────────────── #}
+  <div class="min-w-0 flex-1 flex-col" :class="mobileOpen ? 'flex' : 'hidden lg:flex'">
+    <button x-show="mobileOpen" x-cloak @click="mobileOpen = false; sel = null"
+            class="lg:hidden flex items-center gap-1 px-3 py-2 text-xs font-medium text-accent-600">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      Back to list
+    </button>
+    <div id="ws-pane" class="flex-1 min-w-0">
+      <div class="bg-white rounded-lg border border-line-base shadow-card px-6 py-16 text-center text-sm text-brand-400 flex flex-col items-center gap-2">
+        <svg class="w-8 h-8 text-brand-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        {% if decidable %}Select an order — your oldest pending approval is at the top.{% else %}Select a sales order to see its detail here.{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
