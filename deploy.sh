@@ -72,6 +72,18 @@ if [ "$NO_COMMIT" = false ]; then
     fi
 fi
 
+# Step 1.5: Preflight — refuse to deploy a password-login backdoor without an
+# explicit risk acknowledgement in .env. The app also fail-boots on this
+# (app/startup.py), but asserting here fails fast with a clear message instead
+# of a health-check timeout. Staging sets ALLOW_PASSWORD_LOGIN_RISK=true → passes.
+if grep -qiE '^[[:space:]]*ENABLE_PASSWORD_LOGIN[[:space:]]*=[[:space:]]*true' .env 2>/dev/null \
+   && ! grep -qiE '^[[:space:]]*ALLOW_PASSWORD_LOGIN_RISK[[:space:]]*=[[:space:]]*true' .env 2>/dev/null; then
+    echo "ERROR: ENABLE_PASSWORD_LOGIN=true but ALLOW_PASSWORD_LOGIN_RISK is not true in .env." >&2
+    echo "Password login is an auth bypass. Set ALLOW_PASSWORD_LOGIN_RISK=true to acknowledge" >&2
+    echo "(non-production environments only), or disable ENABLE_PASSWORD_LOGIN." >&2
+    exit 5
+fi
+
 # Step 2: Rebuild app with a unique BUILD_COMMIT each deploy.
 # No --no-cache: the Dockerfile consumes BUILD_COMMIT right before the source COPYs (in
 # BOTH stages), so the template/static COPYs + the Vite build + the app COPY ALWAYS

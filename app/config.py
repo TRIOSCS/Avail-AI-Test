@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     rate_limit_default: str = "120/minute"
     rate_limit_enabled: bool = True
 
+    # Explicit acknowledgement that ENABLE_PASSWORD_LOGIN (an auth bypass) is
+    # intentional on a non-prod env. Boot refuses password login without this.
+    # The boot guard reads os.getenv at runtime (auth.password_login_risk_
+    # acknowledged); this field documents the var and lets Settings load it.
+    allow_password_login_risk: bool = False
+
     # --- Cross-app alerts ---
     alert_recency_days: int = 30  # FYI alerts only count items newer than this
     alerts_epoch: str = ""  # ISO datetime; FYI items dated before this never count (default: no epoch floor)

@@ -116,13 +116,26 @@ def run_startup_migrations() -> None:
 
     Safe to call on every app boot.
     """
-    # Warn if password login backdoor is active outside test mode
-    from .routers.auth import password_login_env_enabled
+    # Fail-boot guard: password login is an auth bypass. On a real (non-TESTING)
+    # boot it may run ONLY when the operator has explicitly acknowledged the risk
+    # via ALLOW_PASSWORD_LOGIN_RISK=true (staging sets this). Otherwise refuse to
+    # start so the bypass can never reach an unacknowledged environment. Read via
+    # the runtime os.getenv helpers (not settings.*, which froze at import) and
+    # keep the auth import function-local (avoids import-time capture and an
+    # auth-router circular import).
+    from .routers.auth import password_login_env_enabled, password_login_risk_acknowledged
 
     if password_login_env_enabled() and not os.getenv("TESTING"):
+        if not password_login_risk_acknowledged():
+            raise RuntimeError(
+                "ENABLE_PASSWORD_LOGIN=true creates an authentication bypass and is "
+                "refused at boot. Disable it, or set ALLOW_PASSWORD_LOGIN_RISK=true to "
+                "acknowledge the risk (non-production environments only, e.g. staging)."
+            )
         logger.critical(
-            "ENABLE_PASSWORD_LOGIN is active in non-test mode. "
-            "This creates an authentication bypass. Disable before production use."
+            "ENABLE_PASSWORD_LOGIN is active in non-test mode with "
+            "ALLOW_PASSWORD_LOGIN_RISK=true — authentication bypass acknowledged. "
+            "Acceptable only on non-production environments."
         )
 
     if os.environ.get("TESTING"):
