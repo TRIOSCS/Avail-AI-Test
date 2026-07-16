@@ -41,6 +41,7 @@ from ...models import (
     VendorCard,
 )
 from ...services import clay_oauth
+from ...services.connector_health import get_health_dashboard
 from ...template_env import template_response
 from ._shared import _base_ctx
 
@@ -994,14 +995,8 @@ async def admin_api_health(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Return connector health dashboard."""
-    try:
-        from ...services.connector_health import get_health_dashboard
-
-        health = get_health_dashboard(db)
-    except (ImportError, RuntimeError, Exception):
-        health = {"connectors": [], "overall_status": "unknown"}
-
+    """Return the connector health dashboard assembled from api_sources telemetry."""
+    health = get_health_dashboard(db)
     return template_response(
         "htmx/partials/admin/api_health.html",
         {"request": request, "health": health},

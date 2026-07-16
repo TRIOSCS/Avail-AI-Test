@@ -29,6 +29,7 @@ from ...models.config import ApiUsageLog, GraphSubscription
 from ...rate_limit import limiter
 from ...schemas.admin import SourceCredentialsUpdate
 from ...services.admin_service import get_all_config, get_system_health, set_config_value
+from ...services.connector_health import effective_status
 
 router = APIRouter(tags=["admin"])
 
@@ -202,29 +203,21 @@ def api_connector_health(
     sources = db.query(ApiSource).order_by(ApiSource.name).all()
     result = []
     for src in sources:
-        total = src.total_searches or 0
-        total_results = src.total_results or 0
-        errors_24h = src.error_count_24h or 0
-        # Auto-flag degraded: >50% failure rate over last 24h (min 4 searches)
-        status = src.status or ApiSourceStatus.PENDING
-        if errors_24h >= 4 and total > 0:
-            recent_success = max(0, total - errors_24h)
-            if errors_24h > recent_success:
-                status = ApiSourceStatus.DEGRADED
         result.append(
             {
                 "id": src.id,
                 "name": src.name,
                 "display_name": src.display_name,
-                "status": status,
+                # Shared auto-degrade heuristic (connector_health service)
+                "status": effective_status(src),
                 "is_active": src.is_active,
                 "avg_response_ms": src.avg_response_ms or 0,
-                "total_searches": total,
-                "total_results": total_results,
+                "total_searches": src.total_searches or 0,
+                "total_results": src.total_results or 0,
                 "last_success": _iso(src.last_success),
                 "last_error": src.last_error,
                 "last_error_at": _iso(src.last_error_at),
-                "error_count_24h": errors_24h,
+                "error_count_24h": src.error_count_24h or 0,
             }
         )
     return {"connectors": result}
@@ -237,7 +230,12 @@ def api_health_dashboard(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Full API health dashboard data -- status, usage, recent check history."""
+    """Full API health dashboard data -- status, usage, recent check history.
+
+    `status` is the effective status (shared auto-degrade heuristic) so this endpoint
+    can never disagree with /api/admin/connector-health or the HTMX health partial
+    about the same connector.
+    """
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
     cutoff_24h = datetime.now(UTC) - timedelta(hours=24)
 
@@ -268,7 +266,7 @@ def api_health_dashboard(
                 "display_name": src.display_name,
                 "category": src.category,
                 "source_type": src.source_type,
-                "status": src.status,
+                "status": effective_status(src),
                 "is_active": src.is_active,
                 "last_success": _iso(src.last_success),
                 "last_error": src.last_error,

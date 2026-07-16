@@ -738,9 +738,11 @@ class TestProactiveRoutes:
 
 class TestAdminRoutes:
     def test_admin_api_health(self, admin_client, db_session: Session):
-        # Route catches ImportError and returns fallback — no patch needed
+        # Empty api_sources table → the connector_health service renders the empty state
         resp = admin_client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
+        assert "Connector Health" in resp.text
+        assert "No connector data available." in resp.text
 
     def test_vendor_merge(self, admin_client, db_session: Session):
         v1 = VendorCard(

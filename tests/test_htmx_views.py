@@ -10,7 +10,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -27,6 +27,7 @@ from app.constants import (
     UserRole,
 )
 from app.models import (
+    ApiSource,
     BuyPlan,
     ChangeLog,
     Company,
@@ -162,6 +163,22 @@ def _make_buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
     db.add(bp)
     db.flush()
     return bp
+
+
+def _make_api_source(db: Session, **kw) -> ApiSource:
+    defaults = dict(
+        name="digikey",
+        display_name="DigiKey",
+        category="distributor",
+        source_type="api",
+        status="live",
+        is_active=True,
+    )
+    defaults.update(kw)
+    src = ApiSource(**defaults)
+    db.add(src)
+    db.flush()
+    return src
 
 
 def _assert_lazy_load_targets_self(html: str, hx_get: str) -> None:
@@ -1787,6 +1804,21 @@ class TestSettings:
             assert resp.status_code == 200
             assert "System Settings" in resp.text
 
+    def test_settings_system_embeds_api_health_loader(self, client: TestClient, test_user: User, db_session: Session):
+        """The System tab hosts the Connector Health panel as a lazy loader: explicit
+        hx-target (so the swap doesn't inherit #main-content's hx-target="this") and
+        hx-push-url="false" (hx-push-url is inherited from the tab nav)."""
+        test_user.role = "admin"
+        db_session.commit()
+
+        resp = client.get("/v2/partials/settings/system")
+        assert resp.status_code == 200
+        assert 'hx-get="/v2/partials/admin/api-health"' in resp.text
+        loader = resp.text.split('hx-get="/v2/partials/admin/api-health"')[1].split(">")[0]
+        assert 'hx-target="this"' in loader
+        assert 'hx-trigger="load"' in loader
+        assert 'hx-push-url="false"' in loader
+
     def test_settings_profile(self, client: TestClient, test_user: User):
         resp = client.get("/v2/partials/settings/profile")
         assert resp.status_code == 200
@@ -2480,13 +2512,146 @@ class TestKnowledge:
 class TestAdminEndpoints:
     """Test admin-level endpoints (merge, import, api health)."""
 
-    def test_api_health(self, client: TestClient):
-        """No app.services.connector_health module exists — the route's guarded import
-        always falls back to the empty dashboard, which must still render cleanly."""
+    def test_api_health_renders_connector_rows(self, client: TestClient, db_session: Session):
+        """Seeded api_sources rows render as real per-connector rows: name, status
+        badge, last success, last error, search/error counts, and response time —
+        plus the overall header badge (live + error mix rolls up to Degraded)."""
+        now = datetime.now(UTC)
+        _make_api_source(
+            db_session,
+            name="digikey",
+            display_name="DigiKey",
+            status="live",
+            last_success=now - timedelta(minutes=5),
+            avg_response_ms=142,
+            total_searches=100,
+            error_count_24h=0,
+        )
+        _make_api_source(
+            db_session,
+            name="mouser",
+            display_name="Mouser",
+            status="error",
+            last_error="HTTP 401 key expired",
+            last_error_at=now - timedelta(hours=1),
+            error_count_24h=3,
+            avg_response_ms=880,
+            total_searches=50,
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/admin/api-health")
+        assert resp.status_code == 200
+        assert "Connector Health" in resp.text
+        assert "No connector data available." not in resp.text
+        # Healthy row — name, Live badge, last-success relative time, response time,
+        # lifetime search count (denominator context for the error count)
+        assert "DigiKey" in resp.text
+        assert "Live" in resp.text
+        assert "5m ago" in resp.text
+        assert "142 ms" in resp.text
+        assert "100 searches" in resp.text
+        # Failing row — name, Error badge, stored error message, 24h error count
+        assert "Mouser" in resp.text
+        assert "Error" in resp.text
+        assert "HTTP 401 key expired" in resp.text
+        assert "3 errors (24h)" in resp.text
+        # Overall header badge: live + error mix → Degraded. Neither row's own badge
+        # is Degraded, so the single occurrence must be the roll-up.
+        assert resp.text.count("Degraded") == 1
+
+    def test_api_health_degraded_heuristic(self, client: TestClient, db_session: Session):
+        """A source with >=4 errors in 24h and more failures than successes renders as
+        Degraded even though its stored status is still 'live' (shared heuristic with
+        /api/admin/connector-health).
+
+        An all-degraded fleet is still serving traffic, so the overall badge is Degraded
+        — never Down.
+        """
+        _make_api_source(
+            db_session,
+            name="flaky",
+            display_name="Flaky Source",
+            status="live",
+            total_searches=10,
+            error_count_24h=8,
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/admin/api-health")
+        assert resp.status_code == 200
+        assert "Flaky Source" in resp.text
+        # Row badge + overall header badge — the lone degraded source IS the fleet.
+        assert resp.text.count("Degraded") == 2
+        assert "Down" not in resp.text
+
+    def test_api_health_overall_down_requires_error(self, client: TestClient, db_session: Session):
+        """Overall Down needs at least one ERROR-status active source with none live.
+
+        An inactive live source must not rescue the roll-up (roll-up counts active
+        sources only), though its row still renders.
+        """
+        _make_api_source(db_session, name="dead", display_name="Dead Source", status="error")
+        _make_api_source(
+            db_session,
+            name="benched",
+            display_name="Benched Source",
+            status="live",
+            is_active=False,
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/admin/api-health")
+        assert resp.status_code == 200
+        # Both rows render (inactive included), but only the active error source rolls up.
+        assert "Dead Source" in resp.text
+        assert "Benched Source" in resp.text
+        assert resp.text.count("Down") == 1
+
+    def test_api_health_error_plus_serving_degraded_is_degraded_not_down(self, client: TestClient, db_session: Session):
+        """A hard-error source mixed with a heuristic-degraded (still-serving) source
+        rolls up to Degraded, not Down — Down requires that NOTHING is serving.
+
+        The degraded source is stored-live but auto-flagged (8 of 10 recent calls
+        errored).
+        """
+        _make_api_source(db_session, name="dead", display_name="Dead Source", status="error")
+        _make_api_source(
+            db_session,
+            name="flaky",
+            display_name="Flaky Source",
+            status="live",
+            total_searches=10,
+            error_count_24h=8,
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/admin/api-health")
+        assert resp.status_code == 200
+        assert "Dead Source" in resp.text
+        assert "Flaky Source" in resp.text
+        # Overall badge is Degraded (something still serves); never Down.
+        assert "Down" not in resp.text
+        assert "Degraded" in resp.text
+
+    def test_api_health_empty(self, client: TestClient):
+        """No api_sources rows → the dashboard renders its genuine empty state and the
+        overall badge reports Unknown."""
         resp = client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
         assert "Connector Health" in resp.text
         assert "No connector data available." in resp.text
+        assert "Unknown" in resp.text
+
+    def test_api_health_non_admin_403(self, nonadmin_client: TestClient, db_session: Session):
+        """require_admin gates the dashboard — a buyer gets 403 and no connector
+        data."""
+        _make_api_source(db_session, name="digikey", display_name="DigiKey")
+        db_session.commit()
+
+        resp = nonadmin_client.get("/v2/partials/admin/api-health")
+        assert resp.status_code == 403
+        assert "DigiKey" not in resp.text
 
     def test_vendor_merge(self, client: TestClient, db_session: Session, test_user: User):
         test_user.role = "admin"

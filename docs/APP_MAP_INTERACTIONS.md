@@ -5277,7 +5277,11 @@ minutes."}` (the global handler toasts it) — and on success returns an HX-Trig
 restart." note (`email_mining_enabled` resolves per-request, so it has none). Internal
 watermark keys (`teams_calls_last_poll`, `8x8_last_poll`, `proactive_last_scan`,
 `SYSTEM_JOB_STATE_KEYS`) are never editable — surfaced read-only in a collapsed
-"Job state (read-only)" disclosure.
+"Job state (read-only)" disclosure. The tab also lazy-loads the read-only Connector
+Health panel (`hx-get /v2/partials/admin/api-health`, `hx-trigger="load"`, explicit
+`hx-target="this"`, `hx-push-url="false"`) — per-connector telemetry rows plus an
+overall roll-up badge assembled by `app/services/connector_health.py`; the partial
+shares the tab's admin-only gate (`require_admin`).
 
 ---
 

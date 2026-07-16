@@ -428,7 +428,6 @@ tests/test_htmx_views_nightly2.py::test_proactive_scorecard
 tests/test_htmx_views_nightly2.py::test_proactive_do_not_offer
 tests/test_htmx_views_nightly2.py::test_material_insights
 tests/test_htmx_views_nightly2.py::test_enrich_material
-tests/test_htmx_views_nightly2.py::test_admin_api_health
 tests/test_htmx_views_nightly2.py::test_vendor_merge
 tests/test_htmx_views_nightly2.py::test_company_merge
 tests/test_htmx_views_nightly21.py::test_pricing_history_ok
@@ -557,8 +556,6 @@ tests/test_htmx_views_nightly5.py::test_multiple_offers_create_multiple_lines
 tests/test_htmx_views_nightly6.py::test_get_knowledge_list_returns_200
 tests/test_htmx_views_nightly6.py::test_get_knowledge_with_query_returns_200
 tests/test_htmx_views_nightly6.py::test_post_knowledge_creates_entry_returns_200
-tests/test_htmx_views_nightly6.py::test_api_health_returns_200
-tests/test_htmx_views_nightly6.py::test_api_health_with_health_service_mocked
 tests/test_htmx_views_nightly6.py::test_scorecard_returns_200
 tests/test_htmx_views_nightly6.py::test_scorecard_service_error_returns_200
 tests/test_htmx_views_nightly7.py::test_test_mode_with_empty_body
