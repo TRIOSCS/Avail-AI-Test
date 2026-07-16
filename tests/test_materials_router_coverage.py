@@ -406,7 +406,11 @@ class TestEnrichMaterial:
         card = _make_card(db_session, mpn="rejrep", display="REJ-REP", manufacturer=None)
         resp = client.post(
             f"/api/materials/{card.id}/enrich",
-            json={"category": "Voltage Regulator", "description": "Adj regulator"},
+            # A category that normalize_category() cannot resolve to a canonical
+            # commodity (not a tree key, not an alias) — the refusal must surface in
+            # rejected_fields. ("Voltage Regulator" is no longer a valid example: it
+            # became a canonical alias in migration 189.)
+            json={"category": "Not A Commodity", "description": "Adj regulator"},
         )
         assert resp.status_code == 200
         data = resp.json()
