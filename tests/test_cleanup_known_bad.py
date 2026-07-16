@@ -148,7 +148,7 @@ class TestCleanupJunkCategories:
 
     def test_unprovenanced_unresolvable_nulled(self, db_session: Session):
         card = _card(db_session, "JUNK-1")
-        force_card_category(db_session, card, "IGBT Modules")  # no canonical mapping
+        force_card_category(db_session, card, "Not A Commodity")  # no canonical mapping
         db_session.flush()
 
         result = cleanup_junk_categories(db_session, apply=True)

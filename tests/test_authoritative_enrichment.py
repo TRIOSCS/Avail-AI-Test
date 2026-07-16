@@ -748,7 +748,7 @@ def test_apply_oem_sourced_off_vocab_category_rejected(db_session):
     oem = OemExtractResult(
         status="oem_sourced",
         description="Adjustable voltage regulator module",
-        category="Voltage Regulator",  # free text — off-vocab
+        category="Not A Commodity",  # free text — off-vocab (voltage regulator became a 189 alias)
         confidence=0.95,
         source_urls=["https://support.lenovo.com/y"],
         source_domains=["support.lenovo.com"],

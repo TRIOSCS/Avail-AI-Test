@@ -106,6 +106,88 @@ def test_legacy_capitalized_canonical_variants_resolve(raw, expected):
     assert normalize_category(raw) == expected
 
 
+# The FULL 2026-07 residue-remap vocabulary (all 64 aliases; migration 189 backfill) in
+# vendor casing, in the runtime block's declaration order. Pinned exhaustively — a
+# wrong-but-valid-tree-key target on any single alias would pass the structural gates
+# (test_every_alias_target_is_a_tree_key, POST_093_ALIASES) and misfile every future
+# ingest of that string, so each raw→target pair is asserted individually.
+# test_residue_pin_covers_the_full_189_vocabulary keeps this list complete.
+_RESIDUE_2026_07_CASES: list[tuple[str, str]] = [
+    ("Power Inductors - SMD", "inductors"),
+    ("Common Mode Chokes / Filters", "inductors"),
+    ("Aluminum Electrolytic Capacitors - Radial Leaded", "capacitors"),
+    ("Multilayer Ceramic Capacitors MLCC - SMD/SMT", "capacitors"),
+    ("Aluminum Organic Polymer Capacitors", "capacitors"),
+    ("Current Sense Resistors - SMD", "resistors"),
+    ("Trimmer Resistors - Through Hole", "resistors"),
+    ("Crystals", "oscillators"),
+    ("MEMS Oscillators", "oscillators"),
+    ("Standard Clock Oscillators", "oscillators"),
+    ("TCXO Oscillators", "oscillators"),
+    ("IGBT Modules", "transistors"),
+    ("Schottky Diodes & Rectifiers", "diodes"),
+    ("ESD Protection Diodes / TVS Diodes", "diodes"),
+    ("Zener Diodes", "diodes"),
+    ("Rectifiers", "diodes"),
+    ("Diode", "diodes"),
+    ("MOSFET", "mosfets"),
+    ("Power Switch ICs - Power Distribution", "power_ic"),
+    ("Switching Controllers", "power_ic"),
+    ("Supervisory Circuits", "power_ic"),
+    ("Motor / Motion / Ignition Controllers & Drivers", "power_ic"),
+    ("Audio Amplifiers", "analog_ic"),
+    ("Precision Amplifiers", "analog_ic"),
+    ("Analog to Digital Converters - ADC", "analog_ic"),
+    ("Data Converter (ADC)", "analog_ic"),
+    ("Digital to Analog Converters - DAC", "analog_ic"),
+    ("Logic IC", "logic_ic"),
+    ("Clock Buffer", "ics_other"),
+    ("RS-232 Interface IC", "ics_other"),
+    ("RS-422/RS-485 Interface IC", "ics_other"),
+    ("PCI Interface IC", "ics_other"),
+    ("Interface IC", "ics_other"),
+    ("LIN Transceivers", "ics_other"),
+    ("Integrated Circuit (Timer)", "ics_other"),
+    ("Timers & Support Products", "ics_other"),
+    ("8-Bit Microcontrollers - MCU", "microcontrollers"),
+    ("Microcontroller", "microcontrollers"),
+    ("Digital Signal Processors & Controllers - DSP, DSC", "dsp"),
+    ("FPGA - Field Programmable Gate Array", "fpga"),
+    ("Hard Disk Drives - HDD", "hdd"),
+    ("LDO Voltage Regulators", "voltage_regulators"),
+    ("Voltage Regulator", "voltage_regulators"),
+    ("Power Supplies - Board Mount", "power_supplies"),
+    ("Electronic Battery", "batteries"),
+    ("Laptop Battery", "batteries"),
+    ("Laptop Battery (FRU / CRU Replacement Part)", "batteries"),
+    ("Storage Controller Battery", "batteries"),
+    ("RAID Controller Accessory / Battery Backup (BBWC Battery Module)", "batteries"),
+    ("RAID Controller Accessory / Battery Module", "batteries"),
+    ("Automotive Connectors", "connectors"),
+    ("Board to Board & Mezzanine Connectors", "connectors"),
+    ("Circular Metric Connectors", "connectors"),
+    ("Terminals", "connectors"),
+    ("Conduit Fittings & Accessories", "cables"),
+    ("Reed Relays", "relays"),
+    ("Board Mount Current Sensors", "sensors"),
+    ("IMUs - Inertial Measurement Units", "sensors"),
+    ("Bluetooth Modules - 802.15.1", "rf"),
+    ("Multiprotocol Modules", "rf"),
+    ("RF Transceiver", "rf"),
+    ("RF/Wireless Module", "rf"),
+    ("Development Boards, Kits, Programmers", "tools_accessories"),
+    ("Server Maintenance Consumable / Thermal Management Accessory", "tools_accessories"),
+]
+
+
+@pytest.mark.parametrize("raw,expected", _RESIDUE_2026_07_CASES)
+def test_2026_07_residue_aliases_normalize(raw, expected):
+    """The 2026-07 residue remap strings (live-DB stranded cards; migration 189) land on
+    canonical keys via the forward hook, so re-ingesting the same vendor taxonomies can
+    never strand new cards."""
+    assert normalize_category(raw) == expected
+
+
 @pytest.mark.parametrize(
     "raw,expected",
     [
@@ -183,6 +265,71 @@ POST_093_ALIASES: dict[str, str] = {
     "internal hard drives": "migration 100_taxonomy_alias_backfill",
     "memory module": "migration 100_taxonomy_alias_backfill",
     "memory modules": "migration 100_taxonomy_alias_backfill",
+    # 2026-07 residue remap — 64 aliases backfilled by migration 189.
+    "power inductors - smd": "migration 189_category_residue_backfill",
+    "common mode chokes / filters": "migration 189_category_residue_backfill",
+    "aluminum electrolytic capacitors - radial leaded": "migration 189_category_residue_backfill",
+    "multilayer ceramic capacitors mlcc - smd/smt": "migration 189_category_residue_backfill",
+    "aluminum organic polymer capacitors": "migration 189_category_residue_backfill",
+    "current sense resistors - smd": "migration 189_category_residue_backfill",
+    "trimmer resistors - through hole": "migration 189_category_residue_backfill",
+    "crystals": "migration 189_category_residue_backfill",
+    "mems oscillators": "migration 189_category_residue_backfill",
+    "standard clock oscillators": "migration 189_category_residue_backfill",
+    "tcxo oscillators": "migration 189_category_residue_backfill",
+    "igbt modules": "migration 189_category_residue_backfill",
+    "schottky diodes & rectifiers": "migration 189_category_residue_backfill",
+    "esd protection diodes / tvs diodes": "migration 189_category_residue_backfill",
+    "zener diodes": "migration 189_category_residue_backfill",
+    "rectifiers": "migration 189_category_residue_backfill",
+    "diode": "migration 189_category_residue_backfill",
+    "mosfet": "migration 189_category_residue_backfill",
+    "power switch ics - power distribution": "migration 189_category_residue_backfill",
+    "switching controllers": "migration 189_category_residue_backfill",
+    "supervisory circuits": "migration 189_category_residue_backfill",
+    "motor / motion / ignition controllers & drivers": "migration 189_category_residue_backfill",
+    "audio amplifiers": "migration 189_category_residue_backfill",
+    "precision amplifiers": "migration 189_category_residue_backfill",
+    "analog to digital converters - adc": "migration 189_category_residue_backfill",
+    "data converter (adc)": "migration 189_category_residue_backfill",
+    "digital to analog converters - dac": "migration 189_category_residue_backfill",
+    "logic ic": "migration 189_category_residue_backfill",
+    "clock buffer": "migration 189_category_residue_backfill",
+    "rs-232 interface ic": "migration 189_category_residue_backfill",
+    "rs-422/rs-485 interface ic": "migration 189_category_residue_backfill",
+    "pci interface ic": "migration 189_category_residue_backfill",
+    "interface ic": "migration 189_category_residue_backfill",
+    "lin transceivers": "migration 189_category_residue_backfill",
+    "integrated circuit (timer)": "migration 189_category_residue_backfill",
+    "timers & support products": "migration 189_category_residue_backfill",
+    "8-bit microcontrollers - mcu": "migration 189_category_residue_backfill",
+    "microcontroller": "migration 189_category_residue_backfill",
+    "digital signal processors & controllers - dsp, dsc": "migration 189_category_residue_backfill",
+    "fpga - field programmable gate array": "migration 189_category_residue_backfill",
+    "hard disk drives - hdd": "migration 189_category_residue_backfill",
+    "ldo voltage regulators": "migration 189_category_residue_backfill",
+    "voltage regulator": "migration 189_category_residue_backfill",
+    "power supplies - board mount": "migration 189_category_residue_backfill",
+    "electronic battery": "migration 189_category_residue_backfill",
+    "laptop battery": "migration 189_category_residue_backfill",
+    "laptop battery (fru / cru replacement part)": "migration 189_category_residue_backfill",
+    "storage controller battery": "migration 189_category_residue_backfill",
+    "raid controller accessory / battery backup (bbwc battery module)": "migration 189_category_residue_backfill",
+    "raid controller accessory / battery module": "migration 189_category_residue_backfill",
+    "automotive connectors": "migration 189_category_residue_backfill",
+    "board to board & mezzanine connectors": "migration 189_category_residue_backfill",
+    "circular metric connectors": "migration 189_category_residue_backfill",
+    "terminals": "migration 189_category_residue_backfill",
+    "conduit fittings & accessories": "migration 189_category_residue_backfill",
+    "reed relays": "migration 189_category_residue_backfill",
+    "board mount current sensors": "migration 189_category_residue_backfill",
+    "imus - inertial measurement units": "migration 189_category_residue_backfill",
+    "bluetooth modules - 802.15.1": "migration 189_category_residue_backfill",
+    "multiprotocol modules": "migration 189_category_residue_backfill",
+    "rf transceiver": "migration 189_category_residue_backfill",
+    "rf/wireless module": "migration 189_category_residue_backfill",
+    "development boards, kits, programmers": "migration 189_category_residue_backfill",
+    "server maintenance consumable / thermal management accessory": "migration 189_category_residue_backfill",
 }
 
 
@@ -195,6 +342,38 @@ def _migration_093():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _migration_189():
+    import importlib.util
+    import os
+
+    path = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "189_category_residue_backfill.py")
+    spec = importlib.util.spec_from_file_location("migration_189_for_alias_sync", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MIGRATION_189_REF = "migration 189_category_residue_backfill"
+
+
+def test_residue_pin_covers_the_full_189_vocabulary():
+    """_RESIDUE_2026_07_CASES pins ALL of migration 189's aliases, not a sample — an un-
+    pinned alias could be retargeted to a wrong-but-valid tree key without any test
+    noticing (the structural gates check key shape and target validity, not which
+    target)."""
+    pinned = {raw.strip().lower() for raw, _ in _RESIDUE_2026_07_CASES}
+    assert pinned == set(_migration_189()._NEW_ALIASES)
+
+
+def test_189_registrations_match_the_migration_snapshot():
+    """Every POST_093_ALIASES entry claiming migration 189 as its backfill must actually
+    be in 189's frozen _NEW_ALIASES snapshot, and vice versa — registering a LATER alias
+    against the already-shipped 189 would be a lie (the frozen backfill never covered
+    it; it needs its own migration and reference)."""
+    registered = {raw for raw, ref in POST_093_ALIASES.items() if ref == _MIGRATION_189_REF}
+    assert registered == set(_migration_189()._NEW_ALIASES)
 
 
 def test_runtime_aliases_are_backfilled_by_093_or_documented():
