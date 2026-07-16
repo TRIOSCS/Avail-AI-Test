@@ -8,22 +8,22 @@ Covers the two deferred prospecting-persistence items:
    It also drives the ``buyer_ready_desc`` SQL ranking (paging in SQL, not in memory).
 2. The warm-intro lookup is fully pg_trgm-indexed after the migration: the new
    ``ix_sightings_vendor_email_trgm`` (migration 170) plus the pre-existing
-   ``ix_site_contacts_email_trgm`` (migration a513288799de). Postgres-only; skipped unless a
-   migrated Postgres URL is supplied via ``PROSPECTING_TRGM_TEST_DB_URL``.
+   ``ix_site_contacts_email_trgm`` (migration a513288799de). Postgres-only via the
+   ``@requires_postgres`` marker + ``pg_engine`` fixture — runs in the Postgres-paths CI
+   job (``PG_TEST_DSN`` set) and is skipped cleanly on the in-memory SQLite suite.
 
 Called by: pytest autodiscovery
 Depends on: conftest fixtures (db_session, client), app.models.prospect_account,
     app.services.prospect_priority
 """
 
-import os
 import uuid
 
-import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_priority import build_priority_snapshot
+from tests.conftest import requires_postgres
 
 
 def _make(db, **kw) -> ProspectAccount:
@@ -116,41 +116,42 @@ class TestBuyerReadySortReadsPersistedColumn:
 
 # ── Item 2: warm-intro pg_trgm GIN indexes (Postgres-only) ────────────────
 
-_PG_URL = os.environ.get("PROSPECTING_TRGM_TEST_DB_URL")
 
+@requires_postgres
+def test_warm_intro_trgm_indexes_exist_after_migration(pg_engine):
+    """The warm-intro trgm GIN indexes + the buyer_ready btree index exist on Postgres.
 
-@pytest.mark.skipif(
-    not _PG_URL,
-    reason="set PROSPECTING_TRGM_TEST_DB_URL to a Postgres migrated to head (170) to verify the pg_trgm indexes",
-)
-def test_warm_intro_trgm_indexes_exist_after_migration():
-    engine = create_engine(_PG_URL)
-    try:
-        with engine.connect() as conn:
-            present = {
-                r[0]
-                for r in conn.execute(
-                    text(
-                        "SELECT indexname FROM pg_indexes WHERE indexname IN "
-                        "('ix_sightings_vendor_email_trgm','ix_site_contacts_email_trgm',"
-                        "'ix_prospect_accounts_buyer_ready_score')"
-                    )
+    The ``pg_engine`` fixture creates ``pg_trgm`` then builds the full ORM schema, which
+    carries the same indexes migration 170 (``ix_sightings_vendor_email_trgm``,
+    ``ix_prospect_accounts_buyer_ready_score``) and migration a513288799de
+    (``ix_site_contacts_email_trgm``) create in production — reconciled into the models so
+    the drift gate keeps model DDL and migration DDL in lock-step (#464). Both warm-intro
+    email indexes must be GIN (trgm) so the leading-wildcard ILIKE scan can use them.
+    Runs only in the Postgres-paths CI job (``PG_TEST_DSN`` set); skipped on SQLite.
+    """
+    with pg_engine.connect() as conn:
+        present = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE indexname IN "
+                    "('ix_sightings_vendor_email_trgm','ix_site_contacts_email_trgm',"
+                    "'ix_prospect_accounts_buyer_ready_score')"
                 )
-            }
-            gin = {
-                r[0]
-                for r in conn.execute(
-                    text(
-                        "SELECT c.relname FROM pg_index x "
-                        "JOIN pg_class c ON c.oid = x.indexrelid "
-                        "JOIN pg_am am ON am.oid = c.relam "
-                        "WHERE am.amname = 'gin' AND c.relname IN "
-                        "('ix_sightings_vendor_email_trgm','ix_site_contacts_email_trgm')"
-                    )
+            )
+        }
+        gin = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT c.relname FROM pg_index x "
+                    "JOIN pg_class c ON c.oid = x.indexrelid "
+                    "JOIN pg_am am ON am.oid = c.relam "
+                    "WHERE am.amname = 'gin' AND c.relname IN "
+                    "('ix_sightings_vendor_email_trgm','ix_site_contacts_email_trgm')"
                 )
-            }
-    finally:
-        engine.dispose()
+            )
+        }
 
     assert "ix_sightings_vendor_email_trgm" in present  # new in migration 170
     assert "ix_site_contacts_email_trgm" in present  # pre-existing (a513288799de)
