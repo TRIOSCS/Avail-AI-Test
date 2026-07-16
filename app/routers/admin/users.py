@@ -276,6 +276,13 @@ async def change_user_role(
         return _render(db, request)  # no-op, nothing to audit
 
     target.role = valid_role
+    # Persist a demotion's intent so the ADMIN_EMAILS login bootstrap (routers/auth.py)
+    # does not silently re-promote this user on their next login; re-promoting to admin
+    # clears it.
+    if valid_role == UserRole.ADMIN:
+        target.admin_bootstrap_opted_out = False
+    elif old_role == UserRole.ADMIN:
+        target.admin_bootstrap_opted_out = True
     record_user_audit(
         db,
         actor_id=admin.id,
