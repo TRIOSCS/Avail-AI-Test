@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import CustomerBidStatus, ExcessListStatus
 from app.models import Company, User
-from app.models.excess import CustomerBid, ExcessLineItem, ExcessList
+from app.models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer
 from app.services import bid_back_service, excess_service
 from app.utils.normalization import normalize_mpn_key
 
@@ -176,6 +176,62 @@ def test_build_bid_back_rejects_foreign_line(db_session, owner, priced_list, sel
             selections=[{"excess_line_item_id": foreign.id}],
         )
     assert exc.value.status_code == 404
+
+
+# ── Corrupt best_offer_id must never 500 (P1 #1 hotfix) ──────────────
+
+
+def test_build_bid_back_nulls_unresolvable_best_offer(db_session, owner, priced_list):
+    """A line whose ``best_offer_id`` points to a non-existent ExcessOffer must NOT 500.
+
+    Mirrors the corrupt staging state (``best_offer_id`` held an offer-LINE id, not an
+    ExcessOffer id, so it resolved to no ``excess_offers`` row). ``selected_offer_id`` is a
+    real FK, so seeding it with that dangling value used to raise IntegrityError on commit
+    → an unhandled 500. Assembly must instead NULL the unresolvable pointer and still build
+    the bid — and a manual price override on another line must keep working.
+    """
+    items = _lines(db_session, priced_list)
+    # Point the first line at an ExcessOffer id that does not exist (the corruption).
+    dangling_offer_id = 987654
+    assert db_session.get(ExcessOffer, dangling_offer_id) is None
+    items[0].best_offer_id = dangling_offer_id
+    db_session.commit()
+
+    override = Decimal("99.0000")
+    selections = [
+        {"excess_line_item_id": items[0].id},  # corrupt pointer → must null, not 500
+        {"excess_line_item_id": items[1].id, "customer_unit_price": override},  # manual override
+    ]
+
+    # Must not raise IntegrityError / 500.
+    bid = bid_back_service.build_bid_back(db_session, list_id=priced_list.id, owner=owner, selections=selections)
+
+    by_line = {ln.excess_line_item_id: ln for ln in bid.lines}
+    # The dangling pointer was dropped — but the line is still priced + assembled.
+    assert by_line[items[0].id].selected_offer_id is None
+    assert by_line[items[0].id].customer_unit_price == items[0].best_offer_unit_price
+    # The manual override still applies on the other line.
+    assert by_line[items[1].id].customer_unit_price == override
+
+
+def test_build_bid_back_records_valid_best_offer(db_session, owner, priced_list):
+    """When ``best_offer_id`` resolves to a real ExcessOffer, it is recorded as
+    provenance."""
+    items = _lines(db_session, priced_list)
+    offer = ExcessOffer(excess_list_id=priced_list.id, submitted_by=owner.id, scope="per_line", status="open")
+    db_session.add(offer)
+    db_session.flush()
+    items[0].best_offer_id = offer.id
+    db_session.commit()
+
+    bid = bid_back_service.build_bid_back(
+        db_session,
+        list_id=priced_list.id,
+        owner=owner,
+        selections=[{"excess_line_item_id": items[0].id}],
+    )
+    line = next(ln for ln in bid.lines if ln.excess_line_item_id == items[0].id)
+    assert line.selected_offer_id == offer.id
 
 
 # ── Export context cleanliness (the load-bearing assertion) ──────────

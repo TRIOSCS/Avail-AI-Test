@@ -1328,13 +1328,16 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
     _offer(u["u_buyer1"], vc["vc_highrel"], ExcessOfferScope.TAKE_ALL, Decimal(18000))
 
     # Best-price rollup (seeder writes it so the column renders without a service call).
+    # best_offer_id holds the parent ExcessOffer id (recompute_line_rollup writes
+    # ExcessOfferLine.offer_id, NOT the offer-LINE id) — the bid-back seeds provenance from
+    # it, so an offer-line id here would dangle and 500 the assembly.
     if eli1.best_offer_id is None:
         eli1.best_offer_unit_price = Decimal(26)
-        eli1.best_offer_id = eol2a.id
+        eli1.best_offer_id = eol2a.offer_id
         eli1.offer_count = 2
     if eli2.best_offer_id is None:
         eli2.best_offer_unit_price = Decimal(10)
-        eli2.best_offer_id = eol3a.id
+        eli2.best_offer_id = eol3a.offer_id
         eli2.offer_count = 2
     _ = eol1a  # Pinnacle's matched line retained for the spread/comparison view.
 

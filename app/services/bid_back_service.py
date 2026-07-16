@@ -23,11 +23,36 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import CustomerBidStatus
 from ..models import User
-from ..models.excess import CustomerBid, CustomerBidLine, ExcessLineItem, ExcessList
+from ..models.excess import (
+    CustomerBid,
+    CustomerBidLine,
+    ExcessLineItem,
+    ExcessList,
+    ExcessOffer,
+    ExcessOfferLine,
+)
+
+
+def _safe_commit(db: Session, *, entity: str = "record") -> None:
+    """Commit the session, mapping IntegrityError to HTTP 409 instead of an unhandled
+    500.
+
+    A dangling provenance pointer (e.g. a corrupt ``best_offer_id``) is sanitized before it
+    reaches a real FK column, so this is a backstop: any OTHER conflicting write surfaces as
+    a clean 409 rather than a 500 out of the global handler.
+    """
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.warning("IntegrityError on {}: {}", entity, exc)
+        raise HTTPException(409, f"Duplicate or conflicting {entity}") from exc
 
 
 def build_bid_back(
@@ -44,7 +69,9 @@ def build_bid_back(
     ``quantity``), create a CustomerBidLine whose ``customer_unit_price`` defaults to the
     line's ``best_offer_unit_price`` rollup and is overridden by an explicit selection
     price. The selected-offer ids are recorded for internal audit only — they are never
-    exported. The line quantity defaults to the posted line's quantity.
+    exported, and any that no longer resolve to a live offer/offer-line on this list are
+    dropped to NULL (a stale ``best_offer_id`` can never 500 the assembly). The line
+    quantity defaults to the posted line's quantity.
 
     Re-assemble semantics (M4): the list keeps ONE CustomerBid row across revisions.
     When a bid already exists, re-assembling BUMPS ``revision`` on the SAME row and
@@ -68,6 +95,21 @@ def build_bid_back(
     posted: dict[int, ExcessLineItem] = {
         it.id: it for it in db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
     }
+
+    # The set of REAL provenance ids for this list. ``selected_offer_id`` /
+    # ``selected_offer_line_id`` are hard FKs, but ``ExcessLineItem.best_offer_id`` is a
+    # plain int (no FK) that can go stale — a corrupt rollup once held an offer-LINE id
+    # instead of an ExcessOffer id, and writing that dangling value into the FK column
+    # raised IntegrityError → an unhandled 500. Resolve every provenance pointer against
+    # these sets and drop anything that no longer points at a live row on THIS list.
+    valid_offer_ids = set(db.scalars(select(ExcessOffer.id).where(ExcessOffer.excess_list_id == list_id)).all())
+    valid_offer_line_ids = set(
+        db.scalars(
+            select(ExcessOfferLine.id)
+            .join(ExcessOffer, ExcessOfferLine.offer_id == ExcessOffer.id)
+            .where(ExcessOffer.excess_list_id == list_id)
+        ).all()
+    )
 
     # One bid per list: re-assemble bumps ``revision`` on the same row (audit chain
     # preserved) instead of leaving a pile of orphan drafts.
@@ -101,18 +143,25 @@ def build_bid_back(
         unit_price = _to_decimal(override) if override is not None else item.best_offer_unit_price
         quantity = sel.get("quantity") or item.quantity
 
+        # Resolve provenance against the live rows — a dangling id is dropped (NULL),
+        # never written into the FK column where it would 500 on commit.
+        candidate_offer_id = sel.get("selected_offer_id") or item.best_offer_id
+        selected_offer_id = candidate_offer_id if candidate_offer_id in valid_offer_ids else None
+        candidate_offer_line_id = sel.get("selected_offer_line_id")
+        selected_offer_line_id = candidate_offer_line_id if candidate_offer_line_id in valid_offer_line_ids else None
+
         db.add(
             CustomerBidLine(
                 customer_bid_id=bid.id,
                 excess_line_item_id=item.id,
-                selected_offer_id=sel.get("selected_offer_id") or item.best_offer_id,
-                selected_offer_line_id=sel.get("selected_offer_line_id"),
+                selected_offer_id=selected_offer_id,
+                selected_offer_line_id=selected_offer_line_id,
                 customer_unit_price=unit_price,
                 quantity=quantity,
             )
         )
 
-    db.commit()
+    _safe_commit(db, entity="customer bid")
     db.refresh(bid)
     logger.info(
         "Assembled CustomerBid id={} rev={} on list={} by owner={} ({} lines)",
