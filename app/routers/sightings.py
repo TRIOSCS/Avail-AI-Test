@@ -23,7 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, Response
 from loguru import logger
 from pydantic import ValidationError
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 from starlette.datastructures import FormData
@@ -367,7 +367,7 @@ async def sightings_workspace(
     """
     from .htmx.offers.follow_ups import follow_up_count
 
-    review_count = db.query(sqlfunc.count(Offer.id)).filter(Offer.status == OfferStatus.PENDING_REVIEW).scalar() or 0
+    review_count = db.scalar(select(sqlfunc.count(Offer.id)).where(Offer.status == OfferStatus.PENDING_REVIEW)) or 0
     ctx = {
         "request": request,
         "user": user,
