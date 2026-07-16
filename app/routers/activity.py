@@ -13,9 +13,7 @@ Called by: app/static/app.js (logCallInitiated), app/static/crm.js
 Depends on: app/utils/phone_utils.py, app/services/activity_service.py
 """
 
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -33,7 +31,6 @@ from ..dependencies import can_manage_account, require_user
 from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
 from ..rate_limit import check_rate_limit
 from ..schemas.activity import (
-    ActivityTimelineResponse,
     CallInitiatedRequest,
     CallOutcomeRequest,
     OutreachInitiatedRequest,
@@ -316,137 +313,3 @@ def record_call_outcome(
         logger.exception("call-outcome error")
         db.rollback()
         raise HTTPException(500, "Failed to record call outcome") from e
-
-
-@router.get("/account/{company_id}", response_model=ActivityTimelineResponse)
-def get_account_timeline_endpoint(
-    company_id: int,
-    channel: list[str] | None = Query(default=None),
-    direction: str | None = Query(default=None),
-    event_type: str | None = Query(default=None),
-    date_from: str | None = Query(default=None),
-    date_to: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get paginated activity timeline for a company account."""
-    company = db.get(Company, company_id)
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    from ..services.activity_service import get_account_timeline
-
-    df, dto = _parse_date_range(date_from, date_to)
-    items, total = get_account_timeline(
-        db,
-        company_id,
-        channel=channel,
-        direction=direction,
-        event_type=event_type,
-        date_from=df,
-        date_to=dto,
-        limit=limit,
-        offset=offset,
-    )
-    return _timeline_response(items, total, limit, offset)
-
-
-@router.get("/contact/{site_contact_id}", response_model=ActivityTimelineResponse)
-def get_contact_timeline_endpoint(
-    site_contact_id: int,
-    channel: list[str] | None = Query(default=None),
-    direction: str | None = Query(default=None),
-    event_type: str | None = Query(default=None),
-    date_from: str | None = Query(default=None),
-    date_to: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get paginated activity timeline for a site contact."""
-    from ..services.activity_service import get_contact_timeline
-
-    contact = db.get(SiteContact, site_contact_id)
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    df, dto = _parse_date_range(date_from, date_to)
-    items, total = get_contact_timeline(
-        db,
-        site_contact_id,
-        channel=channel,
-        direction=direction,
-        event_type=event_type,
-        date_from=df,
-        date_to=dto,
-        limit=limit,
-        offset=offset,
-    )
-    return _timeline_response(items, total, limit, offset)
-
-
-def _parse_date_range(date_from: str | None, date_to: str | None) -> tuple[datetime | None, datetime | None]:
-    """Parse ISO 8601 date_from/date_to query params, or raise HTTP 400."""
-    try:
-        df = datetime.fromisoformat(date_from) if date_from else None
-        dto = datetime.fromisoformat(date_to) if date_to else None
-    except (ValueError, TypeError) as e:
-        raise HTTPException(400, "Invalid date format — expected ISO 8601") from e
-    return df, dto
-
-
-def _timeline_response(items: list[ActivityLog], total: int, limit: int, offset: int) -> dict:
-    """Build the paginated timeline response payload."""
-    return {
-        "items": [_timeline_item(a) for a in items],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
-
-
-def _timeline_item(a: ActivityLog) -> dict:
-    """Serialize an ActivityLog for timeline responses."""
-    return {
-        "id": a.id,
-        "user_id": a.user_id,
-        "user_name": a.user.name if a.user else None,
-        "activity_type": a.activity_type,
-        "channel": a.channel,
-        "company_id": a.company_id,
-        "company_name": a.company.name if a.company else None,
-        "vendor_card_id": a.vendor_card_id,
-        "vendor_name": a.vendor_card.display_name if a.vendor_card else None,
-        "vendor_contact_id": getattr(a, "vendor_contact_id", None),
-        "site_contact_id": getattr(a, "site_contact_id", None),
-        "contact_email": a.contact_email,
-        "contact_phone": a.contact_phone,
-        "contact_name": a.contact_name,
-        "subject": a.subject,
-        "notes": getattr(a, "notes", None),
-        "duration_seconds": a.duration_seconds,
-        "direction": getattr(a, "direction", None),
-        "event_type": getattr(a, "event_type", None),
-        "summary": getattr(a, "summary", None),
-        "source_url": getattr(a, "source_url", None),
-        "created_at": a.created_at.isoformat() if a.created_at else None,
-    }
-
-
-@router.get("/vendors/{vendor_card_id}/last-call")
-def get_vendor_last_call(
-    vendor_card_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get the most recent phone call for a vendor card."""
-    from ..services.activity_service import get_last_call
-
-    result = get_last_call(vendor_card_id, db)
-    if not result:
-        return {"last_call": None}
-
-    return {"last_call": result, "is_current_user": result["user_id"] == user.id}

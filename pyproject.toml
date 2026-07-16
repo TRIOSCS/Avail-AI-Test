@@ -114,7 +114,6 @@ disable_error_code = ["assignment", "union-attr", "arg-type"]
 # into this block.
 [[tool.mypy.overrides]]
 module = [
-    "app.routers.tags",
     "app.routers.avatars",
     "app.routers.error_reports",
     "app.services.category_normalizer",

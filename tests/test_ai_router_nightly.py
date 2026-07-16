@@ -180,33 +180,6 @@ class TestParseIntake:
         assert body.get("parsed") is False
 
 
-# ── freeform offer — missing req (line 727) ───────────────────────────
-
-
-class TestFreeformOffer:
-    def test_freeform_offer_missing_req_returns_404(self, client):
-        """POST /api/ai/parse-freeform-offer with unknown req_id → 404."""
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "all"
-            mock_settings.admin_emails = []
-            resp = client.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "Available: 1000 pcs LM317T @$0.50", "requisition_id": 999999},
-            )
-        assert resp.status_code in (403, 404)
-
-    def test_freeform_offer_ai_disabled_returns_403(self, client):
-        """POST /api/ai/parse-freeform-offer with AI off → 403."""
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "off"
-            mock_settings.admin_emails = []
-            resp = client.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "Available: 1000 pcs LM317T @$0.50"},
-            )
-        assert resp.status_code == 403
-
-
 # ── save-freeform-offers — missing req (line 784) ────────────────────
 
 

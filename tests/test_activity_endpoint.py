@@ -166,35 +166,3 @@ class TestCallInitiated:
             db_session.commit = original_commit
         assert resp.status_code == 500
         assert resp.json()["error"] == "Failed to record phone contact"
-
-
-class TestLastCall:
-    def test_no_calls(self, client, test_vendor_card):
-        resp = client.get(f"/api/activity/vendors/{test_vendor_card.id}/last-call")
-        assert resp.status_code == 200
-        assert resp.json()["last_call"] is None
-
-    def test_with_call(self, client, db_session, test_vendor_card, test_user):
-        # Create a call activity
-        record = ActivityLog(
-            user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            vendor_card_id=test_vendor_card.id,
-            contact_phone="+14155551234",
-            subject="Call to Arrow Electronics",
-        )
-        db_session.add(record)
-        db_session.commit()
-
-        resp = client.get(f"/api/activity/vendors/{test_vendor_card.id}/last-call")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["last_call"] is not None
-        assert data["last_call"]["user_name"] == "Test Buyer"
-        assert data["is_current_user"] is True
-
-    def test_nonexistent_vendor(self, client):
-        resp = client.get("/api/activity/vendors/99999/last-call")
-        assert resp.status_code == 200
-        assert resp.json()["last_call"] is None

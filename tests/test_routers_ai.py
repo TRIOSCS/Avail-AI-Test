@@ -1,6 +1,6 @@
 """test_routers_ai.py — Tests for AI Intelligence Layer Router.
 
-Tests _ai_enabled gate, _build_vendor_history helper, contact enrichment,
+Tests _ai_enabled gate, contact enrichment,
 prospect management, response parsing, company intel, and RFQ drafting.
 
 Covers: ai feature flag modes (off/mike_only/all), vendor history aggregation,
@@ -44,64 +44,6 @@ def test_ai_enabled(flag, email, expected):
         from app.routers.ai import _ai_enabled
 
         assert _ai_enabled(user) is expected
-
-
-# ---------------------------------------------------------------------------
-# _build_vendor_history tests
-# ---------------------------------------------------------------------------
-
-
-def test_build_vendor_history_no_card():
-    """Unknown vendor returns empty dict."""
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = None
-
-    with patch("app.routers.ai.normalize_vendor_name", return_value="acme"):
-        from app.routers.ai import _build_vendor_history
-
-        result = _build_vendor_history("Acme Corp", db)
-    assert result == {}
-
-
-def test_build_vendor_history_with_card():
-    """Known vendor returns aggregated stats."""
-    card = SimpleNamespace(
-        engagement_score=78.5,
-        response_velocity_hours=4.2,
-    )
-    last_contact = SimpleNamespace(
-        created_at=datetime(2026, 2, 10, tzinfo=UTC),
-    )
-
-    db = MagicMock()
-    # first query().filter().first() = card
-    # second query(func.count()).filter().scalar() = rfq count
-    # third query(func.count()).filter().scalar() = offer count
-    # fourth query(func.max()).filter().scalar() = last contact date
-    call_results = iter([card, 15, 3, last_contact.created_at])
-
-    def side_effect(*a, **kw):
-        mock = MagicMock()
-        val = next(call_results)
-        if isinstance(val, int):
-            mock.filter.return_value.scalar.return_value = val
-        elif isinstance(val, datetime):
-            mock.filter.return_value.scalar.return_value = val
-        else:
-            mock.filter.return_value.first.return_value = val
-        return mock
-
-    db.query.side_effect = side_effect
-
-    with patch("app.routers.ai.normalize_vendor_name", return_value="acme"):
-        from app.routers.ai import _build_vendor_history
-
-        result = _build_vendor_history("Acme Corp", db)
-
-    assert result["total_rfqs"] == 15
-    assert result["total_offers"] == 3
-    assert result["last_contact_date"] == "2026-02-10"
-    assert result["engagement_score"] == 78.5
 
 
 # ---------------------------------------------------------------------------
@@ -627,53 +569,6 @@ def test_company_intel_success(ai_client):
     mock_intel.assert_awaited_once_with("Acme Corp", "acmecorp.com")
 
 
-def test_draft_rfq_ai_disabled(ai_client):
-    """POST /api/ai/draft-rfq with AI off returns 403."""
-    with patch("app.routers.ai._ai_enabled", return_value=False):
-        resp = ai_client.post(
-            "/api/ai/draft-rfq",
-            json={
-                "vendor_name": "Acme Corp",
-                "parts": ["LM317T"],
-            },
-        )
-    assert resp.status_code == 403
-
-
-def test_draft_rfq_success(ai_client, db_session):
-    """POST /api/ai/draft-rfq returns a draft email body."""
-    draft_text = (
-        "Dear Acme Corp,\n\n"
-        "We would like to request a quote for the following parts:\n"
-        "- LM317T (1000 pcs)\n\n"
-        "Please provide pricing and lead time.\n\n"
-        "Best regards,\nTest Buyer"
-    )
-
-    mock_draft = AsyncMock(return_value=draft_text)
-    mock_history = MagicMock(return_value={"total_rfqs": 5, "engagement_score": 80.0})
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.routers.ai._build_vendor_history", mock_history),
-        patch("app.services.ai_service.draft_rfq", mock_draft),
-    ):
-        resp = ai_client.post(
-            "/api/ai/draft-rfq",
-            json={
-                "vendor_name": "Acme Corp",
-                "parts": ["LM317T"],
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["available"] is True
-    assert "LM317T" in data["body"]
-    assert "Acme Corp" in data["body"]
-    mock_draft.assert_awaited_once()
-
-
 # ---------------------------------------------------------------------------
 # Additional coverage tests
 # ---------------------------------------------------------------------------
@@ -838,28 +733,6 @@ def test_company_intel_not_available(ai_client):
     assert data["available"] is False
 
 
-def test_draft_rfq_not_available(ai_client, db_session):
-    """POST /api/ai/draft-rfq returns available=False when draft is None."""
-    mock_draft = AsyncMock(return_value=None)
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.routers.ai._build_vendor_history", return_value={}),
-        patch("app.services.ai_service.draft_rfq", mock_draft),
-    ):
-        resp = ai_client.post(
-            "/api/ai/draft-rfq",
-            json={
-                "vendor_name": "Acme Corp",
-                "parts": ["LM317T"],
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["available"] is False
-
-
 def test_parse_email_ai_disabled(ai_client):
     """POST /api/ai/parse-email with AI off returns 403."""
     with patch("app.routers.ai._ai_enabled", return_value=False):
@@ -1001,182 +874,6 @@ def test_save_parsed_offers_with_mpn_matching(ai_client, db_session, ai_test_use
         .first()
     )
     assert offer.requirement_id == r.id
-
-
-# ---------------------------------------------------------------------------
-# Freeform paste parsing (6 tests)
-# ---------------------------------------------------------------------------
-
-
-def test_parse_freeform_rfq_ai_disabled(ai_client):
-    """POST /api/ai/parse-freeform-rfq with AI off returns 403."""
-    with patch("app.routers.ai._ai_enabled", return_value=False):
-        resp = ai_client.post(
-            "/api/ai/parse-freeform-rfq",
-            json={"raw_text": "Need LM317T x500, LM7805 x1000"},
-        )
-    assert resp.status_code == 403
-
-
-def test_parse_freeform_rfq_success(ai_client):
-    """POST /api/ai/parse-freeform-rfq returns RFQ template."""
-    template = {
-        "name": "Acme Project - Feb 2026",
-        "customer_name": "Acme Corp",
-        "deadline": "2026-02-28",
-        "requirements": [
-            {"primary_mpn": "LM317T", "target_qty": 500, "target_price": 0.50},
-            {"primary_mpn": "LM7805", "target_qty": 1000},
-        ],
-    }
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch(
-            "app.services.freeform_parser_service.parse_freeform_rfq",
-            new_callable=AsyncMock,
-            return_value=template,
-        ),
-    ):
-        resp = ai_client.post(
-            "/api/ai/parse-freeform-rfq",
-            json={"raw_text": "Acme needs LM317T x500 at $0.50, LM7805 x1000. Due Feb 28."},
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["parsed"] is True
-    assert data["template"]["name"] == "Acme Project - Feb 2026"
-    assert len(data["template"]["requirements"]) == 2
-
-
-def test_parse_freeform_rfq_no_result(ai_client):
-    """POST /api/ai/parse-freeform-rfq returns parsed=False when parser returns None."""
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch(
-            "app.services.freeform_parser_service.parse_freeform_rfq",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
-        resp = ai_client.post(
-            "/api/ai/parse-freeform-rfq",
-            json={"raw_text": "some text that returns no result"},
-        )
-    assert resp.status_code == 200
-    assert resp.json()["parsed"] is False
-
-
-def test_parse_freeform_offer_ai_disabled(ai_client):
-    """POST /api/ai/parse-freeform-offer with AI off returns 403."""
-    with patch("app.routers.ai._ai_enabled", return_value=False):
-        resp = ai_client.post(
-            "/api/ai/parse-freeform-offer",
-            json={"raw_text": "LM317T 500pcs @ $0.45"},
-        )
-    assert resp.status_code == 403
-
-
-def test_parse_freeform_offer_success(ai_client, db_session):
-    """POST /api/ai/parse-freeform-offer returns offer template."""
-    from app.models import Requisition
-
-    req = Requisition(
-        name="REQ-OFFER",
-        customer_name="Test",
-        status="open",
-        created_by=1,
-    )
-    db_session.add(req)
-    db_session.commit()
-    db_session.refresh(req)
-
-    template = {
-        "vendor_name": "Acme Vendor",
-        "offers": [
-            {"mpn": "LM317T", "qty_available": 500, "unit_price": 0.45, "currency": "USD"},
-            {"mpn": "LM7805", "qty_available": 1000, "unit_price": 0.30},
-        ],
-    }
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch(
-            "app.services.freeform_parser_service.parse_freeform_offer",
-            new_callable=AsyncMock,
-            return_value=template,
-        ),
-    ):
-        resp = ai_client.post(
-            "/api/ai/parse-freeform-offer",
-            json={"raw_text": "LM317T 500 @ $0.45, LM7805 1000 @ $0.30", "requisition_id": req.id},
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["parsed"] is True
-    assert data["template"]["vendor_name"] == "Acme Vendor"
-    assert len(data["template"]["offers"]) == 2
-
-
-def test_parse_freeform_offer_scope_enforced_for_sales(db_session, sales_user, test_requisition):
-    """Sales users cannot build context from foreign requisitions."""
-    with sales_client(db_session, sales_user) as c, patch("app.routers.ai._ai_enabled", return_value=True):
-        resp = c.post(
-            "/api/ai/parse-freeform-offer",
-            json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
-        )
-    assert resp.status_code == 404
-
-
-def test_apply_freeform_rfq_success(ai_client, db_session, ai_test_user):
-    """POST /api/ai/apply-freeform-rfq creates requisition + requirements."""
-    from app.models import Company, CustomerSite, Requirement, Requisition
-
-    # apply-freeform-rfq now gates the site's account on can_manage_account — make the
-    # actor the account owner so the (real) create path runs.
-    co = Company(name="Apply Co", is_active=True, account_owner_id=ai_test_user.id)
-    db_session.add(co)
-    db_session.flush()
-    site = CustomerSite(company_id=co.id, site_name="Apply HQ")
-    db_session.add(site)
-    db_session.commit()
-    db_session.refresh(site)
-
-    payload = {
-        "name": "Apply Test RFQ",
-        "customer_site_id": site.id,
-        "customer_name": "Apply Co",
-        "deadline": "2026-03-15",
-        "requirements": [
-            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500, "target_price": 0.50},
-            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 1000},
-        ],
-    }
-    resp = ai_client.post("/api/ai/apply-freeform-rfq", json=payload)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["id"] is not None
-    assert data["name"] == "Apply Test RFQ"
-    assert data["requirements_added"] == 2
-
-    req = db_session.get(Requisition, data["id"])
-    assert req is not None
-    assert req.customer_site_id == site.id
-    reqs = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).all()
-    assert len(reqs) == 2
-    mpns = {r.primary_mpn for r in reqs}
-    assert "LM317T" in mpns
-    assert "LM7805" in mpns
-
-
-def test_apply_freeform_rfq_no_site(ai_client):
-    """POST /api/ai/apply-freeform-rfq without customer_site_id returns 400."""
-    resp = ai_client.post(
-        "/api/ai/apply-freeform-rfq",
-        json={
-            "name": "Test",
-            "requirements": [{"primary_mpn": "LM317T", "target_qty": 100}],
-        },
-    )
-    assert resp.status_code == 400
 
 
 def test_save_freeform_offers_success(ai_client, db_session, ai_test_user):

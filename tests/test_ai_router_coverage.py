@@ -1,9 +1,8 @@
 """test_ai_router_coverage.py — Coverage tests for app/routers/ai.py.
 
-Targets missing branches: _build_vendor_history, prospect contacts CRUD,
-promote_prospect_contact, parse-email, normalize-parts, standardize-description,
-parse-response, save-parsed-offers, company-intel, draft-rfq, intake-parse,
-freeform rfq/offer, apply-freeform-rfq, save-freeform-offers.
+Targets missing branches: prospect contacts CRUD, promote_prospect_contact,
+parse-email, normalize-parts, standardize-description, parse-response,
+save-parsed-offers, company-intel, intake-parse, save-freeform-offers.
 
 Called by: pytest
 Depends on: app/routers/ai.py, conftest.py
@@ -40,24 +39,6 @@ def test_ai_enabled_unknown_flag_returns_false():
     with patch("app.routers.ai.settings", settings):
         result = _ai_enabled(user)
     assert result is False
-
-
-# ── _build_vendor_history ────────────────────────────────────────────
-
-
-class TestBuildVendorHistory:
-    def test_returns_empty_when_no_vendor_card(self, db_session, test_user):
-        from app.routers.ai import _build_vendor_history
-
-        result = _build_vendor_history("NonExistentVendorXYZ123", db_session)
-        assert result == {}
-
-    def test_returns_history_when_vendor_exists(self, db_session, test_vendor_card):
-        from app.routers.ai import _build_vendor_history
-
-        result = _build_vendor_history(test_vendor_card.display_name, db_session)
-        # May be empty dict if normalized name doesn't match, but no crash
-        assert isinstance(result, dict)
 
 
 # ── list_prospect_contacts ────────────────────────────────────────────
@@ -338,49 +319,6 @@ class TestCompanyIntel:
         assert resp.json()["available"] is True
 
 
-# ── draft-rfq ────────────────────────────────────────────────────────
-
-
-class TestDraftRfq:
-    def test_ai_disabled_returns_403(self, client):
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "off"
-            resp = client.post(
-                "/api/ai/draft-rfq",
-                json={"vendor_name": "Arrow", "parts": ["LM317T x100"]},
-            )
-        assert resp.status_code == 403
-
-    def test_returns_unavailable_when_draft_fails(self, client):
-        with (
-            patch("app.routers.ai.settings") as mock_settings,
-            patch("app.services.ai_service.draft_rfq", new_callable=AsyncMock) as mock_draft,
-        ):
-            mock_settings.ai_features_enabled = "all"
-            mock_draft.return_value = None
-            resp = client.post(
-                "/api/ai/draft-rfq",
-                json={"vendor_name": "Arrow", "parts": ["LM317T x100"]},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["available"] is False
-
-    def test_returns_draft_when_successful(self, client):
-        with (
-            patch("app.routers.ai.settings") as mock_settings,
-            patch("app.services.ai_service.draft_rfq", new_callable=AsyncMock) as mock_draft,
-        ):
-            mock_settings.ai_features_enabled = "all"
-            mock_draft.return_value = "Dear Arrow, we are looking for LM317T..."
-            resp = client.post(
-                "/api/ai/draft-rfq",
-                json={"vendor_name": "Arrow", "parts": ["LM317T x100"]},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["available"] is True
-        assert "body" in resp.json()
-
-
 # ── intake-parse ──────────────────────────────────────────────────────
 
 
@@ -425,144 +363,6 @@ class TestIntakeParse:
             )
         assert resp.status_code == 200
         assert resp.json()["parsed"] is True
-
-
-# ── parse-freeform-rfq ─────────────────────────────────────────────────
-
-
-class TestParseFreeformRfq:
-    def test_ai_disabled_returns_403(self, client):
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "off"
-            resp = client.post(
-                "/api/ai/parse-freeform-rfq",
-                json={"raw_text": "We need 1000 LM317T from TI"},
-            )
-        assert resp.status_code == 403
-
-    def test_parser_returns_none(self, client):
-        with (
-            patch("app.routers.ai.settings") as mock_settings,
-            patch("app.services.freeform_parser_service.parse_freeform_rfq", new_callable=AsyncMock) as mock_parse,
-        ):
-            mock_settings.ai_features_enabled = "all"
-            mock_parse.return_value = None
-            resp = client.post(
-                "/api/ai/parse-freeform-rfq",
-                json={"raw_text": "gibberish text"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["parsed"] is False
-
-    def test_parser_returns_template(self, client):
-        with (
-            patch("app.routers.ai.settings") as mock_settings,
-            patch("app.services.freeform_parser_service.parse_freeform_rfq", new_callable=AsyncMock) as mock_parse,
-        ):
-            mock_settings.ai_features_enabled = "all"
-            mock_parse.return_value = {"name": "Test RFQ", "requirements": []}
-            resp = client.post(
-                "/api/ai/parse-freeform-rfq",
-                json={"raw_text": "We need 1000 LM317T from TI ASAP"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["parsed"] is True
-
-
-# ── parse-freeform-offer ───────────────────────────────────────────────
-
-
-class TestParseFreeformOffer:
-    def test_ai_disabled_returns_403(self, client):
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "off"
-            resp = client.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "LM317T $0.50 qty 1000"},
-            )
-        assert resp.status_code == 403
-
-    def test_parser_returns_none(self, client):
-        with (
-            patch("app.routers.ai.settings") as mock_settings,
-            patch("app.services.freeform_parser_service.parse_freeform_offer", new_callable=AsyncMock) as mock_parse,
-        ):
-            mock_settings.ai_features_enabled = "all"
-            mock_parse.return_value = None
-            resp = client.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "gibberish"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["parsed"] is False
-
-    def test_parser_with_requisition_not_found(self, client, db_session):
-        with patch("app.routers.ai.settings") as mock_settings:
-            mock_settings.ai_features_enabled = "all"
-            resp = client.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "LM317T $0.50", "requisition_id": 99999},
-            )
-        assert resp.status_code == 404
-
-
-# ── apply-freeform-rfq ─────────────────────────────────────────────────
-
-
-class TestApplyFreeformRfq:
-    def test_missing_customer_site_id_returns_400(self, client):
-        """customer_site_id is None by default, router checks and raises 400."""
-        resp = client.post(
-            "/api/ai/apply-freeform-rfq",
-            json={
-                "name": "Test RFQ",
-                "customer_name": "Acme",
-                "requirements": [{"mpn": "LM317T", "target_qty": 100}],
-            },
-        )
-        assert resp.status_code == 400
-
-    def test_site_not_found_returns_404(self, client, db_session):
-        with patch("app.services.ai_offer_service.apply_freeform_rfq") as mock_apply:
-            mock_apply.side_effect = ValueError("Site not found")
-            resp = client.post(
-                "/api/ai/apply-freeform-rfq",
-                json={
-                    "name": "Test RFQ",
-                    "customer_name": "Acme",
-                    "customer_site_id": 99999,
-                    "requirements": [{"mpn": "LM317T", "target_qty": 100}],
-                },
-            )
-        assert resp.status_code == 404
-
-    def test_applies_rfq_successfully(self, client, db_session, test_user):
-        # The route now gates the site's account on can_manage_account, so the site must
-        # exist under a company the actor owns before the (mocked) service runs.
-        from app.models import Company
-
-        company = Company(name="Freeform RFQ Co", is_active=True, account_owner_id=test_user.id)
-        db_session.add(company)
-        db_session.flush()
-        site = CustomerSite(company_id=company.id, site_name="HQ")
-        db_session.add(site)
-        db_session.commit()
-        db_session.refresh(site)
-        with (
-            patch("app.services.ai_offer_service.apply_freeform_rfq") as mock_apply,
-            patch("app.cache.decorators.invalidate_prefix"),
-        ):
-            mock_apply.return_value = {"requisition_id": 1, "requirements_created": 2}
-            resp = client.post(
-                "/api/ai/apply-freeform-rfq",
-                json={
-                    "name": "Test RFQ",
-                    "customer_name": "Acme",
-                    "customer_site_id": site.id,
-                    "requirements": [{"mpn": "LM317T", "target_qty": 100}],
-                },
-            )
-        assert resp.status_code == 200
 
 
 # ── save-freeform-offers ───────────────────────────────────────────────

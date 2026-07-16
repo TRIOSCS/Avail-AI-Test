@@ -20,16 +20,13 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import (
-    can_manage_account,
     get_req_for_user,
     require_prospect_site_access,
     require_requisition_access,
     require_user,
 )
 from ..models import (
-    Contact,
     CustomerSite,
-    Offer,
     ProspectContact,
     Requirement,
     User,
@@ -37,19 +34,14 @@ from ..models import (
     VendorResponse,
 )
 from ..schemas.ai import (
-    ApplyFreeformRfqRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
-    ParseFreeformOfferRequest,
-    ParseFreeformRfqRequest,
     ProspectContactSave,
     ProspectFinderRequest,
-    RfqDraftRequest,
     SaveDraftOffersRequest,
     SaveFreeformOffersRequest,
 )
 from ..schemas.responses import (
-    AiDraftRfqResponse,
     AiFindContactsResponse,
     AiIntakeParseResponse,
     AiNormalizePartsResponse,
@@ -60,8 +52,6 @@ from ..schemas.responses import (
     SimpleOkIdResponse,
     SimpleOkResponse,
 )
-from ..utils.sql_helpers import escape_like
-from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["ai"])
 
@@ -83,45 +73,6 @@ def _ai_enabled(user: User) -> bool:
             return False
         return (user.email or "").strip().lower() in allowed
     return False
-
-
-def _build_vendor_history(vendor_name: str, db: Session) -> dict:
-    """Gather vendor history from AVAIL for smart RFQ context."""
-    norm = normalize_vendor_name(vendor_name)
-
-    card = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
-    if not card:
-        return {}
-
-    from sqlalchemy import func
-
-    safe_vendor = escape_like(vendor_name)
-    total_rfqs = (
-        db.query(func.count(Contact.id))
-        .filter(
-            Contact.vendor_name.ilike(f"%{safe_vendor}%", escape="\\"),
-            Contact.contact_type == "email",
-        )
-        .scalar()
-    ) or 0
-
-    total_offers = (
-        db.query(func.count(Offer.id)).filter(Offer.vendor_name.ilike(f"%{safe_vendor}%", escape="\\")).scalar()
-    ) or 0
-
-    last_contact_date = (
-        db.query(func.max(Contact.created_at))
-        .filter(Contact.vendor_name.ilike(f"%{safe_vendor}%", escape="\\"))
-        .scalar()
-    )
-
-    return {
-        "total_rfqs": total_rfqs,
-        "total_offers": total_offers,
-        "last_contact_date": last_contact_date.strftime("%Y-%m-%d") if last_contact_date else None,
-        "avg_response_hours": card.response_velocity_hours,
-        "engagement_score": card.engagement_score,
-    }
 
 
 def _rfq_context_for_requisition(db: Session, user: User, requisition_id: int) -> list[dict]:
@@ -629,40 +580,6 @@ async def get_company_intel(
     return {"available": True, "intel": intel}
 
 
-# ── Feature 4: Smart RFQ Drafts ──────────────────────────────────────────
-
-
-@router.post("/api/ai/draft-rfq", response_model=AiDraftRfqResponse)
-@limiter.limit("10/minute")
-async def ai_draft_rfq(
-    payload: RfqDraftRequest,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Generate a personalized RFQ email body for a vendor."""
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    vendor_name = payload.vendor_name
-    parts = payload.parts
-
-    vendor_history = _build_vendor_history(vendor_name, db)
-
-    from app.services.ai_service import draft_rfq
-
-    draft = await draft_rfq(
-        vendor_name=vendor_name,
-        parts=parts,
-        vendor_history=vendor_history,
-        user_name=user.name or "",
-    )
-
-    if not draft:
-        return {"available": False, "reason": "Draft generation failed"}
-    return {"available": True, "body": draft}
-
-
 # ── Feature 5b: Unified AI Intake Parser ──────────────────────────────────
 
 
@@ -703,92 +620,6 @@ async def ai_intake_parse(
 
 
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
-
-
-@router.post("/api/ai/parse-freeform-rfq", response_model=AiIntakeParseResponse)
-@limiter.limit("10/minute")
-async def ai_parse_freeform_rfq(
-    payload: ParseFreeformRfqRequest,
-    request: Request,
-    user: User = Depends(require_user),
-):
-    """Parse free-form customer text into RFQ template (name, requirements)."""
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    from app.services.freeform_parser_service import parse_freeform_rfq
-
-    result = await parse_freeform_rfq(payload.raw_text)
-    if not result:
-        return {"parsed": False, "reason": "Parser returned no result"}
-    return {"parsed": True, "template": result}
-
-
-@router.post("/api/ai/parse-freeform-offer", response_model=AiIntakeParseResponse)
-@limiter.limit("10/minute")
-async def ai_parse_freeform_offer(
-    payload: ParseFreeformOfferRequest,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Parse free-form vendor text into offer template(s)."""
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    rfq_context = None
-    if payload.requisition_id:
-        rfq_context = _rfq_context_for_requisition(db, user, payload.requisition_id)
-
-    from app.services.freeform_parser_service import parse_freeform_offer
-
-    result = await parse_freeform_offer(payload.raw_text, rfq_context)
-    if not result:
-        return {"parsed": False, "reason": "Parser returned no result"}
-    return {"parsed": True, "template": result}
-
-
-@router.post("/api/ai/apply-freeform-rfq")
-@limiter.limit("5/minute")
-async def ai_apply_freeform_rfq(
-    request: Request,
-    payload: ApplyFreeformRfqRequest,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Create requisition + requirements from edited RFQ template."""
-    from ..cache.decorators import invalidate_prefix
-    from ..services.ai_offer_service import apply_freeform_rfq as _apply
-
-    if not payload.customer_site_id:
-        raise HTTPException(400, "customer_site_id required")
-
-    # Creating a requisition under a customer site is an account action — gate it on
-    # account-management (mirrors the prospect-contact site gate).
-    from ..models import Company
-
-    site = db.get(CustomerSite, payload.customer_site_id)
-    if not site:
-        raise HTTPException(404, "Customer site not found")
-    company = db.get(Company, site.company_id) if site.company_id else None
-    if not company or not can_manage_account(user, company, db):
-        raise HTTPException(403, "Not authorized to manage this account")
-
-    try:
-        result = _apply(
-            db,
-            name=payload.name,
-            customer_site_id=payload.customer_site_id,
-            customer_name=payload.customer_name,
-            deadline=payload.deadline,
-            requirements=payload.requirements,
-            user_id=user.id,
-        )
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    db.commit()
-    invalidate_prefix("req_list")
-    return result
 
 
 @router.post("/api/ai/save-freeform-offers")

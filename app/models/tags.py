@@ -4,7 +4,7 @@ Tags are applied to MaterialCards via a classification waterfall (existing data 
 prefix lookup → Nexar → AI). Entity tags aggregate interactions and use a two-gate
 visibility system (min_count AND min_percentage) to control display.
 
-Called by: app.services.tagging, app.routers.tags, app.routers.tagging_admin
+Called by: app.services.tagging, app.routers.tagging_admin
 Depends on: app.models.base (Base), app.models.intelligence (MaterialCard)
 """
 

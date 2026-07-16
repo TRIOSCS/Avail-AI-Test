@@ -7,7 +7,7 @@ are excluded so the tab only surfaces live stock.
 
 Scoring: composite of recency (40%) + frequency (30%) + margin potential (30%).
 
-Called by: scheduler.py (background scan), routers/proactive.py (endpoints)
+Called by: scheduler.py (background scan), routers/htmx/proactive.py (endpoints)
 Depends on: models, config, services/proactive_helpers
 """
 

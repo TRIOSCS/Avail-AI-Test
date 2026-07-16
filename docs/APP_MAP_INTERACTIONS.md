@@ -2869,14 +2869,12 @@ REUSING the helpers above (no new ad-hoc checks):
   `[/save|/promote]`) are the HTMX siblings of the `ai.py` routes above and reach the same
   `ProspectContact` mutate/delete; they call `require_prospect_site_access` after the 404 check,
   before mutation, so a cross-account actor can no longer hijack a site-linked prospect by id.
-- `proactive.add_do_not_offer` (`POST /api/proactive/do-not-offer`) — each item's `Company` is
-  gated on `can_manage_account` before the DNO row is written, and the auto-dismiss UPDATE is
-  scoped to `ProactiveMatch.salesperson_id == user.id` (mirrors `/dismiss`) so it never wipes
-  another owner's open matches.
-- `htmx_views.proactive_do_not_offer` (`POST /v2/partials/proactive/do-not-offer`) — the HTMX
-  sibling of `add_do_not_offer`; resolves the form `company_id`/`customer_site_id` to a `Company`
-  and requires `can_manage_account` before inserting `ProactiveDoNotOffer`, so an arbitrary
-  form-supplied company can no longer be suppressed.
+- `htmx_views.proactive_do_not_offer` (`POST /v2/partials/proactive/do-not-offer`) — resolves the
+  form `company_id`/`customer_site_id` to a `Company` and requires `can_manage_account` before
+  inserting `ProactiveDoNotOffer`, so an arbitrary form-supplied company can no longer be
+  suppressed; the auto-dismiss UPDATE is scoped to `ProactiveMatch.salesperson_id == user.id`
+  (mirrors `/dismiss`) so it never wipes another owner's open matches. (The legacy JSON twin
+  `POST /api/proactive/do-not-offer` was removed — the HTMX route is the sole surface.)
 - `sources.parse_response_attachments` (`POST /api/email-mining/parse-response-attachments/{id}`)
   — `require_requisition_access(db, vr.requisition_id, user)` before any Sighting create/overwrite.
 - `prepayment_service.create_prepayment` — `get_buyplan_for_user(db, created_by, buy_plan_id)` (the
@@ -3569,7 +3567,7 @@ enrichment_service.enrich_entity(domain, name)
     |
     +---> normalize_company_output()
     |
-    +---> IntelCache (14-day TTL, keyed by domain)
+    +---> intel_cache table (14-day TTL, keyed by domain; raw-SQL, no ORM model)
     |
     v
 apply_enrichment_to_company(company, blended)  OR

@@ -458,8 +458,8 @@ async def _safe_get(url: str, *, headers: dict, timeout: int, max_redirects: int
 async def scrape_website_contacts(url: str) -> dict:
     """Fetch vendor website homepage + /contact page, extract emails and phones.
 
-    Results are cached in IntelCache with a 7-day TTL keyed by domain to avoid re-
-    scraping the same vendor website on every page view.
+    Results are cached in the intel_cache table with a 7-day TTL keyed by domain to
+    avoid re-scraping the same vendor website on every page view.
     """
     from ..cache.intel_cache import get_cached, set_cached
 

@@ -19,9 +19,9 @@ Usage:
     python scripts/ci_shard.py SHARD TOTAL [ROOT]
     # SHARD is 0-indexed (0..TOTAL-1); ROOT defaults to "tests"
 
-Excludes the same paths pytest.ini's `addopts` ignores (tests/e2e,
-tests/test_browser_e2e.py, plus __pycache__/.claude noise) so a shard's file
-list never includes something the suite wouldn't collect anyway.
+Excludes the same paths pytest.ini's `addopts` ignores (tests/e2e, plus
+__pycache__/.claude noise) so a shard's file list never includes something
+the suite wouldn't collect anyway.
 """
 
 from __future__ import annotations
@@ -33,9 +33,6 @@ from pathlib import Path
 # Directory NAMES (not full paths) to exclude anywhere under root, mirroring
 # pytest.ini's `--ignore=tests/e2e` / `--ignore=.claude`.
 EXCLUDED_DIR_NAMES = {"e2e", "__pycache__", ".claude"}
-# Individual files excluded outright, mirroring
-# `--ignore=tests/test_browser_e2e.py`.
-EXCLUDED_FILE_NAMES = {"test_browser_e2e.py"}
 
 
 def list_test_files(root: Path) -> list[Path]:
@@ -44,8 +41,6 @@ def list_test_files(root: Path) -> list[Path]:
     for path in root.rglob("test_*.py"):
         parts = path.relative_to(root).parts[:-1]  # directory components only
         if EXCLUDED_DIR_NAMES & set(parts):
-            continue
-        if path.name in EXCLUDED_FILE_NAMES:
             continue
         files.append(path)
     return sorted(files)

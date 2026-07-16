@@ -21,7 +21,6 @@ Depends on: app.routers.{ai,proactive,sources,htmx_views,quality_plans,crm.quote
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import patch
 
 import pytest
 
@@ -32,7 +31,6 @@ from app.models import (
     CustomerSite,
     Offer,
     ProactiveDoNotOffer,
-    ProactiveMatch,
     ProspectContact,
     Requirement,
     Requisition,
@@ -176,7 +174,6 @@ def test_g1_manager_can_reassign(client, db_session, test_user, admin_user):
 # FIX GROUP 2 — ai.py site-linked prospect records need can_manage_account
 # Routes: DELETE /api/ai/prospect-contacts/{id}  (2a)
 #         POST   /api/ai/prospect-contacts/{id}/save  (2b)
-#         POST   /api/ai/apply-freeform-rfq  (2c)
 # Helper: can_manage_account
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -238,121 +235,6 @@ def test_g2_vendor_linked_prospect_stays_global(client, db_session, test_user, t
     db_session.refresh(pc)
     resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/save")
     assert resp.status_code == 200
-
-
-def test_g2c_apply_freeform_rfq_blocks_non_owner(client, db_session, test_user, admin_user):
-    co = _foreign_company(db_session, admin_user)
-    site = _site(db_session, co)
-    resp = client.post(
-        "/api/ai/apply-freeform-rfq",
-        json={
-            "name": "RFQ",
-            "customer_name": "Cust",
-            "customer_site_id": site.id,
-            "requirements": [{"primary_mpn": "LM317T", "target_qty": 10}],
-        },
-    )
-    assert resp.status_code == 403
-
-
-def test_g2c_apply_freeform_rfq_allows_owner(client, db_session, test_user):
-    co = _owned_company(db_session, test_user)
-    site = _site(db_session, co)
-    with (
-        patch("app.services.ai_offer_service.apply_freeform_rfq") as mock_apply,
-        patch("app.cache.decorators.invalidate_prefix"),
-    ):
-        mock_apply.return_value = {"requisition_id": 1, "requirements_created": 1}
-        resp = client.post(
-            "/api/ai/apply-freeform-rfq",
-            json={
-                "name": "RFQ",
-                "customer_name": "Cust",
-                "customer_site_id": site.id,
-                "requirements": [{"primary_mpn": "LM317T", "target_qty": 10}],
-            },
-        )
-    assert resp.status_code == 200
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# FIX GROUP 3 — proactive do-not-offer per-account authz + per-owner scope
-# Route: POST /api/proactive/do-not-offer  (proactive.add_do_not_offer)
-# Helper: can_manage_account  (+ salesperson_id scope on auto-dismiss)
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def _proactive_match(db_session, *, company, salesperson_id, mpn="LM317T", status="new"):
-    """A complete ProactiveMatch (offer_id/requirement_id are NOT NULL) for the given
-    owner."""
-    req = _requisition(db_session, salesperson_id, name=f"REQ-PM-{salesperson_id}")
-    item = db_session.query(Requirement).filter_by(requisition_id=req.id).first()
-    site = _site(db_session, company)
-    offer = Offer(
-        requisition_id=req.id,
-        requirement_id=item.id,
-        vendor_name="V",
-        mpn=mpn,
-        unit_price=Decimal("1.00"),
-        qty_available=10,
-        entered_by_id=salesperson_id,
-        status="active",
-        created_at=_now(),
-    )
-    db_session.add(offer)
-    db_session.flush()
-    match = ProactiveMatch(
-        offer_id=offer.id,
-        requirement_id=item.id,
-        requisition_id=req.id,
-        customer_site_id=site.id,
-        salesperson_id=salesperson_id,
-        company_id=company.id,
-        mpn=mpn,
-        status=status,
-        created_at=_now(),
-    )
-    db_session.add(match)
-    db_session.commit()
-    db_session.refresh(match)
-    return match
-
-
-def test_g3_do_not_offer_blocks_non_owner_and_preserves_other_matches(client, db_session, test_user, admin_user):
-    """Non-owner do-not-offer → 403, no DNO row, the owner's 'new' matches untouched."""
-    co = _foreign_company(db_session, admin_user)  # owned by admin_user, not test_user
-    # admin_user's open match for the same mpn+company — must survive
-    owner_match = _proactive_match(db_session, company=co, salesperson_id=admin_user.id)
-
-    resp = client.post(
-        "/api/proactive/do-not-offer",
-        json={"items": [{"mpn": "LM317T", "company_id": co.id}]},
-    )
-    assert resp.status_code == 403
-    # No suppression row created
-    assert db_session.query(ProactiveDoNotOffer).filter_by(company_id=co.id).count() == 0
-    # The rightful owner's open match is untouched
-    db_session.refresh(owner_match)
-    assert owner_match.status == "new"
-
-
-def test_g3_do_not_offer_allows_owner_and_dismisses_only_own_match(client, db_session, test_user, admin_user):
-    """Owner → 200; auto-dismiss scoped to salesperson_id (other owner's match
-    survives)."""
-    co = _owned_company(db_session, test_user)
-    my_match = _proactive_match(db_session, company=co, salesperson_id=test_user.id)
-    other_match = _proactive_match(db_session, company=co, salesperson_id=admin_user.id)
-
-    resp = client.post(
-        "/api/proactive/do-not-offer",
-        json={"items": [{"mpn": "LM317T", "company_id": co.id}]},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["suppressed"] == 1
-    db_session.refresh(my_match)
-    db_session.refresh(other_match)
-    assert my_match.status == "dismissed"  # own match dismissed
-    assert other_match.status == "new"  # the OTHER owner's match untouched
 
 
 # ══════════════════════════════════════════════════════════════════════════

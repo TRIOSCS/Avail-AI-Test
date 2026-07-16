@@ -4,7 +4,7 @@ Uses Claude (via claude_client) to draft personalized emails when
 salespeople want to proactively offer parts to customers based on
 purchase history matches.
 
-Called by: routers/proactive.py (POST /api/proactive/draft)
+Called by: routers/htmx/proactive.py (proactive draft flow)
 Depends on: utils/claude_client.py
 """
 
