@@ -87,6 +87,63 @@ echo "==> Rebuilding app + enrichment-worker images (build tag: $BUILD_COMMIT)..
 # rebuild only the app, leaving the worker on the old image until someone noticed.
 docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app enrichment-worker
 
+# Step 2b: Record the currently-running app image BEFORE we recreate the container,
+# so a failed health check can roll the app back to the last-known-good image instead
+# of leaving the broken build live (deploy.yml already rolls back on a failed health
+# check; this ports the same guarantee to deploy.sh — pre-fix, Step 4 just exited 1
+# and left the broken container running). The Step 2 build re-points the compose image
+# tag to the NEW image, but the OLD image ID stays on disk (still referenced by the
+# still-running old container until Step 3 recreates it), so capturing its ID here is
+# enough to restore it. Empty on a first-ever deploy (no prior container) — then there
+# is nothing to roll back to and we fall through to the same fail-and-exit as before.
+PREV_APP_CONTAINER="$(docker compose ps -q app 2>/dev/null || true)"
+PREV_APP_IMAGE_ID=""
+PREV_APP_IMAGE_REF=""
+if [ -n "$PREV_APP_CONTAINER" ]; then
+    PREV_APP_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$PREV_APP_CONTAINER" 2>/dev/null || true)"
+    PREV_APP_IMAGE_REF="$(docker inspect -f '{{.Config.Image}}' "$PREV_APP_CONTAINER" 2>/dev/null || true)"
+    echo "==> Recorded current app image for rollback: ${PREV_APP_IMAGE_REF:-unknown} (${PREV_APP_IMAGE_ID:-none})"
+else
+    echo "==> No running app container found — no rollback target (first deploy?)."
+fi
+
+# rollback_app: restore the previously-running app image and recreate the container
+# from it, then re-wait for health. Idempotent (safe to run even if the tag already
+# resolves to the previous image) and best-effort (each fallible step is guarded so the
+# whole rollback runs to completion under `set -e`). Returns 0 only if the restored
+# container becomes healthy again; the caller exits non-zero regardless because the
+# DEPLOY failed even when the rollback succeeded.
+rollback_app() {
+    if [ -z "$PREV_APP_IMAGE_ID" ] || [ -z "$PREV_APP_IMAGE_REF" ]; then
+        echo "==> ROLLBACK: no previous app image was recorded — cannot roll back automatically." >&2
+        echo "==>          The failed container is left running for inspection; fix and redeploy." >&2
+        return 1
+    fi
+    echo "==> ROLLBACK: restoring previous app image ${PREV_APP_IMAGE_REF} -> ${PREV_APP_IMAGE_ID}"
+    # Re-point the compose image tag back to the previous image, then force-recreate the
+    # app container from it (the broken new container is replaced).
+    if ! docker tag "$PREV_APP_IMAGE_ID" "$PREV_APP_IMAGE_REF"; then
+        echo "==> ROLLBACK ERROR: could not re-tag the previous image — manual intervention required." >&2
+        return 1
+    fi
+    docker compose up -d --force-recreate app || true
+    echo "==> ROLLBACK: waiting for the restored app to become healthy..."
+    RB_TRIES=0
+    RB_STATUS="unknown"
+    while [ $RB_TRIES -lt "$MAX_TRIES" ]; do
+        RB_CONTAINER="$(docker compose ps -q app 2>/dev/null || true)"
+        RB_STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$RB_CONTAINER" 2>/dev/null || echo "unknown")"
+        if [ "$RB_STATUS" = "healthy" ]; then
+            echo "==> ROLLBACK: previous app version is healthy again."
+            return 0
+        fi
+        RB_TRIES=$((RB_TRIES + 1))
+        sleep 2
+    done
+    echo "==> ROLLBACK CRITICAL: restored app did NOT become healthy (last status: ${RB_STATUS}) — manual intervention required." >&2
+    return 1
+}
+
 # Step 3: Recreate only the app container with the new image
 # Clean up any orphaned rename containers from previous deploys
 echo "==> Restarting app..."
@@ -113,6 +170,12 @@ if [ "$STATUS" != "healthy" ]; then
     echo "==> ERROR: App did not become healthy after ${MAX_TRIES} attempts"
     echo "==> Last 50 log lines:"
     docker compose logs --tail=50 app
+    echo "==> Attempting automatic rollback to the previously-running app image..."
+    if rollback_app; then
+        echo "==> Rollback complete: previous app version restored and healthy. Deploy FAILED."
+    else
+        echo "==> Rollback did NOT fully succeed — investigate immediately."
+    fi
     exit 1
 fi
 

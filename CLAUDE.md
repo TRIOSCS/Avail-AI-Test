@@ -360,12 +360,11 @@ Requisitions, Customers, Vendors, Sourcing Engine.
 ## Configuration
 
 All config via `.env` (see `.env.example`). Key groups: Azure OAuth (`AZURE_CLIENT_ID`,
-`AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_REDIRECT_URI`), Anthropic
-(`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`), `DATABASE_URL`, `REDIS_URL`, supplier API keys
-(feature disabled if unset — e.g. `NEXAR_CLIENT_ID`, `BROKERBIN_API_KEY`,
+`AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`; the OAuth callback URL is derived from `APP_URL`),
+Anthropic (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`), `DATABASE_URL`, `REDIS_URL`, supplier API
+keys (feature disabled if unset — e.g. `NEXAR_CLIENT_ID`, `BROKERBIN_API_KEY`,
 `DIGIKEY_CLIENT_ID`, `MOUSER_API_KEY`), feature flags (`MVP_MODE`, `EMAIL_MINING_ENABLED`,
-etc.), email (`MICROSOFT_GRAPH_ENDPOINT`, `SMTP_FROM`), and observability (`SENTRY_DSN` —
-optional).
+etc.), and observability (`SENTRY_DSN` — optional).
 
 ---
 
