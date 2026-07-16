@@ -176,6 +176,26 @@ def test_offer_qualification_and_buy_plan_links(db_session: Session) -> None:
     assert bp_active.ai_flags[0]["line_id"] is not None
 
 
+def test_seeded_best_offer_ids_resolve_to_real_offers(db_session: Session) -> None:
+    """Every seeded ``ExcessLineItem.best_offer_id`` points at a real ExcessOffer row.
+
+    ``best_offer_id`` holds a PARENT ExcessOffer id (that is what
+    ``recompute_line_rollup`` writes), and the bid-back seeds ``CustomerBidLine.selected_offer_id``
+    — a hard FK — from it. The seeder once wrote an ExcessOfferLine id here (type
+    confusion), so the value dangled and building a bid 500'd. Guards against that
+    regression: a non-null ``best_offer_id`` must resolve, and never to an offer-LINE id.
+    """
+    sds.seed(db_session)
+
+    offer_ids = {row[0] for row in db_session.query(ExcessOffer.id).all()}
+    seeded = db_session.query(ExcessLineItem).filter(ExcessLineItem.best_offer_id.isnot(None)).all()
+
+    assert seeded, "seeder must set best_offer_id on at least one line"
+    for item in seeded:
+        assert item.best_offer_id in offer_ids, f"best_offer_id={item.best_offer_id} is not a real ExcessOffer"
+        assert db_session.get(ExcessOffer, item.best_offer_id) is not None
+
+
 def test_second_seed_is_idempotent(db_session: Session) -> None:
     """Re-running the seeder creates nothing new — counts are stable."""
     sds.seed(db_session)
