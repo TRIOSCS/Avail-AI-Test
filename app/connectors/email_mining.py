@@ -257,6 +257,10 @@ class EmailMiner:
                     delta_token=delta_token,
                     params={"$select": MSG_SELECT, "$top": "50"},
                     max_items=max_messages,
+                    max_page_size=50,
+                    # Bound the initial full-sync round to the same window the
+                    # keyword-search fallback below scans.
+                    initial_lookback_days=lookback_days,
                 )
                 messages = items
                 used_delta = True
@@ -269,6 +273,8 @@ class EmailMiner:
                 messages = []
                 used_delta = False
             except Exception as e:
+                # Any other failure (typed error page, network) keeps the token —
+                # it was never advanced past unfetched data — and falls back.
                 logger.warning(f"Delta query failed for mining, falling back to search: {e}")
                 messages = []
                 used_delta = False
@@ -494,6 +500,11 @@ class EmailMiner:
                     delta_token=delta_token,
                     params={"$select": SENT_SELECT, "$top": "50"},
                     max_items=max_messages,
+                    max_page_size=50,
+                    # Bound the initial full-sync round to the same window the
+                    # search fallback below scans (delta only supports filtering
+                    # on receivedDateTime, ≈ sentDateTime for sent items).
+                    initial_lookback_days=lookback_days,
                 )
                 messages = items
                 used_delta = True
@@ -506,6 +517,8 @@ class EmailMiner:
                 messages = []
                 used_delta = False
             except Exception as e:
+                # Any other failure (typed error page, network) keeps the token —
+                # it was never advanced past unfetched data — and falls back.
                 logger.warning(f"Delta query failed for SentItems, falling back: {e}")
                 messages = []
                 used_delta = False

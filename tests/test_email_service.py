@@ -58,6 +58,7 @@ from app.models import (
     User,
     VendorResponse,
 )
+from app.utils.graph_client import GraphSyncStateExpired
 
 # ── _build_html_body ─────────────────────────────────────────────────
 
@@ -2223,10 +2224,10 @@ class TestPollInbox:
         assert sync.delta_token == "existing-token"
 
     @pytest.mark.asyncio
-    async def test_delta_failure_fallback(self, db_session, test_user, test_requisition):
-        """When delta query fails, fall back to full fetch."""
+    async def test_delta_expired_fallback(self, db_session, test_user, test_requisition):
+        """When the delta token expires (410), fall back to full fetch."""
         mock_gc = AsyncMock()
-        mock_gc.delta_query.side_effect = Exception("Delta gone")
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("SyncStateNotFound")
         mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
@@ -2243,9 +2244,9 @@ class TestPollInbox:
         assert len(results) == 1
 
     @pytest.mark.asyncio
-    async def test_delta_failure_clears_stale_token(self, db_session, test_user, test_requisition):
-        """When delta query fails (e.g. 410), the stale delta_token is cleared from
-        SyncState."""
+    async def test_delta_expired_clears_stale_token(self, db_session, test_user, test_requisition):
+        """A 410 (GraphSyncStateExpired) is the ONLY delta failure that clears the
+        stored delta_token from SyncState."""
         sync = SyncState(
             user_id=test_user.id,
             folder="inbox",
@@ -2256,7 +2257,7 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
-        mock_gc.delta_query.side_effect = Exception("410 SyncStateNotFound")
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("410 SyncStateNotFound")
         mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
@@ -2274,6 +2275,140 @@ class TestPollInbox:
         # Stale delta token must be cleared so next poll starts fresh
         sync = db_session.query(SyncState).first()
         assert sync.delta_token is None
+
+    @pytest.mark.asyncio
+    async def test_graph_error_page_keeps_delta_token_and_falls_back(self, db_session, test_user, test_requisition):
+        """A typed Graph error page mid-delta must NOT clear the stored token —
+        delta_query never advanced it, so the next poll resumes incrementally.
+
+        This poll falls back to a full scan.
+        """
+        from app.utils.graph_client import GraphAPIError
+
+        sync = SyncState(
+            user_id=test_user.id,
+            folder="inbox",
+            delta_token="mid-round-token",
+            last_sync_at=datetime.now(UTC),
+        )
+        db_session.add(sync)
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.delta_query.side_effect = GraphAPIError(503, "max_retries")
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(
+                token="fake-token",
+                db=db_session,
+                requisition_id=test_requisition.id,
+                scanned_by_user_id=test_user.id,
+            )
+
+        assert len(results) == 1  # fallback full scan still processed the inbox
+        sync = db_session.query(SyncState).first()
+        assert sync.delta_token == "mid-round-token"  # token kept, NOT cleared
+
+    @pytest.mark.asyncio
+    async def test_graph_error_page_auth_status_raises(self, db_session, test_user, test_requisition):
+        """A 401 Graph error page raises (poll marked failed) instead of the old silent
+        success with zero messages."""
+        from app.utils.graph_client import GraphAPIError
+
+        mock_gc = AsyncMock()
+        mock_gc.delta_query.side_effect = GraphAPIError(401, "token expired")
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            with pytest.raises(GraphAPIError):
+                await poll_inbox(
+                    token="fake-token",
+                    db=db_session,
+                    requisition_id=test_requisition.id,
+                    scanned_by_user_id=test_user.id,
+                )
+        mock_gc.get_json.assert_not_called()  # no fallback on auth failure
+
+    @pytest.mark.asyncio
+    async def test_transient_error_keeps_delta_token_and_fails_poll(self, db_session, test_user, test_requisition):
+        """A transient/network exception (httpx.ReadTimeout re-raised by the retry
+        layer) must NOT clear the stored token — it is still valid — and must surface as
+        a failed poll, not fall back to a full scan."""
+        import httpx
+
+        sync = SyncState(
+            user_id=test_user.id,
+            folder="inbox",
+            delta_token="still-valid-token",
+            last_sync_at=datetime.now(UTC),
+        )
+        db_session.add(sync)
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.delta_query.side_effect = httpx.ReadTimeout("timed out")
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            with pytest.raises(httpx.ReadTimeout):
+                await poll_inbox(
+                    token="fake-token",
+                    db=db_session,
+                    requisition_id=test_requisition.id,
+                    scanned_by_user_id=test_user.id,
+                )
+
+        mock_gc.get_json.assert_not_called()  # failed poll, not a fallback scan
+        sync = db_session.query(SyncState).first()
+        assert sync.delta_token == "still-valid-token"  # token survives
+
+    @pytest.mark.asyncio
+    async def test_fallback_error_dict_raises(self, db_session, test_user, test_requisition):
+        """An {"error": ...} dict from the fallback fetch (exhausted retries) must raise
+        — a hard Graph outage is a failed poll, not a successful empty one."""
+        from app.utils.graph_client import GraphAPIError
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {"error": "max_retries", "detail": "All retries exhausted"}
+
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+            with pytest.raises(GraphAPIError):
+                await poll_inbox(
+                    token="fake-token",
+                    db=db_session,
+                    requisition_id=test_requisition.id,
+                )
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_bounded_by_backfill_lookback(self, db_session, test_user, test_requisition):
+        """The initial delta round (no stored token) must be bounded to the standard
+        backfill window — otherwise the resumable-nextLink contract would drain the
+        entire mailbox history across polls."""
+        from app.config import settings
+
+        mock_gc = AsyncMock()
+        mock_gc.delta_query.return_value = ([], "initial-delta-token")
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            await poll_inbox(
+                token="fake-token",
+                db=db_session,
+                requisition_id=test_requisition.id,
+                scanned_by_user_id=test_user.id,
+            )
+
+        assert mock_gc.delta_query.call_args.kwargs["initial_lookback_days"] == settings.inbox_backfill_days
 
     @pytest.mark.asyncio
     async def test_fallback_fetch_failure_raises(self, db_session, test_user, test_requisition):
@@ -2497,6 +2632,8 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
+        # Expired delta token → explicit fall back to the get_json full scan
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("expired")
         mock_gc.get_json.return_value = {
             "value": [
                 self._make_inbox_message(
@@ -2536,6 +2673,8 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
+        # Expired delta token → explicit fall back to the get_json full scan
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("expired")
         mock_gc.get_json.return_value = {
             "value": [
                 self._make_inbox_message(
@@ -2575,6 +2714,8 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
+        # Expired delta token → explicit fall back to the get_json full scan
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("expired")
         # This email is from microsoft.com but with a non-noise prefix
         # However, _is_noise_email checks domain first, so it gets filtered
         mock_gc.get_json.return_value = {
@@ -2923,6 +3064,8 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
+        # Expired delta token → explicit fall back to the get_json full scan
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("expired")
         mock_gc.get_json.return_value = {
             "value": [
                 self._make_inbox_message(

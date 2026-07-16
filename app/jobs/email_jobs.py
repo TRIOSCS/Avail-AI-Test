@@ -618,6 +618,9 @@ async def _sync_user_contacts(user, db):
     delta_token = sync_state.delta_token if sync_state else None
 
     try:
+        # No initial_lookback_days: contacts deltas don't support the
+        # receivedDateTime filter, and an address book is a finite collection —
+        # draining it fully on the initial round IS the desired full sync.
         contacts, new_token = await gc.delta_query(
             "/me/contacts/delta",
             delta_token=delta_token,
@@ -626,6 +629,7 @@ async def _sync_user_contacts(user, db):
                 "$top": "100",
             },
             max_items=2500,
+            max_page_size=100,
         )
         # Persist new delta token
         if new_token:
@@ -661,7 +665,9 @@ async def _sync_user_contacts(user, db):
             logger.warning(f"Contacts sync failed for {user.email}: {e}")
             return
     except Exception as e:
-        logger.warning(f"Contacts sync failed for {user.email}: {e}")
+        # Typed error page or network failure — no token was returned, so the
+        # stored one still covers the unfetched data; next run resumes from it.
+        logger.warning(f"Contacts sync failed for {user.email} (token kept): {e}")
         return
 
     enriched = 0
@@ -778,6 +784,7 @@ async def scan_sent_folder(user, db):
 
     from app.utils.graph_client import GraphClient, GraphSyncStateExpired
 
+    from ..config import settings
     from ..models import SyncState
     from ..models.intelligence import ActivityLog
     from ..utils.token_manager import get_valid_token
@@ -804,6 +811,11 @@ async def scan_sent_folder(user, db):
             delta_token=delta_token,
             params=delta_params,
             max_items=500,
+            max_page_size=100,
+            # Bound the initial full-sync round (and thus the whole resumable
+            # drain) to the standard first-time backfill window instead of the
+            # entire Sent Items history.
+            initial_lookback_days=settings.inbox_backfill_days,
         )
     except GraphSyncStateExpired:
         logger.warning(f"Sent folder delta expired for {user.email} — full resync")
@@ -815,7 +827,12 @@ async def scan_sent_folder(user, db):
             delta_token=None,
             params=delta_params,
             max_items=500,
+            max_page_size=100,
+            initial_lookback_days=settings.inbox_backfill_days,
         )
+    # GraphAPIError (typed error page — token NOT advanced) intentionally
+    # propagates: _job_scan_sent_folders logs it per-user and rolls back, so the
+    # run is marked failed and the next scan resumes from the kept token.
 
     # Persist new delta token
     if new_token:

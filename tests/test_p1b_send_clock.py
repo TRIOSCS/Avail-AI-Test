@@ -391,6 +391,10 @@ class TestReplyMatchingAfterReconcile:
         }
 
         mock_gc = AsyncMock()
+        # Expired delta token → explicit fall back to the get_json full scan
+        from app.utils.graph_client import GraphSyncStateExpired
+
+        mock_gc.delta_query.side_effect = GraphSyncStateExpired("expired")
         mock_gc.get_json.return_value = {"value": [inbound_msg]}
 
         with (
