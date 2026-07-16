@@ -19,6 +19,15 @@
   <div class="flex items-center justify-between">
     <h2 class="h2">Buy Plans / Sales Orders <span class="text-sm font-normal text-gray-500">({{ rows | length }})</span></h2>
     <div class="flex items-center gap-2">
+      {# My Buy Plans — entry point to the PERSONAL hub (My Queue + Pipeline) at
+         /v2/buy-plans, distinct from this org-wide decide console. Loads the hub shell
+         (no ?new=1, so it lands on the lens body, not the origination picker) and pushes
+         its canonical URL so a reload/bookmark lands on the hub. #}
+      <a hx-get="/v2/partials/buy-plans" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+         class="btn-secondary btn-sm inline-flex items-center gap-1 cursor-pointer" title="Go to my personal Buy Plans hub (My Queue &amp; Pipeline)">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+        My Buy Plans
+      </a>
       {# New Buy Plan (epic H) — surfaces the create flow on this console. Loads the Buy Plans
          hub landed straight on the Sales-Order origination picker (?new=1); the picker renders
          into #bp-hub-body inside that shell, so its requisition links resolve normally. #}

@@ -151,6 +151,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/materials", response_class=HTMLResponse)
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
+@router.get("/v2/offers/review-queue", response_class=HTMLResponse)
 @router.get("/v2/crm", response_class=HTMLResponse)
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
@@ -177,6 +178,9 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "settings",
         "materials",
         "follow-ups",
+        # "/offers" only appears in the review-queue full page — no collision with other
+        # view segments, so its position here is not load-bearing.
+        "offers",
         "trouble-tickets",
         "my-day",
         "crm",
@@ -231,6 +235,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
         partial_url = "/v2/partials/sightings/workspace"
+    elif current_view == "offers":
+        # The offer review queue (medium-confidence AI-parsed offers) — surfaced from the
+        # Sightings workspace quick-links. Its own canonical page so a pushed/bookmarked
+        # /v2/offers/review-queue reloads straight into the queue instead of 404ing.
+        partial_url = "/v2/partials/offers/review-queue"
     elif current_view == "resell":
         partial_url = "/v2/partials/resell/workspace"
     elif current_view == "my-day":
