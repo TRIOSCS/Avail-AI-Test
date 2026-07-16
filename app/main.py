@@ -241,6 +241,9 @@ app = FastAPI(
     version=APP_VERSION,
     openapi_tags=OPENAPI_TAGS,
     lifespan=lifespan,
+    docs_url="/docs" if settings.expose_api_docs else None,
+    redoc_url="/redoc" if settings.expose_api_docs else None,
+    openapi_url="/openapi.json" if settings.expose_api_docs else None,
 )
 
 # Rate limiting (slowapi)

@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # --- API docs exposure ---
+    # Swagger UI (/docs), ReDoc (/redoc), and the raw schema (/openapi.json) are
+    # OFF by default. FastAPI only registers those routes when their *_url is
+    # non-None (see app/main.py FastAPI() ctor), so False => the routes never
+    # exist => 404. Flip True only in a trusted/dev environment. Env: EXPOSE_API_DOCS.
+    expose_api_docs: bool = False
+
     # --- Rate limiting ---
     rate_limit_default: str = "120/minute"
     rate_limit_enabled: bool = True
