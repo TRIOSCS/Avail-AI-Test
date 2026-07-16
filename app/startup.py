@@ -90,6 +90,7 @@ def run_startup_migrations() -> None:
     | _seed_system_config                           | FAST  | 7-row INSERT ON CONFLICT DO NOTHING                          |
     | _reconcile_system_config                      | FAST  | 4-row UPDATE by key                                          |
     | _seed_manufacturers                           | FAST  | ~50-row INSERT ON CONFLICT DO NOTHING                        |
+    | _seed_tag_threshold_config                     | FAST  | 6-row INSERT ON CONFLICT DO NOTHING                          |
     | _create_count_triggers                        | FAST  | CREATE OR REPLACE FUNCTION/TRIGGER only — no data scan       |
     | _reconcile_connector_active                    | FAST  | no-op by design                                              |
     | _verify_encryption_canary                     | FAST  | single-row decrypt; must fail fast before any encrypted read |
@@ -134,6 +135,7 @@ def run_startup_migrations() -> None:
         _seed_system_config(conn)
         _reconcile_system_config(conn)
         _seed_manufacturers(conn)
+        _seed_tag_threshold_config(conn)
         _create_count_triggers(conn)
         _reconcile_connector_active(conn)
 
@@ -672,6 +674,51 @@ def _seed_manufacturers(conn) -> None:
             VALUES (:name, :aliases)
             ON CONFLICT (canonical_name) DO NOTHING""",
             {"name": canonical_name, "aliases": json.dumps(aliases)},
+        )
+
+
+# Default tag-visibility thresholds — (entity_type, tag_type, min_count, min_percentage).
+# Canonical values mirror alembic migrations 042 (vendor_card/customer_site) + 046 (company).
+# Keep this list in lockstep with those migrations; the two-gate visibility system
+# (recalculate_entity_tag_visibility) treats a MISSING row as "never visible", so an
+# empty tag_threshold_config silently suppresses every AI brand/commodity tag.
+TAG_THRESHOLD_SEEDS = [
+    ("vendor_card", "brand", 2, 0.05),
+    ("vendor_card", "commodity", 3, 0.05),
+    ("customer_site", "brand", 3, 0.05),
+    ("customer_site", "commodity", 3, 0.05),
+    ("company", "brand", 2, 0.05),
+    ("company", "commodity", 3, 0.05),
+]
+
+
+def _seed_tag_threshold_config(conn) -> None:
+    """Seed the default tag-visibility thresholds (INSERT ON CONFLICT DO NOTHING).
+
+    The rows are seeded by migrations 042/046, but a DB materialized outside the
+    incremental chain (``Base.metadata.create_all`` + ``alembic stamp``, or a restore
+    from the 001 schema-only baseline) has the ``tag_threshold_config`` table present
+    yet unseeded — the data-only ``bulk_insert`` in 042/046 never runs. When the table
+    is empty, ``tagging.recalculate_entity_tag_visibility`` marks EVERY AI brand/
+    commodity EntityTag ``is_visible=False`` (no threshold row → fail the gate), so the
+    whole tag-visibility feature silently does nothing. This idempotent boot-time seed
+    self-heals such a DB on the next deploy without touching a correctly-seeded one.
+
+    Called by: run_startup_migrations
+    Depends on: tag_threshold_config table (uq_threshold_entity_tag on entity_type,tag_type)
+    """
+    for entity_type, tag_type, min_count, min_percentage in TAG_THRESHOLD_SEEDS:
+        _exec(
+            conn,
+            """INSERT INTO tag_threshold_config (entity_type, tag_type, min_count, min_percentage)
+            VALUES (:entity_type, :tag_type, :min_count, :min_percentage)
+            ON CONFLICT (entity_type, tag_type) DO NOTHING""",
+            {
+                "entity_type": entity_type,
+                "tag_type": tag_type,
+                "min_count": min_count,
+                "min_percentage": min_percentage,
+            },
         )
 
 
