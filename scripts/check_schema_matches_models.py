@@ -54,9 +54,20 @@ from app.models import Base
 #   - enrichment_credit_usage — exists but EMPTY and referenced only by migration 030;
 #     the old "billing telemetry, never drop" rationale looks moot, but dropping needs
 #     an explicit product decision — keep grandfathered until the user approves.
+#   - intel_cache — ACTIVE raw-SQL-only table (read/written via app/cache/intel_cache.py:
+#     enrichment result cache, email-mining usage counters, Clay OAuth state store,
+#     rate-limit counters). The `IntelCache` ORM class had zero ORM consumers and was
+#     removed in #751 (see the NOTE in app/models/enrichment.py); the table itself is
+#     load-bearing and must NEVER be dropped, so it is intentionally model-less.
+#   - sync_logs — orphaned by #751 (the `SyncLog` model + /api/admin/sync-logs endpoint
+#     were removed as dead code; 0 rows on staging, no remaining code references). A clean
+#     drop-via-migration is a valid follow-up but is deferred to explicit user approval,
+#     same as enrichment_credit_usage above.
 _GRANDFATHERED_REMOVE_TABLES = {
     "_sp1_desc_backup",
     "enrichment_credit_usage",
+    "intel_cache",
+    "sync_logs",
 }
 
 # Indexes that live in the DB (raw-DDL) but the model's metadata never declares, so
@@ -80,6 +91,11 @@ _GRANDFATHERED_REMOVE_INDEXES = {
     #    notification_engagement / self_heal_log index entries left with their
     #    tables (2026-07-02, #464 finish — tables no longer exist on the rebuilt DB).
     "ix_ecu_provider_month",
+    #    intel_cache / sync_logs indexes — belong to the model-less tables grandfathered
+    #    above (#751). They can't be reconciled without first re-mapping their tables,
+    #    which we deliberately don't (intel_cache is raw-SQL-only; sync_logs is orphaned).
+    "ix_intel_cache_cache_key",
+    "ix_sync_source_time",
     # 2. PostgreSQL-only expression / complex-partial indexes (intentional raw-DDL).
     "ix_mc_cat_order_live",
     "ix_mc_category_lower",
