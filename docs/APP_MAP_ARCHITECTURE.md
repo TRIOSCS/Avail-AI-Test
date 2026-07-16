@@ -362,7 +362,14 @@ After this final split, `htmx_views.py` retains only the cross-cutting surface: 
 full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace shell
 (`GET /v2/partials/parts/workspace`), the vendor stock-list import
 (`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
-(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). It no longer defines any
+(`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). `v2_page` also owns the canonical
+full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2/follow-ups`
+(→ `/v2/partials/follow-ups`) and `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
+`offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
+(`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
+once, off the table-refresh path). The Buy Plans hub (`/v2/buy-plans`) is likewise reachable
+from a **"My Buy Plans"** link on the Approvals Buy-Plans tab (`approvals/_tab_buy_plan.html`).
+It no longer defines any
 `/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,
 or requisition bulk/inline-edit — those now live in the 5 modules above.
 
@@ -415,7 +422,7 @@ authoritative reference. Static-analysis tests in
 | Resell | 11 | partials/resell/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/resell.py`) |
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
-| Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope) |
+| Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope). `list.html` (the workspace shell) carries a top **quick-links** bar with count-badged entry points to the offer-review queue + follow-up queue (both nav-swap `#main-content`, pushing their canonical URLs). |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
 | Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |

@@ -360,9 +360,20 @@ async def sightings_workspace(
 ):
     """Return the split-panel workspace layout.
 
-    The table loads via hx-get inside.
+    The table loads via hx-get inside. Two workspace-level quick-links (offer review
+    queue + follow-ups queue) carry their pending counts so a buyer can jump straight to
+    either from their home screen; both counts are computed once here (not on the hot
+    table-refresh path).
     """
-    ctx = {"request": request, "user": user}
+    from .htmx.offers.follow_ups import follow_up_count
+
+    review_count = db.query(sqlfunc.count(Offer.id)).filter(Offer.status == OfferStatus.PENDING_REVIEW).scalar() or 0
+    ctx = {
+        "request": request,
+        "user": user,
+        "review_count": review_count,
+        "follow_up_count": follow_up_count(db, user),
+    }
     return template_response("htmx/partials/sightings/list.html", ctx)
 
 

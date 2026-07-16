@@ -922,3 +922,28 @@ class TestSightingsWorkspaceExtra:
     def test_sightings_workspace(self, client: TestClient, url: str):
         resp = client.get(url)
         assert resp.status_code == 200
+
+    def test_sightings_workspace_surfaces_queue_entry_points(self, client: TestClient):
+        """The Sightings workspace exposes nav entry points to the two buyer queues that
+        have no bottom-nav tab of their own — the offer-review queue and the follow-up
+        queue — each swapping #main-content and pushing its own canonical URL."""
+        resp = client.get("/v2/partials/sightings/workspace")
+        assert resp.status_code == 200
+        body = resp.text
+        assert 'hx-get="/v2/partials/offers/review-queue"' in body
+        assert 'hx-push-url="/v2/offers/review-queue"' in body
+        assert 'hx-get="/v2/partials/follow-ups"' in body
+        assert 'hx-push-url="/v2/follow-ups"' in body
+
+    def test_sightings_workspace_review_queue_shows_pending_count(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """A pending-review offer surfaces its count on the Review Queue quick-link."""
+        req = _make_requisition(db_session, test_user)
+        db_session.flush()
+        _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
+        db_session.commit()
+        resp = client.get("/v2/partials/sightings/workspace")
+        assert resp.status_code == 200
+        # The amber count pill renders only when the count is non-zero.
+        assert 'bg-amber-500 text-white text-[11px] font-semibold">1</span>' in resp.text
