@@ -420,6 +420,137 @@ class TestRateLimitHandler:
         assert hasattr(app.state, "limiter")
 
 
+# ── Rate limit middleware (Task 2: SlowAPIMiddleware) ─────────────────
+
+
+class TestRateLimitMiddleware:
+    """Task 2: registering SlowAPIMiddleware makes the Limiter's ``default_limits``
+    actually enforced on undecorated routes, while streaming/infra endpoints are
+    exempted via ``@limiter.exempt``.
+
+    The 429-behaviour tests build a fresh isolated app + Limiter (in-memory storage is
+    per-instance, so counts are deterministic and need no auth/DB) — mirrors the
+    self-contained ``csrf_app`` pattern in ``test_csrf_module_importable``. The
+    real-app tests then assert app/main.py actually wired the middleware and marked
+    the right routes exempt.
+    """
+
+    @staticmethod
+    def _mini_app(limit: str = "3/minute"):
+        """Build a FastAPI app wired exactly like app/main.py's rate-limit block:
+
+        fresh Limiter (own in-memory store) → exception handler → SlowAPIMiddleware,
+        plus a plain (default-limited) route and a ``@limiter.exempt`` route.
+        """
+        from fastapi import FastAPI, Request
+        from slowapi import Limiter, _rate_limit_exceeded_handler
+        from slowapi.errors import RateLimitExceeded
+        from slowapi.middleware import SlowAPIMiddleware
+        from slowapi.util import get_remote_address
+
+        app = FastAPI()
+        limiter = Limiter(key_func=get_remote_address, default_limits=[limit])
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_middleware(SlowAPIMiddleware)
+
+        @app.get("/limited")
+        async def limited(request: Request):
+            return {"ok": True}
+
+        @app.get("/exempt")
+        @limiter.exempt
+        async def exempt(request: Request):
+            return {"ok": True}
+
+        return app
+
+    def test_default_limit_enforced_on_plain_route(self):
+        """A low default limit yields 429 on the 4th+ hit of an undecorated route.
+
+        TestClient pins request.client.host='testclient', so all calls share one key and
+        the counter accumulates — proving the middleware enforces default_limits.
+        """
+        client = TestClient(self._mini_app("3/minute"))
+        codes = [client.get("/limited").status_code for _ in range(5)]
+        assert codes == [200, 200, 200, 429, 429]
+
+    def test_429_body_uses_repo_error_key(self):
+        """Slowapi's default handler returns {'error': 'Rate limit exceeded: ...'},
+        matching the repo convention (tests assert ['error'], never ['detail'])."""
+        client = TestClient(self._mini_app("2/minute"))
+        client.get("/limited")
+        client.get("/limited")
+        resp = client.get("/limited")
+        assert resp.status_code == 429
+        assert resp.json()["error"].startswith("Rate limit exceeded")
+
+    def test_exempt_route_never_429s(self):
+        """A ``@limiter.exempt`` route bypasses the default limit no matter how many
+        times it is hit — the SSE streams depend on this so a stream is never killed."""
+        client = TestClient(self._mini_app("3/minute"))
+        codes = [client.get("/exempt").status_code for _ in range(8)]
+        assert codes == [200] * 8
+
+    def test_real_app_registers_slowapi_middleware(self):
+        """app/main.py must add SlowAPIMiddleware to the real app when rate limiting is
+        enabled; without it the Limiter's default_limits are never enforced (the whole
+        point of Task 2).
+
+        The test suite sets RATE_LIMIT_ENABLED=false (conftest.py:33) so the singleton
+        app.main.app has NO middleware here — re-import the app in a fresh interpreter
+        with the flag ON and assert the middleware got wired.
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[1]
+        env = {
+            **os.environ,
+            "TESTING": "1",
+            "RATE_LIMIT_ENABLED": "true",
+            "DATABASE_URL": "sqlite://",
+            "REDIS_URL": "",
+            "CACHE_BACKEND": "none",
+            "PYTHONPATH": str(repo_root),
+        }
+        code = (
+            "import app.main as m; "
+            "names=[getattr(x,'cls',type(x)).__name__ for x in m.app.user_middleware]; "
+            "print('SlowAPIMiddleware' in names)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(repo_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, f"import failed: {result.stderr}"
+        assert result.stdout.strip().endswith("True"), (
+            f"SlowAPIMiddleware not registered with RATE_LIMIT_ENABLED=true; stdout={result.stdout!r}"
+        )
+
+    def test_streaming_and_infra_endpoints_are_exempt(self):
+        """The two long-lived SSE streams and the infra probes are ``@limiter.exempt``,
+        so the raised global default never counts (or, for a stream, kills) them.
+
+        Asserts on the limiter's exempt set (populated by the decorator at import time),
+        which is robust to lazy router materialisation.
+        """
+        import app.main  # noqa: F401 -- ensure every router module is imported (decorators run)
+        from app.main import health, health_ready, metrics_endpoint
+        from app.rate_limit import limiter
+        from app.routers.events import event_stream
+        from app.routers.htmx.search_views import search_stream
+
+        for fn in (event_stream, search_stream, metrics_endpoint, health, health_ready):
+            name = f"{fn.__module__}.{fn.__name__}"
+            assert name in limiter._exempt_routes, f"{name} not marked @limiter.exempt"
+
+
 # ── Global exception handler (lines 160-170) ─────────────────────────
 
 
