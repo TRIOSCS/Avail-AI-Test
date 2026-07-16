@@ -512,7 +512,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | name | String 255 | |
 | domain | String 255, indexed | |
 | website | String 500 | |
-| account_type | String 50 | Customer\|Prospect\|Partner\|Competitor |
+| account_type | String 50, indexed (`ix_companies_account_type`) | Customer\|Prospect\|Partner\|Competitor. Migration 191 adds the btree index — the column is filtered in the CRM list path (`crm_service.list_companies`, `== account_type` for CDM types) and the inbound-customer alert source (`== "Customer"`), which had no index. |
 | account_owner_id | FK -> users | |
 | employee_size | String 50 | |
 | hq_city / hq_state / hq_country | String | |

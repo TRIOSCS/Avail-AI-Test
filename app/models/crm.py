@@ -182,6 +182,9 @@ class Company(Base):
         Index("ix_companies_account_owner", "account_owner_id"),
         Index("ix_companies_owner_created", "account_owner_id", "created_at"),
         Index("ix_companies_sf_account_id", "sf_account_id", unique=True),
+        # account_type is filtered in CRM list queries (crm_service.list_companies)
+        # and the inbound-customer alert source — btree index (migration 191).
+        Index("ix_companies_account_type", "account_type"),
         # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
         # pg_trgm GIN indexes for fuzzy ILIKE search + plain btree FK indexes.
         Index("ix_companies_parent_company_id", "parent_company_id"),
