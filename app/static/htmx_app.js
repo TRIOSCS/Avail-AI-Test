@@ -585,6 +585,12 @@ document.body.addEventListener('click', (evt) => {
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
     const status = evt.detail.xhr && evt.detail.xhr.status;
+    // 409 = stale-edit guard conflict (services/stale_guard.py): the server owns the
+    // message via its HX-Trigger showToast (bridged below) and sends HX-Reswap: none,
+    // so the generic error toast here would double-toast. Skip it.
+    if (status === 409) {
+        return;
+    }
     if (status >= 400 && status < 500) {
         let msg = 'Request failed. Please try again.';
         try {
