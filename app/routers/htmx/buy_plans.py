@@ -761,6 +761,15 @@ async def buy_plan_approve_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        # Workspace pane decide: re-render THIS plan's pane in place and nudge the
+        # left work list to repaint (awListRefresh — the split shell's list container
+        # listens for it), so the decided row leaves the Needs-your-approval group.
+        from .approvals_hub import render_plan_pane
+
+        resp = render_plan_pane(request, user, db, plan_id, lens=form.get("lens", "sales-orders"))
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 

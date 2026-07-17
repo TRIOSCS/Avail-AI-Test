@@ -29,6 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
+    SOURCING_ORDER_TYPES,
     AccessKey,
     ApprovalGateType,
     ApprovalRecipientStatus,
@@ -267,6 +268,94 @@ def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope})
     return template_response("htmx/partials/approvals/_workspace_split.html", ctx)
+
+
+# ── Sales Order / Buy Plan detail pane (both lenses, one anatomy) ───────
+
+
+def _viewer_can_decide_plan(db: Session, user: User, plan_id: int) -> bool:
+    """True when *user* holds a PENDING recipient slot on the plan's open BUY_PLAN
+    request (mirrors the engine's decide() gate — same predicate the queue uses)."""
+    from ...constants import ApprovalSubjectType
+
+    row = db.execute(
+        select(ApprovalRequest.id)
+        .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
+        .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalRequest.gate_type == ApprovalGateType.BUY_PLAN,
+            ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+            ApprovalRequest.subject_id == plan_id,
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+        .limit(1)
+    ).first()
+    return row is not None
+
+
+def render_plan_pane(
+    request: Request, user: User, db: Session, plan_id: int, lens: str = "sales-orders"
+) -> HTMLResponse:
+    """Build + render the SO/BP detail pane (shared by the pane GET route and the
+    approve handler's origin=approvals_workspace re-render branch).
+
+    One anatomy for both lenses (spec §8): header → approval block → Quality (sales
+    section) → lines → kanban placeholder → notes placeholder. ``lens`` only threads
+    the decide form's re-render target back to the caller's tab.
+    """
+    from ...dependencies import get_buyplan_for_user
+    from ...models.quality_plan import QualityPlan
+
+    lens = lens if lens in ("sales-orders", "buy-plans") else "sales-orders"
+    bp = get_buyplan_for_user(
+        db,
+        user,
+        plan_id,
+        options=[
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
+            joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.approved_by),
+            joinedload(BuyPlan.submitted_by),
+        ],
+    )
+    # The plan's QP row (spec §4: sales section lives on the SO; QP rows stay keyed per
+    # (plan, vendor) — the SALES answers are plan-level, so the first row carries them).
+    qp = db.execute(
+        select(QualityPlan).where(QualityPlan.buy_plan_id == bp.id).order_by(QualityPlan.id.asc()).limit(1)
+    ).scalar_one_or_none()
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "bp": bp,
+            "lines": bp.lines or [],
+            "lens": lens,
+            "qp": qp,
+            "can_decide": bp.status == BuyPlanStatus.PENDING.value and _viewer_can_decide_plan(db, user, bp.id),
+            "is_sourcing": (bp.order_type or SalesOrderType.NEW.value) in {t.value for t in SOURCING_ORDER_TYPES},
+            "order_type_label": ORDER_TYPE_LABELS.get(bp.order_type or "", bp.order_type),
+            "po_labels": PO_DECISION_LABELS,
+        }
+    )
+    return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
+
+
+@router.get("/v2/partials/approvals/plan/{plan_id:int}/pane", response_class=HTMLResponse)
+async def approvals_plan_pane(
+    request: Request,
+    plan_id: int,
+    lens: str = "sales-orders",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """The Sales Orders / Buy Plans right-hand detail pane for one plan.
+
+    404s for a missing plan or a restricted non-owner (get_buyplan_for_user).
+    """
+    return render_plan_pane(request, user, db, plan_id, lens)
 
 
 # ── The left work list ──────────────────────────────────────────────────
