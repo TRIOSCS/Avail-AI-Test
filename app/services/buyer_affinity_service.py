@@ -506,8 +506,10 @@ def overlap_warning(
     NEVER blocks and never raises on a missing row — purely informational (the user is
     HYBRID-assertive: warn, log the override, proceed). Looks for an ExcessOutreach on
     ``excess_list_id`` to ``target_vendor_card_id`` whose ``submitted_by`` is NOT
-    ``owner_id`` and whose ``sent_at`` (falling back to ``created_at``) is within
-    ``within_days``. Returns the MOST RECENT such touch as
+    ``owner_id``, whose status is a GENUINELY-sent one (a sending/failed/interrupted touch
+    never reached the buyer, so it is not a real prior offer), and whose ``sent_at``
+    (falling back to ``created_at``) is within ``within_days``. Returns the MOST RECENT
+    such touch as
     ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions the
     overlapping teammate touches), or None when there is no recent teammate overlap.
     """
@@ -518,6 +520,10 @@ def overlap_warning(
             ExcessOutreach.excess_list_id == excess_list_id,
             ExcessOutreach.target_vendor_card_id == target_vendor_card_id,
             ExcessOutreach.submitted_by != owner_id,
+            # Only a GENUINELY-sent touch is a real prior offer: a sending/failed/interrupted
+            # row never reached the buyer, so it must not warn a teammate off a still-
+            # uncontacted buyer (the same not-sent exclusion the nudge/offered readers use).
+            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
         )
         .all()
     )
@@ -561,7 +567,8 @@ def overlap_warnings_for(
     Returns ``{vendor_card_id: {by_user_id, by_user_name, when, line_item_ids}}`` for the
     buyers with a recent teammate overlap; a buyer with none is simply absent (the caller
     maps a miss to ``None``). Same predicate/shape as the per-buyer function: a teammate's
-    (``submitted_by != owner_id``) ExcessOutreach on this list to the buyer whose
+    (``submitted_by != owner_id``) GENUINELY-sent ExcessOutreach on this list (a sending/
+    failed/interrupted touch is excluded — it never reached the buyer) to the buyer whose
     ``sent_at`` (else ``created_at``) is within ``within_days``; the most-recent touch wins;
     ``line_item_ids`` unions the overlapping touches.
     """
@@ -574,6 +581,10 @@ def overlap_warnings_for(
             ExcessOutreach.excess_list_id == excess_list_id,
             ExcessOutreach.target_vendor_card_id.in_(list(target_vendor_card_ids)),
             ExcessOutreach.submitted_by != owner_id,
+            # Only a GENUINELY-sent touch is a real prior offer: a sending/failed/interrupted
+            # row never reached the buyer, so it must not warn a teammate off a still-
+            # uncontacted buyer (the same not-sent exclusion the nudge/offered readers use).
+            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
         )
         .all()
     )

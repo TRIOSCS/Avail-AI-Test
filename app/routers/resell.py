@@ -1480,18 +1480,26 @@ async def resell_outreach_export(
         .all()
     )
 
-    header = ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity"]
+    header = ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity", "Note"]
+    not_sent = buyer_affinity_service._NOT_SENT_STATUSES
 
     def _rows():
         for r in rows:
+            # Mirror the tracker's "When": a non-sent row (sending / failed / interrupted)
+            # never reached the buyer, so its created_at is NOT a real send time — leave the
+            # "Sent At" cell blank instead of misreporting the row-creation time as a send.
+            sent_at = "" if r.status in not_sent else _fmt_dt(r.sent_at or r.created_at)
             yield [
                 r.target_vendor_card.display_name if r.target_vendor_card else "Unknown buyer",
                 r.excess_line_item.part_number if r.excess_line_item else "Whole list",
                 r.channel,
                 r.submitted_by_user.name if r.submitted_by_user else "",
                 r.status,
-                _fmt_dt(r.sent_at or r.created_at),
+                sent_at,
                 _fmt_dt(r.updated_at),
+                # Surface the persisted send-failure / degraded-reply-matching reason so an
+                # exported failed/interrupted (or delivered-but-degraded) row is not silent.
+                r.send_error or "",
             ]
 
     return stream_csv(f"resell_outreach_list_{el.id}.csv", header, _rows())
@@ -1664,9 +1672,14 @@ async def resell_retry_outreach(
     subject = _RETRY_SUBJECT.format(title=el.title)
     body = _RETRY_BODY
     # Optimistic flip so the tracker shows ``sending`` + self-polls to the final state.
+    # Refresh ``created_at`` to now so the row is not "born stale": the nightly stale-sending
+    # sweeper selects on ``created_at < now - 30min`` (the sending-started proxy), and the
+    # row's created_at still holds the original, possibly hours-old enqueue time — without
+    # this the sweeper could flip the in-flight retry to ``interrupted`` mid-resend.
     row.status = ExcessOutreachStatus.SENDING
     row.send_error = None
     row.sent_at = None
+    row.created_at = datetime.now(UTC)
     db.commit()
 
     background_tasks.add_task(

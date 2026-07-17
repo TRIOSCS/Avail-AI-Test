@@ -352,6 +352,13 @@ class ExcessOutreach(Base):
     # Persisted send-failure reason (populated on FAILED/INTERRUPTED rows so the tracker
     # can show WHY a send failed and the retry path has context); NULL on a clean send.
     send_error = Column(Text, nullable=True)
+    # The EXACT subject/body the email campaign was sent with (email path only) — persisted
+    # so the one-click Retry double-send guard (an EXACT-subject Sent-folder match) matches
+    # an already-delivered customized-subject campaign, and a legitimate resend reuses the
+    # original wording. NULL on manual-log rows and legacy email rows (retry falls back to
+    # the default text for those).
+    send_subject = Column(Text, nullable=True)
+    send_body = Column(Text, nullable=True)
     sent_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())

@@ -464,6 +464,49 @@ class TestOverlapWarning:
         )
         assert warn is None
 
+    def test_non_sent_teammate_touch_is_not_a_prior_offer(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
+    ):
+        """Finding #7: a teammate's FAILED / INTERRUPTED / SENDING send never reached
+        the buyer, so it must NOT warn a second trader off a still-uncontacted buyer —
+        BOTH the singular ``overlap_warning`` and the batched ``overlap_warnings_for``
+        exclude the not-sent statuses (mirroring the nudge / offered-count readers)."""
+        for non_sent in (
+            ExcessOutreachStatus.FAILED,
+            ExcessOutreachStatus.INTERRUPTED,
+            ExcessOutreachStatus.SENDING,
+        ):
+            buyer = _reachable_card(db_session, f"NonSent {non_sent.value} Buyer")
+            db_session.add(
+                ExcessOutreach(
+                    excess_list_id=excess_list.id,
+                    excess_line_item_id=cap_line.id,
+                    target_vendor_card_id=buyer.id,
+                    submitted_by=teammate.id,  # a teammate — but the send never landed
+                    channel="email",
+                    status=non_sent,
+                    sent_at=None,  # no send time; created_at is recent (within the window)
+                )
+            )
+            db_session.commit()
+
+            # Neither reader must treat the non-delivered touch as a real prior offer.
+            assert (
+                svc.overlap_warning(
+                    db_session, excess_list_id=excess_list.id, target_vendor_card_id=buyer.id, owner_id=trader.id
+                )
+                is None
+            )
+            assert (
+                svc.overlap_warnings_for(
+                    db_session,
+                    excess_list_id=excess_list.id,
+                    target_vendor_card_ids=[buyer.id],
+                    owner_id=trader.id,
+                )
+                == {}
+            )
+
     def test_stale_touch_outside_window_no_warning(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
     ):

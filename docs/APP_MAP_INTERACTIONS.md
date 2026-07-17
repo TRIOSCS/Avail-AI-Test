@@ -2376,11 +2376,17 @@ a total `send_batch_rfq` outage → all pending rows `FAILED` + the exception te
 stranded `sending`); a delivered row whose Graph-id lookup came back empty stays `SENT` with a
 "reply-matching degraded" `send_error` note. The send OUTCOME (status + graph ids) commits
 BEFORE any bookkeeping, so a later activity/cadence write can't roll back a delivered `SENT`;
-the "Emailed" ActivityLog + cadence bump run only for `SENT` buyers (gated at the call site).
-A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
+if that outcome commit itself fails it is snapshotted + re-applied in a fresh transaction (a
+delivered send is never reverted to `sending`). The "Emailed" ActivityLog + cadence bump run
+only for `SENT` buyers (gated at the call site). Every send persists its exact subject/body
+(`send_subject`/`send_body`, migration 195) so the Retry guard can match a customized-subject
+campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
 (`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
-retry re-runs `_find_sent_message` BEFORE resending so an already-delivered row is reconciled to
-`SENT`, never double-sent. An inbound reply carrying a bid flips an `OPEN` list to `COLLECTING`
+retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
+already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES is the
+UNKNOWN case → the row is left `interrupted` and nothing is resent (never assume not-sent); the
+resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
+reply carrying a bid flips an `OPEN` list to `COLLECTING`
 (mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
 one bad list can't abort the nightly sweep.
 

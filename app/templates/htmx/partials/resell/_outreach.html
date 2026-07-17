@@ -88,6 +88,7 @@
             {% else %}{{ (row.sent_at or row.created_at)|localtime('%b %d, %H:%M') if (row.sent_at or row.created_at) else '—' }}{% endif %}
           </td>
           <td>
+            <div class="flex flex-col gap-1">
             <div class="flex items-center gap-2">
               {{ status_badge(row.status, status_map={
                 'sending': 'bg-slate-50 text-slate-500 border-slate-200',
@@ -123,6 +124,17 @@
                 Retry
               </button>
               {% endif %}
+            </div>
+            {# Surface the persisted send_error so a delivered-but-degraded send is not
+               indistinguishable from a healthy one, and a failed/interrupted row shows WHY.
+               A SENT row only ever carries the reply-matching-degraded note (amber); a
+               failed/interrupted row shows its actual failure reason (rose). #}
+            {% if row.send_error %}
+            <span class="text-xs {{ 'text-amber-600' if row.status == 'sent' else 'text-rose-500' }}"
+                  title="{{ row.send_error }}">
+              {% if row.status == 'sent' %}Reply tracking degraded — no email id captured{% else %}{{ row.send_error }}{% endif %}
+            </span>
+            {% endif %}
             </div>
           </td>
         </tr>

@@ -231,8 +231,15 @@ def _make_outreach_rows(
     line_ids: list[int | None],
     status: str,
     sent_at: datetime | None = None,
+    send_subject: str | None = None,
+    send_body: str | None = None,
 ) -> list[ExcessOutreach]:
-    """Create (and flush) one ExcessOutreach row per line id for a single buyer."""
+    """Create (and flush) one ExcessOutreach row per line id for a single buyer.
+
+    ``send_subject`` / ``send_body`` persist the EXACT text an email campaign was sent
+    with (email path only) so the retry double-send guard can match the delivered message
+    and a legitimate resend reuses the original wording; NULL on the manual-log path.
+    """
     rows: list[ExcessOutreach] = []
     for line_id in line_ids:
         row = ExcessOutreach(
@@ -244,6 +251,8 @@ def _make_outreach_rows(
             status=status,
             parts_included=_parts_snapshot(db, excess_list, line_id),
             sent_at=sent_at,
+            send_subject=send_subject,
+            send_body=send_body,
         )
         db.add(row)
         rows.append(row)
@@ -426,6 +435,8 @@ def enqueue_outreach_email(
             channel=ExcessOutreachChannel.EMAIL,
             line_ids=fresh_line_ids,
             status=ExcessOutreachStatus.SENDING,
+            send_subject=subject,
+            send_body=body,
         )
         all_rows.extend(rows)
         plan.append({"card_id": card.id, "email": email, "row_ids": [r.id for r in rows], "parts": parts})
@@ -471,9 +482,11 @@ async def _finalize_outreach_send(
 
     Commit boundary: the send OUTCOME (status + graph ids) is committed here, immediately
     after the send, BEFORE any bookkeeping — so a later activity/cadence write error can
-    never roll back a delivered ``sent``. The per-buyer bookkeeping (an "Emailed"
-    ActivityLog + cadence bump, SENT buyers only) is then committed independently and
-    guarded. Returns the finalized rows.
+    never roll back a delivered ``sent``. If that outcome commit itself fails, the outcome
+    is snapshotted and RE-APPLIED in a fresh transaction (a delivered send is never left
+    rolled back to ``sending``). The per-buyer bookkeeping (an "Emailed" ActivityLog +
+    cadence bump, SENT buyers only) is then committed independently and guarded. Returns
+    the finalized rows.
     """
     from app import email_service
     from app.utils.graph_client import GraphClient
@@ -582,7 +595,43 @@ async def _finalize_outreach_send(
     # Persist the send OUTCOME (status + graph ids) BEFORE any bookkeeping, so a
     # bookkeeping failure below can never roll back a delivered SENT (finding #6 — the old
     # blanket except→rollback could revert a row whose email had already gone out).
-    db.commit()
+    #
+    # If the outcome commit ITSELF fails (a serialization error / dropped connection while
+    # persisting), the delivered rows must NOT be left rolled back to ``sending`` — that
+    # would be swept to ``interrupted`` and re-offered. Snapshot the intended outcome, roll
+    # back the failed transaction, and re-apply it in a fresh one so a delivered send is
+    # durably recorded. A second failure genuinely cannot reach the DB and propagates (the
+    # retry path's Sent-folder reconcile then prevents any double-send).
+    outcome_snapshot = [
+        {
+            "id": r.id,
+            "status": r.status,
+            "sent_at": r.sent_at,
+            "send_error": r.send_error,
+            "graph_message_id": r.graph_message_id,
+            "graph_conversation_id": r.graph_conversation_id,
+        }
+        for r in finalized
+    ]
+    try:
+        db.commit()
+    except Exception:
+        logger.exception(
+            "Outreach outcome commit failed for list={} — re-applying the send outcome in a fresh "
+            "transaction so a delivered send is never reverted to 'sending'",
+            excess_list.id,
+        )
+        db.rollback()
+        for snap in outcome_snapshot:
+            row = db.get(ExcessOutreach, snap["id"])
+            if row is None:
+                continue
+            row.status = snap["status"]
+            row.sent_at = snap["sent_at"]
+            row.send_error = snap["send_error"]
+            row.graph_message_id = snap["graph_message_id"]
+            row.graph_conversation_id = snap["graph_conversation_id"]
+        db.commit()
 
     # Post-send bookkeeping: an "Emailed" ActivityLog + cadence bump per SENT buyer only.
     # Each is guarded + committed independently — a write error is logged, never fatal, and
@@ -749,12 +798,17 @@ async def retry_outreach_send(
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
     — CRITICALLY — the Sent folder is re-checked via ``email_service._find_sent_message``
-    BEFORE any resend: a ``failed`` row may have actually DELIVERED (the failure was
-    downstream of the send), so if the message is already there the row is reconciled to
-    ``sent`` + its graph ids stamped and NOTHING is resent. Only when the reconcile finds
-    nothing is the row reset to ``sending`` and re-sent via :func:`_finalize_outreach_send`
-    (a one-buyer plan built from the row's ``parts_included`` snapshot). Own
-    commit/rollback/close.
+    BEFORE any resend, matched against the EXACT subject the campaign was sent with
+    (``row.send_subject``, so a customized subject still matches its delivered message):
+    a ``failed`` row may have actually DELIVERED (the failure was downstream of the send),
+    so if the message is already there the row is reconciled to ``sent`` + its graph ids
+    stamped and NOTHING is resent. A lookup that RAISES is the UNKNOWN case (delivery
+    indeterminate) — the row is left ``interrupted`` and NOTHING is resent (never assume
+    not-sent). Only when the reconcile positively finds nothing is the row reset to
+    ``sending`` (with a refreshed ``created_at`` so the stale sweeper cannot flip the
+    in-flight retry) and re-sent via :func:`_finalize_outreach_send` (a one-buyer plan
+    built from the row's ``parts_included`` snapshot, reusing the persisted subject/body).
+    Own commit/rollback/close.
     """
     from app import email_service
     from app.utils.graph_client import GraphClient
@@ -784,14 +838,37 @@ async def retry_outreach_send(
             logger.warning("Outreach retry: row={} has no buyer email — left failed", outreach_id)
             return
 
+        # Match the Sent folder against the EXACT subject/body the campaign was ACTUALLY
+        # sent with (persisted on the row), NOT the caller's default — a customized-subject
+        # campaign's delivered message would never match the default subject, defeating the
+        # double-send guard. Legacy rows without a persisted subject fall back to the caller's.
+        guard_subject = row.send_subject or subject
+        resend_body = row.send_body or body
+
         # Double-send guard: re-run the Sent-folder lookup BEFORE resending. A ``failed``
         # row may have actually delivered, so never assume the send did not happen.
         gc = GraphClient(token)
         try:
-            sent_msg = await email_service._find_sent_message(gc, subject, email)
-        except Exception:  # best-effort — a lookup failure falls through to a resend
-            logger.warning("Outreach retry sent-lookup failed for <{}>", email, exc_info=True)
-            sent_msg = None
+            sent_msg = await email_service._find_sent_message(gc, guard_subject, email)
+        except Exception:
+            # A lookup FAILURE is the UNKNOWN case, never proof of not-sent — the original
+            # may have delivered while the Sent-folder query is transiently failing. Never
+            # assume not-sent: leave the row in the ambiguous ``interrupted`` state
+            # (retryable, no false delivery claim) and do NOT resend, so a delivered offer
+            # is never double-sent. The trader (or a later retry) can re-run once Graph recovers.
+            logger.warning(
+                "Outreach retry sent-lookup failed for <{}> — NOT resending (delivery unknown)",
+                email,
+                exc_info=True,
+            )
+            row.status = ExcessOutreachStatus.INTERRUPTED
+            row.sent_at = None
+            row.send_error = (
+                "delivery re-check failed (Graph lookup error) — not resent to avoid a possible "
+                "double-send; retry again once the mail service recovers"
+            )
+            db.commit()
+            return
         if isinstance(sent_msg, dict) and sent_msg:
             # Already in Sent — the original delivered; reconcile, DO NOT resend.
             row.status = ExcessOutreachStatus.SENT
@@ -804,15 +881,20 @@ async def retry_outreach_send(
             return
 
         # Not delivered — reset to ``sending`` and re-send via the shared finalize (which
-        # sends the SENDING row, stamps ids, and commits the send outcome).
+        # sends the SENDING row, stamps ids, and commits the send outcome). Refresh
+        # ``created_at`` to now so the row is NOT "born stale": the stale-sending sweeper
+        # selects on ``created_at < now - 30min`` and would otherwise flip this in-flight
+        # retry to ``interrupted`` the instant it is written (its created_at is the original,
+        # hours-old enqueue time).
         row.status = ExcessOutreachStatus.SENDING
         row.sent_at = None
         row.send_error = None
+        row.created_at = datetime.now(UTC)
         db.commit()
         parts = [p.get("part_number") for p in (row.parts_included or []) if p.get("part_number")]
         plan = [{"card_id": card.id, "email": email, "row_ids": [row.id], "parts": parts}]
         await _finalize_outreach_send(
-            db, excess_list=excess_list, owner=owner, subject=subject, body=body, token=token, plan=plan
+            db, excess_list=excess_list, owner=owner, subject=guard_subject, body=resend_body, token=token, plan=plan
         )
         logger.info("Outreach retry: row={} resent (was not in Sent)", outreach_id)
     except Exception:

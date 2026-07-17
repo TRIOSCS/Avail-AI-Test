@@ -422,6 +422,69 @@ class TestRunOutreachEmailSend:
         assert row.send_error and "degrad" in row.send_error.lower()
 
     @pytest.mark.asyncio
+    async def test_outcome_commit_failure_reapplies_delivered_send(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Finding #4: if the send-outcome commit ITSELF fails (a serialization error /
+        dropped connection), the delivered rows must NOT be left rolled back to
+        ``sending`` — that would be swept to ``interrupted`` and re-offered.
+
+        The outcome is snapshotted and RE-APPLIED in a fresh transaction, so the row is
+        durably SENT.
+        """
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        row_id = rows[0].id
+
+        async def _found(_gc, _subject, _email):
+            return {"id": "m1", "conversationId": "c1"}
+
+        real_commit = db_session.commit
+        state = {"failed_once": False}
+
+        def flaky_commit():
+            # Fail ONLY the first commit (the send-outcome commit), then behave normally so
+            # the re-apply in a fresh transaction can persist the delivered outcome.
+            if not state["failed_once"]:
+                state["failed_once"] = True
+                raise RuntimeError("serialization failure on outcome commit")
+            return real_commit()
+
+        with (
+            patch("app.email_service.send_batch_rfq", side_effect=_sent_result("sales@asyncbuyer.com")),
+            patch("app.email_service._find_sent_message", side_effect=_found),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+            patch.object(db_session, "commit", side_effect=flaky_commit),
+        ):
+            await svc.run_outreach_email_send(
+                list_id=posted_list.id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                groups=plan,
+                session_factory=lambda: db_session,
+            )
+
+        assert state["failed_once"]  # the first (outcome) commit really did fail
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT  # re-applied, never left 'sending'
+        assert row.sent_at is not None
+        assert row.graph_message_id == "m1"
+
+    @pytest.mark.asyncio
     async def test_skipped_recipient_flagged_failed_with_error(
         self,
         db_session: Session,
@@ -919,6 +982,156 @@ class TestRetryOutreachSend:
         assert row.graph_message_id == "resent-1"
         assert row.send_error is None
 
+    @pytest.mark.asyncio
+    async def test_retry_customized_subject_matches_delivered_and_never_resends(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Finding #3: a campaign sent with a CUSTOMIZED subject persists that subject,
+        so the double-send guard queries the Sent folder on the REAL subject (not the
+        seeded default the router passes) — the already-delivered message matches and
+        the offer is never resent."""
+        custom_subject = "Q3 clearance — TI parts"
+        rows, _plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject=custom_subject,
+            body="custom body copy",
+        )
+        row = rows[0]
+        assert row.send_subject == custom_subject  # the exact subject is persisted
+        row.status = ExcessOutreachStatus.FAILED
+        row.send_error = "graph send outage"
+        db_session.commit()
+        row_id = row.id
+
+        send_mock = AsyncMock()
+        seen_subjects: list[str] = []
+
+        async def _found(_gc, subject, _email):
+            seen_subjects.append(subject)
+            # Only the REAL (customized) subject matches the delivered message.
+            return {"id": "already-1", "conversationId": "conv-1"} if subject == custom_subject else None
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.email_service._find_sent_message", side_effect=_found),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            # The router hands the SEEDED default subject — the guard must ignore it in
+            # favour of the persisted one.
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available: Q2 Excess",
+                body="default body",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # matched the delivered message → no double-send
+        assert seen_subjects == [custom_subject]  # guard used the PERSISTED subject
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.graph_message_id == "already-1"
+
+    @pytest.mark.asyncio
+    async def test_retry_lookup_error_leaves_interrupted_and_never_resends(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Finding #1: a transient Sent-folder lookup FAILURE is the UNKNOWN case (the
+        original may have delivered) — the retry must NEVER assume not-sent and resend.
+
+        The
+        row is left ``interrupted`` (retryable, no false delivery claim) with a reason, and
+        nothing is sent.
+        """
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        send_mock = AsyncMock()
+
+        async def _boom(_gc, _subject, _email):
+            raise RuntimeError("graph 429 timeout")
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.email_service._find_sent_message", side_effect=_boom),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # a lookup error must never trigger a (possible double-) send
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.INTERRUPTED
+        assert row.sent_at is None
+        assert row.send_error and "double-send" in row.send_error
+
+    @pytest.mark.asyncio
+    async def test_retry_no_buyer_email_left_failed_without_lookup_or_send(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+    ):
+        """Finding #9: a FAILED row whose buyer card has no resolvable email is left
+        FAILED with a clear reason BEFORE any Sent-folder lookup or resend — it never
+        builds a one-buyer plan with email=None."""
+        card = VendorCard(normalized_name="no email buyer", display_name="No Email Buyer", emails=[])
+        db_session.add(card)
+        db_session.commit()
+        row = ExcessOutreach(
+            excess_list_id=posted_list.id,
+            submitted_by=trader.id,
+            target_vendor_card_id=card.id,
+            channel="email",
+            status=ExcessOutreachStatus.FAILED,
+            send_error="graph send outage",
+        )
+        db_session.add(row)
+        db_session.commit()
+        row_id = row.id
+
+        send_mock = AsyncMock()
+        lookup_mock = AsyncMock()
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.email_service._find_sent_message", lookup_mock),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()
+        lookup_mock.assert_not_awaited()  # returns BEFORE the Sent-folder lookup
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.FAILED
+        assert row.send_error == "no buyer email on file to retry"
+
 
 # ── Router: the submit returns immediately with ``sending`` rows ─────
 
@@ -1003,10 +1216,60 @@ def test_retry_route_flips_failed_to_sending_and_enqueues(
             resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
         assert resp.status_code == 200
         retry_stub.assert_called_once()
+        # Finding #10: the double-send guard's key input is WHICH row gets reconciled — assert
+        # the background task is enqueued with the right outreach_id/owner + a subject/body/token,
+        # not merely that *something* was scheduled.
+        kwargs = retry_stub.call_args.kwargs
+        assert kwargs["outreach_id"] == row_id
+        assert kwargs["owner_id"] == trader.id
+        assert posted_list.title in kwargs["subject"]
+        assert kwargs["body"]
+        assert kwargs["token"]
         db_session.expire_all()
         row = db_session.get(ExcessOutreach, row_id)
         assert row.status == ExcessOutreachStatus.SENDING
         assert row.send_error is None
+    finally:
+        restore()
+
+
+def test_retry_route_refreshes_created_at_so_sweeper_cannot_flip(
+    client,
+    db_session: Session,
+    posted_list: ExcessList,
+    trader: User,
+    buyer_card: VendorCard,
+):
+    """Finding #6: the optimistic retry flip refreshes ``created_at`` so the row is not
+    'born stale'.
+
+    The nightly stale-sending sweeper selects on ``created_at < now - 30min``;
+    a retried row still carrying its original (hours-old) enqueue time would be flipped to
+    ``interrupted`` mid-resend. After the refresh the sweeper leaves the in-flight retry
+    alone.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+    # Age the row well past the staleness threshold (its original enqueue time).
+    aged = db_session.get(ExcessOutreach, row_id)
+    aged.created_at = datetime.now(UTC) - timedelta(hours=5)
+    db_session.commit()
+
+    retry_stub = MagicMock()  # keep the background resend out of this router-level test
+    restore = _own(trader)
+    try:
+        with patch("app.services.resell_outreach_service.retry_outreach_send", retry_stub):
+            resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(ExcessOutreach, row_id).status == ExcessOutreachStatus.SENDING
+
+        # The sweeper must NOT flip the freshly-retried SENDING row (created_at was refreshed).
+        flipped = svc.sweep_stale_sending_outreach(db_session, now=datetime.now(UTC))
+        assert flipped == 0
+        db_session.expire_all()
+        assert db_session.get(ExcessOutreach, row_id).status == ExcessOutreachStatus.SENDING
     finally:
         restore()
 
@@ -1039,3 +1302,128 @@ def test_retry_route_rejects_non_retryable_row(
         assert resp.status_code == 409
     finally:
         restore()
+
+
+# ── Task 5: rendered tracker HTML + CSV export truthfulness ──────────
+
+
+def test_tracker_html_non_sent_row_shows_dash_badge_retry_and_error(
+    client,
+    db_session: Session,
+    posted_list: ExcessList,
+    trader: User,
+    buyer_card: VendorCard,
+    buyer_card_two: VendorCard,
+):
+    """Finding #8: the RENDERED tracker HTML for a FAILED / INTERRUPTED row shows a dash
+    for "When" (never its created_at as an 'offered at' time), the correct failed/amber
+    badge colour, a Retry button, and surfaces send_error — while a genuinely-SENT row
+    renders its real send time and NO Retry affordance."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.utils.timezones import format_localtime
+
+    failed_created = datetime(2026, 3, 3, 9, 7, tzinfo=UTC)
+    sent_when_dt = datetime.now(UTC) - timedelta(minutes=1)
+    third = VendorCard(normalized_name="third buyer", display_name="Third Buyer", emails=["z@third.com"])
+    db_session.add(third)
+    db_session.commit()
+
+    failed = ExcessOutreach(
+        excess_list_id=posted_list.id,
+        submitted_by=trader.id,
+        target_vendor_card_id=buyer_card.id,
+        channel="email",
+        status=ExcessOutreachStatus.FAILED,
+        send_error="graph send outage: 503",
+        created_at=failed_created,
+    )
+    interrupted = ExcessOutreach(
+        excess_list_id=posted_list.id,
+        submitted_by=trader.id,
+        target_vendor_card_id=buyer_card_two.id,
+        channel="email",
+        status=ExcessOutreachStatus.INTERRUPTED,
+        send_error="send interrupted — stuck in 'sending'",
+        created_at=failed_created,
+    )
+    sent = ExcessOutreach(
+        excess_list_id=posted_list.id,
+        submitted_by=trader.id,
+        target_vendor_card_id=third.id,
+        channel="email",
+        status=ExcessOutreachStatus.SENT,
+        sent_at=sent_when_dt,
+        created_at=sent_when_dt,
+    )
+    db_session.add_all([failed, interrupted, sent])
+    db_session.commit()
+
+    restore = _own(trader)
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    html = resp.text
+
+    # Retry button appears ONLY on the two non-sent email rows, never on the sent row.
+    assert html.count("/retry") == 2
+    # Both non-sent reasons are surfaced (no longer invisible).
+    assert "graph send outage: 503" in html
+    assert "send interrupted" in html
+    # Failed (rose) + interrupted (amber) badge colours are rendered.
+    assert "text-rose-600" in html
+    assert "text-amber-700" in html
+    # The SENT row's real send time renders; the non-sent rows' created_at does NOT (When = —).
+    assert format_localtime(sent_when_dt, "%b %d, %H:%M") in html
+    assert format_localtime(failed_created, "%b %d, %H:%M") not in html
+
+
+def test_csv_export_blanks_sent_at_for_non_sent_and_exports_note(
+    client,
+    db_session: Session,
+    posted_list: ExcessList,
+    trader: User,
+    buyer_card: VendorCard,
+    buyer_card_two: VendorCard,
+):
+    """Finding #5 + #2 (export): the CSV 'Sent At' column is BLANK for a non-sent row
+    (never its created_at, which the tracker tab already drops), and the persisted
+    send_error is exported in a 'Note' column instead of being silently omitted."""
+    from datetime import UTC, datetime
+
+    failed = ExcessOutreach(
+        excess_list_id=posted_list.id,
+        submitted_by=trader.id,
+        target_vendor_card_id=buyer_card.id,
+        channel="email",
+        status=ExcessOutreachStatus.FAILED,
+        send_error="graph send outage: 503",
+        # A distinctive naive-formatted stamp (_fmt_dt does not tz-convert) that must NOT
+        # appear as a Sent At once the created_at fallback is dropped for non-sent rows.
+        created_at=datetime(2026, 1, 2, 3, 4, tzinfo=UTC),
+    )
+    sent = ExcessOutreach(
+        excess_list_id=posted_list.id,
+        submitted_by=trader.id,
+        target_vendor_card_id=buyer_card_two.id,
+        channel="email",
+        status=ExcessOutreachStatus.SENT,
+        sent_at=datetime(2026, 5, 6, 7, 8, tzinfo=UTC),
+        created_at=datetime(2026, 5, 6, 7, 8, tzinfo=UTC),
+    )
+    db_session.add_all([failed, sent])
+    db_session.commit()
+
+    restore = _own(trader)
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach/export")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    text = resp.text
+    assert "Note" in text  # the new Note column header
+    assert "graph send outage: 503" in text  # failed reason exported, not hidden
+    assert "2026-05-06 07:08" in text  # the SENT row's real send time is exported
+    assert "2026-01-02 03:04" not in text  # the FAILED row's created_at is NOT a Sent At
