@@ -1276,3 +1276,48 @@ SQLite) — those are listed for completeness/auditability, not because each nee
 own bespoke `@requires_postgres` test. Prioritize the ones with actual `ILIKE`/
 `similarity()`/`tsvector` *query* logic (`services/*`, `routers/*`, `search_service.py`,
 `vendor_utils.py`, `company_utils.py`) over pure-model JSONB declarations.
+
+---
+
+## Approvals Workspace additions (migration 192 `192_approvals_workspace_foundations`)
+
+Single additive, reversible revision (Phase 0 of the workspace rebuild —
+`specs/approvals-workspace.md`; models in `app/models/buy_plan.py`,
+`app/models/quality_plan.py`, `app/models/intelligence.py`):
+
+**`buy_plans_v3`**
+| Column | Type | Notes |
+|--------|------|-------|
+| order_type | String 20 NOT NULL, server_default `'new'`, indexed (`ix_bpv3_order_type`) | `SalesOrderType` enum: `new`\|`revision`\|`testing_service`\|`comps`\|`stock_sale` (validated on the model). Backfilled `stock_sale` where `is_stock_sale` was true. Sourcing types (`SOURCING_ORDER_TYPES` = NEW/REVISION) go through the offer picker; the rest take the lite zero-line path. |
+
+**`buy_plan_lines`**
+| Column | Type | Notes |
+|--------|------|-------|
+| payment_method | String 20, nullable | `PaymentMethod` (now + `ach`, `cod`); recorded at confirm-PO (`PO_LINE_PAYMENT_METHODS` = cc/paypal/wire/ach/cod). COD lines are excluded from prepayment (router guard) and the future risk lane. |
+| received_at / received_by_id | UTCDateTime / FK users SET NULL, nullable | Stamped by the Phase-3 `mark_line_received` action; `is_received` property drives the kanban RECEIVED lane. |
+
+**`activity_log`**
+| Column | Type | Notes |
+|--------|------|-------|
+| buy_plan_line_id | FK buy_plan_lines SET NULL, nullable, indexed | Per-line notes threads + `FIELD_EDIT` audit rows (design D2/D4). |
+| prepayment_id | FK prepayments SET NULL, nullable, indexed | Per-prepayment notes/audit (e.g. the approver method-adjust). |
+
+New `ActivityType` values (≤20 chars): `field_edit` (ONE batched row per save,
+`details={"edits": [{field, old, new}, ...]}` — written by
+`field_audit.log_field_edits`), `line_received`, `attach_added`, `attach_removed`.
+
+**`quality_plans`** — seven nullable PURCHASING AS9120B columns (the Excel workbook
+fields the native section lacked; written via `qp_workspace.apply_qp_purchasing`):
+`purchasing_traceability_verified` (Bool), `purchasing_counterfeit_risk` (String 50),
+`purchasing_risk_level` (String 50), `purchasing_coc_available` (Bool),
+`purchasing_vendor_rating` (String 255), `purchasing_sn_previously_received` (Bool),
+`purchasing_serial_numbers` (Text).
+
+**`buy_plan_attachments`** (NEW) — one polymorphic-ish attachment table for the
+workspace (mirrors `CompanyAttachment`): three nullable CASCADE subject FKs
+(`buy_plan_id` / `buy_plan_line_id` / `prepayment_id`) of which **exactly one** must
+be set (app-validated via `BuyPlanAttachment.validate_subject()` — no DB CHECK), plus
+`file_name` (String 500 NOT NULL), `library_item_id`/`library_drive_id`/
+`library_web_url`/`thumbnail_url`/`content_type`/`size_bytes`, `uploaded_by_id`
+(FK users SET NULL), `created_at`; indexed on all three subject FKs. Write paths land
+in Phase 2.4 (reusing `attachment_service.store_and_attach`).

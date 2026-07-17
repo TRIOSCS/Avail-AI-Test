@@ -6534,3 +6534,62 @@ no separate "sales order" gate. The QP Sales-section gate (the QualityPlan, rena
 QP-scoped approval and **leaves** the lifecycle tabs; the canonical SO# is
 `buy_plans_v3.sales_order_number` (the QP's editable `sales_so_number` input was removed and
 the column dropped).
+
+---
+
+## Approvals Workspace — flows (Phases 0–1)
+
+**One page, four lenses.** `/v2/approvals` → shell (4 pills, per-viewer badges) →
+lazy `#ap-hub-body` ← `render_tab_body(tab)` → `_workspace_split.html` (split view) →
+left `#aw-list` ← `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed`
+(re-fetches on `awListRefresh from:body`) → row click dispatches `aw-select` → right
+`#aw-pane` ← the tab's pane route. The list's oldest Needs-your-approval row
+dispatches `aw-default` once (applied only when nothing is selected) so opening a tab
+lands the approver on a decision. Legacy 3-tab keys alias throughout.
+
+**Decide loops (engine untouched).** Every pane action posts an EXISTING route with
+`origin=approvals_workspace`; the handler re-renders the pane + `HX-Trigger:
+awListRefresh`:
+- SO/BP approve/reject → `POST /v2/partials/buy-plans/{id}/approve` (engine
+  `decide()` inside) → `render_plan_pane`. Reject requires the note-to-fixer
+  (engine-enforced comment).
+- Confirm PO → `POST .../lines/{line}/confirm-po` → `confirm_po(payment_method=...)`
+  + `apply_qp_purchasing` (QP-purchasing incl. AS9120B onto the (plan, vendor) QP
+  row) + `log_field_edits` for the QP diff → `render_po_pane`.
+- Verify / send back / re-source / claim → the existing verify-po / resource / claim
+  routes → `render_po_pane`. `GET /po/{line}/sent-check` surfaces `verify_po_sent`
+  detection **display-only** (never auto-verifies).
+- Prepay decide → `POST /v2/partials/approvals/prepay-requests/{id}/decide` →
+  `render_prepayment_pane`. Approve button reads **"OK to pay — {method}"**; the
+  method dropdown on the approval card posts
+  `POST /v2/partials/approvals/prepayments/{id}/method` (approver-only,
+  REQUESTED-only, `ensure_not_stale` → non-destructive 409, audited via
+  `log_field_edits(prepayment_id=...)`).
+
+**Field-audit choke point (Phase 0.2, wired from Phase 1 onward).** Edit paths compute
+`diff_fields(obj, updates)` and write ONE `FIELD_EDIT` ActivityLog row per save via
+`log_field_edits` (`details={"edits": [...]}`, keyed by `buy_plan_id` +
+`buy_plan_line_id`/`prepayment_id`); `edits_since` backs the Phase-2 approve-time
+change summary; `manager_edited_line_ids` backs the Phase-3 kanban marker.
+
+**Stale-edit guard (Phase 0.3).** Forms embed `stale_token(obj)` (Jinja global) as
+`expected_updated_at`; handlers call `ensure_not_stale` and turn `StaleEditError`
+into `stale_conflict_response()` (409, `HX-Reswap: none`, "This changed — refresh."
+toast). Empty token skips (legacy forms never false-positive).
+
+**Order type + lite path (Phase 1.3).** The SO picker
+(`/v2/partials/buy-plans/sales-orders/new`) carries an order-type select: sourcing
+types (New/Revision) require offers and build via
+`create_sales_order_from_offers(order_type=...)`; non-sourcing types (Stock Sale /
+Testing Service / Comps) list ANY open requisition and create via
+`create_lite_sales_order` — a zero-line DRAFT plan that submits/approves/tracks
+normally but generates **zero buyer tasks** and **never auto-completes**
+(`check_completion`'s empty-lines early return). `_is_stock_sale` now lets an
+explicit STOCK_SALE order type win over the vendor-name inference so submit can't
+clobber the lite flag. The SO pane hides lines/kanban for non-sourcing types.
+
+**COD guard (Phase 1.5).** `routers/prepayments.py` blocks a prepayment request on a
+COD line (and any non-`PREPAYMENT_METHODS` method) with a friendly 400 BEFORE
+`create_prepayment` — the service and engine stay untouched; the request modal's
+method list derives from `PREPAYMENT_METHODS` (wire/PayPal/CC/ACH — COD never
+renders).

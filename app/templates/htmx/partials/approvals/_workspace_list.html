@@ -68,6 +68,17 @@
           title="{{ 'Back to live work' if show_closed else 'Show completed and cancelled' }}">
     {{ 'Closed' if show_closed else 'Live' }}
   </button>
+  {% if tab in ('sales-orders', 'buy-plans') %}
+  {# New sales order — the origination picker (spec §8: create with order type). Lands
+     the Buy Plans hub straight on the picker (?new=1). #}
+  <a hx-get="/v2/partials/buy-plans?new=1" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+     class="btn-primary btn-sm flex-shrink-0 cursor-pointer whitespace-nowrap" title="Start a new sales order">
+    New sales order
+  </a>
+  {% endif %}
+  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). #}
+  <a hx-boost="false" href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}"
+     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
 </form>
 
 {% macro list_row(row) %}

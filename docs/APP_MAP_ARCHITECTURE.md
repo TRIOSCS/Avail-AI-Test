@@ -663,3 +663,75 @@ Single-file services worth flagging individually (not grouped under a shared pac
 | Background jobs | 15 modules |
 | Test files | 100+ |
 | Alembic migrations | 95+ |
+
+---
+
+## Approvals Workspace (spec v4 rebuild — Phases 0–1)
+
+`/v2/approvals` is now the **Approvals Workspace**: one page, four tabs — **Sales
+Orders · Buy Plans · Purchase Orders · Prepayments** — four lenses on the same
+pipeline rooted at the sales order (`specs/approvals-workspace.md`). The 3-tab decide
+console was rebuilt **in place** (D12); legacy tab keys (`buy-plan` / `po-approval` /
+`prepayment`) alias onto the new tabs (`LEGACY_TAB_ALIASES`), so old pushed URLs and
+the `origin=approvals_hub` decide re-renders keep working. The **approvals engine is
+untouched** — every decision posts the existing `buy_plans.py` / `prepayments.py`
+routes; new `origin=approvals_workspace` branches re-render the deciding pane in place
+and fire `awListRefresh` so the left list repaints. `/v2/buy-plans` (personal hub)
+stays as-is until post-Phase-3 parity.
+
+### Router — `app/routers/htmx/approvals_hub.py` (rebuilt)
+
+- `GET /v2/partials/approvals` — shell (`require_access(BUY_PLANS)`): 4 pills with
+  **per-viewer badges** (`_viewer_badges` — decidable engine requests per gate;
+  the PO badge adds verifiable PENDING_VERIFY lines + the viewer's own AWAITING_PO
+  lines) + lazy tab body.
+- `GET /v2/partials/approvals/{tab}` → `render_tab_body` → `_workspace_split.html`
+  (drag-resizable split view; panes **stack below `md`**; `aw-select`/`aw-default`
+  selection events; the list container listens for `awListRefresh from:body`).
+- `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed` →
+  `_workspace_list.html`: debounced search, Mine/All, Live/Closed filter, age chip +
+  SO#/PO# **copy chips** on every row, **"Needs your approval" grouped first** with
+  the oldest decision default-selected (`aw-default`, applied only when nothing is
+  selected). Read models: `buy_plan_tracking_rows` (now carrying the sanctioned
+  read-side `order_type`), `build_po_queue_view`, `pending/resolved_rows_for_gate`.
+- Panes: `GET /plan/{id}/pane?lens=` (`_pane_sales_order.html` — one anatomy for both
+  SO/BP lenses), `GET /po/{line_id}/pane` (`_pane_po_line.html` — buyer confirm-PO
+  form vs manager decide), `GET /po/{line_id}/sent-check` (**display-only**
+  `verify_po_sent` detection — never auto-verifies), `GET /prepayments/{id}/pane`
+  (`_pane_prepayment.html`) and `POST /prepayments/{id}/method` (approver-only,
+  REQUESTED-only, stale-guarded, field-audited method adjust).
+- `PO_DECISION_LABELS` — spec §5 display vocabulary (`pending_verify` → "Pending
+  approval", `verified` → "Approved"); display map only, backend names unchanged.
+- CSV export retained per tab (legacy keys alias).
+
+### Templates — `partials/approvals/`
+
+`approvals_hub.html` (4-pill shell) · `_workspace_split.html` · `_workspace_list.html`
+· `_pane_sales_order.html` · `_pane_po_line.html` · `_pane_prepayment.html` ·
+`_sales_order_new.html` (order-type select + lite branch). The old
+`_tab_buy_plan/_tab_po_approval/_tab_prepayment.html` are **deleted** (the
+`scope_toggle` macro retired with them). Shared atoms (Phase 0): `copy_chip` +
+`age_chip` in `shared/_macros.html`.
+
+### Services (Phase 0 foundations + Phase 1)
+
+- `app/services/field_audit.py` — who/field/old→new audit rows: `diff_fields`,
+  `log_field_edits` (ONE batched `FIELD_EDIT` ActivityLog row per save,
+  `details={"edits": [...]}`), `edits_since`, `manager_edited_line_ids`.
+- `app/services/stale_guard.py` — optimistic-concurrency guard: `stale_token`
+  (Jinja global), `ensure_not_stale`, `stale_conflict_response` (non-destructive 409
+  + toast).
+- `app/services/qp_workspace.py` — `apply_qp_purchasing`: folds the confirm-PO form's
+  QP-purchasing answers (incl. AS9120B) onto the **(plan, vendor)** QualityPlan row
+  (D11; find-or-create, whitelisted columns, explicit yes/no booleans, blanks never
+  clear, returns the FieldEdit diff); `qp_for_line` read helper.
+- `app/services/buyplan_builder.py` — `create_sales_order_from_offers` gains
+  keyword-only `order_type` (sourcing types only); NEW `create_lite_sales_order`
+  (zero-line DRAFT plan for Stock Sale / Testing Service / Comps — the **lite path**:
+  approve goes ACTIVE, generates zero buyer tasks, never auto-completes).
+- `app/services/buyplan_workflow/buyplan_po.py` — `confirm_po` gains keyword-only
+  `payment_method` (validated against `PO_LINE_PAYMENT_METHODS`).
+- `app/routers/prepayments.py` — request-modal methods derive from
+  `PREPAYMENT_METHODS` (ACH in, **COD never**); router-level COD guard (friendly 400)
+  before `create_prepayment` on both HTMX + JSON creates (`prepayment_service.py`
+  untouched).

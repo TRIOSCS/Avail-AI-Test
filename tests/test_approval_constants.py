@@ -64,11 +64,14 @@ def test_approval_step_rule_members() -> None:
 
 
 def test_payment_method_members() -> None:
-    """All three payment-method members present."""
+    """All five payment-method members present (ACH + COD added by the Approvals
+    Workspace, migration 192)."""
     assert PaymentMethod.CC == "cc"
     assert PaymentMethod.PAYPAL == "paypal"
     assert PaymentMethod.WIRE == "wire"
-    assert len(PaymentMethod) == 3
+    assert PaymentMethod.ACH == "ach"
+    assert PaymentMethod.COD == "cod"
+    assert len(PaymentMethod) == 5
 
 
 def test_quality_plan_status_members() -> None:
