@@ -461,3 +461,34 @@ class TestOfferedSummaryExcludesNonSent:
 
         ctx = _outreach_tracker_context(None, db_session, el, trader)
         assert ctx["summary"]["offered"] == 1
+
+
+class TestExpiryPerListIsolation:
+    def test_one_bad_list_mirror_error_does_not_block_the_others(self, db_session: Session, test_company: Company):
+        """One overdue list whose mirror-sync raises must NOT abort the whole batch —
+        the other overdue lists still expire (finding #6 silent-failure isolation)."""
+        from unittest.mock import patch
+
+        from app.services import excess_service
+
+        trader = _make_trader(db_session)
+        past = datetime.now(UTC) - timedelta(hours=1)
+        bad = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
+        good = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
+        bad.close_at = past
+        good.close_at = past
+        db_session.commit()
+        bad_id, good_id = bad.id, good.id
+
+        def _sync(_db, el):
+            if el.id == bad_id:
+                raise RuntimeError("mirror boom")
+
+        with patch("app.services.excess_mirror.sync_list_mirror", side_effect=_sync):
+            expired = excess_service.expire_overdue_lists(db_session, now=datetime.now(UTC))
+
+        db_session.expire_all()
+        # The good list expired despite the bad list's mirror error; the bad one stayed put.
+        assert db_session.get(ExcessList, good_id).status == ExcessListStatus.EXPIRED
+        assert db_session.get(ExcessList, bad_id).status == ExcessListStatus.COLLECTING
+        assert expired == 1

@@ -979,8 +979,12 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
     awarded or closed is stale: it auto-expires so it stops advertising supply and drops
     out of the offerable ("Open to Me") lens. For each expired list the Sighting mirror is
     retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list already
-    ``expired``/``awarded``/``bid_out`` is skipped. Commits once. Returns the count
-    expired.
+    ``expired``/``awarded``/``bid_out`` is skipped.
+
+    Each list's flip + mirror-sync + commit is ISOLATED in its own try/except: one list
+    whose mirror-sync raises is rolled back and skipped, and the batch continues expiring
+    the others (a single bad list must never silently strand the whole nightly sweep).
+    Returns the count SUCCESSFULLY expired.
     """
     from . import excess_mirror
 
@@ -994,15 +998,22 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
         )
         .all()
     )
+    expired_count = 0
     for excess_list in overdue:
-        excess_list.status = ExcessListStatus.EXPIRED
-        db.flush()
-        excess_mirror.sync_list_mirror(db, excess_list)
-
-    if overdue:
-        _safe_commit(db, entity="excess list expiry")
-    logger.info("Expired {} overdue excess list(s) past close_at", len(overdue))
-    return len(overdue)
+        try:
+            excess_list.status = ExcessListStatus.EXPIRED
+            db.flush()
+            excess_mirror.sync_list_mirror(db, excess_list)
+            _safe_commit(db, entity="excess list expiry")
+            expired_count += 1
+        except Exception:  # noqa: BLE001 — deliberate per-list isolation: ANY failure (mirror sync, commit) on one list must be logged and skipped so the batch keeps expiring the rest
+            logger.exception(
+                "Auto-expiry failed for list={} — rolling back this list, continuing the batch",
+                excess_list.id,
+            )
+            db.rollback()
+    logger.info("Expired {} of {} overdue excess list(s) past close_at", expired_count, len(overdue))
+    return expired_count
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.constants import ExcessOutreachStatus
+from app.constants import ExcessListStatus, ExcessOutreachStatus
 from app.models import Company, ExcessList, ExcessOutreach, User, VendorCard
 from app.models.excess import ExcessLineItem, ExcessOffer
 from app.services import resell_outreach_service as svc
@@ -481,6 +481,31 @@ class TestRecordResponse:
         assert len(offers) == 1
         assert offers[0].offerer_vendor_card_id == buyer_card.id
         assert offers[0].status == "open"
+
+    def test_reply_with_offer_flips_open_list_to_collecting(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """An inbound reply carrying a bid on an OPEN list signals active collection —
+        the list flips OPEN -> COLLECTING, mirroring the User-driven submit_offer
+        path."""
+        excess_list.status = ExcessListStatus.OPEN
+        db_session.commit()
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+
+        svc.record_response(
+            db_session,
+            conversation_id="conv-1",
+            has_offer=True,
+            offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+        )
+
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.COLLECTING
 
     def test_reply_declined_advances_to_declined(
         self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, trader: User

@@ -53,6 +53,7 @@ from ..constants import (
     Channel,
     Direction,
     EventType,
+    ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
     ExcessOutreachChannel,
@@ -1073,6 +1074,11 @@ def _link_inbound_offer(
 
     for line_item_id in affected:
         recompute_line_rollup(db, line_item_id)
+
+    # Any first inbound bid on an OPEN list signals active collection — flip to COLLECTING
+    # (mirrors the User-driven submit_offer path in excess_service).
+    if excess_list is not None and excess_list.status == ExcessListStatus.OPEN:
+        excess_list.status = ExcessListStatus.COLLECTING
 
     # M6: notify the list owner a buyer reply carrying a bid landed (deduped per
     # (list, buyer)). The buyer here is the canonical VendorCard, not a User.
