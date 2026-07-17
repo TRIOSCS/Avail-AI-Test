@@ -853,15 +853,22 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
 > `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
 > Resell lifecycle members (open/collecting/bid_out/awarded); the pre-Resell active/bidding
-> members remain (not in the cutover's removal scope).
+> members remain DEFINED for back-compat, but **migration 193 remapped every legacy ROW**
+> (`active`->`open` + stamp `open_at`, `bidding`->`collecting` + stamp `open_at`; `closed`
+> stays CLOSED, distinct from `bid_out` — decision D5), so no live row carries a legacy
+> status and the publish guard can rely on `draft` being the only pre-post state.
 >
 > Service logic lives in `app/services/excess_service.py`:
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
-> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*;
+> `withdraw_offer` is GUARDED at the service layer to open/late offers — 409 for a won
+> offer [unaward it first] or a lost/withdrawn one, mirroring the router guard),
 > `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated; a
 > `take_all` offer awards EVERY non-withdrawn line (it carries no offer lines), a
-> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409 if a
+> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409
+> unless the offer is open/late (a lost/withdrawn offer is not awardable — this guard
+> runs BEFORE the line-scope check); 409 if a
 > line is already awarded to a different offer; marks lines `awarded`, recomputes rollups,
 > fires the buyer-score win-hook `buyer_affinity_service.recompute_buyer_score_on_win`
 > BEFORE the commit — no-ops for an offer with no canonical buyer; RETIRES the sold lines
@@ -879,7 +886,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > (templates under `app/templates/htmx/partials/resell/*`).
 >
 > Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
-> `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
+> `sync_list_mirror`/`publish_list` are the dual-write owners (`publish_list` is GUARDED
+> to `draft` — 409 otherwise, so a resolved posting can't be re-opened and re-mirrored —
+> and clears any stale `close_at` on publish) — every active posted
 > `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
 > `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
 > NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
@@ -895,7 +904,11 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 >
 > Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
 > `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
-> header + `customer_bid_lines`, seeding each `customer_unit_price` from the line's
+> header + `customer_bid_lines`. Re-assemble semantics (D3): a non-terminal latest bid
+> (draft/sent) bumps `revision` in place on the SAME row; a TERMINAL latest (accepted/
+> rejected) is frozen history, so a re-assemble INSERTs a NEW `customer_bids` row
+> (`revision`+1, draft) and leaves the answered row — status, send/response stamps and its
+> lines — untouched. It seeds each `customer_unit_price` from the line's
 > `best_offer_unit_price` rollup (trader override per line); the chosen offer ids are
 > recorded INTERNALLY (`selected_offer_id`/`selected_offer_line_id`) for audit and are
 > NEVER exported. `bid_back_export_context` is a PURE WHITELIST — line dicts carry only
@@ -910,7 +923,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
+- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy active/bidding enum members remain defined but migration 193 remapped all legacy rows -> open/collecting; closed kept distinct from bid_out)
 - version (int, default 1) — lock-on-post; a revision bumps version
 - open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
 
