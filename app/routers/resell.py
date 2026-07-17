@@ -1340,8 +1340,14 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
         .all()
     )
     # Distinct-buyer counts so "offered N · M responded · K bid" reads per buyer, not per
-    # (buyer × line) row — a 3-line per-line campaign is one buyer offered, not three.
-    offered = {r.target_vendor_card_id for r in rows if r.target_vendor_card_id is not None}
+    # (buyer × line) row — a 3-line per-line campaign is one buyer offered, not three. Only
+    # genuinely-sent rows count as "offered": a ``sending`` / ``failed`` / ``interrupted``
+    # row never reached the buyer, so it must not inflate the offered tally.
+    offered = {
+        r.target_vendor_card_id
+        for r in rows
+        if r.target_vendor_card_id is not None and r.status not in buyer_affinity_service._NOT_SENT_STATUSES
+    }
     responded = {
         r.target_vendor_card_id for r in rows if r.target_vendor_card_id is not None and r.status in _RESPONDED_OUTREACH
     }
@@ -1356,6 +1362,9 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
         "list": el,
         "rows": rows,
         "summary": {"offered": len(offered), "responded": len(responded), "bid": len(bid)},
+        # The shared not-sent set (as string values) so the template renders "—" for a
+        # non-sent row's "When" instead of its meaningless created_at.
+        "not_sent_statuses": [s.value for s in buyer_affinity_service._NOT_SENT_STATUSES],
         # Drives the tracker's self-poll: while any row is still ``sending`` (its
         # background send job has not finalized), the tab polls itself for the final state.
         "any_sending": any(r.status == ExcessOutreachStatus.SENDING for r in rows),
@@ -1607,6 +1616,67 @@ async def resell_submit_outreach(
             notes=notes or None,
         )
 
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+# Retry re-uses the standard offer template (the compose modal's seeded subject/body in
+# offer_buyers_modal.html) — the original campaign's subject/body are not persisted, so a
+# one-click retry re-sends with the default text. Kept in sync with that template.
+_RETRY_SUBJECT = "Excess available: {title}"
+_RETRY_BODY = "We have the following excess available — let us know if you'd like to bid."
+
+# Outreach statuses a failed send can be retried FROM (a genuine send failure or an
+# interrupted/orphaned send — never a live sending/sent/engaged row).
+_RETRYABLE_OUTREACH = (ExcessOutreachStatus.FAILED, ExcessOutreachStatus.INTERRUPTED)
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/retry", response_class=HTMLResponse)
+async def resell_retry_outreach(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+    token: str = Depends(require_fresh_token),
+):
+    """Retry a failed / interrupted EMAIL outreach (owner-only), then re-render the
+    tracker.
+
+    Optimistically flips the row back to ``sending`` (so the tracker re-render shows it +
+    polls) and hands the reconcile-first resend to a background job
+    (:func:`resell_outreach_service.retry_outreach_send`), which re-checks the Sent folder
+    BEFORE resending so an already-delivered row is reconciled to ``sent`` instead of
+    double-sent. 404 when the row is missing / on another list; 409 when it is not in a
+    retryable state or is not an email outreach.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    row = db.get(ExcessOutreach, outreach_id)
+    if row is None or row.excess_list_id != el.id:
+        raise HTTPException(404, "Outreach not found")
+    if row.channel != ExcessOutreachChannel.EMAIL:
+        raise HTTPException(409, "Only an email outreach can be retried")
+    if row.status not in _RETRYABLE_OUTREACH:
+        raise HTTPException(409, "Only a failed or interrupted outreach can be retried")
+
+    subject = _RETRY_SUBJECT.format(title=el.title)
+    body = _RETRY_BODY
+    # Optimistic flip so the tracker shows ``sending`` + self-polls to the final state.
+    row.status = ExcessOutreachStatus.SENDING
+    row.send_error = None
+    row.sent_at = None
+    db.commit()
+
+    background_tasks.add_task(
+        resell_outreach_service.retry_outreach_send,
+        outreach_id=outreach_id,
+        owner_id=user.id,
+        subject=subject,
+        body=body,
+        token=token,
+    )
     el = excess_service.get_excess_list(db, list_id)
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 

@@ -28,8 +28,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import ExcessListStatus, ExcessOutreachStatus
-from app.models import Company, ExcessList, ExcessOutreach, User, VendorCard
+from app.constants import ActivityType, ExcessListStatus, ExcessOutreachStatus
+from app.models import ActivityLog, Company, ExcessList, ExcessOutreach, User, VendorCard
 from app.models.excess import ExcessLineItem
 from app.services import resell_outreach_service as svc
 from tests.conftest import engine
@@ -271,7 +271,7 @@ class TestRunOutreachEmailSend:
         buyer_card: VendorCard,
     ):
         """A sent-message lookup failure must not lose the row: it stays ``sent`` with
-        NULL graph ids (reply matching degrades but the touch is still tracked)."""
+        NULL graph ids AND a degraded-reply-matching note (the touch is still tracked)."""
         rows, plan = svc.enqueue_outreach_email(
             db_session,
             list_id=posted_list.id,
@@ -304,18 +304,28 @@ class TestRunOutreachEmailSend:
         db_session.expire_all()
         row = db_session.get(ExcessOutreach, row_id)
         assert row is not None  # never dropped
+        # Delivered (SENT), never regressed to a failure state — the SEND succeeded; only
+        # the reply-matching lookup degraded.
         assert row.status == ExcessOutreachStatus.SENT
         assert row.graph_message_id is None
         assert row.graph_conversation_id is None
+        # A degraded flag is stamped so the tracker can say "delivered, reply-matching
+        # degraded" (finding: graph-id-missing must not silently look like a clean send).
+        assert row.send_error and "degrad" in row.send_error.lower()
 
     @pytest.mark.asyncio
-    async def test_skipped_recipient_flagged_no_response(
+    async def test_skipped_recipient_flagged_failed_with_error(
         self,
         db_session: Session,
         posted_list: ExcessList,
         trader: User,
         buyer_card: VendorCard,
     ):
+        """A skipped recipient (DNC / no email) is a SEND FAILURE, not buyer silence:
+
+        the row is ``failed`` with the skip reason persisted in ``send_error`` — never
+        ``no_response`` (which would libel the buyer as contacted-and-silent).
+        """
         rows, plan = svc.enqueue_outreach_email(
             db_session,
             list_id=posted_list.id,
@@ -346,20 +356,66 @@ class TestRunOutreachEmailSend:
 
         db_session.expire_all()
         row = db_session.get(ExcessOutreach, row_id)
-        assert row.status == ExcessOutreachStatus.NO_RESPONSE
+        assert row.status == ExcessOutreachStatus.FAILED
+        assert row.send_error == "do-not-contact"
         assert row.sent_at is None
         assert row.graph_message_id is None
 
     @pytest.mark.asyncio
-    async def test_total_send_failure_flags_no_response_not_stuck_sending(
+    async def test_genuine_per_buyer_send_failure_flagged_failed(
         self,
         db_session: Session,
         posted_list: ExcessList,
         trader: User,
         buyer_card: VendorCard,
     ):
-        """If send_batch_rfq raises, the row must not be stranded in ``sending`` — it is
-        flagged ``no_response`` so the tracker poll can stop."""
+        """A per-buyer send error (status='failed') → ``failed`` + the error
+        persisted."""
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        row_id = rows[0].id
+
+        async def _failed(*_args, **_kwargs):
+            return [{"vendor_email": "sales@asyncbuyer.com", "status": "failed", "error": "smtp 550 mailbox full"}]
+
+        with (
+            patch("app.email_service.send_batch_rfq", side_effect=_failed),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.run_outreach_email_send(
+                list_id=posted_list.id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                groups=plan,
+                session_factory=lambda: db_session,
+            )
+
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.FAILED
+        assert row.send_error == "smtp 550 mailbox full"
+        assert row.sent_at is None
+
+    @pytest.mark.asyncio
+    async def test_total_send_failure_flags_failed_not_stuck_sending(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """If send_batch_rfq raises for the whole batch, the row must not be stranded in
+        ``sending`` NOR mislabeled ``no_response`` — it is flagged ``failed`` with the
+        exception text so the tracker poll stops and the trader sees the real reason."""
         rows, plan = svc.enqueue_outreach_email(
             db_session,
             list_id=posted_list.id,
@@ -390,7 +446,8 @@ class TestRunOutreachEmailSend:
 
         db_session.expire_all()
         row = db_session.get(ExcessOutreach, row_id)
-        assert row.status == ExcessOutreachStatus.NO_RESPONSE
+        assert row.status == ExcessOutreachStatus.FAILED
+        assert row.send_error and "graph send outage" in row.send_error
 
     @pytest.mark.asyncio
     async def test_idempotent_rerun_does_not_double_send(
@@ -502,6 +559,259 @@ class TestRunOutreachEmailSend:
         assert all(r.graph_conversation_id for r in finalized)
 
 
+# ── Task 3: commit-after-send + guarded bookkeeping + activity gating ─
+
+
+class TestCommitAfterSendAndActivityGating:
+    @pytest.mark.asyncio
+    async def test_bookkeeping_exception_does_not_revert_delivered_sent(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A post-send bookkeeping failure (activity/cadence write) must NOT roll back
+        the already-delivered SENT status + graph ids — the email went out, so the
+        tracker must reflect it regardless of a downstream write error (regression for
+        the blanket except->rollback)."""
+        list_id = posted_list.id
+        owner_id = trader.id
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=list_id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        row_id = rows[0].id
+
+        async def _lookup(_gc, _subject, _email):
+            return {"id": "msg-bk-1", "conversationId": "conv-bk-1"}
+
+        def _explode_bookkeeping(*_args, **_kwargs):
+            raise RuntimeError("cadence clock write blew up")
+
+        with (
+            patch("app.email_service.send_batch_rfq", side_effect=_sent_result("sales@asyncbuyer.com")),
+            patch("app.email_service._find_sent_message", side_effect=_lookup),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+            patch("app.services.resell_outreach_service._log_outreach_activity", side_effect=_explode_bookkeeping),
+        ):
+            # Must NOT raise — the bookkeeping error is guarded.
+            await svc.run_outreach_email_send(
+                list_id=list_id,
+                owner_id=owner_id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                groups=plan,
+                session_factory=lambda: db_session,
+            )
+
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT  # delivered SENT survived
+        assert row.graph_message_id == "msg-bk-1"
+        assert row.graph_conversation_id == "conv-bk-1"
+
+    @pytest.mark.asyncio
+    async def test_sent_send_writes_one_emailed_activity(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A successful send logs exactly one outbound 'Emailed' ActivityLog (happy path
+        still bumps cadence)."""
+        list_id = posted_list.id
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=list_id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+
+        async def _lookup(_gc, _subject, _email):
+            return {"id": "m", "conversationId": "c"}
+
+        with (
+            patch("app.email_service.send_batch_rfq", side_effect=_sent_result("sales@asyncbuyer.com")),
+            patch("app.email_service._find_sent_message", side_effect=_lookup),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.run_outreach_email_send(
+                list_id=list_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                groups=plan,
+                session_factory=lambda: db_session,
+            )
+
+        db_session.expire_all()
+        acts = db_session.query(ActivityLog).filter(ActivityLog.excess_list_id == list_id).all()
+        assert len(acts) == 1
+        assert acts[0].activity_type == ActivityType.EMAIL_SENT
+
+    @pytest.mark.asyncio
+    async def test_failed_send_writes_no_activity_and_no_cadence_bump(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A FAILED send must write NO ActivityLog (neither 'Emailed' nor a NOTE) and so
+        must NOT advance the cadence clocks — a send that never landed must not look
+        like the buyer was contacted (finding #6)."""
+        list_id = posted_list.id
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=list_id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+
+        async def _skipped(*_args, **_kwargs):
+            return [{"vendor_email": "sales@asyncbuyer.com", "status": "skipped", "error": "do-not-contact"}]
+
+        with (
+            patch("app.email_service.send_batch_rfq", side_effect=_skipped),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.run_outreach_email_send(
+                list_id=list_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                groups=plan,
+                session_factory=lambda: db_session,
+            )
+
+        db_session.expire_all()
+        acts = db_session.query(ActivityLog).filter(ActivityLog.excess_list_id == list_id).all()
+        assert acts == []  # no activity, so no cadence bump
+
+
+# ── Task 4: retry with the reconcile-first double-send guard ─────────
+
+
+def _fail_row(db_session: Session, posted_list, trader, buyer_card) -> int:
+    """Enqueue one email row then drive it to FAILED; return its id."""
+    rows, _plan = svc.enqueue_outreach_email(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader,
+        buyers=[{"vendor_card_id": buyer_card.id}],
+        scope="whole_list",
+        subject="Excess available",
+        body="surplus",
+    )
+    row = rows[0]
+    row.status = ExcessOutreachStatus.FAILED
+    row.send_error = "graph send outage"
+    db_session.commit()
+    return row.id
+
+
+class TestRetryOutreachSend:
+    @pytest.mark.asyncio
+    async def test_retry_reconciles_already_delivered_and_does_not_resend(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Double-send guard: a FAILED row whose email is ALREADY in the Sent folder was
+        actually delivered (the failure was downstream) — retry reconciles it to SENT +
+        stamps the found ids and NEVER resends."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+
+        send_mock = AsyncMock()
+
+        async def _found(_gc, _subject, _email):
+            return {"id": "already-sent-1", "conversationId": "conv-already-1"}
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.email_service._find_sent_message", side_effect=_found),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # the guard prevented a double-send
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.graph_message_id == "already-sent-1"
+        assert row.graph_conversation_id == "conv-already-1"
+        assert row.send_error is None
+
+    @pytest.mark.asyncio
+    async def test_retry_resends_when_not_in_sent_folder(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """When the pre-send reconcile finds nothing, the original never went out: retry
+        resets the row to sending and re-sends exactly once, then stamps the new ids."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+
+        send_mock = AsyncMock(return_value=[{"vendor_email": "sales@asyncbuyer.com", "status": "sent"}])
+        calls: list[int] = []
+
+        async def _lookup(_gc, _subject, _email):
+            # 1st call = the pre-send reconcile guard (not delivered → None);
+            # 2nd call = the post-send stamp inside _finalize_outreach_send.
+            calls.append(1)
+            return None if len(calls) == 1 else {"id": "resent-1", "conversationId": "conv-resent-1"}
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.email_service._find_sent_message", side_effect=_lookup),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        assert send_mock.await_count == 1  # resent exactly once
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.graph_message_id == "resent-1"
+        assert row.send_error is None
+
+
 # ── Router: the submit returns immediately with ``sending`` rows ─────
 
 
@@ -564,5 +874,60 @@ def test_submit_email_returns_immediately_with_sending_rows(
         assert len(rows) == 1
         assert rows[0].status == ExcessOutreachStatus.SENDING
         assert rows[0].graph_conversation_id is None
+    finally:
+        restore()
+
+
+def test_retry_route_flips_failed_to_sending_and_enqueues(
+    client,
+    db_session: Session,
+    posted_list: ExcessList,
+    trader: User,
+    buyer_card: VendorCard,
+):
+    """POST .../retry on a FAILED row flips it to ``sending`` at once and enqueues the
+    reconcile-first background retry (the request never resends inline)."""
+    row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+    retry_stub = MagicMock()
+    restore = _own(trader)
+    try:
+        with patch("app.services.resell_outreach_service.retry_outreach_send", retry_stub):
+            resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
+        assert resp.status_code == 200
+        retry_stub.assert_called_once()
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENDING
+        assert row.send_error is None
+    finally:
+        restore()
+
+
+def test_retry_route_rejects_non_retryable_row(
+    client,
+    db_session: Session,
+    posted_list: ExcessList,
+    trader: User,
+    buyer_card: VendorCard,
+):
+    """A row that is not failed/interrupted (e.g. already SENT) cannot be retried —
+    409."""
+    rows, _plan = svc.enqueue_outreach_email(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader,
+        buyers=[{"vendor_card_id": buyer_card.id}],
+        scope="whole_list",
+        subject="Excess available",
+        body="surplus",
+    )
+    row = rows[0]
+    row.status = ExcessOutreachStatus.SENT
+    db_session.commit()
+    row_id = row.id
+    restore = _own(trader)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
+        assert resp.status_code == 409
     finally:
         restore()

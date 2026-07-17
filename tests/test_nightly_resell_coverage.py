@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session
 
 os.environ.setdefault("TESTING", "1")
 
-from app.constants import ExcessListStatus
-from app.models import Company, User
-from app.models.excess import ExcessLineItem, ExcessList
-from app.routers.resell import _file_extension, _hours_until, _offer_coverage
+from app.constants import ExcessListStatus, ExcessOutreachStatus
+from app.models import Company, User, VendorCard
+from app.models.excess import ExcessLineItem, ExcessList, ExcessOutreach
+from app.routers.resell import _file_extension, _hours_until, _offer_coverage, _outreach_tracker_context
+from app.services import resell_outreach_service as outreach_svc
 
 # ── Pure-function unit tests ──────────────────────────────────────────────────
 
@@ -374,3 +375,89 @@ class TestResellPublishErrors:
         db_session.commit()
         r = client.post(f"/api/resell/{el.id}/publish")
         assert r.status_code == 403
+
+
+# ── Task 4: stale-``sending`` sweeper ─────────────────────────────────────────
+
+
+def _make_outreach(
+    db: Session,
+    el: ExcessList,
+    owner: User,
+    *,
+    status: str,
+    created_at: datetime,
+    card_id: int | None = None,
+) -> ExcessOutreach:
+    row = ExcessOutreach(
+        excess_list_id=el.id,
+        submitted_by=owner.id,
+        target_vendor_card_id=card_id,
+        channel="email",
+        status=status,
+        created_at=created_at,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _make_card(db: Session, name: str) -> VendorCard:
+    vc = VendorCard(normalized_name=name.lower(), display_name=name, emails=[f"{name.lower()}@x.com"])
+    db.add(vc)
+    db.flush()
+    return vc
+
+
+class TestStaleSendingSweeper:
+    def test_flips_aged_sending_to_interrupted_leaves_fresh_and_settled(
+        self, db_session: Session, test_company: Company
+    ):
+        """A ``sending`` row older than the threshold is flipped to ``interrupted`` (its
+        background job died mid-flight); a fresh ``sending`` row and any already-settled
+        row are untouched.
+
+        The sweep NEVER assumes not-sent (interrupted, not no_response), and never
+        resends.
+        """
+        trader = _make_trader(db_session)
+        el = _make_list(db_session, trader, test_company)
+        now = datetime.now(UTC)
+
+        aged = _make_outreach(
+            db_session, el, trader, status=ExcessOutreachStatus.SENDING, created_at=now - timedelta(hours=2)
+        )
+        fresh = _make_outreach(db_session, el, trader, status=ExcessOutreachStatus.SENDING, created_at=now)
+        settled = _make_outreach(
+            db_session, el, trader, status=ExcessOutreachStatus.SENT, created_at=now - timedelta(hours=2)
+        )
+        db_session.commit()
+
+        flipped = outreach_svc.sweep_stale_sending_outreach(db_session, now=now)
+
+        assert flipped == 1
+        db_session.expire_all()
+        assert db_session.get(ExcessOutreach, aged.id).status == ExcessOutreachStatus.INTERRUPTED
+        assert db_session.get(ExcessOutreach, aged.id).send_error  # a reason is recorded
+        assert db_session.get(ExcessOutreach, fresh.id).status == ExcessOutreachStatus.SENDING
+        assert db_session.get(ExcessOutreach, settled.id).status == ExcessOutreachStatus.SENT
+
+
+class TestOfferedSummaryExcludesNonSent:
+    def test_offered_count_ignores_failed_buyer(self, db_session: Session, test_company: Company):
+        """The tracker glance 'offered N' counts only buyers genuinely offered — a buyer
+        whose only row is FAILED is not counted (finding: a failed send must not inflate
+        the offered tally)."""
+        trader = _make_trader(db_session)
+        el = _make_list(db_session, trader, test_company)
+        now = datetime.now(UTC)
+        card_sent = _make_card(db_session, "SentBuyer")
+        card_failed = _make_card(db_session, "FailedBuyer")
+        _make_outreach(db_session, el, trader, status=ExcessOutreachStatus.SENT, created_at=now, card_id=card_sent.id)
+        _make_outreach(
+            db_session, el, trader, status=ExcessOutreachStatus.FAILED, created_at=now, card_id=card_failed.id
+        )
+        db_session.commit()
+
+        ctx = _outreach_tracker_context(None, db_session, el, trader)
+        assert ctx["summary"]["offered"] == 1
