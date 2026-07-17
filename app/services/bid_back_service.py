@@ -98,6 +98,13 @@ def build_bid_back(
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can build the bid back")
 
+    # Serialize concurrent re-assembles of this list (mirrors excess_service._lock_list_for_award's
+    # M9 pattern): a second concurrent build BLOCKS here until the first commits (_safe_commit
+    # below), then reads the freshly-committed ``latest`` revision instead of racing it — so two
+    # builds can neither both fork the same revision number nor silently clobber each other's line
+    # selections. ``with_for_update`` is a no-op on SQLite (tests) and enforced on PostgreSQL (prod).
+    db.scalars(select(ExcessList).where(ExcessList.id == list_id).with_for_update()).first()
+
     # Index the posting's lines so we can validate each selection belongs here and seed
     # the price from the rollup.
     posted: dict[int, ExcessLineItem] = {

@@ -1066,3 +1066,39 @@ class TestWithdrawOfferServiceGuard:
         result = excess_service.withdraw_offer(db_session, offer.id)
 
         assert result.status == ExcessOfferStatus.WITHDRAWN
+
+    def test_withdraw_offer_locks_list_for_serialization(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        monkeypatch,
+    ):
+        """withdraw_offer must take the same list/line lock award/unaward use (M9)
+        BEFORE its status guard, so a concurrent award can't commit (offer->won,
+        line->awarded) between an unlocked read and the withdraw's UPDATE and strand an
+        awarded line on a withdrawn offer.
+
+        Spy the lock hook to prove it's wired (with_for_update itself is a no-op on the
+        SQLite test engine, so the race is unobservable here — this guards the hook
+        against regression).
+        """
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        calls: list[tuple[int, int]] = []
+        real_lock = excess_service._lock_list_for_award
+
+        def _spy(db, off, list_id):
+            calls.append((off.id, list_id))
+            return real_lock(db, off, list_id)
+
+        monkeypatch.setattr(excess_service, "_lock_list_for_award", _spy)
+
+        excess_service.withdraw_offer(db_session, offer.id)
+
+        assert calls == [(offer.id, excess_list.id)]

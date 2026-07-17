@@ -650,6 +650,12 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
         raise HTTPException(404, f"ExcessOffer {offer_id} not found")
+    # Serialize vs a concurrent award/unaward of this offer's list (M9): lock the list +
+    # its lines and refresh THIS offer so the status guard below reads freshly-committed
+    # state. Without the lock a concurrent award can commit (offer->won, line->awarded)
+    # between our unlocked read and our unconditional UPDATE, overwriting won->withdrawn
+    # and leaving an awarded line pointing at a withdrawn offer.
+    _lock_list_for_award(db, offer, offer.excess_list_id)
     if offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
         raise HTTPException(409, "Only an open or late offer can be withdrawn — unaward a won offer first")
 
