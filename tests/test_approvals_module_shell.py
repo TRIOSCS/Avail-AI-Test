@@ -63,11 +63,11 @@ def test_approvals_page_threads_tab(nonadmin_client: TestClient):
     assert "/v2/partials/approvals?tab=po-approval" in r.text
 
 
-def test_approvals_shell_renders_three_tabs(nonadmin_client: TestClient):
-    """The Approvals hub shell renders all three gate-tab URLs + the lazy-body guard."""
+def test_approvals_shell_renders_four_tabs(nonadmin_client: TestClient):
+    """The Approvals Workspace shell renders all four tab URLs + the lazy-body guard."""
     r = nonadmin_client.get("/v2/partials/approvals")
     assert r.status_code == 200
-    for key in ("buy-plan", "po-approval", "prepayment"):
+    for key in ("sales-orders", "buy-plans", "purchase-orders", "prepayments"):
         assert f"?tab={key}" in r.text
     assert 'hx-target="#ap-hub-body"' in r.text
 

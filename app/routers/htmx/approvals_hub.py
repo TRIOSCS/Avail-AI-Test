@@ -1,39 +1,49 @@
-"""routers/htmx/approvals_hub.py — Approvals hub (3-tab decide surface, HTMX + Alpine).
+"""routers/htmx/approvals_hub.py — Approvals Workspace (4-tab split-view console).
 
-The clean, org-wide "browse + decide + history, per gate type" console at /v2/approvals —
-one tab per surviving approval gate:
-  - Buy Plan   → BUY_PLAN engine gate   (services/approvals/queue helpers)
-  - PO Approval→ per-line PENDING_VERIFY (services/approvals/po_queue — NOT engine-backed)
-  - Prepayment → PREPAYMENT engine gate (services/approvals/queue helpers)
+One page, four tabs — Sales Orders · Buy Plans · Purchase Orders · Prepayments — all
+lenses on the same pipeline rooted at the sales order (specs/approvals-workspace.md).
+Every tab is a split view: LEFT the work list (search, Mine/All, live/closed filter,
+age on every row, "Needs your approval" grouped first, oldest default-selected), RIGHT
+the detail pane with the action at the bottom. The approvals ENGINE is untouched —
+decisions post the existing buy_plans.py / prepayments routes.
 
-Distinct from the Buy Plans hub (routers/htmx/buy_plans.py), which owns the personal
-My Queue / Pipeline surfaces at /v2/buy-plans. Origination ("New Buy Plan") is NOT here —
-it is deal creation, not a decide action.
+Legacy tab keys (buy-plan / po-approval / prepayment) alias onto the new tabs so old
+pushed URLs and the existing origin=approvals_hub decide re-renders keep working.
+``render_tab_body`` is shared: the tab GET route and the decide handlers both call it
+so a one-click decision re-renders the refreshed tab in place.
 
-``render_tab_body`` is shared: the tab GET route and the buy_plans.py decide handlers
-(verify-po / resource / approve / prepay-decide, origin=approvals_hub) both call it so a
-one-click decision re-renders the refreshed tab in place.
-
-Called by: app/main.py (router mount).
+Called by: app/main.py (router mount); routers/htmx/buy_plans.py + routers/prepayments.py
+    (decide handlers' re-render branches).
 Depends on: app.dependencies, app.database, app.services.approvals.{queue,po_queue},
-    ._shared (_base_ctx), app.template_env.
+    app.services.prepayment_service (read helpers), ._shared (_base_ctx), app.template_env.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from ...constants import AccessKey, ApprovalGateType, BuyPlanLineStatus
+from ...constants import (
+    AccessKey,
+    ApprovalGateType,
+    ApprovalRecipientStatus,
+    ApprovalRequestStatus,
+    BuyPlanLineStatus,
+    BuyPlanStatus,
+    SalesOrderType,
+)
 from ...database import get_db
-from ...dependencies import require_access, require_user
-from ...models import BuyPlanLine, User
+from ...dependencies import can_verify_po_line, require_access, require_user
+from ...models import BuyPlan, BuyPlanLine, User
+from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ...services.approvals.po_queue import build_po_queue_view
 from ...services.approvals.queue import (
     buy_plan_tracking_rows,
-    pending_count_for_gate,
     pending_rows_for_gate,
     resolved_rows_for_gate,
 )
@@ -43,18 +53,161 @@ from ._shared import _base_ctx
 
 router = APIRouter(tags=["htmx-views"])
 
-# tab key (dash-cased URL segment) → order. One per surviving gate type.
-_TABS = ("buy-plan", "po-approval", "prepayment")
-DEFAULT_TAB = "buy-plan"
+# The four workspace tabs (dash-cased URL segments), in display order. Sales Orders and
+# Buy Plans are two LENSES on the same quote-less BuyPlan — same rows, same approve.
+_TABS = ("sales-orders", "buy-plans", "purchase-orders", "prepayments")
+DEFAULT_TAB = "sales-orders"
+
+# Legacy 3-tab console keys → workspace tabs. Old pushed URLs (?tab=buy-plan) and the
+# origin=approvals_hub decide handlers resolve through this map.
+LEGACY_TAB_ALIASES = {
+    "buy-plan": "buy-plans",
+    "po-approval": "purchase-orders",
+    "prepayment": "prepayments",
+}
+
+_TAB_LABELS = {
+    "sales-orders": "Sales Orders",
+    "buy-plans": "Buy Plans",
+    "purchase-orders": "Purchase Orders",
+    "prepayments": "Prepayments",
+}
+
+# PO decision vocabulary (spec §5): the UI says Approve / Approved / Pending approval
+# everywhere users see a per-line PO state. Backend names stay pending_verify/verified —
+# this is a DISPLAY map only, never a code rename.
+PO_DECISION_LABELS = {
+    BuyPlanLineStatus.AWAITING_PO.value: "Awaiting PO",
+    BuyPlanLineStatus.PENDING_VERIFY.value: "Pending approval",
+    BuyPlanLineStatus.VERIFIED.value: "Approved",
+    BuyPlanLineStatus.ISSUE.value: "Issue",
+    BuyPlanLineStatus.CANCELLED.value: "Cancelled",
+    BuyPlanLineStatus.RESOURCING.value: "Re-sourcing",
+}
+
+# Order-type badge labels (SalesOrderType → short display).
+ORDER_TYPE_LABELS = {
+    SalesOrderType.NEW.value: "New",
+    SalesOrderType.REVISION.value: "Revision",
+    SalesOrderType.TESTING_SERVICE.value: "Testing Service",
+    SalesOrderType.COMPS.value: "Comps",
+    SalesOrderType.STOCK_SALE.value: "Stock Sale",
+}
+
+# Plan lifecycle statuses shown in the default (live) list vs behind the Closed filter.
+_LIVE_PLAN_STATUSES = (
+    BuyPlanStatus.DRAFT.value,
+    BuyPlanStatus.PENDING.value,
+    BuyPlanStatus.ACTIVE.value,
+    BuyPlanStatus.INBOUND.value,
+    BuyPlanStatus.HALTED.value,
+)
+_CLOSED_PLAN_STATUSES = (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value)
+
+_LIVE_LINE_STATUSES = (
+    BuyPlanLineStatus.AWAITING_PO.value,
+    BuyPlanLineStatus.PENDING_VERIFY.value,
+    BuyPlanLineStatus.RESOURCING.value,
+    BuyPlanLineStatus.ISSUE.value,
+)
+_CLOSED_LINE_STATUSES = (BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.CANCELLED.value)
 
 
-def _po_pending_count(db: Session) -> int:
-    """Org-wide count of PENDING_VERIFY lines (the PO Approval pill)."""
-    return int(
+def _resolve_tab(tab: str) -> str | None:
+    """Map *tab* (new key or legacy alias) to a canonical workspace tab, or None."""
+    tab = LEGACY_TAB_ALIASES.get(tab, tab)
+    return tab if tab in _TABS else None
+
+
+# ── Row view-model ──────────────────────────────────────────────────────
+
+
+@dataclass
+class WorkspaceRow:
+    """One left-list row, fully resolved for the template (no ORM in Jinja)."""
+
+    key: str  # unique per row across the tab, e.g. "plan-7" / "line-12" / "prepay-3"
+    pane_url: str
+    title: str
+    subtitle: str
+    status: str
+    status_label: str
+    needs_approval: bool
+    amount: float | None = None
+    age_at: datetime | None = None
+    copy_number: str | None = None  # SO#/PO# rendered as a copy chip on the row
+    order_type: str | None = None
+    closed: bool = False
+
+
+def _matches(q: str, *fields: str | None) -> bool:
+    """Case-insensitive substring match of *q* against any of *fields*."""
+    if not q:
+        return True
+    needle = q.strip().lower()
+    return any(needle in (f or "").lower() for f in fields)
+
+
+# ── Per-viewer badges ───────────────────────────────────────────────────
+
+
+def _decidable_gate_counts(db: Session, user: User) -> dict[str, int]:
+    """Open engine requests the viewer can decide RIGHT NOW, counted per gate type.
+
+    Mirrors the engine's decide() eligibility (REQUESTED + a PENDING recipient slot),
+    same join as queue._actionable_request_ids but grouped by gate for the tab badges.
+    """
+    rows = db.execute(
+        select(ApprovalRequest.gate_type, func.count(func.distinct(ApprovalRequest.id)))
+        .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
+        .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+        .group_by(ApprovalRequest.gate_type)
+    ).all()
+    return {str(gate): int(cnt) for gate, cnt in rows}
+
+
+def _po_waiting_on_viewer(db: Session, user: User) -> int:
+    """PO-tab badge: lines waiting on THIS viewer.
+
+    = PENDING_VERIFY lines the viewer may approve (can_verify_po_line — right + dollar
+    limit) + the viewer's own assigned AWAITING_PO lines (their confirm-PO work).
+    """
+    pending = (
+        db.execute(select(BuyPlanLine).where(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY.value))
+        .scalars()
+        .all()
+    )
+    verifiable = sum(1 for line in pending if can_verify_po_line(user, line))
+    own_awaiting = int(
         db.execute(
-            select(func.count(BuyPlanLine.id)).where(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
+            select(func.count(BuyPlanLine.id)).where(
+                BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO.value,
+                BuyPlanLine.buyer_id == user.id,
+            )
         ).scalar_one()
     )
+    return verifiable + own_awaiting
+
+
+def _viewer_badges(db: Session, user: User) -> dict[str, int]:
+    """Per-viewer tab badges (spec §5: tab badges = items waiting on the viewer)."""
+    gates = _decidable_gate_counts(db, user)
+    plan_count = gates.get(ApprovalGateType.BUY_PLAN.value, 0)
+    return {
+        # Sales Orders and Buy Plans are lenses on the same object → same badge.
+        "sales-orders": plan_count,
+        "buy-plans": plan_count,
+        "purchase-orders": _po_waiting_on_viewer(db, user),
+        "prepayments": gates.get(ApprovalGateType.PREPAYMENT.value, 0),
+    }
+
+
+# ── Shell + tab body ────────────────────────────────────────────────────
 
 
 @router.get("/v2/partials/approvals", response_class=HTMLResponse)
@@ -64,20 +217,21 @@ async def approvals_hub_shell(
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
-    """Return the Approvals hub shell (3-pill tab switcher + a lazy body).
+    """Return the Approvals Workspace shell (4-pill tab switcher + a lazy tab body).
 
-    The shell renders the Buy Plan / PO Approval / Prepayment pills (with org-wide pending
-    counts) + a lazy body that loads the active tab partial into ``#ap-hub-body``. Row data
-    is fetched by the body, not here. ``?tab=`` threads a deep-link / pushed tab URL.
+    The shell renders the four tab pills with per-viewer "waiting on you" badges + a
+    lazy body that loads the active tab's split view into ``#ap-hub-body``. ``?tab=``
+    threads a deep-link / pushed tab URL; legacy 3-tab keys alias onto the new tabs.
     """
-    active_tab = tab if tab in _TABS else DEFAULT_TAB
-    counts = {
-        "buy-plan": pending_count_for_gate(db, ApprovalGateType.BUY_PLAN),
-        "po-approval": _po_pending_count(db),
-        "prepayment": pending_count_for_gate(db, ApprovalGateType.PREPAYMENT),
-    }
+    active_tab = _resolve_tab(tab) or DEFAULT_TAB
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"active_tab": active_tab, "counts": counts})
+    ctx.update(
+        {
+            "active_tab": active_tab,
+            "tabs": [(key, _TAB_LABELS[key]) for key in _TABS],
+            "badges": _viewer_badges(db, user),
+        }
+    )
     return template_response("htmx/partials/approvals/approvals_hub.html", ctx)
 
 
@@ -89,16 +243,276 @@ async def approvals_hub_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render one Approvals hub tab body into ``#ap-hub-body``.
+    """Render one workspace tab body (the split view) into ``#ap-hub-body``.
 
-    ``tab`` is one of buy-plan / po-approval / prepayment; any other value 404s. ``scope``
-    is the SEE-ALL / SEE-MINE toggle (default ``all`` — the full org-wide queue). The
-    two-segment prepay-decide POST (buy_plans.py) does not collide with this one-segment
-    GET converter.
+    ``tab`` is one of the four workspace keys (legacy 3-tab keys alias); any other
+    value 404s. ``scope`` seeds the list's Mine/All toggle.
     """
-    if tab not in _TABS:
+    if _resolve_tab(tab) is None:
         raise HTTPException(404, "Unknown approvals tab")
     return render_tab_body(request, user, db, tab, scope)
+
+
+def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
+    """Build + render one workspace tab body (shared by the tab GET route and the
+    decide handlers' origin=approvals_hub / legacy re-render branches).
+
+    The body is the split view: the left list lazy-loads ``/{tab}/list`` (so a decide
+    re-render always repaints a FRESH list), the right pane fills on row selection.
+    """
+    resolved = _resolve_tab(tab)
+    if resolved is None:
+        raise HTTPException(404, "Unknown approvals tab")
+    scope = "mine" if scope == "mine" else "all"
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope})
+    return template_response("htmx/partials/approvals/_workspace_split.html", ctx)
+
+
+# ── The left work list ──────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/approvals/{tab}/list", response_class=HTMLResponse)
+async def approvals_workspace_list(
+    request: Request,
+    tab: str,
+    q: str = "",
+    scope: str = "all",
+    show_closed: bool = False,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render one tab's left work list (search + Mine/All + live/closed + age rows).
+
+    Rows group "Needs your approval" first (oldest first — decision queues surface the
+    stalest work); the rest render newest-first. The oldest needs-your-approval row is
+    the default selection (dispatched to the pane on first load only).
+    """
+    resolved = _resolve_tab(tab)
+    if resolved is None:
+        raise HTTPException(404, "Unknown approvals tab")
+    scope = "mine" if scope == "mine" else "all"
+
+    if resolved in ("sales-orders", "buy-plans"):
+        rows = _plan_rows(db, user, lens=resolved, q=q, scope=scope, show_closed=show_closed)
+    elif resolved == "purchase-orders":
+        rows = _po_rows(db, user, q=q, scope=scope, show_closed=show_closed)
+    else:
+        rows = _prepayment_rows(db, user, q=q, scope=scope, show_closed=show_closed)
+
+    needs = [r for r in rows if r.needs_approval]
+    rest = [r for r in rows if not r.needs_approval]
+    default_row = needs[0] if needs else None
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "tab": resolved,
+            "q": q,
+            "scope": scope,
+            "show_closed": show_closed,
+            "needs_rows": needs,
+            "other_rows": rest,
+            "default_row": default_row,
+            "list_url": f"/v2/partials/approvals/{resolved}/list",
+        }
+    )
+    return template_response("htmx/partials/approvals/_workspace_list.html", ctx)
+
+
+def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_closed: bool) -> list[WorkspaceRow]:
+    """Sales Orders / Buy Plans list rows — one per plan, decidable first (oldest
+    first), then the rest newest-first. Both lenses read the same tracking rows."""
+    tracking = buy_plan_tracking_rows(db, user, scope=scope)
+    wanted = _CLOSED_PLAN_STATUSES if show_closed else _LIVE_PLAN_STATUSES
+    tracking = [t for t in tracking if t.status in wanted]
+    tracking = [t for t in tracking if _matches(q, t.customer_name, t.so_number, f"#{t.plan_id}", str(t.plan_id))]
+
+    # Age source: submitted_at (time in the queue) falling back to created_at — one
+    # batched query, keyed by plan id (PlanTrackingRow carries no timestamps).
+    ages: dict[int, datetime] = {}
+    if tracking:
+        for pid, submitted_at, created_at in db.execute(
+            select(BuyPlan.id, BuyPlan.submitted_at, BuyPlan.created_at).where(
+                BuyPlan.id.in_([t.plan_id for t in tracking])
+            )
+        ).all():
+            ages[pid] = submitted_at or created_at
+
+    rows = [
+        WorkspaceRow(
+            key=f"plan-{t.plan_id}",
+            pane_url=f"/v2/partials/approvals/plan/{t.plan_id}/pane?lens={lens}",
+            title=t.customer_name or f"Plan #{t.plan_id}",
+            subtitle=f"Plan #{t.plan_id} · {t.part_count} part{'s' if t.part_count != 1 else ''}",
+            status=t.status,
+            status_label=(t.status or "").replace("_", " ").capitalize(),
+            needs_approval=t.can_decide,
+            amount=float(t.amount) if t.amount is not None else None,
+            age_at=ages.get(t.plan_id),
+            copy_number=t.so_number,
+            order_type=ORDER_TYPE_LABELS.get(t.order_type or "", t.order_type),
+            closed=t.status in _CLOSED_PLAN_STATUSES,
+        )
+        for t in tracking
+    ]
+    # Decidable first, OLDEST first (spec §5); the rest newest-first.
+    needs = sorted((r for r in rows if r.needs_approval), key=lambda r: int(r.key.split("-")[1]))
+    rest = sorted((r for r in rows if not r.needs_approval), key=lambda r: -int(r.key.split("-")[1]))
+    return needs + rest
+
+
+def _po_line_row(line: BuyPlanLine, plan, *, needs: bool, closed: bool = False) -> WorkspaceRow:
+    """Build one PO-tab row from an ORM line (+ its plan)."""
+    mpn = None
+    if line.requirement is not None:
+        mpn = line.requirement.primary_mpn
+    elif line.offer is not None:
+        mpn = line.offer.mpn
+    vendor = line.offer.vendor_name if line.offer is not None else None
+    customer = None
+    if plan is not None and plan.requisition is not None:
+        customer = plan.requisition.customer_name
+    amount = float(line.unit_cost or 0) * (line.quantity or 0)
+    return WorkspaceRow(
+        key=f"line-{line.id}",
+        pane_url=f"/v2/partials/approvals/po/{line.id}/pane",
+        title=" · ".join(x for x in (mpn, vendor) if x) or f"Line #{line.id}",
+        subtitle=" · ".join(
+            x
+            for x in (
+                customer,
+                f"SO {plan.sales_order_number}" if plan is not None and plan.sales_order_number else None,
+            )
+            if x
+        ),
+        status=line.status,
+        status_label=PO_DECISION_LABELS.get(line.status, line.status),
+        needs_approval=needs,
+        amount=amount,
+        age_at=line.po_confirmed_at or line.created_at,
+        copy_number=line.po_number,
+        closed=closed,
+    )
+
+
+def _po_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) -> list[WorkspaceRow]:
+    """Purchase Orders list rows — one per buy-plan line.
+
+    Live: PENDING_VERIFY (oldest first; needs-approval where can_verify_po_line), the
+    viewer's assigned AWAITING_PO lines (their confirm-PO work), the claimable
+    RESOURCING pool and flagged ISSUE lines. Closed: VERIFIED / CANCELLED lines.
+    """
+    rows: list[WorkspaceRow] = []
+
+    if show_closed:
+        closed_lines = (
+            db.execute(
+                select(BuyPlanLine)
+                .options(
+                    joinedload(BuyPlanLine.offer),
+                    joinedload(BuyPlanLine.requirement),
+                    joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.requisition),
+                )
+                .where(BuyPlanLine.status.in_(_CLOSED_LINE_STATUSES))
+                .order_by(BuyPlanLine.id.desc())
+                .limit(50)
+            )
+            .unique()
+            .scalars()
+            .all()
+        )
+        if scope == "mine":
+            closed_lines = [
+                ln
+                for ln in closed_lines
+                if ln.buyer_id == user.id or (ln.buy_plan is not None and ln.buy_plan.submitted_by_id == user.id)
+            ]
+        rows = [_po_line_row(ln, ln.buy_plan, needs=False, closed=True) for ln in closed_lines]
+        return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
+
+    # Pending approval — reuse the PO queue read model (oldest first by construction).
+    view = build_po_queue_view(db, user, scope=scope)
+    for pending in view.pending:
+        rows.append(_po_line_row(pending.line, pending.plan, needs=can_verify_po_line(user, pending.line)))
+
+    # The viewer's own confirm-PO work + the open re-sourcing pool + flagged issues.
+    other_statuses = (
+        BuyPlanLineStatus.AWAITING_PO.value,
+        BuyPlanLineStatus.RESOURCING.value,
+        BuyPlanLineStatus.ISSUE.value,
+    )
+    others = (
+        db.execute(
+            select(BuyPlanLine)
+            .options(
+                joinedload(BuyPlanLine.offer),
+                joinedload(BuyPlanLine.requirement),
+                joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.requisition),
+            )
+            .join(BuyPlan, BuyPlan.id == BuyPlanLine.buy_plan_id)
+            .where(
+                BuyPlanLine.status.in_(other_statuses),
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
+            )
+            .order_by(BuyPlanLine.id.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    if scope == "mine":
+        others = [
+            ln
+            for ln in others
+            if ln.buyer_id == user.id or (ln.buy_plan is not None and ln.buy_plan.submitted_by_id == user.id)
+        ]
+    for line in others:
+        needs = line.status == BuyPlanLineStatus.AWAITING_PO.value and line.buyer_id == user.id
+        rows.append(_po_line_row(line, line.buy_plan, needs=needs))
+
+    return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
+
+
+def _prepayment_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) -> list[WorkspaceRow]:
+    """Prepayments list rows — pending requests (decidable first) or, behind the
+    Closed filter, the recently-resolved audit feed."""
+    rows: list[WorkspaceRow] = []
+    if show_closed:
+        source = resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user)
+    else:
+        source = pending_rows_for_gate(db, user, ApprovalGateType.PREPAYMENT, scope=scope)
+
+    for vm in source:
+        if vm.subject_id is None:
+            continue
+        title = vm.beneficiary or vm.subject_label
+        amount = float(vm.amount) if vm.amount is not None else None
+        subtitle_bits = [
+            (vm.payment_method or "").upper() or None,
+            f"SO {vm.so_number}" if vm.so_number else None,
+            f"req. {vm.requester_name}" if vm.requester_name and vm.requester_name != "—" else None,
+        ]
+        status = vm.prepay_status or vm.status
+        rows.append(
+            WorkspaceRow(
+                key=f"prepay-{vm.subject_id}",
+                pane_url=f"/v2/partials/approvals/prepayments/{vm.subject_id}/pane",
+                title=title,
+                subtitle=" · ".join(b for b in subtitle_bits if b),
+                status=status,
+                status_label=(status or "").replace("_", " ").capitalize(),
+                needs_approval=vm.can_act,
+                amount=amount,
+                age_at=vm.created_at,
+                copy_number=vm.po_number,
+                closed=show_closed,
+            )
+        )
+    return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
+
+
+# ── CSV export (kept from the 3-tab console; legacy tab keys alias) ─────
 
 
 def _fmt_dt(dt: datetime | None) -> str:
@@ -113,30 +527,29 @@ async def approvals_hub_export(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Stream one Approvals hub list as a CSV download (attachment).
+    """Stream one workspace list as a CSV download (attachment).
 
-    Same auth (require_user) and SEE-ALL / SEE-MINE scope as the console tab body, reusing
-    each tab's exact read model so the download can never drift from what the console shows:
-      - ``buy-plan``    → the Buy Plans / Sales Orders tracking list (buy_plan_tracking_rows);
-      - ``prepayment``  → the Prepayment "Recently resolved" audit feed (resolved_rows_for_gate);
-      - ``po-approval`` → the PO Approval "Recently resolved" audit feed (build_po_queue_view
-        .history — org-wide by construction, so ``scope`` is threaded but does not narrow it,
-        matching the console's own PO history section).
-    Any ``tab`` outside the three surviving gate tabs 404s.
+    Same auth (require_user) and Mine/All scope as the tab list, reusing each tab's
+    exact read model so the download can never drift from what the console shows:
+      - sales-orders / buy-plans → the plan tracking list (buy_plan_tracking_rows);
+      - prepayments → the resolved audit feed (resolved_rows_for_gate);
+      - purchase-orders → the resolved PO decision feed (build_po_queue_view.history).
+    Legacy 3-tab keys alias; anything else 404s.
     """
-    if tab not in _TABS:
+    resolved = _resolve_tab(tab)
+    if resolved is None:
         raise HTTPException(404, "Unknown approvals tab")
     scope = "mine" if scope == "mine" else "all"
 
-    if tab == "buy-plan":
-        header = ["Plan ID", "Customer", "Sales Order", "Status", "Value"]
+    if resolved in ("sales-orders", "buy-plans"):
+        header = ["Plan ID", "Customer", "Sales Order", "Order Type", "Status", "Value"]
         rows = (
-            [r.plan_id, r.customer_name, r.so_number, r.status, r.amount]
+            [r.plan_id, r.customer_name, r.so_number, r.order_type, r.status, r.amount]
             for r in buy_plan_tracking_rows(db, user, scope=scope)
         )
-        return stream_csv(f"approvals_buy_plans_{scope}.csv", header, rows)
+        return stream_csv(f"approvals_sales_orders_{scope}.csv", header, rows)
 
-    if tab == "prepayment":
+    if resolved == "prepayments":
         header = [
             "Prepayment ID",
             "Beneficiary",
@@ -172,57 +585,10 @@ async def approvals_hub_export(
         )
         return stream_csv(f"approvals_prepayments_resolved_{scope}.csv", header, rows)
 
-    # po-approval — the org-wide Recently-resolved PO decision feed.
+    # purchase-orders — the org-wide recently-resolved PO decision feed.
     header = ["Plan ID", "Outcome", "Description", "Actor", "Note", "Resolved Date"]
     rows = (
         [h.plan_id, h.kind, h.label, h.actor_name, h.note, _fmt_dt(h.when)]
         for h in build_po_queue_view(db, user, scope=scope).history
     )
     return stream_csv("approvals_po_resolved.csv", header, rows)
-
-
-def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
-    """Build + render one Approvals hub tab body (shared by the tab GET + the decide
-    handlers' origin=approvals_hub re-render branches).
-
-    ``scope`` (``all`` | ``mine``) is threaded to every tab's read model AND into the tab's
-    scope toggle + decide-form hidden field so a decision re-renders the SAME scope.
-    """
-    scope = "mine" if scope == "mine" else "all"
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx["scope"] = scope
-
-    if tab == "buy-plan":
-        ctx["rows"] = buy_plan_tracking_rows(db, user, scope=scope)
-        return template_response("htmx/partials/approvals/_tab_buy_plan.html", ctx)
-
-    if tab == "prepayment":
-        from ...dependencies import is_manager_or_admin
-
-        ctx.update(
-            {
-                "pending_rows": pending_rows_for_gate(db, user, ApprovalGateType.PREPAYMENT, scope=scope),
-                "resolved_rows": resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user),
-                "user": user,
-                # Gate the payment-closure affordances: the "Undo paid" correction is
-                # manager/admin only; "Mark paid" is also offered to the requester (owner).
-                "is_manager_admin": is_manager_or_admin(user),
-            }
-        )
-        return template_response("htmx/partials/approvals/_tab_prepayment.html", ctx)
-
-    # po-approval — the per-line PENDING_VERIFY trio (not engine-backed).
-    from ...services.prepayment_service import prepayment_state_for_lines
-    from .buy_plans import _can_resource
-
-    view = build_po_queue_view(db, user, scope=scope)
-    ctx.update(
-        {
-            "view": view,
-            "user": user,
-            "can_resource": _can_resource(user),
-            # Live prepayment state per line (badge #11 + button→pill #10), one batch query.
-            "prepay_state": prepayment_state_for_lines(db, [row.line.id for row in view.pending]),
-        }
-    )
-    return template_response("htmx/partials/approvals/_tab_po_approval.html", ctx)
