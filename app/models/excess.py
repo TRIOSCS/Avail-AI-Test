@@ -344,10 +344,14 @@ class ExcessOutreach(Base):
     target_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
     submitted_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     channel = Column(String(20), default="email")  # email, phone, teams, marketplace, other
-    status = Column(String(20), default="sent")  # sent, opened, responded, bid, declined, no_response
+    # sending, sent, opened, responded, bid, declined, no_response, failed, interrupted
+    status = Column(String(20), default="sent")
     graph_message_id = Column(String(255), nullable=True)
     graph_conversation_id = Column(String(255), nullable=True)
     parts_included = Column(JSON, nullable=True)
+    # Persisted send-failure reason (populated on FAILED/INTERRUPTED rows so the tracker
+    # can show WHY a send failed and the retry path has context); NULL on a clean send.
+    send_error = Column(Text, nullable=True)
     sent_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())

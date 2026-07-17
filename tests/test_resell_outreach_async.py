@@ -120,6 +120,44 @@ def _sent_result(email: str):
     return _fake_send
 
 
+# ── Task 1: FAILED / INTERRUPTED statuses + persisted send_error column ────
+
+
+class TestOutreachFailedStates:
+    def test_failed_and_interrupted_enum_members_exist(self):
+        assert ExcessOutreachStatus.FAILED == "failed"
+        assert ExcessOutreachStatus.INTERRUPTED == "interrupted"
+
+    def test_model_validates_interrupted_status(self):
+        # The status validator auto-accepts the new members (no per-member edit).
+        row = ExcessOutreach(excess_list_id=1, submitted_by=1, status="interrupted")
+        assert row.status == "interrupted"
+        row2 = ExcessOutreach(excess_list_id=1, submitted_by=1, status="failed")
+        assert row2.status == "failed"
+
+    def test_send_error_round_trips(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        row = ExcessOutreach(
+            excess_list_id=posted_list.id,
+            submitted_by=trader.id,
+            target_vendor_card_id=buyer_card.id,
+            status=ExcessOutreachStatus.FAILED,
+            send_error="graph send outage: 503",
+        )
+        db_session.add(row)
+        db_session.commit()
+        row_id = row.id
+        db_session.expire_all()
+        reloaded = db_session.get(ExcessOutreach, row_id)
+        assert reloaded.status == ExcessOutreachStatus.FAILED
+        assert reloaded.send_error == "graph send outage: 503"
+
+
 # ── Phase 1: enqueue returns fast, no Graph touched ──────────────────
 
 
