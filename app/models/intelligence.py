@@ -474,6 +474,11 @@ class ActivityLog(Base):
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="SET NULL"), nullable=True)
+    # Approvals Workspace (migration 192): per-line / per-prepayment notes threads and
+    # field-diff audit rows key on these. Nullable + SET NULL like the other
+    # polymorphic-scope FKs — the timeline row outlives its subject.
+    buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="SET NULL"), nullable=True)
+    prepayment_id = Column(Integer, ForeignKey("prepayments.id", ondelete="SET NULL"), nullable=True)
     # Resell-outreach scope: outreach/touch events on an excess list write to the same
     # immutable timeline + cadence clocks (resell-outreach Chunk A; CRM Phase 3 generalizes
     # the activity layer). Nullable + SET NULL like the other polymorphic-scope FKs.
@@ -582,6 +587,19 @@ class ActivityLog(Base):
             "excess_list_id",
             "created_at",
             postgresql_where=Column("excess_list_id").isnot(None),
+        ),
+        # Approvals Workspace (migration 192): per-line / per-prepayment thread reads.
+        Index(
+            "ix_activity_buy_plan_line",
+            "buy_plan_line_id",
+            "created_at",
+            postgresql_where=Column("buy_plan_line_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_prepayment",
+            "prepayment_id",
+            "created_at",
+            postgresql_where=Column("prepayment_id").isnot(None),
         ),
         # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
         # a composite user/channel index + a partial index over un-scored activity rows.

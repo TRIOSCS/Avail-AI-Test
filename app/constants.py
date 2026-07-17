@@ -440,6 +440,45 @@ class TicketType(StrEnum):
     FEATURE = "feature"
 
 
+class SalesOrderType(StrEnum):
+    """Order type of a sales order (quote-less BuyPlan) — buy_plans_v3.order_type.
+
+    Single source of truth for the Approvals Workspace order-type badge and the
+    create-SO picker. All values <= 20 chars (column width String(20)). Distinct from
+    QPOrderType (QualityPlan's own new/revision vocabulary) — do not conflate.
+    Sourcing types (NEW / REVISION) go through the offer-picker flow; the other types
+    take the lite path (no lines, no buyer tasks).
+    """
+
+    NEW = "new"
+    REVISION = "revision"
+    TESTING_SERVICE = "testing_service"  # 15 chars — fits String(20)
+    COMPS = "comps"
+    STOCK_SALE = "stock_sale"
+
+
+# Order types that source parts through offers (picker requires offers; the rest take
+# the lite no-lines path). Read by buyplan_builder and the SO picker router.
+SOURCING_ORDER_TYPES: frozenset[SalesOrderType] = frozenset({SalesOrderType.NEW, SalesOrderType.REVISION})
+
+
+class KanbanLane(StrEnum):
+    """PO-tab kanban lanes for buy-plan lines (Approvals Workspace Phase 3).
+
+    Display-only vocabulary — never persisted; computed per-line by
+    app/services/kanban_lanes.py from (line status, prepayment status, payment
+    method, received). Order here is NOT the board order (the lane service owns
+    precedence and column layout).
+    """
+
+    AWAITING_PO = "awaiting_po"
+    PENDING_APPROVAL = "pending_approval"
+    PAID_AWAITING_DELIVERY = "paid_awaiting_delivery"
+    APPROVED = "approved"
+    RECEIVED = "received"
+    RESOURCING = "resourcing"
+
+
 class BuyPlanStatus(StrEnum):
     """Buy plan header statuses."""
 
@@ -766,6 +805,12 @@ class ActivityType(StrEnum):
     APPROVAL_REJECTED = "aprvl_rejected"  # 14 chars
     APPROVAL_DELEGATED = "aprvl_delegated"  # 15 chars
     APPROVAL_CANCELLED = "aprvl_cancelled"  # 15 chars
+    # Approvals Workspace (Phase 0): field-diff audit rows (details={"edits": [...]}),
+    # mark-received stamps, and attachment add/remove events.
+    FIELD_EDIT = "field_edit"
+    LINE_RECEIVED = "line_received"
+    ATTACH_ADDED = "attach_added"
+    ATTACH_REMOVED = "attach_removed"
 
 
 class CallOutcome(StrEnum):
@@ -1195,6 +1240,27 @@ class PaymentMethod(StrEnum):
     CC = "cc"
     PAYPAL = "paypal"
     WIRE = "wire"
+    ACH = "ach"
+    COD = "cod"
+
+
+# The two frozen payment-method lists (Approvals Workspace D7). Tuples, not sets —
+# order drives the dropdowns. PO lines accept every method (incl. COD); prepayments
+# NEVER accept COD (paying on delivery is definitionally not a prepayment) — the
+# prepayment router guards on PREPAYMENT_METHODS before create_prepayment.
+PO_LINE_PAYMENT_METHODS: tuple[PaymentMethod, ...] = (
+    PaymentMethod.CC,
+    PaymentMethod.PAYPAL,
+    PaymentMethod.WIRE,
+    PaymentMethod.ACH,
+    PaymentMethod.COD,
+)
+PREPAYMENT_METHODS: tuple[PaymentMethod, ...] = (
+    PaymentMethod.CC,
+    PaymentMethod.PAYPAL,
+    PaymentMethod.WIRE,
+    PaymentMethod.ACH,
+)
 
 
 class PrepaymentStatus(StrEnum):
