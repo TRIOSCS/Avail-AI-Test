@@ -212,6 +212,114 @@ class TestEnqueueOutreachEmail:
         assert group["parts"] == ["LM358N"]
 
 
+# ── Task 6: campaign idempotency (a double-submit makes no duplicate) ─
+
+
+class TestCampaignIdempotency:
+    def test_second_identical_submit_creates_no_duplicate_row(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A second identical submit (double-click / retried request) must not create a
+        second live row nor a second send-plan entry — the buyer already has a live
+        SENDING/SENT row for the same (list, line)."""
+        first_rows, first_plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        assert len(first_rows) == 1
+        assert len(first_plan) == 1
+
+        second_rows, second_plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        # Deduped: no new row, no new send.
+        assert second_rows == []
+        assert second_plan == []
+        total = db_session.query(ExcessOutreach).filter_by(excess_list_id=posted_list.id).count()
+        assert total == 1
+
+    def test_reoffer_outside_window_is_allowed(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A prior offer OLDER than the dedup window is a legitimate re-offer, not a
+        duplicate — a new row is created."""
+        from datetime import UTC, datetime, timedelta
+
+        old = ExcessOutreach(
+            excess_list_id=posted_list.id,
+            target_vendor_card_id=buyer_card.id,
+            submitted_by=trader.id,
+            channel="email",
+            status=ExcessOutreachStatus.SENT,
+            sent_at=datetime.now(UTC) - timedelta(days=3),
+            created_at=datetime.now(UTC) - timedelta(days=3),
+        )
+        db_session.add(old)
+        db_session.commit()
+
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        assert len(rows) == 1  # re-offer allowed
+        assert len(plan) == 1
+
+    def test_distinct_buyer_not_deduped(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+        buyer_card_two: VendorCard,
+    ):
+        """A live row for buyer A must not suppress a first offer to buyer B."""
+        svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        rows, plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card_two.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        assert len(rows) == 1
+        assert plan[0]["card_id"] == buyer_card_two.id
+
+
 # ── Phase 2: the background job finalizes the rows ───────────────────
 
 
