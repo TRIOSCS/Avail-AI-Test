@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -297,17 +298,23 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
 def publish_list(db: Session, list_id: int, user) -> ExcessList:
     """Publish an excess list: flip to ``open`` then live-mirror every active line.
 
-    The testable entry point for posting. Sets ``status=open``, stamps both ``open_at``
-    (the posting-window start, Chunk E) and ``updated_at``, then runs
-    ``sync_list_mirror`` so the posted lines surface to the matcher. Commits. Returns the
-    refreshed list.
+    The testable entry point for posting. Guards that the list is a ``draft`` (409
+    otherwise — mirrors ``excess_service.close_list``: re-publishing an already-posted or
+    resolved list would reopen a decided posting and re-mirror sold-through supply). Sets
+    ``status=open``, stamps both ``open_at`` (the posting-window start, Chunk E) and
+    ``updated_at``, clears any stale ``close_at`` (an open posting must not advertise a
+    leftover close time), then runs ``sync_list_mirror`` so the posted lines surface to the
+    matcher. Commits. Returns the refreshed list.
     """
     from .excess_service import get_excess_list
 
     excess_list = get_excess_list(db, list_id)
+    if excess_list.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Only a draft list can be published")
     now = datetime.now(UTC)
     excess_list.status = ExcessListStatus.OPEN
     excess_list.open_at = now
+    excess_list.close_at = None
     excess_list.updated_at = now
     db.flush()
 

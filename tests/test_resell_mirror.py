@@ -26,6 +26,10 @@ Depends on: app.services.excess_mirror, app.services.excess_service, app.models,
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import pytest
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.constants import ExcessLineItemStatus, ExcessListStatus
@@ -327,16 +331,73 @@ def test_publish_list_opens_and_mirrors(db_session: Session):
     assert len(rows) == 2  # one per line
 
 
-def test_publish_twice_no_second_virtual_req(db_session: Session):
+def test_resync_no_second_virtual_req(db_session: Session):
+    """Re-syncing an already-published list's mirror is idempotent — one virtual req,
+    one Sighting (``ensure_virtual_requirement`` get-or-creates).
+
+    Split out of the old publish-twice test now that a second publish is a 409 (see the
+    publish-guard pack).
+    """
     company = _make_company(db_session)
     owner = _make_user(db_session)
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
 
     publish_list(db_session, el.id, owner)
-    publish_list(db_session, el.id, owner)
+    sync_list_mirror(db_session, el)
+    db_session.commit()
 
     assert db_session.query(Requisition).filter(Requisition.is_scratch.is_(True)).count() == 1
     assert len(_customer_excess_sightings(db_session, company.id)) == 1
+
+
+# ---------------------------------------------------------------------------
+# publish_list guard — 409 unless DRAFT + clear stale close_at
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ExcessListStatus.OPEN,
+        ExcessListStatus.COLLECTING,
+        ExcessListStatus.BID_OUT,
+        ExcessListStatus.AWARDED,
+        ExcessListStatus.CLOSED,
+        ExcessListStatus.EXPIRED,
+    ],
+)
+def test_publish_rejects_non_draft(db_session: Session, status):
+    """Publishing anything but a DRAFT is a 409 (a re-publish would reopen a resolved
+    posting and re-mirror sold-through supply) — status is left untouched."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = status
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        publish_list(db_session, el.id, owner)
+
+    assert exc.value.status_code == 409
+    db_session.refresh(el)
+    assert el.status == status  # no mutation on the rejected publish
+
+
+def test_publish_clears_stale_close_at(db_session: Session):
+    """A draft that somehow carries a leftover ``close_at`` gets it cleared on publish —
+    an open posting must not advertise a stale close time."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.close_at = datetime.now(UTC)
+    db_session.commit()
+
+    publish_list(db_session, el.id, owner)
+
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.OPEN
+    assert el.close_at is None
+    assert el.open_at is not None
 
 
 def test_unresolvable_part_skips_mirror(db_session: Session):
