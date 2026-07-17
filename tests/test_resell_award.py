@@ -389,25 +389,31 @@ class TestAwardOfferService:
     def test_award_conflict_409_line_already_awarded(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
-        """Two competing offers on the same line: awarding the second must 409 (the line
-        is already sold) — never silently steal it."""
+        """A still-open offer landing on an already-sold line must 409 (never silently
+        steal it) — this is the line-level ``already awarded`` guard, distinct from the
+        offer-status guard that rejects a lost/withdrawn offer.
+
+        ``second`` is created AFTER
+        the award so it is genuinely open (not closed as a pre-existing competitor — that
+        M1 path is covered in TestAwardClosesCompetingOffers).
+        """
         first = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
+        db_session.commit()
+        excess_service.award_offer(db_session, first.id, owner)  # cap_line -> awarded
+
         second = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.70")
         )
         db_session.commit()
-        excess_service.award_offer(db_session, first.id, owner)
 
         with pytest.raises(HTTPException) as exc:
             excess_service.award_offer(db_session, second.id, owner)
         assert exc.value.status_code == 409
         assert "already awarded" in exc.value.detail
         db_session.refresh(second)
-        # Awarding ``first`` closed the competing ``second`` as ``lost`` (M1); the
-        # re-award attempt still 409s on the already-sold line and never re-opens it.
-        assert second.status == ExcessOfferStatus.LOST
+        assert second.status == ExcessOfferStatus.OPEN  # the failed award left it untouched
 
     def test_award_retires_sighting_mirror(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
@@ -627,11 +633,14 @@ class TestAwardRoute:
         first = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
+        db_session.commit()
+        excess_service.award_offer(db_session, first.id, owner)  # cap_line -> awarded
+        # A new open offer on the now-sold line (created after the award) hits the
+        # line-level ``already awarded`` guard.
         second = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.70")
         )
         db_session.commit()
-        excess_service.award_offer(db_session, first.id, owner)
 
         app.dependency_overrides[require_user] = lambda: owner
         try:
@@ -965,3 +974,131 @@ class TestWithdrawRoute:
         assert resp.status_code == 200
         assert f"/offers/{offer.id}/award" not in resp.text
         assert f"/offers/{offer.id}/withdraw" not in resp.text
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  award_offer / withdraw_offer — service-level status guards (Phase 1)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestAwardOfferStatusGuard:
+    """award_offer only acts on an in-play offer (open/late).
+
+    A withdrawn or lost offer is already closed — awarding it would resurrect a dead
+    bid. A WON offer returns early via the idempotency guard, so it never reaches this
+    precondition.
+    """
+
+    @pytest.mark.parametrize("dead_status", [ExcessOfferStatus.WITHDRAWN, ExcessOfferStatus.LOST])
+    def test_award_dead_offer_409(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        dead_status,
+    ):
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        offer.status = dead_status
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.award_offer(db_session, offer.id, owner)
+
+        assert exc.value.status_code == 409
+        db_session.refresh(offer)
+        assert offer.status == dead_status  # unchanged
+        db_session.refresh(cap_line)
+        assert cap_line.status != ExcessLineItemStatus.AWARDED
+
+    def test_award_late_offer_wins(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A LATE offer (landed after the window closed) is still awardable."""
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        offer.status = ExcessOfferStatus.LATE
+        db_session.commit()
+
+        result = excess_service.award_offer(db_session, offer.id, owner)
+
+        assert result.status == ExcessOfferStatus.WON
+        db_session.refresh(cap_line)
+        assert cap_line.status == ExcessLineItemStatus.AWARDED
+
+
+class TestWithdrawOfferServiceGuard:
+    """withdraw_offer must enforce the same (open/late) precondition the router does — a
+    direct service call on a won offer is a 409 (unaward it first), not a silent flip
+    that would strand its awarded lines."""
+
+    def test_withdraw_won_offer_service_409(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)  # -> won
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WON
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.withdraw_offer(db_session, offer.id)
+
+        assert exc.value.status_code == 409
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WON  # not withdrawn
+
+    def test_withdraw_open_offer_service_ok(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """The happy path still works — an open offer withdraws cleanly to withdrawn."""
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        result = excess_service.withdraw_offer(db_session, offer.id)
+
+        assert result.status == ExcessOfferStatus.WITHDRAWN
+
+    def test_withdraw_offer_locks_list_for_serialization(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        monkeypatch,
+    ):
+        """withdraw_offer must take the same list/line lock award/unaward use (M9)
+        BEFORE its status guard, so a concurrent award can't commit (offer->won,
+        line->awarded) between an unlocked read and the withdraw's UPDATE and strand an
+        awarded line on a withdrawn offer.
+
+        Spy the lock hook to prove it's wired (with_for_update itself is a no-op on the
+        SQLite test engine, so the race is unobservable here — this guards the hook
+        against regression).
+        """
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        calls: list[tuple[int, int]] = []
+        real_lock = excess_service._lock_list_for_award
+
+        def _spy(db, off, list_id):
+            calls.append((off.id, list_id))
+            return real_lock(db, off, list_id)
+
+        monkeypatch.setattr(excess_service, "_lock_list_for_award", _spy)
+
+        excess_service.withdraw_offer(db_session, offer.id)
+
+        assert calls == [(offer.id, excess_list.id)]

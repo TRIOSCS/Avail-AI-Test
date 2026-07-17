@@ -40,6 +40,10 @@ def upgrade() -> None:
         sa.Column("excess_list_id", sa.Integer(), nullable=False),
         sa.Column("owner_id", sa.Integer(), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=True),
+        # ``revision`` counts assembly passes. Under D3 (2026-07) a re-assemble off a
+        # TERMINAL (accepted/rejected) prior bid INSERTs a NEW customer_bids row
+        # (revision + 1) so the answered revision is frozen history; a non-terminal
+        # (draft/sent) prior still bumps in place on the same row.
         sa.Column("revision", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),

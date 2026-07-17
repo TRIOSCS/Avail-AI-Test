@@ -631,16 +631,33 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
     )
 
 
+# Offer statuses an award / withdraw may act on: an inbound bid still in play. A won offer
+# must be UNAWARDED first (withdrawing it would strand its awarded lines); a lost/withdrawn
+# offer is already closed. Mirrors ``routers.resell._WITHDRAWABLE_OFFER_STATUSES`` so a
+# direct service call is guarded even when the (defence-in-depth) router guard is bypassed.
+_ACTIONABLE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
+
+
 def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     """Withdraw an inbound offer and recompute the rollup of every line it touched.
 
     Marks the offer ``withdrawn`` so its lines drop out of the active-state rollup, then
     recomputes ``best_offer_unit_price`` / ``best_offer_id`` / ``offer_count`` for each
-    line item the offer referenced. Raises 404 if the offer does not exist.
+    line item the offer referenced. Raises 404 if the offer does not exist, 409 unless the
+    offer is still in play (``open``/``late``) — a won offer must be unawarded first, a
+    lost/withdrawn one is already closed.
     """
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
         raise HTTPException(404, f"ExcessOffer {offer_id} not found")
+    # Serialize vs a concurrent award/unaward of this offer's list (M9): lock the list +
+    # its lines and refresh THIS offer so the status guard below reads freshly-committed
+    # state. Without the lock a concurrent award can commit (offer->won, line->awarded)
+    # between our unlocked read and our unconditional UPDATE, overwriting won->withdrawn
+    # and leaving an awarded line pointing at a withdrawn offer.
+    _lock_list_for_award(db, offer, offer.excess_list_id)
+    if offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
+        raise HTTPException(409, "Only an open or late offer can be withdrawn — unaward a won offer first")
 
     affected = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
     offer.status = ExcessOfferStatus.WITHDRAWN
@@ -780,7 +797,8 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     Owner-only (the list owner is the only one who may pick a winner): raises 404 if the
     offer does not exist, 403 if *owner* does not own the offer's list. Idempotent — an
-    already-won offer is returned unchanged. Otherwise: guards that none of the awarded
+    already-won offer is returned unchanged; a lost/withdrawn offer is 409 (only an
+    ``open``/``late`` offer is awardable). Otherwise: guards that none of the awarded
     lines are already sold to a different offer (409, ``unaward first``), flips the offer
     to ``won`` and its lines to ``awarded``, recomputes each touched line's best-price
     rollup, recomputes the winning buyer's ``BuyerScore`` (``recompute_buyer_score_on_win``),
@@ -800,6 +818,11 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     if offer.status == ExcessOfferStatus.WON:
         return offer  # idempotent — a double-award is a no-op, not a second flip
+
+    if offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
+        # A lost/withdrawn offer is already closed — awarding it would resurrect a dead
+        # bid (a won offer already returned above via the idempotency guard).
+        raise HTTPException(409, "Only an open or late offer can be awarded")
 
     affected = _award_scope_items(db, offer, excess_list)
     if not affected:

@@ -254,8 +254,10 @@ class CustomerBid(Base):
     revision = Column(Integer, nullable=False, default=1, server_default="1")
     # Lifecycle stamps (M4): sent_at when the clean PDF is emailed to the seller;
     # responded_at / responded_by_id record WHO (the trader) logged the seller's
-    # accept/reject and WHEN. Re-assembling a non-terminal bid bumps ``revision`` and
-    # clears these (a new revision is a fresh draft — the superseded stamps are dropped).
+    # accept/reject and WHEN. Re-assembling a NON-terminal bid bumps ``revision`` and
+    # clears these in place (a new revision is a fresh draft — the superseded stamps drop);
+    # re-assembling off a TERMINAL (accepted/rejected) bid instead INSERTs a new revision
+    # row and leaves this frozen row — stamps included — untouched (D3).
     sent_at = Column(UTCDateTime, nullable=True)
     responded_at = Column(UTCDateTime, nullable=True)
     responded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

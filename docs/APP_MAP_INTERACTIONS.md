@@ -2087,13 +2087,15 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
     |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
     |     confirm re-renders the whole detail like add-line — RS-5)
-    +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
+    +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror;
+    |     GUARDED to draft [409 otherwise — no re-open of a resolved posting] + clears stale close_at)
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
-    |     awards its matched lines; 409 if a line is already awarded to another offer;
-    |     idempotent for an already-won offer; recomputes rollups + buyer-score win-hook;
+    |     awards its matched lines; idempotent for an already-won offer; 409 unless the offer
+    |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
+    |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
     |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
     |     list→awarded status once every line is decided. RESPONSE is an OOB compose
     |     (_award_response.html): PRIMARY = Offers tab (hx-target #tab-offers-<id>), OOB =
@@ -2110,8 +2112,11 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
     |     carries the resolved seller contact so Send shows/gates on the recipient email)
     +-- POST /api/resell/{id}/bid                        (owner-only; bid_back_service.build_bid_back:
-    |     assemble / RE-ASSEMBLE — bumps CustomerBid.revision on the SAME row [audit chain, no
-    |     orphan draft] + replaces its lines + resets to a fresh draft; re-renders the tab — M4)
+    |     assemble / RE-ASSEMBLE — a NON-terminal latest bid [draft/sent] bumps CustomerBid.revision
+    |     on the SAME row [audit chain, no orphan draft] + replaces its lines + resets to a fresh
+    |     draft; a TERMINAL latest [accepted/rejected] is frozen history so a re-assemble INSERTs a
+    |     NEW customer_bids row [revision+1, draft] and leaves the answered row untouched — D3;
+    |     re-renders the tab — M4)
     +-- GET  /api/resell/{id}/bid/{bid_id}/pdf           (owner-only clean bid PDF, whitelist only)
     +-- POST /api/resell/{id}/bid/{bid_id}/send          (owner-only; bid_back_service.send_bid_back:
     |     resolve_seller_contact → email the clean PDF via send_batch_rfq [no requisition,
@@ -2146,9 +2151,14 @@ opens the reply viewer, which reuses the `VendorResponse` rows the poll already 
 new reply-content table) and offers a manual "Convert to offer" — offer auto-detection from
 the AI parse is a deliberately deferred Phase-2 decision.
 
-**Bid-back lifecycle (M4).** The `CustomerBid` runs `draft → sent → accepted/rejected`
-on ONE row per list. `build_bid_back` re-assemble BUMPS `revision` on that row (audit chain
-preserved) and resets it to a fresh draft instead of orphaning a new draft each time.
+**Bid-back lifecycle (M4 + D3).** The `CustomerBid` runs `draft → sent → accepted/rejected`.
+`build_bid_back` re-assemble BUMPS `revision` in place on the SAME row while the latest bid
+is non-terminal (`draft`/`sent`) — audit chain preserved, resetting a sent bid to a fresh
+draft instead of orphaning a new one. Once the latest bid is TERMINAL (`accepted`/`rejected`)
+it is frozen history: a re-assemble INSERTs a NEW `CustomerBid` row (`revision`+1, `draft`)
+and leaves the answered row — status, `sent_at`/`responded_at`/`responded_by_id` and its
+lines — untouched (D3), so a list can hold multiple immutable answered revisions plus the
+working draft (the id-desc select surfaces the newest).
 `send_bid_back` resolves the seller's send contact (`resolve_seller_contact`: the list's
 `customer_site` → an active company site → a primary `SiteContact`), renders the clean
 whitelisted PDF, and emails it via `email_service.send_batch_rfq` in no-requisition mode
