@@ -704,3 +704,85 @@ Usage:
       title="{{ _title }}">{{ (_name[:1]|upper) if _name else '?' }}</span>
 {%- endif -%}
 {%- endmacro %}
+
+
+{# ── Copy Chip ────────────────────────────────────────────────────── #}
+{#
+  Click-to-copy chip for reference numbers (SO#, PO#, wire reference). Copies
+  `value` to the clipboard behind a secure-context guard (falls back to
+  window.prompt on HTTP / old browsers — same pattern as htmx_app.js copyLink()
+  and outreach_btn(copy=True)), flashes "Copied" for 1.5s, and sets the global
+  $store.toast fields directly (`show` is a boolean field, not a method).
+
+  Alpine-safety: the @click handler lives in a DOUBLE-quoted attribute, so it
+  uses ONLY single-quoted JS strings, and `value` reaches JS via the
+  data-copy-value attribute (Jinja-escaped) — never interpolated into the JS
+  string, so a value containing quotes can't break the attribute.
+
+  Args:
+    value: The text to copy (required).
+    label: Visible chip text; defaults to `value`.
+
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import copy_chip %}
+    {{ copy_chip(plan.sales_order_number) }}
+    {{ copy_chip(line.po_number, label='PO ' ~ line.po_number) }}
+#}
+{% macro copy_chip(value, label=None) -%}
+{%- if value -%}
+<button type="button"
+        x-data="{ copied: false }"
+        data-copy-value="{{ value }}"
+        class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium font-mono rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
+        title="Copy {{ value }}"
+        @click="const v = $el.dataset.copyValue;
+                const flash = () => { copied = true; setTimeout(() => { copied = false; }, 1500);
+                                      $store.toast.message = 'Copied ' + v; $store.toast.type = 'success'; $store.toast.show = true; };
+                if (navigator.clipboard && window.isSecureContext) {
+                  navigator.clipboard.writeText(v).then(flash).catch(() => window.prompt('Copy:', v));
+                } else {
+                  window.prompt('Copy:', v);
+                }">
+  <svg class="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+  </svg>
+  <span x-show="!copied">{{ label if label is not none else value }}</span>
+  <span x-show="copied" x-cloak class="text-emerald-600">Copied</span>
+</button>
+{%- endif -%}
+{%- endmacro %}
+
+
+{# ── Age Chip ─────────────────────────────────────────────────────── #}
+{#
+  Relative-age pill using the |timeago filter, colored by staleness thresholds:
+  emerald (fresh) → amber at `amber_days` → rose at `red_days`. Server-rendered
+  (no Alpine); naive datetimes are assumed UTC (matches |timeago's own
+  _elapsed_seconds handling). Renders nothing when dt is falsy.
+
+  Args:
+    dt:         datetime (aware or naive-UTC).
+    amber_days: Age in days at which the chip turns amber (default 3).
+    red_days:   Age in days at which the chip turns rose (default 7).
+
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import age_chip %}
+    {{ age_chip(plan.submitted_at) }}
+    {{ age_chip(prepayment.paid_at, amber_days=3, red_days=7) }}
+#}
+{% macro age_chip(dt, amber_days=3, red_days=7) -%}
+{%- if dt -%}
+{%- set _now = now() -%}
+{%- set _dt_aware = dt if dt.tzinfo else dt.replace(tzinfo=_now.tzinfo) -%}
+{%- set _age_days = (_now - _dt_aware).days -%}
+{%- if _age_days >= red_days -%}
+{%- set _tone = 'bg-rose-50 text-rose-600 border-rose-200' -%}
+{%- elif _age_days >= amber_days -%}
+{%- set _tone = 'bg-amber-50 text-amber-600 border-amber-200' -%}
+{%- else -%}
+{%- set _tone = 'bg-emerald-50 text-emerald-600 border-emerald-200' -%}
+{%- endif -%}
+<span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded border {{ _tone }}"
+      title="{{ dt|fmtdate }}">{{ dt|timeago }}</span>
+{%- endif -%}
+{%- endmacro %}
