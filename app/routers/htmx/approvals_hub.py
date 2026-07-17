@@ -477,6 +477,147 @@ async def approvals_po_sent_check(
     return HTMLResponse(html)
 
 
+# ── Prepayment detail pane ──────────────────────────────────────────────
+
+
+def render_prepayment_pane(request: Request, user: User, db: Session, prepayment_id: int) -> HTMLResponse:
+    """Build + render the prepayment detail pane (shared by the pane GET route, the
+    method-adjust POST, and the prepay-decide handler's origin=approvals_workspace
+    branch).
+
+    Amount + payee always visible; PO#/SO# as copy chips; the payment-method dropdown
+    renders on the approval card (adjustable by the approver before deciding — spec
+    §7's ONE pre-approval edit); the approve button reads "OK to pay — {method}"; a
+    paid prepayment shows its wire reference.
+    """
+    from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
+    from ...models.quality_plan import Prepayment
+    from ...services.approvals.queue import _beneficiary
+    from ...services.stale_guard import stale_token
+
+    pp = db.get(
+        Prepayment,
+        prepayment_id,
+        options=[
+            joinedload(Prepayment.vendor_card),
+            joinedload(Prepayment.buy_plan).joinedload(BuyPlan.requisition),
+            joinedload(Prepayment.buy_plan_line),
+            joinedload(Prepayment.created_by),
+        ],
+    )
+    if pp is None:
+        raise HTTPException(404, "Prepayment not found")
+
+    open_request = db.execute(
+        select(ApprovalRequest)
+        .where(
+            ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
+            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
+            ApprovalRequest.subject_id == pp.id,
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    can_decide = False
+    if open_request is not None:
+        can_decide = (
+            db.execute(
+                select(ApprovalStepRecipient.id)
+                .join(ApprovalStep, ApprovalStep.id == ApprovalStepRecipient.step_id)
+                .where(
+                    ApprovalStep.request_id == open_request.id,
+                    ApprovalStepRecipient.user_id == user.id,
+                    ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "pp": pp,
+            "plan": pp.buy_plan,
+            "line": pp.buy_plan_line,
+            "user": user,
+            "open_request": open_request,
+            "can_decide": can_decide,
+            "beneficiary": _beneficiary(pp),
+            "prepay_methods": [
+                (m.value, m.value.upper() if len(m.value) <= 3 else m.value.title()) for m in PREPAYMENT_METHODS
+            ],
+            "method_label": (pp.payment_method or "").upper() or "—",
+            "pp_stale_token": stale_token(pp),
+        }
+    )
+    return template_response("htmx/partials/approvals/_pane_prepayment.html", ctx)
+
+
+@router.get("/v2/partials/approvals/prepayments/{prepayment_id:int}/pane", response_class=HTMLResponse)
+async def approvals_prepayment_pane(
+    request: Request,
+    prepayment_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """The Prepayments right-hand detail pane for one prepayment."""
+    return render_prepayment_pane(request, user, db, prepayment_id)
+
+
+@router.post("/v2/partials/approvals/prepayments/{prepayment_id:int}/method", response_class=HTMLResponse)
+async def approvals_prepayment_method(
+    request: Request,
+    prepayment_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Adjust a REQUESTED prepayment's payment method on the approval card (spec §7's
+    ONE pre-approval prepayment edit).
+
+    Approver-only (User.can_approve_prepayments — the same flag the engine routes on),
+    REQUESTED-only (a decided/paid/void prepayment is immutable), stale-guarded
+    (ensure_not_stale on the prepayment's updated_at token), method ∈
+    PREPAYMENT_METHODS (COD can never appear — nothing to pay in advance), and the
+    change is field-audited (log_field_edits with prepayment_id). Re-renders the pane.
+    prepayment_service.py is untouched — this edit never crosses into the engine.
+    """
+    from ...constants import PREPAYMENT_METHODS, PrepaymentStatus
+    from ...models.quality_plan import Prepayment
+    from ...services.field_audit import diff_fields, log_field_edits
+    from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
+
+    if not getattr(user, "can_approve_prepayments", False):
+        raise HTTPException(403, "Prepayment approval right required to adjust the payment method.")
+
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(404, "Prepayment not found")
+    if pp.status != PrepaymentStatus.REQUESTED.value:
+        raise HTTPException(400, "Only a requested (undecided) prepayment's method can be adjusted.")
+
+    form = await request.form()
+    method = (form.get("payment_method") or "").strip().lower()
+    if method not in {m.value for m in PREPAYMENT_METHODS}:
+        raise HTTPException(400, "Invalid prepayment method.")
+
+    try:
+        ensure_not_stale(pp, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
+
+    edits = diff_fields(pp, {"payment_method": method})
+    if edits:
+        pp.payment_method = method
+        log_field_edits(db, user=user, buy_plan_id=pp.buy_plan_id, prepayment_id=pp.id, edits=edits)
+        db.commit()
+
+    resp = render_prepayment_pane(request, user, db, prepayment_id)
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
+
 # ── The left work list ──────────────────────────────────────────────────
 
 

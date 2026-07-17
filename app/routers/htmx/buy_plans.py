@@ -455,6 +455,14 @@ async def prepay_request_decide(
             db.commit()
             await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
 
+    if origin == "approvals_workspace" and ar.subject_id is not None:
+        # Workspace pane decide: re-render the prepayment's pane in place + repaint
+        # the left list (awListRefresh), mirroring the SO/PO pane branches.
+        from .approvals_hub import render_prepayment_pane
+
+        resp = render_prepayment_pane(request, user, db, int(ar.subject_id))
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
