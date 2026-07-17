@@ -1,6 +1,6 @@
 """Tests for M9 (LIKE escape) and M10 (enrichment error classification).
 
-M9: Verify that sightings and tags routers escape LIKE wildcards in user input.
+M9: Verify that the sightings router escapes LIKE wildcards in user input.
 M10: Verify that enrichment connector errors are classified by type.
 
 Called by: pytest
@@ -36,9 +36,9 @@ class TestLikeEscapeIntegration:
         """User-facing search inputs must have LIKE wildcards escaped."""
         assert escape_like(raw) == expected
 
-    @pytest.mark.parametrize("module_name", ["sightings", "tags"])
+    @pytest.mark.parametrize("module_name", ["sightings"])
     def test_router_imports_escape_like(self, module_name):
-        """sightings.py and tags.py must import escape_like."""
+        """sightings.py must import escape_like."""
         import importlib
 
         router_module = importlib.import_module(f"app.routers.{module_name}")

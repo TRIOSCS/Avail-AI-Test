@@ -5,7 +5,7 @@ Purpose:
   Sales and buyers paste free-form text from customers (RFQ) or vendors (offers).
   AI cleans and structures it into editable templates. User reviews, edits, and saves.
 
-Called by: routers/ai.py (parse-freeform-rfq, parse-freeform-offer)
+Called by: routers/htmx/requisitions.py, routers/htmx/offers/crud.py (freeform paste parsing)
 Depends on: utils/claude_client, utils/llm_router
 """
 

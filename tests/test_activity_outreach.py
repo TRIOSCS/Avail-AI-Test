@@ -13,11 +13,22 @@ from app.models.crm import Company, CustomerSite, SiteContact
 
 
 @pytest.fixture(autouse=True)
-def _clear_rate_limit():
-    """Reset the shared rate limiter's in-memory fallback between tests."""
+def _clear_rate_limit(monkeypatch):
+    """Reset the shared rate limiter's in-memory fallback between tests, and FREEZE the
+    fixed-window clock (``rate_limit._now``) for the duration of each test.
+
+    The outreach limiter is a fixed-window counter keyed by ``…:{window_index}`` where
+    the index derives from wall-clock time. Under xdist load a test's request loop could
+    straddle a window boundary — the counter reset mid-loop, the expected 429 came back
+    201, and the test flaked (only in the full sharded run, never in isolation). Pinning
+    ``_now`` to a constant keeps every request in one window, so the ratchet is
+    deterministic. ``_now`` exists precisely as this test seam.
+    """
+    from app import rate_limit
     from app.rate_limit import reset_rate_limit_state
 
     reset_rate_limit_state()
+    monkeypatch.setattr(rate_limit, "_now", lambda: 1_000_000.0)
     yield
     reset_rate_limit_state()
 

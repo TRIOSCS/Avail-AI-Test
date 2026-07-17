@@ -22,7 +22,6 @@ from app.models import (
     Quote,
     Requisition,
     SiteContact,
-    SyncLog,
     User,
     VendorContact,
     VendorResponse,
@@ -1161,42 +1160,6 @@ class TestEnrichment:
 
 
 # ── Sync logs ─────────────────────────────────────────────────────────
-
-
-class TestSyncLogs:
-    def test_sync_logs_non_admin(self, client, db_session, test_user):
-        """Non-admin user gets 403."""
-        # test_user has role 'buyer', not admin
-        resp = client.get("/api/admin/sync-logs")
-        assert resp.status_code == 403
-
-    def test_sync_logs_admin(self, admin_client, db_session):
-        log = SyncLog(
-            source="email_mining",
-            status="completed",
-            started_at=datetime.now(UTC),
-            finished_at=datetime.now(UTC),
-            duration_seconds=5.2,
-        )
-        db_session.add(log)
-        db_session.commit()
-
-        resp = admin_client.get("/api/admin/sync-logs")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 1
-        assert data[0]["source"] == "email_mining"
-
-    def test_sync_logs_filter_source(self, admin_client, db_session):
-        log1 = SyncLog(source="email_mining", status="completed", started_at=datetime.now(UTC))
-        log2 = SyncLog(source="contacts", status="completed", started_at=datetime.now(UTC))
-        db_session.add_all([log1, log2])
-        db_session.commit()
-
-        resp = admin_client.get("/api/admin/sync-logs", params={"source": "contacts"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert all(entry["source"] == "contacts" for entry in data)
 
 
 # ── Users list ────────────────────────────────────────────────────────

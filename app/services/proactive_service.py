@@ -3,7 +3,7 @@
 Scans newly-logged offers against archived requisitions (closed 30+ days).
 Generates ProactiveMatch records for salespeople to review and send to customers.
 
-Called by: scheduler.py (background scan), routers/proactive.py (endpoints)
+Called by: scheduler.py (background scan), routers/htmx/proactive.py (endpoints)
 Depends on: models, config, utils/graph_client
 """
 

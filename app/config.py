@@ -112,15 +112,6 @@ class Settings(BaseSettings):
     # --- Mouser ---
     mouser_api_key: str = ""
 
-    # --- OEMSecrets ---
-    oemsecrets_api_key: str = ""
-
-    # --- Sourcengine ---
-    sourcengine_api_key: str = ""
-
-    # --- element14 / Newark ---
-    element14_api_key: str = ""
-
     # --- AI ---
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"

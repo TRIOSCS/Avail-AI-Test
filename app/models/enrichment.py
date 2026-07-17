@@ -1,9 +1,12 @@
-"""Enrichment models — jobs, queue, signatures, prospects, intel cache."""
+"""Enrichment models — jobs, queue, signatures, prospects.
+
+(The `intel_cache` table is raw-SQL only and intentionally has no ORM model — see
+the note at the bottom of this module.)
+"""
 
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     Column,
     Float,
@@ -162,13 +165,8 @@ class ProspectContact(Base):
     )
 
 
-class IntelCache(Base):
-    """Cached intelligence data with TTL."""
-
-    __tablename__ = "intel_cache"
-    id = Column(Integer, primary_key=True)
-    cache_key = Column(String(500), nullable=False, unique=True, index=True)
-    data = Column(JSON, nullable=False)
-    ttl_days = Column(Integer, nullable=False, default=7)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    expires_at = Column(UTCDateTime, nullable=False)
+# NOTE: The `intel_cache` table is intentionally NOT mapped as an ORM model.
+# It is read/written exclusively via raw SQL (see app/cache/intel_cache.py); the
+# former `IntelCache` ORM class had zero ORM consumers and was removed. The table
+# itself is preserved (managed by Alembic) — do not add a mapped class back without
+# a consumer.

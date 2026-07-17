@@ -1,7 +1,7 @@
 """Tests for Unified Activity Timeline (migration 058).
 
 Tests timeline query functions, direction/event_type population,
-and the new /api/activity/account and /api/activity/contact endpoints.
+and the requisition Activity-tab HTMX timeline partial.
 
 Depends on: tests/conftest.py fixtures (test_user, test_company, test_customer_site, client)
 """
@@ -293,27 +293,6 @@ class TestDirectionEventTypePopulation:
 # ═══════════════════════════════════════════════════════════════════════
 #  TestTimelineEndpoints
 # ═══════════════════════════════════════════════════════════════════════
-
-
-class TestTimelineEndpoints:
-    def test_account_timeline_returns_200(self, client, test_company, company_activities):
-        resp = client.get(f"/api/activity/account/{test_company.id}")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "items" in data
-        assert "total" in data
-        assert data["total"] == 5
-
-    def test_account_timeline_404_for_unknown(self, client):
-        resp = client.get("/api/activity/account/999999")
-        assert resp.status_code == 404
-
-    def test_contact_timeline_returns_200(self, client, site_contact, contact_activities):
-        resp = client.get(f"/api/activity/contact/{site_contact.id}")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "items" in data
-        assert data["total"] == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -50,7 +50,6 @@ from .enrichment import (
     EmailSignatureExtract,  # noqa: F401
     EnrichmentJob,  # noqa: F401
     EnrichmentQueue,  # noqa: F401
-    IntelCache,  # noqa: F401
     ProspectContact,  # noqa: F401
 )
 
@@ -159,9 +158,6 @@ from .sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead  # noqa
 
 # Strategic Vendors (per-buyer assignments with 39-day TTL)
 from .strategic import StrategicVendor  # noqa: F401
-
-# Sync
-from .sync import SyncLog  # noqa: F401
 
 # Tagging (AI classification + entity propagation)
 from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401

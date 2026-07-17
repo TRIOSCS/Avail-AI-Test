@@ -8,8 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...dependencies import can_manage_account, require_admin, require_buyer, require_user
-from ...dependencies import is_admin as _is_admin
-from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorCard, VendorContact
+from ...models import Company, CustomerSite, SiteContact, User, VendorCard, VendorContact
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
@@ -433,35 +432,6 @@ async def add_suggested_to_site(
         payload.site_id,
     )
     return {"ok": True, "added": 1, "contact_id": sc.id}
-
-
-@router.get("/api/admin/sync-logs")
-async def get_sync_logs(
-    source: str = "",
-    limit: int = 20,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """View recent sync log entries."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Admin only")
-    q = db.query(SyncLog).order_by(SyncLog.started_at.desc())
-    if source:
-        q = q.filter(SyncLog.source == source)
-    logs = q.limit(limit).all()
-    return [
-        {
-            "id": entry.id,
-            "source": entry.source,
-            "status": entry.status,
-            "started_at": entry.started_at.isoformat() if entry.started_at else None,
-            "finished_at": entry.finished_at.isoformat() if entry.finished_at else None,
-            "duration_seconds": entry.duration_seconds,
-            "row_counts": entry.row_counts,
-            "errors": entry.errors,
-        }
-        for entry in logs
-    ]
 
 
 # ── Users (simple list for dropdowns) ────────────────────────────────────

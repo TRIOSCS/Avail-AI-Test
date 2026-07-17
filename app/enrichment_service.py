@@ -378,8 +378,8 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
     Delegates provider orchestration to enrichment_router.gather_company and field-level
-    arbitration to firmo_tiers.blend_company. Results cached in IntelCache with 14-day
-    TTL keyed by domain.
+    arbitration to firmo_tiers.blend_company. Results cached in the intel_cache table
+    with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
     from .services import enrichment_router

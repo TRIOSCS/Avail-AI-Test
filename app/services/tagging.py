@@ -3,7 +3,7 @@
 Waterfall: existing_data → prefix_lookup → (Nexar/AI in later phases).
 Two-gate visibility: Gate 1 (min_count) AND Gate 2 (min_percentage).
 
-Called by: app.routers.tags, app.routers.tagging_admin, app.routers.requisitions,
+Called by: app.routers.tagging_admin, app.routers.requisitions,
            app.search_service, app.email_service
 Depends on: app.models.tags, app.services.prefix_lookup
 """
