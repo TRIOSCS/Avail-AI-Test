@@ -865,16 +865,29 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO — returns the refreshed detail partial."""
+    """Buyer confirms PO — returns the refreshed detail partial (or, from the
+    Approvals Workspace, the refreshed PO pane).
+
+    Workspace additions: ``payment_method`` (validated against
+    ``PO_LINE_PAYMENT_METHODS`` in the service) records the Acctivate PO terms;
+    ``qp_purchasing_*`` fields fold the QP-purchasing answers (incl. AS9120B) onto the
+    line's vendor QP row via ``qp_workspace.apply_qp_purchasing`` — the applied diff is
+    field-audited. ``origin=approvals_workspace`` re-renders the PO pane + refreshes
+    the work list.
+    """
     from ...services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ...services.buyplan_workflow import confirm_po
+    from ...services.field_audit import log_field_edits
+    from ...services.qp_workspace import apply_qp_purchasing
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    plan = get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
+    payment_method = (form.get("payment_method") or "").strip() or None
+    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -888,12 +901,24 @@ async def buy_plan_confirm_po_partial(
     else:
         ship_date = datetime.now()
 
+    qp_fields = {key[len("qp_") :]: value for key, value in form.multi_items() if key.startswith("qp_")}
+
     try:
-        confirm_po(plan_id, line_id, po_number, ship_date, user, db)
+        line = confirm_po(plan_id, line_id, po_number, ship_date, user, db, payment_method=payment_method)
+        if qp_fields:
+            _qp, edits = apply_qp_purchasing(db, plan=plan, line=line, user=user, fields=qp_fields)
+            log_field_edits(db, user=user, buy_plan_id=plan_id, buy_plan_line_id=line_id, edits=edits)
         db.commit()
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -987,6 +1012,12 @@ async def buy_plan_resource_line_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
@@ -1007,10 +1038,14 @@ async def buy_plan_claim_line_partial(
 
     No per-record ownership gate: the open pool is intentionally claimable by ANY active
     PO-cutter regardless of who owns the parent requisition. The lost race → 409.
+    ``origin=approvals_workspace`` re-renders the claimed line's PO pane in place.
     """
     from ...services.buyplan_workflow import claim_line
 
     _require_po_cutter(user)
+
+    form = await request.form()
+    origin = form.get("origin", "")
 
     try:
         claim_line(plan_id, line_id, user, db)
@@ -1018,6 +1053,13 @@ async def buy_plan_claim_line_partial(
     except ValueError as e:
         logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
         raise HTTPException(409, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1055,6 +1097,12 @@ async def buy_plan_verify_po_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 

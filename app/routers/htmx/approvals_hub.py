@@ -358,6 +358,125 @@ async def approvals_plan_pane(
     return render_plan_pane(request, user, db, plan_id, lens)
 
 
+# ── Purchase-order line detail pane ─────────────────────────────────────
+
+
+def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> HTMLResponse:
+    """Build + render the PO-line detail pane (shared by the pane GET route and the
+    confirm-po / verify-po / resource handlers' origin=approvals_workspace branches).
+
+    Buyer view (AWAITING_PO): the confirm-PO form (PO# + est ship + payment method +
+    the QP-purchasing fields incl. AS9120B). Manager view (PENDING_VERIFY): line amount
+    vs the viewer's limit, Approve / Send back / Cancel via the EXISTING routes, and
+    the display-only sent-mail detection. Approved/re-sourcing/issue states render
+    their stamps.
+    """
+    from ...constants import PO_LINE_PAYMENT_METHODS
+    from ...dependencies import get_buyplan_for_user
+    from ...services.qp_workspace import qp_for_line
+
+    line = db.get(
+        BuyPlanLine,
+        line_id,
+        options=[
+            joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanLine.requirement),
+            joinedload(BuyPlanLine.buyer),
+            joinedload(BuyPlanLine.po_verified_by),
+        ],
+    )
+    if line is None:
+        raise HTTPException(404, "PO line not found")
+    plan = get_buyplan_for_user(db, user, line.buy_plan_id, options=[joinedload(BuyPlan.requisition)])
+
+    # "Line N of M · partial-ship yes/no" — the deferred-scope sibling flag (spec §12).
+    sibling_ids = [
+        lid
+        for (lid,) in db.execute(
+            select(BuyPlanLine.id).where(BuyPlanLine.buy_plan_id == plan.id).order_by(BuyPlanLine.id.asc())
+        ).all()
+    ]
+    line_index = sibling_ids.index(line.id) + 1 if line.id in sibling_ids else 1
+
+    qp = qp_for_line(db, plan, line)
+    limit = getattr(user, "purchase_order_approval_limit", None)
+    amount = float(line.unit_cost or 0) * (line.quantity or 0)
+
+    from .buy_plans import _can_resource  # lazy: buy_plans lazily imports this module back
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "line": line,
+            "plan": plan,
+            "qp": qp,
+            "user": user,
+            "amount": amount,
+            "approval_limit": limit,
+            "over_limit": limit is not None and amount > limit,
+            "can_verify": can_verify_po_line(user, line),
+            "can_resource": _can_resource(user),
+            "is_assigned_buyer": line.buyer_id == user.id,
+            "line_index": line_index,
+            "line_total": len(sibling_ids),
+            "partial_ship": (qp.sales_authorized_ship_partial if qp is not None else None),
+            "payment_methods": [
+                (m.value, m.value.upper() if len(m.value) <= 3 else m.value.title()) for m in PO_LINE_PAYMENT_METHODS
+            ],
+            "po_labels": PO_DECISION_LABELS,
+            "status_label": PO_DECISION_LABELS.get(line.status, line.status),
+        }
+    )
+    return template_response("htmx/partials/approvals/_pane_po_line.html", ctx)
+
+
+@router.get("/v2/partials/approvals/po/{line_id:int}/pane", response_class=HTMLResponse)
+async def approvals_po_pane(
+    request: Request,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """The Purchase Orders right-hand detail pane for one buy-plan line."""
+    return render_po_pane(request, user, db, line_id)
+
+
+@router.get("/v2/partials/approvals/po/{line_id:int}/sent-check", response_class=HTMLResponse)
+async def approvals_po_sent_check(
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """DISPLAY-ONLY sent-mail detection for one line's PO (spec §8: never auto-verifies).
+
+    Runs the existing ``verify_po_sent`` Graph scan for the line's plan and reports
+    whether the buyer's sent folder contains the PO email. Detection is a signal — the
+    line only ever verifies through the gated verify_po action.
+    """
+    from ...services.buyplan_workflow import verify_po_sent
+
+    line = db.get(BuyPlanLine, line_id)
+    if line is None:
+        raise HTTPException(404, "PO line not found")
+    plan = db.get(BuyPlan, line.buy_plan_id)
+    if plan is None:
+        raise HTTPException(404, "Buy plan not found")
+
+    try:
+        results = await verify_po_sent(plan, db)
+    except Exception:  # noqa: BLE001 — a detection failure must never break the pane
+        results = []
+    mine = next((r for r in results if r.get("line_id") == line_id), None)
+
+    if mine and mine.get("found"):
+        html = '<span class="text-xs text-emerald-600">PO email found in the buyer&#39;s sent mail (detection only — approve below).</span>'
+    elif mine and not mine.get("skipped"):
+        html = '<span class="text-xs text-gray-400">No PO email detected in the buyer&#39;s sent mail.</span>'
+    else:
+        html = '<span class="text-xs text-gray-400">Sent-mail detection unavailable.</span>'
+    return HTMLResponse(html)
+
+
 # ── The left work list ──────────────────────────────────────────────────
 
 

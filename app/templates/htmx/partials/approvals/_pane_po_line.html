@@ -1,0 +1,246 @@
+{#
+  approvals/_pane_po_line.html — the Purchase Orders detail pane (one buy-plan line).
+  Buyer view (AWAITING_PO, assigned buyer): confirm-PO form — PO# + est ship +
+  payment method (wire/PayPal/CC/ACH/COD, mirroring the Acctivate PO terms) + the
+  QP-purchasing fields incl. the AS9120B answers (traceability, counterfeit risk,
+  risk level, CoC, vendor rating, SN history). Manager view (PENDING_VERIFY): line
+  amount vs the viewer's approval limit, the display-only sent-mail detection, and
+  Approve (backend verify_po) / Send back (note) / Cancel→re-source via the EXISTING
+  routes with origin=approvals_workspace (re-renders THIS pane + awListRefresh).
+  Approved/re-sourcing/issue/cancelled render their stamps. Vocabulary per spec §5:
+  Approve / Approved / Pending approval — backend names never surface.
+  Receives: line, plan, qp (QualityPlan|None), user, amount, approval_limit,
+            over_limit, can_verify, is_assigned_buyer, line_index, line_total,
+            partial_ship, payment_methods, po_labels, status_label.
+  Called by: htmx/approvals_hub.py render_po_pane.
+  Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros;
+              buy_plans/_macros.html resource_form.
+#}
+{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form %}
+
+{% macro qp_text_input(name, label, value) %}
+<label class="block min-w-0">
+  <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+  <input type="text" name="qp_{{ name }}" value="{{ value if value is not none else '' }}" class="input input-sm w-full">
+</label>
+{% endmacro %}
+
+{% macro qp_yn_select(name, label, value) %}
+<label class="block min-w-0">
+  <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+  <select name="qp_{{ name }}" class="input input-sm w-full">
+    <option value="" {% if value is none %}selected{% endif %}>—</option>
+    <option value="yes" {% if value is true %}selected{% endif %}>Yes</option>
+    <option value="no" {% if value is false %}selected{% endif %}>No</option>
+  </select>
+</label>
+{% endmacro %}
+
+<div class="p-4 space-y-4" id="aw-pane-body">
+
+  {# ── Header ─────────────────────────────────────────────────────── #}
+  <div class="flex items-start justify-between gap-3">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <h2 class="text-base font-semibold text-gray-900 truncate font-mono">
+          {{ (line.requirement.primary_mpn if line.requirement else none) or (line.offer.mpn if line.offer else none) or 'Line #' ~ line.id }}
+        </h2>
+        <span class="badge bg-brand-50 text-brand-600 border-brand-200">{{ status_label }}</span>
+      </div>
+      <div class="flex items-center gap-2 mt-1 flex-wrap">
+        {% if line.offer %}<span class="text-tertiary">{{ line.offer.vendor_name }}</span>{% endif %}
+        {% if line.po_number %}{{ copy_chip(line.po_number, label='PO ' ~ line.po_number) }}{% endif %}
+        {% if plan.sales_order_number %}{{ copy_chip(plan.sales_order_number, label='SO ' ~ plan.sales_order_number) }}{% endif %}
+        {{ age_chip(line.po_confirmed_at or line.created_at) }}
+      </div>
+      <div class="text-tertiary mt-1">
+        Line {{ line_index }} of {{ line_total }}
+        · partial ship {% if partial_ship is true %}yes{% elif partial_ship is false %}no{% else %}—{% endif %}
+        {% if line.buyer %} · buyer {{ line.buyer.name }}{% endif %}
+      </div>
+    </div>
+    <div class="text-right flex-shrink-0">
+      <div class="text-[11px] uppercase tracking-wide text-gray-400">Line amount</div>
+      <div class="text-sm font-semibold tabular-nums text-gray-900">${{ '{:,.2f}'.format(amount) }}</div>
+      <div class="text-tertiary tabular-nums">{{ line.quantity }} × ${{ '{:,.4f}'.format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</div>
+      {% if line.payment_method %}
+      <div class="mt-0.5"><span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-gray-100 text-gray-600 border border-gray-200">{{ line.payment_method }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if line.status == 'awaiting_po' %}
+  {# ── Buyer view: confirm-PO form + QP-purchasing ─────────────────── #}
+  <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/confirm-po"
+        hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-3">
+    <input type="hidden" name="origin" value="approvals_workspace">
+    <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3 space-y-2">
+      <div class="text-sm font-semibold text-accent-700">Confirm the PO you cut in Acctivate</div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">PO number</span>
+          <input type="text" name="po_number" required placeholder="PO-…" class="input input-sm w-full font-mono">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Est. ship date</span>
+          <input type="date" name="estimated_ship_date" class="input input-sm w-full">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Payment method</span>
+          <select name="payment_method" required class="input input-sm w-full">
+            <option value="">Select…</option>
+            {% for val, label in payment_methods %}
+            <option value="{{ val }}" {% if line.payment_method == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-line-base bg-white p-3">
+      <div class="text-sm font-semibold text-gray-800 mb-2">Quality — purchasing section</div>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+        {{ qp_text_input('purchasing_condition', 'Condition', qp.purchasing_condition if qp else none) }}
+        {{ qp_text_input('purchasing_fw_hw_rev', 'FW / HW / REV / Date codes', qp.purchasing_fw_hw_rev if qp else none) }}
+        {{ qp_text_input('purchasing_product_commodity', 'Product commodity', qp.purchasing_product_commodity if qp else none) }}
+        {{ qp_yn_select('purchasing_testing_required', 'Testing required', qp.purchasing_testing_required if qp else none) }}
+        {{ qp_text_input('purchasing_testing_option', 'Testing option', qp.purchasing_testing_option if qp else none) }}
+        {{ qp_text_input('purchasing_routing_prescreening_whs', 'Routing / prescreening whs', qp.purchasing_routing_prescreening_whs if qp else none) }}
+        {{ qp_text_input('purchasing_packaging', 'Packaging', qp.purchasing_packaging if qp else none) }}
+        {{ qp_yn_select('purchasing_tpo_ship_complete', 'Will TPO ship complete', qp.purchasing_tpo_ship_complete if qp else none) }}
+        {{ qp_text_input('purchasing_tpo_notes', 'TPO notes / shipping schedule', qp.purchasing_tpo_notes if qp else none) }}
+        {{ qp_yn_select('purchasing_traceability_verified', 'Traceability verified', qp.purchasing_traceability_verified if qp else none) }}
+        {{ qp_text_input('purchasing_counterfeit_risk', 'Counterfeit risk', qp.purchasing_counterfeit_risk if qp else none) }}
+        {{ qp_text_input('purchasing_risk_level', 'Risk level', qp.purchasing_risk_level if qp else none) }}
+        {{ qp_yn_select('purchasing_coc_available', 'CoC available', qp.purchasing_coc_available if qp else none) }}
+        {{ qp_text_input('purchasing_vendor_rating', 'Vendor rating', qp.purchasing_vendor_rating if qp else none) }}
+        {{ qp_yn_select('purchasing_sn_previously_received', 'SN previously received', qp.purchasing_sn_previously_received if qp else none) }}
+        {{ qp_text_input('purchasing_serial_numbers', 'Serial numbers', qp.purchasing_serial_numbers if qp else none) }}
+      </div>
+    </div>
+
+    <div class="flex justify-end">
+      <button type="submit" data-loading-disable class="btn-primary btn-sm">Confirm PO</button>
+    </div>
+  </form>
+
+  {% elif line.status == 'pending_verify' %}
+  {# ── Manager view: decide ────────────────────────────────────────── #}
+  {% if can_verify %}
+  <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ sendBackOpen: false }">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <div class="text-sm font-semibold text-accent-700">Awaiting your approval</div>
+        <div class="text-xs text-gray-600 mt-0.5 tabular-nums">
+          ${{ '{:,.2f}'.format(amount) }}
+          {% if approval_limit is not none %} · your limit ${{ '{:,.2f}'.format(approval_limit | float) }}{% else %} · your limit unlimited{% endif %}
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/verify-po"
+              hx-target="#aw-pane" hx-swap="innerHTML">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="action" value="approve">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve</button>
+        </form>
+        <button type="button" @click="sendBackOpen = !sendBackOpen" class="btn-danger btn-sm">Send back</button>
+      </div>
+    </div>
+    <form x-show="sendBackOpen" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/verify-po"
+          hx-target="#aw-pane" hx-swap="innerHTML" class="mt-2 space-y-1.5">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="action" value="reject">
+      <textarea name="rejection_note" rows="2" placeholder="Note to the buyer — what needs fixing?"
+                class="input input-sm w-full"></textarea>
+      <button type="submit" data-loading-disable class="btn-danger btn-sm">Send back to buyer</button>
+    </form>
+    {# Display-only sent-mail detection (spec §8) — a signal, never an auto-verify.
+       Explicit hx-target (never inherit). #}
+    <div class="mt-2"
+         hx-get="/v2/partials/approvals/po/{{ line.id }}/sent-check"
+         hx-trigger="load"
+         hx-target="this"
+         hx-swap="innerHTML">
+      <span class="text-xs text-gray-400">Checking the buyer&#39;s sent mail…</span>
+    </div>
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+    Pending approval — awaiting a purchase-order approver{% if over_limit %} (amount exceeds your limit){% endif %}.
+  </div>
+  {% endif %}
+  {% if can_resource %}
+  <div class="rounded-lg border border-line-base bg-white p-3">
+    <div class="text-xs text-gray-500 mb-1">Vendor fell down? Cancel this PO and pool the line for re-sourcing:</div>
+    {{ resource_form(line, plan, [], 'approvals_workspace', '#aw-pane') }}
+  </div>
+  {% endif %}
+
+  {% elif line.status == 'verified' %}
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+    Approved{% if line.po_verified_by %} by {{ line.po_verified_by.name }}{% endif %}{% if line.po_verified_at %} · {{ line.po_verified_at | fmtdate('%b %d, %Y') }}{% endif %}
+  </div>
+
+  {% elif line.status == 'resourcing' %}
+  <div class="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 flex items-center justify-between gap-3 flex-wrap">
+    <span>In the re-sourcing pool — first buyer to claim it owns the backfill.</span>
+    <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/claim"
+          hx-target="#aw-pane" hx-swap="innerHTML">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <button type="submit" data-loading-disable class="btn-primary btn-sm">Claim this line</button>
+    </form>
+  </div>
+
+  {% elif line.status == 'issue' %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+    Issue flagged{% if line.issue_type %} — {{ line.issue_type.replace('_', ' ') }}{% endif %}{% if line.issue_note %}: {{ line.issue_note }}{% endif %}
+  </div>
+
+  {% elif line.status == 'cancelled' %}
+  <div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-500">Cancelled.</div>
+  {% endif %}
+
+  {% if line.status != 'awaiting_po' %}
+  {# ── QP-purchasing summary (read-only outside the buyer's confirm form) ── #}
+  <div class="rounded-lg border border-line-base bg-white p-3">
+    <div class="text-sm font-semibold text-gray-800 mb-2">Quality — purchasing section</div>
+    {% if qp %}
+    {% macro yn(v) %}{% if v is true %}Yes{% elif v is false %}No{% else %}—{% endif %}{% endmacro %}
+    <dl class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
+      {% for label, val in [
+        ('Condition', qp.purchasing_condition),
+        ('FW / HW / REV / Date codes', qp.purchasing_fw_hw_rev),
+        ('Product commodity', qp.purchasing_product_commodity),
+        ('Testing required', yn(qp.purchasing_testing_required)),
+        ('Testing option', qp.purchasing_testing_option),
+        ('Routing / prescreening whs', qp.purchasing_routing_prescreening_whs),
+        ('Packaging', qp.purchasing_packaging),
+        ('Will TPO ship complete', yn(qp.purchasing_tpo_ship_complete)),
+        ('TPO notes / schedule', qp.purchasing_tpo_notes),
+        ('Traceability verified', yn(qp.purchasing_traceability_verified)),
+        ('Counterfeit risk', qp.purchasing_counterfeit_risk),
+        ('Risk level', qp.purchasing_risk_level),
+        ('CoC available', yn(qp.purchasing_coc_available)),
+        ('Vendor rating', qp.purchasing_vendor_rating),
+        ('SN previously received', yn(qp.purchasing_sn_previously_received)),
+        ('Serial numbers', qp.purchasing_serial_numbers),
+      ] %}
+      <div class="min-w-0">
+        <dt class="text-gray-400 uppercase tracking-wide text-[10px]">{{ label }}</dt>
+        <dd class="text-gray-800 break-words">{{ val if val not in (none, '') else '—' }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <p class="text-xs text-gray-400">No quality-plan data recorded for this vendor yet.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── Notes (Phase 2) ─────────────────────────────────────────────── #}
+  <div class="rounded-lg border border-dashed border-line-base bg-gray-50 px-3 py-3 text-xs text-gray-400 text-center">
+    Notes &amp; attachments land here (Phase 2).
+  </div>
+</div>

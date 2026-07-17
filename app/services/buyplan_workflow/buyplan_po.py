@@ -28,11 +28,23 @@ def confirm_po(
     estimated_ship_date: datetime,
     user: User,
     db: Session,
+    *,
+    payment_method: str | None = None,
 ) -> BuyPlanLine:
     """Buyer confirms PO was cut for a line in Acctivate.
 
-    Line status: awaiting_po → pending_verify.
+    Line status: awaiting_po → pending_verify. ``payment_method`` (Approvals Workspace)
+    records the terms on the Acctivate PO — one of ``PO_LINE_PAYMENT_METHODS`` (wire /
+    PayPal / credit card / ACH / COD); None leaves the column untouched (legacy
+    callers), any other value is a ValueError.
     """
+    from ...constants import PO_LINE_PAYMENT_METHODS
+
+    if payment_method is not None:
+        valid = {m.value for m in PO_LINE_PAYMENT_METHODS}
+        if payment_method not in valid:
+            raise ValueError(f"Invalid payment method: {payment_method!r}. Valid: {sorted(valid)}")
+
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
@@ -48,6 +60,8 @@ def confirm_po(
     line.po_number = po_number
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(UTC)
+    if payment_method is not None:
+        line.payment_method = payment_method
     line.status = BuyPlanLineStatus.PENDING_VERIFY.value
     logger.info("PO {} confirmed for line {} (plan {})", po_number, line_id, plan_id)
 
