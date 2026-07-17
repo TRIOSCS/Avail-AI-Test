@@ -898,7 +898,16 @@ def _is_manager_or_admin(user: User) -> bool:
 
 
 def _is_stock_sale(plan: BuyPlan, db: Session) -> bool:
-    """Detect stock/internal sales by vendor name match against config."""
+    """Detect stock/internal sales by vendor name match against config.
+
+    An EXPLICIT Stock Sale order type (Approvals Workspace lite path) wins over the
+    vendor-name inference — a zero-line lite plan would otherwise have its declared
+    flag clobbered to False at submit time.
+    """
+    from ...constants import SalesOrderType
+
+    if plan.order_type == SalesOrderType.STOCK_SALE.value:
+        return True
     stock_names = settings.stock_sale_vendor_names
     if not plan.lines:
         return False

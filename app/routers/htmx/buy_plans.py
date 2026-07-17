@@ -192,10 +192,19 @@ async def buy_plans_list_partial(
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
 
 
+def _normalize_order_type(raw: str | None) -> str:
+    """Normalize a picker/create order-type value: blank/unknown → NEW."""
+    from ...constants import SalesOrderType
+
+    value = (raw or "").strip().lower()
+    return value if value in {t.value for t in SalesOrderType} else SalesOrderType.NEW.value
+
+
 @router.get("/v2/partials/buy-plans/sales-orders/new", response_class=HTMLResponse)
 async def sales_order_new(
     request: Request,
     requisition_id: int | None = None,
+    order_type: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -204,42 +213,62 @@ async def sales_order_new(
     Origination is deal CREATION, not a decide action — it lives under the Buy Plans hub
     prefix (/v2/partials/buy-plans/*), NOT the Approvals decide prefix. The two-segment
     ``sales-orders/new`` path does not collide with the ``{plan_id:int}`` detail route or
-    the one-segment ``{tab}`` hub-lens converter. With no ``requisition_id`` it lists open
-    (OPEN_PIPELINE) requisitions that carry at least one ACTIVE offer, scoped to what the
-    user may see. With ``requisition_id`` it loads that requisition's per-requirement
-    offer/sell-price form (``get_builder_data`` + ``apply_smart_defaults``), enforcing access
-    via ``get_req_for_user`` (404 for a restricted role that does not own it).
+    the one-segment ``{tab}`` hub-lens converter.
+
+    ``order_type`` drives the path (spec §3): SOURCING types (New / Revision) list open
+    (OPEN_PIPELINE) requisitions carrying at least one ACTIVE offer and build via the
+    per-requirement offer/sell form; NON-SOURCING types (Stock Sale / Testing Service /
+    Comps) take the LITE path — any open requisition qualifies (no offers needed) and
+    the builder collapses to a create-only confirm. Access via ``get_req_for_user``
+    (404 for a restricted role that does not own the requisition).
     """
     from sqlalchemy import func
 
-    from ...constants import OfferStatus, RequisitionStatus
+    from ...constants import (
+        SOURCING_ORDER_TYPES,
+        OfferStatus,
+        RequisitionStatus,
+        SalesOrderType,
+    )
     from ...dependencies import get_req_for_user
     from ...models import Offer, Requirement
     from ...services.quote_builder_service import apply_smart_defaults, get_builder_data
 
+    otype = _normalize_order_type(order_type)
+    sourcing = otype in {t.value for t in SOURCING_ORDER_TYPES}
     ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "order_type": otype,
+            "sourcing": sourcing,
+            "order_type_choices": [(t.value, t.value.replace("_", " ").title()) for t in SalesOrderType],
+        }
+    )
 
     if requisition_id is not None:
         req = get_req_for_user(db, user, requisition_id)
-        lines = get_builder_data(req.id, db)
-        apply_smart_defaults(lines)
+        lines = []
+        if sourcing:
+            lines = get_builder_data(req.id, db)
+            apply_smart_defaults(lines)
         ctx.update({"selected_req": req, "lines": lines})
         return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
 
-    # Picker mode: open requisitions with at least one active offer, scoped to the viewer.
-    has_active_offer = (
-        select(Offer.id)
-        .join(Requirement, Offer.requirement_id == Requirement.id)
-        .where(
-            Requirement.requisition_id == Requisition.id,
-            Offer.status == OfferStatus.ACTIVE,
+    # Picker mode: open requisitions, scoped to the viewer. Sourcing types additionally
+    # require at least one active offer (the plan is built FROM offers); non-sourcing
+    # (lite) types list every open requisition.
+    q = db.query(Requisition).filter(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
+    if sourcing:
+        has_active_offer = (
+            select(Offer.id)
+            .join(Requirement, Offer.requirement_id == Requirement.id)
+            .where(
+                Requirement.requisition_id == Requisition.id,
+                Offer.status == OfferStatus.ACTIVE,
+            )
+            .exists()
         )
-        .exists()
-    )
-    q = db.query(Requisition).filter(
-        Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
-        has_active_offer,
-    )
+        q = q.filter(has_active_offer)
     if user.role in RESTRICTED_ROLES:
         q = q.filter(Requisition.created_by == user.id)
     reqs = q.order_by(Requisition.id.desc()).all()
@@ -271,18 +300,23 @@ async def sales_order_create(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Originate a DRAFT buy plan (Sales Order) from the chosen offers, then render its
-    detail.
+    """Originate a DRAFT buy plan (Sales Order), then render its detail.
 
-    Parses ``requisition_id`` + per-requirement ``offer_<rid>`` / ``sell_<rid>`` form fields,
-    enforces requisition access (``require_requisition_access`` — 404 for a restricted role
-    that does not own it), and calls ``create_sales_order_from_offers``. On the builder's
-    duplicate-open-SO ValueError it renders the existing open Sales Order's detail with a
-    toast (never a 500); any other ValueError (e.g. no requirements) is a 400.
+    Parses ``requisition_id`` + ``order_type`` + per-requirement ``offer_<rid>`` /
+    ``sell_<rid>`` form fields, enforces requisition access
+    (``require_requisition_access`` — 404 for a restricted role that does not own it).
+    SOURCING order types (New / Revision) build from the chosen offers
+    (``create_sales_order_from_offers``); NON-SOURCING types (Stock Sale / Testing
+    Service / Comps) take the LITE path (``create_lite_sales_order`` — zero lines, no
+    kanban). On the builder's duplicate-open-SO ValueError it renders the existing open
+    Sales Order's detail with a toast (never a 500); any other ValueError (e.g. no
+    requirements) is a 400.
     """
+    from ...constants import SOURCING_ORDER_TYPES
     from ...dependencies import require_requisition_access
     from ...services.buyplan_builder import (
         DuplicateSalesOrderError,
+        create_lite_sales_order,
         create_sales_order_from_offers,
     )
 
@@ -296,6 +330,8 @@ async def sales_order_create(
         raise HTTPException(400, "Invalid requisition") from e
 
     require_requisition_access(db, req_id, user)
+
+    order_type = _normalize_order_type(form.get("order_type"))
 
     selections: dict[int, int] = {}
     sell_prices: dict[int, float] = {}
@@ -314,7 +350,10 @@ async def sales_order_create(
                 continue
 
     try:
-        plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user)
+        if order_type in {t.value for t in SOURCING_ORDER_TYPES}:
+            plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user, order_type=order_type)
+        else:
+            plan = create_lite_sales_order(req_id, order_type, db, user)
     except DuplicateSalesOrderError as exc:
         # An open Sales Order already exists for this requisition — open it instead of
         # 500ing. The exception carries the existing plan id, so no re-query is needed.
