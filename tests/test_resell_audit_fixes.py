@@ -371,10 +371,14 @@ class TestM9AwardLocking:
         db_session.flush()
         line = _line(db_session, excess_list, "GRM188R")
         first = _open_offer(db_session, excess_list, buyer, line, Decimal("0.90"))
-        second = _open_offer(db_session, excess_list, buyer, line, Decimal("0.80"))
         db_session.commit()
 
         excess_service.award_offer(db_session, first.id, owner)
+
+        # A new open offer on the now-sold line (created AFTER the award, so it is genuinely
+        # open — not closed as a pre-existing competitor) hits the lock/already-awarded path.
+        second = _open_offer(db_session, excess_list, buyer, line, Decimal("0.80"))
+        db_session.commit()
 
         with pytest.raises(HTTPException) as exc:
             excess_service.award_offer(db_session, second.id, owner)
