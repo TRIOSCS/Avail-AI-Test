@@ -958,9 +958,10 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - excess_list_id -> excess_lists (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL — per buyer×line)
 - target_vendor_card_id -> vendor_cards (SET NULL, the canonical buyer), submitted_by -> users
 - channel: email | phone | teams | marketplace | other (ExcessOutreachChannel)
-- status: sent -> opened -> responded -> bid | declined | no_response (ExcessOutreachStatus)
+- status: sending -> sent -> opened -> responded -> bid | declined; no_response = GENUINE buyer silence past a real sent (ExcessOutreachStatus). Send-outcome states (send never reached the buyer, NOT silence): failed (skipped/DNC/send error/outage — reason in send_error) + interrupted (a 'sending' row the sweeper found orphaned). Both retryable. (migration 194 added failed/interrupted + send_error)
+- send_error (Text, nullable; migration 194) — persisted send-failure reason on failed/interrupted rows (or a "reply-matching degraded" note on a delivered row whose Graph-id lookup came back empty); NULL on a clean send
 - graph_message_id / graph_conversation_id (email only), parts_included (JSON), sent_at
-- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning)
+- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning). Same-campaign double-submits are deduped in enqueue (skip a buyer with a live sending/sent row on the same list+line within a 1h window). Downstream "was this buyer genuinely offered?" readers (offered tally, response_rate denominator, last_offered_at, don't-forget nudge, tracker) exclude the not-sent set {sending, failed, interrupted} via buyer_affinity_service._NOT_SENT_STATUSES
 
 **`buyer_scores`** — Per-buyer "good bidder" rollup (migration 133; inverts the vendor scorecard)
 - vendor_card_id -> vendor_cards (UNIQUE index)
