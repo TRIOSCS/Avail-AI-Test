@@ -161,6 +161,73 @@ def test_reassemble_after_sent_resets_to_fresh_draft(db_session, owner, priced_l
     assert again.sent_at is None
 
 
+# ── Re-assemble after a TERMINAL bid forks a NEW immutable row (D3) ───
+
+
+def test_reassemble_after_accepted_creates_new_immutable_row(db_session, owner, priced_list):
+    """D3: re-assembling off an ACCEPTED bid INSERTs a NEW draft revision; the accepted
+    row is frozen history — its status and send/response stamps stay untouched, and it
+    keeps its own lines (they are NOT deleted into the new revision)."""
+    accepted = _assemble(db_session, priced_list, owner)
+    accepted.status = CustomerBidStatus.ACCEPTED
+    accepted.sent_at = datetime.now(UTC)
+    accepted.responded_at = datetime.now(UTC)
+    accepted.responded_by_id = owner.id
+    db_session.commit()
+    accepted_id = accepted.id
+
+    fresh = _assemble(db_session, priced_list, owner)
+
+    # A brand-new row, not a mutation of the accepted one.
+    assert fresh.id != accepted_id
+    assert fresh.status == CustomerBidStatus.DRAFT
+    assert fresh.revision == 2
+    assert len(fresh.lines) == 2  # the new revision carries its own freshly-built lines
+    # Two rows now exist for the list: the frozen accepted revision + the new draft.
+    assert db_session.query(CustomerBid).filter_by(excess_list_id=priced_list.id).count() == 2
+    # The accepted row is UNTOUCHED — frozen history.
+    frozen = db_session.get(CustomerBid, accepted_id)
+    assert frozen.status == CustomerBidStatus.ACCEPTED
+    assert frozen.revision == 1
+    assert frozen.sent_at is not None
+    assert frozen.responded_at is not None
+    assert frozen.responded_by_id == owner.id
+    assert len(frozen.lines) == 2  # the accepted revision keeps its own lines
+
+
+def test_reassemble_after_rejected_creates_new_draft_row(db_session, owner, priced_list):
+    """D3: rejected→revise forks a new draft revision too; the rejected row stays put."""
+    rejected = _assemble(db_session, priced_list, owner)
+    rejected.status = CustomerBidStatus.REJECTED
+    rejected.responded_at = datetime.now(UTC)
+    db_session.commit()
+    rejected_id = rejected.id
+
+    fresh = _assemble(db_session, priced_list, owner)
+
+    assert fresh.id != rejected_id
+    assert fresh.status == CustomerBidStatus.DRAFT
+    assert fresh.revision == 2
+    frozen = db_session.get(CustomerBid, rejected_id)
+    assert frozen.status == CustomerBidStatus.REJECTED
+    assert db_session.query(CustomerBid).filter_by(excess_list_id=priced_list.id).count() == 2
+
+
+def test_reassemble_after_accepted_new_row_is_latest(db_session, owner, priced_list):
+    """The forked draft is what the id-desc select (_latest_bid / Build-Bid tab)
+    surfaces as the newest revision — the frozen row must not shadow it."""
+    accepted = _assemble(db_session, priced_list, owner)
+    accepted.status = CustomerBidStatus.ACCEPTED
+    db_session.commit()
+
+    fresh = _assemble(db_session, priced_list, owner)
+
+    latest = (
+        db_session.query(CustomerBid).filter_by(excess_list_id=priced_list.id).order_by(CustomerBid.id.desc()).first()
+    )
+    assert latest.id == fresh.id
+
+
 # ── resolve_seller_contact ───────────────────────────────────────────
 
 
@@ -212,7 +279,8 @@ def _sent_ok(email: str):
 
 
 async def test_send_bid_back_flips_to_sent(db_session, owner, seller_company, priced_list):
-    """A confirmed send flips draft→sent, stamps sent_at, and attaches the clean PDF."""
+    """A confirmed send flips draft→sent, stamps sent_at, and attaches the clean
+    PDF."""
     _seed_site_email(db_session, seller_company, "buyer@initech.com")
     bid = _assemble(db_session, priced_list, owner)
 
@@ -248,7 +316,8 @@ async def test_send_bid_back_requires_draft(db_session, owner, seller_company, p
 
 
 async def test_send_bid_back_no_email_422(db_session, owner, priced_list):
-    """No customer contact email on file → 422 (never email nobody), bid stays draft."""
+    """No customer contact email on file → 422 (never email nobody), bid stays
+    draft."""
     bid = _assemble(db_session, priced_list, owner)
     with pytest.raises(HTTPException) as exc:
         await bid_back_service.send_bid_back(
