@@ -2662,7 +2662,10 @@ class TestSearchRequirement:
             await search_requirement(req, db_session)
 
         reloaded = db_session.query(Requirement).filter_by(id=req_id).one()
-        assert reloaded.material_card_id is not None
+        card = db_session.get(MaterialCard, reloaded.material_card_id)
+        assert card is not None
+        assert card.normalized_mpn == "lm317t"
+        assert card.display_mpn == "LM317T"
 
 
 class TestPersistSearchWrite:
