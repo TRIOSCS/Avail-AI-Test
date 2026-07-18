@@ -1,0 +1,61 @@
+# release-draft.yml — auto-draft a GitHub release when APP_VERSION changes on main.
+#
+# What: on every push to main that touches app/config.py (or manual dispatch),
+# reads APP_VERSION and creates a DRAFT release "v<version>" with generated
+# notes — unless a tag or release for that version already exists.
+# Why: publishing a release is the production deploy trigger (deploy.yml runs
+# on release:published). This keeps the releases page from silently lagging
+# the code: every version bump gets a ready-to-publish draft, and a human
+# pressing "Publish" is what actually deploys.
+# Depends on: app/config.py APP_VERSION constant format, deploy.yml semantics.
+
+name: Draft Release on Version Bump
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - app/config.py
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Draft release for APP_VERSION if none exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -oP '^APP_VERSION = "\K[0-9]+(\.[0-9]+)*' app/config.py)
+          TAG="v$VERSION"
+          echo "APP_VERSION=$VERSION -> tag $TAG"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — nothing to draft."
+            exit 0
+          fi
+
+          # Drafts have no tag yet, so also check existing releases by tag_name.
+          EXISTING=$(gh api "repos/$REPO/releases" --paginate \
+            --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
+          if [ -n "$EXISTING" ]; then
+            echo "Release for $TAG already exists (id $EXISTING) — nothing to draft."
+            exit 0
+          fi
+
+          URL=$(gh api -X POST "repos/$REPO/releases" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="$TAG" \
+            -F draft=true \
+            -F generate_release_notes=true \
+            --jq '.html_url')
+          echo "Drafted $TAG at $URL — publishing it will deploy via deploy.yml (CI-gated)."
