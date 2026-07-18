@@ -282,12 +282,12 @@ class TestMigration192:
 
         cfg = Config("alembic.ini")
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert heads == ["196_approvals_workspace_foundations"]
+        assert heads == ["196_approvals_foundations"]
 
     def test_downgrade_reverses_every_upgrade_object(self):
         """Every column/index/constraint/table added in upgrade() is dropped in
         downgrade()."""
-        src = open("alembic/versions/196_approvals_workspace_foundations.py").read()
+        src = open("alembic/versions/196_approvals_foundations.py").read()
         upgrade_body = src.split("def upgrade()")[1].split("def downgrade()")[0]
         downgrade_body = src.split("def downgrade()")[1]
         import re
