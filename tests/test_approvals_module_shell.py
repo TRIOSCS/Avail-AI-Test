@@ -37,11 +37,11 @@ def test_buy_plans_lens_url_308s_to_workspace(nonadmin_client: TestClient):
 
 
 def test_buy_plan_detail_url_308s_to_workspace_tab(nonadmin_client: TestClient):
-    """Detail deep links land on the workspace's Buy Plans tab (no list preselection —
-    accepted gap, see docs/APPROVALS_PARITY_CHECKLIST.md)."""
+    """Detail deep links land on the workspace's Buy Plans tab CARRYING the plan id —
+    ?select= drives the list's preselection (docs/APPROVALS_PARITY_CHECKLIST.md)."""
     r = nonadmin_client.get("/v2/buy-plans/999999", follow_redirects=False)
     assert r.status_code == 308
-    assert r.headers["location"] == "/v2/approvals?tab=buy-plans"
+    assert r.headers["location"] == "/v2/approvals?tab=buy-plans&select=999999"
 
 
 # ── Approvals Workspace (4-tab split-view console) ──────────────────────────
@@ -71,6 +71,20 @@ def test_approvals_page_threads_workspace_tab(nonadmin_client: TestClient):
     r = nonadmin_client.get("/v2/approvals?tab=purchase-orders")
     assert r.status_code == 200
     assert "/v2/partials/approvals?tab=purchase-orders" in r.text
+
+
+def test_approvals_page_threads_select(nonadmin_client: TestClient):
+    """The redirected /v2/buy-plans/{id} URL (?tab=&select=) threads select into the
+    partial URL on first full-page load; a non-numeric select is dropped (the shell
+    route takes a typed int)."""
+    r = nonadmin_client.get("/v2/approvals?tab=buy-plans&select=42")
+    assert r.status_code == 200
+    # Jinja autoescapes the & inside hx-get="{{ partial_url }}".
+    assert "/v2/partials/approvals?tab=buy-plans&amp;select=42" in r.text
+    bad = nonadmin_client.get("/v2/approvals?tab=buy-plans&select=abc")
+    assert bad.status_code == 200
+    assert 'hx-get="/v2/partials/approvals?tab=buy-plans"' in bad.text
+    assert "select=abc" not in bad.text
 
 
 def test_approvals_shell_renders_four_tabs(nonadmin_client: TestClient):

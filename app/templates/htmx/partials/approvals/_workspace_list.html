@@ -7,7 +7,8 @@
   the right pane; the oldest needs-your-approval row dispatches aw-default once so
   opening the tab lands the approver on a decision, never a hunt.
   Receives: tab, q, scope, show_closed, needs_rows / other_rows (list[WorkspaceRow]),
-            default_row (WorkspaceRow|None), list_url.
+            default_row (WorkspaceRow|None — the oldest needs-approval row, or the
+            ?select=-deep-linked plan's row/pane stand-in), list_url.
   Called by: htmx/approvals_hub.py approvals_workspace_list (GET /{tab}/list).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}

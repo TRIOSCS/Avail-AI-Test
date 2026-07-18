@@ -257,11 +257,16 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/settings?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/settings"
     elif current_view == "approvals":
-        # The Approvals module is now the org-wide 3-tab decide console (Buy Plan / PO
-        # Approval / Prepayment) at /v2/partials/approvals. Thread ?tab= through (customer
-        # deep-link pattern) so a reload/bookmark of a pushed tab URL paints the right tab.
+        # The Approvals Workspace at /v2/partials/approvals. Thread ?tab= through
+        # (customer deep-link pattern) so a reload/bookmark of a pushed tab URL paints
+        # the right tab, and ?select=<plan id> (the retired /v2/buy-plans/{id} deep-link
+        # redirect) so the workspace lands on that plan's pane. select is digits-only
+        # here — the shell route takes a typed int and would 422 on garbage.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/approvals?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/approvals"
+        select_qs = request.query_params.get("select", "").strip()
+        if select_qs.isdigit():
+            partial_url = f"{partial_url}{'&' if tab_qs else '?'}select={int(select_qs)}"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -298,16 +303,19 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
 # ── Retired Buy Plans hub (/v2/buy-plans) ─────────────────────────────
 # The personal My Queue + Pipeline hub retired into the Approvals Workspace once
 # Phase-3 parity landed (spec §11.1; docs/APPROVALS_PARITY_CHECKLIST.md). Old
-# bookmarks and pushed URLs 308 onto the workspace's Buy Plans tab. The workspace
-# list has no per-plan preselection, so a /v2/buy-plans/{id} deep link lands on the
-# tab, not the plan (accepted gap — see the checklist).
+# bookmarks and pushed URLs 308 onto the workspace's Buy Plans tab; a detail deep
+# link carries ?select=<plan id> so the workspace list preselects that plan's row
+# into the pane (parity gap 1 closed).
 
 
 @router.get("/v2/buy-plans")
 @router.get("/v2/buy-plans/{bp_id:int}")
 async def buy_plans_hub_retired_redirect(bp_id: int | None = None) -> RedirectResponse:
     """308 the retired Buy Plans hub (and its detail deep links) to the workspace."""
-    return RedirectResponse("/v2/approvals?tab=buy-plans", status_code=308)
+    target = "/v2/approvals?tab=buy-plans"
+    if bp_id is not None:
+        target = f"{target}&select={bp_id}"
+    return RedirectResponse(target, status_code=308)
 
 
 # ── Parts workspace (split-panel entry point) ─────────────────────────

@@ -1900,9 +1900,12 @@ the normal PO flow. See APP_MAP_DATABASE `po_cancellations`.
 Approvals Workspace reached capability parity — the mapping and the accepted gaps are
 pinned in `docs/APPROVALS_PARITY_CHECKLIST.md`. What replaced what:
 
-- **Full page** `/v2/buy-plans[?lens=]` and `/v2/buy-plans/{id}` → **308** to
-  `/v2/approvals?tab=buy-plans` (`htmx_views.buy_plans_hub_retired_redirect`; no
-  workspace list preselection — a detail deep link lands on the tab, accepted gap).
+- **Full page** `/v2/buy-plans[?lens=]` → **308** to `/v2/approvals?tab=buy-plans`;
+  `/v2/buy-plans/{id}` → **308** to `/v2/approvals?tab=buy-plans&select={id}`
+  (`htmx_views.buy_plans_hub_retired_redirect`). `?select=` threads full page →
+  shell → tab body → list; the SO/BP list dispatches that plan's pane as the default
+  selection (access-checked via `get_buyplan_for_user`; unknown/inaccessible ids fall
+  back silently to the oldest needs-approval default).
 - **Partials**: `GET /v2/partials/buy-plans` → 308 `/v2/partials/approvals?tab=buy-plans`
   (`?new=1` → 308 the origination picker); `/{my-queue,pipeline}` → 308
   `/v2/partials/approvals/buy-plans[?scope=]`; `/pipeline-archive` → 308

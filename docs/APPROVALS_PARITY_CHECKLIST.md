@@ -7,6 +7,9 @@ Spec: `specs/approvals-workspace.md` §11.1 ("old Buy Plans hub retires after pa
 
 **This PR is blocked on Mike's parity sign-off.** Prepare-only; do not merge before
 he approves. Legend: ☑ built and verified in the workspace · ☐ needs check / gap.
+One conscious gap remains: the org-wide `open_avg_margin` metric strip, dropped with
+rationale (see Margin metrics below). The deep-link preselection gap is closed —
+`/v2/buy-plans/{id}` now lands on its plan via `?select=`.
 
 ## How to verify any row
 
@@ -48,7 +51,7 @@ listed where they exist.
 | Plan lifecycle controls (halt / resume / cancel / reset) | Manager SO pane lifecycle controls (workspace 2.5) + the staying plan-detail partial; same POST routes | As a manager on the pane: halt with reason, resume, cancel, reset all work (`test_approvals_workspace_pane.py`) | ☑ |
 | Stall warnings (`no_approver_reason`) | BP-tab rows + SO pane + plan detail partial | See `no_approver` row above | ☑ |
 | Deep link `/v2/buy-plans` (and `?lens=`) | 308 → `/v2/approvals?tab=buy-plans`; the `lens` query is dropped (no workspace equivalent of a lens key) | `curl -I /v2/buy-plans` → 308, Location `/v2/approvals?tab=buy-plans` (`test_htmx_views_nightly30.py`) | ☑ |
-| Deep link `/v2/buy-plans/{id}` | 308 → `/v2/approvals?tab=buy-plans`. **GAP:** the workspace list has no `?select=` preselection — a plan deep link lands on the tab, not the plan; the pane default-selects the oldest needs-approval row instead. Templates that push `/v2/buy-plans/{id}` after loading the detail partial (requisition/customer buy-plan tabs, QP detail) still work in-session; only a reload/bookmark loses the specific plan | Reload a pushed `/v2/buy-plans/{id}` URL → workspace BP tab (`test_htmx_views_nightly30.py`) | ☐ gap (accepted: tab-level redirect only; list preselection is a follow-up) |
+| Deep link `/v2/buy-plans/{id}` | 308 → `/v2/approvals?tab=buy-plans&select={id}`; `select` threads full page → shell → tab body → list, and the list dispatches THAT plan's pane as the default selection (its rendered row when listed, a direct pane dispatch when it sits in the other live/closed set; unknown/inaccessible ids fall back silently to the oldest needs-approval default) | Reload a pushed `/v2/buy-plans/{id}` URL → workspace BP tab with that plan's pane loaded (`test_approvals_hub_tabs.py`, `test_approvals_module_shell.py`) | ☑ |
 | Hub partial URLs (`/v2/partials/buy-plans`, `/{tab}`, `/pipeline-archive`) | 308 → workspace partials (`/v2/partials/approvals?tab=buy-plans`, `/v2/partials/approvals/buy-plans`, `/v2/partials/approvals/buy-plans/list?show_closed=true`); `?new=1` → 308 to the origination picker partial | `test_buy_plans_router_gaps.py` redirect assertions | ☑ |
 | Approvals nav item + alert badge | Nav already points at `/v2/approvals` (internal id `buy-plans` keeps the alert-badge + active-highlight wiring; `/v2/buy-plans*` URLs still highlight it via `urlToNav` so redirected/pushed URLs stay correct) | Nav badge polls `/v2/partials/alerts/buy-plans/badge` (unchanged route) | ☑ |
 

@@ -397,7 +397,8 @@ full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2
 `offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
 (`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
 once, off the table-refresh path). The retired Buy Plans hub URLs (`/v2/buy-plans[/{id}]`)
-**308-redirect** to `/v2/approvals?tab=buy-plans` (spec §11.1 retirement;
+**308-redirect** to `/v2/approvals?tab=buy-plans` — a detail deep link adds
+`&select={id}` so the workspace preselects that plan's pane (spec §11.1 retirement;
 `docs/APPROVALS_PARITY_CHECKLIST.md`).
 It no longer defines any
 `/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,

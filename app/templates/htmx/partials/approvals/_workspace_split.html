@@ -5,7 +5,9 @@
   aw-select (the list's oldest needs-your-approval row dispatches aw-default on first
   render — applied only when nothing is selected yet). Resizable on desktop (drag
   handle, parts/workspace.html pattern); the panes STACK below md (<900px, spec §5).
-  Receives: tab (canonical tab key), tab_label, scope ('all'|'mine').
+  Receives: tab (canonical tab key), tab_label, scope ('all'|'mine'),
+            select (int|None — deep-linked plan id, rides the list's lazy URL so the
+            list dispatches THAT plan's pane as the default selection).
   Called by: htmx/approvals_hub.py render_tab_body (tab GET + decide re-renders).
   Depends on: HTMX, Alpine.js, Tailwind; _workspace_list.html (left list rows).
 #}
@@ -46,7 +48,7 @@
        only the baked ?scope applies; on refetches the form's values are appended
        after it and Starlette's last-value-wins resolution makes them authoritative. #}
     <div id="aw-list" class="flex-1 flex flex-col min-h-0 md:overflow-y-auto"
-         hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}"
+         hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}{% if select %}&select={{ select }}{% endif %}"
          hx-include="#aw-filters"
          hx-trigger="load, awListRefresh from:body"
          hx-target="this"
