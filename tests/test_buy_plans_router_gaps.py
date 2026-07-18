@@ -343,17 +343,22 @@ def test_approve_value_error(approver_client, buy_plan):
 def test_approve_stale_my_queue_origin_falls_through_to_detail(approver_client, buy_plan):
     """The my_queue origin retired with its surface — a stale origin=my_queue post falls
     through to the default detail-partial re-render."""
+    detail_mock = AsyncMock(return_value=_ok_html())
     with patch("app.services.buyplan_workflow.approve_buy_plan"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
                 "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                new=detail_mock,
             ):
                 resp = approver_client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/approve",
                     data={"action": "approve", "origin": "my_queue"},
                 )
     assert resp.status_code == 200
+    # The fall-through IS the claim: the default detail partial was rendered
+    # and its body is what came back (not a my_queue surface, not an error page).
+    detail_mock.assert_awaited_once()
+    assert resp.text == _ok_html().body.decode()
 
 
 # ── buy_plan_halt_partial (lines 644-647, 650) ───────────────────────
@@ -397,17 +402,21 @@ def test_halt_stale_my_queue_origin_falls_through_to_detail(client, buy_plan):
     mock_plan = MagicMock()
     mock_plan.id = buy_plan.id
 
+    detail_mock = AsyncMock(return_value=_ok_html())
     with patch("app.services.buyplan_workflow.halt_plan", return_value=mock_plan):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
                 "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                new=detail_mock,
             ):
                 resp = client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/halt",
                     data={"origin": "my_queue", "reason": "stop"},
                 )
     assert resp.status_code == 200
+    # The fall-through IS the claim: the default detail partial rendered the body.
+    detail_mock.assert_awaited_once()
+    assert resp.text == _ok_html().body.decode()
 
 
 # ── buy_plan_confirm_po_partial (lines 708-711, 717-718) ─────────────
@@ -508,15 +517,19 @@ def test_verify_po_stale_my_queue_origin_falls_through_to_detail(po_approver_cli
     with patch("app.services.buyplan_workflow.verify_po"):
         with patch("app.services.buyplan_workflow.check_completion", return_value=None):
             with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
+                detail_mock = AsyncMock(return_value=_ok_html())
                 with patch(
                     "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                    new=AsyncMock(return_value=_ok_html()),
+                    new=detail_mock,
                 ):
                     resp = po_approver_client.post(
                         f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/verify-po",
                         data={"action": "approve", "origin": "my_queue"},
                     )
     assert resp.status_code == 200
+    # The fall-through IS the claim: the default detail partial rendered the body.
+    detail_mock.assert_awaited_once()
+    assert resp.text == _ok_html().body.decode()
 
 
 # ── buy_plan_flag_issue_partial (lines 913-914) ───────────────────────
