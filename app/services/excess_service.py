@@ -931,6 +931,144 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     return offer
 
 
+# ---------------------------------------------------------------------------
+# Phase 4: Draft editing (finding #14 / D4)
+# ---------------------------------------------------------------------------
+#
+# Before a list is posted it is a private working draft the owner may correct in place;
+# once posted the lines lock. All four editors below are DRAFT-ONLY + owner-only. A draft
+# carries no offers and no Sighting mirror, so these are side-effect-free except the
+# ``total_line_items`` counter (kept in step with the actual line rows on delete).
+
+# The honest 409 the draft-lock guards raise (replaces the old, false "revise as a new
+# version" copy — there is no versioned-revise flow; the real path is close + re-create).
+_POSTED_LOCKED_MSG = "Posted lists are locked. Close this list and create a new one to make changes."
+
+
+def _require_owned_draft(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Load a list and assert *owner* may edit it as a DRAFT (404 → 403 → 409).
+
+    Shared guard for the draft-edit set: the list must exist (404), *owner* must own it
+    (403), and it must still be a draft (409, honest copy) — mirrors ``close_list``'s
+    guard order so a direct service call is protected even if the router guard is bypassed.
+    """
+    el = get_excess_list(db, list_id)
+    if el.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can edit it")
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, _POSTED_LOCKED_MSG)
+    return el
+
+
+def delete_line(db: Session, list_id: int, line_id: int, owner: User) -> ExcessList:
+    """Delete one line from a draft list (owner-only, draft-only); returns the list.
+
+    404 if the line does not exist or belongs to a different list (never touch another
+    list's line). Decrements ``total_line_items`` (floored at 0) so the counter stays in
+    step with the actual rows. Commits; returns the refreshed list for the detail re-render.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    db.delete(line)
+    el.total_line_items = max((el.total_line_items or 0) - 1, 0)
+    _safe_commit(db, entity="excess line delete")
+    db.refresh(el)
+    logger.info("Deleted ExcessLineItem id={} from draft list={} by owner={}", line_id, list_id, owner.id)
+    return el
+
+
+def update_line(
+    db: Session,
+    list_id: int,
+    line_id: int,
+    owner: User,
+    *,
+    part_number: str,
+    quantity: int,
+    manufacturer: str | None = None,
+    condition: str | None = None,
+    date_code: str | None = None,
+    asking_price: Decimal | None = None,
+) -> ExcessList:
+    """Edit one line on a draft list (owner-only, draft-only); returns the list.
+
+    404 across lists. Re-validates ``quantity > 0`` HERE (400) — otherwise it reaches the
+    ``ExcessLineItem.@validates('quantity')`` ValueError as an unhandled 500. When the part
+    number or manufacturer changes, the stale MaterialCard link is dropped and re-resolved
+    (the resolve is find-or-create and never raises on an unresolvable MPN). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    if quantity is None or quantity <= 0:
+        raise HTTPException(400, "Quantity must be a positive whole number")
+
+    identity_changed = (part_number or "").strip() != (line.part_number or "") or (manufacturer or None) != (
+        line.manufacturer or None
+    )
+    line.part_number = part_number.strip()
+    line.normalized_part_number = normalize_mpn_key(part_number) or None
+    line.quantity = quantity
+    line.manufacturer = manufacturer or None
+    line.condition = condition or "New"
+    line.date_code = date_code or None
+    line.asking_price = asking_price
+    if identity_changed:
+        # Re-resolve the material-card link off the new MPN/manufacturer (the mirror needs
+        # a correct card at post time). Drop the stale link first so the resolver runs.
+        line.material_card_id = None
+        _resolve_line_material_card(db, line)
+    _safe_commit(db, entity="excess line update")
+    db.refresh(el)
+    logger.info("Updated ExcessLineItem id={} on draft list={} by owner={}", line_id, list_id, owner.id)
+    return el
+
+
+def update_excess_list(
+    db: Session,
+    list_id: int,
+    owner: User,
+    *,
+    title: str,
+    notes: str | None = None,
+    company_id: int | None = None,
+    customer_site_id: int | None = None,
+) -> ExcessList:
+    """Edit a draft list's header (owner-only, draft-only); returns the refreshed list.
+
+    Updates ``title`` / ``notes`` / ``customer_site_id`` and, when ``company_id`` is given
+    and differs, re-points the seller company (404 if it does not exist). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    if company_id is not None and company_id != el.company_id:
+        company = db.get(Company, company_id)
+        if not company:
+            raise HTTPException(404, f"Company {company_id} not found")
+        el.company_id = company_id
+    el.title = title
+    el.notes = notes
+    el.customer_site_id = customer_site_id
+    _safe_commit(db, entity="excess list update")
+    db.refresh(el)
+    logger.info("Updated draft ExcessList id={} by owner={}", list_id, owner.id)
+    return el
+
+
+def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
+    """Delete a whole draft list (owner-only, draft-only); cascades to its children.
+
+    The ORM ``cascade="all, delete-orphan"`` on line_items/offers/customer_bids cleans the
+    children (a draft has no offers/bids, but the cascade is defence-in-depth). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    db.delete(el)
+    _safe_commit(db, entity="excess list delete")
+    logger.info("Deleted draft ExcessList id={} by owner={}", list_id, owner.id)
+
+
 # List statuses a manual close may act on: an actively-posted window. A draft was never
 # published (nothing to close), and a bid_out/awarded/closed/expired list is already
 # resolved — re-closing it is a no-op the endpoint should reject (M5).

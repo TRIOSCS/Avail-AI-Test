@@ -944,7 +944,7 @@ async def resell_add_line_form(
     el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     return template_response(
         "htmx/partials/resell/add_line_modal.html",
         {"request": request, "list_id": list_id},
@@ -1017,7 +1017,7 @@ async def resell_add_line(
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     # L2: a non-positive quantity would reach the ExcessLineItem @validates("quantity")
@@ -1045,6 +1045,153 @@ async def resell_add_line(
     # draft is what makes the header Post button appear (line_count > 0), so a Lines-only
     # swap would leave the header stale and the user with no way to publish (RS-5).
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+# ── Draft editing (finding #14 / D4) — all DRAFT-only + owner-only, thin over the
+#    service guards (404 → 403 → 409). A draft has no offers/mirror, so these are
+#    side-effect-free except total_line_items. ──────────────────────────────────
+
+
+@router.get("/v2/partials/resell/{list_id}/lines/{line_id}/edit-form", response_class=HTMLResponse)
+async def resell_edit_line_form(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the pre-filled edit-line modal (owner-only, draft-only)."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    return template_response(
+        "htmx/partials/resell/edit_line_modal.html",
+        {"request": request, "list_id": list_id, "line": line},
+    )
+
+
+@router.get("/v2/partials/resell/{list_id}/edit-form", response_class=HTMLResponse)
+async def resell_edit_list_form(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the pre-filled edit-list-header modal (owner-only, draft-only)."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
+    companies = db.scalars(select(Company).order_by(Company.name)).all()
+    return template_response(
+        "htmx/partials/resell/edit_list_modal.html",
+        {"request": request, "list": el, "companies": companies},
+    )
+
+
+@router.patch("/api/resell/{list_id}/lines/{line_id}", response_class=HTMLResponse)
+async def resell_update_line(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    part_number: str = Form(...),
+    quantity: int = Form(...),
+    manufacturer: str = Form(""),
+    condition: str = Form("New"),
+    date_code: str = Form(""),
+    asking_price: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Edit one draft line, then re-render the whole detail panel."""
+    el = excess_service.update_line(
+        db,
+        list_id,
+        line_id,
+        user,
+        part_number=part_number,
+        quantity=quantity,
+        manufacturer=manufacturer or None,
+        condition=condition or "New",
+        date_code=date_code or None,
+        asking_price=_to_decimal(asking_price),
+    )
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.delete("/api/resell/{list_id}/lines/{line_id}", response_class=HTMLResponse)
+async def resell_delete_line(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Delete one draft line, then re-render the whole detail panel."""
+    el = excess_service.delete_line(db, list_id, line_id, user)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.patch("/api/resell/{list_id}", response_class=HTMLResponse)
+async def resell_update_list(
+    request: Request,
+    list_id: int,
+    title: str = Form(...),
+    company_id: int = Form(...),
+    notes: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Edit a draft list's header (title/customer/notes), then re-render the detail
+    panel."""
+    el = excess_service.update_excess_list(db, list_id, user, title=title, notes=notes or None, company_id=company_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.delete("/api/resell/{list_id}", response_class=HTMLResponse)
+async def resell_delete_list(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Delete a whole draft list, then refresh the My-Lists left pane + reset the detail
+    pane.
+
+    Returns the refreshed My-Lists partial (primary → #resell-list-body) with an OOB
+    reset of the now-orphaned detail pane (#split-right-resell) and a confirmation
+    toast.
+    """
+    excess_service.delete_excess_list(db, list_id, user)
+    lists = (
+        db.scalars(
+            select(ExcessList)
+            .options(joinedload(ExcessList.company))
+            .where(ExcessList.owner_id == user.id)
+            .order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc())
+        )
+        .unique()
+        .all()
+    )
+    resp = template_response(
+        "htmx/partials/resell/_list_after_delete.html",
+        {
+            "request": request,
+            "user": user,
+            "lens": "mine",
+            "stage": "",
+            "needs": "",
+            "q": "",
+            "cards": _list_cards(db, list(lists), can_see_customer=True),
+            "can_see_customer": True,
+            "can_post": excess_service.can_post(user),
+        },
+    )
+    return _toast(resp, "List deleted")
 
 
 @router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
@@ -1094,7 +1241,7 @@ async def resell_import_confirm(
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     try:
