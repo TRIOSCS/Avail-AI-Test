@@ -133,7 +133,7 @@ class BuyPlan(Base):
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)
 
-    # ── Order type (Approvals Workspace — migration 192). SalesOrderType vocabulary;
+    # ── Order type (Approvals Workspace — migration 196). SalesOrderType vocabulary;
     # server_default 'new' so every pre-existing row reads as a New order (stock sales
     # backfilled to 'stock_sale' from is_stock_sale in the migration).
     order_type = Column(String(20), nullable=False, default=SalesOrderType.NEW.value, server_default="new")
@@ -238,12 +238,12 @@ class BuyPlanLine(Base):
     sales_note = Column(Text)
     manager_note = Column(Text)
 
-    # ── Payment method (Approvals Workspace — migration 192). PaymentMethod
+    # ── Payment method (Approvals Workspace — migration 196). PaymentMethod
     # vocabulary (PO lines accept all 5 incl. COD — see PO_LINE_PAYMENT_METHODS).
     # Nullable: recorded at confirm-PO time; legacy lines have none.
     payment_method = Column(String(20), nullable=True)
 
-    # ── Receiving (Approvals Workspace — migration 192). Stamped by
+    # ── Receiving (Approvals Workspace — migration 196). Stamped by
     # mark_line_received (buyplan_workflow/buyplan_po.py, Phase 3) — a manual
     # "mark received" event; never changes plan status.
     received_at = Column(UTCDateTime, nullable=True)

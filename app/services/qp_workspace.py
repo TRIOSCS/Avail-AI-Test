@@ -1,7 +1,7 @@
 """qp_workspace.py — Quality-plan writes for the Approvals Workspace panes.
 
 Purpose: apply_qp_purchasing folds the PO pane's QP-purchasing answers (incl. the
-         AS9120B counterfeit-avoidance fields from migration 192) onto the plan's
+         AS9120B counterfeit-avoidance fields from migration 196) onto the plan's
          QualityPlan row for the line's VENDOR — QP rows stay keyed per
          (buy_plan, vendor_card) (design D11); the row is found-or-created here.
          Only whitelisted purchasing_* columns are writable; boolean answers arrive

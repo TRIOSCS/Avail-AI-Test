@@ -4,7 +4,7 @@ Covers: the new constants (SalesOrderType, SOURCING_ORDER_TYPES, PaymentMethod A
 PO_LINE_PAYMENT_METHODS / PREPAYMENT_METHODS, ActivityType additions, KanbanLane), the
 new ORM columns on BuyPlan / BuyPlanLine / QualityPlan / ActivityLog, the
 BuyPlanAttachment model with its exactly-one-subject validation, and the single-head
-invariant of migration 192.
+invariant of migration 196.
 """
 
 from datetime import UTC, datetime
@@ -282,12 +282,12 @@ class TestMigration192:
 
         cfg = Config("alembic.ini")
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert heads == ["192_approvals_workspace_foundations"]
+        assert heads == ["196_approvals_workspace_foundations"]
 
     def test_downgrade_reverses_every_upgrade_object(self):
         """Every column/index/constraint/table added in upgrade() is dropped in
         downgrade()."""
-        src = open("alembic/versions/192_approvals_workspace_foundations.py").read()
+        src = open("alembic/versions/196_approvals_workspace_foundations.py").read()
         upgrade_body = src.split("def upgrade()")[1].split("def downgrade()")[0]
         downgrade_body = src.split("def downgrade()")[1]
         import re

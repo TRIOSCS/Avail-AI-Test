@@ -97,7 +97,7 @@ class QualityPlan(Base):
     purchasing_tpo_ship_complete = Column(Boolean, nullable=True)  # Will TPO ship complete?
     purchasing_tpo_notes = Column(Text, nullable=True)  # TPO Notes / Shipping Schedule
 
-    # ── § PURCHASING AS9120B fields (Approvals Workspace — migration 192). The
+    # ── § PURCHASING AS9120B fields (Approvals Workspace — migration 196). The
     # counterfeit-avoidance / traceability answers the Excel QP workbook carried but the
     # native section lacked. All nullable; written via qp_workspace.apply_qp_purchasing.
     purchasing_traceability_verified = Column(Boolean, nullable=True)  # supply-chain traceability verified?

@@ -474,7 +474,7 @@ class ActivityLog(Base):
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="SET NULL"), nullable=True)
-    # Approvals Workspace (migration 192): per-line / per-prepayment notes threads and
+    # Approvals Workspace (migration 196): per-line / per-prepayment notes threads and
     # field-diff audit rows key on these. Nullable + SET NULL like the other
     # polymorphic-scope FKs — the timeline row outlives its subject.
     buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="SET NULL"), nullable=True)
@@ -588,7 +588,7 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("excess_list_id").isnot(None),
         ),
-        # Approvals Workspace (migration 192): per-line / per-prepayment thread reads.
+        # Approvals Workspace (migration 196): per-line / per-prepayment thread reads.
         Index(
             "ix_activity_buy_plan_line",
             "buy_plan_line_id",

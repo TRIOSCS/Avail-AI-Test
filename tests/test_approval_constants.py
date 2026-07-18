@@ -65,7 +65,7 @@ def test_approval_step_rule_members() -> None:
 
 def test_payment_method_members() -> None:
     """All five payment-method members present (ACH + COD added by the Approvals
-    Workspace, migration 192)."""
+    Workspace, migration 196)."""
     assert PaymentMethod.CC == "cc"
     assert PaymentMethod.PAYPAL == "paypal"
     assert PaymentMethod.WIRE == "wire"
