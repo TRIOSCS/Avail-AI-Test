@@ -7,8 +7,10 @@ zero readers/writers anywhere in app/ (grep-verified). Their documented
 writers were never built — FacetAudit's docstring named
 app/management/audit_facets.py ("future") which does not exist;
 KnowledgeConfig's docstring named services/teams_qa_service.py which also
-does not exist. Both tables are empty in production by construction (no
-writer ever ran).
+does not exist. facet_audits is empty in production by construction (no
+writer ever ran); knowledge_config holds only the single seed row that
+064_teams_qa_routing inserted ('daily_question_cap' = '10') — no reader
+ever consumed it, so dropping it loses nothing observable.
 
 ReconcileRun (reconcile_runs table, same telemetry.py module) and
 KnowledgeEntry (knowledge_entries table, same knowledge.py module) are LIVE
@@ -25,9 +27,10 @@ declared them:
     here WITH that unique constraint so downgrade matches the live schema
     immediately before this migration, not the pre-174 baseline.
 
-Safety: both tables are dropped empty (no writer ever existed, so no data
-loss); downgrade fully reconstructs the schema; prod additionally has
-6-hourly pg_dump backups (scripts/restore.sh) as a further safety net.
+Safety: no application writer ever existed for either table, so no
+app-generated data is lost; downgrade fully reconstructs the schema and
+re-inserts 064's seed row; prod additionally has 6-hourly pg_dump backups
+(scripts/restore.sh) as a further safety net.
 
 Revision ID: 196_drop_facet_audits_kconfig
 Revises: 195_outreach_send_subject_body
@@ -68,6 +71,9 @@ def downgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("key", name="uq_knowledge_config_key"),
     )
+    # Restore the seed row 064_teams_qa_routing inserted, so downgrade
+    # reproduces the exact pre-removal state, not just the schema.
+    op.execute("INSERT INTO knowledge_config (key, value) VALUES ('daily_question_cap', '10')")
 
     op.create_table(
         "facet_audits",
