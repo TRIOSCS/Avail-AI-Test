@@ -709,6 +709,25 @@ robustness items that do not change the retry/breaker/health semantics above:
   `_source_age_hours` with the real elapsed age (`_cache_age_hours`) instead of
   a hardcoded `0.0`, so `score_sighting_v2`'s freshness factor reflects reality
   for cache-served rows. A live fetch still tags `0.0`.
+- **Streamed results are durable.** `Sighting.requirement_id` is nullable
+  (migration 196); after a live (non-cache-hit) `stream_search_mpn` run emits
+  its terminal `done` SSE event, `_persist_interactive_sightings` runs via
+  `asyncio.to_thread` and persists the deduped results as requirement-less
+  Sightings through `_save_sightings(fresh, req=None, ...)`. Requirement-less
+  saves keep vendor-card creation, scoring/evidence tiers, material-card
+  upsert + `last_searched_at` stamping, and tag propagation, but skip lead
+  sync, vendor-summary rebuild, and unavailability suppression (all
+  requirement-scoped, NOT NULL FKs). Stale requirement-less rows are deduped
+  by `(vendor_name_normalized, normalized_mpn)` — the key is set at Sighting
+  construction, not just by the material-card backfill. Cache-hit streams
+  never re-persist. Migration 196's downgrade fails loudly if NULL rows
+  exist (documented DELETE required) rather than silently dropping data.
+- **Vendor feedback reaches live sighting scores.**
+  `get_vendor_feedback_adjustment` (sourcing_leads) is batched per distinct
+  vendor card in `_save_sightings` — one grouped query per vendor, applied via
+  `_effective_trust_score` to the vendor_score input of `score_sighting` /
+  `score_sighting_v2` (clamped 0-100); a `do_not_contact` vendor's trust input
+  is floored at ≤15 rather than the sighting being dropped.
 - **Currency-aware price scoring.** `app/utils/currency.py` (`to_usd`, static
   approximate FX table, SCORING-ONLY — never invoicing/PO/customer-facing
   price) converts `unit_price` to USD before computing the median-price

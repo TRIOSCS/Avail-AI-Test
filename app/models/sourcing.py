@@ -235,7 +235,12 @@ class Manufacturer(Base):
 class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    # Nullable (migration 196_sighting_req_id_nullable): requirement-less
+    # rows represent interactive/global "quick search" discoveries persisted by
+    # stream_search_mpn (app/search_service.py) — never tied to a Requisition.
+    # The FK's ondelete="CASCADE" is preserved: NULL values are simply exempt
+    # from cascade, so requirement-scoped rows keep deleting with their parent.
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=True)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
     vendor_name_normalized = Column(String(255), index=True)
