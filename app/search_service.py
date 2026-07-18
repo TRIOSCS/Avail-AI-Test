@@ -2146,10 +2146,11 @@ def _save_sightings(
         base = vendor_score_map.get(norm_name)
         if base is None:
             return None
+        base_score = float(base)
         adj = feedback_by_vendor_id.get(vendor_id_map.get(norm_name))
         if adj is None:
-            return base
-        adjusted = max(0.0, min(100.0, base + adj.confidence_penalty))
+            return base_score
+        adjusted = max(0.0, min(100.0, base_score + adj.confidence_penalty))
         if adj.do_not_contact:
             adjusted = min(adjusted, 15.0)
         return adjusted
