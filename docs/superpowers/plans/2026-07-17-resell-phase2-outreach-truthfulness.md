@@ -20,7 +20,7 @@
 
 ### Task 1: New statuses + `send_error` column migration (194)
 
-**Files:** Modify `app/constants.py:240-257`; `app/models/excess.py:339-351` (add `send_error` nullable Text + update status comment `:345`); Create `alembic/versions/194_excess_outreach_failed_states.py`; Modify `MIGRATION_NUMBERS_IN_FLIGHT.txt`; Test `tests/test_resell_outreach_async.py`.
+**Files:** Modify `app/constants.py:240-257`; `app/models/excess.py:339-351` (add `send_error` nullable Text + update status comment `:345`); Create `alembic/versions/194_outreach_failed_states.py`; Modify `MIGRATION_NUMBERS_IN_FLIGHT.txt`; Test `tests/test_resell_outreach_async.py`.
 
 **Interfaces:** Produces `ExcessOutreachStatus.FAILED`/`INTERRUPTED`; `ExcessOutreach.send_error: str | None`.
 

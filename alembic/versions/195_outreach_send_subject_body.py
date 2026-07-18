@@ -21,7 +21,7 @@ Called by: alembic (upgrade/downgrade).
 Depends on: excess_outreach (created in 133_resell_outreach_schema).
 
 Revision ID: 195_outreach_send_subject_body
-Revises: 194_excess_outreach_failed_states
+Revises: 194_outreach_failed_states
 Create Date: 2026-07-17
 """
 
@@ -32,7 +32,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "195_outreach_send_subject_body"
-down_revision = "194_excess_outreach_failed_states"
+down_revision = "194_outreach_failed_states"
 branch_labels = None
 depends_on = None
 

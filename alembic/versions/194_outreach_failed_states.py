@@ -14,7 +14,7 @@ Downgrade: fully reversible — drops the column.
 Called by: alembic (upgrade/downgrade).
 Depends on: excess_outreach (created in 133_resell_outreach_schema).
 
-Revision ID: 194_excess_outreach_failed_states
+Revision ID: 194_outreach_failed_states
 Revises: 193_resell_legacy_status_remap
 Create Date: 2026-07-17
 """
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "194_excess_outreach_failed_states"
+revision = "194_outreach_failed_states"
 down_revision = "193_resell_legacy_status_remap"
 branch_labels = None
 depends_on = None
