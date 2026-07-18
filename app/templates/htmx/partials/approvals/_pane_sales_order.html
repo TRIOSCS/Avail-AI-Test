@@ -47,22 +47,40 @@
     </div>
   </div>
 
-  {# ── Approval block ─────────────────────────────────────────────── #}
+  {# ── Approval block — approve is a TWO-PART action (spec §7): decide AND choose
+       the handoff. Notify & proceed → the existing approve path (buyers get cut-PO
+       tasks; the submitter gets the change summary). Send back for sign-off → the
+       existing reject→draft transition with the summary attached (note optional;
+       blank auto-fills server-side). Reject stays a separate hard no (note required).
+       The change summary (the audit log since submission) is embedded below. ── #}
   {% if bp.status == 'pending' and can_decide %}
-  <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ rejectOpen: false }">
+  <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ panel: '' }">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <div class="text-sm font-semibold text-accent-700">Awaiting your approval</div>
       <div class="flex items-center gap-1.5">
         <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML">
           <input type="hidden" name="origin" value="approvals_workspace">
           <input type="hidden" name="lens" value="{{ lens }}">
-          <input type="hidden" name="action" value="approve">
-          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve</button>
+          <input type="hidden" name="handoff" value="proceed">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve &amp; notify</button>
         </form>
-        <button type="button" @click="rejectOpen = !rejectOpen" class="btn-danger btn-sm">Reject</button>
+        <button type="button" @click="panel = panel === 'send_back' ? '' : 'send_back'"
+                class="btn-secondary btn-sm">Send back for sign-off</button>
+        <button type="button" @click="panel = panel === 'reject' ? '' : 'reject'"
+                class="btn-danger btn-sm">Reject</button>
       </div>
     </div>
-    <form x-show="rejectOpen" x-cloak x-collapse
+    <form x-show="panel === 'send_back'" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
+          class="mt-2 space-y-1.5">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="handoff" value="send_back">
+      <textarea name="notes" rows="2" placeholder="Optional note to the salesperson — the change summary rides along."
+                class="input input-sm w-full"></textarea>
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Send back with summary</button>
+    </form>
+    <form x-show="panel === 'reject'" x-cloak x-collapse
           hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
           class="mt-2 space-y-1.5">
       <input type="hidden" name="origin" value="approvals_workspace">
@@ -72,10 +90,12 @@
                 class="input input-sm w-full"></textarea>
       <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm reject</button>
     </form>
+    {% include "htmx/partials/approvals/_change_summary.html" %}
   </div>
   {% elif bp.status == 'pending' %}
   <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
     Awaiting manager approval.
+    {% include "htmx/partials/approvals/_change_summary.html" %}
   </div>
   {% elif bp.approved_at and bp.status in ('active', 'inbound', 'completed') %}
   <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">

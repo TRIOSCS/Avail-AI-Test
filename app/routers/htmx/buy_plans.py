@@ -141,6 +141,11 @@ async def _notify_if_completed(plan_id: int, just_completed: bool) -> None:
 
 _APPROVALS_TABS = ("my_queue", "pipeline")
 
+# The auto-filled note when a manager sends a plan back for sign-off without typing
+# one — the engine requires a non-blank reject comment, and the change summary (the
+# audit log since submission) always rides along on the pane (spec §7).
+SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
+
 
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing stage tab for the Approvals hub based on the user's role.
@@ -453,6 +458,24 @@ async def prepay_request_decide(
             pp.void_reason = "rejected by approver"
             pp.voided_at = datetime.now(UTC)
             pp.voided_by_id = user.id
+            # Note-to-the-fixer (2.2): the (required) reject reason lands on the
+            # prepayment's notes thread tagged with the decision, and the requester
+            # (the fixer) gets an in-app notification.
+            from ...services.approvals.notifications import write_in_app
+            from ...services.workspace_notes import add_note
+
+            note_text = (comment or "").strip()
+            if note_text:
+                add_note(
+                    db,
+                    user=user,
+                    body=note_text,
+                    buy_plan_id=pp.buy_plan_id,
+                    prepayment_id=pp.id,
+                    decision="rejected",
+                )
+            if pp.created_by_id is not None:
+                write_in_app(db, pp.created_by_id, "prepay_rejected", f"Prepayment #{pp.id} rejected", note_text)
             db.commit()
             await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
 
@@ -758,6 +781,7 @@ async def buy_plan_approve_partial(
 
     from ...constants import ApprovalRequestStatus, ApprovalSubjectType
     from ...models.approvals import ApprovalRequest
+    from ...services.approvals.notifications import write_in_app
     from ...services.approvals.service import decide as svc_decide
     from ...services.buyplan_notifications import (
         notify_approved,
@@ -765,12 +789,35 @@ async def buy_plan_approve_partial(
         run_notify_bg,
     )
     from ...services.buyplan_workflow import approve_buy_plan
+    from ...services.field_audit import edits_since, format_change_summary
+    from ...services.workspace_notes import add_note
 
     form = await request.form()
     action = form.get("action", "approve")
     origin = form.get("origin", "")
     hub_scope = form.get("hub_scope", "all")
-    notes = form.get("notes")
+    notes = (form.get("notes") or "").strip() or None
+
+    # Two-part approve (spec §7 / workspace 2.2): the workspace approval block posts a
+    # handoff instead of a bare action — proceed → the existing approve path; send_back
+    # → the existing reject→draft transition ("send back for sign-off"). The engine
+    # requires a non-blank reject comment, so a blank send-back note auto-fills.
+    handoff = (form.get("handoff") or "").strip()
+    if handoff == "proceed":
+        action = "approve"
+    elif handoff == "send_back":
+        action = "reject"
+        if not notes:
+            notes = SEND_BACK_DEFAULT_NOTE
+    decision_tag = None
+    if action == "reject":
+        decision_tag = "sent_back" if handoff == "send_back" else "rejected"
+
+    # The submitter is the fixer (change-summary recipient / note-to-fixer target);
+    # capture submitted_at BEFORE the decision so the summary window can't move.
+    bp = db.get(BuyPlan, plan_id)
+    fixer_id = bp.submitted_by_id if bp is not None else None
+    submitted_at = bp.submitted_at if bp is not None else None
 
     open_request = (
         db.execute(
@@ -806,6 +853,27 @@ async def buy_plan_approve_partial(
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    # Post-decision fan-out (2.2) — after the decision committed, never inside it:
+    #   approve → the submitter gets the change summary (the audit log since
+    #   submission, "was X → now Y"; skipped when nothing changed);
+    #   reject / send-back → the note-to-the-fixer lands on the plan's notes thread
+    #   tagged with the decision, and the submitter gets an in-app notification.
+    if action == "approve" and fixer_id is not None:
+        summary = format_change_summary(edits_since(db, buy_plan_id=plan_id, since=submitted_at))
+        if summary:
+            write_in_app(db, fixer_id, "buy_plan_changes", f"Buy plan #{plan_id} approved with changes", summary)
+            db.commit()
+    elif action == "reject" and notes:
+        add_note(db, user=user, body=notes, buy_plan_id=plan_id, decision=decision_tag)
+        if fixer_id is not None:
+            title = (
+                f"Buy plan #{plan_id} sent back for sign-off"
+                if decision_tag == "sent_back"
+                else f"Buy plan #{plan_id} rejected"
+            )
+            write_in_app(db, fixer_id, f"buy_plan_{decision_tag}", title, notes)
+        db.commit()
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
@@ -1107,19 +1175,47 @@ async def buy_plan_verify_po_partial(
     origin = form.get("origin", "")
     hub_scope = form.get("hub_scope", "all")
 
+    rejection_note = (form.get("rejection_note") or "").strip() or None
     try:
-        line = verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
+        line = verify_po(plan_id, line_id, action, user, db, rejection_note=rejection_note)
         # verify_po's own internal (approve-only) check_completion call already mutated
         # the SAME identity-mapped BuyPlan object `line.buy_plan` resolves to (verify_po
         # loaded it via db.get(BuyPlan, plan_id) itself) — reading .status off it here
         # is a free identity-map hit, NOT a second completion scan.
         just_completed = line.buy_plan is not None and line.buy_plan.status == BuyPlanStatus.COMPLETED.value
+        buyer_id = line.buyer_id
         db.commit()
         if action == "reject":
             await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
         await _notify_if_completed(plan_id, just_completed)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e)) from e
+
+    # PO send-back note-to-the-fixer (2.2): the manager's note lands on the LINE's
+    # notes thread tagged sent_back, and the assigned buyer (the fixer) gets an
+    # in-app notification. The note is optional on a send-back (spec §7).
+    if action == "reject":
+        from ...services.approvals.notifications import write_in_app
+        from ...services.workspace_notes import add_note
+
+        if rejection_note:
+            add_note(
+                db,
+                user=user,
+                body=rejection_note,
+                buy_plan_id=plan_id,
+                buy_plan_line_id=line_id,
+                decision="sent_back",
+            )
+        if buyer_id is not None:
+            write_in_app(
+                db,
+                buyer_id,
+                "po_sent_back",
+                f"PO sent back on plan #{plan_id}",
+                rejection_note,
+            )
+        db.commit()
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)

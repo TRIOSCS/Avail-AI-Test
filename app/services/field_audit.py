@@ -183,6 +183,16 @@ def edits_since(db: Session, *, buy_plan_id: int, since: datetime | None) -> lis
     return rows
 
 
+def format_change_summary(rows: list[EditRow], limit: int = 25) -> str:
+    """Render EditRows as the plain-text "was X → now Y" change summary (one line per
+    field) for the in-app notification body. Empty input → empty string (callers skip
+    the notification — spec §7: the summary is empty if nothing changed)."""
+    lines = [f"{row.field}: was {row.old or '—'} → now {row.new or '—'}" for row in rows[:limit]]
+    if len(rows) > limit:
+        lines.append(f"… and {len(rows) - limit} more change(s)")
+    return "\n".join(lines)
+
+
 def manager_edited_line_ids(db: Session, plan: BuyPlan) -> set[int]:
     """IDs of *plan*'s lines that a manager/admin has field-edited.
 

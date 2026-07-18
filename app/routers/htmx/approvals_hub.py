@@ -307,6 +307,7 @@ def render_plan_pane(
     """
     from ...dependencies import get_buyplan_for_user
     from ...models.quality_plan import QualityPlan
+    from ...services.field_audit import edits_since
     from ...services.qp_workspace import can_edit_qp_sales
     from ...services.stale_guard import stale_token
 
@@ -344,6 +345,13 @@ def render_plan_pane(
             # predicate the POST enforces (draft → owner/manager; pending → manager only).
             "can_edit_qp_sales": can_edit_qp_sales(user, bp),
             "qp_stale_token": stale_token(qp) if qp is not None else "",
+            # Two-part approve (2.2): the audit-log change summary since submission,
+            # embedded in the approval block ("was X → now Y"; empty = nothing changed).
+            "change_edits": (
+                edits_since(db, buy_plan_id=bp.id, since=bp.submitted_at)
+                if bp.status == BuyPlanStatus.PENDING.value
+                else []
+            ),
         }
     )
     return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
