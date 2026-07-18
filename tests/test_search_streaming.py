@@ -104,6 +104,85 @@ def test_build_connectors_brokerbin_gates_on_bearer_token(db_session):
     assert stats["brokerbin"]["status"] == "skipped"
 
 
+# ── _build_connectors config cache (60s TTL, no-op under TESTING) ────────
+
+
+class TestConnectorConfigCache:
+    def test_noop_under_testing(self, db_session):
+        """Under TESTING=1 the connector-config cache never serves a stale value — every
+        _build_connectors call re-queries credentials, so tests stay deterministic
+        without needing the reset hook."""
+        from app.search_service import _build_connectors, _reset_connector_config_cache
+
+        _reset_connector_config_cache()
+        call_count = {"n": 0}
+
+        def _counting_batch(_db, _keys):
+            call_count["n"] += 1
+            return {}
+
+        with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+            _build_connectors(db_session)
+            _build_connectors(db_session)
+
+        assert call_count["n"] == 2  # no caching under TESTING
+
+    def test_caches_across_calls_when_not_testing(self, db_session):
+        """Outside TESTING, a second _build_connectors call within the 60s TTL is served
+        from the in-process cache — no repeat DB round trip for the disabled/errored
+        source sets + batched credentials."""
+        import os
+
+        from app.search_service import _build_connectors, _reset_connector_config_cache
+
+        _reset_connector_config_cache()
+        call_count = {"n": 0}
+
+        def _counting_batch(_db, _keys):
+            call_count["n"] += 1
+            return {}
+
+        original = os.environ.pop("TESTING", None)
+        try:
+            with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+                _build_connectors(db_session)
+                _build_connectors(db_session)
+        finally:
+            if original is not None:
+                os.environ["TESTING"] = original
+            _reset_connector_config_cache()
+
+        assert call_count["n"] == 1  # second call served from the 60s cache
+
+    def test_reset_forces_a_fresh_lookup(self, db_session):
+        """_reset_connector_config_cache() invalidates immediately, without waiting out
+        the 60s TTL — the hook a settings/credential mutation point (or a test) uses to
+        force fresh config."""
+        import os
+
+        from app.search_service import _build_connectors, _reset_connector_config_cache
+
+        _reset_connector_config_cache()
+        call_count = {"n": 0}
+
+        def _counting_batch(_db, _keys):
+            call_count["n"] += 1
+            return {}
+
+        original = os.environ.pop("TESTING", None)
+        try:
+            with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+                _build_connectors(db_session)
+                _reset_connector_config_cache()
+                _build_connectors(db_session)
+        finally:
+            if original is not None:
+                os.environ["TESTING"] = original
+            _reset_connector_config_cache()
+
+        assert call_count["n"] == 2  # reset forced a fresh lookup
+
+
 # ── Aggressive dedup tests ──────────────────────────────────────────────
 
 

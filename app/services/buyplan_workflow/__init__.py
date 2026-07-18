@@ -73,6 +73,7 @@ from .buyplan_po import (
     _line_amount,
     _log_po_line_activity,
     confirm_po,
+    mark_line_received,
     verify_po,
     verify_po_sent,
 )
@@ -117,6 +118,7 @@ __all__ = [
     "flag_line_issue",
     "generate_case_report",
     "halt_plan",
+    "mark_line_received",
     "plan_needs_approver_reason",
     "remove_buy_plan_line",
     "reset_buy_plan_to_draft",

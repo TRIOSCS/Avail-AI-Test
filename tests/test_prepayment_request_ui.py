@@ -223,9 +223,9 @@ def test_htmx_create_makes_prepayment_linked_to_line(client, db_session: Session
 
 
 def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Session, test_user: User):
-    """#12: submitting the modal with origin=approvals_hub re-renders the PO Approval
-    tab body (not the plan detail), and that body now shows the pill/badge for the new
-    prepayment."""
+    """#12: submitting the modal with origin=approvals_hub re-renders the workspace
+    Purchase Orders tab body (not the plan detail); its list lazy-reloads so the new
+    prepayment's state paints fresh."""
     _seed_approver(db_session)
     _bp, line = _plan_with_line(db_session, test_user)
     db_session.commit()
@@ -244,9 +244,8 @@ def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Ses
     )
     assert r.status_code == 200, r.text
     body = r.text
-    assert "Pending POs" in body  # the PO Approval tab body
+    assert "/v2/partials/approvals/purchase-orders/list" in body  # the workspace PO tab body
     assert "Line Items" not in body  # NOT the full plan detail
-    assert "Prepay requested" in body  # the just-created prepayment renders its pill
     assert "showToast" in r.headers.get("HX-Trigger", "")
 
 

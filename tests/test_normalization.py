@@ -193,6 +193,31 @@ class TestNormalizeMpnKey:
         assert normalize_mpn_key(value) == expected
 
 
+# ── normalize_mpn_key: trailing-digit / date-code decision guardrail ──
+#
+# normalize_mpn_key is used as a hard-equality dedup key across offers,
+# material cards, sightings, requirements, and substitute lists (see
+# app.services.ai_offer_service, app.services.search_worker_base.queue_manager,
+# app.jobs.inventory_jobs, etc.). A trailing "#2023"-style date code is
+# indistinguishable, post-strip, from a legitimate numeric MPN suffix (voltage/
+# pin-count/value codes are extremely common), and the codebase already models
+# date codes as their own field via normalize_date_code() rather than inline in
+# the MPN. Deliberately NOT stripping trailing digit runs here — these tests
+# pin that decision so it isn't silently "fixed" later without re-reading the
+# false-merge risk.
+class TestNormalizeMpnKeyDateCodeGuardrail:
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            pytest.param("PART#2023", "PART#2445", id="different_hash_date_codes_stay_distinct"),
+            pytest.param("PART-DC2023", "PART-DC2445", id="different_dc_prefixed_codes_stay_distinct"),
+            pytest.param("TPS3300", "TPS3301", id="genuine_numeric_suffix_stays_distinct"),
+        ],
+    )
+    def test_trailing_digits_not_collapsed(self, a, b):
+        assert normalize_mpn_key(a) != normalize_mpn_key(b)
+
+
 # ── fuzzy_mpn_match ──────────────────────────────────────────────────
 
 

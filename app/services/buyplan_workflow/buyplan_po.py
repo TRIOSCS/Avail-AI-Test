@@ -28,11 +28,23 @@ def confirm_po(
     estimated_ship_date: datetime,
     user: User,
     db: Session,
+    *,
+    payment_method: str | None = None,
 ) -> BuyPlanLine:
     """Buyer confirms PO was cut for a line in Acctivate.
 
-    Line status: awaiting_po → pending_verify.
+    Line status: awaiting_po → pending_verify. ``payment_method`` (Approvals Workspace)
+    records the terms on the Acctivate PO — one of ``PO_LINE_PAYMENT_METHODS`` (wire /
+    PayPal / credit card / ACH / COD); None leaves the column untouched (legacy
+    callers), any other value is a ValueError.
     """
+    from ...constants import PO_LINE_PAYMENT_METHODS
+
+    if payment_method is not None:
+        valid = {m.value for m in PO_LINE_PAYMENT_METHODS}
+        if payment_method not in valid:
+            raise ValueError(f"Invalid payment method: {payment_method!r}. Valid: {sorted(valid)}")
+
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
@@ -48,8 +60,79 @@ def confirm_po(
     line.po_number = po_number
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(UTC)
+    if payment_method is not None:
+        line.payment_method = payment_method
     line.status = BuyPlanLineStatus.PENDING_VERIFY.value
     logger.info("PO {} confirmed for line {} (plan {})", po_number, line_id, plan_id)
+
+    db.flush()
+    return line
+
+
+def mark_line_received(plan_id: int, line_id: int, user: User, db: Session) -> BuyPlanLine:
+    """Manually mark a line's goods as received (Approvals Workspace Phase 3, D6).
+
+    TRIO's "OPS Received (Y/N)" — there is no automated receiving event, so this
+    action backs the kanban's Received column. ADDITIVE: it stamps
+    ``received_at``/``received_by_id`` and writes a LINE_RECEIVED activity row; it
+    NEVER touches line.status or the plan's status machinery (completion still runs
+    exclusively through ``verify_po``).
+
+    Actor gate (service-side — the route is plain ``require_user``): the line's
+    assigned buyer, or a manager/admin. State gate: the line must be VERIFIED, or in
+    the paid-risk state (a PAID prepayment — money went out, goods can arrive before
+    the verify sign-off). Idempotent: an already-received line returns unchanged (a
+    double-tap is a no-op, never an error).
+
+    Raises:
+        ValueError: unknown plan/line, line not in plan, cancelled line, or a line
+            neither verified nor prepaid.
+        PermissionError: actor is neither the line's buyer nor a manager/admin.
+    """
+    from ...constants import PrepaymentStatus
+    from ...dependencies import is_manager_or_admin
+
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    line = db.get(BuyPlanLine, line_id)
+    if not line or line.buy_plan_id != plan_id:
+        raise ValueError(f"Line {line_id} not found in plan {plan_id}")
+
+    if line.received_at is not None:
+        return line  # idempotent — already received, nothing to do
+
+    if not (line.buyer_id == user.id or is_manager_or_admin(user)):
+        raise PermissionError("Only the line's buyer or a manager can mark it received.")
+
+    if line.status == BuyPlanLineStatus.CANCELLED.value:
+        raise ValueError("A cancelled line cannot be marked received.")
+    if line.status != BuyPlanLineStatus.VERIFIED.value:
+        # The paid-risk escape hatch: a PAID prepayment means goods may arrive
+        # before the approver signs off — receiving must not wait on the verify.
+        from ..prepayment_service import prepayment_state_for_lines
+
+        prepay_state = prepayment_state_for_lines(db, [line.id]).get(line.id)
+        if prepay_state != PrepaymentStatus.PAID.value:
+            raise ValueError("Only an approved (verified) or prepaid line can be marked received.")
+
+    line.received_at = datetime.now(UTC)
+    line.received_by_id = user.id
+
+    from ...constants import ActivityType
+    from ..activity_service import log_activity
+
+    po_label = f"PO {line.po_number}" if line.po_number else f"line {line.id}"
+    log_activity(
+        db,
+        activity_type=ActivityType.LINE_RECEIVED,
+        user_id=user.id,
+        buy_plan_id=plan.id,
+        buy_plan_line_id=line.id,
+        requisition_id=plan.requisition_id,
+        description=f"Goods received on {po_label} (buy plan #{plan.id}) — marked by {user.name or user.email}",
+    )
+    logger.info("Line {} (plan {}) marked received by user {}", line_id, plan_id, user.id)
 
     db.flush()
     return line

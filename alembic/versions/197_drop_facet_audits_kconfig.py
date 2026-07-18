@@ -32,8 +32,8 @@ app-generated data is lost; downgrade fully reconstructs the schema and
 re-inserts 064's seed row; prod additionally has 6-hourly pg_dump backups
 (scripts/restore.sh) as a further safety net.
 
-Revision ID: 196_drop_facet_audits_kconfig
-Revises: 195_outreach_send_subject_body
+Revision ID: 197_drop_facet_audits_kconfig
+Revises: 196_approvals_foundations
 Create Date: 2026-07-18
 """
 
@@ -43,8 +43,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "196_drop_facet_audits_kconfig"
-down_revision = "195_outreach_send_subject_body"
+revision = "197_drop_facet_audits_kconfig"
+down_revision = "196_approvals_foundations"
 branch_labels = None
 depends_on = None
 

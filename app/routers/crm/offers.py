@@ -705,6 +705,11 @@ async def approve_offer(
     maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
     _log_offer_status_change(db, offer, old_status, user)
     db.commit()
+
+    from ...services.proactive_matching import trigger_rematch_on_offer_approval
+
+    trigger_rematch_on_offer_approval(db, offer)
+
     return {"ok": True, "status": "active"}
 
 

@@ -25,6 +25,7 @@ from ...constants import (
     RESTRICTED_ROLES,
     AccessKey,
     BuyPlanStatus,
+    PaymentMethod,
     UserRole,
 )
 from ...database import get_db
@@ -43,6 +44,7 @@ from ...models import (
     User,
 )
 from ...services.buyplan_naming import summarize_top_flag
+from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
 from ...template_env import template_response
 from ._shared import _base_ctx, _is_ops_member
 
@@ -140,6 +142,22 @@ async def _notify_if_completed(plan_id: int, just_completed: bool) -> None:
 
 _APPROVALS_TABS = ("my_queue", "pipeline")
 
+# The auto-filled note when a manager sends a plan back for sign-off without typing
+# one — the engine requires a non-blank reject comment, and the change summary (the
+# audit log since submission) always rides along on the pane (spec §7).
+SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
+
+
+def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int, form) -> HTMLResponse:
+    """The shared origin=approvals_workspace re-render for plan lifecycle POSTs (halt /
+    resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an awListRefresh
+    nudge so the left work list repaints its status."""
+    from .approvals_hub import render_plan_pane
+
+    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
 
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing stage tab for the Approvals hub based on the user's role.
@@ -192,10 +210,19 @@ async def buy_plans_list_partial(
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
 
 
+def _normalize_order_type(raw: str | None) -> str:
+    """Normalize a picker/create order-type value: blank/unknown → NEW."""
+    from ...constants import SalesOrderType
+
+    value = (raw or "").strip().lower()
+    return value if value in {t.value for t in SalesOrderType} else SalesOrderType.NEW.value
+
+
 @router.get("/v2/partials/buy-plans/sales-orders/new", response_class=HTMLResponse)
 async def sales_order_new(
     request: Request,
     requisition_id: int | None = None,
+    order_type: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -204,45 +231,65 @@ async def sales_order_new(
     Origination is deal CREATION, not a decide action — it lives under the Buy Plans hub
     prefix (/v2/partials/buy-plans/*), NOT the Approvals decide prefix. The two-segment
     ``sales-orders/new`` path does not collide with the ``{plan_id:int}`` detail route or
-    the one-segment ``{tab}`` hub-lens converter. With no ``requisition_id`` it lists open
-    (OPEN_PIPELINE) requisitions that carry at least one ACTIVE offer, scoped to what the
-    user may see. With ``requisition_id`` it loads that requisition's per-requirement
-    offer/sell-price form (``get_builder_data`` + ``apply_smart_defaults``), enforcing access
-    via ``get_req_for_user`` (404 for a restricted role that does not own it).
+    the one-segment ``{tab}`` hub-lens converter.
+
+    ``order_type`` drives the path (spec §3): SOURCING types (New / Revision) list open
+    (OPEN_PIPELINE) requisitions carrying at least one ACTIVE offer and build via the
+    per-requirement offer/sell form; NON-SOURCING types (Stock Sale / Testing Service /
+    Comps) take the LITE path — any open requisition qualifies (no offers needed) and
+    the builder collapses to a create-only confirm. Access via ``get_req_for_user``
+    (404 for a restricted role that does not own the requisition).
     """
     from sqlalchemy import func
 
-    from ...constants import OfferStatus, RequisitionStatus
+    from ...constants import (
+        SOURCING_ORDER_TYPES,
+        OfferStatus,
+        RequisitionStatus,
+        SalesOrderType,
+    )
     from ...dependencies import get_req_for_user
     from ...models import Offer, Requirement
     from ...services.quote_builder_service import apply_smart_defaults, get_builder_data
 
+    otype = _normalize_order_type(order_type)
+    sourcing = otype in {t.value for t in SOURCING_ORDER_TYPES}
     ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "order_type": otype,
+            "sourcing": sourcing,
+            "order_type_choices": [(t.value, t.value.replace("_", " ").title()) for t in SalesOrderType],
+        }
+    )
 
     if requisition_id is not None:
         req = get_req_for_user(db, user, requisition_id)
-        lines = get_builder_data(req.id, db)
-        apply_smart_defaults(lines)
+        lines = []
+        if sourcing:
+            lines = get_builder_data(req.id, db)
+            apply_smart_defaults(lines)
         ctx.update({"selected_req": req, "lines": lines})
         return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
 
-    # Picker mode: open requisitions with at least one active offer, scoped to the viewer.
-    has_active_offer = (
-        select(Offer.id)
-        .join(Requirement, Offer.requirement_id == Requirement.id)
-        .where(
-            Requirement.requisition_id == Requisition.id,
-            Offer.status == OfferStatus.ACTIVE,
+    # Picker mode: open requisitions, scoped to the viewer. Sourcing types additionally
+    # require at least one active offer (the plan is built FROM offers); non-sourcing
+    # (lite) types list every open requisition.
+    stmt = select(Requisition).where(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
+    if sourcing:
+        has_active_offer = (
+            select(Offer.id)
+            .join(Requirement, Offer.requirement_id == Requirement.id)
+            .where(
+                Requirement.requisition_id == Requisition.id,
+                Offer.status == OfferStatus.ACTIVE,
+            )
+            .exists()
         )
-        .exists()
-    )
-    q = db.query(Requisition).filter(
-        Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
-        has_active_offer,
-    )
+        stmt = stmt.where(has_active_offer)
     if user.role in RESTRICTED_ROLES:
-        q = q.filter(Requisition.created_by == user.id)
-    reqs = q.order_by(Requisition.id.desc()).all()
+        stmt = stmt.where(Requisition.created_by == user.id)
+    reqs = db.scalars(stmt.order_by(Requisition.id.desc())).all()
 
     counts: dict[int, int] = {}
     if reqs:
@@ -271,18 +318,23 @@ async def sales_order_create(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Originate a DRAFT buy plan (Sales Order) from the chosen offers, then render its
-    detail.
+    """Originate a DRAFT buy plan (Sales Order), then render its detail.
 
-    Parses ``requisition_id`` + per-requirement ``offer_<rid>`` / ``sell_<rid>`` form fields,
-    enforces requisition access (``require_requisition_access`` — 404 for a restricted role
-    that does not own it), and calls ``create_sales_order_from_offers``. On the builder's
-    duplicate-open-SO ValueError it renders the existing open Sales Order's detail with a
-    toast (never a 500); any other ValueError (e.g. no requirements) is a 400.
+    Parses ``requisition_id`` + ``order_type`` + per-requirement ``offer_<rid>`` /
+    ``sell_<rid>`` form fields, enforces requisition access
+    (``require_requisition_access`` — 404 for a restricted role that does not own it).
+    SOURCING order types (New / Revision) build from the chosen offers
+    (``create_sales_order_from_offers``); NON-SOURCING types (Stock Sale / Testing
+    Service / Comps) take the LITE path (``create_lite_sales_order`` — zero lines, no
+    kanban). On the builder's duplicate-open-SO ValueError it renders the existing open
+    Sales Order's detail with a toast (never a 500); any other ValueError (e.g. no
+    requirements) is a 400.
     """
+    from ...constants import SOURCING_ORDER_TYPES
     from ...dependencies import require_requisition_access
     from ...services.buyplan_builder import (
         DuplicateSalesOrderError,
+        create_lite_sales_order,
         create_sales_order_from_offers,
     )
 
@@ -296,6 +348,8 @@ async def sales_order_create(
         raise HTTPException(400, "Invalid requisition") from e
 
     require_requisition_access(db, req_id, user)
+
+    order_type = _normalize_order_type(form.get("order_type"))
 
     selections: dict[int, int] = {}
     sell_prices: dict[int, float] = {}
@@ -314,7 +368,10 @@ async def sales_order_create(
                 continue
 
     try:
-        plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user)
+        if order_type in {t.value for t in SOURCING_ORDER_TYPES}:
+            plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user, order_type=order_type)
+        else:
+            plan = create_lite_sales_order(req_id, order_type, db, user)
     except DuplicateSalesOrderError as exc:
         # An open Sales Order already exists for this requisition — open it instead of
         # 500ing. The exception carries the existing plan id, so no re-query is needed.
@@ -413,9 +470,35 @@ async def prepay_request_decide(
             pp.void_reason = "rejected by approver"
             pp.voided_at = datetime.now(UTC)
             pp.voided_by_id = user.id
+            # Note-to-the-fixer (2.2): the (required) reject reason lands on the
+            # prepayment's notes thread tagged with the decision, and the requester
+            # (the fixer) gets an in-app notification.
+            from ...services.approvals.notifications import write_in_app
+            from ...services.workspace_notes import add_note
+
+            note_text = (comment or "").strip()
+            if note_text:
+                add_note(
+                    db,
+                    user=user,
+                    body=note_text,
+                    buy_plan_id=pp.buy_plan_id,
+                    prepayment_id=pp.id,
+                    decision="rejected",
+                )
+            if pp.created_by_id is not None:
+                write_in_app(db, pp.created_by_id, "prepay_rejected", f"Prepayment #{pp.id} rejected", note_text)
             db.commit()
             await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
 
+    if origin == "approvals_workspace" and ar.subject_id is not None:
+        # Workspace pane decide: re-render the prepayment's pane in place + repaint
+        # the left list (awListRefresh), mirroring the SO/PO pane branches.
+        from .approvals_hub import render_prepayment_pane
+
+        resp = render_prepayment_pane(request, user, db, int(ar.subject_id))
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
@@ -710,6 +793,7 @@ async def buy_plan_approve_partial(
 
     from ...constants import ApprovalRequestStatus, ApprovalSubjectType
     from ...models.approvals import ApprovalRequest
+    from ...services.approvals.notifications import write_in_app
     from ...services.approvals.service import decide as svc_decide
     from ...services.buyplan_notifications import (
         notify_approved,
@@ -717,12 +801,35 @@ async def buy_plan_approve_partial(
         run_notify_bg,
     )
     from ...services.buyplan_workflow import approve_buy_plan
+    from ...services.field_audit import edits_since, format_change_summary
+    from ...services.workspace_notes import add_note
 
     form = await request.form()
     action = form.get("action", "approve")
     origin = form.get("origin", "")
     hub_scope = form.get("hub_scope", "all")
-    notes = form.get("notes")
+    notes = (form.get("notes") or "").strip() or None
+
+    # Two-part approve (spec §7 / workspace 2.2): the workspace approval block posts a
+    # handoff instead of a bare action — proceed → the existing approve path; send_back
+    # → the existing reject→draft transition ("send back for sign-off"). The engine
+    # requires a non-blank reject comment, so a blank send-back note auto-fills.
+    handoff = (form.get("handoff") or "").strip()
+    if handoff == "proceed":
+        action = "approve"
+    elif handoff == "send_back":
+        action = "reject"
+        if not notes:
+            notes = SEND_BACK_DEFAULT_NOTE
+    decision_tag = None
+    if action == "reject":
+        decision_tag = "sent_back" if handoff == "send_back" else "rejected"
+
+    # The submitter is the fixer (change-summary recipient / note-to-fixer target);
+    # capture submitted_at BEFORE the decision so the summary window can't move.
+    bp = db.get(BuyPlan, plan_id)
+    fixer_id = bp.submitted_by_id if bp is not None else None
+    submitted_at = bp.submitted_at if bp is not None else None
 
     open_request = (
         db.execute(
@@ -759,8 +866,38 @@ async def buy_plan_approve_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    # Post-decision fan-out (2.2) — after the decision committed, never inside it:
+    #   approve → the submitter gets the change summary (the audit log since
+    #   submission, "was X → now Y"; skipped when nothing changed);
+    #   reject / send-back → the note-to-the-fixer lands on the plan's notes thread
+    #   tagged with the decision, and the submitter gets an in-app notification.
+    if action == "approve" and fixer_id is not None:
+        summary = format_change_summary(edits_since(db, buy_plan_id=plan_id, since=submitted_at))
+        if summary:
+            write_in_app(db, fixer_id, "buy_plan_changes", f"Buy plan #{plan_id} approved with changes", summary)
+            db.commit()
+    elif action == "reject" and notes:
+        add_note(db, user=user, body=notes, buy_plan_id=plan_id, decision=decision_tag)
+        if fixer_id is not None:
+            title = (
+                f"Buy plan #{plan_id} sent back for sign-off"
+                if decision_tag == "sent_back"
+                else f"Buy plan #{plan_id} rejected"
+            )
+            write_in_app(db, fixer_id, f"buy_plan_{decision_tag}", title, notes)
+        db.commit()
+
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        # Workspace pane decide: re-render THIS plan's pane in place and nudge the
+        # left work list to repaint (awListRefresh — the split shell's list container
+        # listens for it), so the decided row leaves the Needs-your-approval group.
+        from .approvals_hub import render_plan_pane
+
+        resp = render_plan_pane(request, user, db, plan_id, lens=form.get("lens", "sales-orders"))
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
@@ -805,6 +942,8 @@ async def buy_plan_halt_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -817,16 +956,29 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO — returns the refreshed detail partial."""
+    """Buyer confirms PO — returns the refreshed detail partial (or, from the Approvals
+    Workspace, the refreshed PO pane).
+
+    Workspace additions: ``payment_method`` (validated against
+    ``PO_LINE_PAYMENT_METHODS`` in the service) records the Acctivate PO terms;
+    ``qp_purchasing_*`` fields fold the QP-purchasing answers (incl. AS9120B) onto the
+    line's vendor QP row via ``qp_workspace.apply_qp_purchasing`` — the applied diff is
+    field-audited. ``origin=approvals_workspace`` re-renders the PO pane + refreshes
+    the work list.
+    """
     from ...services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ...services.buyplan_workflow import confirm_po
+    from ...services.field_audit import diff_fields, log_field_edits
+    from ...services.qp_workspace import apply_qp_purchasing
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
-    get_buyplan_for_user(db, user, plan_id)
+    plan = get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
+    payment_method = (form.get("payment_method") or "").strip() or None
+    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -840,12 +992,66 @@ async def buy_plan_confirm_po_partial(
     else:
         ship_date = datetime.now()
 
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE being confirmed.
+    target_line = db.get(BuyPlanLine, line_id)
+    if target_line is not None and target_line.buy_plan_id == plan_id:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
+
+    # COD contradicts a live prepayment (money is already committed up front) — reject
+    # here at the route so prepayment_service stays untouched by the confirm-PO flow.
+    if payment_method == PaymentMethod.COD.value:
+        from ...constants import PrepaymentStatus
+        from ...models.quality_plan import Prepayment
+
+        live_prepayment = db.scalars(
+            select(Prepayment.id).where(
+                Prepayment.buy_plan_line_id == line_id,
+                Prepayment.status.in_(
+                    (
+                        PrepaymentStatus.REQUESTED.value,
+                        PrepaymentStatus.APPROVED.value,
+                        PrepaymentStatus.PAID.value,
+                    )
+                ),
+            )
+        ).first()
+        if live_prepayment is not None:
+            raise HTTPException(
+                400,
+                "This line has a prepayment in progress — COD terms would contradict it. "
+                "Pick the prepaid method, or void the prepayment first.",
+            )
+
+    qp_fields = {key[len("qp_") :]: value for key, value in form.multi_items() if key.startswith("qp_")}
+
+    # Field-audit (2.1): diff the line's PO fields BEFORE confirm_po mutates them, then
+    # merge with the QP-purchasing diff into ONE row per save.
+    line_updates: dict = {"po_number": po_number, "estimated_ship_date": ship_date}
+    if payment_method is not None:
+        line_updates["payment_method"] = payment_method
+    line_edits = diff_fields(target_line, line_updates) if target_line is not None else []
+
     try:
-        confirm_po(plan_id, line_id, po_number, ship_date, user, db)
+        line = confirm_po(plan_id, line_id, po_number, ship_date, user, db, payment_method=payment_method)
+        edits = list(line_edits)
+        if qp_fields:
+            _qp, qp_edits = apply_qp_purchasing(db, plan=plan, line=line, user=user, fields=qp_fields)
+            edits.extend(qp_edits)
+        log_field_edits(db, user=user, buy_plan_id=plan_id, buy_plan_line_id=line_id, edits=edits)
         db.commit()
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -939,6 +1145,12 @@ async def buy_plan_resource_line_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
@@ -959,10 +1171,14 @@ async def buy_plan_claim_line_partial(
 
     No per-record ownership gate: the open pool is intentionally claimable by ANY active
     PO-cutter regardless of who owns the parent requisition. The lost race → 409.
+    ``origin=approvals_workspace`` re-renders the claimed line's PO pane in place.
     """
     from ...services.buyplan_workflow import claim_line
 
     _require_po_cutter(user)
+
+    form = await request.form()
+    origin = form.get("origin", "")
 
     try:
         claim_line(plan_id, line_id, user, db)
@@ -970,6 +1186,13 @@ async def buy_plan_claim_line_partial(
     except ValueError as e:
         logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
         raise HTTPException(409, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -991,13 +1214,15 @@ async def buy_plan_verify_po_partial(
     origin = form.get("origin", "")
     hub_scope = form.get("hub_scope", "all")
 
+    rejection_note = (form.get("rejection_note") or "").strip() or None
     try:
-        line = verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
+        line = verify_po(plan_id, line_id, action, user, db, rejection_note=rejection_note)
         # verify_po's own internal (approve-only) check_completion call already mutated
         # the SAME identity-mapped BuyPlan object `line.buy_plan` resolves to (verify_po
         # loaded it via db.get(BuyPlan, plan_id) itself) — reading .status off it here
         # is a free identity-map hit, NOT a second completion scan.
         just_completed = line.buy_plan is not None and line.buy_plan.status == BuyPlanStatus.COMPLETED.value
+        buyer_id = line.buyer_id
         db.commit()
         if action == "reject":
             await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
@@ -1005,12 +1230,89 @@ async def buy_plan_verify_po_partial(
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e)) from e
 
+    # PO send-back note-to-the-fixer (2.2): the manager's note lands on the LINE's
+    # notes thread tagged sent_back, and the assigned buyer (the fixer) gets an
+    # in-app notification. The note is optional on a send-back (spec §7).
+    if action == "reject":
+        from ...services.approvals.notifications import write_in_app
+        from ...services.workspace_notes import add_note
+
+        if rejection_note:
+            add_note(
+                db,
+                user=user,
+                body=rejection_note,
+                buy_plan_id=plan_id,
+                buy_plan_line_id=line_id,
+                decision="sent_back",
+            )
+        if buyer_id is not None:
+            write_in_app(
+                db,
+                buyer_id,
+                "po_sent_back",
+                f"PO sent back on plan #{plan_id}",
+                rejection_note,
+            )
+        db.commit()
+
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
         return render_tab_body(request, user, db, "po-approval", hub_scope)
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/receive", response_class=HTMLResponse)
+async def buy_plan_receive_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manually mark a line's goods received (Approvals Workspace 3.2 — the kanban
+    Received column's backing action).
+
+    Plain ``require_user`` here — the actor gate (line buyer / manager / admin) and
+    the state gate (verified, or the paid-risk prepay state) live service-side in
+    ``mark_line_received``; idempotent (an already-received line is a no-op). Never
+    touches plan status machinery. ``origin=approvals_workspace`` re-renders the
+    workspace pane in place: with a ``lens`` the SO/BP pane (the kanban card's Mark
+    received), without one the PO-line pane.
+    """
+    from ...services.buyplan_workflow import mark_line_received
+
+    form = await request.form()
+    origin = form.get("origin", "")
+
+    try:
+        mark_line_received(plan_id, line_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_plan_pane, render_po_pane
+
+        lens = str(form.get("lens") or "")
+        if lens:
+            resp = render_plan_pane(request, user, db, plan_id, lens=lens)
+        else:
+            resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1103,6 +1405,9 @@ async def buy_plan_cancel_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1132,6 +1437,10 @@ async def buy_plan_resume_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    form = await request.form()
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1154,6 +1463,11 @@ async def buy_plan_set_so_partial(
         raise HTTPException(403, "Only the plan owner or a manager can edit the Sales Order number.")
 
     form = await request.form()
+    # Stale-edit guard (2.1): the narrowest edited object is the PLAN (SO# lives on it).
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     try:
         set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
         db.commit()
@@ -1183,9 +1497,14 @@ async def buy_plan_add_line_partial(
     # map does NOT retroactively apply new loader options, so without this the service's
     # joinedload(BuyPlan.lines)/joinedload(BuyPlan.requisition) would do nothing and
     # plan.lines/plan.requisition would lazy-load one row at a time instead.
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): a new line's narrowest EXISTING object is the plan.
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     try:
         requirement_id = int(form.get("requirement_id") or 0)
         offer_id = int(form.get("offer_id") or 0)
@@ -1222,20 +1541,60 @@ async def buy_plan_edit_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # edit_buy_plan_line's own loader options (see buy_plan_add_line_partial for why).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE.
+    target_line = next((ln for ln in (plan.lines or []) if ln.id == line_id), None)
+    if target_line is not None:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
     quantity = _parse_optional_int(form.get("quantity"))
     unit_sell = _parse_optional_float(form.get("unit_sell"))
     offer_id = _parse_optional_int(form.get("offer_id"))
+    # Manager edit-anything-at-verify fields (2.3) — the service refuses them for
+    # anyone but a manager/admin on a PENDING_VERIFY line. po_number keeps the
+    # present-vs-absent distinction: the field ABSENT is a no-op (None → _UNSET in the
+    # service), while present-but-EMPTY is an explicit clear of an erroneous number
+    # (audited old→"" by the service; empty-on-empty stays a no-op).
+    po_number_raw = form.get("po_number")
+    po_number = str(po_number_raw).strip() if po_number_raw is not None else None
+    unit_cost = _parse_optional_float(form.get("unit_cost"))
+    ship_date_str = (form.get("estimated_ship_date") or "").strip()
+    estimated_ship_date = None
+    if ship_date_str:
+        try:
+            estimated_ship_date = datetime.fromisoformat(ship_date_str)
+        except ValueError as e:
+            raise HTTPException(400, "Expected an ISO date for the estimated ship date.") from e
 
     try:
-        edit_buy_plan_line(plan_id, line_id, user, db, quantity=quantity, unit_sell=unit_sell, offer_id=offer_id)
+        edit_buy_plan_line(
+            plan_id,
+            line_id,
+            user,
+            db,
+            quantity=quantity,
+            unit_sell=unit_sell,
+            offer_id=offer_id,
+            po_number=po_number,
+            estimated_ship_date=estimated_ship_date,
+            unit_cost=unit_cost,
+        )
         db.commit()
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    if form.get("origin") == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1260,7 +1619,16 @@ async def buy_plan_remove_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # remove_buy_plan_line's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE being removed.
+    form = await request.form()
+    target_line = next((ln for ln in (plan.lines or []) if ln.id == line_id), None)
+    if target_line is not None:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
 
     try:
         updated = remove_buy_plan_line(plan_id, line_id, user, db)
@@ -1304,9 +1672,14 @@ async def buy_plan_bulk_lines_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # bulk_edit_buy_plan_lines's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): a whole-plan save's narrowest object is the PLAN.
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     raw_payload = form.get("payload")
     try:
         parsed = json.loads(str(raw_payload))
@@ -1351,5 +1724,9 @@ async def buy_plan_reset_partial(
         db.commit()
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    form = await request.form()
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)

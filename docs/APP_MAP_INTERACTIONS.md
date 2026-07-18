@@ -281,8 +281,20 @@ search_service.py (orchestrator)
     +---> vendor_utils.py (fuzzy match, dedup vendor names)
     |       +---> DB: UPSERT vendor_cards
     |
-    +---> scoring.py (6-factor: price, qty, freshness, auth, confidence, vendor)
-    |       +---> evidence_tiers.py (assign T1-T7)
+    NOTE: MPN dedup across connector results goes through
+          `strip_packaging_suffixes()` (app/services/search_worker_base/
+          mpn_normalizer.py). It now also strips `-TRPBF`/`/TRPBF` (combined
+          tape-and-reel + lead-free), `-E3`/`-E4` (Vishay/ON Semi Pb-free grade
+          suffix), and a `[-/]TR<n>` reel-quantity pattern. It deliberately does
+          NOT strip `-13`/`-Q1`/`-EP`/bare `-T` — these mark genuinely distinct
+          SKUs (package variant, AEC-Q100 automotive grade, "Enhanced Product"
+          grade) whose stripping would wrongly merge different parts.
+          `normalize_mpn_key()` deliberately does NOT strip date codes — a
+          guardrail-tested decision, not an oversight.
+    |
+    +---> scoring.py (score_sighting_v2 — 5-factor weighted: trust 0.30, price 0.25,
+    |       qty 0.20, freshness 0.15, completeness 0.10; SIGHTING_V2_WEIGHTS)
+    |       +---> evidence_tiers.py (assign T1-T7, via app/source_trust.py)
     |
     +---> DB: UPSERT sightings (dedup by requirement + vendor + mpn)
     |
@@ -646,9 +658,18 @@ robustness items that do not change the retry/breaker/health semantics above:
 - **eBay explicit 429.** `ebay.py::_do_search` special-cased 401 and 404 but let a
   429 fall through to the generic `raise_for_status` path. It now handles 429
   explicitly like DigiKey (its OAuth-client-credentials sibling): honor Retry-After
-  (capped at 30s by `_parse_retry_after`, the Phase-1 cap) with one inline retry,
+  (capped by `_parse_retry_after`, see below) with one inline retry,
   then raise the typed `ConnectorRateLimitError` on a persistent 429. eBay now
   conforms to the 429→`ConnectorRateLimitError` row of the contract above.
+- **`_parse_retry_after` cap lowered to 8s (was 30s).** `_fetch_fresh`'s aggregate
+  fan-out budget is `settings.search_total_timeout_s` (12s default) — a 30s sleep
+  would always outlive that deadline and get cancelled anyway, so honoring an
+  upstream's longer Retry-After was pointless in the search context. Paired with
+  this, `_search_with_retry` (`app/connectors/sources.py`) now acquires the
+  per-connector semaphore ONLY around the `_do_search` HTTP call, not around the
+  retry sleep — a 429 backoff no longer pins the connector's concurrency slot (and
+  transitively the caller's search-wide `asyncio.Semaphore(10)`) while it sleeps,
+  so a slow retrying connector no longer starves its peers' throughput.
 - **Nexar empty-REST → GraphQL fall-through.** `NexarConnector._do_search` tried the
   Octopart REST v4 path first and returned its result whenever it was `not None` —
   so a 200 REST response with ZERO seller rows (`[]`) short-circuited the richer
@@ -680,6 +701,42 @@ robustness items that do not change the retry/breaker/health semantics above:
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
 `tests/test_constants.py`, `tests/test_search_streaming.py`, and
 `tests/test_health_monitor.py`.
+
+**Search fan-out performance &amp; correctness.**
+
+- **Real cache-age scoring.** Search-result Redis cache entries now carry a
+  `cached_at` timestamp; results served from cache are tagged
+  `_source_age_hours` with the real elapsed age (`_cache_age_hours`) instead of
+  a hardcoded `0.0`, so `score_sighting_v2`'s freshness factor reflects reality
+  for cache-served rows. A live fetch still tags `0.0`.
+- **Currency-aware price scoring.** `app/utils/currency.py` (`to_usd`, static
+  approximate FX table, SCORING-ONLY — never invoicing/PO/customer-facing
+  price) converts `unit_price` to USD before computing the median-price
+  baseline and the per-offer price-competitiveness comparison, so listings in
+  EUR/GBP/JPY/etc. no longer get compared as raw numbers against USD listings.
+- **Shared single-MPN search cache.** `stream_search_mpn` now reads/writes the
+  same shared `search:`-prefixed Redis cache key used by the batch search path
+  (via the shared helpers `_flatten_dedupe_filter_junk` / `_aggregate_source_stats`),
+  instead of maintaining its own cache.
+- **Bounded AI web-search gather.** The "smart AI trigger" web-search gather in
+  `_fetch_fresh` is now bounded by `settings.ai_search_timeout_s` (default 20.0,
+  separate from `search_total_timeout_s` — the AI gather starts its own clock
+  after conventional connectors finish). Previously bounded only by the
+  connector's own 60s httpx timeout, so one slow Claude web-search call could
+  hold `_fetch_fresh` open for a minute past every other connector. Pending
+  tasks past the budget are cancelled and recorded in `stats_updates` with an
+  "AI search budget exceeded" error.
+- **Post-search persistence off the event loop.** The post-search DB write
+  (`_persist_search_write`) now runs via `asyncio.to_thread` with its own
+  dedicated write session (SQLAlchemy sessions are not thread-safe, so it
+  cannot reuse the request session) and batched material-card existence
+  checks, keeping the event loop free during the write.
+- **`_build_connectors` config cache.** `_load_connector_config` now caches the
+  disabled/errored source sets + batched credentials `_build_connectors`
+  otherwise re-queried on every search, behind a 60s in-process TTL
+  (`_CONNECTOR_CONFIG_TTL_S`) — a no-op under `TESTING=1`. Connector INSTANCES
+  are still built fresh per call; `_reset_connector_config_cache()` forces
+  immediate freshness after a Settings → Sources credential/status mutation.
 
 ### Browser-worker carve-out
 
@@ -1272,7 +1329,12 @@ the `rfqVendorModal` section below) is fed from four sources:
    render a bordered indigo "affinity" chip + confidence % + reasoning in
    `title`. The button lives INSIDE its own swap target
    (`#rfq-affinity-section`), so the response replaces it — a second click
-   cannot duplicate rows.
+   cannot duplicate rows. `score_affinity_matches` (`vendor_affinity_service.py`) now
+   takes an optional `db` and multiplies the AI base confidence by a behavioral
+   multiplier from `VendorCard`: `response_rate` (+/-0.20), `ghost_rate` (-0.25),
+   `cancellation_rate` (-0.15); multiplier clamped `[0.5, 1.5]`, final confidence
+   re-clamped to the existing `[0.30, 0.75]` band. `db=None` (no card lookup) leaves
+   the multiplier at 1.0.
 3. **Any-vendor autocomplete.** A debounced input against the existing
    `GET /api/autocomplete/names` (vendors filtered client-side from the mixed
    response; the endpoint is not forked). Picking a result POSTs
@@ -2372,6 +2434,18 @@ proactive matches surface on the Proactive tab without waiting for the daily cro
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
 
+**Immediate re-match on offer approval.**
+`proactive_matching.trigger_rematch_on_offer_approval(db, offer)` closes a separate
+watermark gap: a batch scan only ever sees an offer once, at `Offer.created_at`; an
+offer created `pending_review` is excluded from the scan's live-status filter, so if
+it's approved after the watermark has advanced past its `created_at`, it stays
+invisible to every future batch scan too. The hook runs a targeted single-offer
+`find_matches_for_offer(offer.id, db)` in its own commit/rollback (a re-match failure
+never blocks the caller's approval transaction) and is a no-op for offers without a
+`material_card_id`. Wired into all three offer-approval paths: the htmx offers CRUD
+`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and
+`approve_offer` (`app/routers/crm/offers.py`).
+
 **Hotlist → Proactive (monitor without purchase history).** The CPH path returns
 no matches when a customer has never bought the part (`_find_matches` needs CPH
 rows). A **HOTLIST** requisition (`RequisitionStatus.HOTLIST`) is an explicit
@@ -3186,6 +3260,11 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
   with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
   hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+  `find_vendor_dedup_candidates` is now dialect-dispatched like the Company scanner:
+  **PostgreSQL** = pg_trgm self-join on `normalized_name` via `func.similarity()` over
+  the `ix_vendor_cards_name_trgm` GIN index — full-table coverage, no 500-row cap;
+  **SQLite/fallback** = buckets candidates by a cheap first-4-chars blocking key on the
+  normalized name before the pairwise scan.
 - **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
   `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
   per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
@@ -5289,22 +5368,24 @@ unified_score_service.py (top-level, monthly)
             |       +---> cancellation_rate, quote_conversion
             +---> vendor_metrics_snapshot (DB)
 
-SIGHTING SCORING (per search result):
-    scoring.py
-        +---> price competitiveness
-        +---> quantity match
-        +---> freshness (recency)
-        +---> authorized distributor bonus
-        +---> source confidence
-        +---> vendor reliability (from vendor_score)
+SIGHTING SCORING (per search result, score_sighting_v2, app/scoring.py):
+    scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS):
+        +---> trust        0.30  (authorized=95, else vendor_score, else 35 new-vendor baseline)
+        +---> price         0.25  (median/unit ratio, capped 0-100)
+        +---> qty           0.20  (coverage of target_qty, or flat 60 if qty known but no target)
+        +---> freshness     0.15  (100 - age_hours/24*5; missing = 25)
+        +---> completeness  0.10  (price/qty/lead_time/condition fields present)
 
-LEAD SCORING (per sourcing lead):
+LEAD SCORING (per sourcing lead, app/services/sourcing_leads.py):
+    SourcingLead.confidence_score = sighting*0.5 + source_reliability*0.2 +
+        freshness*0.15 + contactability*0.1 + historical*0.05, plus an ADDITIVE
+        vendor-feedback adjustment (see "Vendor Feedback Loop" below).
     sourcing_score.py
         +---> freshness_score
-        +---> source_reliability_score
+        +---> source_reliability_score  (app/source_trust.py base + evidence-tier bonus)
         +---> contactability_score
         +---> historical_success_score
-        +---> vendor_safety_score --> prospect_signals.py
+        +---> vendor_safety_score --> prospect_signals.py (+ vendor-feedback do_not_contact override)
 
 PROSPECT SCORING:
     prospect_scoring.py
@@ -5322,6 +5403,57 @@ ACTIVITY SCORECARD (per-user leaderboard, on-demand read):
         +---> 4 GROUP BY queries total (no per-user N+1); range:
               this_week / this_month (default) / this_quarter / all_time
 ```
+
+### Source Trust Authority (`app/source_trust.py`)
+
+Single authority for source-type reliability + evidence-tier trust, replacing scattered
+per-caller constants. Pure data/lookup module, no I/O.
+
+- `SOURCE_RELIABILITY_BASE` — source_type -> base reliability (0-100): authorized/API
+  aggregators (digikey/mouser/farnell/element14/nexar/octopart) = 90; `avail_history`/
+  `salesforce` = 85; **`brokerbin`/`sourcengine` = 80** (new API-marketplace bucket — they
+  are direct API connectors, previously mis-bucketed with scraped marketplaces at 72);
+  scraped marketplaces (netcomponents/icsource/thebrokersite) = 72; `ai`/`web` = 40;
+  default 60.
+- `EVIDENCE_TIER_BONUS` — bonus/penalty on top of the base, ordering
+  **T1 (+8) > T2 (+5) > T6 (+3) > T3 (+2) > T4 (0) > T5 (−5) > T7 (−15)**. Deliberate
+  correction: T6 (manual buyer entry) moved from −10 to +3 — a human-verified manual
+  entry now outranks T3 (anonymous marketplace scrape).
+- Source-type category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/
+  `EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
+  assignment) and `services/sourcing_leads.py` (`_source_reliability` = base + tier
+  bonus) share one membership list instead of drifting copies.
+- `VENDOR_RELIABILITY_UNKNOWN` (25.0) / `VENDOR_RELIABILITY_KNOWN_NO_SCORE` (50.0) —
+  reliability fallbacks consumed by `services/buyplan_scoring.py`'s `score_offer`
+  vendor-reliability component when a vendor has no computed `vendor_score` yet.
+
+### Vendor Feedback Loop (sourcing leads)
+
+`services/sourcing_leads.get_vendor_feedback_adjustment(db, vendor_card_id)` rolls up a
+vendor's buyer `LeadFeedbackEvent` history (joined through `SourcingLead`) into a
+time-decayed adjustment — one grouped query, no N+1:
+
+```
+get_vendor_feedback_adjustment(db, vendor_card_id)
+    +---> SELECT LeadFeedbackEvent ⋈ SourcingLead WHERE vendor_card_id = ...
+    |       AND created_at >= now - 270d   (FEEDBACK_LOOKBACK_DAYS, ~3 half-lives)
+    +---> per event: decay = 0.5 ** (age_days / 90)   (FEEDBACK_HALF_LIFE_DAYS)
+    |       confidence_penalty += weight[status] * decay
+    |       safety_penalty     += weight[status] * decay
+    +---> do_not_contact = True if ANY event has status == "do_not_contact"
+    |       (NOT decayed — a standing buyer instruction, never fades)
+    return VendorFeedbackAdjustment(confidence_penalty, safety_penalty, do_not_contact)
+```
+
+Applied ADDITIVELY (not weighted further) so a `do_not_contact`/repeated `bad_lead`
+history from THIS vendor meaningfully drags the score rather than being diluted:
+- `_compute_confidence` adds `feedback.confidence_penalty` after the weighted sum
+  (`sighting*0.5 + source_reliability*0.2 + freshness*0.15 + contactability*0.1 +
+  historical*0.05`).
+- `_compute_vendor_safety` adds `feedback.safety_penalty`; a `do_not_contact` event on
+  ANY of this vendor's leads forces `safety_score <= 15` and appends the
+  `buyer_marked_do_not_contact` flag — this override never decays, unlike the rest of
+  the adjustment.
 
 ### CRM -> Activity Scorecard Tab (`/v2/partials/crm/scorecard`, ALL users)
 
@@ -6651,3 +6783,125 @@ no separate "sales order" gate. The QP Sales-section gate (the QualityPlan, rena
 QP-scoped approval and **leaves** the lifecycle tabs; the canonical SO# is
 `buy_plans_v3.sales_order_number` (the QP's editable `sales_so_number` input was removed and
 the column dropped).
+
+---
+
+## Approvals Workspace — flows (Phases 0–1)
+
+**One page, four lenses.** `/v2/approvals` → shell (4 pills, per-viewer badges) →
+lazy `#ap-hub-body` ← `render_tab_body(tab)` → `_workspace_split.html` (split view) →
+left `#aw-list` ← `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed`
+(re-fetches on `awListRefresh from:body`) → row click dispatches `aw-select` → right
+`#aw-pane` ← the tab's pane route. The list's oldest Needs-your-approval row
+dispatches `aw-default` once (applied only when nothing is selected) so opening a tab
+lands the approver on a decision. Legacy 3-tab keys alias throughout.
+
+**Decide loops (engine untouched).** Every pane action posts an EXISTING route with
+`origin=approvals_workspace`; the handler re-renders the pane + `HX-Trigger:
+awListRefresh`:
+- SO/BP approve/reject → `POST /v2/partials/buy-plans/{id}/approve` (engine
+  `decide()` inside) → `render_plan_pane`. Reject requires the note-to-fixer
+  (engine-enforced comment).
+- Confirm PO → `POST .../lines/{line}/confirm-po` → `confirm_po(payment_method=...)`
+  + `apply_qp_purchasing` (QP-purchasing incl. AS9120B onto the (plan, vendor) QP
+  row) + `log_field_edits` for the QP diff → `render_po_pane`.
+- Verify / send back / re-source / claim → the existing verify-po / resource / claim
+  routes → `render_po_pane`. `GET /po/{line}/sent-check` surfaces `verify_po_sent`
+  detection **display-only** (never auto-verifies).
+- Prepay decide → `POST /v2/partials/approvals/prepay-requests/{id}/decide` →
+  `render_prepayment_pane`. Approve button reads **"OK to pay — {method}"**; the
+  method dropdown on the approval card posts
+  `POST /v2/partials/approvals/prepayments/{id}/method` (approver-only,
+  REQUESTED-only, `ensure_not_stale` → non-destructive 409, audited via
+  `log_field_edits(prepayment_id=...)`).
+
+**Field-audit choke point (Phase 0.2, wired from Phase 1 onward).** Edit paths compute
+`diff_fields(obj, updates)` and write ONE `FIELD_EDIT` ActivityLog row per save via
+`log_field_edits` (`details={"edits": [...]}`, keyed by `buy_plan_id` +
+`buy_plan_line_id`/`prepayment_id`); `edits_since` backs the Phase-2 approve-time
+change summary; `manager_edited_line_ids` backs the Phase-3 kanban marker.
+
+**Stale-edit guard (Phase 0.3).** Forms embed `stale_token(obj)` (Jinja global) as
+`expected_updated_at`; handlers call `ensure_not_stale` and turn `StaleEditError`
+into `stale_conflict_response()` (409, `HX-Reswap: none`, "This changed — refresh."
+toast). Empty token skips (legacy forms never false-positive).
+
+**Order type + lite path (Phase 1.3).** The SO picker
+(`/v2/partials/buy-plans/sales-orders/new`) carries an order-type select: sourcing
+types (New/Revision) require offers and build via
+`create_sales_order_from_offers(order_type=...)`; non-sourcing types (Stock Sale /
+Testing Service / Comps) list ANY open requisition and create via
+`create_lite_sales_order` — a zero-line DRAFT plan that submits/approves/tracks
+normally but generates **zero buyer tasks** and **never auto-completes**
+(`check_completion`'s empty-lines early return). `_is_stock_sale` now lets an
+explicit STOCK_SALE order type win over the vendor-name inference so submit can't
+clobber the lite flag. The SO pane hides lines/kanban for non-sourcing types.
+
+**COD guard (Phase 1.5).** `routers/prepayments.py` blocks a prepayment request on a
+COD line (and any non-`PREPAYMENT_METHODS` method) with a friendly 400 BEFORE
+`create_prepayment` — the service and engine stay untouched; the request modal's
+method list derives from `PREPAYMENT_METHODS` (wire/PayPal/CC/ACH — COD never
+renders).
+
+**Editing layer (Phase 2).** Every edit route carries the stale guard
+(narrowest-object `expected_updated_at`; mismatch → non-destructive 409) and lands
+ONE `FIELD_EDIT` row per save: single-line edits log at service depth in
+`edit_buy_plan_line`/`add`/`remove`/`set_sales_order_number`; the bulk save batches
+all touched lines into one row (per-edit `line_id` in the details JSON); confirm-po
+merges line PO fields + QP-purchasing into one row. QP-sales answers save via
+`POST /v2/partials/approvals/plan/{id}/qp-sales` → `apply_qp_sales` (draft →
+owner/manager; pending → MANAGER only). **Approve is two-part** (spec §7):
+`handoff=proceed` → approve + the submitter's in-app change summary
+(`edits_since(plan, submitted_at)` → "was X → now Y", skipped when empty);
+`handoff=send_back` → the existing reject→draft with the summary attached (blank
+note auto-fills; manager edits persist). Every reject/send-back note-to-the-fixer
+ALSO lands as a decision-tagged NOTE row on the item's thread + a `write_in_app`
+notification to the fixer. **Manager edit-anything at verify**: a manager/admin may
+edit qty / unit cost / PO# / est ship on a PENDING_VERIFY line via
+`/lines/{id}/edit` (vendor stays offer-swap-only; bulk stays strict); the pane
+shows the Acctivate warning + "Edited by manager" marker. **Notes & attachments on
+every item** (never status-locked): `POST /v2/partials/approvals/notes` /
+`.../attachments` (shared `store_and_attach` on `BuyPlanAttachment`,
+`validate_subject`, ATTACH_ADDED/REMOVED activity; delete = uploader or manager);
+`_notes_thread.html` renders threads + files with decision-tagged rows in all three
+panes. **Lifecycle controls**: manager-only halt/resume/cancel/reset on the SO pane
+via the existing POSTs (`origin=approvals_workspace`); `plan_needs_approver_reason`
+stall warnings on BP-tab rows and the pane.
+
+**PO kanban (Phase 3, spec §6).** `render_plan_pane` builds `kanban` via
+`services/kanban_lanes.build_kanban(db, plan)` on ACTIVE/INBOUND **sourcing** orders
+only (lite plans and draft/pending/closed plans get no board); `_pane_kanban.html`
+renders it inside `_pane_sales_order.html`. Lanes are **display-only, never
+persisted**, computed per line by `kanban_lane(line_status, prepay_status,
+payment_method, received)` with this exact precedence:
+
+1. `cancelled` → hidden (no column);
+2. `resourcing` → **Re-sourcing** (the claim pool — lane renders only when populated);
+3. received (`received_at` stamped) → **Received** — paid-and-received is NOT a risk;
+4. prepayment **PAID** and `payment_method != cod` → **Paid · awaiting delivery** (the
+   RISK lane — money out before goods on any advance rail, **outranks verified**; COD
+   never enters);
+5. `verified` → **Approved**; 6. `pending_verify` → **Pending approval**;
+7. else (`awaiting_po` + `issue`) → **Awaiting PO** (issue keeps a badge, not a column).
+
+Card data is batch-resolved (no N+1): prepay badge state via
+`prepayment_state_for_lines` (read-only), amount/payee/`paid_at` off the
+most-progressed live Prepayment row, `manager_edited_line_ids` for the Edited marker,
+`note_counts` + `BuyPlanAttachment` group-counts, plan-level QP `partial_ship`. Risk
+cards show **amount + payee** on their face and age green → amber (3d) → red (7d)
+keyed on `paid_at` (shared `age_chip` thresholds). **No drag** — cards move only by
+the real actions; tapping a card `hx-get`s that line's PO pane into `#aw-pane`
+(explicit `hx-target`).
+
+**Mark received (Phase 3).** TRIO's "OPS Received (Y/N)" — no automated receiving
+event exists, so `mark_line_received(plan_id, line_id, user, db)`
+(`buyplan_workflow/buyplan_po.py`, ADDITIVE) backs the Received column: actor gate =
+the line's buyer or a manager/admin (service-side); state gate = VERIFIED **or** the
+paid-risk state (a PAID prepayment — goods can land before the verify sign-off);
+idempotent (an already-received line no-ops); stamps `received_at`/`received_by_id` +
+ONE `LINE_RECEIVED` ActivityLog row keyed to the line; **never** touches line.status
+or the plan's completion machinery (completion still runs only through `verify_po`).
+Route: `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive` (`require_user`;
+PermissionError→403, ValueError→400); `origin=approvals_workspace` re-renders the
+SO/BP pane when a `lens` rides along (the kanban card's button — the board repaints
+in place) else the PO-line pane, both with `awListRefresh`.

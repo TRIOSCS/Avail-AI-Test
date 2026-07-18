@@ -9,7 +9,8 @@ to ~10min and recorded zero ApiSource telemetry.
 Covers:
 - _await_next_within_budget (the extracted, unit-testable deadline helper)
 - stream_search_mpn end-to-end with a hung connector (timeout chip + done + telemetry)
-- _parse_retry_after cap lowered 300s -> 30s
+- _parse_retry_after cap lowered 300s -> 30s -> 8s (search budget is 12s aggregate;
+  a 30s sleep always outlives it and gets cancelled anyway)
 
 Called by: pytest
 Depends on: app/search_service.py, app/connectors/sources.py, tests/conftest.py
@@ -202,21 +203,21 @@ class TestStreamingBudgetIntegration:
         assert reloaded.last_success is not None
 
 
-# ── FIX A pair: Retry-After cap 300s -> 30s ──────────────────────────────────
+# ── FIX A pair: Retry-After cap 300s -> 30s -> 8s ────────────────────────────
 
 
 class TestRetryAfterCap:
     @pytest.mark.parametrize(
         ("header", "expected"),
         [
-            ("600", 30.0),  # multi-minute upstream advertisement is capped
-            ("31", 30.0),
-            ("30", 30.0),
-            ("10", 10.0),  # under the cap is unchanged
+            ("600", 8.0),  # multi-minute upstream advertisement is capped
+            ("9", 8.0),
+            ("8", 8.0),
+            ("5", 5.0),  # under the cap is unchanged
             ("0.1", 1.0),  # floor still 1.0
         ],
     )
-    def test_header_capped_at_30(self, header, expected):
+    def test_header_capped_at_8(self, header, expected):
         from app.connectors.sources import _parse_retry_after
 
         resp = MagicMock()

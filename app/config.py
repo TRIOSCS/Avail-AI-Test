@@ -294,6 +294,14 @@ class Settings(BaseSettings):
     # are cancelled when exceeded so the orchestrator returns partial results
     # well under Caddy's 30s lb_try_duration.
     search_total_timeout_s: float = 12.0
+    # Bounded budget for the "smart AI trigger" web-search gather in _fetch_fresh,
+    # which previously ran AFTER the main search_total_timeout_s deadline had
+    # already returned, bounded only by the connector's own 60s httpx timeout.
+    # Kept separate from search_total_timeout_s (rather than reusing it) because
+    # the AI gather starts its own clock once conventional connectors finish —
+    # 20s gives Claude's grounded web search room to complete without letting a
+    # single slow AI call blow well past the interactive search's overall budget.
+    ai_search_timeout_s: float = 20.0
 
     # --- Contact intelligence ---
     contact_scoring_enabled: bool = True

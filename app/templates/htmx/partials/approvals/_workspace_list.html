@@ -1,0 +1,157 @@
+{#
+  approvals/_workspace_list.html — the Approvals Workspace left work list (any tab).
+  Search (300ms debounce) + Mine/All toggle + live/closed filter, then the rows:
+  "Needs your approval" grouped FIRST (oldest first — decision queues surface the
+  stalest work), everything else below. Every row shows its age; Acctivate numbers
+  (SO#/PO#) render as one-tap copy chips (spec §5). Rows dispatch aw-select to fill
+  the right pane; the oldest needs-your-approval row dispatches aw-default once so
+  opening the tab lands the approver on a decision, never a hunt.
+  Receives: tab, q, scope, show_closed, needs_rows / other_rows (list[WorkspaceRow]),
+            default_row (WorkspaceRow|None), list_url.
+  Called by: htmx/approvals_hub.py approvals_workspace_list (GET /{tab}/list).
+  Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
+#}
+{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
+
+{# Badge tone keyed on the RAW backend status; text is the DISPLAY label (spec §5
+   vocabulary — e.g. pending_verify renders "Pending approval"). #}
+{% set _STATUS_TONES = {
+  'draft': 'bg-slate-50 text-slate-500 border-slate-200',
+  'pending': 'bg-amber-50 text-amber-600 border-amber-200',
+  'active': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'inbound': 'bg-sky-50 text-sky-600 border-sky-200',
+  'halted': 'bg-rose-50 text-rose-500 border-rose-200',
+  'completed': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'cancelled': 'bg-gray-50 text-gray-400 border-gray-200',
+  'awaiting_po': 'bg-sky-50 text-sky-600 border-sky-200',
+  'pending_verify': 'bg-amber-50 text-amber-600 border-amber-200',
+  'verified': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'issue': 'bg-rose-50 text-rose-500 border-rose-200',
+  'resourcing': 'bg-orange-50 text-orange-600 border-orange-200',
+  'requested': 'bg-amber-50 text-amber-600 border-amber-200',
+  'approved': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'paid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+  'void': 'bg-gray-50 text-gray-400 border-gray-200',
+  'rejected': 'bg-rose-50 text-rose-500 border-rose-200',
+  'expired': 'bg-gray-50 text-gray-400 border-gray-200'
+} %}
+{% macro aw_badge(row) -%}
+<span class="badge {{ _STATUS_TONES.get(row.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ row.status_label }}</span>
+{%- endmacro %}
+
+{# ── Filters — every control targets #aw-list EXPLICITLY (never inherit). #}
+<form id="aw-filters" class="flex items-center gap-2 p-2 border-b border-line-base bg-gray-50 flex-shrink-0"
+      @submit.prevent>
+  <input type="text" name="q" value="{{ q }}" placeholder="Search customer, SO#, part…"
+         aria-label="Search {{ tab }}"
+         class="input input-sm flex-1 min-w-0"
+         hx-get="{{ list_url }}"
+         hx-target="#aw-list"
+         hx-swap="innerHTML"
+         hx-include="#aw-filters"
+         hx-trigger="keyup changed delay:300ms">
+  <input type="hidden" name="scope" value="{{ scope }}">
+  {# Hidden show_closed keeps a search (hx-include="#aw-filters") — and the split
+     shell's awListRefresh refetch — inside the Closed view instead of snapping back
+     to Live. #}
+  <input type="hidden" name="show_closed" value="{{ 'true' if show_closed else 'false' }}">
+  {# Mine/All segmented toggle — reloads THIS list at the chosen scope. #}
+  <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium flex-shrink-0">
+    {% for val, label in [('all', 'All'), ('mine', 'Mine')] %}
+    <button type="button"
+            hx-get="{{ list_url }}?scope={{ val }}&show_closed={{ 'true' if show_closed else 'false' }}&q={{ q|urlencode }}"
+            hx-target="#aw-list" hx-swap="innerHTML"
+            class="px-2.5 py-1 rounded-full transition-colors {{ 'bg-accent-500 text-white shadow-sm' if scope == val else 'text-brand-600 hover:text-brand-800' }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+  {# Live / Closed filter — completed & cancelled work lives behind this. #}
+  <button type="button"
+          hx-get="{{ list_url }}?scope={{ scope }}&show_closed={{ 'false' if show_closed else 'true' }}&q={{ q|urlencode }}"
+          hx-target="#aw-list" hx-swap="innerHTML"
+          class="px-2.5 py-1 rounded-full text-xs font-medium transition-colors flex-shrink-0 {{ 'bg-gray-700 text-white' if show_closed else 'bg-brand-100 text-brand-600 hover:bg-brand-200' }}"
+          title="{{ 'Back to live work' if show_closed else 'Show completed and cancelled' }}">
+    {{ 'Closed' if show_closed else 'Live' }}
+  </button>
+  {% if tab in ('sales-orders', 'buy-plans') %}
+  {# New sales order — the origination picker (spec §8: create with order type). Lands
+     the Buy Plans hub straight on the picker (?new=1). #}
+  <a hx-get="/v2/partials/buy-plans?new=1" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+     class="btn-primary btn-sm flex-shrink-0 cursor-pointer whitespace-nowrap" title="Start a new sales order">
+    New sales order
+  </a>
+  {% endif %}
+  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). #}
+  <a hx-boost="false" href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}"
+     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
+</form>
+
+{# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a
+   real <button>, and a nested button is invalid HTML — the parser splits the row and
+   drops the amount/status/age column outside the clickable row (kanban-card pattern:
+   div + role + tabindex + enter/space handlers). #}
+{% macro list_row(row) %}
+<div role="button" tabindex="0"
+        data-row-key="{{ row.key }}"
+        @click="$dispatch('aw-select', {key: '{{ row.key }}', url: '{{ row.pane_url }}'})"
+        @keydown.enter.prevent="$el.click()"
+        @keydown.space.prevent="$el.click()"
+        :class="sel === '{{ row.key }}' ? 'bg-accent-50 border-l-2 border-l-accent-500' : 'border-l-2 border-l-transparent hover:bg-gray-50'"
+        class="w-full text-left px-3 py-2 transition-colors cursor-pointer grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+  <span class="min-w-0">
+    <span class="flex items-center gap-1.5 min-w-0">
+      <span class="text-sm font-semibold text-gray-900 truncate">{{ row.title }}</span>
+      {% if row.order_type %}
+      <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200 flex-shrink-0">{{ row.order_type }}</span>
+      {% endif %}
+    </span>
+    <span class="flex items-center gap-1.5 mt-0.5 min-w-0">
+      {# Stop-propagated (kanban-card pattern): copying a number must not also
+         fire the row's select. #}
+      {% if row.copy_number %}<span @click.stop>{{ copy_chip(row.copy_number) }}</span>{% endif %}
+      {% if row.subtitle %}<span class="text-tertiary truncate">{{ row.subtitle }}</span>{% endif %}
+    </span>
+    {% if row.stalled %}
+    <span class="inline-flex items-center gap-1 mt-0.5 text-[11px] font-semibold text-amber-700"
+          title="This plan is waiting on an approval nobody is configured to give — fix approver rights in Admin.">
+      <span aria-hidden="true">&#9888;</span> No approver configured — stalled
+    </span>
+    {% endif %}
+  </span>
+  <span class="flex flex-col items-end gap-1 flex-shrink-0">
+    <span class="flex items-center gap-1.5">
+      {% if row.amount is not none %}
+      <span class="text-xs font-semibold tabular-nums text-gray-700">${{ '{:,.0f}'.format(row.amount) }}</span>
+      {% endif %}
+      {{ aw_badge(row) }}
+    </span>
+    {{ age_chip(row.age_at) }}
+  </span>
+</div>
+{% endmacro %}
+
+<div class="flex-1 min-h-0 md:overflow-y-auto">
+  {% if needs_rows %}
+  <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-accent-600">Needs your approval</div>
+  <div class="divide-y divide-line-subtle border-b border-line-base">
+    {% for row in needs_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if other_rows %}
+  {% if needs_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
+  <div class="divide-y divide-line-subtle">
+    {% for row in other_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if not needs_rows and not other_rows %}
+  <div class="px-4 py-10 text-center text-sm text-brand-400">
+    {% if q %}Nothing matches “{{ q }}”.{% elif show_closed %}No closed items{% if scope == 'mine' %} of yours{% endif %}.{% else %}Nothing here{% if scope == 'mine' %} for you{% endif %} — all clear.{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% if default_row %}
+{# First-render default selection: land the approver on the OLDEST decision. The split
+   shell applies aw-default only when nothing is selected yet, so a search/refresh
+   re-render never steals an in-progress selection. #}
+<div x-init="$dispatch('aw-default', {key: '{{ default_row.key }}', url: '{{ default_row.pane_url }}'})"></div>
+{% endif %}

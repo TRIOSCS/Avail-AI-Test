@@ -210,3 +210,34 @@ async def test_no_token_skips(db_session, test_user, test_quote, test_requisitio
     assert results[0]["skipped"] is True
     assert results[0]["reason"] == "no_token"
     assert results[0]["found"] is False
+
+
+# ── confirm_po payment_method (Approvals Workspace 1.4) ──────────────
+
+
+def test_confirm_po_payment_method_stored(db_session, test_user, test_quote, test_requisition):
+    """confirm_po's keyword-only payment_method lands on the line (valid value)."""
+    from app.services.buyplan_workflow import confirm_po
+
+    plan = _make_plan(db_session, test_user, test_quote, test_requisition)
+    line = _make_line(db_session, plan, buyer=test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    updated = confirm_po(plan.id, line.id, "PO-PM-1", datetime.now(UTC), test_user, db_session, payment_method="wire")
+    assert updated.payment_method == "wire"
+    assert updated.status == BuyPlanLineStatus.PENDING_VERIFY.value
+
+
+def test_confirm_po_payment_method_invalid_rejected(db_session, test_user, test_quote, test_requisition):
+    """An unknown payment method is a ValueError BEFORE any mutation."""
+    from app.services.buyplan_workflow import confirm_po
+
+    plan = _make_plan(db_session, test_user, test_quote, test_requisition)
+    line = _make_line(db_session, plan, buyer=test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="Invalid payment method"):
+        confirm_po(plan.id, line.id, "PO-PM-2", datetime.now(UTC), test_user, db_session, payment_method="crypto")
+    db_session.rollback()
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+    assert line.po_number is None

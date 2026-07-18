@@ -12,7 +12,7 @@ NOTE: this module used to also define ``KnowledgeConfig`` (table
 routing service). That service (``services/teams_qa_service.py``) was never
 built, so the model had zero readers/writers; it was removed as dead code
 (see docs/audit/2026-07-18-non-production-code-audit.md ss1) and the table
-dropped by alembic/versions/196_drop_facet_audits_kconfig.py.
+dropped by alembic/versions/197_drop_facet_audits_kconfig.py.
 """
 
 from datetime import UTC, datetime

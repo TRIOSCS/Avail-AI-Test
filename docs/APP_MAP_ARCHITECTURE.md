@@ -625,6 +625,8 @@ Single-file services worth flagging individually (not grouped under a shared pac
 | `app/services/company_import_service.py` | CSV bulk import for companies + contacts: parses into a status-flagged preview (no writes), then creates rows from the confirmed payload, deduped by normalized name/website/email, with authz-aware row flags for non-manager reps. Called by `app.routers.htmx.companies.core` (`import_companies_preview/confirm`, `import_contacts_preview/confirm`). |
 | `app/services/connector_registry.py` | Central connector-metadata registry (`get_connector_for_source`, `source_has_test_path`) — P4.1 extracted this out of `routers/sources.py` so `health_monitor.py` can resolve a connector's test path without importing the router; `routers/sources.py` still imports it back under its original private name for its own Test-button call site. See APP_MAP_INTERACTIONS.md § 9a (Settings → Connectors Tab) "Testability & Test-all concurrency" for the full testability contract. |
 | `app/services/connector_health.py` | Connector-health dashboard assembly: `get_health_dashboard(db)` builds per-connector rows (name, effective status, last success/error, search + 24h error counts, avg response ms) from the `api_sources` telemetry columns that `health_monitor` and the search path maintain, plus an active-sources overall roll-up (`down` requires an ERROR-status active source with none live; an all-degraded fleet — heuristic-degraded but still serving traffic — reports `degraded`). `effective_status(src)` is the single home of the auto-degrade heuristic (>=4 errors in 24h and more failures than successes → `degraded`), shared with the `/api/admin/connector-health` and `/api/admin/api-health/dashboard` JSON endpoints so all admin surfaces agree about the same connector. Called by `app.routers.htmx.settings.admin_api_health` (renders `htmx/partials/admin/api_health.html`, lazy-loaded by the settings System tab) and `app.routers.admin.system` (`api_connector_health`, `api_health_dashboard`). The route previously imported this module before it existed (missing since the Sprint 8-10 commit) and always fell back to an empty dashboard. |
+| `app/source_trust.py` | Single authority for source-type reliability + evidence-tier trust: `SOURCE_RELIABILITY_BASE` (source_type -> 0-100 base score), `EVIDENCE_TIER_BONUS` (T1-T7 -> bonus/penalty, T1(+8) > T2(+5) > T6(+3) > T3(+2) > T4(0) > T5(-5) > T7(-15)), and the shared source-category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/`EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`). Pure data/lookup, no I/O. Called by `app.evidence_tiers` (tier assignment), `app.services.sourcing_leads` (`_source_reliability`), and `app.services.buyplan_scoring` (`score_offer` vendor-reliability fallback constants). See APP_MAP_INTERACTIONS.md "Source Trust Authority". |
+| `app/utils/currency.py` | Static, hand-maintained FX-to-USD conversion table (`FX_TO_USD`) + `to_usd(amount, currency)` — SCORING-ONLY (median-price baselines, per-offer price-competitiveness), explicitly never used for invoicing/PO totals/customer-facing price display, which keep the vendor's original `unit_price` + `currency` unchanged. Unrecognized/missing currency assumes USD. Pure, no I/O. Called by `app.search_service` (`quick_search_mpn`, `_save_sightings`). |
 
 ## Scripts (`scripts/`)
 
@@ -663,3 +665,144 @@ Single-file services worth flagging individually (not grouped under a shared pac
 | Background jobs | 15 modules |
 | Test files | 100+ |
 | Alembic migrations | 95+ |
+
+---
+
+## Approvals Workspace (spec v4 rebuild — Phases 0–1)
+
+`/v2/approvals` is now the **Approvals Workspace**: one page, four tabs — **Sales
+Orders · Buy Plans · Purchase Orders · Prepayments** — four lenses on the same
+pipeline rooted at the sales order (`specs/approvals-workspace.md`). The 3-tab decide
+console was rebuilt **in place** (D12); legacy tab keys (`buy-plan` / `po-approval` /
+`prepayment`) alias onto the new tabs (`LEGACY_TAB_ALIASES`), so old pushed URLs and
+the `origin=approvals_hub` decide re-renders keep working. The **approvals engine is
+untouched** — every decision posts the existing `buy_plans.py` / `prepayments.py`
+routes; new `origin=approvals_workspace` branches re-render the deciding pane in place
+and fire `awListRefresh` so the left list repaints. `/v2/buy-plans` (personal hub)
+stays as-is until post-Phase-3 parity.
+
+### Router — `app/routers/htmx/approvals_hub.py` (rebuilt)
+
+- `GET /v2/partials/approvals` — shell (`require_access(BUY_PLANS)`): 4 pills with
+  **per-viewer badges** (`_viewer_badges` — decidable engine requests per gate;
+  the PO badge adds verifiable PENDING_VERIFY lines + the viewer's own AWAITING_PO
+  lines) + lazy tab body.
+- `GET /v2/partials/approvals/{tab}` → `render_tab_body` → `_workspace_split.html`
+  (drag-resizable split view; panes **stack below `md`**; `aw-select`/`aw-default`
+  selection events; the list container listens for `awListRefresh from:body`).
+- `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed` →
+  `_workspace_list.html`: debounced search, Mine/All, Live/Closed filter, age chip +
+  SO#/PO# **copy chips** on every row, **"Needs your approval" grouped first** with
+  the oldest decision default-selected (`aw-default`, applied only when nothing is
+  selected). Read models: `buy_plan_tracking_rows` (now carrying the sanctioned
+  read-side `order_type`), `build_po_queue_view`, `pending/resolved_rows_for_gate`.
+- Panes: `GET /plan/{id}/pane?lens=` (`_pane_sales_order.html` — one anatomy for both
+  SO/BP lenses), `GET /po/{line_id}/pane` (`_pane_po_line.html` — buyer confirm-PO
+  form vs manager decide), `GET /po/{line_id}/sent-check` (**display-only**
+  `verify_po_sent` detection — never auto-verifies), `GET /prepayments/{id}/pane`
+  (`_pane_prepayment.html`) and `POST /prepayments/{id}/method` (approver-only,
+  REQUESTED-only, stale-guarded, field-audited method adjust).
+- `PO_DECISION_LABELS` — spec §5 display vocabulary (`pending_verify` → "Pending
+  approval", `verified` → "Approved"); display map only, backend names unchanged.
+- CSV export retained per tab (legacy keys alias).
+
+### Templates — `partials/approvals/`
+
+`approvals_hub.html` (4-pill shell) · `_workspace_split.html` · `_workspace_list.html`
+· `_pane_sales_order.html` · `_pane_po_line.html` · `_pane_prepayment.html` ·
+`_sales_order_new.html` (order-type select + lite branch). The old
+`_tab_buy_plan/_tab_po_approval/_tab_prepayment.html` are **deleted** (the
+`scope_toggle` macro retired with them). Shared atoms (Phase 0): `copy_chip` +
+`age_chip` in `shared/_macros.html`.
+
+### Services (Phase 0 foundations + Phase 1)
+
+- `app/services/field_audit.py` — who/field/old→new audit rows: `diff_fields`,
+  `log_field_edits` (ONE batched `FIELD_EDIT` ActivityLog row per save,
+  `details={"edits": [...]}`), `edits_since`, `manager_edited_line_ids`.
+- `app/services/stale_guard.py` — optimistic-concurrency guard: `stale_token`
+  (Jinja global), `ensure_not_stale`, `stale_conflict_response` (non-destructive 409
+  + toast).
+- `app/services/qp_workspace.py` — `apply_qp_purchasing`: folds the confirm-PO form's
+  QP-purchasing answers (incl. AS9120B) onto the **(plan, vendor)** QualityPlan row
+  (D11; find-or-create, whitelisted columns, explicit yes/no booleans, blanks never
+  clear, returns the FieldEdit diff); `qp_for_line` read helper.
+- `app/services/buyplan_builder.py` — `create_sales_order_from_offers` gains
+  keyword-only `order_type` (sourcing types only); NEW `create_lite_sales_order`
+  (zero-line DRAFT plan for Stock Sale / Testing Service / Comps — the **lite path**:
+  approve goes ACTIVE, generates zero buyer tasks, never auto-completes).
+- `app/services/buyplan_workflow/buyplan_po.py` — `confirm_po` gains keyword-only
+  `payment_method` (validated against `PO_LINE_PAYMENT_METHODS`).
+- `app/routers/prepayments.py` — request-modal methods derive from
+  `PREPAYMENT_METHODS` (ACH in, **COD never**); router-level COD guard (friendly 400)
+  before `create_prepayment` on both HTMX + JSON creates (`prepayment_service.py`
+  untouched).
+
+### Phase 2 — editing layer
+
+- **Stale guard + field audit on every edit route** (`routers/htmx/buy_plans.py`):
+  `/so-number`, `/lines/add`, `/lines/{id}/edit`, `/lines/{id}/remove`,
+  `/lines/bulk`, `confirm-po` all round-trip `expected_updated_at` (narrowest-object
+  token: plan for so-number/add/bulk, line for edit/remove/confirm-po) →
+  `ensure_not_stale` → non-destructive 409. Line diffs are computed inside
+  `_apply_line_edit`'s return (`buyplan_workflow/buyplan_lines.py`) and logged at
+  service depth — ONE `FIELD_EDIT` row per save; bulk batches every touched line
+  (edits/adds/removals) into one row with per-edit `line_id` attribution
+  (`FieldEdit.line_id`). confirm-po merges the line's PO fields with the
+  QP-purchasing diff into one row.
+- **QP-sales editing**: `POST /v2/partials/approvals/plan/{id}/qp-sales`
+  (`approvals_hub.py`) → `qp_workspace.apply_qp_sales` (+ `can_edit_qp_sales`
+  matrix: draft → owner/manager, pending → MANAGER only, else locked;
+  `qp_sales_row` read helper). Inline display→edit→save editor on
+  `_pane_sales_order.html`.
+- **Two-part approve** (`buy_plan_approve_partial`): `handoff=proceed|send_back` —
+  proceed → existing approve + `write_in_app` change summary to the submitter
+  (`field_audit.format_change_summary` over `edits_since(plan, submitted_at)`);
+  send_back → existing reject→draft, blank note auto-fills `SEND_BACK_DEFAULT_NOTE`.
+  `_change_summary.html` renders "was X → now Y" in the approval block. Every
+  reject/send-back also lands its note as a decision-tagged NOTE row
+  (`workspace_notes.add_note`, `details={"decision": "rejected"|"sent_back"}`) +
+  in-app notification to the fixer (submitter / line buyer / prepay requester).
+- **Manager edit-anything at verify** (`_manager_verify_override` in
+  `buyplan_lines.py`): MANAGER/ADMIN on a PENDING_VERIFY line may change quantity
+  (cut-PO refusal relaxed) plus `po_number` / `estimated_ship_date` / `unit_cost`
+  (new `edit_buy_plan_line` kwargs). Vendor stays offer-swap-only for everyone; the
+  bulk editor keeps the strict guards. `_pane_po_line.html` manager edit form +
+  "Edits here do not change Acctivate" warning + "Edited by manager" marker
+  (`manager_edited_line_ids`).
+- **Notes + attachments** (`app/services/workspace_notes.py`: `add_note` /
+  `notes_thread` / `note_counts` — narrowest-subject scoping; never status-locked).
+  Routes in `approvals_hub.py`: `POST /v2/partials/approvals/notes`,
+  `POST /v2/partials/approvals/attachments` (multipart → shared `store_and_attach`
+  with `BuyPlanAttachment` + subject fk_field; `validate_subject()`; ATTACH_ADDED),
+  `DELETE /v2/partials/approvals/attachments/{id}` (uploader or manager;
+  ATTACH_REMOVED). `_notes_thread.html` embedded in all three panes.
+- **Lifecycle controls on the pane**: manager-only halt/resume/cancel/reset block on
+  `_pane_sales_order.html` posting the existing `buy_plans.py` routes with
+  `origin=approvals_workspace` (shared `_workspace_pane_response`).
+  `plan_needs_approver_reason` stall warnings on BP-tab list rows
+  (`WorkspaceRow.stalled`) and on the pane.
+
+### Phase 3 — PO kanban
+
+- `app/services/kanban_lanes.py` (NEW — deliberately NOT under `services/approvals/`;
+  the engine stays untouched): `kanban_lane` (pure per-line lane placement with the
+  spec-§6 precedence — cancelled hidden; resourcing > received > paid-risk (COD
+  excluded, outranks verified) > approved > pending approval > awaiting PO),
+  `build_kanban` (the whole board as `KanbanLaneView`/`KanbanCard` DTOs —
+  batch-resolved prepay badge amount/payee/paid_at, per-lane age anchors,
+  edited-by-manager marker, note/file counts, line N of M + partial-ship,
+  `can_receive`), `LANE_ORDER` / `LANE_LABELS`.
+- `app/services/buyplan_workflow/buyplan_po.py` — NEW additive `mark_line_received`
+  (buyer/manager/admin; VERIFIED or paid-risk; idempotent; stamps
+  `received_at`/`received_by_id`; `LINE_RECEIVED` activity; no plan-status changes)
+  + route `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive`
+  (`routers/htmx/buy_plans.py`).
+- `app/templates/htmx/partials/approvals/_pane_kanban.html` (NEW) — replaces the
+  Phase-1 placeholder in `_pane_sales_order.html` (ACTIVE/INBOUND sourcing orders
+  only): `_surface_pipeline.html`-style column grid, deal_card-shaped cards, risk
+  lane amber-tinted with amount+payee on the face + paid_at aging (3d/7d), claim
+  button on Re-sourcing cards, Mark received on eligible cards, **no drag** — card
+  tap `hx-get`s the PO-line pane into `#aw-pane` (explicit target).
+- Tests: `tests/test_kanban_lanes.py`, `tests/test_mark_received.py`,
+  `tests/test_kanban_render.py`.

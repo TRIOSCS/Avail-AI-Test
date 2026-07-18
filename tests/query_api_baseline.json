@@ -1,4 +1,4 @@
 {
-  "total": 1546,
+  "total": 1545,
   "note": "Legacy SQLAlchemy 1.x Query-API call count under app/. DOWN-only ratchet enforced by tests/test_query_api_ratchet.py. Regenerate with: python -m scripts.query_api_baseline --write (only after intentionally REMOVING sites)."
 }

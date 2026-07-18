@@ -1,0 +1,84 @@
+{#
+  approvals/_workspace_split.html — one Approvals Workspace tab body: the split view.
+  LEFT: the work list (lazy-loaded from /{tab}/list; re-fetches on awListRefresh so a
+  decision repaints a fresh list). RIGHT: the detail pane, filled when a row dispatches
+  aw-select (the list's oldest needs-your-approval row dispatches aw-default on first
+  render — applied only when nothing is selected yet). Resizable on desktop (drag
+  handle, parts/workspace.html pattern); the panes STACK below md (<900px, spec §5).
+  Receives: tab (canonical tab key), tab_label, scope ('all'|'mine').
+  Called by: htmx/approvals_hub.py render_tab_body (tab GET + decide re-renders).
+  Depends on: HTMX, Alpine.js, Tailwind; _workspace_list.html (left list rows).
+#}
+<div class="flex max-md:flex-col md:h-[calc(100vh-150px)]"
+     x-data="{
+       splitRatio: parseFloat(localStorage.getItem('aw-split') || '0.42'),
+       dragging: false,
+       sel: null,
+       paneUrl: null,
+       startDrag(e) { this.dragging = true; e.preventDefault(); },
+       onDrag(e) {
+         if (!this.dragging) return;
+         const rect = this.$refs.container.getBoundingClientRect();
+         this.splitRatio = Math.max(0.25, Math.min(0.75, (e.clientX - rect.left) / rect.width));
+       },
+       stopDrag() {
+         if (this.dragging) { this.dragging = false; localStorage.setItem('aw-split', this.splitRatio.toFixed(3)); }
+       },
+       select(key, url) {
+         this.sel = key; this.paneUrl = url;
+         htmx.ajax('GET', url, { target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind' });
+       }
+     }"
+     x-ref="container"
+     @mousemove.window="onDrag($event)"
+     @mouseup.window="stopDrag()"
+     @aw-select.window="select($event.detail.key, $event.detail.url)"
+     @aw-default.window="if (!sel) select($event.detail.key, $event.detail.url)">
+
+  {# ── Left: the work list ─────────────────────────────────────────── #}
+  <div class="flex flex-col min-w-0 md:border-r border-line-base max-md:!w-full max-md:border-b"
+       :style="'width: ' + (splitRatio * 100) + '%'">
+    {# awListRefresh (fired by decide responses via HX-Trigger) repaints a fresh list.
+       Explicit hx-target="this" — never inherit (#main-content landmine).
+       hx-include="#aw-filters" carries the CURRENT q/scope/show_closed (the rendered
+       list's own filter form) on every refetch, so a refresh never snaps a filtered
+       or Closed view back to defaults. On first load the form doesn't exist yet, so
+       only the baked ?scope applies; on refetches the form's values are appended
+       after it and Starlette's last-value-wins resolution makes them authoritative. #}
+    <div id="aw-list" class="flex-1 flex flex-col min-h-0 md:overflow-y-auto"
+         hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}"
+         hx-include="#aw-filters"
+         hx-trigger="load, awListRefresh from:body"
+         hx-target="this"
+         hx-swap="innerHTML">
+      {# Empty placeholder so hx-include="#aw-filters" resolves on the FIRST load too
+         (htmx logs a console error on an unmatched include selector). The swap
+         replaces it with the list's real filter form. #}
+      <form id="aw-filters" hidden></form>
+      <div class="p-6 text-center text-gray-400 text-sm">Loading {{ tab_label|lower }}…</div>
+    </div>
+  </div>
+
+  {# ── Drag handle (desktop only — panes stack on mobile) ──────────── #}
+  <div class="hidden md:block w-[3px] cursor-col-resize bg-gray-200 hover:bg-accent-400 transition-colors flex-shrink-0 relative group"
+       :class="dragging ? 'bg-accent-500' : ''"
+       @mousedown="startDrag($event)">
+    <div class="absolute inset-y-0 -left-2 -right-2"></div>
+  </div>
+
+  {# ── Right: the detail pane ──────────────────────────────────────── #}
+  <div class="flex-1 min-w-0 flex flex-col bg-white md:overflow-y-auto">
+    {# Loading bar for imperative pane loads (htmx.ajax indicator target) —
+       lives OUTSIDE #aw-pane so the innerHTML swap never removes it. #}
+    <div id="aw-pane-ind" class="htmx-indicator h-0.5 bg-accent-500 animate-pulse flex-shrink-0"></div>
+    <div id="aw-pane" class="flex-1 min-h-0">
+      <div class="flex flex-col items-center justify-center h-full min-h-[200px] text-gray-400 p-8">
+        <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <p class="text-sm font-medium text-gray-600">Select an item</p>
+        <p class="text-secondary mt-1">Pick a row on the left to review and decide</p>
+      </div>
+    </div>
+  </div>
+</div>
