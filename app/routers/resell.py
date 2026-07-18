@@ -28,7 +28,7 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
@@ -55,6 +55,7 @@ from ..services import (
 )
 from ..template_env import template_response
 from ..utils.csv_export import stream_csv
+from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["resell"])
@@ -390,7 +391,21 @@ async def resell_lists(
             offer_lists = offer_lists.filter(ExcessOffer.scope == ExcessOfferScope.TAKE_ALL)
         query = query.filter(ExcessList.id.in_(offer_lists))
     if q:
-        query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
+        if lens == "open":
+            # #10: a non-owner must NOT be able to search the free-text title — traders name
+            # lists after the customer ("Acme Corp — surplus"), so title search is a
+            # de-anonymization oracle (a hit/miss confirms the hidden customer name). Match
+            # on PART IDENTITY instead: normalized MPN (query normalized the same way the
+            # column is) or manufacturer — both indexed (models/excess.py) — via a subquery
+            # on excess_list_id. The title ILIKE stays for the owner's mine lens only.
+            conds = [ExcessLineItem.manufacturer.ilike(f"%{escape_like(q)}%", escape="\\")]
+            norm_q = normalize_mpn_key(q)
+            if norm_q:
+                conds.append(ExcessLineItem.normalized_part_number.ilike(f"%{escape_like(norm_q)}%", escape="\\"))
+            part_match = select(ExcessLineItem.excess_list_id).where(or_(*conds))
+            query = query.filter(ExcessList.id.in_(part_match))
+        else:
+            query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
     lists = query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc()).all()
     cards = _list_cards(db, lists, can_see_customer=can_see_customer)
