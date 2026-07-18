@@ -468,6 +468,15 @@ def _resolve_offer(db: Session, offer_id: int, offer_lookup: dict[int, Offer] | 
     return db.get(Offer, offer_id)
 
 
+def _manager_verify_override(actor: User | None, line: BuyPlanLine) -> bool:
+    """Spec §7 "manager edit-anything at verify": a MANAGER/ADMIN editing a line that
+    sits at PENDING_VERIFY may change what the cut-PO guards otherwise refuse
+    (quantity) and the PO-stage fields (po_number / estimated_ship_date / unit_cost).
+    Mike's call: the field audit covers it. Vendor/offer is NOT part of the override —
+    offer-swap-only for everyone, and never after a cut PO."""
+    return actor is not None and _is_manager_or_admin(actor) and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
+
+
 def _apply_line_edit(
     line: BuyPlanLine,
     plan: BuyPlan,
@@ -476,6 +485,10 @@ def _apply_line_edit(
     offer_id: Any = _UNSET,
     quantity: Any = _UNSET,
     unit_sell: Any = _UNSET,
+    po_number: Any = _UNSET,
+    estimated_ship_date: Any = _UNSET,
+    unit_cost: Any = _UNSET,
+    actor: User | None = None,
     offer_lookup: dict[int, Offer] | None = None,
 ) -> list[FieldEdit]:
     """Apply qty/offer/sell edits to *line*, shared by :func:`edit_buy_plan_line` and
@@ -495,6 +508,11 @@ def _apply_line_edit(
         fractional values) and must be positive.
       - ``unit_sell``: never gated by :func:`_has_cut_po` (it never touches the PO).
         ``None`` clears it; any other value sets it.
+      - ``po_number`` / ``estimated_ship_date`` / ``unit_cost`` (2.3): editable ONLY
+        under the :func:`_manager_verify_override` (manager/admin on a PENDING_VERIFY
+        line — "edit anything at verify", audit covers it); anyone else passing them
+        gets a ValueError. The same override relaxes the cut-PO ``quantity`` refusal.
+        Vendor stays offer-swap-only for EVERYONE and never changes after a cut PO.
     Recomputes ``line.margin_pct`` at the end. No commit/flush/recalc — caller's job.
 
     Returns the field-audit diff of what ACTUALLY changed (Approvals Workspace 2.1):
@@ -531,7 +549,7 @@ def _apply_line_edit(
     if quantity is not _UNSET:
         quantity_int = _require_int_quantity(quantity)
         if quantity_int != line.quantity:
-            if _has_cut_po(line):
+            if _has_cut_po(line) and not _manager_verify_override(actor, line):
                 raise ValueError("Cannot change the quantity after a PO is cut on this line.")
             if quantity_int <= 0:
                 raise ValueError("Quantity must be a positive whole number.")
@@ -542,6 +560,30 @@ def _apply_line_edit(
         new_sell = float(unit_sell) if unit_sell is not None else None
         edits.extend(diff_fields(line, {"unit_sell": new_sell}))
         line.unit_sell = new_sell
+
+    # PO-stage fields (2.3): manager-at-verify only; every change field-diff logged.
+    if po_number is not _UNSET:
+        new_po = str(po_number).strip()
+        if new_po and new_po != (line.po_number or ""):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the PO number at verify.")
+            edits.extend(diff_fields(line, {"po_number": new_po}))
+            line.po_number = new_po
+
+    if estimated_ship_date is not _UNSET and estimated_ship_date is not None:
+        if diff_fields(line, {"estimated_ship_date": estimated_ship_date}):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the estimated ship date at verify.")
+            edits.extend(diff_fields(line, {"estimated_ship_date": estimated_ship_date}))
+            line.estimated_ship_date = estimated_ship_date
+
+    if unit_cost is not _UNSET and unit_cost is not None:
+        new_cost = float(unit_cost)
+        if diff_fields(line, {"unit_cost": new_cost}):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the unit cost at verify.")
+            edits.extend(diff_fields(line, {"unit_cost": new_cost}))
+            line.unit_cost = new_cost
 
     line.margin_pct = _line_margin_pct(
         float(line.unit_sell) if line.unit_sell is not None else None,
@@ -665,6 +707,9 @@ def edit_buy_plan_line(
     quantity: int | None = None,
     unit_sell: float | None = None,
     offer_id: int | None = None,
+    po_number: str | None = None,
+    estimated_ship_date: datetime | None = None,
+    unit_cost: float | None = None,
 ) -> BuyPlan:
     """Edit a line's qty / sell price / vendor(offer) and recompute the header rollups.
 
@@ -694,6 +739,10 @@ def edit_buy_plan_line(
         offer_id=offer_id if offer_id is not None else _UNSET,
         quantity=quantity if quantity is not None else _UNSET,
         unit_sell=unit_sell if unit_sell is not None else _UNSET,
+        po_number=po_number if po_number is not None else _UNSET,
+        estimated_ship_date=estimated_ship_date if estimated_ship_date is not None else _UNSET,
+        unit_cost=unit_cost if unit_cost is not None else _UNSET,
+        actor=user,
     )
     _recalculate_financials(plan)
     # Field-audit (2.1): the single service choke point — one FIELD_EDIT row per save,
@@ -829,6 +878,10 @@ def bulk_edit_buy_plan_lines(
                     quantity_kw = _UNSET
 
                 unit_sell_kw = entry.get("unit_sell") if "unit_sell" in entry else _UNSET
+                # NO actor pass-through: the bulk (whole-plan) editor keeps the strict
+                # cut-PO guards for everyone — the manager-at-verify override (2.3) is
+                # scoped to the single-line PO-pane edit path (edit_buy_plan_line),
+                # where the edit targets one PENDING_VERIFY line deliberately.
                 line_edits = _apply_line_edit(
                     line,
                     plan,

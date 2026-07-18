@@ -1463,14 +1463,43 @@ async def buy_plan_edit_line_partial(
     quantity = _parse_optional_int(form.get("quantity"))
     unit_sell = _parse_optional_float(form.get("unit_sell"))
     offer_id = _parse_optional_int(form.get("offer_id"))
+    # Manager edit-anything-at-verify fields (2.3) — the service refuses them for
+    # anyone but a manager/admin on a PENDING_VERIFY line.
+    po_number = (form.get("po_number") or "").strip() or None
+    unit_cost = _parse_optional_float(form.get("unit_cost"))
+    ship_date_str = (form.get("estimated_ship_date") or "").strip()
+    estimated_ship_date = None
+    if ship_date_str:
+        try:
+            estimated_ship_date = datetime.fromisoformat(ship_date_str)
+        except ValueError as e:
+            raise HTTPException(400, "Expected an ISO date for the estimated ship date.") from e
 
     try:
-        edit_buy_plan_line(plan_id, line_id, user, db, quantity=quantity, unit_sell=unit_sell, offer_id=offer_id)
+        edit_buy_plan_line(
+            plan_id,
+            line_id,
+            user,
+            db,
+            quantity=quantity,
+            unit_sell=unit_sell,
+            offer_id=offer_id,
+            po_number=po_number,
+            estimated_ship_date=estimated_ship_date,
+            unit_cost=unit_cost,
+        )
         db.commit()
     except PermissionError as e:
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    if form.get("origin") == "approvals_workspace":
+        from .approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

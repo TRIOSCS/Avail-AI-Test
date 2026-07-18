@@ -47,6 +47,10 @@
           {{ (line.requirement.primary_mpn if line.requirement else none) or (line.offer.mpn if line.offer else none) or 'Line #' ~ line.id }}
         </h2>
         <span class="badge bg-brand-50 text-brand-600 border-brand-200">{{ status_label }}</span>
+        {% if manager_edited %}
+        <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-violet-50 text-violet-600 border border-violet-200"
+              title="A manager edited this line — see the audit trail.">Edited by manager</span>
+        {% endif %}
       </div>
       <div class="flex items-center gap-2 mt-1 flex-wrap">
         {% if line.offer %}<span class="text-tertiary">{{ line.offer.vendor_name }}</span>{% endif %}
@@ -170,6 +174,52 @@
   {% else %}
   <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
     Pending approval — awaiting a purchase-order approver{% if over_limit %} (amount exceeds your limit){% endif %}.
+  </div>
+  {% endif %}
+  {% if can_manager_edit %}
+  {# ── Manager edit-anything at verify (spec §7 / 2.3): qty, unit cost, PO number,
+       est ship, sell — every change is field-audited; vendor is NOT here (offer-swap
+       only, never free text). ── #}
+  <div class="rounded-lg border border-violet-200 bg-violet-50/50 p-3" x-data="{ editOpen: false }">
+    <div class="flex items-center justify-between gap-3">
+      <div class="text-sm font-semibold text-violet-700">Manager edit</div>
+      <button type="button" @click="editOpen = !editOpen" class="btn-secondary btn-sm"
+              x-text="editOpen ? 'Close' : 'Edit line'"></button>
+    </div>
+    <form x-show="editOpen" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/edit"
+          hx-target="#aw-pane" hx-swap="innerHTML" class="mt-2 space-y-2">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="expected_updated_at" value="{{ line_stale_token }}">
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Quantity</span>
+          <input type="number" name="quantity" min="1" step="1" value="{{ line.quantity or '' }}" class="input input-sm w-full">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Unit cost</span>
+          <input type="number" name="unit_cost" min="0" step="any" value="{{ line.unit_cost if line.unit_cost is not none else '' }}" class="input input-sm w-full">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Unit sell</span>
+          <input type="number" name="unit_sell" min="0" step="any" value="{{ line.unit_sell if line.unit_sell is not none else '' }}" class="input input-sm w-full">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">PO number</span>
+          <input type="text" name="po_number" value="{{ line.po_number or '' }}" class="input input-sm w-full font-mono">
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wide text-gray-500">Est. ship date</span>
+          <input type="date" name="estimated_ship_date"
+                 value="{{ line.estimated_ship_date.strftime('%Y-%m-%d') if line.estimated_ship_date else '' }}"
+                 class="input input-sm w-full">
+        </label>
+      </div>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <span class="text-[11px] text-amber-700">Edits here do not change Acctivate.</span>
+        <button type="submit" data-loading-disable class="btn-primary btn-sm">Save edits</button>
+      </div>
+    </form>
   </div>
   {% endif %}
   {% if can_resource %}

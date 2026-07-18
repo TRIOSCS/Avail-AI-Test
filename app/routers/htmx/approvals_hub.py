@@ -432,7 +432,9 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     their stamps.
     """
     from ...constants import PO_LINE_PAYMENT_METHODS
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
+    from ...services.buyplan_workflow import can_edit_buy_plan_lines
+    from ...services.field_audit import manager_edited_line_ids
     from ...services.qp_workspace import qp_for_line
     from ...services.stale_guard import stale_token
 
@@ -489,6 +491,15 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             # Stale-edit guard (2.1): the confirm-PO / line-edit forms round-trip the
             # LINE's token (narrowest edited object).
             "line_stale_token": stale_token(line),
+            # Manager edit-anything at verify (2.3): the pane shows the edit form with
+            # the SAME predicate the /lines/{id}/edit service gate enforces (manager on
+            # an editable plan, line at pending_verify), plus the edited-by marker.
+            "can_manager_edit": (
+                is_manager_or_admin(user)
+                and can_edit_buy_plan_lines(user, plan)
+                and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
+            ),
+            "manager_edited": line.id in manager_edited_line_ids(db, plan),
         }
     )
     return template_response("htmx/partials/approvals/_pane_po_line.html", ctx)
