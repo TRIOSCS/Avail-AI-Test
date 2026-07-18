@@ -87,7 +87,7 @@
           hx-target="#tab-outreach-{{ el.id }}"
           hx-swap="innerHTML"
           data-loading-disable
-          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Offer created from reply'; $store.toast.type='success'; $store.toast.show=true; }"
+          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='{{ 'Bid logged' if manual else 'Offer created from reply' }}'; $store.toast.type='success'; $store.toast.show=true; }"
           class="space-y-3 mt-3">
       <div>
         <label class="form-label">Part number <span class="text-rose-500">*</span></label>

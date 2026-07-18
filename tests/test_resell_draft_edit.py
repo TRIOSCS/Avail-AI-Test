@@ -356,14 +356,61 @@ class TestDraftEditRoutes:
         assert 'id="split-right-resell"' in resp.text
         assert "showToast" in resp.headers.get("HX-Trigger", "")
 
-    def test_non_owner_delete_line_403(self, client, db_session, owner, company):
-        """The default client user (a buyer, not the owner) cannot delete a draft
-        line."""
+    def test_non_owner_delete_line_404_masks_draft(self, client, db_session, owner, company):
+        """A non-owner probing a draft line gets 404 (not 403) — a private draft's
+        existence is masked, mirroring the GET edit-form's _get_list_for_user (finding
+        #3).
+
+        A 403 would reveal which sequential ids are live private drafts.
+        """
         el = _draft_with_lines(db_session, owner, company)
         line = _lines(db_session, el)[0]
         resp = client.delete(f"/api/resell/{el.id}/lines/{line.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == 404
         assert db_session.get(ExcessLineItem, line.id) is not None
+
+    def test_non_owner_patch_line_404_masks_draft(self, client, db_session, owner, company):
+        """A non-owner PATCHing a draft line gets 404 (existence masked, finding #3)."""
+        el = _draft_with_lines(db_session, owner, company)
+        line = _lines(db_session, el)[0]
+        resp = client.patch(
+            f"/api/resell/{el.id}/lines/{line.id}",
+            data={"part_number": "LM358N", "quantity": "5"},
+        )
+        assert resp.status_code == 404
+
+    def test_non_owner_patch_list_404_masks_draft(self, client, db_session, owner, company):
+        """A non-owner PATCHing a draft header gets 404 (existence masked, finding
+        #3)."""
+        el = _draft_with_lines(db_session, owner, company)
+        resp = client.patch(
+            f"/api/resell/{el.id}",
+            data={"title": "Hijacked", "company_id": str(company.id)},
+        )
+        assert resp.status_code == 404
+        db_session.refresh(el)
+        assert el.title == "Draft to edit"  # untouched
+
+    def test_non_owner_delete_list_404_masks_draft(self, client, db_session, owner, company):
+        """A non-owner DELETEing a draft list gets 404 (existence masked, finding
+        #3)."""
+        el = _draft_with_lines(db_session, owner, company)
+        list_id = el.id
+        resp = client.delete(f"/api/resell/{list_id}")
+        assert resp.status_code == 404
+        assert db_session.get(ExcessList, list_id) is not None  # not deleted
+
+    def test_delete_list_route_pushes_workspace_url(self, client, db_session, owner, company):
+        """Deleting a draft rewrites the address bar to the workspace root so a reload
+        does not reopen the now-deleted list id (finding #8)."""
+        el = _draft_with_lines(db_session, owner, company)
+        restore = _as_owner(client, owner)
+        try:
+            resp = client.delete(f"/api/resell/{el.id}")
+        finally:
+            restore()
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Push-Url") == "/v2/resell"
 
 
 class TestHonest409Copy:

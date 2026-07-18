@@ -25,10 +25,12 @@
        selected: {{ preselect_ids|default([])|tojson }},
        scope: {{ "per_line" | tojson if line_ids else "whole_list" | tojson }},
        channel: "email",
+       noContactIds: [{% for nc in no_contact_buyers %}{{ nc.card.id }}{{ "," if not loop.last }}{% endfor %}],
        query: "",
        results: [],
        searchOpen: false,
        addedCompanies: [],
+       setChannel(ch) { this.channel = ch; if (ch === "email") { this.selected = this.selected.filter(id => !this.noContactIds.includes(id)); } },
        toggle(id) { this.selected.includes(id) ? this.selected = this.selected.filter(x => x !== id) : this.selected.push(id); },
        isSel(id) { return this.selected.includes(id); },
        async search() {
@@ -182,7 +184,7 @@
       <label class="block font-medium text-secondary uppercase tracking-wider mb-1">Channel</label>
       <div class="flex flex-wrap gap-2 text-sm">
         {% for ch in channels %}
-        <button type="button" @click="channel = '{{ ch }}'"
+        <button type="button" @click="setChannel('{{ ch }}')"
                 :class="channel === '{{ ch }}' ? 'bg-accent-500 text-white border-accent-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-accent-50'"
                 class="px-3 py-1.5 rounded-full border font-medium transition-colors capitalize">{{ ch }}</button>
         {% endfor %}

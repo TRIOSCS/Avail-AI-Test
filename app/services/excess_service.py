@@ -643,6 +643,19 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
 # direct service call is guarded even when the (defence-in-depth) router guard is bypassed.
 _ACTIONABLE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
 
+# List statuses that are TERMINAL — a closed-without-bid (D5) or nightly-expired list is
+# dead and must never be reopened. Awarding/assigning on one would flip it back to
+# ``awarded`` (and a later unaward to ``bid_out``), the exact reopen the D5 contract
+# forbids (finding #4). ``awarded`` is a RESOLVED (not terminal) state that award/unaward
+# legitimately toggle, so it is NOT in this set; assign adds it separately below.
+_TERMINAL_LIST_STATUSES = (ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED)
+
+# List statuses on which ``assign_offer_line`` (unmatched-queue resolution) is rejected:
+# the two terminal states above PLUS ``awarded`` (a resolved list whose lines are all
+# decided). Assign is only meaningful while offers are still being resolved — open,
+# collecting, or bid_out.
+_ASSIGN_BLOCKED_LIST_STATUSES = frozenset(s.value for s in (*_TERMINAL_LIST_STATUSES, ExcessListStatus.AWARDED))
+
 
 def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     """Withdraw an inbound offer and recompute the rollup of every line it touched.
@@ -690,16 +703,24 @@ def assign_offer_line(
     (and thus awardable). Sets ``excess_line_item_id`` + flips ``match_status`` → MATCHED,
     then recomputes the target line's best-price rollup (and, on a RE-assign, the line it
     moved off of, so the old line no longer counts the moved bid). Guards: the list exists
-    (404) + *owner* owns it (403); the offer line belongs to this list (404); the target
-    line is on this list (404, never another list's line). Commits.
+    (404) + *owner* owns it (403); the list is not resolved/terminal — ``awarded``/
+    ``closed``/``expired`` reject 409 (finding #2 + the finding #4 "second vector": a
+    salvaged line on a dead list must not become awardable); the parent offer is still in
+    play (``open``/``late``) — a won/lost/withdrawn offer's line is 409 (re-pointing a won
+    offer's line would strand its award linkage); the offer line belongs to this list
+    (404); the target line is on this list (404, never another list's line). Commits.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can assign an offer line")
+    if excess_list.status in _ASSIGN_BLOCKED_LIST_STATUSES:
+        raise HTTPException(409, "This list is resolved — its offer lines can no longer be reassigned")
 
     offer_line = db.get(ExcessOfferLine, offer_line_id)
     if offer_line is None or offer_line.offer is None or offer_line.offer.excess_list_id != list_id:
         raise HTTPException(404, f"Offer line {offer_line_id} not found on list {list_id}")
+    if offer_line.offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
+        raise HTTPException(409, "Only an open or late offer's line can be assigned")
 
     target = db.get(ExcessLineItem, target_line_item_id)
     if target is None or target.excess_list_id != list_id:
@@ -874,6 +895,13 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     if offer.status == ExcessOfferStatus.WON:
         return offer  # idempotent — a double-award is a no-op, not a second flip
+
+    # A terminal list (closed-without-bid per D5, or nightly-expired) is dead: awarding an
+    # offer on it would reopen it to ``awarded`` (and a later unaward would step it to
+    # ``bid_out``), violating the D5 "terminal, no reopen" contract (finding #4). A late
+    # offer on such a list stays queued/reviewable but can never resurrect the posting.
+    if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}:
+        raise HTTPException(409, "This list is closed — it can't be reopened by awarding an offer")
 
     if offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
         # A lost/withdrawn offer is already closed — awarding it would resurrect a dead

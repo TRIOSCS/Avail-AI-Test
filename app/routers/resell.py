@@ -1114,6 +1114,9 @@ async def resell_update_line(
     db: Session = Depends(get_db),
 ):
     """Edit one draft line, then re-render the whole detail panel."""
+    # 404-mask a non-owner on a private draft (existence not revealed) BEFORE the service's
+    # owner-check would 403 it — consistent with the GET edit-form path (finding #3).
+    _get_list_for_user(db, list_id, user)
     el = excess_service.update_line(
         db,
         list_id,
@@ -1138,6 +1141,8 @@ async def resell_delete_line(
     db: Session = Depends(get_db),
 ):
     """Delete one draft line, then re-render the whole detail panel."""
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
     el = excess_service.delete_line(db, list_id, line_id, user)
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
@@ -1154,6 +1159,8 @@ async def resell_update_list(
 ):
     """Edit a draft list's header (title/customer/notes), then re-render the detail
     panel."""
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
     el = excess_service.update_excess_list(db, list_id, user, title=title, notes=notes or None, company_id=company_id)
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
@@ -1170,8 +1177,11 @@ async def resell_delete_list(
 
     Returns the refreshed My-Lists partial (primary → #resell-list-body) with an OOB
     reset of the now-orphaned detail pane (#split-right-resell) and a confirmation
-    toast.
+    toast. Also pushes the workspace URL so the address bar no longer points at the now-
+    deleted list id (finding #8).
     """
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
     excess_service.delete_excess_list(db, list_id, user)
     lists = (
         db.scalars(
@@ -1197,6 +1207,9 @@ async def resell_delete_list(
             "can_post": excess_service.can_post(user),
         },
     )
+    # Rewrite the address bar to the workspace root — the pushed /v2/resell/{deleted_id}
+    # would otherwise reopen a 404/empty detail on reload/bookmark (finding #8).
+    resp.headers["HX-Push-Url"] = "/v2/resell"
     return _toast(resp, "List deleted")
 
 
@@ -2158,8 +2171,12 @@ async def resell_outreach_log_bid(
     _el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
 
     qty = _to_int(quantity)
-    if not mpn_raw.strip() or qty is None:
-        raise HTTPException(400, "A logged bid needs a part number and quantity")
+    # L2: reject a non-positive quantity here (400) — mirrors resell_submit_offer. A
+    # negative qty is not None, so without the ``qty <= 0`` clause it flows into
+    # _link_inbound_offer and trips the ExcessOfferLine @validates('quantity') ValueError
+    # as an unhandled 500, after the parent ExcessOffer row was already flushed.
+    if not mpn_raw.strip() or qty is None or qty <= 0:
+        raise HTTPException(400, "A logged bid needs a part number and a positive quantity")
 
     resell_outreach_service.record_manual_response(
         db,

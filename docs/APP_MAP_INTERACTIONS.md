@@ -2098,10 +2098,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        |     title/notes/company_id[re-validates exists]/customer_site_id; re-renders detail)
     |        +-- DELETE /api/resell/{id}                   (excess_service.delete_excess_list; cascade
     |        |     cleans children → refreshes My-Lists [#resell-list-body] + OOB detail-pane reset
-    |        |     [#split-right-resell] + toast)
+    |        |     [#split-right-resell] + toast + HX-Push-Url /v2/resell so a reload no longer
+    |        |     reopens the deleted list id [finding #8])
     |        +-- GET .../{id}/edit-form, .../{id}/lines/{line_id}/edit-form (pre-filled modals)
-    |     [Honest 409 copy (×3): "Posted lists are locked. Close this list and create a new one
-    |      to make changes." replaces the false "revise as a new version".]
+    |     [All four mutating routes call _get_list_for_user FIRST so a NON-owner probing a private
+    |      draft gets 404 [existence masked], not the service's 403 — matches the GET edit-form
+    |      path [finding #3]. Honest 409 copy (×3): "Posted lists are locked. Close this list and
+    |      create a new one to make changes." replaces the false "revise as a new version".]
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
     |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
     |     confirm re-renders the whole detail like add-line — RS-5)
@@ -2111,7 +2114,8 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
-    |     awards its matched lines; idempotent for an already-won offer; 409 unless the offer
+    |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
+    |     [closed/expired — awarding would reopen the dead list, finding #4]; 409 unless the offer
     |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
     |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
     |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
@@ -2129,7 +2133,9 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
     |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
-    |     salvaged bid is awardable. Same _award_response OOB compose as award)
+    |     salvaged bid is awardable. GUARDED: 409 on a resolved/terminal list [awarded/closed/
+    |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
+    |     "second vector"]. Same _award_response OOB compose as award)
     +-- GET  /v2/partials/resell/{id}/build-bid          (owner-only Build-Bid tab: each line's
     |     best-offer planning price + editable "our offer"; once assembled, the clean
     |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
@@ -2171,9 +2177,12 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
           +-- POST .../{oid}/log-response  (resell_outreach_service.record_manual_response →
           |     responded; never regresses a terminal bid/declined; 409 for an email row)
           +-- GET  .../{oid}/log-bid-form  (reuses _reply_viewer.html — manual flag + convert_url
-          |     — as the Log-bid modal)
+          |     — as the Log-bid modal; honest 'Bid logged' toast, not 'Offer created from reply')
           +-- POST .../{oid}/log-bid       (record_manual_response(has_offer=True) → bid + an
-                ExcessOffer via the SAME _link_inbound_offer path an emailed bid uses)
+                ExcessOffer via the SAME _link_inbound_offer path an emailed bid uses; 400 unless
+                the qty is positive [finding #1]; _link_inbound_offer is GATED on the same terminal
+                check as the status advance, so a replayed Log-bid on an already-bid/declined row is
+                an idempotent no-op — no duplicate offer [finding #5/#9/#10])
 ```
 
 **Triage filters (finding #16).** The left-list `stage` filter takes the usual status values

@@ -294,6 +294,38 @@ class TestAwardOfferService:
             excess_service.award_offer(db_session, 999_999, owner)
         assert exc.value.status_code == 404
 
+    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+    def test_award_on_terminal_list_409_no_reopen(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        terminal_status,
+    ):
+        """A CLOSED (D5 'close without bid') or EXPIRED list is terminal — awarding a
+        still-open offer on it must 409, never flip it to AWARDED (finding #4).
+
+        Without the guard, award reopens the dead list to AWARDED and a subsequent
+        unaward steps it to BID_OUT — exactly the reopen the D5 contract forbids.
+        """
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        excess_list.status = terminal_status
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.award_offer(db_session, offer.id, owner)
+        assert exc.value.status_code == 409
+        db_session.refresh(offer)
+        db_session.refresh(excess_list)
+        assert offer.status == ExcessOfferStatus.OPEN  # not flipped to won
+        assert excess_list.status == terminal_status  # stayed terminal — no reopen
+        db_session.refresh(cap_line)
+        assert cap_line.status == ExcessLineItemStatus.AVAILABLE
+
     def test_award_take_all_marks_all_lines(
         self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
     ):
@@ -1259,6 +1291,57 @@ class TestAssignOfferLineService:
         assert a.offer_count == 0
         assert b.best_offer_id == offer_line.offer_id  # B now owns it
         assert b.best_offer_unit_price == Decimal("1.10")
+
+    @pytest.mark.parametrize(
+        "blocked_status",
+        [ExcessListStatus.AWARDED, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED],
+    )
+    def test_assign_on_resolved_list_409(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        blocked_status,
+    ):
+        """Assign is unmatched-queue resolution — a resolved/terminal list (awarded,
+        closed, expired) must reject it (finding #2), closing the 'second vector' to a
+        reopen (finding #4).
+
+        The line stays unmatched.
+        """
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        excess_list.status = blocked_status
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, owner)
+        assert exc.value.status_code == 409
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
+
+    def test_assign_won_offer_line_409(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A line whose parent offer is WON (awarded) can't be reassigned — that would
+        strand the award's line linkage (finding #2).
+
+        Only an open/late offer's line is assignable.
+        """
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.get(ExcessOffer, offer_line.offer_id).status = ExcessOfferStatus.WON
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, owner)
+        assert exc.value.status_code == 409
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
 
 
 class TestAssignOfferLineRoute:
