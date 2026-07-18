@@ -8,7 +8,8 @@
   same single approval. Decide posts the EXISTING approve route with
   origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
   Receives: bp (BuyPlan), lines, lens, qp (QualityPlan|None), can_decide (bool),
-            is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS).
+            is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS),
+            can_edit_qp_sales (bool), qp_stale_token (str).
   Called by: htmx/approvals_hub.py render_plan_pane (pane GET + approve re-render).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
@@ -97,9 +98,27 @@
   {% endif %}
 
   {# ── Quality — sales section (spec §4: the QP SALES answers live on the SO; always
-       present, collapsible once reviewed) ─────────────────────────── #}
+       present, collapsible once reviewed). Inline editing (2.1): the display grid is
+       the "cell display"; Edit swaps in the form (the parts cell_display→cell_edit
+       shape, one section-sized cell) — Save posts qp-sales, stale-guarded + audited. #}
+  {% macro qps_text(name, label, value) %}
+  <label class="block min-w-0">
+    <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+    <input type="text" name="qp_{{ name }}" value="{{ value if value is not none else '' }}" class="input input-sm w-full">
+  </label>
+  {% endmacro %}
+  {% macro qps_yn(name, label, value) %}
+  <label class="block min-w-0">
+    <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+    <select name="qp_{{ name }}" class="input input-sm w-full">
+      <option value="" {% if value is none %}selected{% endif %}>—</option>
+      <option value="yes" {% if value is true %}selected{% endif %}>Yes</option>
+      <option value="no" {% if value is false %}selected{% endif %}>No</option>
+    </select>
+  </label>
+  {% endmacro %}
   <div class="rounded-lg border border-line-base bg-white"
-       x-data="{ qpOpen: {{ 'false' if qp and qp.sales_section_reviewed_at else 'true' }} }">
+       x-data="{ qpOpen: {{ 'false' if qp and qp.sales_section_reviewed_at else 'true' }}, qpEdit: false }">
     <button type="button" @click="qpOpen = !qpOpen"
             class="w-full flex items-center justify-between px-3 py-2 text-left">
       <span class="text-sm font-semibold text-gray-800">Quality — sales section</span>
@@ -109,6 +128,41 @@
       </span>
     </button>
     <div x-show="qpOpen" x-collapse class="border-t border-line-subtle px-3 py-2">
+      {% if can_edit_qp_sales %}
+      <div class="flex justify-end mb-1" x-show="!qpEdit">
+        <button type="button" @click="qpEdit = true; qpOpen = true"
+                class="text-xs font-medium text-accent-600 cursor-pointer">Edit</button>
+      </div>
+      <form x-show="qpEdit" x-cloak @keydown.escape.prevent="qpEdit = false"
+            hx-post="/v2/partials/approvals/plan/{{ bp.id }}/qp-sales"
+            hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-2">
+        <input type="hidden" name="expected_updated_at" value="{{ qp_stale_token }}">
+        <input type="hidden" name="lens" value="{{ lens }}">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+          {{ qps_text('sales_condition', 'Condition', qp.sales_condition if qp else none) }}
+          {{ qps_text('sales_quantity', 'Quantity', qp.sales_quantity if qp else none) }}
+          {{ qps_text('sales_fw_hw_rev', 'FW / HW / REV / Date codes', qp.sales_fw_hw_rev if qp else none) }}
+          {{ qps_text('sales_product_commodity', 'Product commodity', qp.sales_product_commodity if qp else none) }}
+          {{ qps_yn('sales_testing_required', 'Testing required', qp.sales_testing_required if qp else none) }}
+          {{ qps_text('sales_testing_option', 'Testing option', qp.sales_testing_option if qp else none) }}
+          {{ qps_text('sales_testing_specifics', 'Testing specifics', qp.sales_testing_specifics if qp else none) }}
+          {{ qps_text('sales_test_location', 'Test location', qp.sales_test_location if qp else none) }}
+          {{ qps_yn('sales_serial_preapproval_required', 'Serial preapproval required', qp.sales_serial_preapproval_required if qp else none) }}
+          {{ qps_yn('sales_authorized_ship_early', 'Authorized to ship early', qp.sales_authorized_ship_early if qp else none) }}
+          {{ qps_yn('sales_authorized_ship_partial', 'Authorized to ship partial', qp.sales_authorized_ship_partial if qp else none) }}
+          {{ qps_text('sales_routing_prescreening_whs', 'Routing / prescreening whs', qp.sales_routing_prescreening_whs if qp else none) }}
+          {{ qps_yn('sales_third_party_pkg_ok', 'Third-party packaging OK', qp.sales_third_party_pkg_ok if qp else none) }}
+          {{ qps_text('sales_pkg_requirements', 'Packaging requirements', qp.sales_pkg_requirements if qp else none) }}
+          {{ qps_text('sales_bom_matrix_links', 'Acceptable subs / BOM notes', qp.sales_bom_matrix_links if qp else none) }}
+          {{ qps_text('sales_notes', 'Sales notes', qp.sales_notes if qp else none) }}
+        </div>
+        <div class="flex items-center justify-end gap-1.5">
+          <button type="button" @click="qpEdit = false" class="btn-secondary btn-sm">Cancel</button>
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+      {% endif %}
+      <div {% if can_edit_qp_sales %}x-show="!qpEdit"{% endif %}>
       {% if qp %}
       {% macro yn(v) %}{% if v is true %}Yes{% elif v is false %}No{% else %}—{% endif %}{% endmacro %}
       <dl class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
@@ -139,6 +193,7 @@
       {% else %}
       <p class="text-xs text-gray-400 py-1">No quality-plan data recorded yet.</p>
       {% endif %}
+      </div>
     </div>
   </div>
 

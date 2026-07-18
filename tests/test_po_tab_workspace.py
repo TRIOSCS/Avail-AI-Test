@@ -284,7 +284,8 @@ def test_confirm_po_from_pane_records_method_qp_and_audit(hub_client: TestClient
     qp = db_session.query(QualityPlan).filter(QualityPlan.buy_plan_id == bp.id).one()
     assert qp.purchasing_condition == "NEW SEALED"
     assert qp.purchasing_traceability_verified is True
-    # The QP save is field-audited (one batched FIELD_EDIT row).
+    # The save is field-audited: ONE batched FIELD_EDIT row per save carrying the
+    # line's PO fields (2.1) AND the QP-purchasing answers.
     audit = (
         db_session.query(ActivityLog)
         .filter(
@@ -295,6 +296,9 @@ def test_confirm_po_from_pane_records_method_qp_and_audit(hub_client: TestClient
         .one()
     )
     assert {e["field"] for e in audit.details["edits"]} == {
+        "po_number",
+        "estimated_ship_date",
+        "payment_method",
         "purchasing_condition",
         "purchasing_traceability_verified",
     }

@@ -35,11 +35,19 @@ from ..models.intelligence import ActivityLog
 
 @dataclass(frozen=True)
 class FieldEdit:
-    """One field change within a single save: field name + stringified old/new."""
+    """One field change within a single save: field name + stringified old/new.
+
+    ``line_id`` (optional) attributes the edit to a specific buy-plan line when ONE
+    audit row batches edits across several lines (the bulk "save all" path — one row
+    per save, D4). It is a plain integer in the details JSON, NOT an FK, so it
+    survives the line's deletion (the "line removed" edit). Single-line saves leave
+    it None and attribute via the row's buy_plan_line_id column instead.
+    """
 
     field: str
     old: str
     new: str
+    line_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,14 @@ def log_field_edits(
     from .activity_service import log_activity
 
     summary = "Edited " + ", ".join(edit.field for edit in edits)
+    # Drop the None line_id key so single-line saves keep the original 3-key edit
+    # shape ({field, old, new}) — only bulk multi-line rows carry per-edit line_ids.
+    serialized = []
+    for edit in edits:
+        entry = asdict(edit)
+        if entry.get("line_id") is None:
+            entry.pop("line_id", None)
+        serialized.append(entry)
     return log_activity(
         db,
         activity_type=ActivityType.FIELD_EDIT,
@@ -125,7 +141,7 @@ def log_field_edits(
         buy_plan_line_id=buy_plan_line_id,
         prepayment_id=prepayment_id,
         summary=summary[:500],
-        details={"edits": [asdict(edit) for edit in edits]},
+        details={"edits": serialized},
     )
 
 
@@ -159,7 +175,8 @@ def edits_since(db: Session, *, buy_plan_id: int, since: datetime | None) -> lis
                     user_id=record.user_id,
                     user_name=user_name,
                     at=record.created_at,
-                    buy_plan_line_id=record.buy_plan_line_id,
+                    # Per-edit line attribution (bulk rows) wins over the row's column.
+                    buy_plan_line_id=edit.get("line_id") or record.buy_plan_line_id,
                     prepayment_id=record.prepayment_id,
                 )
             )

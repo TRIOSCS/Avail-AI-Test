@@ -47,6 +47,27 @@ QP_PURCHASING_FIELDS: tuple[str, ...] = (
     "purchasing_serial_numbers",
 )
 
+# The SO pane's writable QP-sales columns (spec §4 SALES section — the workbook
+# fields that live on the sales order). Anything else posted is ignored.
+QP_SALES_FIELDS: tuple[str, ...] = (
+    "sales_condition",
+    "sales_quantity",
+    "sales_fw_hw_rev",
+    "sales_product_commodity",
+    "sales_testing_required",
+    "sales_testing_option",
+    "sales_testing_specifics",
+    "sales_test_location",
+    "sales_serial_preapproval_required",
+    "sales_authorized_ship_early",
+    "sales_authorized_ship_partial",
+    "sales_routing_prescreening_whs",
+    "sales_third_party_pkg_ok",
+    "sales_pkg_requirements",
+    "sales_bom_matrix_links",
+    "sales_notes",
+)
+
 _BOOL_FIELDS = frozenset(
     {
         "purchasing_testing_required",
@@ -54,12 +75,20 @@ _BOOL_FIELDS = frozenset(
         "purchasing_traceability_verified",
         "purchasing_coc_available",
         "purchasing_sn_previously_received",
+        "sales_testing_required",
+        "sales_serial_preapproval_required",
+        "sales_authorized_ship_early",
+        "sales_authorized_ship_partial",
+        "sales_third_party_pkg_ok",
     }
 )
 
+_INT_FIELDS = frozenset({"sales_quantity"})
+
 
 def _coerce(field: str, value: Any) -> Any:
-    """Normalize one raw form value: booleans from explicit yes/no strings; ''→None."""
+    """Normalize one raw form value: booleans from explicit yes/no strings; whole
+    numbers for the int fields (non-numeric → ValueError); ''→None."""
     if field in _BOOL_FIELDS:
         if isinstance(value, bool):
             return value
@@ -69,6 +98,14 @@ def _coerce(field: str, value: Any) -> Any:
         if text in ("no", "false", "0"):
             return False
         return None  # unanswered
+    if field in _INT_FIELDS:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{field} must be a whole number.") from e
     if isinstance(value, str):
         value = value.strip()
     return value or None
@@ -120,6 +157,69 @@ def apply_qp_purchasing(
         qp = query.order_by(QualityPlan.id).first()
     if qp is None:
         qp = QualityPlan(buy_plan_id=plan.id, vendor_card_id=vendor_card_id, created_by_id=user.id)
+        db.add(qp)
+        db.flush()
+
+    edits = diff_fields(qp, updates)
+    for edit in edits:
+        setattr(qp, edit.field, updates[edit.field])
+    db.flush()
+    return qp, edits
+
+
+def can_edit_qp_sales(user: User, plan: BuyPlan) -> bool:
+    """Whether *user* may edit the plan's QP-sales answers NOW (spec §7 matrix).
+
+    draft → the owning salesperson OR a manager/admin; pending → MANAGER/ADMIN ONLY
+    (sales keeps notes while pending, not fields); everything else → locked (active+
+    header is locked; line changes go through the PO stage). Enforced server-side by
+    the qp-sales route — the pane hides the editor with the SAME predicate.
+    """
+    from ..constants import BuyPlanStatus, UserRole
+
+    is_manager = user.role in (UserRole.MANAGER, UserRole.ADMIN)
+    if plan.status == BuyPlanStatus.DRAFT.value:
+        req = plan.requisition
+        return is_manager or bool(req and req.created_by == user.id)
+    if plan.status == BuyPlanStatus.PENDING.value:
+        return is_manager
+    return False
+
+
+def qp_sales_row(db: Session, plan: BuyPlan) -> QualityPlan | None:
+    """The plan's FIRST QualityPlan row — the SALES answers are plan-level (D11: QP
+    rows stay keyed per (plan, vendor); the first row carries the sales section).
+    Read-only lookup; :func:`apply_qp_sales` find-or-creates on write."""
+    return db.query(QualityPlan).filter(QualityPlan.buy_plan_id == plan.id).order_by(QualityPlan.id).first()
+
+
+def apply_qp_sales(
+    db: Session,
+    *,
+    plan: BuyPlan,
+    user: User,
+    fields: dict[str, Any],
+) -> tuple[QualityPlan, list[FieldEdit]]:
+    """Apply the SO pane's QP-sales answers to the plan's first QualityPlan row.
+
+    Mirrors :func:`apply_qp_purchasing`: only whitelisted ``sales_*`` fields apply
+    (booleans from explicit yes/no, sales_quantity a whole number, blanks leave the
+    column untouched); returns ``(qp, edits)`` — the caller logs the diff and owns the
+    commit. Permission is the ROUTE's job (:func:`can_edit_qp_sales`); a save that
+    changes nothing returns an empty diff and writes nothing.
+    """
+    updates: dict[str, Any] = {}
+    for field in QP_SALES_FIELDS:
+        if field not in fields:
+            continue
+        value = _coerce(field, fields[field])
+        if value is None and str(fields[field] or "").strip() == "":
+            continue  # unanswered blank — never null out an existing answer
+        updates[field] = value
+
+    qp = qp_sales_row(db, plan)
+    if qp is None:
+        qp = QualityPlan(buy_plan_id=plan.id, created_by_id=user.id)
         db.add(qp)
         db.flush()
 

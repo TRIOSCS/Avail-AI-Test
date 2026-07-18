@@ -75,6 +75,7 @@
   <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/confirm-po"
         hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-3">
     <input type="hidden" name="origin" value="approvals_workspace">
+    <input type="hidden" name="expected_updated_at" value="{{ line_stale_token }}">
     <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3 space-y-2">
       <div class="text-sm font-semibold text-accent-700">Confirm the PO you cut in Acctivate</div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">

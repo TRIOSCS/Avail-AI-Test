@@ -43,6 +43,7 @@ from ...models import (
     User,
 )
 from ...services.buyplan_naming import summarize_top_flag
+from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
 from ...template_env import template_response
 from ._shared import _base_ctx, _is_ops_member
 
@@ -885,7 +886,7 @@ async def buy_plan_confirm_po_partial(
     """
     from ...services.buyplan_notifications import notify_po_confirmed, run_notify_bg
     from ...services.buyplan_workflow import confirm_po
-    from ...services.field_audit import log_field_edits
+    from ...services.field_audit import diff_fields, log_field_edits
     from ...services.qp_workspace import apply_qp_purchasing
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
@@ -909,13 +910,30 @@ async def buy_plan_confirm_po_partial(
     else:
         ship_date = datetime.now()
 
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE being confirmed.
+    target_line = db.get(BuyPlanLine, line_id)
+    if target_line is not None and target_line.buy_plan_id == plan_id:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
+
     qp_fields = {key[len("qp_") :]: value for key, value in form.multi_items() if key.startswith("qp_")}
+
+    # Field-audit (2.1): diff the line's PO fields BEFORE confirm_po mutates them, then
+    # merge with the QP-purchasing diff into ONE row per save.
+    line_updates: dict = {"po_number": po_number, "estimated_ship_date": ship_date}
+    if payment_method is not None:
+        line_updates["payment_method"] = payment_method
+    line_edits = diff_fields(target_line, line_updates) if target_line is not None else []
 
     try:
         line = confirm_po(plan_id, line_id, po_number, ship_date, user, db, payment_method=payment_method)
+        edits = list(line_edits)
         if qp_fields:
-            _qp, edits = apply_qp_purchasing(db, plan=plan, line=line, user=user, fields=qp_fields)
-            log_field_edits(db, user=user, buy_plan_id=plan_id, buy_plan_line_id=line_id, edits=edits)
+            _qp, qp_edits = apply_qp_purchasing(db, plan=plan, line=line, user=user, fields=qp_fields)
+            edits.extend(qp_edits)
+        log_field_edits(db, user=user, buy_plan_id=plan_id, buy_plan_line_id=line_id, edits=edits)
         db.commit()
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
@@ -1258,6 +1276,11 @@ async def buy_plan_set_so_partial(
         raise HTTPException(403, "Only the plan owner or a manager can edit the Sales Order number.")
 
     form = await request.form()
+    # Stale-edit guard (2.1): the narrowest edited object is the PLAN (SO# lives on it).
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     try:
         set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
         db.commit()
@@ -1287,9 +1310,14 @@ async def buy_plan_add_line_partial(
     # map does NOT retroactively apply new loader options, so without this the service's
     # joinedload(BuyPlan.lines)/joinedload(BuyPlan.requisition) would do nothing and
     # plan.lines/plan.requisition would lazy-load one row at a time instead.
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): a new line's narrowest EXISTING object is the plan.
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     try:
         requirement_id = int(form.get("requirement_id") or 0)
         offer_id = int(form.get("offer_id") or 0)
@@ -1326,9 +1354,16 @@ async def buy_plan_edit_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # edit_buy_plan_line's own loader options (see buy_plan_add_line_partial for why).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE.
+    target_line = next((ln for ln in (plan.lines or []) if ln.id == line_id), None)
+    if target_line is not None:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
     quantity = _parse_optional_int(form.get("quantity"))
     unit_sell = _parse_optional_float(form.get("unit_sell"))
     offer_id = _parse_optional_int(form.get("offer_id"))
@@ -1364,7 +1399,16 @@ async def buy_plan_remove_line_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # remove_buy_plan_line's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+
+    # Stale-edit guard (2.1): the narrowest edited object is the LINE being removed.
+    form = await request.form()
+    target_line = next((ln for ln in (plan.lines or []) if ln.id == line_id), None)
+    if target_line is not None:
+        try:
+            ensure_not_stale(target_line, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
 
     try:
         updated = remove_buy_plan_line(plan_id, line_id, user, db)
@@ -1408,9 +1452,14 @@ async def buy_plan_bulk_lines_partial(
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
     # bulk_edit_buy_plan_lines's own loader options (see buy_plan_add_line_partial).
-    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
 
     form = await request.form()
+    # Stale-edit guard (2.1): a whole-plan save's narrowest object is the PLAN.
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
     raw_payload = form.get("payload")
     try:
         parsed = json.loads(str(raw_payload))

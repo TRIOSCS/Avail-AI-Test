@@ -307,6 +307,8 @@ def render_plan_pane(
     """
     from ...dependencies import get_buyplan_for_user
     from ...models.quality_plan import QualityPlan
+    from ...services.qp_workspace import can_edit_qp_sales
+    from ...services.stale_guard import stale_token
 
     lens = lens if lens in ("sales-orders", "buy-plans") else "sales-orders"
     bp = get_buyplan_for_user(
@@ -338,6 +340,10 @@ def render_plan_pane(
             "is_sourcing": (bp.order_type or SalesOrderType.NEW.value) in {t.value for t in SOURCING_ORDER_TYPES},
             "order_type_label": ORDER_TYPE_LABELS.get(bp.order_type or "", bp.order_type),
             "po_labels": PO_DECISION_LABELS,
+            # QP-sales inline editing (2.1): the pane hides the editor with the SAME
+            # predicate the POST enforces (draft → owner/manager; pending → manager only).
+            "can_edit_qp_sales": can_edit_qp_sales(user, bp),
+            "qp_stale_token": stale_token(qp) if qp is not None else "",
         }
     )
     return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
@@ -358,6 +364,52 @@ async def approvals_plan_pane(
     return render_plan_pane(request, user, db, plan_id, lens)
 
 
+@router.post("/v2/partials/approvals/plan/{plan_id:int}/qp-sales", response_class=HTMLResponse)
+async def approvals_plan_qp_sales(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save the SO pane's QP-sales answers (spec §4/§7 — Approvals Workspace 2.1).
+
+    Thin route → ``qp_workspace.apply_qp_sales``. Permission per the §7 matrix
+    (``can_edit_qp_sales``): draft → owner or manager; pending → MANAGER ONLY; locked
+    otherwise (403). Stale-guarded on the QP row's ``updated_at`` token (a plan with no
+    QP row yet round-trips an empty token, which skips the check). The applied diff is
+    field-audited (ONE row per save; a no-change save writes nothing). Re-renders the
+    pane + refreshes the work list.
+    """
+    from ...dependencies import get_buyplan_for_user
+    from ...services.field_audit import log_field_edits
+    from ...services.qp_workspace import apply_qp_sales, can_edit_qp_sales, qp_sales_row
+    from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
+
+    bp = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
+    if not can_edit_qp_sales(user, bp):
+        raise HTTPException(403, "You cannot edit the Quality sales section in this plan's current status.")
+
+    form = await request.form()
+    qp = qp_sales_row(db, bp)
+    if qp is not None:
+        try:
+            ensure_not_stale(qp, form.get("expected_updated_at"))
+        except StaleEditError:
+            return stale_conflict_response()
+
+    fields = {key[len("qp_") :]: value for key, value in form.multi_items() if key.startswith("qp_")}
+    try:
+        _qp, edits = apply_qp_sales(db, plan=bp, user=user, fields=fields)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    log_field_edits(db, user=user, buy_plan_id=bp.id, edits=edits)
+    db.commit()
+
+    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
+
 # ── Purchase-order line detail pane ─────────────────────────────────────
 
 
@@ -374,6 +426,7 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     from ...constants import PO_LINE_PAYMENT_METHODS
     from ...dependencies import get_buyplan_for_user
     from ...services.qp_workspace import qp_for_line
+    from ...services.stale_guard import stale_token
 
     line = db.get(
         BuyPlanLine,
@@ -425,6 +478,9 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             ],
             "po_labels": PO_DECISION_LABELS,
             "status_label": PO_DECISION_LABELS.get(line.status, line.status),
+            # Stale-edit guard (2.1): the confirm-PO / line-edit forms round-trip the
+            # LINE's token (narrowest edited object).
+            "line_stale_token": stale_token(line),
         }
     )
     return template_response("htmx/partials/approvals/_pane_po_line.html", ctx)
