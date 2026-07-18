@@ -2190,6 +2190,27 @@ Demo seed: `python -m app.management.seed_resell_demo` (idempotent; `--reset` to
 three deal shapes (40-line collecting w/ per-line + unmatched + take-all offers, a single-line
 one-off w/ 2 offers, an awarded list).
 
+**Anonymization policy (Phase 3, decision D2 — one predicate everywhere).** Customer-identity
+hiding is enforced through the SINGLE ownership predicate `can_see_customer` (== `is_owner` ==
+`el.owner_id == user.id`), threaded from `resell.py` into every template. To a NON-owner (the
+"Open to Me" offerer lens + the non-owner detail) the app projects only MPN / qty / condition —
+never the seller company, and never any of these owner-private aggregates:
+- the seller **company name** and the **owner name** chip (`_header_chips.html`);
+- the free-text **title** — traders name lists after the customer, so a non-owner gets the
+  neutral `Excess listing #N` label (`_display_title`);
+- **offer count** (header "N offers" chip + Offers-tab count badge), **offer coverage** meter,
+  the amber offer-count badge, and the **"N/M awarded"** progress chip — all competitive signal,
+  gated identically to the already-private per-line offer badge / best-offer price (RS-1);
+  `_list_cards` also NULLs coverage/offer_count for non-owners as defense-in-depth.
+Two de-anonymization ORACLES are closed the same way: (1) the left-list `q` search filters on
+**part identity** (normalized MPN / manufacturer, both indexed) in the open lens — never the
+title, which would let a non-owner confirm a hidden customer name by hit/miss; the title ILIKE
+stays for the owner's mine lens only. (2) The outreach email **subject** prefill is neutral
+(`Excess available: N lines`) — never the customer-named title, which ships externally to the
+buyer; and the internal per-touch **ActivityLog subject** references the list by id
+(`excess offer (list #N)`), since that log lands on the SHARED buyer vendor-card timeline.
+Reply-matching is unaffected — it keys on the PERSISTED `send_subject`, not the prefill default.
+
 **Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
 - **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback
   (`notify_po_rejected`, fired from the verify-po reject path), new assignment / approval

@@ -587,21 +587,7 @@ def test_submit_outreach_draft_list_409(client, db_session, trader_user, draft_l
         restore()
 
 
-def test_submit_outreach_posted_list_200(client, db_session, trader_user, posted_list):
-    """Submitting outreach on a POSTED (collecting) list still succeeds — no
-    regression."""
-    buyer = _reachable_buyer(db_session, "Posted Buyer", engagement=10.0, commodity=_CAP)
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.post(
-            f"/api/resell/{posted_list.id}/outreach",
-            data={
-                "vendor_card_ids": str(buyer.id),
-                "scope": "whole_list",
-                "channel": "phone",
-            },
-        )
-        assert resp.status_code == 200
-    finally:
-        restore()
+# NB: the former assert-200-only ``test_submit_outreach_posted_list_200`` was dropped as
+# redundant assertion theater — the posted-list success path is covered with real
+# outcome assertions by ``test_submit_outreach_log_path`` (rows/channel/target created)
+# and ``test_submit_outreach_email_path`` (sending rows + background job dispatched).

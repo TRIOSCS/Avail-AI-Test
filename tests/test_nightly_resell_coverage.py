@@ -305,22 +305,58 @@ class TestResellOfferFormErrors:
         assert r.status_code == 403
 
 
+def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):
+    """A list with an EXPLICIT title/status — for inclusion/exclusion filter asserts."""
+    el = ExcessList(
+        title=title,
+        company_id=company.id,
+        owner_id=owner.id,
+        status=status,
+        total_line_items=0,
+        created_at=datetime.now(UTC),
+    )
+    db.add(el)
+    db.flush()
+    return el
+
+
 class TestResellListFiltering:
     def test_lists_stage_filter(self, _trader_client, db_session: Session, test_company: Company):
-        """Lists filtered by stage returns 200."""
+        """Stage=collecting returns ONLY collecting lists — an awarded list is
+        excluded."""
         client, trader = _trader_client
-        _make_list(db_session, trader, test_company)
+        _titled_list(db_session, trader, test_company, "Collecting-Widget-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Awarded-Gizmo-List", ExcessListStatus.AWARDED)
         db_session.commit()
-        r = client.get("/v2/partials/resell/lists?stage=collecting&lens=mine")
-        assert r.status_code == 200
+
+        body = client.get("/v2/partials/resell/lists?stage=collecting&lens=mine").text
+        assert "Collecting-Widget-List" in body  # matching stage included
+        assert "Awarded-Gizmo-List" not in body  # non-matching stage excluded
 
     def test_lists_q_filter(self, _trader_client, db_session: Session, test_company: Company):
-        """Lists filtered by search query returns 200."""
+        """Q matches the title in the mine lens — matching title included, non-matching
+        excluded (proves the search actually filters, not just returns 200)."""
         client, trader = _trader_client
-        _make_list(db_session, trader, test_company)
+        _titled_list(db_session, trader, test_company, "Titanium capacitors surplus")
+        _titled_list(db_session, trader, test_company, "Ceramic resistors clearance")
         db_session.commit()
-        r = client.get("/v2/partials/resell/lists?q=surplus&lens=mine")
-        assert r.status_code == 200
+
+        body = client.get("/v2/partials/resell/lists?q=Titanium&lens=mine").text
+        assert "Titanium capacitors surplus" in body  # title contains the query term
+        assert "Ceramic resistors clearance" not in body  # non-matching title excluded
+
+    def test_lists_mine_lens_excludes_other_owners(self, _trader_client, db_session: Session, test_company: Company):
+        """Owner-scoping guard (multi-user): the mine lens returns ONLY the caller's
+        lists — another trader's list must never appear."""
+        client, trader = _trader_client
+        other = _make_trader(db_session)
+        _titled_list(db_session, trader, test_company, "My-Own-Surplus")
+        _titled_list(db_session, other, test_company, "Someone-Elses-Surplus")
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?lens=mine").text
+        assert "My-Own-Surplus" in body  # caller's own list present
+        assert "Someone-Elses-Surplus" not in body  # another owner's list absent
 
 
 class TestResellCreateListErrors:
