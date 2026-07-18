@@ -7,6 +7,7 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -167,6 +168,14 @@ class TestOfferApproval:
         assert pending_offer.status == "active"
         assert pending_offer.approved_by_id is not None
         assert pending_offer.approved_at is not None
+
+    def test_approve_offer_triggers_proactive_rematch(self, client, pending_offer):
+        """Approval triggers the single-offer proactive re-match hook (watermark gap)."""
+        with patch("app.services.proactive_matching.trigger_rematch_on_offer_approval") as mock_rematch:
+            resp = client.put(f"/api/offers/{pending_offer.id}/approve")
+        assert resp.status_code == 200
+        mock_rematch.assert_called_once()
+        assert mock_rematch.call_args.args[1].id == pending_offer.id
 
     def test_approve_creates_changelog(self, client, pending_offer, db_session):
         """Approving creates a changelog entry."""

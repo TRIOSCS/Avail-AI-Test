@@ -47,12 +47,17 @@ HISTORY_SOURCES: frozenset[str] = frozenset({"material_history", "stock_list", "
 # ---------------------------------------------------------------------------
 # Base source reliability (0-100) — sourcing_leads._source_reliability()'s base score
 # before the evidence-tier bonus below is applied. Kept as the exact bucket values
-# sourcing_leads previously hardcoded so refactoring this out doesn't change scores.
+# sourcing_leads previously hardcoded, with one deliberate correction: brokerbin and
+# sourcengine are direct API connectors (tier T2, see API_SOURCES) and previously sat
+# in the 72.0 scraped-marketplace bucket — they now get their own API-marketplace
+# bucket at 80.0: above scraped marketplaces (API transport, fresh data) but below
+# authorized/aggregator APIs (inventory is still unverified broker stock).
 # ---------------------------------------------------------------------------
 
 SOURCE_RELIABILITY_BASE: dict[str, float] = {
     **dict.fromkeys({"digikey", "mouser", "farnell", "element14", "nexar", "octopart"}, 90.0),
-    **dict.fromkeys({"netcomponents", "icsource", "thebrokersite", "brokerbin", "sourcengine"}, 72.0),
+    **dict.fromkeys({"brokerbin", "sourcengine"}, 80.0),
+    **dict.fromkeys({"netcomponents", "icsource", "thebrokersite"}, 72.0),
     **dict.fromkeys({"salesforce", "avail_history"}, 85.0),
     **dict.fromkeys({"ai", "web"}, 40.0),
 }

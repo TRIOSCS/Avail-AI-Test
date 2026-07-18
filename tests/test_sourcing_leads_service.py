@@ -170,7 +170,8 @@ class TestSourceReliability:
         ("source", "tier", "expected"),
         [
             ("digikey", None, 90),
-            ("brokerbin", None, 72),
+            ("brokerbin", None, 80),  # T2 API connector bucket (see app.source_trust)
+            ("netcomponents", None, 72),
             ("ai", None, 40),
             ("digikey", "T1", 98),  # 90 + 8 tier bonus
             ("digikey", "T7", 75),  # 90 - 15 tier penalty
@@ -178,7 +179,8 @@ class TestSourceReliability:
         ],
         ids=[
             "authorized_distributor",
-            "marketplace_source",
+            "api_marketplace_source",
+            "scraped_marketplace_source",
             "ai_source",
             "tier_bonus",
             "tier_penalty",

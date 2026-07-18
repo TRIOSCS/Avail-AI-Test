@@ -23,7 +23,9 @@ class TestSourceReliabilityBase:
         [
             ("digikey", 90.0),
             ("DIGIKEY", 90.0),  # case-insensitive
-            ("brokerbin", 72.0),
+            ("brokerbin", 80.0),  # T2 API connector: above scraped marketplaces, below authorized APIs
+            ("sourcengine", 80.0),
+            ("netcomponents", 72.0),
             ("ai", 40.0),
             ("unknown_connector", SOURCE_RELIABILITY_DEFAULT),
             (None, SOURCE_RELIABILITY_DEFAULT),
