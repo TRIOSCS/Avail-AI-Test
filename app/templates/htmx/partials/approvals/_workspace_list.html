@@ -85,12 +85,18 @@
      class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
 </form>
 
+{# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a
+   real <button>, and a nested button is invalid HTML — the parser splits the row and
+   drops the amount/status/age column outside the clickable row (kanban-card pattern:
+   div + role + tabindex + enter/space handlers). #}
 {% macro list_row(row) %}
-<button type="button"
+<div role="button" tabindex="0"
         data-row-key="{{ row.key }}"
         @click="$dispatch('aw-select', {key: '{{ row.key }}', url: '{{ row.pane_url }}'})"
+        @keydown.enter.prevent="$el.click()"
+        @keydown.space.prevent="$el.click()"
         :class="sel === '{{ row.key }}' ? 'bg-accent-50 border-l-2 border-l-accent-500' : 'border-l-2 border-l-transparent hover:bg-gray-50'"
-        class="w-full text-left px-3 py-2 transition-colors grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+        class="w-full text-left px-3 py-2 transition-colors cursor-pointer grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
   <span class="min-w-0">
     <span class="flex items-center gap-1.5 min-w-0">
       <span class="text-sm font-semibold text-gray-900 truncate">{{ row.title }}</span>
@@ -99,7 +105,9 @@
       {% endif %}
     </span>
     <span class="flex items-center gap-1.5 mt-0.5 min-w-0">
-      {% if row.copy_number %}{{ copy_chip(row.copy_number) }}{% endif %}
+      {# Stop-propagated (kanban-card pattern): copying a number must not also
+         fire the row's select. #}
+      {% if row.copy_number %}<span @click.stop>{{ copy_chip(row.copy_number) }}</span>{% endif %}
       {% if row.subtitle %}<span class="text-tertiary truncate">{{ row.subtitle }}</span>{% endif %}
     </span>
     {% if row.stalled %}
@@ -118,7 +126,7 @@
     </span>
     {{ age_chip(row.age_at) }}
   </span>
-</button>
+</div>
 {% endmacro %}
 
 <div class="flex-1 min-h-0 md:overflow-y-auto">

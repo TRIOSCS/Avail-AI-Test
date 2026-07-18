@@ -51,6 +51,10 @@
          hx-trigger="load, awListRefresh from:body"
          hx-target="this"
          hx-swap="innerHTML">
+      {# Empty placeholder so hx-include="#aw-filters" resolves on the FIRST load too
+         (htmx logs a console error on an unmatched include selector). The swap
+         replaces it with the list's real filter form. #}
+      <form id="aw-filters" hidden></form>
       <div class="p-6 text-center text-gray-400 text-sm">Loading {{ tab_label|lower }}…</div>
     </div>
   </div>
