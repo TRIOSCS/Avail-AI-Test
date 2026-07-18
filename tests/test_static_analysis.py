@@ -614,7 +614,8 @@ def test_modal_uses_canonical_close_class():
 _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/admin/spec_codes_pending.html",
     "app/templates/htmx/partials/buy_plans/detail.html",
-    "app/templates/htmx/partials/buy_plans/hub.html",
+    # The SO origination surface self-hosts in #main-content post-hub-retirement.
+    "app/templates/htmx/partials/approvals/_sales_order_new.html",
     "app/templates/htmx/partials/dashboard.html",
     "app/templates/htmx/partials/emails/intelligence_dashboard.html",
     "app/templates/htmx/partials/follow_ups/list.html",

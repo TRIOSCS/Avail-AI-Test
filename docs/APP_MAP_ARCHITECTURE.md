@@ -204,7 +204,7 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Lazy-load wrapper:** `lazy_body` macro (`partials/shared/_macros.html`) is the mandated
   wrapper for any faceted/lazy-load sub-container (spinner/skeleton `caller()` block ->
   `hx-get` on `trigger` swapped into an explicit `hx-target`, defaulting to `this`) — used by
-  `approvals/approvals_hub.html`, `buy_plans/hub.html`, `settings/index.html`,
+  `approvals/approvals_hub.html`, `settings/index.html`,
   `sightings/list.html`, `quotes/detail.html`, `resell/detail.html`, `resell/workspace.html`.
   Never hand-roll an inner `hx-get` container without it.
 - **Typeahead is server-rendered, not client-fetch:** the customer picker
@@ -277,20 +277,22 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   (its company activity add-note route re-renders the Activity tab); tests import
   `_staleness_tier` from here.
 - `app/routers/htmx/buy_plans.py` — **deal/sourcing-cluster split (Buy Plans / Approvals slice)**:
-  the Approvals (Buy Plans) hub partials (`/v2/partials/approvals*` two-lens shell +
-  `{tab}` body — only **My Queue** + **Pipeline** survive after Approvals-rework Phase F-2;
-  the old 5 stage lenses sales_orders/buy_plans/purchase_orders/prepayments/supervise and
-  their standalone `/v2/partials/buy-plans/{resource,orders,board,archive,supervise}` boards
-  were retired), the Pipeline lazy Done archive (`/v2/partials/approvals/pipeline-archive`),
-  `/v2/partials/approvals/sales-orders/new|create`, the prepay decide (`/prepay-requests/{id}/decide`),
+  the buy-plan workflow routes the Approvals Workspace drives —
+  `/v2/partials/buy-plans/sales-orders/new|create` (origination, now SELF-HOSTED in
+  `#so-origination`/`#main-content`), the prepay decide (`/prepay-requests/{id}/decide`),
   the single-plan detail (`/v2/partials/buy-plans/{id}`), and the per-plan lifecycle actions
   submit/approve/halt/receive/confirm-po/resource/reject-received/claim/verify-po/issue/cancel/reset
-  (their `origin=my_queue` returns re-render My Queue in place) plus the legacy
-  `GET /v2/buy-plans` 302 redirect. Owns the cluster-private helpers `_default_lens`,
-  `_can_supervise`/`_can_resource`/`_can_see_all_deals`/`_resolve_deal_scope`/`_require_po_cutter`,
-  `_render_my_queue_body` + `_render_pipeline_body` (the two surviving lens-body builders, also
-  shared by the `origin=my_queue` action returns), and the `_APPROVALS_TABS`/`_PO_CUTTER_ROLES`
-  constants. Imports `_is_ops_member` from `_shared` (a quotes route in the monolith still uses
+  (`origin=approvals_workspace` re-renders the pane in place + fires `awListRefresh`;
+  `origin=approvals_hub` re-renders the workspace tab body; anything else falls through to
+  the detail partial). The old **Buy Plans hub retired post-parity** (spec §11.1;
+  `docs/APPROVALS_PARITY_CHECKLIST.md`): `GET /v2/partials/buy-plans` (and its
+  `?new=1` origination entry), `/v2/partials/buy-plans/{my-queue,pipeline}` and
+  `/v2/partials/buy-plans/pipeline-archive` are now **308 redirects** onto the workspace
+  equivalents (`/v2/partials/approvals?tab=buy-plans`, the picker partial,
+  `/v2/partials/approvals/buy-plans[?scope=]`, `/v2/partials/approvals/buy-plans/list?show_closed=true`);
+  unknown lens values still 404. Owns the cluster-private helpers
+  `_can_supervise`/`_can_resource`/`_require_po_cutter` and `_PO_CUTTER_ROLES`. Imports
+  `_is_ops_member` from `_shared` (a quotes route in the monolith still uses
   it). **Trap:** the `settings/ops-group|users` routes are interleaved in the source
   between `buy_plan_cancel` and `buy_plan_reset` but belong to the settings domain — they now
   live in `app/routers/htmx/settings.py`.
@@ -394,8 +396,9 @@ full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2
 (→ `/v2/partials/follow-ups`) and `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
 `offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
 (`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
-once, off the table-refresh path). The Buy Plans hub (`/v2/buy-plans`) is likewise reachable
-from a **"My Buy Plans"** link on the Approvals Buy-Plans tab (`approvals/_tab_buy_plan.html`).
+once, off the table-refresh path). The retired Buy Plans hub URLs (`/v2/buy-plans[/{id}]`)
+**308-redirect** to `/v2/approvals?tab=buy-plans` (spec §11.1 retirement;
+`docs/APPROVALS_PARITY_CHECKLIST.md`).
 It no longer defines any
 `/v2/partials/*` route directly for search, email, insights/knowledge/dashboard, My Day,
 or requisition bulk/inline-edit — those now live in the 5 modules above.
@@ -457,7 +460,7 @@ authoritative reference. Static-analysis tests in
 | Tickets | 4 | partials/tickets/ |
 | Settings | 8 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
 | Shared | 18 | partials/shared/ |
-| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module** (renamed from Buy Plans), a **two-lens** shell at `/v2/approvals` (own primary-nav tab; legacy `/v2/buy-plans` 302s to it). `buy_plans/hub.html` is the shell with only two lenses after Approvals-rework **Phase F-2**: **My Queue** (`approvals/_surface_my_queue.html`, the role-aware "what needs YOU now" surface, default for non-supervisors) + **Pipeline** (`approvals/_surface_pipeline.html`, the 4-stage deal board Build/Approve/Purchase/Done via `approvals/_pipeline_macros.html` `deal_card` + `_pipeline_archive_rows.html` for lazy Done paging, default for supervisors). The old 5 stage lenses (Sales Orders / Buy Plans / Purchase Orders / Vendor Prepayments / Supervise) and their standalone `/orders` `/board` `/resource` `/archive` `/supervise` boards were **RETIRED** in F-2 (parity restored by My Queue + Pipeline in F-1; the `_tab_*`/`_pending_section`/`_board`/`_orders_queue`/`_resource_queue`/`_supervise`/`_archive*` templates were deleted). Routes (all `routers/htmx/buy_plans.py`): `GET /v2/partials/approvals` (shell, alias `/v2/partials/buy-plans`, `lens=` → `_default_lens`; unknown lens 404s), `GET /v2/partials/approvals/{tab}?scope=` (`approvals_tab_partial`, my-queue\|pipeline), `GET /v2/partials/approvals/pipeline-archive` (lazy Done), plus sales-order new/create + prepay decide. **Pipeline scope is role-defaulted** via `_can_see_all_deals` + `_resolve_deal_scope` (buyers/managers/ops default `all` + an All/Mine toggle; sales/traders locked to `mine`); the toggle reloads `#bp-hub-body` in place. `detail.html`/`_macros.html` are the single-plan view. Read models in `services/buyplan_hub.py` (`deals_board`/`completed_archive`/`my_queue` — the role-aware `QueueRow` builder; `buyer_line_queue`/`team_line_queue`/`resourcing_pool_queue`/`supervise_overview` survive as independently-tested read models) + `services/approvals/queue.py` (`build_queue_view`, per gate). The write-side state machine, `services/buyplan_workflow.py` (1,855 lines), is now a **package** (P4.3+): `buyplan_approval.py` (submit/approve/reject, halt/resume, reset/cancel/resubmit, `check_completion`), `buyplan_po.py` (buyer PO confirmation + approver PO verification), `buyplan_lines.py` (claim/flag/resolve/resource + the line-editing API), and `buyplan_reports.py` (favoritism detection + case-report generation) — `__init__.py` re-exports every public AND internal name reached via `app.services.buyplan_workflow.<name>` so no caller/test needs to change its import path. The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
+| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module**, ONE surface: the **Approvals Workspace** at `/v2/approvals` (4-tab split view — Sales Orders / Buy Plans / Purchase Orders / Prepayments; `routers/htmx/approvals_hub.py`, see the Approvals Workspace section). The old two-lens Buy Plans hub (My Queue + Pipeline) **RETIRED post-parity** (spec §11.1; `docs/APPROVALS_PARITY_CHECKLIST.md`): `buy_plans/hub.html`, `approvals/_surface_my_queue.html`, `approvals/_surface_pipeline.html`, `approvals/_pipeline_macros.html` and `approvals/_pipeline_archive_rows.html` are deleted, `/v2/buy-plans[/{id}]` and the hub partial URLs 308 onto the workspace, and the hub read models (`my_queue`/`QueueRow`, `deals_board`, `completed_archive`, `open_avg_margin`, `supervise_overview`, the line queues) are deleted — `services/buyplan_hub.py` survives only as the shared helpers (`_customer_name`, `_age_hours`, `_line_mpn`, `_query_po_pending_verify`) the workspace PO queue (`services/approvals/po_queue.py`) imports. Origination (`_sales_order_new.html`, self-hosted in `#so-origination`) and the single-plan `detail.html`/`_macros.html` stay under `routers/htmx/buy_plans.py`. The write-side state machine, `services/buyplan_workflow.py` (1,855 lines), is now a **package** (P4.3+): `buyplan_approval.py` (submit/approve/reject, halt/resume, reset/cancel/resubmit, `check_completion`), `buyplan_po.py` (buyer PO confirmation + approver PO verification + `mark_line_received`), `buyplan_lines.py` (claim/flag/resolve/resource + the line-editing API), and `buyplan_reports.py` (favoritism detection + case-report generation) — `__init__.py` re-exports every public AND internal name reached via `app.services.buyplan_workflow.<name>` so no caller/test needs to change its import path. The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
 
@@ -533,7 +536,7 @@ authoritative reference. Static-analysis tests in
 | `ingest_source_data.py` | `python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]` | SP-Ingest CLI: parse → clean → consolidate → (ai_correct) → ingest TRIO source files (SFDC part master + inventory sheets) into `material_cards` via the SP2 tier ladder. DRY RUN by default; `--apply` writes. |
 | `reconcile_decoded_facets.py` | `python -m app.management.reconcile_decoded_facets [--apply] [--limit N]` | Facet-accuracy reconcile: re-run the fixed MPN decoder + desc extractor over cards with mpn_decode/desc_parse facet rows for capacity_gb/gpu_family/memory_gb; corrects changed values (same source, newer ladder timestamp) and DELETES keys the fixed extractor no longer yields. DRY RUN by default with per-failure-class tallies; `--apply` writes. |
 | `backfill_vendor_specs.py` | `python -m app.management.backfill_vendor_specs [--apply] [--limit N] [--daily-cap N] [--source mouser\|element14]` | Vendor-API parametric enrichment: select uncategorized cards demand-first (`sourced_qty_90d DESC NULLS LAST`), search the source for each within a date-keyed per-day call cap (`vendor_api:{source}:calls:{date}`), then the per-source writer enriches through the F1 ladder. `--source mouser` (default, cap 800) → `vendor_spec_enrich.enrich_card_from_mouser` (Mouser's rich DESCRIPTION → desc grammar at connector_desc/84; Mouser carries no structured parametrics). `--source element14` (cap 100 — Element14 rate-limits hard) → `enrich_card_from_element14` (Element14's structured `attributes` ARE parametrics; the connector maps them to seeded keys via `_vendor_spec_map`, written at element14_api/90). DRY RUN by default (counts/searches/writes nothing); `--apply` writes. |
-| `seed_sample_data.py` | `ALLOW_SAMPLE_DATA_SEED=true python -m app.management.seed_sample_data [--owner EMAIL]` / `python -m app.management.seed_sample_data --wipe` | Populate staging with a realistic, interconnected sample dataset (companies/contacts/vendors, requisitions+requirements, offers across statuses, quotes incl. revised/won + chosen offers, buy plans, resell/excess lists with competing per-line + take-all broker offers and a customer bid-back, sightings, dated activities, account/contact tasks, outreach + buyer scores, material cards via the F1 ladder) so every workflow can be exercised end-to-end. **Production guard:** seeding REFUSES to run (loud non-zero exit, zero rows written, no DB session opened) unless `ALLOW_SAMPLE_DATA_SEED=true` is explicitly set — so a stray invocation can never inject demo data into the real production DB; `--wipe` is exempt (it only deletes tagged sample rows). Idempotent-additive (re-run creates 0 rows; get-or-create on natural keys), every sample row carries the `AVSAMPLE`/`avsample` marker, and `--wipe` deletes ONLY tagged sample rows (FK-safe) — never real data. `--owner EMAIL` assigns the deals to that user (redirecting the seeder/sales/buyer/trader roles) so they show in that user's own-work lenses (buy-plans "orders"/"deals", resell "Open to Me") not just admin "supervise"; re-owning needs `--wipe` first (rows are never UPDATEd), and an unknown email pre-provisions a real, never-wiped account. ORM-only, zero outbound effects. |
+| `seed_sample_data.py` | `ALLOW_SAMPLE_DATA_SEED=true python -m app.management.seed_sample_data [--owner EMAIL]` / `python -m app.management.seed_sample_data --wipe` | Populate staging with a realistic, interconnected sample dataset (companies/contacts/vendors, requisitions+requirements, offers across statuses, quotes incl. revised/won + chosen offers, buy plans, resell/excess lists with competing per-line + take-all broker offers and a customer bid-back, sightings, dated activities, account/contact tasks, outreach + buyer scores, material cards via the F1 ladder) so every workflow can be exercised end-to-end. **Production guard:** seeding REFUSES to run (loud non-zero exit, zero rows written, no DB session opened) unless `ALLOW_SAMPLE_DATA_SEED=true` is explicitly set — so a stray invocation can never inject demo data into the real production DB; `--wipe` is exempt (it only deletes tagged sample rows). Idempotent-additive (re-run creates 0 rows; get-or-create on natural keys), every sample row carries the `AVSAMPLE`/`avsample` marker, and `--wipe` deletes ONLY tagged sample rows (FK-safe) — never real data. `--owner EMAIL` assigns the deals to that user (redirecting the seeder/sales/buyer/trader roles) so they show in that user's own-work scopes (the Approvals workspace Mine lists, resell "Open to Me"); re-owning needs `--wipe` first (rows are never UPDATEd), and an unknown email pre-provisions a real, never-wiped account. ORM-only, zero outbound effects. |
 
 ## TRIO Source Ingest (`app/services/source_ingest/`)
 
@@ -676,8 +679,9 @@ console was rebuilt **in place** (D12); legacy tab keys (`buy-plan` / `po-approv
 the `origin=approvals_hub` decide re-renders keep working. The **approvals engine is
 untouched** — every decision posts the existing `buy_plans.py` / `prepayments.py`
 routes; new `origin=approvals_workspace` branches re-render the deciding pane in place
-and fire `awListRefresh` so the left list repaints. `/v2/buy-plans` (personal hub)
-stays as-is until post-Phase-3 parity.
+and fire `awListRefresh` so the left list repaints. The `/v2/buy-plans` personal hub
+**retired post-Phase-3 parity** (spec §11.1; `docs/APPROVALS_PARITY_CHECKLIST.md`):
+all its full-page and partial URLs 308 onto the workspace.
 
 ### Router — `app/routers/htmx/approvals_hub.py` (rebuilt)
 
@@ -798,7 +802,7 @@ stays as-is until post-Phase-3 parity.
   (`routers/htmx/buy_plans.py`).
 - `app/templates/htmx/partials/approvals/_pane_kanban.html` (NEW) — replaces the
   Phase-1 placeholder in `_pane_sales_order.html` (ACTIVE/INBOUND sourcing orders
-  only): `_surface_pipeline.html`-style column grid, deal_card-shaped cards, risk
+  only): retired-Pipeline-style column grid, deal_card-shaped cards, risk
   lane amber-tinted with amount+payee on the face + paid_at aging (3d/7d), claim
   button on Re-sourcing cards, Mark received on eligible cards, **no drag** — card
   tap `hx-get`s the PO-line pane into `#aw-pane` (explicit target).

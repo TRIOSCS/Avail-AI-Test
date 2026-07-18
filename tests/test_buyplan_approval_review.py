@@ -22,7 +22,6 @@ Depends on: app.routers.htmx_views, app.services.buyplan_workflow, app.dependenc
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -322,23 +321,6 @@ def test_detail_issue_modal_present_for_awaiting_line(
     assert f"/v2/partials/buy-plans/{plan.id}/lines/' + modalLineId + '/issue" in body
     # The dead $dispatch('open-modal') affordance is gone.
     assert "open-modal" not in body
-
-
-def test_rejected_draft_blocker_distinguishes_from_fresh(db_session: Session, test_user, sales_user, test_requisition):
-    """A rejected plan returns to DRAFT but the hub blocker marks it 'rejected —
-    resubmit' (via approved_at), distinguishing it from a never-submitted draft."""
-    from datetime import datetime
-
-    from app.services.buyplan_hub import _compute_blocker
-
-    fresh = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
-    rejected = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
-    rejected.approved_at = datetime.now(UTC)
-    rejected.approval_notes = "no"
-    db_session.flush()
-
-    assert _compute_blocker(fresh) == "ready to submit"
-    assert _compute_blocker(rejected) == "rejected — resubmit"
 
 
 # ── BP-1: modal confirm buttons fire via htmx.ajax (not dead static hx-post) ──

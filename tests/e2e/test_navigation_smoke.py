@@ -20,7 +20,7 @@ NAV_ITEMS = [
     ("vendors", "/v2/vendors", "/v2/partials/vendors"),
     ("prospecting", "/v2/prospecting", "/v2/partials/prospecting"),
     ("materials", "/v2/materials", "/v2/partials/materials/workspace"),
-    ("buy-plans", "/v2/buy-plans", "/v2/partials/buy-plans"),
+    ("buy-plans", "/v2/approvals", "/v2/partials/approvals"),
     ("follow-ups", "/v2/follow-ups", "/v2/partials/follow-ups"),
     ("proactive", "/v2/proactive", "/v2/partials/proactive"),
     ("resell", "/v2/resell", "/v2/partials/resell/workspace"),

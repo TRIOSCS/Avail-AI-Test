@@ -26,7 +26,7 @@ from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quotes import Quote
 
-# ── helpers (mirror tests/test_buyplan_hub_routes.py) ───────────────────────
+# ── helpers (buy-plan/quote/requisition builders) ───────────────────────────
 
 
 def _make_quote(db: Session, req_id: int) -> Quote:

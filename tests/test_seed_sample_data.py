@@ -306,7 +306,7 @@ def test_owner_assigns_deals_to_existing_user(db_session: Session) -> None:
     assert lines and all(line.buyer_id == owner.id for line in lines)
 
     # EVERY buy plan — draft, pending AND active — is submitted by the owner so all
-    # three surface in the owner's "deals" board (deals_board scope=mine filters
+    # three surface in the owner's Mine scope (the workspace lists filter
     # BuyPlan.submitted_by_id == user; the DRAFT must not be left with NULL).
     plans = db_session.query(BuyPlan).all()
     assert len(plans) == 3

@@ -822,13 +822,16 @@ class TestProspectingEnrichStatus:
 class TestBuyPlanListViews:
     """GET /v2/partials/buy-plans and sub-tabs."""
 
-    def test_buy_plans_list(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans", headers=HX)
-        assert resp.status_code == 200
-        # Personal hub shell: both lens tabs + lazy body target.
-        assert "My Queue" in resp.text
-        assert "Pipeline" in resp.text
-        assert 'hx-target="#bp-hub-body"' in resp.text
+    def test_buy_plans_list_retired_redirects_to_workspace(self, client: TestClient):
+        # The personal hub shell retired (spec §11.1): its partial 308s onto the
+        # workspace shell's Buy Plans tab, and the old ?new=1 origination entry
+        # 308s straight to the self-hosted origination picker.
+        resp = client.get("/v2/partials/buy-plans", headers=HX, follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        new = client.get("/v2/partials/buy-plans?new=1", headers=HX, follow_redirects=False)
+        assert new.status_code == 308
+        assert new.headers["location"] == "/v2/partials/buy-plans/sales-orders/new"
 
     def test_approvals_list(self, client: TestClient):
         resp = client.get("/v2/partials/approvals", headers=HX)

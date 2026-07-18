@@ -222,8 +222,8 @@ class TestDeletedRoutes:
             assert not (_TEMPLATES / rel).exists(), f"{rel} should be deleted"
 
     def test_approvals_rest_cluster_left_intact(self):
-        """The Approvals REST cluster is LEFT (buyplan_hub still builds its decision
-        URL)."""
+        """The Approvals REST cluster is LEFT (the standalone JSON decision/reassign/
+        cancel routes outlive the retired hub read models)."""
         for path in (
             "/v2/approvals/requests/{id}/decision",
             "/v2/approvals/requests/{id}/reassign",

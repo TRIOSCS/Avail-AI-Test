@@ -9,14 +9,15 @@ endpoint, so buyers can reorder / filter the cached offers. Covers:
   - hitting the endpoint with a sort param reorders the re-rendered vendor cards;
   - a confidence / source filter param drops the non-matching cards.
 
-Fix 2 (LOW): the personal Buy Plans hub (/v2/buy-plans) no longer shares the
-"Approvals — AvailAI" <title> with the org decide console (/v2/approvals) — it gets
-its own "Buy Plans — AvailAI" title so the two pages are distinct in history/tabs.
+Fix 2 (LOW, post-retirement): the old personal Buy Plans hub URL now 308s to the
+Approvals Workspace, so its retired "Buy Plans — AvailAI" <title> never renders — the
+workspace's own title takes over after the redirect.
 
 Called by: pytest
 Depends on: conftest (client fixture, authed as test_user with BUY_PLANS access),
             app.routers.part_dossier.dossier_market, app.routers.htmx_views.search_filter,
-            app.templates/htmx/partials/search/dossier_market.html + buy_plans/hub.html.
+            app.templates/htmx/partials/search/dossier_market.html,
+            app.routers.htmx.buy_plans (retired-hub redirect).
 """
 
 from __future__ import annotations
@@ -147,15 +148,15 @@ def test_filter_endpoint_source_filters_by_source(client: TestClient):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Fix 2 — the Buy Plans hub gets its own <title>, distinct from Approvals
+# Fix 2 — the retired Buy Plans hub URL lands on the Approvals Workspace title
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def test_buy_plans_hub_has_distinct_title(client: TestClient):
-    """The personal Buy Plans hub renders its own title, not the Approvals one."""
-    resp = client.get("/v2/partials/buy-plans")
+def test_buy_plans_hub_url_lands_on_approvals_title(client: TestClient):
+    """The hub retired (spec §11.1): its partial 308s to the workspace shell, whose own
+    <title> takes over (the hub's "Buy Plans — AvailAI" title is gone)."""
+    resp = client.get("/v2/partials/buy-plans", follow_redirects=True)
     assert resp.status_code == 200
     body = resp.text
     assert "<title" in body
-    assert "Buy Plans — AvailAI" in body
-    assert "Approvals — AvailAI" not in body
+    assert "Buy Plans — AvailAI" not in body

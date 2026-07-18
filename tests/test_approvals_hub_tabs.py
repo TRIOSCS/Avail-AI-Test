@@ -647,13 +647,16 @@ def test_sales_order_new_stays_off_approvals_prefix(hub_client: TestClient):
     assert hub_client.get("/v2/partials/approvals/sales-orders/new").status_code == 404
 
 
-def test_buy_plans_hub_still_serves(hub_client: TestClient):
-    # The old hub keeps its own home until post-parity retirement: the full page
-    # must not have become a redirect into the workspace...
+def test_buy_plans_hub_retired_308s_to_workspace(hub_client: TestClient):
+    # Post-parity retirement (spec §11.1): the old hub full page and its shell
+    # partial both 308 onto the workspace's Buy Plans tab...
     r = hub_client.get("/v2/buy-plans", follow_redirects=False)
-    assert r.status_code == 200
-    # ...and the hub partial itself must still render the two-lens hub shell.
-    partial = hub_client.get("/v2/partials/buy-plans")
-    assert partial.status_code == 200
-    assert "My Queue" in partial.text
-    assert "Pipeline" in partial.text
+    assert r.status_code == 308
+    assert r.headers["location"] == "/v2/approvals?tab=buy-plans"
+    partial = hub_client.get("/v2/partials/buy-plans", follow_redirects=False)
+    assert partial.status_code == 308
+    assert partial.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+    # ...and following the shell redirect serves the workspace on that tab.
+    followed = hub_client.get("/v2/partials/buy-plans", follow_redirects=True)
+    assert followed.status_code == 200
+    assert 'id="ap-hub-body"' in followed.text
