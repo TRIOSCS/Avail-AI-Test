@@ -98,7 +98,9 @@
             :class="tab === '{{ key }}' ? 'border-accent-500 text-accent-700' : 'border-transparent text-gray-500 hover:text-gray-700'"
             class="py-2.5 text-sm font-medium border-b-2 transition-colors">
       {{ label }}
-      {% if key == 'offers' and offer_count %}<span class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700" aria-label="{{ offer_count }} offers">{{ offer_count }}</span>{% endif %}
+      {# Offer-count badge is OWNER-PRIVATE (D2) — the tab body is already owner-only; gate
+         the label badge too so the count never leaks to a non-owner. #}
+      {% if key == 'offers' and offer_count and can_see_customer %}<span class="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700" aria-label="{{ offer_count }} offers">{{ offer_count }}</span>{% endif %}
     </button>
     {% endfor %}
   </div>

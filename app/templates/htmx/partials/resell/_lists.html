@@ -5,7 +5,7 @@
   awarded→won, draft→muted) — no new colors (spec §"Design consistency").
   Receives: cards [{list, display_title, customer_name, coverage_filled,
             coverage_total, offer_count, hours_until}], lens, stage, needs, q,
-            can_post, user.
+            can_see_customer (owner-only coverage/offer gate — D2), can_post, user.
   Called by: resell.resell_lists.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text, filter_pill %}
@@ -71,6 +71,11 @@
         }) }}
       </div>
       <div class="mt-1.5 flex items-center gap-3 text-secondary">
+        {# Offer coverage + count are OWNER-PRIVATE (D2): the "Open to Me" (offerer) lens
+           must not learn how many lines already have offers or how many bids are in —
+           same competitive leak the per-line offer badge hides. The closing time below
+           stays public (offerers need the window). #}
+        {% if can_see_customer %}
         <span class="inline-flex items-center gap-1.5" title="Offer coverage: {{ c.coverage_filled }} of {{ c.coverage_total }} lines have an offer">
           {{ coverage_meter(c.coverage_filled, c.coverage_total) }}
           <span class="tabular-nums">{{ c.coverage_filled }}/{{ c.coverage_total }}</span>
@@ -80,6 +85,7 @@
           <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
           {{ c.offer_count }}
         </span>
+        {% endif %}
         {% endif %}
         {% if c.hours_until is not none %}
         <span class="ml-auto">{{ time_text(c.hours_until) }}</span>

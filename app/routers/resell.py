@@ -181,9 +181,14 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
                 "list": el,
                 "display_title": _display_title(el, can_see_customer=can_see_customer),
                 "customer_name": (el.company.name if (can_see_customer and el.company) else None),
-                "coverage_filled": covered,
-                "coverage_total": total,
-                "offer_count": offer_counts.get(el.id, 0),
+                # Offer coverage + count are OWNER-PRIVATE (D2): a non-owner (the "Open to
+                # Me" lens) must not learn how many lines already have offers or how many
+                # bids are in — same competitive leak the per-line offer badge hides. Null
+                # them here so the data never reaches the template (defense-in-depth with
+                # the ``can_see_customer`` gate around the meter/badge in _lists.html).
+                "coverage_filled": covered if can_see_customer else None,
+                "coverage_total": total if can_see_customer else None,
+                "offer_count": offer_counts.get(el.id, 0) if can_see_customer else None,
                 "hours_until": _hours_until(getattr(el, "close_at", None)),
             }
         )
@@ -400,6 +405,7 @@ async def resell_lists(
             "needs": needs,
             "q": q,
             "cards": cards,
+            "can_see_customer": can_see_customer,
             "can_post": excess_service.can_post(user),
         },
     )
