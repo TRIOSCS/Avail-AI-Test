@@ -17,6 +17,7 @@ Depends on: app.services.activity_service.log_activity, app.models.intelligence
 
 from __future__ import annotations
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..constants import ActivityType, Channel
@@ -82,18 +83,18 @@ def notes_thread(
     if len(given) != 1:
         raise ValueError("notes_thread needs exactly one of buy_plan_id / buy_plan_line_id / prepayment_id")
 
-    query = db.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.NOTE.value)
+    stmt = select(ActivityLog).where(ActivityLog.activity_type == ActivityType.NOTE.value)
     if buy_plan_line_id is not None:
-        query = query.filter(ActivityLog.buy_plan_line_id == buy_plan_line_id)
+        stmt = stmt.where(ActivityLog.buy_plan_line_id == buy_plan_line_id)
     elif prepayment_id is not None:
-        query = query.filter(ActivityLog.prepayment_id == prepayment_id)
+        stmt = stmt.where(ActivityLog.prepayment_id == prepayment_id)
     else:
-        query = query.filter(
+        stmt = stmt.where(
             ActivityLog.buy_plan_id == buy_plan_id,
             ActivityLog.buy_plan_line_id.is_(None),
             ActivityLog.prepayment_id.is_(None),
         )
-    return query.order_by(ActivityLog.created_at.asc(), ActivityLog.id.asc()).all()
+    return list(db.scalars(stmt.order_by(ActivityLog.created_at.asc(), ActivityLog.id.asc())).all())
 
 
 def note_counts(
@@ -104,43 +105,43 @@ def note_counts(
     prepayment_ids: list[int] | None = None,
 ) -> dict[int, int]:
     """Batched note counts for cards/rows, keyed by subject id — pass exactly one id
-    list. Plan counts use the same plan-level scoping as :func:`notes_thread`."""
-    from sqlalchemy import func
+    list.
 
+    Plan counts use the same plan-level scoping as :func:`notes_thread`.
+    """
     given = [v for v in (buy_plan_ids, buy_plan_line_ids, prepayment_ids) if v is not None]
     if len(given) != 1:
         raise ValueError("note_counts needs exactly one of buy_plan_ids / buy_plan_line_ids / prepayment_ids")
 
-    base = db.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.NOTE.value)
+    is_note = ActivityLog.activity_type == ActivityType.NOTE.value
     if buy_plan_line_ids is not None:
         if not buy_plan_line_ids:
             return {}
-        rows = (
-            base.filter(ActivityLog.buy_plan_line_id.in_(buy_plan_line_ids))
-            .with_entities(ActivityLog.buy_plan_line_id, func.count(ActivityLog.id))
+        stmt = (
+            select(ActivityLog.buy_plan_line_id, func.count(ActivityLog.id))
+            .where(is_note, ActivityLog.buy_plan_line_id.in_(buy_plan_line_ids))
             .group_by(ActivityLog.buy_plan_line_id)
-            .all()
         )
     elif prepayment_ids is not None:
         if not prepayment_ids:
             return {}
-        rows = (
-            base.filter(ActivityLog.prepayment_id.in_(prepayment_ids))
-            .with_entities(ActivityLog.prepayment_id, func.count(ActivityLog.id))
+        stmt = (
+            select(ActivityLog.prepayment_id, func.count(ActivityLog.id))
+            .where(is_note, ActivityLog.prepayment_id.in_(prepayment_ids))
             .group_by(ActivityLog.prepayment_id)
-            .all()
         )
     else:
         if not buy_plan_ids:
             return {}
-        rows = (
-            base.filter(
+        stmt = (
+            select(ActivityLog.buy_plan_id, func.count(ActivityLog.id))
+            .where(
+                is_note,
                 ActivityLog.buy_plan_id.in_(buy_plan_ids),
                 ActivityLog.buy_plan_line_id.is_(None),
                 ActivityLog.prepayment_id.is_(None),
             )
-            .with_entities(ActivityLog.buy_plan_id, func.count(ActivityLog.id))
             .group_by(ActivityLog.buy_plan_id)
-            .all()
         )
+    rows = db.execute(stmt).all()
     return {int(subject_id): int(count) for subject_id, count in rows}

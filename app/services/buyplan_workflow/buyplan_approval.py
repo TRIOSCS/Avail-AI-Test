@@ -901,8 +901,8 @@ def _is_stock_sale(plan: BuyPlan, db: Session) -> bool:
     """Detect stock/internal sales by vendor name match against config.
 
     An EXPLICIT Stock Sale order type (Approvals Workspace lite path) wins over the
-    vendor-name inference — a zero-line lite plan would otherwise have its declared
-    flag clobbered to False at submit time.
+    vendor-name inference — a zero-line lite plan would otherwise have its declared flag
+    clobbered to False at submit time.
     """
     from ...constants import SalesOrderType
 

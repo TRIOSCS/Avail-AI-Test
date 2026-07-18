@@ -40,8 +40,8 @@ def stale_token(obj: Any) -> str:
     """The object's optimistic-concurrency token: updated_at as ISO-8601 UTC.
 
     "" when the object has no updated_at (never updated / legacy row) — which
-    ensure_not_stale treats as skip-the-check on round-trip. Naive datetimes are
-    assumed UTC so SQLite and PostgreSQL produce the same token for the same instant.
+    ensure_not_stale treats as skip-the-check on round-trip. Naive datetimes are assumed
+    UTC so SQLite and PostgreSQL produce the same token for the same instant.
     """
     updated_at = getattr(obj, "updated_at", None)
     if not isinstance(updated_at, datetime):
@@ -54,13 +54,13 @@ def stale_token(obj: Any) -> str:
 def ensure_not_stale(obj: Any, expected: str | None) -> None:
     """Raise StaleEditError when *obj* changed since *expected* was rendered.
 
-    expected empty/None SKIPS the check entirely (D5 — legacy forms, objects that
-    have never been updated, and callers that opt out never false-positive).
+    expected empty/None SKIPS the check entirely (D5 — legacy forms, objects that have
+    never been updated, and callers that opt out never false-positive).
 
-    Tokens compare as exact ISO strings, so a backend that stores updated_at at
-    second resolution (no microseconds) can miss a same-second overwrite. That
-    second-resolution tolerance is ACCEPTED per design D5 — the guard targets
-    human-scale form races, not sub-second write contention.
+    Tokens compare as exact ISO strings, so a backend that stores updated_at at second
+    resolution (no microseconds) can miss a same-second overwrite. That second-
+    resolution tolerance is ACCEPTED per design D5 — the guard targets human-scale form
+    races, not sub-second write contention.
     """
     if not expected:
         return

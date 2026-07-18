@@ -411,7 +411,8 @@ class TestQpSales:
         assert _field_edit_rows(db_session) == []
 
     def test_pending_plan_manager_only(self, hub_client, db_session, test_user):
-        """Spec §7: pending → MANAGER ONLY — the owning (non-manager) buyer is refused."""
+        """Spec §7: pending → MANAGER ONLY — the owning (non-manager) buyer is
+        refused."""
         req, q, _rq = _req_quote(db_session, test_user)
         bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
         db_session.commit()

@@ -1,5 +1,5 @@
-"""test_workspace_notes_attachments.py — notes threads + file attachments
-(Approvals Workspace 2.4, designs D2 + D3).
+"""test_workspace_notes_attachments.py — notes threads + file attachments (Approvals
+Workspace 2.4, designs D2 + D3).
 
 Covers workspace_notes (add_note / notes_thread / note_counts — narrowest-subject
 scoping, decision tags, blank-body refusal), the notes route (never status-locked,
@@ -57,8 +57,8 @@ def _plan_and_line(db: Session, user: User, *, status: str = BuyPlanStatus.ACTIV
 
 
 def _fake_store(db: Session):
-    """A store_and_attach stand-in that skips Graph but persists a real row (the
-    same shape the real service returns)."""
+    """A store_and_attach stand-in that skips Graph but persists a real row (the same
+    shape the real service returns)."""
 
     async def _store(db_arg, *, model, fk_field, entity_label, entity_id, file, user):
         att = model(

@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..constants import ActivityType, Channel, UserRole
@@ -90,9 +91,9 @@ def diff_fields(obj: Any, updates: dict[str, Any]) -> list[FieldEdit]:
     """Diff *updates* against *obj*'s current attribute values.
 
     Returns one FieldEdit per field whose stringified value actually changes; an
-    unchanged field (after normalization — e.g. Decimal("5.00") vs "5.00" is a
-    change, Decimal("5.00") vs Decimal("5.00") is not) produces nothing, so a no-op
-    save writes no audit row.
+    unchanged field (after normalization — e.g. Decimal("5.00") vs "5.00" is a change,
+    Decimal("5.00") vs Decimal("5.00") is not) produces nothing, so a no-op save writes
+    no audit row.
     """
     edits: list[FieldEdit] = []
     for field, new_value in updates.items():
@@ -161,19 +162,19 @@ def edits_since(db: Session, *, buy_plan_id: int, since: datetime | None) -> lis
     since=None returns the plan's full edit history. Backs the approve-time change
     summary (_change_summary.html).
     """
-    query = (
-        db.query(ActivityLog)
-        .filter(
+    stmt = (
+        select(ActivityLog)
+        .where(
             ActivityLog.activity_type == ActivityType.FIELD_EDIT.value,
             ActivityLog.buy_plan_id == buy_plan_id,
         )
         .order_by(ActivityLog.created_at.asc(), ActivityLog.id.asc())
     )
     if since is not None:
-        query = query.filter(ActivityLog.created_at >= since)
+        stmt = stmt.where(ActivityLog.created_at >= since)
 
     rows: list[EditRow] = []
-    for record in query.all():
+    for record in db.scalars(stmt).all():
         user_name = record.user.name if record.user else None
         for edit in (record.details or {}).get("edits", []):
             rows.append(
@@ -194,8 +195,11 @@ def edits_since(db: Session, *, buy_plan_id: int, since: datetime | None) -> lis
 
 def format_change_summary(rows: list[EditRow], limit: int = 25) -> str:
     """Render EditRows as the plain-text "was X → now Y" change summary (one line per
-    field) for the in-app notification body. Empty input → empty string (callers skip
-    the notification — spec §7: the summary is empty if nothing changed)."""
+    field) for the in-app notification body.
+
+    Empty input → empty string (callers skip the notification — spec §7: the summary is
+    empty if nothing changed).
+    """
     lines = [f"{row.field}: was {row.old or '—'} → now {row.new or '—'}" for row in rows[:limit]]
     if len(rows) > limit:
         lines.append(f"… and {len(rows) - limit} more change(s)")
@@ -213,16 +217,15 @@ def manager_edited_line_ids(db: Session, plan: BuyPlan) -> set[int]:
     AND each edit's ``line_id`` (bulk saves batch several lines under one row whose
     FK is deliberately NULL).
     """
-    rows = (
-        db.query(ActivityLog.buy_plan_line_id, ActivityLog.details)
+    rows = db.execute(
+        select(ActivityLog.buy_plan_line_id, ActivityLog.details)
         .join(User, User.id == ActivityLog.user_id)
-        .filter(
+        .where(
             ActivityLog.activity_type == ActivityType.FIELD_EDIT.value,
             ActivityLog.buy_plan_id == plan.id,
             User.role.in_((UserRole.MANAGER.value, UserRole.ADMIN.value)),
         )
-        .all()
-    )
+    ).all()
     line_ids: set[int] = set()
     for fk_line_id, details in rows:
         details = details or {}

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models.auth import User
@@ -143,10 +144,10 @@ def qp_for_line(db: Session, plan: BuyPlan, line: BuyPlanLine) -> QualityPlan | 
     fresh vendor-B row via diff-against-empty). Read-only lookup.
     """
     vendor_card_id = line.offer.vendor_card_id if line.offer is not None else None
-    query = db.query(QualityPlan).filter(QualityPlan.buy_plan_id == plan.id)
+    stmt = select(QualityPlan).where(QualityPlan.buy_plan_id == plan.id)
     if vendor_card_id is not None:
-        return query.filter(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id).first()
-    return query.order_by(QualityPlan.id).first()
+        return db.scalars(stmt.where(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id)).first()
+    return db.scalars(stmt.order_by(QualityPlan.id)).first()
 
 
 def apply_qp_purchasing(
@@ -169,11 +170,11 @@ def apply_qp_purchasing(
 
     vendor_card_id = line.offer.vendor_card_id if line.offer is not None else None
     qp = None
-    query = db.query(QualityPlan).filter(QualityPlan.buy_plan_id == plan.id)
+    stmt = select(QualityPlan).where(QualityPlan.buy_plan_id == plan.id)
     if vendor_card_id is not None:
-        qp = query.filter(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id).first()
+        qp = db.scalars(stmt.where(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id)).first()
     if qp is None and vendor_card_id is None:
-        qp = query.order_by(QualityPlan.id).first()
+        qp = db.scalars(stmt.order_by(QualityPlan.id)).first()
     if qp is None:
         qp = QualityPlan(buy_plan_id=plan.id, vendor_card_id=vendor_card_id, created_by_id=user.id)
         db.add(qp)
@@ -191,8 +192,8 @@ def can_edit_qp_sales(user: User, plan: BuyPlan) -> bool:
 
     draft → the owning salesperson OR a manager/admin; pending → MANAGER/ADMIN ONLY
     (sales keeps notes while pending, not fields); everything else → locked (active+
-    header is locked; line changes go through the PO stage). Enforced server-side by
-    the qp-sales route — the pane hides the editor with the SAME predicate.
+    header is locked; line changes go through the PO stage). Enforced server-side by the
+    qp-sales route — the pane hides the editor with the SAME predicate.
     """
     from ..constants import BuyPlanStatus, UserRole
 
@@ -206,10 +207,12 @@ def can_edit_qp_sales(user: User, plan: BuyPlan) -> bool:
 
 
 def qp_sales_row(db: Session, plan: BuyPlan) -> QualityPlan | None:
-    """The plan's FIRST QualityPlan row — the SALES answers are plan-level (D11: QP
-    rows stay keyed per (plan, vendor); the first row carries the sales section).
-    Read-only lookup; :func:`apply_qp_sales` find-or-creates on write."""
-    return db.query(QualityPlan).filter(QualityPlan.buy_plan_id == plan.id).order_by(QualityPlan.id).first()
+    """The plan's FIRST QualityPlan row — the SALES answers are plan-level (D11: QP rows
+    stay keyed per (plan, vendor); the first row carries the sales section).
+
+    Read-only lookup; :func:`apply_qp_sales` find-or-creates on write.
+    """
+    return db.scalars(select(QualityPlan).where(QualityPlan.buy_plan_id == plan.id).order_by(QualityPlan.id)).first()
 
 
 def apply_qp_sales(

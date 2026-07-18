@@ -258,8 +258,8 @@ async def approvals_hub_tab(
 
 
 def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
-    """Build + render one workspace tab body (shared by the tab GET route and the
-    decide handlers' origin=approvals_hub / legacy re-render branches).
+    """Build + render one workspace tab body (shared by the tab GET route and the decide
+    handlers' origin=approvals_hub / legacy re-render branches).
 
     The body is the split view: the left list lazy-loads ``/{tab}/list`` (so a decide
     re-render always repaints a FRESH list), the right pane fills on row selection.
@@ -445,11 +445,11 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     """Build + render the PO-line detail pane (shared by the pane GET route and the
     confirm-po / verify-po / resource handlers' origin=approvals_workspace branches).
 
-    Buyer view (AWAITING_PO): the confirm-PO form (PO# + est ship + payment method +
-    the QP-purchasing fields incl. AS9120B). Manager view (PENDING_VERIFY): line amount
-    vs the viewer's limit, Approve / Send back / Cancel via the EXISTING routes, and
-    the display-only sent-mail detection. Approved/re-sourcing/issue states render
-    their stamps.
+    Buyer view (AWAITING_PO): the confirm-PO form (PO# + est ship + payment method + the
+    QP-purchasing fields incl. AS9120B). Manager view (PENDING_VERIFY): line amount vs
+    the viewer's limit, Approve / Send back / Cancel via the EXISTING routes, and the
+    display-only sent-mail detection. Approved/re-sourcing/issue states render their
+    stamps.
     """
     from ...constants import PO_LINE_PAYMENT_METHODS
     from ...dependencies import get_buyplan_for_user, is_manager_or_admin
@@ -544,7 +544,8 @@ async def approvals_po_sent_check(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """DISPLAY-ONLY sent-mail detection for one line's PO (spec §8: never auto-verifies).
+    """DISPLAY-ONLY sent-mail detection for one line's PO (spec §8: never auto-
+    verifies).
 
     Runs the existing ``verify_po_sent`` Graph scan for the line's plan and reports
     whether the buyer's sent folder contains the PO email. Detection is a signal — the
@@ -584,10 +585,10 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     branch).
 
     Amount + payee always visible; PO#/SO# as copy chips; the payment-method dropdown
-    renders on the approval card (adjustable by the approver before deciding — spec
-    §7's ONE pre-approval edit); the approve button reads "OK to pay — {method}"; a
-    paid prepayment shows its wire reference. Plan access rides get_buyplan_for_user
-    (same gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
+    renders on the approval card (adjustable by the approver before deciding — spec §7's
+    ONE pre-approval edit); the approve button reads "OK to pay — {method}"; a paid
+    prepayment shows its wire reference. Plan access rides get_buyplan_for_user (same
+    gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
     """
     from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
     from ...dependencies import get_buyplan_for_user
@@ -681,10 +682,10 @@ async def approvals_prepayment_method(
 
     Approver-only (User.can_approve_prepayments — the same flag the engine routes on),
     REQUESTED-only (a decided/paid/void prepayment is immutable), stale-guarded
-    (ensure_not_stale on the prepayment's updated_at token), method ∈
-    PREPAYMENT_METHODS (COD can never appear — nothing to pay in advance), and the
-    change is field-audited (log_field_edits with prepayment_id). Re-renders the pane.
-    prepayment_service.py is untouched — this edit never crosses into the engine.
+    (ensure_not_stale on the prepayment's updated_at token), method ∈ PREPAYMENT_METHODS
+    (COD can never appear — nothing to pay in advance), and the change is field-audited
+    (log_field_edits with prepayment_id). Re-renders the pane. prepayment_service.py is
+    untouched — this edit never crosses into the engine.
     """
     from ...constants import PREPAYMENT_METHODS, PrepaymentStatus
     from ...models.quality_plan import Prepayment
@@ -750,7 +751,7 @@ def _notes_ctx(
         files_filter = BuyPlanAttachment.buy_plan_id == plan_id
         thread_subject = {"buy_plan_id": plan_id}
 
-    files = db.query(BuyPlanAttachment).filter(files_filter).order_by(BuyPlanAttachment.id.asc()).all()
+    files = db.scalars(select(BuyPlanAttachment).where(files_filter).order_by(BuyPlanAttachment.id.asc())).all()
     return {
         "thread_notes": notes,
         "thread_files": files,
@@ -819,8 +820,8 @@ async def approvals_add_note(
 ):
     """Add a note to a sales order / PO line / prepayment thread (design D2).
 
-    Notes are NEVER status-locked — field locks never lock conversation. The note
-    lands as an ActivityLog NOTE row on the narrowest subject; re-renders the thread.
+    Notes are NEVER status-locked — field locks never lock conversation. The note lands
+    as an ActivityLog NOTE row on the narrowest subject; re-renders the thread.
     """
     from ...services.workspace_notes import add_note
 
@@ -852,10 +853,10 @@ async def approvals_add_attachment(
 
     Multipart → the shared attachment_service.store_and_attach with BuyPlanAttachment
     and the subject's fk_field; the exactly-one-subject invariant is asserted via
-    validate_subject() on the constructed kwargs BEFORE store_and_attach runs (the
-    app-level stand-in for a DB CHECK — store_and_attach commits internally, so a
-    post-store check could never undo a bad row). The upload is ActivityLog'd
-    (ATTACH_ADDED). Never status-locked.
+    validate_subject() on the constructed kwargs BEFORE store_and_attach runs (the app-
+    level stand-in for a DB CHECK — store_and_attach commits internally, so a post-store
+    check could never undo a bad row). The upload is ActivityLog'd (ATTACH_ADDED). Never
+    status-locked.
     """
     from ...constants import ActivityType, Channel
     from ...models.buy_plan import BuyPlanAttachment
@@ -1018,7 +1019,10 @@ async def approvals_workspace_list(
 
 def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_closed: bool) -> list[WorkspaceRow]:
     """Sales Orders / Buy Plans list rows — one per plan, decidable first (oldest
-    first), then the rest newest-first. Both lenses read the same tracking rows."""
+    first), then the rest newest-first.
+
+    Both lenses read the same tracking rows.
+    """
     tracking = buy_plan_tracking_rows(db, user, scope=scope)
     wanted = _CLOSED_PLAN_STATUSES if show_closed else _LIVE_PLAN_STATUSES
     tracking = [t for t in tracking if t.status in wanted]
@@ -1178,8 +1182,8 @@ def _po_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) 
 
 
 def _prepayment_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) -> list[WorkspaceRow]:
-    """Prepayments list rows — pending requests (decidable first) or, behind the
-    Closed filter, the recently-resolved audit feed."""
+    """Prepayments list rows — pending requests (decidable first) or, behind the Closed
+    filter, the recently-resolved audit feed."""
     rows: list[WorkspaceRow] = []
     if show_closed:
         source = resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user)

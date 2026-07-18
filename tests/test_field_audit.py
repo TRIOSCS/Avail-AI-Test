@@ -225,8 +225,8 @@ class TestManagerEditedLineIds:
         assert manager_edited_line_ids(db_session, plan) == {line_a.id, line_b.id}
 
     def test_non_verify_stage_edits_never_mark(self, db_session: Session, test_user: User):
-        """Draft-stage manager edits (no stage tag) must not raise the kanban
-        "edited by manager" marker — only stage="verify" rows count."""
+        """Draft-stage manager edits (no stage tag) must not raise the kanban "edited by
+        manager" marker — only stage="verify" rows count."""
         req = _req(db_session, test_user)
         plan = _plan(db_session, req)
         line = _line(db_session, plan)

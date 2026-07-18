@@ -443,11 +443,11 @@ class TicketType(StrEnum):
 class SalesOrderType(StrEnum):
     """Order type of a sales order (quote-less BuyPlan) — buy_plans_v3.order_type.
 
-    Single source of truth for the Approvals Workspace order-type badge and the
-    create-SO picker. All values <= 20 chars (column width String(20)). Distinct from
-    QPOrderType (QualityPlan's own new/revision vocabulary) — do not conflate.
-    Sourcing types (NEW / REVISION) go through the offer-picker flow; the other types
-    take the lite path (no lines, no buyer tasks).
+    Single source of truth for the Approvals Workspace order-type badge and the create-
+    SO picker. All values <= 20 chars (column width String(20)). Distinct from
+    QPOrderType (QualityPlan's own new/revision vocabulary) — do not conflate. Sourcing
+    types (NEW / REVISION) go through the offer-picker flow; the other types take the
+    lite path (no lines, no buyer tasks).
     """
 
     NEW = "new"
@@ -466,9 +466,9 @@ class KanbanLane(StrEnum):
     """PO-tab kanban lanes for buy-plan lines (Approvals Workspace Phase 3).
 
     Display-only vocabulary — never persisted; computed per-line by
-    app/services/kanban_lanes.py from (line status, prepayment status, payment
-    method, received). Order here is NOT the board order (the lane service owns
-    precedence and column layout).
+    app/services/kanban_lanes.py from (line status, prepayment status, payment method,
+    received). Order here is NOT the board order (the lane service owns precedence and
+    column layout).
     """
 
     AWAITING_PO = "awaiting_po"

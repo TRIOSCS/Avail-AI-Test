@@ -59,8 +59,8 @@ def _verified_line(db: Session, bp, rq, buyer: User, **overrides):
 
 @pytest.fixture()
 def ws_client(db_session: Session, test_user: User):
-    """TestClient authed as test_user (plain require_user — the receive route's gate
-    is service-side)."""
+    """TestClient authed as test_user (plain require_user — the receive route's gate is
+    service-side)."""
     from app.main import app
 
     app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]

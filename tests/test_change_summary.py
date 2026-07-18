@@ -63,8 +63,8 @@ def hub_client(db_session: Session, test_user: User):
 
 
 def _pending_plan(db: Session, user: User, *, with_edit: bool = False):
-    """A PENDING plan with an open engine request; optionally one post-submission
-    field edit so the change summary has content."""
+    """A PENDING plan with an open engine request; optionally one post-submission field
+    edit so the change summary has content."""
     from datetime import UTC, datetime
 
     req, q, rq = _req_quote(db, user)
@@ -112,8 +112,8 @@ def test_summary_empty_state(hub_client, db_session, test_user):
 
 
 def test_summary_excludes_pre_submission_edits(hub_client, db_session, test_user):
-    """edits_since windows on submitted_at — an edit from before submission is not
-    part of this approval's summary."""
+    """edits_since windows on submitted_at — an edit from before submission is not part
+    of this approval's summary."""
     from datetime import UTC, datetime
 
     _req, _rq, bp = _pending_plan(db_session, test_user, with_edit=True)

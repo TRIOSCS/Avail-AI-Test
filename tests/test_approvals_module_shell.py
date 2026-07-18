@@ -57,8 +57,11 @@ def test_approvals_page_lazy_loads_hub_partial(nonadmin_client: TestClient):
 
 
 def test_approvals_page_threads_tab(nonadmin_client: TestClient):
-    """A pushed ?tab= URL (incl. a LEGACY 3-tab key) threads into the lazy partial URL
-    on first load; the shell aliases legacy keys onto the workspace tabs."""
+    """A pushed ?tab= URL (incl.
+
+    a LEGACY 3-tab key) threads into the lazy partial URL on first load; the shell
+    aliases legacy keys onto the workspace tabs.
+    """
     r = nonadmin_client.get("/v2/approvals?tab=po-approval")
     assert r.status_code == 200
     assert "/v2/partials/approvals?tab=po-approval" in r.text

@@ -1,8 +1,8 @@
 """tests/test_workspace_macros.py — Tests for the copy_chip / age_chip shared macros
 (Phase 0.4, app/templates/htmx/partials/shared/_macros.html).
 
-Renders through the app's real Jinja2 environment (app.template_env.templates.env)
-so filter/global registration (timeago, fmtdate, now) is exercised, not mocked.
+Renders through the app's real Jinja2 environment (app.template_env.templates.env) so
+filter/global registration (timeago, fmtdate, now) is exercised, not mocked.
 """
 
 import re

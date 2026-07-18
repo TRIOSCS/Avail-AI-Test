@@ -32,7 +32,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..constants import BuyPlanLineStatus, KanbanLane, PaymentMethod, PrepaymentStatus
@@ -111,9 +111,9 @@ def kanban_lane(
 class KanbanCard:
     """One kanban card, fully resolved for the template (no ORM in Jinja).
 
-    Card face (spec §6): part number, vendor, qty × unit cost, PO# (copy chip),
-    est ship, payment-method chip, prepayment badge (state + amount + payee),
-    notes/file count, age, edited-by-manager marker; risk cards age on paid_at.
+    Card face (spec §6): part number, vendor, qty × unit cost, PO# (copy chip), est
+    ship, payment-method chip, prepayment badge (state + amount + payee), notes/file
+    count, age, edited-by-manager marker; risk cards age on paid_at.
     """
 
     line_id: int
@@ -181,9 +181,9 @@ def _age_anchor(line: BuyPlanLine, lane: KanbanLane, paid_at: datetime | None) -
 def _live_prepayments(db: Session, line_ids: list[int]) -> dict[int, object]:
     """The single most-progressed live (non-void) Prepayment row per line.
 
-    Same precedence as prepayment_state_for_lines (paid > approved > requested,
-    void excluded) but returning the ROW — the kanban badge needs amount, payee
-    snapshot and paid_at, not just the state string.
+    Same precedence as prepayment_state_for_lines (paid > approved > requested, void
+    excluded) but returning the ROW — the kanban badge needs amount, payee snapshot and
+    paid_at, not just the state string.
     """
     from ..models.quality_plan import Prepayment
 
@@ -194,14 +194,12 @@ def _live_prepayments(db: Session, line_ids: list[int]) -> dict[int, object]:
         PrepaymentStatus.APPROVED.value: 2,
         PrepaymentStatus.REQUESTED.value: 1,
     }
-    rows = (
-        db.query(Prepayment)
-        .filter(
+    rows = db.scalars(
+        select(Prepayment).where(
             Prepayment.buy_plan_line_id.in_(line_ids),
             Prepayment.status.in_(list(precedence.keys())),
         )
-        .all()
-    )
+    ).all()
     best: dict[int, object] = {}
     for pp in rows:
         line_id = pp.buy_plan_line_id
@@ -217,12 +215,11 @@ def _attachment_counts(db: Session, line_ids: list[int]) -> dict[int, int]:
     """Batched per-line attachment counts (BuyPlanAttachment.buy_plan_line_id)."""
     if not line_ids:
         return {}
-    rows = (
-        db.query(BuyPlanAttachment.buy_plan_line_id, func.count(BuyPlanAttachment.id))
-        .filter(BuyPlanAttachment.buy_plan_line_id.in_(line_ids))
+    rows = db.execute(
+        select(BuyPlanAttachment.buy_plan_line_id, func.count(BuyPlanAttachment.id))
+        .where(BuyPlanAttachment.buy_plan_line_id.in_(line_ids))
         .group_by(BuyPlanAttachment.buy_plan_line_id)
-        .all()
-    )
+    ).all()
     return {int(line_id): int(count) for line_id, count in rows}
 
 
@@ -231,12 +228,12 @@ def _as_float(value: Decimal | float | None) -> float | None:
 
 
 def build_kanban(db: Session, plan: BuyPlan) -> list[KanbanLaneView]:
-    """Assemble the plan's PO kanban: the five spec §6 columns in board order, plus
-    the Re-sourcing lane ONLY when it has cards (mirrors the Pipeline's conditional
-    Halted lane — an empty claim pool is a dead column).
+    """Assemble the plan's PO kanban: the five spec §6 columns in board order, plus the
+    Re-sourcing lane ONLY when it has cards (mirrors the Pipeline's conditional Halted
+    lane — an empty claim pool is a dead column).
 
-    Cancelled lines are hidden entirely. All card data is batch-resolved (one query
-    each for prepayments, notes, attachments, manager edits) — no per-line N+1.
+    Cancelled lines are hidden entirely. All card data is batch-resolved (one query each
+    for prepayments, notes, attachments, manager edits) — no per-line N+1.
     """
     from .field_audit import manager_edited_line_ids
     from .prepayment_service import prepayment_state_for_lines

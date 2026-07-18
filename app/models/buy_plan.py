@@ -271,7 +271,10 @@ class BuyPlanLine(Base):
     @property
     def is_received(self) -> bool:
         """True once the goods on this line have been marked received (received_at
-        stamped by mark_line_received). Drives the kanban RECEIVED lane."""
+        stamped by mark_line_received).
+
+        Drives the kanban RECEIVED lane.
+        """
         return self.received_at is not None
 
     @property

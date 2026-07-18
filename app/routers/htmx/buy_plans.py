@@ -149,9 +149,9 @@ SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
 
 
 def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int, form) -> HTMLResponse:
-    """The shared origin=approvals_workspace re-render for plan lifecycle POSTs
-    (halt / resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an
-    awListRefresh nudge so the left work list repaints its status."""
+    """The shared origin=approvals_workspace re-render for plan lifecycle POSTs (halt /
+    resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an awListRefresh
+    nudge so the left work list repaints its status."""
     from .approvals_hub import render_plan_pane
 
     resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
@@ -275,7 +275,7 @@ async def sales_order_new(
     # Picker mode: open requisitions, scoped to the viewer. Sourcing types additionally
     # require at least one active offer (the plan is built FROM offers); non-sourcing
     # (lite) types list every open requisition.
-    q = db.query(Requisition).filter(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
+    stmt = select(Requisition).where(Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)))
     if sourcing:
         has_active_offer = (
             select(Offer.id)
@@ -286,10 +286,10 @@ async def sales_order_new(
             )
             .exists()
         )
-        q = q.filter(has_active_offer)
+        stmt = stmt.where(has_active_offer)
     if user.role in RESTRICTED_ROLES:
-        q = q.filter(Requisition.created_by == user.id)
-    reqs = q.order_by(Requisition.id.desc()).all()
+        stmt = stmt.where(Requisition.created_by == user.id)
+    reqs = db.scalars(stmt.order_by(Requisition.id.desc())).all()
 
     counts: dict[int, int] = {}
     if reqs:
@@ -956,8 +956,8 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO — returns the refreshed detail partial (or, from the
-    Approvals Workspace, the refreshed PO pane).
+    """Buyer confirms PO — returns the refreshed detail partial (or, from the Approvals
+    Workspace, the refreshed PO pane).
 
     Workspace additions: ``payment_method`` (validated against
     ``PO_LINE_PAYMENT_METHODS`` in the service) records the Acctivate PO terms;
@@ -1006,9 +1006,8 @@ async def buy_plan_confirm_po_partial(
         from ...constants import PrepaymentStatus
         from ...models.quality_plan import Prepayment
 
-        live_prepayment = (
-            db.query(Prepayment.id)
-            .filter(
+        live_prepayment = db.scalars(
+            select(Prepayment.id).where(
                 Prepayment.buy_plan_line_id == line_id,
                 Prepayment.status.in_(
                     (
@@ -1018,8 +1017,7 @@ async def buy_plan_confirm_po_partial(
                     )
                 ),
             )
-            .first()
-        )
+        ).first()
         if live_prepayment is not None:
             raise HTTPException(
                 400,

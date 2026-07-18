@@ -195,8 +195,8 @@ def test_qp_prefill_never_borrows_another_vendors_row(db_session: Session, test_
 
 
 def test_apply_qp_purchasing_bool_garbage_never_nulls(db_session: Session, test_user: User):
-    """A forged/garbage value for a boolean field (coerces to None despite being
-    non-empty) must NOT null out a stored answer."""
+    """A forged/garbage value for a boolean field (coerces to None despite being non-
+    empty) must NOT null out a stored answer."""
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     line = _pending_verify_line(db_session, bp, rq, test_user)
@@ -506,8 +506,8 @@ def test_sent_check_found_is_display_only(hub_client: TestClient, db_session: Se
 
 
 def test_sent_check_restricted_non_owner_404s_before_scan(db_session: Session, test_user: User):
-    """A restricted (sales) non-owner is 404'd by the plan-access gate BEFORE the
-    Graph scan ever runs (same gate as render_po_pane)."""
+    """A restricted (sales) non-owner is 404'd by the plan-access gate BEFORE the Graph
+    scan ever runs (same gate as render_po_pane)."""
     from unittest.mock import Mock
 
     from app.main import app

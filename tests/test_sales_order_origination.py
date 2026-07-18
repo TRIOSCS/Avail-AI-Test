@@ -205,7 +205,8 @@ def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
     """Approvals-Workspace naming (specs/approvals-workspace.md §8): origination is the
     'New sales order' flow — the SO is the root object, the buy plan rides inside it.
 
-    Supersedes the earlier frozen-scope 'buy plan, not Sales Order' labeling."""
+    Supersedes the earlier frozen-scope 'buy plan, not Sales Order' labeling.
+    """
     req, _requirement, _offer = so_setup
     r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
     assert r.status_code == 200

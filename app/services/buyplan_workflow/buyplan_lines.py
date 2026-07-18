@@ -470,10 +470,12 @@ def _resolve_offer(db: Session, offer_id: int, offer_lookup: dict[int, Offer] | 
 
 def _manager_verify_override(actor: User | None, line: BuyPlanLine) -> bool:
     """Spec §7 "manager edit-anything at verify": a MANAGER/ADMIN editing a line that
-    sits at PENDING_VERIFY may change what the cut-PO guards otherwise refuse
-    (quantity) and the PO-stage fields (po_number / estimated_ship_date / unit_cost).
+    sits at PENDING_VERIFY may change what the cut-PO guards otherwise refuse (quantity)
+    and the PO-stage fields (po_number / estimated_ship_date / unit_cost).
+
     Mike's call: the field audit covers it. Vendor/offer is NOT part of the override —
-    offer-swap-only for everyone, and never after a cut PO."""
+    offer-swap-only for everyone, and never after a cut PO.
+    """
     return actor is not None and _is_manager_or_admin(actor) and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
@@ -596,8 +598,8 @@ def _apply_line_edit(
 
 
 def _line_audit_label(line: BuyPlanLine) -> str:
-    """Short human label for a line in "line added"/"line removed" audit edits
-    (part · vendor · ×qty) — plain strings, so it survives the line's deletion."""
+    """Short human label for a line in "line added"/"line removed" audit edits (part ·
+    vendor · ×qty) — plain strings, so it survives the line's deletion."""
     mpn = None
     if line.requirement is not None:
         mpn = line.requirement.primary_mpn

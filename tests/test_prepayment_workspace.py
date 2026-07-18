@@ -45,7 +45,10 @@ from tests.test_approvals_hub_tabs import (
 
 @pytest.fixture()
 def hub_client(db_session: Session, test_user: User):
-    """TestClient authed as test_user with every decide right incl. prepayments."""
+    """TestClient authed as test_user with every decide right incl.
+
+    prepayments.
+    """
     from app.main import app
 
     test_user.can_approve_buy_plans = True
