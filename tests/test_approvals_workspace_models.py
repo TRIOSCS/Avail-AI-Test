@@ -277,12 +277,14 @@ class TestBuyPlanAttachment:
 
 class TestMigration192:
     def test_single_alembic_head_is_192(self):
+        # 197_sighting_req_id_nullable chains onto 196_approvals_foundations,
+        # so the (still single) head advanced past 196.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config("alembic.ini")
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert heads == ["196_approvals_foundations"]
+        assert heads == ["197_sighting_req_id_nullable"]
 
     def test_downgrade_reverses_every_upgrade_object(self):
         """Every column/index/constraint/table added in upgrade() is dropped in
