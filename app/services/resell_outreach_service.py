@@ -288,7 +288,11 @@ def _log_outreach_activity(
         excess_list_id=excess_list.id,
         vendor_card_id=card.id,
         contact_name=card.display_name,
-        subject=f"{verb} {card.display_name}: excess offer ({excess_list.title})",
+        # #11: reference the list neutrally by id, NEVER the free-text title — this log lands
+        # on the SHARED buyer vendor-card timeline, so the customer-named title would leak the
+        # customer to any other trader viewing that buyer (same anonymization gate as the
+        # non-owner "Excess listing #N" label).
+        subject=f"{verb} {card.display_name}: excess offer (list #{excess_list.id})",
         notes=notes,
         is_meaningful=True,
         auto_logged=True,

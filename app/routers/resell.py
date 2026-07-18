@@ -1338,6 +1338,13 @@ def _buyer_panel_context(
     suggestions = _suggestion_rows(db, el, owner, line_ids)
     suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
     scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
+    # Line count for the neutral outreach subject prefill (#11) — the campaign's scope:
+    # the selected lines, or the whole list. NEVER the title (which names the customer).
+    line_count = (
+        len(scope_lines)
+        if scope_lines
+        else (db.scalar(select(func.count(ExcessLineItem.id)).where(ExcessLineItem.excess_list_id == el.id)) or 0)
+    )
     return {
         "request": request,
         "user": owner,
@@ -1347,6 +1354,7 @@ def _buyer_panel_context(
         "channels": [c.value for c in ExcessOutreachChannel],
         "line_ids": line_ids or [],
         "scope_lines": scope_lines,
+        "line_count": line_count,
         "preselect_ids": preselect_ids or [],
     }
 

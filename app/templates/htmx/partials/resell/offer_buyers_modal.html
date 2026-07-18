@@ -8,6 +8,7 @@
 
   Receives: list, suggestions [{buyer: RankedBuyer, overlap}], no_contact_buyers
             [{card}], channels (list), line_ids (list), scope_lines (or None),
+            line_count (int — neutral subject prefill, #11),
             preselect_ids (buyer vendor_card_ids to pre-check — RS-8), user.
   Called by: resell.resell_offer_buyers_form (via the detail "Offer to buyers" action
              and the "not yet offered" nudge chips, which pass a preselect buyer).
@@ -189,7 +190,10 @@
     <div x-show="channel === 'email'" x-cloak class="space-y-3">
       <div>
         <label class="form-label">Subject</label>
-        <input type="text" name="subject" class="input" value="Excess available: {{ el.title }}">
+        {# #11: NEVER prefill the customer-named list title — the subject ships externally
+           to the buyer and would de-anonymize the customer. Neutral, part-count default;
+           the owner can still edit it before sending. #}
+        <input type="text" name="subject" class="input" value="Excess available: {{ line_count }} line{{ 's' if line_count != 1 }}">
       </div>
       <div>
         <label class="form-label">Message</label>
