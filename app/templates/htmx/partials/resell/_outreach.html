@@ -124,6 +124,26 @@
                 Retry
               </button>
               {% endif %}
+              {# Manual-channel log actions (finding #12): a phone/teams/marketplace touch has
+                 no email thread, so the owner records the outcome directly on the row —
+                 Log response (→ responded) or Log their bid (→ bid + an ExcessOffer). Hidden
+                 once the row is terminal (bid/declined). #}
+              {% if row.channel != 'email' and row.status not in ('bid', 'declined') %}
+              {% if row.status == 'sent' %}
+              <button hx-post="/api/resell/{{ el.id }}/outreach/{{ row.id }}/log-response"
+                      hx-target="#tab-outreach-{{ el.id }}" hx-swap="innerHTML"
+                      data-loading-disable
+                      class="text-xs font-medium text-accent-600 hover:text-accent-700 hover:underline">
+                Log response
+              </button>
+              {% endif %}
+              <button @click="$dispatch('open-modal')"
+                      hx-get="/v2/partials/resell/{{ el.id }}/outreach/{{ row.id }}/log-bid-form"
+                      hx-target="#modal-content"
+                      class="text-xs font-medium text-accent-600 hover:text-accent-700 hover:underline">
+                Log bid
+              </button>
+              {% endif %}
             </div>
             {# Surface the persisted send_error so a delivered-but-degraded send is not
                indistinguishable from a healthy one, and a failed/interrupted row shows WHY.

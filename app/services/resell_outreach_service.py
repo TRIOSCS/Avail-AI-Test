@@ -1014,6 +1014,46 @@ def record_response(
     return rows
 
 
+def record_manual_response(
+    db: Session,
+    *,
+    outreach: ExcessOutreach,
+    has_offer: bool = False,
+    offer_lines: list[dict] | None = None,
+    offer_notes: str | None = None,
+    commit: bool = True,
+) -> ExcessOutreach:
+    """Log a manual-channel buyer outcome directly on ONE outreach row (finding #12).
+
+    A phone/teams/marketplace touch has no email thread, so the conversation-keyed
+    ``record_response`` can never advance it — this is the manual counterpart. Advances the
+    row to ``bid`` (when the buyer bid) or ``responded``, but NEVER regresses a row already
+    in a terminal state (``bid`` / ``declined``) — same rule as ``record_response``. When
+    ``has_offer``, creates the inbound ExcessOffer via the SAME ``_link_inbound_offer`` path
+    an emailed bid uses (buyer-scoped, queued-never-dropped line matching, rollup recompute).
+    ``commit`` (default True) commits + refreshes; pass False when the caller owns the txn.
+    """
+    _terminal = {ExcessOutreachStatus.BID, ExcessOutreachStatus.DECLINED}
+    if outreach.status not in _terminal:
+        outreach.status = ExcessOutreachStatus.BID if has_offer else ExcessOutreachStatus.RESPONDED
+
+    if has_offer:
+        _link_inbound_offer(db, outreach, offer_lines or [], offer_notes)
+
+    if commit:
+        db.commit()
+        db.refresh(outreach)
+    else:
+        db.flush()
+    logger.info(
+        "Manually logged outreach id={} → {} (offer={})",
+        outreach.id,
+        outreach.status,
+        has_offer,
+    )
+    return outreach
+
+
 def _log_inbound_reply_activity(db: Session, *, outreach: ExcessOutreach, vr: VendorResponse) -> None:
     """Write one inbound ActivityLog for a buyer's reply on a resell outreach.
 

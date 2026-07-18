@@ -116,11 +116,16 @@
         </label>
         {% endfor %}
 
-        {# No-contact history buyers: dealt-with-before but no resolvable email — manual
-           log only, disabled checkbox, clear badge (mirrors the RFQ modal no-email row). #}
+        {# No-contact history buyers: dealt-with-before but no resolvable email. On the
+           EMAIL channel they can't be reached, so the checkbox stays disabled; on a manual
+           channel (phone/teams/marketplace) no email is needed, so the checkbox is enabled
+           and toggles the buyer into the selection (finding #12). #}
         {% for nc in no_contact_buyers %}
         <label class="flex items-center gap-3 px-3 py-2">
-          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <input type="checkbox" :disabled="channel === 'email'"
+                 :checked="isSel({{ nc.card.id }})" @change="toggle({{ nc.card.id }})"
+                 :class="channel === 'email' ? 'cursor-not-allowed' : ''"
+                 class="rounded border-gray-300">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-500">{{ nc.card.display_name }}</span>
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>

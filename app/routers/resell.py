@@ -1982,6 +1982,26 @@ def _load_outreach_for_owner(
     return el, outreach
 
 
+def _load_manual_outreach_for_owner(
+    db: Session, list_id: int, outreach_id: int, user: User
+) -> tuple[ExcessList, ExcessOutreach]:
+    """Owner-gated load of one MANUAL-channel outreach row (finding #12).
+
+    404 (not 403) when the row is missing or belongs to another list — existence is not
+    revealed. 409 for an ``email`` row: an emailed touch has a thread, so its outcome is
+    logged via the reply viewer / inbox matcher, not the manual-log path. Shared by the
+    manual log-response / log-bid routes.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    outreach = db.get(ExcessOutreach, outreach_id)
+    if outreach is None or outreach.excess_list_id != el.id:
+        raise HTTPException(404, "Outreach not found")
+    if outreach.channel == ExcessOutreachChannel.EMAIL:
+        raise HTTPException(409, "Use the reply viewer to log an email outreach's outcome")
+    return el, outreach
+
+
 @router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/reply", response_class=HTMLResponse)
 async def resell_outreach_reply(
     request: Request,
@@ -2043,6 +2063,101 @@ async def resell_outreach_convert_offer(
     resell_outreach_service.record_response(
         db,
         conversation_id=outreach.graph_conversation_id,
+        has_offer=True,
+        offer_lines=[
+            {
+                "mpn_raw": mpn_raw.strip(),
+                "quantity": qty,
+                "unit_price": _to_decimal(unit_price),
+                "lead_time_days": _to_int(lead_time_days),
+                "terms_text": terms_text or None,
+            }
+        ],
+        offer_notes=notes or None,
+    )
+
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/log-response", response_class=HTMLResponse)
+async def resell_outreach_log_response(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Log a manual-channel buyer RESPONSE (owner-only), then re-render the tracker.
+
+    The manual counterpart to the inbox reply matcher for a phone/teams/marketplace touch
+    that has no email thread: advances the row sent → responded (never regresses a terminal
+    bid/declined). 409 for an email row (use the reply viewer).
+    """
+    _el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+    resell_outreach_service.record_manual_response(db, outreach=outreach, has_offer=False)
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+@router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/log-bid-form", response_class=HTMLResponse)
+async def resell_outreach_log_bid_form(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the Log-their-bid modal for a manual-channel row (owner-only).
+
+    Reuses the reply viewer's convert-to-offer line form, pointed at the manual log-bid
+    route (a manual touch has no reply thread, so the ``manual`` flag renders the honest
+    "logged manually" note instead of an email thread).
+    """
+    el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+    return template_response(
+        "htmx/partials/resell/_reply_viewer.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "outreach": outreach,
+            "replies": [],
+            "manual": True,
+            "convert_url": f"/api/resell/{el.id}/outreach/{outreach.id}/log-bid",
+        },
+    )
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/log-bid", response_class=HTMLResponse)
+async def resell_outreach_log_bid(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    mpn_raw: str = Form(""),
+    quantity: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time_days: str = Form(""),
+    terms_text: str = Form(""),
+    notes: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Log a manual-channel buyer BID (owner-only): create the inbound ExcessOffer +
+    advance the row → bid, then re-render the tracker.
+
+    Reuses ``record_manual_response(has_offer=True)`` → the SAME queued-never-dropped line
+    matcher an emailed bid uses. 409 for an email row (use the reply viewer).
+    """
+    _el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+
+    qty = _to_int(quantity)
+    if not mpn_raw.strip() or qty is None:
+        raise HTTPException(400, "A logged bid needs a part number and quantity")
+
+    resell_outreach_service.record_manual_response(
+        db,
+        outreach=outreach,
         has_offer=True,
         offer_lines=[
             {
