@@ -143,7 +143,7 @@ def _line_amount(line: BuyPlanLine) -> float:
 
     Mirrors ``_recalculate_financials``'s per-line cost math — the single grain for the
     per-PO dollar-limit check (``verify_po``, ``can_verify_po_line``) and the per-line
-    stall detectors (``plan_needs_approver_reason``, hub ``_query_stuck_no_approver_plans``).
+    stall detector (``plan_needs_approver_reason``).
     """
     return float(line.unit_cost or 0) * (line.quantity or 0)
 

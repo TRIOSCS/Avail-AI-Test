@@ -20,7 +20,7 @@ Depends on: models, dependencies, database, .htmx.my_day, .htmx.email_views,
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -97,7 +97,6 @@ _VIEW_ACCESS: dict[str, AccessKey] = {
     "sightings": AccessKey.SIGHTINGS,
     "materials": AccessKey.MATERIALS,
     "search": AccessKey.SEARCH,
-    "buy-plans": AccessKey.BUY_PLANS,
     "approvals": AccessKey.BUY_PLANS,
     "resell": AccessKey.RESELL,
     "crm": AccessKey.CRM,
@@ -118,7 +117,7 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
     (AccessKey.SIGHTINGS, "/v2/sightings"),
     (AccessKey.MATERIALS, "/v2/materials"),
     (AccessKey.SEARCH, "/v2/search"),
-    (AccessKey.BUY_PLANS, "/v2/buy-plans"),
+    (AccessKey.BUY_PLANS, "/v2/approvals"),
     (AccessKey.RESELL, "/v2/resell"),
     (AccessKey.CRM, "/v2/crm"),
     (AccessKey.PROACTIVE, "/v2/proactive"),
@@ -139,8 +138,6 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 @router.get("/v2/contacts", response_class=HTMLResponse)
 @router.get("/v2/vendor-contacts", response_class=HTMLResponse)
 @router.get("/v2/approvals", response_class=HTMLResponse)
-@router.get("/v2/buy-plans", response_class=HTMLResponse)
-@router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/resell", response_class=HTMLResponse)
 @router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -166,11 +163,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         return template_response(
             "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
         )
-    # First matching segment wins — order is load-bearing (e.g. /buy-plans before
-    # /requisitions). Anything unmatched defaults to the requisitions view.
+    # First matching segment wins — order is load-bearing (e.g. /vendor-contacts before
+    # /vendors). Anything unmatched defaults to the requisitions view.
     _VIEW_SEGMENTS = (
         "approvals",
-        "buy-plans",
         "resell",
         "quotes",
         "prospecting",
@@ -208,8 +204,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     # (settings, quotes, follow-ups, trouble-tickets) are never gated.
     gate_key = _VIEW_ACCESS.get(current_view)
     if gate_key is not None and not user_has_access(user, gate_key, db):
-        from fastapi.responses import RedirectResponse
-
         target = next((url for key, url in _MODULE_ENTRY_URLS if user_has_access(user, key, db)), None)
         if target is not None:
             return RedirectResponse(target, status_code=302)
@@ -268,17 +262,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # deep-link pattern) so a reload/bookmark of a pushed tab URL paints the right tab.
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/approvals?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/approvals"
-    elif current_view == "buy-plans":
-        # The Buy Plans hub (personal My Queue + Pipeline) reclaimed /v2/buy-plans as its
-        # non-redirected home. Thread ?lens= so a reload/bookmark of a pushed lens URL paints
-        # the right lens instead of falling to _default_lens. A detail URL (/buy-plans/{id})
-        # is overridden by the _DETAIL_VIEWS block below.
-        lens_qs = request.query_params.get("lens", "").strip()
-        partial_url = (
-            f"/v2/partials/buy-plans?lens={quote(lens_qs)}"
-            if lens_qs in ("my_queue", "pipeline")
-            else "/v2/partials/buy-plans"
-        )
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
@@ -287,7 +270,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "requisitions",
         "vendors",
         "customers",
-        "buy-plans",
         "resell",
         "quotes",
         "prospecting",
@@ -311,6 +293,21 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return page_response(ctx)
+
+
+# ── Retired Buy Plans hub (/v2/buy-plans) ─────────────────────────────
+# The personal My Queue + Pipeline hub retired into the Approvals Workspace once
+# Phase-3 parity landed (spec §11.1; docs/APPROVALS_PARITY_CHECKLIST.md). Old
+# bookmarks and pushed URLs 308 onto the workspace's Buy Plans tab. The workspace
+# list has no per-plan preselection, so a /v2/buy-plans/{id} deep link lands on the
+# tab, not the plan (accepted gap — see the checklist).
+
+
+@router.get("/v2/buy-plans")
+@router.get("/v2/buy-plans/{bp_id:int}")
+async def buy_plans_hub_retired_redirect(bp_id: int | None = None) -> RedirectResponse:
+    """308 the retired Buy Plans hub (and its detail deep links) to the workspace."""
+    return RedirectResponse("/v2/approvals?tab=buy-plans", status_code=308)
 
 
 # ── Parts workspace (split-panel entry point) ─────────────────────────
