@@ -1102,3 +1102,227 @@ class TestWithdrawOfferServiceGuard:
         excess_service.withdraw_offer(db_session, offer.id)
 
         assert calls == [(offer.id, excess_list.id)]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  assign_offer_line (Task 4 / finding #15) — salvage an unmatched offer line
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _unmatched_offer_line(
+    db: Session, *, excess_list: ExcessList, submitter: User, mpn_raw: str, unit_price: Decimal
+) -> ExcessOfferLine:
+    """An OPEN per-line offer carrying ONE unmatched line (excess_line_item_id=None)."""
+    offer = ExcessOffer(
+        excess_list_id=excess_list.id,
+        submitted_by=submitter.id,
+        scope="per_line",
+        status=ExcessOfferStatus.OPEN,
+    )
+    db.add(offer)
+    db.flush()
+    line = ExcessOfferLine(
+        offer_id=offer.id,
+        excess_line_item_id=None,
+        mpn_raw=mpn_raw,
+        quantity=50,
+        unit_price=unit_price,
+        match_status=OfferLineMatchStatus.UNMATCHED,
+    )
+    db.add(line)
+    db.flush()
+    return line
+
+
+class TestAssignOfferLineService:
+    def test_assign_matches_and_rolls_up_target(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Assigning an unmatched line to a target line flips it MATCHED, links it, and
+        recomputes the target's best-price rollup (the salvaged bid now owns the
+        line)."""
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+        assert cap_line.best_offer_id is None  # nothing on the target yet
+
+        result = excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, owner)
+
+        assert result.match_status == OfferLineMatchStatus.MATCHED
+        assert result.excess_line_item_id == cap_line.id
+        db_session.refresh(cap_line)
+        assert cap_line.best_offer_id == offer_line.offer_id
+        assert cap_line.best_offer_unit_price == Decimal("0.95")
+
+    def test_assigned_offer_becomes_awardable(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """The salvaged offer is now a real matched bid → the owner can award it."""
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+        excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, owner)
+
+        awarded = excess_service.award_offer(db_session, offer_line.offer_id, owner)
+        assert awarded.status == ExcessOfferStatus.WON
+        db_session.refresh(cap_line)
+        assert cap_line.status == ExcessLineItemStatus.AWARDED
+
+    def test_target_line_on_other_list_404(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        seller_company: Company,
+    ):
+        """A target line that belongs to a DIFFERENT list is rejected — 404."""
+        other_list = ExcessList(company_id=seller_company.id, owner_id=owner.id, title="Other")
+        db_session.add(other_list)
+        db_session.flush()
+        stray = _line(db_session, other_list, "STRAY-PART")
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, stray.id, owner)
+        assert exc.value.status_code == 404
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
+
+    def test_offer_line_on_other_list_404(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        seller_company: Company,
+    ):
+        """An offer line whose offer is on a DIFFERENT list is not assignable here —
+        404."""
+        other_list = ExcessList(company_id=seller_company.id, owner_id=owner.id, title="Other")
+        db_session.add(other_list)
+        db_session.flush()
+        stray_line = _unmatched_offer_line(
+            db_session, excess_list=other_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, stray_line.id, cap_line.id, owner)
+        assert exc.value.status_code == 404
+
+    def test_non_owner_403(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        outsider: User,
+    ):
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, outsider)
+        assert exc.value.status_code == 403
+
+    def test_reassign_moves_and_recomputes_both_lines(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """Re-assigning to a different line recomputes BOTH the old and the new target
+        (the old loses the bid, the new gains it)."""
+        a = _line(db_session, excess_list, "REASSIGN-A")
+        b = _line(db_session, excess_list, "REASSIGN-B")
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("1.10")
+        )
+        db_session.commit()
+
+        excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, a.id, owner)
+        db_session.refresh(a)
+        assert a.best_offer_id == offer_line.offer_id  # A owns it after the first assign
+
+        excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, b.id, owner)
+
+        db_session.refresh(a)
+        db_session.refresh(b)
+        assert a.best_offer_id is None  # A recomputed — the bid moved away
+        assert a.offer_count == 0
+        assert b.best_offer_id == offer_line.offer_id  # B now owns it
+        assert b.best_offer_unit_price == Decimal("1.10")
+
+
+class TestAssignOfferLineRoute:
+    def test_assign_route_200_and_salvages(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        from app.dependencies import require_user
+        from app.main import app
+
+        excess_list.status = ExcessListStatus.COLLECTING
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(
+                f"/api/resell/{excess_list.id}/offer-lines/{offer_line.id}/assign",
+                data={"target_line_item_id": str(cap_line.id)},
+            )
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 200
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.MATCHED
+        assert offer_line.excess_line_item_id == cap_line.id
+
+    def test_assign_route_non_owner_403(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, broker: User
+    ):
+        """The default client user is not the owner → 403 (the line stays unmatched)."""
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+        resp = client.post(
+            f"/api/resell/{excess_list.id}/offer-lines/{offer_line.id}/assign",
+            data={"target_line_item_id": str(cap_line.id)},
+        )
+        assert resp.status_code == 403
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED
+
+    def test_offers_tab_renders_assign_control_for_unmatched(
+        self, client, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """The unmatched queue surfaces an assign form pointed at the offer line + a
+        target option for the posted line (the manual-resolution affordance)."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        excess_list.status = ExcessListStatus.COLLECTING
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            body = client.get(f"/v2/partials/resell/{excess_list.id}/offers").text
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert f"/offer-lines/{offer_line.id}/assign" in body
+        assert f'value="{cap_line.id}"' in body  # the posted line is an assign target

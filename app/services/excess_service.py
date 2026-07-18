@@ -678,6 +678,56 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     return offer
 
 
+def assign_offer_line(
+    db: Session, list_id: int, offer_line_id: int, target_line_item_id: int, owner: User
+) -> ExcessOfferLine:
+    """Assign an unmatched/ambiguous offer line to a posted line (owner-only; finding
+    #15).
+
+    The queued-never-dropped matcher parks an ``ExcessOfferLine`` whose ``mpn_raw`` didn't
+    cleanly resolve in the unmatched queue; this is the manual resolution: the owner points
+    it at the intended ``ExcessLineItem``, so the salvaged bid becomes a real matched offer
+    (and thus awardable). Sets ``excess_line_item_id`` + flips ``match_status`` → MATCHED,
+    then recomputes the target line's best-price rollup (and, on a RE-assign, the line it
+    moved off of, so the old line no longer counts the moved bid). Guards: the list exists
+    (404) + *owner* owns it (403); the offer line belongs to this list (404); the target
+    line is on this list (404, never another list's line). Commits.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can assign an offer line")
+
+    offer_line = db.get(ExcessOfferLine, offer_line_id)
+    if offer_line is None or offer_line.offer is None or offer_line.offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer line {offer_line_id} not found on list {list_id}")
+
+    target = db.get(ExcessLineItem, target_line_item_id)
+    if target is None or target.excess_list_id != list_id:
+        raise HTTPException(404, f"Line {target_line_item_id} not found on list {list_id}")
+
+    previous_line_item_id = offer_line.excess_line_item_id
+    offer_line.excess_line_item_id = target.id
+    offer_line.match_status = OfferLineMatchStatus.MATCHED
+    db.flush()
+
+    # Recompute the new target, and the line it moved off of (a re-assign), so both rollups
+    # reflect the move. A first assign from the unmatched queue has no previous line.
+    if previous_line_item_id is not None and previous_line_item_id != target.id:
+        recompute_line_rollup(db, previous_line_item_id)
+    recompute_line_rollup(db, target.id)
+
+    _safe_commit(db, entity="offer line assignment")
+    db.refresh(offer_line)
+    logger.info(
+        "Assigned ExcessOfferLine id={} → line_item={} on list={} by owner={}",
+        offer_line_id,
+        target.id,
+        list_id,
+        owner.id,
+    )
+    return offer_line
+
+
 # Line statuses that are decided (no longer collecting offers) for list-status derivation.
 _DECIDED_LINE_STATUSES = (ExcessLineItemStatus.AWARDED, ExcessLineItemStatus.WITHDRAWN)
 

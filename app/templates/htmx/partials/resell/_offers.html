@@ -251,7 +251,7 @@
       Unmatched queue ({{ unmatched|length }}) — resolve manually
     </p>
     <table class="compact-table min-w-full">
-      <thead><tr><th class="text-left">Raw MPN</th><th class="text-right">Unit $</th><th class="text-right">Qty</th><th class="text-left">Broker</th></tr></thead>
+      <thead><tr><th class="text-left">Raw MPN</th><th class="text-right">Unit $</th><th class="text-right">Qty</th><th class="text-left">Broker</th><th class="text-left">Assign to</th></tr></thead>
       <tbody>
         {% for e in unmatched %}
         <tr>
@@ -259,6 +259,24 @@
           <td class="text-right tabular-nums">{% if e.line.unit_price is not none %}${{ "{:,.4f}".format(e.line.unit_price|float) }}{% else %}—{% endif %}</td>
           <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
           <td>{{ _broker_label(e.offer, is_owner) }}</td>
+          {# Manual resolution (finding #15): point the parked line at the intended posted
+             line — it becomes a matched, awardable bid. Same OOB re-render as award. #}
+          <td>
+            {% if line_items %}
+            <form hx-post="/api/resell/{{ el.id }}/offer-lines/{{ e.line.id }}/assign"
+                  hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+                  class="inline-flex items-center gap-1">
+              <select name="target_line_item_id" required aria-label="Assign to line"
+                      class="text-xs border border-amber-300 rounded px-1 py-0.5 bg-white">
+                <option value="">Choose line…</option>
+                {% for item in line_items %}
+                <option value="{{ item.id }}">{{ item.part_number }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" data-loading-disable class="btn-primary btn-sm">Assign</button>
+            </form>
+            {% else %}<span class="text-xs text-gray-400">no lines</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

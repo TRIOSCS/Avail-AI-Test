@@ -1448,6 +1448,31 @@ async def resell_withdraw_offer(
     return _toast(resp, "Offer withdrawn")
 
 
+@router.post("/api/resell/{list_id}/offer-lines/{offer_line_id}/assign", response_class=HTMLResponse)
+async def resell_assign_offer_line(
+    request: Request,
+    list_id: int,
+    offer_line_id: int,
+    target_line_item_id: int = Form(...),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Assign an unmatched offer line to a posted line (owner-only), then re-render the
+    Offers tab + OOB lines/chips.
+
+    Manual resolution of the unmatched queue (finding #15): the salvaged line becomes a
+    matched, awardable bid. The service owns the guards (404 list/offer-line/target, 403
+    non-owner) and the rollup recompute; the response is the same OOB compose the award
+    action uses so the Alpine tab state never resets.
+    """
+    excess_service.assign_offer_line(db, list_id, offer_line_id, target_line_item_id, user)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Offer assigned to line")
+
+
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
 #
 # The trader→buyer half of Resell (the inverse of sourcing's RFQ). Offering excess OUT
