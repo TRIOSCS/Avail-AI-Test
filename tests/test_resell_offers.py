@@ -30,6 +30,7 @@ from app.services.excess_service import (
     import_line_items,
     submit_offer,
 )
+from app.utils.normalization import normalize_mpn_key
 from tests.conftest import engine
 
 _ = engine  # Ensure test DB tables are created
@@ -92,6 +93,12 @@ def test_confirm_import_resolves_material_card_id(db_session: Session):
 
     item = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
     assert item.material_card_id is not None
+    # The line resolves to the ACTUAL MAX232 card (not just some non-null row): confirm the
+    # linked card's normalized MPN matches the imported part.
+    card = db_session.get(MaterialCard, item.material_card_id)
+    assert card is not None
+    assert card.normalized_mpn == normalize_mpn_key("MAX232")
+    assert item.part_number == "MAX232"
 
 
 def test_import_unresolvable_mpn_leaves_material_card_null(db_session: Session):

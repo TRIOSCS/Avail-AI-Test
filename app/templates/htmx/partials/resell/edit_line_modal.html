@@ -1,0 +1,56 @@
+{#
+  resell/edit_line_modal.html — Edit-one-line modal (draft lists only).
+  PATCHes /api/resell/{id}/lines/{line_id} which re-renders the WHOLE detail panel
+  (so the Lines tab + header stay in step). Pre-filled from the line's current values.
+  Mirrors add_line_modal.html; the form lives in the global modal (outside the detail
+  root), so it targets the detail root by its document-wide marker attribute.
+  Receives: list_id, line (ExcessLineItem).
+  Called by: resell.resell_edit_line_form.
+#}
+<div class="p-5">
+  <h3 class="h2 mb-4">Edit line</h3>
+  <form hx-patch="/api/resell/{{ list_id }}/lines/{{ line.id }}"
+        hx-target="[data-resell-detail-root]"
+        hx-swap="outerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Line updated'; $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+    <div>
+      <label class="form-label">Part number <span class="text-rose-500">*</span></label>
+      <input type="text" name="part_number" required class="input" value="{{ line.part_number }}">
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="form-label">Manufacturer</label>
+        <input type="text" name="manufacturer" class="input" value="{{ line.manufacturer or '' }}">
+      </div>
+      <div>
+        <label class="form-label">Quantity <span class="text-rose-500">*</span></label>
+        <input type="number" name="quantity" required min="1" value="{{ line.quantity }}" class="input">
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <label class="form-label">Condition</label>
+        <select name="condition" class="input">
+          {% for opt in ['New', 'Used', 'Refurbished'] %}
+          <option value="{{ opt }}" {{ 'selected' if (line.condition or 'New') == opt }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Date code</label>
+        <input type="text" name="date_code" class="input" value="{{ line.date_code or '' }}">
+      </div>
+      <div>
+        <label class="form-label">Asking price</label>
+        <input type="number" name="asking_price" step="0.01" min="0" class="input"
+               value="{{ '%.2f'|format(line.asking_price|float) if line.asking_price is not none else '' }}">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" class="btn btn-primary">Save line</button>
+    </div>
+  </form>
+</div>

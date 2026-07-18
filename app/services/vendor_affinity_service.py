@@ -8,7 +8,7 @@ Depends on: app.models (MaterialCard, Sighting, MaterialVendorHistory, EntityTag
 from __future__ import annotations
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -238,11 +238,67 @@ def _classify_mpn(mpn: str, manufacturer: str | None, api_key: str) -> str | Non
         return None
 
 
-def score_affinity_matches(mpn: str, matches: list[dict]) -> list[dict]:
-    """Assign confidence scores and reasoning to affinity matches using deterministic
-    scoring."""
+# Behavioral weighting applied on top of the deterministic level/mpn_count base score.
+# Responsive vendors get a boost; ghosting/frequently-cancelling vendors get dampened.
+# Missing signals are treated as neutral (no adjustment), not worst-case.
+_RESPONSE_RATE_WEIGHT = 0.20
+_GHOST_RATE_WEIGHT = 0.25
+_CANCELLATION_RATE_WEIGHT = 0.15
+_BEHAVIOR_MULTIPLIER_MIN = 0.5
+_BEHAVIOR_MULTIPLIER_MAX = 1.5
+
+
+def _behavior_multiplier(vendor_card: VendorCard | None) -> tuple[float, str | None]:
+    """Compute a confidence multiplier from VendorCard response_rate / ghost_rate /
+    cancellation_rate.
+
+    Returns (multiplier, note) where note is a short human-readable reason to append to
+    the match's reasoning, or None if no behavioral signal was available.
+    """
+    if vendor_card is None:
+        return 1.0, None
+
+    multiplier = 1.0
+    notes: list[str] = []
+
+    if vendor_card.response_rate is not None:
+        multiplier += (vendor_card.response_rate - 0.5) * _RESPONSE_RATE_WEIGHT
+        if vendor_card.response_rate >= 0.7:
+            notes.append("responsive vendor")
+        elif vendor_card.response_rate <= 0.2:
+            notes.append("low response rate")
+
+    if vendor_card.ghost_rate:
+        multiplier -= vendor_card.ghost_rate * _GHOST_RATE_WEIGHT
+        if vendor_card.ghost_rate >= 0.5:
+            notes.append("history of ghosting")
+
+    if vendor_card.cancellation_rate:
+        multiplier -= vendor_card.cancellation_rate * _CANCELLATION_RATE_WEIGHT
+        if vendor_card.cancellation_rate >= 0.3:
+            notes.append("elevated cancellation rate")
+
+    multiplier = max(_BEHAVIOR_MULTIPLIER_MIN, min(_BEHAVIOR_MULTIPLIER_MAX, multiplier))
+    return multiplier, (", ".join(notes) if notes else None)
+
+
+def score_affinity_matches(mpn: str, matches: list[dict], db: Session | None = None) -> list[dict]:
+    """Assign confidence scores and reasoning to affinity matches.
+
+    Base confidence is deterministic (level + mpn_count). When `db` is supplied, the
+    base confidence is then weighted by the matched vendor's behavioral signals
+    (response_rate / ghost_rate / cancellation_rate on VendorCard) — responsive
+    vendors are boosted, ghosting/cancelling vendors are dampened — before being
+    re-clamped to the existing [0.30, 0.75] confidence band.
+    """
     if not matches:
         return []
+
+    vendor_cards: dict[int, VendorCard] = {}
+    if db is not None:
+        vendor_ids = {m["vendor_id"] for m in matches if m.get("vendor_id")}
+        if vendor_ids:
+            vendor_cards = {vc.id: vc for vc in db.scalars(select(VendorCard).where(VendorCard.id.in_(vendor_ids)))}
 
     scored = []
     for match in matches:
@@ -262,6 +318,12 @@ def score_affinity_matches(mpn: str, matches: list[dict]) -> list[dict]:
             confidence = 0.30 + 0.02 * extra
             confidence = min(confidence, 0.50)
             reason = f"Vendor supplies parts in the same AI-classified category ({mpn_count} MPN(s))"
+
+        vendor_card = vendor_cards.get(match.get("vendor_id"))
+        multiplier, note = _behavior_multiplier(vendor_card)
+        confidence *= multiplier
+        if note:
+            reason = f"{reason}; {note}"
 
         # Clamp to [0.30, 0.75]
         confidence = max(0.30, min(0.75, confidence))
@@ -288,7 +350,7 @@ def find_vendor_affinity(mpn: str, db: Session) -> list[dict]:
         l3 = [m for m in l3 if m["vendor_name"].lower() not in l3_exclude]
         combined.extend(l3)
 
-    scored = score_affinity_matches(mpn, combined)
+    scored = score_affinity_matches(mpn, combined, db)
 
     # Deduplicate: keep highest confidence per vendor_name (lowered).
     best: dict[str, dict] = {}

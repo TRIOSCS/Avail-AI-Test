@@ -281,8 +281,20 @@ search_service.py (orchestrator)
     +---> vendor_utils.py (fuzzy match, dedup vendor names)
     |       +---> DB: UPSERT vendor_cards
     |
-    +---> scoring.py (6-factor: price, qty, freshness, auth, confidence, vendor)
-    |       +---> evidence_tiers.py (assign T1-T7)
+    NOTE: MPN dedup across connector results goes through
+          `strip_packaging_suffixes()` (app/services/search_worker_base/
+          mpn_normalizer.py). It now also strips `-TRPBF`/`/TRPBF` (combined
+          tape-and-reel + lead-free), `-E3`/`-E4` (Vishay/ON Semi Pb-free grade
+          suffix), and a `[-/]TR<n>` reel-quantity pattern. It deliberately does
+          NOT strip `-13`/`-Q1`/`-EP`/bare `-T` — these mark genuinely distinct
+          SKUs (package variant, AEC-Q100 automotive grade, "Enhanced Product"
+          grade) whose stripping would wrongly merge different parts.
+          `normalize_mpn_key()` deliberately does NOT strip date codes — a
+          guardrail-tested decision, not an oversight.
+    |
+    +---> scoring.py (score_sighting_v2 — 5-factor weighted: trust 0.30, price 0.25,
+    |       qty 0.20, freshness 0.15, completeness 0.10; SIGHTING_V2_WEIGHTS)
+    |       +---> evidence_tiers.py (assign T1-T7, via app/source_trust.py)
     |
     +---> DB: UPSERT sightings (dedup by requirement + vendor + mpn)
     |
@@ -646,9 +658,18 @@ robustness items that do not change the retry/breaker/health semantics above:
 - **eBay explicit 429.** `ebay.py::_do_search` special-cased 401 and 404 but let a
   429 fall through to the generic `raise_for_status` path. It now handles 429
   explicitly like DigiKey (its OAuth-client-credentials sibling): honor Retry-After
-  (capped at 30s by `_parse_retry_after`, the Phase-1 cap) with one inline retry,
+  (capped by `_parse_retry_after`, see below) with one inline retry,
   then raise the typed `ConnectorRateLimitError` on a persistent 429. eBay now
   conforms to the 429→`ConnectorRateLimitError` row of the contract above.
+- **`_parse_retry_after` cap lowered to 8s (was 30s).** `_fetch_fresh`'s aggregate
+  fan-out budget is `settings.search_total_timeout_s` (12s default) — a 30s sleep
+  would always outlive that deadline and get cancelled anyway, so honoring an
+  upstream's longer Retry-After was pointless in the search context. Paired with
+  this, `_search_with_retry` (`app/connectors/sources.py`) now acquires the
+  per-connector semaphore ONLY around the `_do_search` HTTP call, not around the
+  retry sleep — a 429 backoff no longer pins the connector's concurrency slot (and
+  transitively the caller's search-wide `asyncio.Semaphore(10)`) while it sleeps,
+  so a slow retrying connector no longer starves its peers' throughput.
 - **Nexar empty-REST → GraphQL fall-through.** `NexarConnector._do_search` tried the
   Octopart REST v4 path first and returned its result whenever it was `not None` —
   so a 200 REST response with ZERO seller rows (`[]`) short-circuited the richer
@@ -680,6 +701,42 @@ robustness items that do not change the retry/breaker/health semantics above:
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
 `tests/test_constants.py`, `tests/test_search_streaming.py`, and
 `tests/test_health_monitor.py`.
+
+**Search fan-out performance &amp; correctness.**
+
+- **Real cache-age scoring.** Search-result Redis cache entries now carry a
+  `cached_at` timestamp; results served from cache are tagged
+  `_source_age_hours` with the real elapsed age (`_cache_age_hours`) instead of
+  a hardcoded `0.0`, so `score_sighting_v2`'s freshness factor reflects reality
+  for cache-served rows. A live fetch still tags `0.0`.
+- **Currency-aware price scoring.** `app/utils/currency.py` (`to_usd`, static
+  approximate FX table, SCORING-ONLY — never invoicing/PO/customer-facing
+  price) converts `unit_price` to USD before computing the median-price
+  baseline and the per-offer price-competitiveness comparison, so listings in
+  EUR/GBP/JPY/etc. no longer get compared as raw numbers against USD listings.
+- **Shared single-MPN search cache.** `stream_search_mpn` now reads/writes the
+  same shared `search:`-prefixed Redis cache key used by the batch search path
+  (via the shared helpers `_flatten_dedupe_filter_junk` / `_aggregate_source_stats`),
+  instead of maintaining its own cache.
+- **Bounded AI web-search gather.** The "smart AI trigger" web-search gather in
+  `_fetch_fresh` is now bounded by `settings.ai_search_timeout_s` (default 20.0,
+  separate from `search_total_timeout_s` — the AI gather starts its own clock
+  after conventional connectors finish). Previously bounded only by the
+  connector's own 60s httpx timeout, so one slow Claude web-search call could
+  hold `_fetch_fresh` open for a minute past every other connector. Pending
+  tasks past the budget are cancelled and recorded in `stats_updates` with an
+  "AI search budget exceeded" error.
+- **Post-search persistence off the event loop.** The post-search DB write
+  (`_persist_search_write`) now runs via `asyncio.to_thread` with its own
+  dedicated write session (SQLAlchemy sessions are not thread-safe, so it
+  cannot reuse the request session) and batched material-card existence
+  checks, keeping the event loop free during the write.
+- **`_build_connectors` config cache.** `_load_connector_config` now caches the
+  disabled/errored source sets + batched credentials `_build_connectors`
+  otherwise re-queried on every search, behind a 60s in-process TTL
+  (`_CONNECTOR_CONFIG_TTL_S`) — a no-op under `TESTING=1`. Connector INSTANCES
+  are still built fresh per call; `_reset_connector_config_cache()` forces
+  immediate freshness after a Settings → Sources credential/status mutation.
 
 ### Browser-worker carve-out
 
@@ -1272,7 +1329,12 @@ the `rfqVendorModal` section below) is fed from four sources:
    render a bordered indigo "affinity" chip + confidence % + reasoning in
    `title`. The button lives INSIDE its own swap target
    (`#rfq-affinity-section`), so the response replaces it — a second click
-   cannot duplicate rows.
+   cannot duplicate rows. `score_affinity_matches` (`vendor_affinity_service.py`) now
+   takes an optional `db` and multiplies the AI base confidence by a behavioral
+   multiplier from `VendorCard`: `response_rate` (+/-0.20), `ghost_rate` (-0.25),
+   `cancellation_rate` (-0.15); multiplier clamped `[0.5, 1.5]`, final confidence
+   re-clamped to the existing `[0.30, 0.75]` band. `db=None` (no card lookup) leaves
+   the multiplier at 1.0.
 3. **Any-vendor autocomplete.** A debounced input against the existing
    `GET /api/autocomplete/names` (vendors filtered client-side from the mixed
    response; the endpoint is not forked). Picking a result POSTs
@@ -1959,8 +2021,11 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- GET /v2/partials/resell/{id}                    (right detail: breadcrumb + chips +
     |        lazy tabs Lines · Offers · Build Bid · Outreach(owner) · Activity; customer chip owner-only)
     |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
-    |        +-- GET .../{id}/offers   (owner-only stack: pinned take-all banner +
-    |        |     per-line offer tables + unmatched queue; non-owner sees nothing)
+    |        +-- GET .../{id}/offers   (OWNER: pinned take-all banner + per-line offer tables +
+    |        |     unmatched queue [each row an "Assign to" select — finding #15]. NON-OWNER
+    |        |     (broker): their OWN offers ONLY + a Withdraw per open/late bid — NO competitor
+    |        |     data (Phase-3 anonymization); a submitter reaches it even after the window
+    |        |     closes — finding #13)
     |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
     |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
     |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
@@ -1977,6 +2042,24 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard;
     |     re-renders the WHOLE detail via [data-resell-detail-root], not just Lines, so the
     |     header Post button appears once a fresh draft has lines — RS-5)
+    +-- DRAFT-EDIT set (finding #14 / D4 — all DRAFT-only + owner-only, guarded 404→403→409 in
+    |     the service; a draft has no offers/mirror so side-effect-free except total_line_items):
+    |        +-- PATCH  /api/resell/{id}/lines/{line_id}  (excess_service.update_line; re-validates
+    |        |     quantity>0 → 400 [the model @validates 500s otherwise]; re-resolves the
+    |        |     MaterialCard when MPN/manufacturer changes; re-renders detail)
+    |        +-- DELETE /api/resell/{id}/lines/{line_id}  (excess_service.delete_line; decrements
+    |        |     total_line_items; re-renders detail)
+    |        +-- PATCH  /api/resell/{id}                   (excess_service.update_excess_list;
+    |        |     title/notes/company_id[re-validates exists]/customer_site_id; re-renders detail)
+    |        +-- DELETE /api/resell/{id}                   (excess_service.delete_excess_list; cascade
+    |        |     cleans children → refreshes My-Lists [#resell-list-body] + OOB detail-pane reset
+    |        |     [#split-right-resell] + toast + HX-Push-Url /v2/resell so a reload no longer
+    |        |     reopens the deleted list id [finding #8])
+    |        +-- GET .../{id}/edit-form, .../{id}/lines/{line_id}/edit-form (pre-filled modals)
+    |     [All four mutating routes call _get_list_for_user FIRST so a NON-owner probing a private
+    |      draft gets 404 [existence masked], not the service's 403 — matches the GET edit-form
+    |      path [finding #3]. Honest 409 copy (×3): "Posted lists are locked. Close this list and
+    |      create a new one to make changes." replaces the false "revise as a new version".]
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
     |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
     |     confirm re-renders the whole detail like add-line — RS-5)
@@ -1986,7 +2069,8 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
-    |     awards its matched lines; idempotent for an already-won offer; 409 unless the offer
+    |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
+    |     [closed/expired — awarding would reopen the dead list, finding #4]; 409 unless the offer
     |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
     |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
     |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
@@ -2000,6 +2084,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
     |     (close_at set) else collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed
     |     posting stays retired — M5). Same _award_response OOB)
+    +-- POST /api/resell/{id}/offer-lines/{offer_line_id}/assign (owner-only; finding #15;
+    |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
+    |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
+    |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
+    |     salvaged bid is awardable. GUARDED: 409 on a resolved/terminal list [awarded/closed/
+    |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
+    |     "second vector"]. Same _award_response OOB compose as award)
     +-- GET  /v2/partials/resell/{id}/build-bid          (owner-only Build-Bid tab: each line's
     |     best-offer planning price + editable "our offer"; once assembled, the clean
     |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
@@ -2020,6 +2111,11 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/close                      (owner-only; excess_service.close_list:
     |     GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the Sighting
     |     mirror [sync_list_mirror on a now-closed posting] — M5)
+    +-- POST /api/resell/{id}/close-without-bid          (owner-only; D5; excess_service.
+    |     close_list_without_bid → the TERMINAL closed state [distinct from bid_out]: same
+    |     open/collecting guard + close_at + mirror retire, but CLOSED is never swept by the
+    |     nightly expiry [only open/collecting are] and never reopens. close_list and
+    |     close_list_without_bid share _end_posting_window(target_status))
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
     |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
     |     submit_outreach [manual log]; re-renders the Outreach tracker)
@@ -2028,10 +2124,28 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     thread (_replies_context joins VendorResponse↔ExcessOutreach on graph_conversation_id,
     |     newest-first) + a "Convert to offer" quick-add. 404 when the outreach has no thread)
     +-- POST /api/resell/{id}/outreach/{oid}/offer      (RS-4, owner-only; human-reviewed
-          offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
-          via the SAME queued-never-dropped line matcher as an emailed bid + advances the
-          outreach →bid; re-renders the tracker into #tab-outreach-<id>)
+    |     offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
+    |     via the SAME queued-never-dropped line matcher as an emailed bid + advances the
+    |     outreach →bid; re-renders the tracker into #tab-outreach-<id>)
+    +-- MANUAL-CHANNEL log (finding #12, owner-only; a phone/teams/marketplace row is 'sent'
+          with NO email thread, so the conversation-keyed reply matcher can't advance it):
+          +-- POST .../{oid}/log-response  (resell_outreach_service.record_manual_response →
+          |     responded; never regresses a terminal bid/declined; 409 for an email row)
+          +-- GET  .../{oid}/log-bid-form  (reuses _reply_viewer.html — manual flag + convert_url
+          |     — as the Log-bid modal; honest 'Bid logged' toast, not 'Offer created from reply')
+          +-- POST .../{oid}/log-bid       (record_manual_response(has_offer=True) → bid + an
+                ExcessOffer via the SAME _link_inbound_offer path an emailed bid uses; 400 unless
+                the qty is positive [finding #1]; _link_inbound_offer is GATED on the same terminal
+                check as the status advance, so a replayed Log-bid on an already-bid/declined row is
+                an idempotent no-op — no duplicate offer [finding #5/#9/#10])
 ```
+
+**Triage filters (finding #16).** The left-list `stage` filter takes the usual status values
+(`open`/`collecting`/`bid_out`/`awarded`/`closed`/`expired`, each an exact `status=`) PLUS a
+synthetic `stage=live` token that widens to `[open, collecting]`. The workspace "Open" glance
+card counts open+collecting (a list flips open→collecting on its first offer but is still
+live), so it links to `stage=live` to match its count; the strict `open` pill in `_lists.html`
+keeps meaning EXACTLY `status=open`.
 
 **RS-4 reply tracking (inbound half).** The send path already stamps
 `ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the
@@ -2082,6 +2196,39 @@ offerer-facing list + non-owner detail project ONLY MPN/qty/condition, never the
 Demo seed: `python -m app.management.seed_resell_demo` (idempotent; `--reset` to clear) creates
 three deal shapes (40-line collecting w/ per-line + unmatched + take-all offers, a single-line
 one-off w/ 2 offers, an awarded list).
+
+**Anonymization policy (Phase 3, decision D2 — one predicate everywhere).** Customer-identity
+hiding is enforced through the SINGLE ownership predicate `can_see_customer` (== `is_owner` ==
+`el.owner_id == user.id`), threaded from `resell.py` into every template. To a NON-owner (the
+"Open to Me" offerer lens + the non-owner detail) the app projects only MPN / qty / condition —
+never the seller company, and never any of these owner-private aggregates:
+- the seller **company name** and the **owner name** chip (`_header_chips.html`);
+- the free-text **title** — traders name lists after the customer, so a non-owner gets the
+  neutral `Excess listing #N` label (`_display_title`);
+- **offer count** (header "N offers" chip + Offers-tab count badge), **offer coverage** meter,
+  the amber offer-count badge, and the **"N/M awarded"** progress chip — all competitive signal,
+  gated identically to the already-private per-line offer badge / best-offer price (RS-1);
+  `_list_cards` also NULLs coverage/offer_count for non-owners as defense-in-depth.
+Three de-anonymization ORACLES are closed the same way: (1) the left-list `q` search filters on
+**part identity** (normalized MPN / manufacturer, both indexed) in the open lens — never the
+title, which would let a non-owner confirm a hidden customer name by hit/miss; the title ILIKE
+stays for the owner's mine lens only. (2) The outreach email **subject** prefill is neutral
+(`Excess available: N lines`) — never the customer-named title, which ships externally to the
+buyer; and the internal per-touch **ActivityLog subject** references the list by id
+(`excess offer (list #N)`), since that log lands on the SHARED buyer vendor-card timeline.
+Reply-matching is unaffected — it keys on the PERSISTED `send_subject`, not the prefill default.
+(3) The left-list **`needs`** offer-triage filter (`needs=offers` / `needs=take_all` → lists
+carrying a live/whole-list bid) is the OWNER's board only — gated on `can_see_customer`
+(`resell.py resell_lists`), so a non-owner cannot craft `lens=open&needs=offers` and diff it
+against the plain open lens to learn which anonymized `Excess listing #N` postings have already
+drawn a bid (the offer-EXISTENCE sibling of the offer-count chip it hides).
+
+Same gate on every OTHER cross-trader writer that names the list, since each lands on a surface
+keyed only on `vendor_card_id` (the shared buyer timeline / Tasks tab): the retry resend's
+**fallback** subject is the neutral part-count default, never `el.title` (used only when a legacy
+/ cleared row has no persisted `send_subject`); the inbound-offer **owner notification**
+(`notify_owner_of_offer` → `New offer from <buyer> on list #N`); and the "not yet offered"
+**follow-up task** title (`auto_create_resell_followup_task` → `… on Excess listing #N …`).
 
 **Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
 - **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback
@@ -2179,6 +2326,18 @@ newest active offers for every card touched by the completed buy plan, so new
 proactive matches surface on the Proactive tab without waiting for the daily cron.
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
+
+**Immediate re-match on offer approval.**
+`proactive_matching.trigger_rematch_on_offer_approval(db, offer)` closes a separate
+watermark gap: a batch scan only ever sees an offer once, at `Offer.created_at`; an
+offer created `pending_review` is excluded from the scan's live-status filter, so if
+it's approved after the watermark has advanced past its `created_at`, it stays
+invisible to every future batch scan too. The hook runs a targeted single-offer
+`find_matches_for_offer(offer.id, db)` in its own commit/rollback (a re-match failure
+never blocks the caller's approval transaction) and is a no-op for offers without a
+`material_card_id`. Wired into all three offer-approval paths: the htmx offers CRUD
+`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and
+`approve_offer` (`app/routers/crm/offers.py`).
 
 **Hotlist → Proactive (monitor without purchase history).** The CPH path returns
 no matches when a customer has never bought the part (`_find_matches` needs CPH
@@ -2994,6 +3153,11 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
   with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
   hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+  `find_vendor_dedup_candidates` is now dialect-dispatched like the Company scanner:
+  **PostgreSQL** = pg_trgm self-join on `normalized_name` via `func.similarity()` over
+  the `ix_vendor_cards_name_trgm` GIN index — full-table coverage, no 500-row cap;
+  **SQLite/fallback** = buckets candidates by a cheap first-4-chars blocking key on the
+  normalized name before the pairwise scan.
 - **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
   `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
   per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
@@ -5098,22 +5262,24 @@ unified_score_service.py (top-level, monthly)
             |       +---> cancellation_rate, quote_conversion
             +---> vendor_metrics_snapshot (DB)
 
-SIGHTING SCORING (per search result):
-    scoring.py
-        +---> price competitiveness
-        +---> quantity match
-        +---> freshness (recency)
-        +---> authorized distributor bonus
-        +---> source confidence
-        +---> vendor reliability (from vendor_score)
+SIGHTING SCORING (per search result, score_sighting_v2, app/scoring.py):
+    scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS):
+        +---> trust        0.30  (authorized=95, else vendor_score, else 35 new-vendor baseline)
+        +---> price         0.25  (median/unit ratio, capped 0-100)
+        +---> qty           0.20  (coverage of target_qty, or flat 60 if qty known but no target)
+        +---> freshness     0.15  (100 - age_hours/24*5; missing = 25)
+        +---> completeness  0.10  (price/qty/lead_time/condition fields present)
 
-LEAD SCORING (per sourcing lead):
+LEAD SCORING (per sourcing lead, app/services/sourcing_leads.py):
+    SourcingLead.confidence_score = sighting*0.5 + source_reliability*0.2 +
+        freshness*0.15 + contactability*0.1 + historical*0.05, plus an ADDITIVE
+        vendor-feedback adjustment (see "Vendor Feedback Loop" below).
     sourcing_score.py
         +---> freshness_score
-        +---> source_reliability_score
+        +---> source_reliability_score  (app/source_trust.py base + evidence-tier bonus)
         +---> contactability_score
         +---> historical_success_score
-        +---> vendor_safety_score --> prospect_signals.py
+        +---> vendor_safety_score --> prospect_signals.py (+ vendor-feedback do_not_contact override)
 
 PROSPECT SCORING:
     prospect_scoring.py
@@ -5131,6 +5297,57 @@ ACTIVITY SCORECARD (per-user leaderboard, on-demand read):
         +---> 4 GROUP BY queries total (no per-user N+1); range:
               this_week / this_month (default) / this_quarter / all_time
 ```
+
+### Source Trust Authority (`app/source_trust.py`)
+
+Single authority for source-type reliability + evidence-tier trust, replacing scattered
+per-caller constants. Pure data/lookup module, no I/O.
+
+- `SOURCE_RELIABILITY_BASE` — source_type -> base reliability (0-100): authorized/API
+  aggregators (digikey/mouser/farnell/element14/nexar/octopart) = 90; `avail_history`/
+  `salesforce` = 85; **`brokerbin`/`sourcengine` = 80** (new API-marketplace bucket — they
+  are direct API connectors, previously mis-bucketed with scraped marketplaces at 72);
+  scraped marketplaces (netcomponents/icsource/thebrokersite) = 72; `ai`/`web` = 40;
+  default 60.
+- `EVIDENCE_TIER_BONUS` — bonus/penalty on top of the base, ordering
+  **T1 (+8) > T2 (+5) > T6 (+3) > T3 (+2) > T4 (0) > T5 (−5) > T7 (−15)**. Deliberate
+  correction: T6 (manual buyer entry) moved from −10 to +3 — a human-verified manual
+  entry now outranks T3 (anonymous marketplace scrape).
+- Source-type category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/
+  `EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
+  assignment) and `services/sourcing_leads.py` (`_source_reliability` = base + tier
+  bonus) share one membership list instead of drifting copies.
+- `VENDOR_RELIABILITY_UNKNOWN` (25.0) / `VENDOR_RELIABILITY_KNOWN_NO_SCORE` (50.0) —
+  reliability fallbacks consumed by `services/buyplan_scoring.py`'s `score_offer`
+  vendor-reliability component when a vendor has no computed `vendor_score` yet.
+
+### Vendor Feedback Loop (sourcing leads)
+
+`services/sourcing_leads.get_vendor_feedback_adjustment(db, vendor_card_id)` rolls up a
+vendor's buyer `LeadFeedbackEvent` history (joined through `SourcingLead`) into a
+time-decayed adjustment — one grouped query, no N+1:
+
+```
+get_vendor_feedback_adjustment(db, vendor_card_id)
+    +---> SELECT LeadFeedbackEvent ⋈ SourcingLead WHERE vendor_card_id = ...
+    |       AND created_at >= now - 270d   (FEEDBACK_LOOKBACK_DAYS, ~3 half-lives)
+    +---> per event: decay = 0.5 ** (age_days / 90)   (FEEDBACK_HALF_LIFE_DAYS)
+    |       confidence_penalty += weight[status] * decay
+    |       safety_penalty     += weight[status] * decay
+    +---> do_not_contact = True if ANY event has status == "do_not_contact"
+    |       (NOT decayed — a standing buyer instruction, never fades)
+    return VendorFeedbackAdjustment(confidence_penalty, safety_penalty, do_not_contact)
+```
+
+Applied ADDITIVELY (not weighted further) so a `do_not_contact`/repeated `bad_lead`
+history from THIS vendor meaningfully drags the score rather than being diluted:
+- `_compute_confidence` adds `feedback.confidence_penalty` after the weighted sum
+  (`sighting*0.5 + source_reliability*0.2 + freshness*0.15 + contactability*0.1 +
+  historical*0.05`).
+- `_compute_vendor_safety` adds `feedback.safety_penalty`; a `do_not_contact` event on
+  ANY of this vendor's leads forces `safety_score <= 15` and appends the
+  `buyer_marked_do_not_contact` flag — this override never decays, unlike the rest of
+  the adjustment.
 
 ### CRM -> Activity Scorecard Tab (`/v2/partials/crm/scorecard`, ALL users)
 

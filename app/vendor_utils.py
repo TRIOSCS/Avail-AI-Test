@@ -239,7 +239,9 @@ def fuzzy_dedup_scan(
         ``(row, None, score)`` tuples in scan order.
 
     Called by: app.company_utils._find_company_dedup_candidates_rapidfuzz (pairwise),
-               app.services.vendor_duplicates._fuzzy_match_python (anchor)
+               app.services.vendor_duplicates._fuzzy_match_python (anchor),
+               app.vendor_utils._find_vendor_dedup_candidates_blocked (pairwise, one
+               call per blocking bucket rather than one call across the whole table)
     Depends on: rapidfuzz.fuzz.token_sort_ratio
     """
     from rapidfuzz import fuzz
@@ -420,52 +422,151 @@ def _enrich_with_vendor_cards(results: dict, db) -> None:
         group["blacklisted_count"] = blacklisted_count
 
 
-def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
-    """Find potential duplicate vendor cards using fuzzy matching.
+def _vendor_pair_dict(card_a: Any, card_b: Any, score: float) -> dict:
+    """Build the public candidate shape shared by both dedup backends below."""
+    return {
+        "vendor_a": {
+            "id": card_a.id,
+            "name": card_a.display_name,
+            "sightings": card_a.sighting_count or 0,
+        },
+        "vendor_b": {
+            "id": card_b.id,
+            "name": card_b.display_name,
+            "sightings": card_b.sighting_count or 0,
+        },
+        "score": int(score),
+    }
 
-    Returns groups of vendors that may be duplicates, sorted by match score.
+
+def _find_vendor_dedup_candidates_pg(db, threshold: int, limit: int) -> list[dict]:
+    """PostgreSQL path: pg_trgm self-join on normalized_name via func.similarity().
+
+    Uses the ix_vendor_cards_name_trgm GIN index (migration 024_vendor_trgm_index) so
+    every vendor card is compared, not just the top 500 by sighting_count — a
+    low-sighting-count duplicate is found regardless of table size. Pairs are
+    deduplicated with a.id < b.id so each unordered pair appears once.
+    """
+    from sqlalchemy import func, select, text
+
+    from .models import VendorCard
+
+    a = VendorCard.__table__.alias("a")
+    b = VendorCard.__table__.alias("b")
+    sim = func.similarity(a.c.normalized_name, b.c.normalized_name)
+
+    pair_rows = db.execute(
+        select(
+            a.c.id.label("a_id"),
+            a.c.display_name.label("a_name"),
+            a.c.sighting_count.label("a_sightings"),
+            b.c.id.label("b_id"),
+            b.c.display_name.label("b_name"),
+            b.c.sighting_count.label("b_sightings"),
+            sim.label("sim"),
+        )
+        .where(
+            a.c.id < b.c.id,
+            a.c.normalized_name.isnot(None),
+            b.c.normalized_name.isnot(None),
+            a.c.normalized_name != "",
+            b.c.normalized_name != "",
+            a.c.normalized_name.op("%")(b.c.normalized_name),
+            sim >= (threshold / 100.0),
+        )
+        .order_by(text("sim DESC"))
+        .limit(limit)
+    ).all()
+
+    candidates = [
+        {
+            "vendor_a": {"id": r.a_id, "name": r.a_name, "sightings": r.a_sightings or 0},
+            "vendor_b": {"id": r.b_id, "name": r.b_name, "sightings": r.b_sightings or 0},
+            "score": round(r.sim * 100),
+        }
+        for r in pair_rows
+    ]
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates
+
+
+def _vendor_blocking_key(normalized_name: str) -> str:
+    """Cheap blocking key for the non-pg_trgm vendor dedup fallback.
+
+    First 4 characters of the normalized name with internal spaces removed (e.g. "arrow
+    electronics" and "arrow electronic" both key to "arro"). This groups near-duplicates
+    that share a common prefix — the overwhelming majority of real vendor-name near-
+    dupes (legal-suffix drift, singular/plural, minor misspellings later in the string)
+    — into small buckets, so only within-bucket pairs are scored instead of every pair
+    in the whole table.
+
+    Known blind spot (accepted tradeoff, documented rather than silently missed): a
+    duplicate whose FIRST 4 characters differ — e.g. a typo in the first word, or
+    reordered tokens ("Electronics Arrow" vs "Arrow Electronics") — will land in a
+    different bucket and won't be compared. fuzzy_score_vendor's token_sort_ratio is
+    order-invariant but blocking-by-prefix is not; this is a real but narrow gap
+    relative to the bug being fixed (low-sighting-count vendors dropped entirely by the
+    old 500-row cap, not just prefix-typo'd ones).
+    """
+    if not normalized_name:
+        return ""
+    return normalized_name.replace(" ", "")[:4]
+
+
+def _find_vendor_dedup_candidates_blocked(db, threshold: int, limit: int) -> list[dict]:
+    """SQLite / no-pg_trgm fallback: bucket by _vendor_blocking_key, scan pairwise
+    within each bucket only.
+
+    Replaces the old flat top-500-by-sighting_count cap (which meant two
+    low-sighting-count vendors past position 500 could never be compared at all).
+    Every vendor card is loaded and bucketed — O(n) — then each bucket is scanned
+    pairwise via fuzzy_dedup_scan — O(bucket_size^2) per bucket, not O(n^2) across
+    the whole table. All matching pairs across all buckets are collected and sorted
+    by score before `limit` truncates the OUTPUT, so a real duplicate is never
+    silently dropped by scan order the way the old early-exit truncation could.
     """
     from .models import VendorCard
 
     cards = (
         db.query(VendorCard.id, VendorCard.display_name, VendorCard.normalized_name, VendorCard.sighting_count)
-        .order_by(VendorCard.sighting_count.desc().nullslast())
-        .limit(500)
+        .filter(VendorCard.normalized_name.isnot(None), VendorCard.normalized_name != "")
         .all()
     )
 
-    seen_pairs: set[tuple] = set()
-    candidates = []
+    buckets: dict[str, list] = {}
+    for card in cards:
+        buckets.setdefault(_vendor_blocking_key(card.normalized_name), []).append(card)
 
-    for i, card_a in enumerate(cards):
-        for card_b in cards[i + 1 :]:
+    seen_pairs: set[tuple[int, int]] = set()
+    candidates = []
+    for bucket in buckets.values():
+        if len(bucket) < 2:
+            continue
+        scanned = fuzzy_dedup_scan(bucket, lambda c: c.normalized_name, threshold=threshold)
+        for card_a, card_b, score in scanned:
             pair_key = (min(card_a.id, card_b.id), max(card_a.id, card_b.id))
             if pair_key in seen_pairs:
                 continue
+            seen_pairs.add(pair_key)
+            candidates.append(_vendor_pair_dict(card_a, card_b, score))
 
-            score = fuzzy_score_vendor(card_a.normalized_name, card_b.normalized_name)
-            if score >= threshold:
-                seen_pairs.add(pair_key)
-                candidates.append(
-                    {
-                        "vendor_a": {
-                            "id": card_a.id,
-                            "name": card_a.display_name,
-                            "sightings": card_a.sighting_count or 0,
-                        },
-                        "vendor_b": {
-                            "id": card_b.id,
-                            "name": card_b.display_name,
-                            "sightings": card_b.sighting_count or 0,
-                        },
-                        "score": score,
-                    }
-                )
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates[:limit]
 
-            if len(candidates) >= limit:
-                break
-        if len(candidates) >= limit:
-            break
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)  # type: ignore[arg-type,return-value]
-    return candidates
+def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
+    """Find potential duplicate vendor cards using fuzzy matching.
+
+    Returns groups of vendors that may be duplicates, sorted by match score
+    descending: [{"vendor_a": {id, name, sightings}, "vendor_b": {...}, "score": int}].
+
+    Backend by dialect (same output shape either way):
+      - PostgreSQL: pg_trgm self-join on normalized_name via func.similarity() over
+        the ix_vendor_cards_name_trgm GIN index — full-table coverage, no cap.
+      - SQLite / fallback: blocking-bucket rapidfuzz scan (_find_vendor_dedup_candidates_blocked)
+        — also full-table coverage, without the old 500-row cap that dropped
+        low-sighting-count duplicates.
+    """
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        return _find_vendor_dedup_candidates_pg(db, threshold, limit)
+    return _find_vendor_dedup_candidates_blocked(db, threshold, limit)

@@ -60,10 +60,10 @@
   <div x-show="lens === 'mine'" x-cloak
        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3 flex-shrink-0">
     {% set glance = [
-      ('open', 'stage=open', 'Open', stats.open, 'Posted, awaiting offers'),
+      ('open', 'stage=live', 'Open', stats.open, 'Open + collecting offers'),
       ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
       ('take_all', 'needs=take_all', 'Take-all', stats.take_all, 'Whole-list offers'),
-      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Sent to the customer'),
+      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Collection window closed'),
       ('awarded', 'stage=awarded', 'Awarded', stats.awarded, 'Closed deals')
     ] %}
     {% for token, query, label, value, sub in glance %}

@@ -28,6 +28,7 @@ from app.services.proactive_matching import (
     find_matches_for_offer,
     mark_match_sent,
     run_proactive_scan,
+    trigger_rematch_on_offer_approval,
 )
 from tests.conftest import engine  # noqa: F401
 
@@ -696,6 +697,64 @@ def test_run_proactive_scan_commit_failure(db_session):
 
     assert result["matches_created"] == 0
     assert result["scanned_offers"] >= 1
+
+
+# ── trigger_rematch_on_offer_approval ──────────────────────────────────────
+
+
+def test_trigger_rematch_on_offer_approval_finds_matches_past_watermark(db_session):
+    """Regression for the proactive_matching.py watermark gap: an offer created as
+    pending_review (invisible to run_proactive_scan's live-status filter) that is
+    approved AFTER the watermark has advanced is still matched via the targeted hook."""
+    from app.models.config import SystemConfig
+
+    data = _setup_scenario(db_session)
+
+    # Advance the watermark to now, simulating a scan that already ran.
+    db_session.add(SystemConfig(key="proactive_last_scan", value=datetime.now(UTC).isoformat()))
+    db_session.commit()
+
+    # Offer created (with an old created_at, before the watermark) as pending_review —
+    # run_proactive_scan's Offer.created_at > since filter would never pick this up.
+    offer = _make_offer(
+        db_session,
+        data,
+        status="pending_review",
+        created_at=datetime.now(UTC) - timedelta(days=1),
+    )
+
+    # A full batch scan finds nothing — the watermark already passed this offer.
+    scan_result = run_proactive_scan(db_session)
+    assert scan_result["matches_created"] == 0
+
+    # Buyer approves the offer — the targeted hook picks it up immediately.
+    offer.status = "approved"
+    db_session.commit()
+    match_count = trigger_rematch_on_offer_approval(db_session, offer)
+
+    assert match_count == 1
+    matches = db_session.query(ProactiveMatch).filter(ProactiveMatch.offer_id == offer.id).all()
+    assert len(matches) == 1
+    assert matches[0].company_id == data["company"].id
+
+
+def test_trigger_rematch_on_offer_approval_no_material_card_is_noop(db_session):
+    data = _setup_scenario(db_session)
+    offer = _make_offer(db_session, data, material_card_id=None)
+
+    match_count = trigger_rematch_on_offer_approval(db_session, offer)
+
+    assert match_count == 0
+
+
+def test_trigger_rematch_on_offer_approval_handles_commit_failure(db_session):
+    data = _setup_scenario(db_session)
+    offer = _make_offer(db_session, data)
+
+    with patch.object(db_session, "commit", side_effect=Exception("DB error")):
+        match_count = trigger_rematch_on_offer_approval(db_session, offer)
+
+    assert match_count == 0
 
 
 # ── dismiss_match error paths (lines 364, 366) ──────────────────────────

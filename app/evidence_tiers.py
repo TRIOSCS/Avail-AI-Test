@@ -1,7 +1,7 @@
 """Evidence tier definitions — data provenance tags for sightings and offers.
 
 Called by: search_service._save_sightings(), email_service._apply_parsed_result()
-Depends on: nothing (pure logic)
+Depends on: app.source_trust (canonical source-type category membership)
 
 Tiers indicate how trustworthy a data point is:
   T1 — Authorized distributor API (e.g., DigiKey, Mouser, Element14 with is_authorized)
@@ -11,16 +11,20 @@ Tiers indicate how trustworthy a data point is:
   T5 — AI-parsed email, high confidence (>=0.8) — auto-applied
   T6 — Manual entry by a buyer
   T7 — Historical/material vendor history (stale, no live confirmation)
+
+Trust ordering (see app/source_trust.py for the authoritative reliability-bonus
+table): T1 > T2 > T6 (manual) > T3 (scrape) > T4/T5 (email-parsed) > T7 (historical).
 """
 
-# Authorized distributor APIs
-_AUTHORIZED_SOURCES = {"digikey", "mouser", "element14"}
-
-# Direct API connectors (reliable structured data)
-_API_SOURCES = {"nexar", "octopart", "brokerbin", "sourcengine"}
-
-# Marketplace / scraper sources (less structured)
-_MARKETPLACE_SOURCES = {"ebay", "oemsecrets", "ics", "ics_scrape"}
+from .source_trust import (
+    API_SOURCES as _API_SOURCES,
+)
+from .source_trust import (
+    AUTHORIZED_SOURCES as _AUTHORIZED_SOURCES,
+)
+from .source_trust import (
+    MARKETPLACE_SOURCES as _MARKETPLACE_SOURCES,
+)
 
 
 def tier_for_sighting(source_type: str | None, is_authorized: bool) -> str:

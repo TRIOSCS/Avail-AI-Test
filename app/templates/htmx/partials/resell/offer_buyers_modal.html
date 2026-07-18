@@ -8,6 +8,7 @@
 
   Receives: list, suggestions [{buyer: RankedBuyer, overlap}], no_contact_buyers
             [{card}], channels (list), line_ids (list), scope_lines (or None),
+            line_count (int — neutral subject prefill, #11),
             preselect_ids (buyer vendor_card_ids to pre-check — RS-8), user.
   Called by: resell.resell_offer_buyers_form (via the detail "Offer to buyers" action
              and the "not yet offered" nudge chips, which pass a preselect buyer).
@@ -24,10 +25,12 @@
        selected: {{ preselect_ids|default([])|tojson }},
        scope: {{ "per_line" | tojson if line_ids else "whole_list" | tojson }},
        channel: "email",
+       noContactIds: [{% for nc in no_contact_buyers %}{{ nc.card.id }}{{ "," if not loop.last }}{% endfor %}],
        query: "",
        results: [],
        searchOpen: false,
        addedCompanies: [],
+       setChannel(ch) { this.channel = ch; if (ch === "email") { this.selected = this.selected.filter(id => !this.noContactIds.includes(id)); } },
        toggle(id) { this.selected.includes(id) ? this.selected = this.selected.filter(x => x !== id) : this.selected.push(id); },
        isSel(id) { return this.selected.includes(id); },
        async search() {
@@ -115,11 +118,16 @@
         </label>
         {% endfor %}
 
-        {# No-contact history buyers: dealt-with-before but no resolvable email — manual
-           log only, disabled checkbox, clear badge (mirrors the RFQ modal no-email row). #}
+        {# No-contact history buyers: dealt-with-before but no resolvable email. On the
+           EMAIL channel they can't be reached, so the checkbox stays disabled; on a manual
+           channel (phone/teams/marketplace) no email is needed, so the checkbox is enabled
+           and toggles the buyer into the selection (finding #12). #}
         {% for nc in no_contact_buyers %}
         <label class="flex items-center gap-3 px-3 py-2">
-          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <input type="checkbox" :disabled="channel === 'email'"
+                 :checked="isSel({{ nc.card.id }})" @change="toggle({{ nc.card.id }})"
+                 :class="channel === 'email' ? 'cursor-not-allowed' : ''"
+                 class="rounded border-gray-300">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-500">{{ nc.card.display_name }}</span>
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
@@ -176,7 +184,7 @@
       <label class="block font-medium text-secondary uppercase tracking-wider mb-1">Channel</label>
       <div class="flex flex-wrap gap-2 text-sm">
         {% for ch in channels %}
-        <button type="button" @click="channel = '{{ ch }}'"
+        <button type="button" @click="setChannel('{{ ch }}')"
                 :class="channel === '{{ ch }}' ? 'bg-accent-500 text-white border-accent-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-accent-50'"
                 class="px-3 py-1.5 rounded-full border font-medium transition-colors capitalize">{{ ch }}</button>
         {% endfor %}
@@ -189,7 +197,10 @@
     <div x-show="channel === 'email'" x-cloak class="space-y-3">
       <div>
         <label class="form-label">Subject</label>
-        <input type="text" name="subject" class="input" value="Excess available: {{ el.title }}">
+        {# #11: NEVER prefill the customer-named list title — the subject ships externally
+           to the buyer and would de-anonymize the customer. Neutral, part-count default;
+           the owner can still edit it before sending. #}
+        <input type="text" name="subject" class="input" value="Excess available: {{ line_count }} line{{ 's' if line_count != 1 }}">
       </div>
       <div>
         <label class="form-label">Message</label>

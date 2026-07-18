@@ -1209,6 +1209,12 @@ def test_retry_route_flips_failed_to_sending_and_enqueues(
     """POST .../retry on a FAILED row flips it to ``sending`` at once and enqueues the
     reconcile-first background retry (the request never resends inline)."""
     row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+    # #11/#12: the customer-named title must NEVER reach the retry resend subject. The
+    # service resends with ``row.send_subject or subject`` — so for a legacy / cleared-
+    # subject row (send_subject NULL) this fallback ships EXTERNALLY to the buyer. Give the
+    # list a customer name and prove the enqueued fallback is neutralized.
+    posted_list.title = "Acme Corp — surplus FPGAs"
+    db_session.commit()
     retry_stub = MagicMock()
     restore = _own(trader)
     try:
@@ -1222,7 +1228,9 @@ def test_retry_route_flips_failed_to_sending_and_enqueues(
         kwargs = retry_stub.call_args.kwargs
         assert kwargs["outreach_id"] == row_id
         assert kwargs["owner_id"] == trader.id
-        assert posted_list.title in kwargs["subject"]
+        # The fallback subject is the neutral part-count default, never the customer title.
+        assert posted_list.title not in kwargs["subject"], "customer-named title leaked into the retry resend subject"
+        assert "Excess available" in kwargs["subject"]  # neutral, part-count fallback
         assert kwargs["body"]
         assert kwargs["token"]
         db_session.expire_all()

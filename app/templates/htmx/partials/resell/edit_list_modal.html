@@ -1,0 +1,38 @@
+{#
+  resell/edit_list_modal.html — Edit-draft-header modal (draft lists only).
+  PATCHes /api/resell/{id} (title/customer/notes) which re-renders the WHOLE detail
+  panel. Pre-filled from the list's current values. Mirrors create_modal.html.
+  Receives: list (ExcessList), companies.
+  Called by: resell.resell_edit_list_form.
+#}
+{% set el = list %}
+<div class="p-5">
+  <h2 class="h2 mb-5">Edit list details</h2>
+
+  <form hx-patch="/api/resell/{{ el.id }}"
+        hx-target="[data-resell-detail-root]"
+        hx-swap="outerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='List updated'; $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+    <div>
+      <label class="form-label">Title <span class="text-rose-500">*</span></label>
+      <input type="text" name="title" required class="input" value="{{ el.title }}">
+    </div>
+    <div>
+      <label class="form-label">Customer <span class="text-rose-500">*</span></label>
+      <select name="company_id" required class="input">
+        {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if c.id == el.company_id }}>{{ c.name }}</option>{% endfor %}
+      </select>
+      <p class="text-secondary mt-1">The customer is owner-only — never shown to brokers.</p>
+    </div>
+    <div>
+      <label class="form-label">Notes</label>
+      <textarea name="notes" rows="2" class="input" placeholder="Optional…">{{ el.notes or '' }}</textarea>
+    </div>
+    <div class="modal-footer">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </div>
+  </form>
+</div>

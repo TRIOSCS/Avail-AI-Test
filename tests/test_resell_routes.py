@@ -230,6 +230,88 @@ def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, 
         app.dependency_overrides.pop(require_user, None)
 
 
+def test_open_lens_search_matches_part_identity_not_title(client, db_session, trader_user, test_company):
+    """#10: in the OPEN (offerer) lens, ``q`` must search part identity (normalized MPN
+    / manufacturer), NEVER the free-text title.
+
+    Searching the title is a de-anonymization oracle: a non-owner could confirm a hidden
+    customer name by typing it and seeing whether a (still-anonymized) row comes back. So
+    a customer-name query returns NOTHING, while a real MPN / manufacturer query returns
+    the anonymized row.
+    """
+
+    leaky_title = f"{test_company.name} — surplus FPGAs Q3"  # trader named it after the customer
+    el = ExcessList(
+        title=leaky_title,
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.OPEN,
+        total_line_items=1,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(el)
+    db_session.flush()
+    db_session.add(
+        ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="XCVU9P-2FLGA2104I",
+            normalized_part_number=normalize_mpn_key("XCVU9P-2FLGA2104I"),
+            manufacturer="Xilinx",
+            quantity=50,
+            condition="New",
+        )
+    )
+    db_session.commit()
+    neutral = f"Excess listing #{el.id}"
+
+    # ── Non-owner (default buyer client), open lens ──
+    # Customer-name query → NO row (title is not searchable by non-owners).
+    by_customer = client.get(f"/v2/partials/resell/lists?lens=open&q={test_company.name}").text
+    assert neutral not in by_customer, "title search leaked the row to a non-owner (de-anon oracle)"
+    assert leaky_title not in by_customer
+
+    # Real MPN query (with the trader's dashes) → the anonymized row comes back.
+    by_mpn = client.get("/v2/partials/resell/lists?lens=open&q=XCVU9P-2FLGA2104I").text
+    assert neutral in by_mpn, "MPN search must return the matching anonymized row"
+
+    # Manufacturer query → the anonymized row comes back.
+    by_mfr = client.get("/v2/partials/resell/lists?lens=open&q=Xilinx").text
+    assert neutral in by_mfr, "manufacturer search must return the matching anonymized row"
+
+
+def test_mine_lens_search_still_matches_title(client, db_session, trader_user, test_company):
+    """Control: the OWNER's mine lens still searches the free-text title (their own data)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    el = ExcessList(
+        title="Titanium widgets clearance",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.OPEN,
+        total_line_items=1,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(el)
+    db_session.flush()
+    db_session.add(
+        ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="LM358N",
+            normalized_part_number=normalize_mpn_key("LM358N"),
+            quantity=10,
+        )
+    )
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        body = client.get("/v2/partials/resell/lists?lens=mine&q=Titanium").text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert "Titanium widgets clearance" in body, "owner title search must still match"
+
+
 # ── Detail + tabs ────────────────────────────────────────────────────
 
 

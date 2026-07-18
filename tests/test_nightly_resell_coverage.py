@@ -305,22 +305,94 @@ class TestResellOfferFormErrors:
         assert r.status_code == 403
 
 
+def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):
+    """A list with an EXPLICIT title/status — for inclusion/exclusion filter asserts."""
+    el = ExcessList(
+        title=title,
+        company_id=company.id,
+        owner_id=owner.id,
+        status=status,
+        total_line_items=0,
+        created_at=datetime.now(UTC),
+    )
+    db.add(el)
+    db.flush()
+    return el
+
+
 class TestResellListFiltering:
     def test_lists_stage_filter(self, _trader_client, db_session: Session, test_company: Company):
-        """Lists filtered by stage returns 200."""
+        """Stage=collecting returns ONLY collecting lists — an awarded list is
+        excluded."""
         client, trader = _trader_client
-        _make_list(db_session, trader, test_company)
+        _titled_list(db_session, trader, test_company, "Collecting-Widget-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Awarded-Gizmo-List", ExcessListStatus.AWARDED)
         db_session.commit()
-        r = client.get("/v2/partials/resell/lists?stage=collecting&lens=mine")
-        assert r.status_code == 200
+
+        body = client.get("/v2/partials/resell/lists?stage=collecting&lens=mine").text
+        assert "Collecting-Widget-List" in body  # matching stage included
+        assert "Awarded-Gizmo-List" not in body  # non-matching stage excluded
+
+    def test_stage_live_includes_open_and_collecting_only(self, _trader_client, db_session: Session, test_company):
+        """Task 6 (finding #16): ``stage=live`` expands to [open, collecting] — matching
+        the "Open" glance card's count — and excludes resolved (bid_out/awarded)
+        lists."""
+        client, trader = _trader_client
+        _titled_list(db_session, trader, test_company, "Live-Open-List", ExcessListStatus.OPEN)
+        _titled_list(db_session, trader, test_company, "Live-Collecting-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Live-BidOut-List", ExcessListStatus.BID_OUT)
+        _titled_list(db_session, trader, test_company, "Live-Awarded-List", ExcessListStatus.AWARDED)
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?stage=live&lens=mine").text
+        assert "Live-Open-List" in body  # open is live
+        assert "Live-Collecting-List" in body  # collecting is live
+        assert "Live-BidOut-List" not in body  # resolved — excluded
+        assert "Live-Awarded-List" not in body  # resolved — excluded
+
+    def test_stage_open_stays_strict(self, _trader_client, db_session: Session, test_company: Company):
+        """The strict ``stage=open`` pill still means EXACTLY status=open — collecting
+        is NOT overloaded into it (only the ``live`` token widens to both)."""
+        client, trader = _trader_client
+        _titled_list(db_session, trader, test_company, "Strict-Open-List", ExcessListStatus.OPEN)
+        _titled_list(db_session, trader, test_company, "Strict-Collecting-List", ExcessListStatus.COLLECTING)
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?stage=open&lens=mine").text
+        assert "Strict-Open-List" in body
+        assert "Strict-Collecting-List" not in body  # collecting is NOT status=open
+
+    def test_workspace_open_card_links_to_stage_live(self, _trader_client, db_session: Session):
+        """The "Open" glance card links to stage=live (matching its open+collecting
+        count), not the strict stage=open it mismatched before."""
+        client, _trader = _trader_client
+        body = client.get("/v2/partials/resell/workspace?lens=mine").text
+        assert "lens=mine&stage=live" in body
 
     def test_lists_q_filter(self, _trader_client, db_session: Session, test_company: Company):
-        """Lists filtered by search query returns 200."""
+        """Q matches the title in the mine lens — matching title included, non-matching
+        excluded (proves the search actually filters, not just returns 200)."""
         client, trader = _trader_client
-        _make_list(db_session, trader, test_company)
+        _titled_list(db_session, trader, test_company, "Titanium capacitors surplus")
+        _titled_list(db_session, trader, test_company, "Ceramic resistors clearance")
         db_session.commit()
-        r = client.get("/v2/partials/resell/lists?q=surplus&lens=mine")
-        assert r.status_code == 200
+
+        body = client.get("/v2/partials/resell/lists?q=Titanium&lens=mine").text
+        assert "Titanium capacitors surplus" in body  # title contains the query term
+        assert "Ceramic resistors clearance" not in body  # non-matching title excluded
+
+    def test_lists_mine_lens_excludes_other_owners(self, _trader_client, db_session: Session, test_company: Company):
+        """Owner-scoping guard (multi-user): the mine lens returns ONLY the caller's
+        lists — another trader's list must never appear."""
+        client, trader = _trader_client
+        other = _make_trader(db_session)
+        _titled_list(db_session, trader, test_company, "My-Own-Surplus")
+        _titled_list(db_session, other, test_company, "Someone-Elses-Surplus")
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?lens=mine").text
+        assert "My-Own-Surplus" in body  # caller's own list present
+        assert "Someone-Elses-Surplus" not in body  # another owner's list absent
 
 
 class TestResellCreateListErrors:

@@ -11,12 +11,17 @@
 #}
 {% set el = list %}
 {% set buyer = outreach.target_vendor_card.display_name if outreach.target_vendor_card else 'this buyer' %}
+{# Reused by BOTH the email reply viewer (default) and the manual Log-bid modal (finding
+   #12). ``manual`` swaps the email-thread framing for a manual-touch note; ``convert_url``
+   points the convert form at the right POST route (email-convert vs manual log-bid). #}
+{% set manual = manual|default(false) %}
+{% set convert_url = convert_url|default('/api/resell/' ~ el.id ~ '/outreach/' ~ outreach.id ~ '/offer') %}
 <div class="p-5" x-data="{ showConvert: {{ 'false' if outreach.status == 'bid' else 'true' }} }">
 
   {# ── Header ─────────────────────────────────────────────────────── #}
   <div class="flex items-start justify-between gap-3 mb-4">
     <div>
-      <h2 class="h2">Reply from {{ buyer }}</h2>
+      <h2 class="h2">{{ 'Log bid from' if manual else 'Reply from' }} {{ buyer }}</h2>
       <p class="text-sm text-gray-500">On <span class="font-medium text-gray-700">{{ el.title }}</span></p>
     </div>
     <button type="button" @click="$dispatch('close-modal')" aria-label="Close"
@@ -49,6 +54,13 @@
     </div>
     {% endfor %}
   </div>
+  {% elif manual %}
+  {# Manual-channel touch (phone/teams/marketplace) — there is no email thread to show.
+     Honest note, then the same convert form to record the buyer's bid. #}
+  <div class="rounded-lg border border-dashed border-brand-200 p-5 text-center text-sm text-gray-500">
+    <p class="font-medium text-gray-600">This was a {{ outreach.channel }} touch — no email thread.</p>
+    <p class="text-secondary mt-1">Record the buyer's bid below.</p>
+  </div>
   {% else %}
   {# The outreach advanced on a reply but no message body was captured (or it was purged).
      Honest note, not a silent blank — the convert form below still works off the thread. #}
@@ -62,20 +74,20 @@
   <div class="mt-5 pt-4 border-t border-gray-100">
     <div class="flex items-center justify-between">
       <h3 class="text-sm font-semibold text-gray-900">
-        {% if outreach.status == 'bid' %}Add another offer line{% else %}Convert reply to an offer{% endif %}
+        {% if outreach.status == 'bid' %}Add another offer line{% elif manual %}Record the buyer's bid{% else %}Convert reply to an offer{% endif %}
       </h3>
       <button type="button" @click="showConvert = !showConvert"
               class="text-xs font-medium text-accent-600 hover:text-accent-700"
               x-text="showConvert ? 'Hide' : 'Add offer'"></button>
     </div>
-    <p class="text-secondary mt-0.5">Read the reply, then record the buyer's price and quantity as a tracked offer.</p>
+    <p class="text-secondary mt-0.5">Record the buyer's price and quantity as a tracked offer.</p>
 
     <form x-show="showConvert" x-cloak
-          hx-post="/api/resell/{{ el.id }}/outreach/{{ outreach.id }}/offer"
+          hx-post="{{ convert_url }}"
           hx-target="#tab-outreach-{{ el.id }}"
           hx-swap="innerHTML"
           data-loading-disable
-          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Offer created from reply'; $store.toast.type='success'; $store.toast.show=true; }"
+          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='{{ 'Bid logged' if manual else 'Offer created from reply' }}'; $store.toast.type='success'; $store.toast.show=true; }"
           class="space-y-3 mt-3">
       <div>
         <label class="form-label">Part number <span class="text-rose-500">*</span></label>

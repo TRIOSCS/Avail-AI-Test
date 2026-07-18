@@ -1,0 +1,20 @@
+{#
+  resell/_list_after_delete.html — response after a draft list is deleted.
+  PRIMARY body = the refreshed My-Lists partial (the delete button's hx-target is
+  #resell-list-body), so the deleted row drops out. Out-of-band it RESETS the detail
+  pane (#split-right-resell) to the "select a list" placeholder — the just-deleted
+  detail is gone. A confirmation toast fires via HX-Trigger (see resell.resell_delete_list).
+  Receives: the _lists.html context (cards, lens, stage, needs, q, can_see_customer, can_post).
+  Called by: resell.resell_delete_list.
+#}
+{% include "htmx/partials/resell/_lists.html" %}
+<div id="split-right-resell" hx-swap-oob="innerHTML">
+  <div class="flex items-center justify-center h-full text-gray-400">
+    <div class="text-center px-6">
+      <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+      </svg>
+      <p class="text-sm">Select a list to view its lines and offers</p>
+    </div>
+  </div>
+</div>
