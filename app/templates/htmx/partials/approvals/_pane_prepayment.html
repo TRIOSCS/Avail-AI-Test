@@ -121,8 +121,6 @@
   </div>
   {% endif %}
 
-  {# ── Notes (Phase 2) ─────────────────────────────────────────────── #}
-  <div class="rounded-lg border border-dashed border-line-base bg-gray-50 px-3 py-3 text-xs text-gray-400 text-center">
-    Notes &amp; attachments land here (Phase 2).
-  </div>
+  {# ── Notes & attachments (2.4) — never status-locked ─────────────── #}
+  {% include "htmx/partials/approvals/_notes_thread.html" %}
 </div>
