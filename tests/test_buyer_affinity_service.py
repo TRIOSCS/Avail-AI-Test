@@ -348,6 +348,62 @@ class TestRecomputeBuyerScore:
         assert again.id == score.id
         assert db_session.query(BuyerScore).filter_by(vendor_card_id=buyer.id).count() == 1
 
+    def test_non_sent_outreach_excluded_from_response_rate_and_last_offered(
+        self, db_session: Session, excess_list: ExcessList, trader: User
+    ):
+        """A FAILED / INTERRUPTED / SENDING row never reached the buyer, so it must NOT
+        dilute the response_rate denominator nor claim a last_offered_at (a send that
+        failed is not an offer)."""
+        buyer = _reachable_card(db_session, "Excl Buyer")
+        now = datetime.now(UTC)
+        # Two genuine sends, one responded → response_rate 1/2 = 0.50.
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="email",
+                status=ExcessOutreachStatus.SENT,
+                sent_at=now - timedelta(days=2),
+            )
+        )
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="email",
+                status=ExcessOutreachStatus.RESPONDED,
+                sent_at=now - timedelta(days=1),
+            )
+        )
+        # Three non-sent rows with a RECENT created_at — if counted they would push the
+        # denominator to 5 (rate 0.20) and pollute last_offered_at up to ~now.
+        for bad_status in (
+            ExcessOutreachStatus.FAILED,
+            ExcessOutreachStatus.INTERRUPTED,
+            ExcessOutreachStatus.SENDING,
+        ):
+            db_session.add(
+                ExcessOutreach(
+                    excess_list_id=excess_list.id,
+                    target_vendor_card_id=buyer.id,
+                    submitted_by=trader.id,
+                    channel="email",
+                    status=bad_status,
+                    send_error="did not send",
+                    created_at=now,
+                )
+            )
+        db_session.commit()
+
+        score = svc.recompute_buyer_score(db_session, buyer.id)
+        assert score.response_rate == Decimal("0.50")  # 1/2, not 1/5
+        assert score.last_offered_at is not None
+        # last_offered_at is the responded row's sent_at (now-1d), NOT a non-sent row's
+        # created_at (=now) — proving the non-sent rows were excluded.
+        assert score.last_offered_at < now - timedelta(hours=1)
+
     def test_no_history_zero_rollup(self, db_session: Session):
         buyer = _reachable_card(db_session, "Empty Buyer")
         db_session.commit()
@@ -407,6 +463,49 @@ class TestOverlapWarning:
             db_session, excess_list_id=excess_list.id, target_vendor_card_id=buyer.id, owner_id=trader.id
         )
         assert warn is None
+
+    def test_non_sent_teammate_touch_is_not_a_prior_offer(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
+    ):
+        """Finding #7: a teammate's FAILED / INTERRUPTED / SENDING send never reached
+        the buyer, so it must NOT warn a second trader off a still-uncontacted buyer —
+        BOTH the singular ``overlap_warning`` and the batched ``overlap_warnings_for``
+        exclude the not-sent statuses (mirroring the nudge / offered-count readers)."""
+        for non_sent in (
+            ExcessOutreachStatus.FAILED,
+            ExcessOutreachStatus.INTERRUPTED,
+            ExcessOutreachStatus.SENDING,
+        ):
+            buyer = _reachable_card(db_session, f"NonSent {non_sent.value} Buyer")
+            db_session.add(
+                ExcessOutreach(
+                    excess_list_id=excess_list.id,
+                    excess_line_item_id=cap_line.id,
+                    target_vendor_card_id=buyer.id,
+                    submitted_by=teammate.id,  # a teammate — but the send never landed
+                    channel="email",
+                    status=non_sent,
+                    sent_at=None,  # no send time; created_at is recent (within the window)
+                )
+            )
+            db_session.commit()
+
+            # Neither reader must treat the non-delivered touch as a real prior offer.
+            assert (
+                svc.overlap_warning(
+                    db_session, excess_list_id=excess_list.id, target_vendor_card_id=buyer.id, owner_id=trader.id
+                )
+                is None
+            )
+            assert (
+                svc.overlap_warnings_for(
+                    db_session,
+                    excess_list_id=excess_list.id,
+                    target_vendor_card_ids=[buyer.id],
+                    owner_id=trader.id,
+                )
+                == {}
+            )
 
     def test_stale_touch_outside_window_no_warning(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
@@ -548,6 +647,45 @@ class TestNotYetOfferedStrip:
         ids = {r.vendor_card_id for r in strip}
         assert historical.id in ids
         assert already.id not in ids
+
+    def test_failed_outreach_row_is_still_nudgeable(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """A buyer whose only touch on this list is a FAILED send has not really been
+        offered — the nudge must still surface them (re-nudgeable), unlike a genuine
+        SENT row which removes them."""
+        buyer = _reachable_card(db_session, "Failed-Touch Buyer", engagement=60.0)
+        prior_list = ExcessList(company_id=excess_list.company_id, owner_id=trader.id, title="Prior FT")
+        db_session.add(prior_list)
+        db_session.flush()
+        prior_mc = _material_card(db_session, "GRM31C", _CAP)
+        prior_line = ExcessLineItem(
+            excess_list_id=prior_list.id,
+            part_number="GRM31C",
+            quantity=10,
+            material_card_id=prior_mc.id,
+            asking_price=Decimal("1.00"),
+        )
+        db_session.add(prior_line)
+        db_session.flush()
+        _won_offer_for(
+            db_session, excess_list=prior_list, buyer=buyer, owner=trader, line=prior_line, unit_price=Decimal("0.95")
+        )
+        # A FAILED touch on THIS list must NOT count as "already offered".
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="email",
+                status=ExcessOutreachStatus.FAILED,
+                send_error="graph outage",
+            )
+        )
+        db_session.commit()
+
+        strip = svc.not_yet_offered_strip(db_session, excess_list_id=excess_list.id)
+        assert buyer.id in {r.vendor_card_id for r in strip}
 
 
 # ═══════════════════════════════════════════════════════════════════════

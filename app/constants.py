@@ -241,11 +241,23 @@ class ExcessOutreachStatus(StrEnum):
     """Response lifecycle for a resell outreach (ExcessOutreach.status).
 
     sending -> sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer)
-    or declined; ``no_response`` is the terminal silence state used by the don't-forget
-    nudge. ``sending`` is the transient optimistic state a multi-buyer email campaign is
-    written in while its background send job runs (the modal returns immediately) — the
-    job advances each row to ``sent`` / ``no_response``. Advanced by the reply adapter
-    (see resell_outreach_service in Chunk B).
+    or declined. ``sending`` is the transient optimistic state a multi-buyer email
+    campaign is written in while its background send job runs (the modal returns
+    immediately) — the job then advances each row to its outcome.
+
+    Send-outcome states (the send never reached the buyer, so these are NOT buyer
+    silence):
+      - ``failed``      — the send itself failed (skipped recipient / DNC / a per-buyer
+        send error / a total send outage). The reason is persisted in
+        ``ExcessOutreach.send_error``; the row is retryable.
+      - ``interrupted`` — a row left stuck in ``sending`` (its background job died
+        mid-flight) that the stale-sending sweeper flipped so it stops polling; also
+        retryable.
+
+    ``no_response`` is the terminal GENUINE-buyer-silence state used by the don't-forget
+    nudge — reached ONLY after a real ``sent`` that the buyer never answered, never as a
+    catch-all for a send that failed. Advanced past ``sent`` by the reply adapter (see
+    resell_outreach_service in Chunk B).
     """
 
     SENDING = "sending"
@@ -255,6 +267,8 @@ class ExcessOutreachStatus(StrEnum):
     BID = "bid"
     DECLINED = "declined"
     NO_RESPONSE = "no_response"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class QuoteStatus(StrEnum):

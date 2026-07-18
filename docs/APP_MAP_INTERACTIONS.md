@@ -2365,7 +2365,30 @@ if matched, do NOT call Graph `/me/sendMail` — is enforced on every vendor-sen
 rose "do-not-contact" partial *before* the TESTING gate / token fetch; the service path
 `email_service.send_batch_rfq` skips the recipient (`status="skipped"`, `error="do-not-contact"`)
 and continues. The resell `submit_outreach_email` path delegates to `send_batch_rfq`, so a
-DNC buyer is recorded `ExcessOutreachStatus.NO_RESPONSE` and never emailed.
+DNC buyer is recorded `ExcessOutreachStatus.FAILED` with `send_error="do-not-contact"` (Phase 2
+send-truthfulness — NOT `NO_RESPONSE`, which is genuine buyer silence only) and never emailed.
+
+**Resell outreach send truthfulness (Phase 2).** `_finalize_outreach_send` (the shared
+send+stamp step behind the background `run_outreach_email_send` and the inline
+`submit_outreach_email`) no longer collapses failures to `NO_RESPONSE`. A skipped/DNC
+recipient or a per-buyer send error → `FAILED` + the result error persisted in `send_error`;
+a total `send_batch_rfq` outage → all pending rows `FAILED` + the exception text (never
+stranded `sending`); a delivered row whose Graph-id lookup came back empty stays `SENT` with a
+"reply-matching degraded" `send_error` note. The send OUTCOME (status + graph ids) commits
+BEFORE any bookkeeping, so a later activity/cadence write can't roll back a delivered `SENT`;
+if that outcome commit itself fails it is snapshotted + re-applied in a fresh transaction (a
+delivered send is never reverted to `sending`). The "Emailed" ActivityLog + cadence bump run
+only for `SENT` buyers (gated at the call site). Every send persists its exact subject/body
+(`send_subject`/`send_body`, migration 195) so the Retry guard can match a customized-subject
+campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
+(`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
+retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
+already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES is the
+UNKNOWN case → the row is left `interrupted` and nothing is resent (never assume not-sent); the
+resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
+reply carrying a bid flips an `OPEN` list to `COLLECTING`
+(mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
+one bad list can't abort the nightly sweep.
 
 Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
 Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
