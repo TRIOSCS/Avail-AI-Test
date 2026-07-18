@@ -647,13 +647,112 @@ def test_sales_order_new_stays_off_approvals_prefix(hub_client: TestClient):
     assert hub_client.get("/v2/partials/approvals/sales-orders/new").status_code == 404
 
 
-def test_buy_plans_hub_still_serves(hub_client: TestClient):
-    # The old hub keeps its own home until post-parity retirement: the full page
-    # must not have become a redirect into the workspace...
+def test_buy_plans_hub_retired_308s_to_workspace(hub_client: TestClient):
+    # Post-parity retirement (spec §11.1): the old hub full page and its shell
+    # partial both 308 onto the workspace's Buy Plans tab...
     r = hub_client.get("/v2/buy-plans", follow_redirects=False)
+    assert r.status_code == 308
+    assert r.headers["location"] == "/v2/approvals?tab=buy-plans"
+    partial = hub_client.get("/v2/partials/buy-plans", follow_redirects=False)
+    assert partial.status_code == 308
+    assert partial.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+    # ...and following the shell redirect serves the workspace on that tab.
+    followed = hub_client.get("/v2/partials/buy-plans", follow_redirects=True)
+    assert followed.status_code == 200
+    assert 'id="ap-hub-body"' in followed.text
+
+
+# ── Deep-link preselection (?select= — parity gap 1 closed) ──────────────
+
+
+def test_buy_plan_detail_308_carries_select(hub_client: TestClient):
+    """/v2/buy-plans/{id} 308s onto the workspace WITH &select={id} — the deep link
+    keeps its plan instead of landing on the tab's default selection."""
+    r = hub_client.get("/v2/buy-plans/123", follow_redirects=False)
+    assert r.status_code == 308
+    assert r.headers["location"] == "/v2/approvals?tab=buy-plans&select=123"
+
+
+def test_select_threads_shell_to_tab_body_to_list(hub_client: TestClient):
+    """?select= rides the shell's lazy tab-body URL, then the tab body's lazy list URL —
+    the full chain a redirected deep link travels."""
+    shell = hub_client.get("/v2/partials/approvals?tab=buy-plans&select=42")
+    assert shell.status_code == 200
+    assert "/v2/partials/approvals/buy-plans?select=42" in shell.text
+    body = hub_client.get("/v2/partials/approvals/buy-plans?select=42")
+    assert body.status_code == 200
+    assert "/v2/partials/approvals/buy-plans/list?scope=all&select=42" in body.text
+
+
+def test_list_select_preselects_that_plan_not_the_oldest(hub_client: TestClient, db_session: Session, test_user: User):
+    """With two decidable plans, ?select= makes the SELECTED (newer) plan's row the aw-
+    default dispatch instead of the oldest needs-approval row."""
+    req, q, _ = _req_quote(db_session, test_user)
+    older = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    req2, q2, _ = _req_quote(db_session, test_user)
+    newer = _plan(db_session, req2, q2, status=BuyPlanStatus.PENDING.value)
+    _pending_buy_plan_request(db_session, older, test_user)
+    _pending_buy_plan_request(db_session, newer, test_user)
+    db_session.commit()
+
+    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={newer.id}")
     assert r.status_code == 200
-    # ...and the hub partial itself must still render the two-lens hub shell.
-    partial = hub_client.get("/v2/partials/buy-plans")
-    assert partial.status_code == 200
-    assert "My Queue" in partial.text
-    assert "Pipeline" in partial.text
+    dispatch = r.text.split("aw-default")[1]
+    assert f"'plan-{newer.id}'" in dispatch
+    assert f"/v2/partials/approvals/plan/{newer.id}/pane?lens=buy-plans" in dispatch
+    # Both tabs honor select — same object, either lens may carry the deep link.
+    so = hub_client.get(f"/v2/partials/approvals/sales-orders/list?select={newer.id}")
+    assert f"/v2/partials/approvals/plan/{newer.id}/pane?lens=sales-orders" in so.text.split("aw-default")[1]
+
+
+def test_list_select_unknown_plan_falls_back_to_default(hub_client: TestClient, db_session: Session, test_user: User):
+    """A nonexistent select id falls back silently to the oldest needs-approval row."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    _pending_buy_plan_request(db_session, bp, test_user)
+    db_session.commit()
+
+    r = hub_client.get("/v2/partials/approvals/sales-orders/list?select=999999")
+    assert r.status_code == 200
+    dispatch = r.text.split("aw-default")[1]
+    assert f"'plan-{bp.id}'" in dispatch
+    assert "plan-999999" not in r.text
+
+
+def test_list_select_inaccessible_plan_falls_back(hub_client: TestClient, db_session: Session, test_user: User):
+    """A restricted viewer's select of another rep's plan (not in their rendered list)
+    falls back to the normal default — the same get_buyplan_for_user gate the pane route
+    enforces."""
+    other = _other_user(db_session)
+    req, q, _ = _req_quote(db_session, other)
+    theirs = _plan(db_session, req, q, status=BuyPlanStatus.COMPLETED.value)  # closed → not a live row
+    myreq, myq, _ = _req_quote(db_session, test_user)
+    mine = _plan(db_session, myreq, myq, status=BuyPlanStatus.PENDING.value)
+    _pending_buy_plan_request(db_session, mine, test_user)
+    test_user.role = "sales"  # RESTRICTED_ROLES — may only see own requisitions' plans
+    db_session.commit()
+
+    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={theirs.id}")
+    assert r.status_code == 200
+    # Neither listed (closed) nor dispatched (inaccessible — no pane stand-in).
+    assert f"'plan-{theirs.id}'" not in r.text
+    assert f'data-row-key="plan-{theirs.id}"' not in r.text
+    # The normal needs-approval default still dispatches.
+    assert f"'plan-{mine.id}'" in r.text.split("aw-default")[1]
+
+
+def test_list_select_closed_plan_still_dispatches_its_pane(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A select id that sits in the Closed set (not rendered in the live list) still
+    dispatches that plan's pane — the deep link wins over list membership."""
+    req, q, _ = _req_quote(db_session, test_user)
+    done = _plan(db_session, req, q, status=BuyPlanStatus.COMPLETED.value)
+    db_session.commit()
+
+    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={done.id}")
+    assert r.status_code == 200
+    assert f"Plan #{done.id}" not in r.text  # not a rendered live row
+    dispatch = r.text.split("aw-default")[1]
+    assert f"'plan-{done.id}'" in dispatch
+    assert f"/v2/partials/approvals/plan/{done.id}/pane?lens=buy-plans" in dispatch

@@ -9,22 +9,27 @@
        price; non-sourcing → a create-only confirm (zero lines, no kanban).
   Both POST to the create route, which originates a DRAFT plan and swaps its detail
   into #main-content.
+  The surface is SELF-HOSTED: it renders its own #so-origination container and every
+  internal navigation (order-type change, requisition pick, Back) outerHTML-swaps that
+  container, so the picker works wherever it lands (the workspace lists load it into
+  #main-content). Cancel returns to the Approvals Workspace shell.
   Receives: selected_req (Requisition|None); order_type (normalized value); sourcing
             (bool); order_type_choices (list[(value, label)]);
             picker_rows (list of {id,name,customer,offer_count}) in picker mode;
             lines (get_builder_data shape; empty for non-sourcing) in builder mode.
-  Called by: buy_plans.py sales_order_new (GET /v2/partials/buy-plans/sales-orders/new),
-             rendered into #bp-hub-body.
+  Called by: buy_plans.py sales_order_new (GET /v2/partials/buy-plans/sales-orders/new).
   Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 {% if selected_req is none %}
 {# ── Mode 1: requisition picker ── #}
-<div>
+<div id="so-origination" class="page-fluid">
   <div class="flex items-center justify-between mb-4">
     <h2 class="h2">New Sales Order</h2>
-    <button hx-get="/v2/partials/buy-plans/my-queue"
-            hx-target="#bp-hub-body"
+    {# Cancel leaves origination entirely — back to the Approvals Workspace shell. #}
+    <button hx-get="/v2/partials/approvals"
+            hx-target="#main-content"
             hx-swap="innerHTML"
+            hx-push-url="/v2/approvals"
             class="btn btn-secondary btn-sm">
       Cancel
     </button>
@@ -36,8 +41,8 @@
     <label for="so-order-type" class="text-sm font-medium text-gray-700">Order type</label>
     <select id="so-order-type" name="order_type" class="input input-sm w-44"
             hx-get="/v2/partials/buy-plans/sales-orders/new"
-            hx-target="#bp-hub-body"
-            hx-swap="innerHTML"
+            hx-target="#so-origination"
+            hx-swap="outerHTML"
             hx-trigger="change">
       {% for val, label in order_type_choices %}
       <option value="{{ val }}" {% if val == order_type %}selected{% endif %}>{{ label }}</option>
@@ -59,8 +64,8 @@
   <div class="divide-y divide-line-base rounded-lg border border-line-base bg-white">
     {% for row in picker_rows %}
     <button hx-get="/v2/partials/buy-plans/sales-orders/new?requisition_id={{ row.id }}&order_type={{ order_type }}"
-            hx-target="#bp-hub-body"
-            hx-swap="innerHTML"
+            hx-target="#so-origination"
+            hx-swap="outerHTML"
             class="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
       <span class="min-w-0">
         <span class="text-sm font-semibold text-gray-900 truncate">{{ row.name or 'REQ #' ~ row.id }}</span>
@@ -86,7 +91,7 @@
 </div>
 {% else %}
 {# ── Mode 2: builder for the chosen requisition ── #}
-<div>
+<div id="so-origination" class="page-fluid">
   <div class="flex items-center justify-between mb-4">
     <div class="min-w-0">
       <h2 class="h2 truncate">
@@ -95,8 +100,8 @@
       <p class="text-xs text-gray-600">REQ #{{ selected_req.id }} · {{ order_type.replace('_', ' ') | title }}</p>
     </div>
     <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-            hx-target="#bp-hub-body"
-            hx-swap="innerHTML"
+            hx-target="#so-origination"
+            hx-swap="outerHTML"
             class="btn btn-secondary btn-sm">
       Back
     </button>
@@ -116,8 +121,8 @@
     </div>
     <div class="mt-4 flex items-center justify-end gap-2">
       <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-              hx-target="#bp-hub-body"
-              hx-swap="innerHTML"
+              hx-target="#so-origination"
+              hx-swap="outerHTML"
               type="button"
               class="btn btn-secondary btn-sm">
         Cancel
@@ -181,8 +186,8 @@
     </div>
     <div class="mt-4 flex items-center justify-end gap-2">
       <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-              hx-target="#bp-hub-body"
-              hx-swap="innerHTML"
+              hx-target="#so-origination"
+              hx-swap="outerHTML"
               type="button"
               class="btn btn-secondary btn-sm">
         Cancel

@@ -357,21 +357,17 @@ class TestBulkArchive:
 
 
 class TestBuyPlanListPartial:
-    def test_buy_plan_list_200(self, client: TestClient) -> None:
-        """No lens param → role-derived default lens; hub shell renders."""
-        resp = client.get("/v2/partials/buy-plans")
-        assert resp.status_code == 200
-        assert 'id="bp-hub-body"' in resp.text
+    def test_buy_plan_list_308s_to_workspace(self, client: TestClient) -> None:
+        """The hub shell retired (spec §11.1) — 308 onto the workspace shell."""
+        resp = client.get("/v2/partials/buy-plans", follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
 
-    def test_buy_plan_list_lens_pipeline(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/buy-plans?lens=pipeline")
-        assert resp.status_code == 200
-        assert 'hx-target="#bp-hub-body"' in resp.text
-
-    def test_buy_plan_list_lens_my_queue(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/buy-plans?lens=my_queue")
-        assert resp.status_code == 200
-        assert "My Queue" in resp.text
+    def test_buy_plan_list_lens_urls_redirect_and_serve_workspace(self, client: TestClient) -> None:
+        for lens in ("pipeline", "my_queue"):
+            resp = client.get(f"/v2/partials/buy-plans?lens={lens}", follow_redirects=True)
+            assert resp.status_code == 200
+            assert 'hx-target="#ap-hub-body"' in resp.text
 
 
 class TestBuyPlanDetailPartial:

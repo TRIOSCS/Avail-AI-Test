@@ -7,7 +7,8 @@
   the right pane; the oldest needs-your-approval row dispatches aw-default once so
   opening the tab lands the approver on a decision, never a hunt.
   Receives: tab, q, scope, show_closed, needs_rows / other_rows (list[WorkspaceRow]),
-            default_row (WorkspaceRow|None), list_url.
+            default_row (WorkspaceRow|None — the oldest needs-approval row, or the
+            ?select=-deep-linked plan's row/pane stand-in), list_url.
   Called by: htmx/approvals_hub.py approvals_workspace_list (GET /{tab}/list).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
@@ -73,9 +74,10 @@
     {{ 'Closed' if show_closed else 'Live' }}
   </button>
   {% if tab in ('sales-orders', 'buy-plans') %}
-  {# New sales order — the origination picker (spec §8: create with order type). Lands
-     the Buy Plans hub straight on the picker (?new=1). #}
-  <a hx-get="/v2/partials/buy-plans?new=1" hx-target="#main-content" hx-push-url="/v2/buy-plans"
+  {# New sales order — the origination picker (spec §8: create with order type). Loads
+     the self-hosted picker surface into #main-content (no URL push: a reload lands
+     back on the workspace, matching the pre-retirement behavior). #}
+  <a hx-get="/v2/partials/buy-plans/sales-orders/new" hx-target="#main-content" hx-push-url="false"
      class="btn-primary btn-sm flex-shrink-0 cursor-pointer whitespace-nowrap" title="Start a new sales order">
     New sales order
   </a>

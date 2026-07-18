@@ -47,7 +47,7 @@ def nav_click(page: Page, href: str):
 NAV_ITEMS = [
     ("/v2/requisitions", "Sales Hub"),
     ("/v2/search", "Search"),
-    ("/v2/buy-plans", "Buys"),
+    ("/v2/approvals", "Approvals"),
     ("/v2/vendors", "Vendors"),
     ("/v2/materials", "Materials"),
     ("/v2/companies", "Cos"),
@@ -158,10 +158,10 @@ class TestBottomNavigation:
         expect(authed_page).to_have_url(re.compile(r"/v2/search"))
 
     def test_navigate_to_buy_plans(self, authed_page, base_url):
-        """Clicking Buys nav loads buy plans content."""
+        """Clicking Approvals nav loads the Approvals Workspace."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/buy-plans")
-        expect(authed_page).to_have_url(re.compile(r"/v2/buy-plans"))
+        nav_click(authed_page, "/v2/approvals")
+        expect(authed_page).to_have_url(re.compile(r"/v2/approvals"))
 
     def test_navigate_to_proactive(self, authed_page, base_url):
         """Clicking Proact nav loads proactive content."""

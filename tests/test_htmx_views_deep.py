@@ -211,16 +211,20 @@ class TestBuyPlansRoutes:
     @pytest.mark.parametrize(
         "path",
         [
-            "/v2/partials/buy-plans",  # default → role-derived lens
-            "/v2/partials/buy-plans?lens=deals",  # unknown lens → role-default fallback
+            "/v2/partials/buy-plans",  # retired hub shell
+            "/v2/partials/buy-plans?lens=deals",  # any old lens value redirects too
         ],
     )
-    def test_buy_plans_list_ok(self, client: TestClient, path: str):
-        resp = client.get(path)
-        assert resp.status_code == 200
-        # Hub shell renders with the lazy body container + its explicit hx-target.
-        assert 'id="bp-hub-body"' in resp.text
-        assert 'hx-target="#bp-hub-body"' in resp.text
+    def test_buy_plans_list_308s_to_workspace(self, client: TestClient, path: str):
+        # The hub shell retired (spec §11.1) — 308 onto the workspace shell, which
+        # renders its own lazy body container + explicit hx-target after the redirect.
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        followed = client.get(path, follow_redirects=True)
+        assert followed.status_code == 200
+        assert 'id="ap-hub-body"' in followed.text
+        assert 'hx-target="#ap-hub-body"' in followed.text
 
     def test_buy_plan_detail_404(self, client: TestClient):
         resp = client.get("/v2/partials/buy-plans/99999")

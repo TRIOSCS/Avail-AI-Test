@@ -218,6 +218,7 @@ def _viewer_badges(db: Session, user: User) -> dict[str, int]:
 async def approvals_hub_shell(
     request: Request,
     tab: str = "",
+    select: int | None = None,
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
@@ -226,6 +227,8 @@ async def approvals_hub_shell(
     The shell renders the four tab pills with per-viewer "waiting on you" badges + a
     lazy body that loads the active tab's split view into ``#ap-hub-body``. ``?tab=``
     threads a deep-link / pushed tab URL; legacy 3-tab keys alias onto the new tabs.
+    ``?select=<plan id>`` (the retired /v2/buy-plans/{id} deep-link redirect) threads
+    into the tab body so the SO/BP list preselects that plan's pane.
     """
     active_tab = _resolve_tab(tab) or DEFAULT_TAB
     ctx = _base_ctx(request, user, "buy-plans")
@@ -234,6 +237,7 @@ async def approvals_hub_shell(
             "active_tab": active_tab,
             "tabs": [(key, _TAB_LABELS[key]) for key in _TABS],
             "badges": _viewer_badges(db, user),
+            "select": select,
         }
     )
     return template_response("htmx/partials/approvals/approvals_hub.html", ctx)
@@ -244,32 +248,39 @@ async def approvals_hub_tab(
     request: Request,
     tab: str,
     scope: str = "all",
+    select: int | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Render one workspace tab body (the split view) into ``#ap-hub-body``.
 
     ``tab`` is one of the four workspace keys (legacy 3-tab keys alias); any other
-    value 404s. ``scope`` seeds the list's Mine/All toggle.
+    value 404s. ``scope`` seeds the list's Mine/All toggle. ``select`` (a plan id from
+    a /v2/buy-plans/{id} deep link) threads into the list's lazy URL so the list
+    preselects that plan.
     """
     if _resolve_tab(tab) is None:
         raise HTTPException(404, "Unknown approvals tab")
-    return render_tab_body(request, user, db, tab, scope)
+    return render_tab_body(request, user, db, tab, scope, select=select)
 
 
-def render_tab_body(request: Request, user: User, db: Session, tab: str, scope: str = "all") -> HTMLResponse:
+def render_tab_body(
+    request: Request, user: User, db: Session, tab: str, scope: str = "all", select: int | None = None
+) -> HTMLResponse:
     """Build + render one workspace tab body (shared by the tab GET route and the decide
     handlers' origin=approvals_hub / legacy re-render branches).
 
     The body is the split view: the left list lazy-loads ``/{tab}/list`` (so a decide
     re-render always repaints a FRESH list), the right pane fills on row selection.
+    ``select`` rides the list's lazy URL for deep-link preselection (decide re-renders
+    never pass it — a decision must not steal the selection back).
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
         raise HTTPException(404, "Unknown approvals tab")
     scope = "mine" if scope == "mine" else "all"
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope})
+    ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope, "select": select})
     return template_response("htmx/partials/approvals/_workspace_split.html", ctx)
 
 
@@ -969,6 +980,35 @@ async def approvals_remove_attachment(
 # ── The left work list ──────────────────────────────────────────────────
 
 
+def _selected_plan_row(db: Session, user: User, rows: list[WorkspaceRow], tab: str, select: int) -> WorkspaceRow | None:
+    """Resolve a ``?select=<plan id>`` deep link to the row whose pane should open.
+
+    The plan's own rendered row when it is in the list; otherwise (the plan sits in the
+    other live/closed set, or is filtered out) a dispatch-only stand-in targeting its
+    pane — gated by the SAME access check the pane route uses (get_buyplan_for_user), so
+    an unknown/inaccessible id resolves to None and the caller falls back to the normal
+    default silently.
+    """
+    row = next((r for r in rows if r.key == f"plan-{select}"), None)
+    if row is not None:
+        return row
+    from ...dependencies import get_buyplan_for_user
+
+    try:
+        get_buyplan_for_user(db, user, select)
+    except HTTPException:
+        return None
+    return WorkspaceRow(
+        key=f"plan-{select}",
+        pane_url=f"/v2/partials/approvals/plan/{select}/pane?lens={tab}",
+        title="",
+        subtitle="",
+        status="",
+        status_label="",
+        needs_approval=False,
+    )
+
+
 @router.get("/v2/partials/approvals/{tab}/list", response_class=HTMLResponse)
 async def approvals_workspace_list(
     request: Request,
@@ -976,6 +1016,7 @@ async def approvals_workspace_list(
     q: str = "",
     scope: str = "all",
     show_closed: bool = False,
+    select: int | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -983,7 +1024,9 @@ async def approvals_workspace_list(
 
     Rows group "Needs your approval" first (oldest first — decision queues surface the
     stalest work); the rest render newest-first. The oldest needs-your-approval row is
-    the default selection (dispatched to the pane on first load only).
+    the default selection (dispatched to the pane on first load only). ``select`` (a
+    plan id from a retired /v2/buy-plans/{id} deep link, SO/BP tabs only) overrides
+    that default with the selected plan's pane when the viewer may see the plan.
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
@@ -1000,6 +1043,8 @@ async def approvals_workspace_list(
     needs = [r for r in rows if r.needs_approval]
     rest = [r for r in rows if not r.needs_approval]
     default_row = needs[0] if needs else None
+    if select is not None and resolved in ("sales-orders", "buy-plans"):
+        default_row = _selected_plan_row(db, user, rows, resolved, select) or default_row
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(

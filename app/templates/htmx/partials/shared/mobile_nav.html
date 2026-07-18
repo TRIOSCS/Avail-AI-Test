@@ -45,11 +45,11 @@
        'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
     ] %}
     {# The "Approvals" nav item (internal id 'buy-plans' — alert badge + active-nav wiring)
-       leads to the org-wide 3-tab decide console at /v2/approvals (/v2/partials/approvals:
-       Buy Plan / PO Approval / Prepayment). The personal My Queue + Pipeline "Buy Plans"
-       hub now lives at its own non-redirected home /v2/buy-plans; urlToNav aliases BOTH
-       /v2/approvals and /v2/buy-plans → 'buy-plans' (line above) so either highlights this
-       item. NOTE: the Buy Plans hub has no dedicated nav slot yet — see follow-up. #}
+       leads to the Approvals Workspace at /v2/approvals (/v2/partials/approvals: Sales
+       Orders / Buy Plans / Purchase Orders / Prepayments). The old /v2/buy-plans hub
+       retired into the workspace (docs/APPROVALS_PARITY_CHECKLIST.md); urlToNav still
+       aliases /v2/buy-plans → 'buy-plans' (line above) because plan-detail loads keep
+       pushing /v2/buy-plans/{id}, and full-page hits of those URLs 308 to the workspace. #}
     {% for id, label, href, partial, icon_path in nav_items %}
     {# Per-user nav gate: hide a section the user lacks access to. `access` is a
        {nav-id: bool} map from _base_ctx; default-show if it's somehow absent. #}
