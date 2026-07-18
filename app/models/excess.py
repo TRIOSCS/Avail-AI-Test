@@ -254,8 +254,10 @@ class CustomerBid(Base):
     revision = Column(Integer, nullable=False, default=1, server_default="1")
     # Lifecycle stamps (M4): sent_at when the clean PDF is emailed to the seller;
     # responded_at / responded_by_id record WHO (the trader) logged the seller's
-    # accept/reject and WHEN. Re-assembling a non-terminal bid bumps ``revision`` and
-    # clears these (a new revision is a fresh draft — the superseded stamps are dropped).
+    # accept/reject and WHEN. Re-assembling a NON-terminal bid bumps ``revision`` and
+    # clears these in place (a new revision is a fresh draft — the superseded stamps drop);
+    # re-assembling off a TERMINAL (accepted/rejected) bid instead INSERTs a new revision
+    # row and leaves this frozen row — stamps included — untouched (D3).
     sent_at = Column(UTCDateTime, nullable=True)
     responded_at = Column(UTCDateTime, nullable=True)
     responded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -342,10 +344,21 @@ class ExcessOutreach(Base):
     target_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
     submitted_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     channel = Column(String(20), default="email")  # email, phone, teams, marketplace, other
-    status = Column(String(20), default="sent")  # sent, opened, responded, bid, declined, no_response
+    # sending, sent, opened, responded, bid, declined, no_response, failed, interrupted
+    status = Column(String(20), default="sent")
     graph_message_id = Column(String(255), nullable=True)
     graph_conversation_id = Column(String(255), nullable=True)
     parts_included = Column(JSON, nullable=True)
+    # Persisted send-failure reason (populated on FAILED/INTERRUPTED rows so the tracker
+    # can show WHY a send failed and the retry path has context); NULL on a clean send.
+    send_error = Column(Text, nullable=True)
+    # The EXACT subject/body the email campaign was sent with (email path only) — persisted
+    # so the one-click Retry double-send guard (an EXACT-subject Sent-folder match) matches
+    # an already-delivered customized-subject campaign, and a legitimate resend reuses the
+    # original wording. NULL on manual-log rows and legacy email rows (retry falls back to
+    # the default text for those).
+    send_subject = Column(Text, nullable=True)
+    send_body = Column(Text, nullable=True)
     sent_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())

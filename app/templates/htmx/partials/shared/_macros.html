@@ -129,8 +129,11 @@ Usage:
   'down': 'bg-rose-50 text-rose-500 border-rose-200'
 } -%}
 {%- set colors = status_map if status_map else default_map -%}
+{# Caption overrides where the generic replace/capitalize reads wrong. bid_out -> "Bids
+   out" (Resell D5) — kept distinct from CLOSED's generic "Closed". #}
+{%- set label_map = {'bid_out': 'Bids out'} -%}
 <span class="badge {{ colors.get(value, 'bg-gray-50 text-gray-600 border-gray-200') }}">
-  {{ value|replace('_', ' ')|capitalize }}
+  {{ label_map.get(value, value|replace('_', ' ')|capitalize) }}
 </span>
 {%- endmacro %}
 

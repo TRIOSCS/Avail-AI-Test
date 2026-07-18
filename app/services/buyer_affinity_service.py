@@ -79,6 +79,17 @@ _RESPONDED_STATUSES = {
     ExcessOutreachStatus.DECLINED,
     ExcessOutreachStatus.OPENED,
 }
+# Outreach statuses where the send did NOT actually reach the buyer — a transient
+# ``sending`` row, a ``failed`` send, or an ``interrupted`` (orphaned) one. The SINGLE
+# source of truth for "this row is not a genuine offer": reused by every downstream reader
+# (offered counts, response_rate denominator, last_offered_at, the don't-forget nudge, the
+# tracker) so a non-delivered send never inflates a count, dilutes a rate, or strands a
+# re-nudgeable buyer.
+_NOT_SENT_STATUSES = {
+    ExcessOutreachStatus.SENDING,
+    ExcessOutreachStatus.FAILED,
+    ExcessOutreachStatus.INTERRUPTED,
+}
 
 
 class RankedBuyer(NamedTuple):
@@ -394,7 +405,11 @@ def recompute_buyer_score(db: Session, vendor_card_id: int) -> BuyerScore:
     avg_bid_pct = (sum(pcts) / len(pcts)).quantize(Decimal("0.01")) if pcts else None
 
     # ── response_rate + median_response_hours + last_offered_at over outreach. ──
+    # Only genuinely-sent rows count: a ``sending`` / ``failed`` / ``interrupted`` row
+    # never reached the buyer, so it must not dilute the response_rate denominator nor
+    # claim a last_offered_at (its ``created_at`` would falsely read as "we offered them").
     outreach = db.query(ExcessOutreach).filter(ExcessOutreach.target_vendor_card_id == vendor_card_id).all()
+    outreach = [o for o in outreach if o.status not in _NOT_SENT_STATUSES]
     sent = len(outreach)
     responded = sum(1 for o in outreach if o.status in _RESPONDED_STATUSES)
     response_rate = (Decimal(responded) / Decimal(sent)).quantize(Decimal("0.01")) if sent else None
@@ -402,6 +417,8 @@ def recompute_buyer_score(db: Session, vendor_card_id: int) -> BuyerScore:
     response_gaps: list[float] = []
     last_offered_at: datetime | None = None
     for o in outreach:
+        # Only sent rows reach here; ``sent_at`` is the true offer time, with ``created_at``
+        # the fallback for a manual-log touch (which legitimately has no ``sent_at``).
         stamp = o.sent_at or o.created_at
         if stamp is not None:
             stamp = _aware(stamp)
@@ -489,8 +506,10 @@ def overlap_warning(
     NEVER blocks and never raises on a missing row — purely informational (the user is
     HYBRID-assertive: warn, log the override, proceed). Looks for an ExcessOutreach on
     ``excess_list_id`` to ``target_vendor_card_id`` whose ``submitted_by`` is NOT
-    ``owner_id`` and whose ``sent_at`` (falling back to ``created_at``) is within
-    ``within_days``. Returns the MOST RECENT such touch as
+    ``owner_id``, whose status is a GENUINELY-sent one (a sending/failed/interrupted touch
+    never reached the buyer, so it is not a real prior offer), and whose ``sent_at``
+    (falling back to ``created_at``) is within ``within_days``. Returns the MOST RECENT
+    such touch as
     ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions the
     overlapping teammate touches), or None when there is no recent teammate overlap.
     """
@@ -501,6 +520,10 @@ def overlap_warning(
             ExcessOutreach.excess_list_id == excess_list_id,
             ExcessOutreach.target_vendor_card_id == target_vendor_card_id,
             ExcessOutreach.submitted_by != owner_id,
+            # Only a GENUINELY-sent touch is a real prior offer: a sending/failed/interrupted
+            # row never reached the buyer, so it must not warn a teammate off a still-
+            # uncontacted buyer (the same not-sent exclusion the nudge/offered readers use).
+            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
         )
         .all()
     )
@@ -544,7 +567,8 @@ def overlap_warnings_for(
     Returns ``{vendor_card_id: {by_user_id, by_user_name, when, line_item_ids}}`` for the
     buyers with a recent teammate overlap; a buyer with none is simply absent (the caller
     maps a miss to ``None``). Same predicate/shape as the per-buyer function: a teammate's
-    (``submitted_by != owner_id``) ExcessOutreach on this list to the buyer whose
+    (``submitted_by != owner_id``) GENUINELY-sent ExcessOutreach on this list (a sending/
+    failed/interrupted touch is excluded — it never reached the buyer) to the buyer whose
     ``sent_at`` (else ``created_at``) is within ``within_days``; the most-recent touch wins;
     ``line_item_ids`` unions the overlapping touches.
     """
@@ -557,6 +581,10 @@ def overlap_warnings_for(
             ExcessOutreach.excess_list_id == excess_list_id,
             ExcessOutreach.target_vendor_card_id.in_(list(target_vendor_card_ids)),
             ExcessOutreach.submitted_by != owner_id,
+            # Only a GENUINELY-sent touch is a real prior offer: a sending/failed/interrupted
+            # row never reached the buyer, so it must not warn a teammate off a still-
+            # uncontacted buyer (the same not-sent exclusion the nudge/offered readers use).
+            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
         )
         .all()
     )
@@ -607,12 +635,16 @@ def not_yet_offered_strip(
     [] when every historical buyer has already been offered.
     """
     ranked = rank_buyers_for(db, excess_list_id=excess_list_id, limit=limit)
+    # "Already offered" excludes non-sent rows: a buyer whose only touch on this list is a
+    # ``sending`` / ``failed`` / ``interrupted`` row was not really offered, so they stay
+    # re-nudgeable (a failed send should surface again, not silently strand the buyer).
     already = {
         cid
         for (cid,) in db.query(ExcessOutreach.target_vendor_card_id)
         .filter(
             ExcessOutreach.excess_list_id == excess_list_id,
             ExcessOutreach.target_vendor_card_id.isnot(None),
+            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
         )
         .distinct()
         .all()

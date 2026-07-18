@@ -19,6 +19,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.constants import ExcessListStatus, ExcessOutreachStatus
 from app.models import Company, ExcessList, ExcessOutreach, User, VendorCard
 from app.models.excess import ExcessLineItem, ExcessOffer
 from app.services import resell_outreach_service as svc
@@ -340,7 +341,8 @@ class TestSubmitOutreachEmail:
         buyer_card: VendorCard,
     ):
         # send_batch_rfq reports the recipient was skipped (DNC / no email): the row must
-        # still exist, flagged no_response — never silently dropped.
+        # still exist, flagged FAILED with the skip reason persisted — never silently
+        # dropped, and never NO_RESPONSE (a send that never went out is not buyer silence).
         async def _fake_send(*_args, **_kwargs):
             return [
                 {
@@ -366,7 +368,8 @@ class TestSubmitOutreachEmail:
                 body="surplus",
             )
         assert len(outreach) == 1
-        assert outreach[0].status == "no_response"
+        assert outreach[0].status == ExcessOutreachStatus.FAILED
+        assert outreach[0].send_error == "do-not-contact"
         assert outreach[0].graph_message_id is None
 
     @pytest.mark.asyncio
@@ -383,8 +386,9 @@ class TestSubmitOutreachEmail:
         Unlike test_email_skipped_recipient_flagged_not_dropped (which stubs
         send_batch_rfq), this exercises the REAL send_batch_rfq DNC query: a do-not-
         contact SiteContact whose email matches the buyer card means the recipient is
-        never passed to GraphClient.post_json, and the row is recorded no_response.
-        Proves the resell vendor-send path inherits the DNC block.
+        never passed to GraphClient.post_json, and the row is recorded FAILED with the
+        skip reason (never NO_RESPONSE). Proves the resell vendor-send path inherits the
+        DNC block.
         """
         from app.models.crm import CustomerSite, SiteContact
 
@@ -418,7 +422,8 @@ class TestSubmitOutreachEmail:
             )
 
         assert len(outreach) == 1
-        assert outreach[0].status == "no_response"
+        assert outreach[0].status == ExcessOutreachStatus.FAILED
+        assert outreach[0].send_error == "do-not-contact"
         # The DNC recipient must never reach Graph sendMail.
         mock_gc.post_json.assert_not_called()
 
@@ -476,6 +481,31 @@ class TestRecordResponse:
         assert len(offers) == 1
         assert offers[0].offerer_vendor_card_id == buyer_card.id
         assert offers[0].status == "open"
+
+    def test_reply_with_offer_flips_open_list_to_collecting(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """An inbound reply carrying a bid on an OPEN list signals active collection —
+        the list flips OPEN -> COLLECTING, mirroring the User-driven submit_offer
+        path."""
+        excess_list.status = ExcessListStatus.OPEN
+        db_session.commit()
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+
+        svc.record_response(
+            db_session,
+            conversation_id="conv-1",
+            has_offer=True,
+            offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+        )
+
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.COLLECTING
 
     def test_reply_declined_advances_to_declined(
         self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, trader: User

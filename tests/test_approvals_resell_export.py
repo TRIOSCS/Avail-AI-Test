@@ -539,7 +539,7 @@ def test_outreach_export_is_csv_attachment_with_rows(
         resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach/export")
         _assert_attachment(resp, filename_contains=f"resell_outreach_list_{posted_list.id}.csv")
         rows = _parse_csv(resp.text)
-        assert rows[0] == ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity"]
+        assert rows[0] == ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity", "Note"]
         assert len(rows) == 2  # header + one outreach touch
         body = "\n".join(",".join(r) for r in rows[1:])
         assert "Reach Buyer" in body

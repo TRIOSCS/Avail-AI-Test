@@ -38,6 +38,11 @@ from ..models.excess import (
     ExcessOfferLine,
 )
 
+# Terminal CustomerBid statuses: the seller has answered, so the revision is frozen
+# history. Re-assembling off one forks a NEW immutable revision (D3) rather than mutating
+# the answered row. A non-terminal (draft/sent) latest still bumps in place.
+_TERMINAL_BID_STATUSES = (CustomerBidStatus.ACCEPTED, CustomerBidStatus.REJECTED)
+
 
 def _safe_commit(db: Session, *, entity: str = "record") -> None:
     """Commit the session, mapping IntegrityError to HTTP 409 instead of an unhandled
@@ -73,11 +78,14 @@ def build_bid_back(
     dropped to NULL (a stale ``best_offer_id`` can never 500 the assembly). The line
     quantity defaults to the posted line's quantity.
 
-    Re-assemble semantics (M4): the list keeps ONE CustomerBid row across revisions.
-    When a bid already exists, re-assembling BUMPS ``revision`` on the SAME row and
-    replaces its lines (preserving the audit chain) instead of orphaning a fresh draft.
-    A new revision resets the row to ``draft`` and clears the prior send/response
-    stamps — they belonged to the superseded revision.
+    Re-assemble semantics (M4 + D3): re-assembling a NON-terminal latest bid
+    (``draft``/``sent``) BUMPS ``revision`` on the SAME row and replaces its lines
+    (no orphan drafts) — a ``sent`` bid resets to a fresh ``draft`` and its prior
+    send/response stamps clear, since they belonged to the superseded revision. But a
+    TERMINAL latest bid (``accepted``/``rejected``) is frozen history: re-assembling off
+    one INSERTs a NEW immutable ``CustomerBid`` row (``revision`` + 1, ``draft``) and
+    leaves the answered row — its status, stamps and lines — completely untouched. The
+    id-desc select above always surfaces the newest revision.
 
     Guards (raise HTTPException, never silent): the list must exist (404); *owner* must
     own the list (403 — assembling a bid back is the owner's privilege); and every
@@ -89,6 +97,13 @@ def build_bid_back(
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can build the bid back")
+
+    # Serialize concurrent re-assembles of this list (mirrors excess_service._lock_list_for_award's
+    # M9 pattern): a second concurrent build BLOCKS here until the first commits (_safe_commit
+    # below), then reads the freshly-committed ``latest`` revision instead of racing it — so two
+    # builds can neither both fork the same revision number nor silently clobber each other's line
+    # selections. ``with_for_update`` is a no-op on SQLite (tests) and enforced on PostgreSQL (prod).
+    db.scalars(select(ExcessList).where(ExcessList.id == list_id).with_for_update()).first()
 
     # Index the posting's lines so we can validate each selection belongs here and seed
     # the price from the rollup.
@@ -111,10 +126,11 @@ def build_bid_back(
         ).all()
     )
 
-    # One bid per list: re-assemble bumps ``revision`` on the same row (audit chain
-    # preserved) instead of leaving a pile of orphan drafts.
-    bid = db.query(CustomerBid).filter(CustomerBid.excess_list_id == list_id).order_by(CustomerBid.id.desc()).first()
-    if bid is None:
+    # Re-assemble semantics: a non-terminal latest bid (draft/sent) bumps ``revision`` on
+    # the SAME row (no orphan drafts); a TERMINAL latest (accepted/rejected) is frozen
+    # history, so we fork a NEW immutable revision instead of mutating the answered row (D3).
+    latest = db.query(CustomerBid).filter(CustomerBid.excess_list_id == list_id).order_by(CustomerBid.id.desc()).first()
+    if latest is None:
         bid = CustomerBid(
             excess_list_id=list_id,
             owner_id=owner.id,
@@ -123,7 +139,22 @@ def build_bid_back(
         )
         db.add(bid)
         db.flush()  # need bid.id before attaching lines
+    elif latest.status in {s.value for s in _TERMINAL_BID_STATUSES}:
+        # D3: the seller answered this revision — leave it UNTOUCHED (status, send/response
+        # stamps and its own lines are frozen) and insert the next revision as a fresh draft.
+        bid = CustomerBid(
+            excess_list_id=list_id,
+            owner_id=owner.id,
+            status=CustomerBidStatus.DRAFT,
+            revision=(latest.revision or 1) + 1,
+            notes=None,
+        )
+        db.add(bid)
+        db.flush()  # need bid.id before attaching lines
     else:
+        # Non-terminal (draft/sent): bump the revision in place and replace its lines (a
+        # sent bid resets to a fresh draft — the superseded send/response stamps drop).
+        bid = latest
         bid.revision = (bid.revision or 1) + 1
         bid.status = CustomerBidStatus.DRAFT
         bid.sent_at = None

@@ -853,15 +853,22 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
 > `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
 > Resell lifecycle members (open/collecting/bid_out/awarded); the pre-Resell active/bidding
-> members remain (not in the cutover's removal scope).
+> members remain DEFINED for back-compat, but **migration 193 remapped every legacy ROW**
+> (`active`->`open` + stamp `open_at`, `bidding`->`collecting` + stamp `open_at`; `closed`
+> stays CLOSED, distinct from `bid_out` — decision D5), so no live row carries a legacy
+> status and the publish guard can rely on `draft` being the only pre-post state.
 >
 > Service logic lives in `app/services/excess_service.py`:
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
 > part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
-> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*;
+> `withdraw_offer` is GUARDED at the service layer to open/late offers — 409 for a won
+> offer [unaward it first] or a lost/withdrawn one, mirroring the router guard),
 > `award_offer` (the single chokepoint that flips an offer -> `won`: owner-gated; a
 > `take_all` offer awards EVERY non-withdrawn line (it carries no offer lines), a
-> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409 if a
+> `per_line` offer awards its matched lines; idempotent for an already-won offer; 409
+> unless the offer is open/late (a lost/withdrawn offer is not awardable — this guard
+> runs BEFORE the line-scope check); 409 if a
 > line is already awarded to a different offer; marks lines `awarded`, recomputes rollups,
 > fires the buyer-score win-hook `buyer_affinity_service.recompute_buyer_score_on_win`
 > BEFORE the commit — no-ops for an offer with no canonical buyer; RETIRES the sold lines
@@ -879,7 +886,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > (templates under `app/templates/htmx/partials/resell/*`).
 >
 > Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
-> `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
+> `sync_list_mirror`/`publish_list` are the dual-write owners (`publish_list` is GUARDED
+> to `draft` — 409 otherwise, so a resolved posting can't be re-opened and re-mirrored —
+> and clears any stale `close_at` on publish) — every active posted
 > `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
 > `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
 > NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
@@ -895,7 +904,11 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 >
 > Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
 > `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
-> header + `customer_bid_lines`, seeding each `customer_unit_price` from the line's
+> header + `customer_bid_lines`. Re-assemble semantics (D3): a non-terminal latest bid
+> (draft/sent) bumps `revision` in place on the SAME row; a TERMINAL latest (accepted/
+> rejected) is frozen history, so a re-assemble INSERTs a NEW `customer_bids` row
+> (`revision`+1, draft) and leaves the answered row — status, send/response stamps and its
+> lines — untouched. It seeds each `customer_unit_price` from the line's
 > `best_offer_unit_price` rollup (trader override per line); the chosen offer ids are
 > recorded INTERNALLY (`selected_offer_id`/`selected_offer_line_id`) for audit and are
 > NEVER exported. `bid_back_export_context` is a PURE WHITELIST — line dicts carry only
@@ -910,7 +923,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
+- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy active/bidding enum members remain defined but migration 193 remapped all legacy rows -> open/collecting; closed kept distinct from bid_out)
 - version (int, default 1) — lock-on-post; a revision bumps version
 - open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
 
@@ -945,9 +958,11 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - excess_list_id -> excess_lists (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL — per buyer×line)
 - target_vendor_card_id -> vendor_cards (SET NULL, the canonical buyer), submitted_by -> users
 - channel: email | phone | teams | marketplace | other (ExcessOutreachChannel)
-- status: sent -> opened -> responded -> bid | declined | no_response (ExcessOutreachStatus)
+- status: sending -> sent -> opened -> responded -> bid | declined; no_response = GENUINE buyer silence past a real sent (ExcessOutreachStatus). Send-outcome states (send never reached the buyer, NOT silence): failed (skipped/DNC/send error/outage — reason in send_error) + interrupted (a 'sending' row the sweeper found orphaned). Both retryable. (migration 194 added failed/interrupted + send_error)
+- send_error (Text, nullable; migration 194) — persisted send-failure reason on failed/interrupted rows (or a "reply-matching degraded" note on a delivered row whose Graph-id lookup came back empty); NULL on a clean send. Surfaced in the tracker cell + the CSV export "Note" column so a failed/interrupted (or delivered-but-degraded) row is never silent
+- send_subject / send_body (Text, nullable; migration 195) — the EXACT subject/body an email campaign was sent with, so a one-click Retry matches an already-delivered CUSTOMIZED-subject message in the double-send guard (email_service._find_sent_message is an exact-subject match) and a legitimate resend reuses the original wording; NULL on manual-log + legacy email rows
 - graph_message_id / graph_conversation_id (email only), parts_included (JSON), sent_at
-- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning)
+- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning). Same-campaign double-submits are deduped in enqueue (skip a buyer with a live sending/sent row on the same list+line within a 1h window). Downstream "was this buyer genuinely offered?" readers (offered tally, response_rate denominator, last_offered_at, don't-forget nudge, tracker, AND the team-overlap advisory overlap_warning / overlap_warnings_for) exclude the not-sent set {sending, failed, interrupted} via buyer_affinity_service._NOT_SENT_STATUSES
 
 **`buyer_scores`** — Per-buyer "good bidder" rollup (migration 133; inverts the vendor scorecard)
 - vendor_card_id -> vendor_cards (UNIQUE index)

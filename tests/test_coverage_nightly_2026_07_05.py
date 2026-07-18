@@ -98,9 +98,10 @@ class TestResellJobs:
         scheduler = MagicMock()
         settings = MagicMock()
         register_resell_jobs(scheduler, settings)
-        scheduler.add_job.assert_called_once()
-        call_kwargs = scheduler.add_job.call_args
-        assert call_kwargs[1]["id"] == "expire_resell_lists" or call_kwargs.kwargs.get("id") == "expire_resell_lists"
+        # Two lifecycle jobs: the list-expiry backstop + the stale-'sending' sweeper.
+        assert scheduler.add_job.call_count == 2
+        job_ids = {c.kwargs.get("id") for c in scheduler.add_job.call_args_list}
+        assert job_ids == {"expire_resell_lists", "sweep_stale_sending_outreach"}
 
 
 # ─────────────────────────────────────────────────────────────────────
