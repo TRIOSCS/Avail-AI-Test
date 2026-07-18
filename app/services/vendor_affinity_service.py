@@ -8,7 +8,7 @@ Depends on: app.models (MaterialCard, Sighting, MaterialVendorHistory, EntityTag
 from __future__ import annotations
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -252,8 +252,8 @@ def _behavior_multiplier(vendor_card: VendorCard | None) -> tuple[float, str | N
     """Compute a confidence multiplier from VendorCard response_rate / ghost_rate /
     cancellation_rate.
 
-    Returns (multiplier, note) where note is a short human-readable reason to append
-    to the match's reasoning, or None if no behavioral signal was available.
+    Returns (multiplier, note) where note is a short human-readable reason to append to
+    the match's reasoning, or None if no behavioral signal was available.
     """
     if vendor_card is None:
         return 1.0, None
@@ -298,7 +298,7 @@ def score_affinity_matches(mpn: str, matches: list[dict], db: Session | None = N
     if db is not None:
         vendor_ids = {m["vendor_id"] for m in matches if m.get("vendor_id")}
         if vendor_ids:
-            vendor_cards = {vc.id: vc for vc in db.query(VendorCard).filter(VendorCard.id.in_(vendor_ids)).all()}
+            vendor_cards = {vc.id: vc for vc in db.scalars(select(VendorCard).where(VendorCard.id.in_(vendor_ids)))}
 
     scored = []
     for match in matches:

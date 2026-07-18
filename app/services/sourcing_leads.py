@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.sourcing import Requirement, Sighting
@@ -172,8 +173,8 @@ class VendorFeedbackAdjustment:
 
     confidence_penalty / safety_penalty are signed point adjustments (negative =
     penalty, positive = boost) meant to be added directly to a 0-100 score before
-    clamping. do_not_contact is True if the vendor has ANY do_not_contact feedback
-    event on record (not decayed — a standing buyer instruction, not a fading signal).
+    clamping. do_not_contact is True if the vendor has ANY do_not_contact feedback event
+    on record (not decayed — a standing buyer instruction, not a fading signal).
     """
 
     confidence_penalty: float
@@ -186,8 +187,7 @@ _NO_FEEDBACK_ADJUSTMENT = VendorFeedbackAdjustment(0.0, 0.0, False, 0.0)
 
 
 def get_vendor_feedback_adjustment(db: Session, vendor_card_id: int | None) -> VendorFeedbackAdjustment:
-    """Aggregate a vendor's recent LeadFeedbackEvent history into a scoring
-    adjustment.
+    """Aggregate a vendor's recent LeadFeedbackEvent history into a scoring adjustment.
 
     One grouped-scope query per call (joins LeadFeedbackEvent -> SourcingLead,
     filtered to this vendor and a bounded lookback window) — not a query per event
@@ -203,15 +203,14 @@ def get_vendor_feedback_adjustment(db: Session, vendor_card_id: int | None) -> V
         return _NO_FEEDBACK_ADJUSTMENT
 
     cutoff = _now_utc() - timedelta(days=FEEDBACK_LOOKBACK_DAYS)
-    rows = (
-        db.query(LeadFeedbackEvent.status, LeadFeedbackEvent.created_at)
+    rows = db.execute(
+        select(LeadFeedbackEvent.status, LeadFeedbackEvent.created_at)
         .join(SourcingLead, LeadFeedbackEvent.lead_id == SourcingLead.id)
-        .filter(
+        .where(
             SourcingLead.vendor_card_id == vendor_card_id,
             LeadFeedbackEvent.created_at >= cutoff,
         )
-        .all()
-    )
+    ).all()
     if not rows:
         return _NO_FEEDBACK_ADJUSTMENT
 
@@ -270,8 +269,8 @@ def _compute_vendor_safety(
 
     feedback_penalty / feedback_do_not_contact come from get_vendor_feedback_adjustment
     — the vendor-wide, time-decayed rollup of buyer LeadFeedbackEvent history. A
-    do_not_contact event on ANY of this vendor's leads forces the score into
-    high_risk territory here, even if this particular lead was never flagged.
+    do_not_contact event on ANY of this vendor's leads forces the score into high_risk
+    territory here, even if this particular lead was never flagged.
     """
     score = 50.0
     flags: list[str] = []

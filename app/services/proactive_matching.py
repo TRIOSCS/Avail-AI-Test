@@ -533,16 +533,16 @@ def run_proactive_scan(db: Session) -> dict:
 def trigger_rematch_on_offer_approval(db: Session, offer: Offer) -> int:
     """Targeted single-offer re-match, called by offer-approval routers.
 
-    Closes the watermark gap documented in run_proactive_scan(): a batch scan only
-    ever sees an offer once, at Offer.created_at. An offer created as pending_review
-    is excluded from the scan's live-status filter; if it's approved after the
-    watermark has advanced past its created_at, it's invisible to every future batch
-    scan too. This runs find_matches_for_offer() for that one offer instead of
-    waiting for (or forcing) a full rescan.
+    Closes the watermark gap documented in run_proactive_scan(): a batch scan only ever
+    sees an offer once, at Offer.created_at. An offer created as pending_review is
+    excluded from the scan's live-status filter; if it's approved after the watermark
+    has advanced past its created_at, it's invisible to every future batch scan too.
+    This runs find_matches_for_offer() for that one offer instead of waiting for (or
+    forcing) a full rescan.
 
     Uses its own commit so a re-match failure never blocks the caller's approval
-    transaction — the offer status change should succeed even if matching fails.
-    No-op for offers without a material_card_id (find_matches_for_offer requires one).
+    transaction — the offer status change should succeed even if matching fails. No-op
+    for offers without a material_card_id (find_matches_for_offer requires one).
     """
     if not offer.material_card_id:
         return 0
