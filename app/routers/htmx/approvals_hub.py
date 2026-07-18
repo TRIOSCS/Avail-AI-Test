@@ -312,6 +312,7 @@ def render_plan_pane(
     from ...models.quality_plan import QualityPlan
     from ...services.buyplan_workflow import plan_needs_approver_reason
     from ...services.field_audit import edits_since
+    from ...services.kanban_lanes import build_kanban
     from ...services.qp_workspace import can_edit_qp_sales
     from ...services.stale_guard import stale_token
 
@@ -334,6 +335,7 @@ def render_plan_pane(
         select(QualityPlan).where(QualityPlan.buy_plan_id == bp.id).order_by(QualityPlan.id.asc()).limit(1)
     ).scalar_one_or_none()
 
+    is_sourcing = (bp.order_type or SalesOrderType.NEW.value) in {t.value for t in SOURCING_ORDER_TYPES}
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
@@ -342,7 +344,14 @@ def render_plan_pane(
             "lens": lens,
             "qp": qp,
             "can_decide": bp.status == BuyPlanStatus.PENDING.value and _viewer_can_decide_plan(db, user, bp.id),
-            "is_sourcing": (bp.order_type or SalesOrderType.NEW.value) in {t.value for t in SOURCING_ORDER_TYPES},
+            "is_sourcing": is_sourcing,
+            # PO kanban (3.3, spec §6) — the centerpiece on ACTIVE/INBOUND sourcing
+            # orders; None hides the board entirely (draft/pending/closed + lite plans).
+            "kanban": (
+                build_kanban(db, bp)
+                if is_sourcing and bp.status in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value)
+                else None
+            ),
             "order_type_label": ORDER_TYPE_LABELS.get(bp.order_type or "", bp.order_type),
             "po_labels": PO_DECISION_LABELS,
             # QP-sales inline editing (2.1): the pane hides the editor with the SAME

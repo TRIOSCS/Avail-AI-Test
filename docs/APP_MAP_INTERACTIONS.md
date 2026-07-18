@@ -6618,3 +6618,41 @@ every item** (never status-locked): `POST /v2/partials/approvals/notes` /
 panes. **Lifecycle controls**: manager-only halt/resume/cancel/reset on the SO pane
 via the existing POSTs (`origin=approvals_workspace`); `plan_needs_approver_reason`
 stall warnings on BP-tab rows and the pane.
+
+**PO kanban (Phase 3, spec §6).** `render_plan_pane` builds `kanban` via
+`services/kanban_lanes.build_kanban(db, plan)` on ACTIVE/INBOUND **sourcing** orders
+only (lite plans and draft/pending/closed plans get no board); `_pane_kanban.html`
+renders it inside `_pane_sales_order.html`. Lanes are **display-only, never
+persisted**, computed per line by `kanban_lane(line_status, prepay_status,
+payment_method, received)` with this exact precedence:
+
+1. `cancelled` → hidden (no column);
+2. `resourcing` → **Re-sourcing** (the claim pool — lane renders only when populated);
+3. received (`received_at` stamped) → **Received** — paid-and-received is NOT a risk;
+4. prepayment **PAID** and `payment_method != cod` → **Paid · awaiting delivery** (the
+   RISK lane — money out before goods on any advance rail, **outranks verified**; COD
+   never enters);
+5. `verified` → **Approved**; 6. `pending_verify` → **Pending approval**;
+7. else (`awaiting_po` + `issue`) → **Awaiting PO** (issue keeps a badge, not a column).
+
+Card data is batch-resolved (no N+1): prepay badge state via
+`prepayment_state_for_lines` (read-only), amount/payee/`paid_at` off the
+most-progressed live Prepayment row, `manager_edited_line_ids` for the Edited marker,
+`note_counts` + `BuyPlanAttachment` group-counts, plan-level QP `partial_ship`. Risk
+cards show **amount + payee** on their face and age green → amber (3d) → red (7d)
+keyed on `paid_at` (shared `age_chip` thresholds). **No drag** — cards move only by
+the real actions; tapping a card `hx-get`s that line's PO pane into `#aw-pane`
+(explicit `hx-target`).
+
+**Mark received (Phase 3).** TRIO's "OPS Received (Y/N)" — no automated receiving
+event exists, so `mark_line_received(plan_id, line_id, user, db)`
+(`buyplan_workflow/buyplan_po.py`, ADDITIVE) backs the Received column: actor gate =
+the line's buyer or a manager/admin (service-side); state gate = VERIFIED **or** the
+paid-risk state (a PAID prepayment — goods can land before the verify sign-off);
+idempotent (an already-received line no-ops); stamps `received_at`/`received_by_id` +
+ONE `LINE_RECEIVED` ActivityLog row keyed to the line; **never** touches line.status
+or the plan's completion machinery (completion still runs only through `verify_po`).
+Route: `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive` (`require_user`;
+PermissionError→403, ValueError→400); `origin=approvals_workspace` re-renders the
+SO/BP pane when a `lens` rides along (the kanban card's button — the board repaints
+in place) else the PO-line pane, both with `awListRefresh`.

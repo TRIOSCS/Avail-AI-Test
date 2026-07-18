@@ -780,3 +780,27 @@ stays as-is until post-Phase-3 parity.
   `origin=approvals_workspace` (shared `_workspace_pane_response`).
   `plan_needs_approver_reason` stall warnings on BP-tab list rows
   (`WorkspaceRow.stalled`) and on the pane.
+
+### Phase 3 — PO kanban
+
+- `app/services/kanban_lanes.py` (NEW — deliberately NOT under `services/approvals/`;
+  the engine stays untouched): `kanban_lane` (pure per-line lane placement with the
+  spec-§6 precedence — cancelled hidden; resourcing > received > paid-risk (COD
+  excluded, outranks verified) > approved > pending approval > awaiting PO),
+  `build_kanban` (the whole board as `KanbanLaneView`/`KanbanCard` DTOs —
+  batch-resolved prepay badge amount/payee/paid_at, per-lane age anchors,
+  edited-by-manager marker, note/file counts, line N of M + partial-ship,
+  `can_receive`), `LANE_ORDER` / `LANE_LABELS`.
+- `app/services/buyplan_workflow/buyplan_po.py` — NEW additive `mark_line_received`
+  (buyer/manager/admin; VERIFIED or paid-risk; idempotent; stamps
+  `received_at`/`received_by_id`; `LINE_RECEIVED` activity; no plan-status changes)
+  + route `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive`
+  (`routers/htmx/buy_plans.py`).
+- `app/templates/htmx/partials/approvals/_pane_kanban.html` (NEW) — replaces the
+  Phase-1 placeholder in `_pane_sales_order.html` (ACTIVE/INBOUND sourcing orders
+  only): `_surface_pipeline.html`-style column grid, deal_card-shaped cards, risk
+  lane amber-tinted with amount+payee on the face + paid_at aging (3d/7d), claim
+  button on Re-sourcing cards, Mark received on eligible cards, **no drag** — card
+  tap `hx-get`s the PO-line pane into `#aw-pane` (explicit target).
+- Tests: `tests/test_kanban_lanes.py`, `tests/test_mark_received.py`,
+  `tests/test_kanban_render.py`.

@@ -256,11 +256,10 @@
     {% endif %}
   </div>
 
-  {# ── PO kanban (Phase 3) ────────────────────────────────────────── #}
-  {% if bp.status in ('active', 'inbound') %}
-  <div class="rounded-lg border border-dashed border-line-base bg-gray-50 px-3 py-4 text-xs text-gray-400 text-center">
-    PO kanban lands here (Phase 3) — track this order's POs on the Purchase Orders tab meanwhile.
-  </div>
+  {# ── PO kanban (3.3, spec §6) — sourcing orders only; the centerpiece once the
+       plan is active/inbound (render_plan_pane builds `kanban` exactly then). #}
+  {% if kanban is not none %}
+  {% include "htmx/partials/approvals/_pane_kanban.html" %}
   {% endif %}
   {% endif %}
 
