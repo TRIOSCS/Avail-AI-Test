@@ -277,6 +277,87 @@ def test_submit_outreach_log_path(client, db_session, trader_user, posted_list):
         restore()
 
 
+def _customer_named_list(db_session, trader_user, test_company) -> ExcessList:
+    """A posted list a trader named after the customer (the natural, leaky habit)."""
+    el = ExcessList(
+        title=f"{test_company.name} — surplus FPGAs Q3",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.COLLECTING,
+        total_line_items=1,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(el)
+    db_session.flush()
+    db_session.add(
+        ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="XCVU9P-2FLGA2104I",
+            normalized_part_number=normalize_mpn_key("XCVU9P-2FLGA2104I"),
+            quantity=10,
+        )
+    )
+    db_session.commit()
+    return el
+
+
+def test_outreach_subject_prefill_is_neutral(client, db_session, trader_user, test_company):
+    """#11: the outreach email subject PREFILL must not embed the customer-named list
+    title.
+
+    The subject ships externally to the buyer, so embedding ``el.title`` (which traders
+    write as the customer name) de-anonymizes the customer. The prefill is a neutral,
+    part-count default instead; the owner can still edit it before sending.
+    """
+    import re
+
+    el = _customer_named_list(db_session, trader_user, test_company)
+    restore = _own(db_session, None, trader_user)
+    try:
+        body = client.get(f"/v2/partials/resell/{el.id}/offer-buyers-form").text
+    finally:
+        restore()
+
+    m = re.search(r'name="subject"[^>]*value="([^"]*)"', body)
+    assert m, "subject input not found in the outreach modal"
+    subject_value = m.group(1)
+    assert el.title not in subject_value, "customer-named title leaked into the outreach subject prefill"
+    assert test_company.name not in subject_value
+    assert subject_value.strip(), "a neutral default subject must be present"
+    assert "Excess available" in subject_value  # neutral, part-count prefix
+
+
+def test_outreach_activity_log_subject_omits_customer_title(client, db_session, trader_user, test_company):
+    """#11: the internal outreach ActivityLog subject must not embed the customer-named
+    list title.
+
+    The log lands on the (shared) buyer vendor-card timeline, so the title would leak
+    the customer to any OTHER trader viewing that buyer. It references the list
+    neutrally by id.
+    """
+    from app.models import ActivityLog
+
+    el = _customer_named_list(db_session, trader_user, test_company)
+    buyer = _reachable_buyer(db_session, "Timeline Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{el.id}/outreach",
+            data={"vendor_card_ids": str(buyer.id), "scope": "whole_list", "channel": "phone"},
+        )
+        assert resp.status_code == 200
+    finally:
+        restore()
+
+    logs = db_session.query(ActivityLog).filter_by(excess_list_id=el.id).all()
+    assert logs, "an outreach ActivityLog should have been written"
+    subject = logs[0].subject or ""
+    assert el.title not in subject, "customer title leaked into the outreach ActivityLog subject"
+    assert test_company.name not in subject
+    assert f"#{el.id}" in subject, "the log should still reference the list neutrally by id"
+
+
 def test_submit_outreach_email_path(client, db_session, trader_user, posted_list):
     """The email channel enqueues 'sending' rows + a background send, returning at once.
 
@@ -506,21 +587,7 @@ def test_submit_outreach_draft_list_409(client, db_session, trader_user, draft_l
         restore()
 
 
-def test_submit_outreach_posted_list_200(client, db_session, trader_user, posted_list):
-    """Submitting outreach on a POSTED (collecting) list still succeeds — no
-    regression."""
-    buyer = _reachable_buyer(db_session, "Posted Buyer", engagement=10.0, commodity=_CAP)
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.post(
-            f"/api/resell/{posted_list.id}/outreach",
-            data={
-                "vendor_card_ids": str(buyer.id),
-                "scope": "whole_list",
-                "channel": "phone",
-            },
-        )
-        assert resp.status_code == 200
-    finally:
-        restore()
+# NB: the former assert-200-only ``test_submit_outreach_posted_list_200`` was dropped as
+# redundant assertion theater — the posted-list success path is covered with real
+# outcome assertions by ``test_submit_outreach_log_path`` (rows/channel/target created)
+# and ``test_submit_outreach_email_path`` (sending rows + background job dispatched).

@@ -108,7 +108,6 @@ class TestFollowupTaskService:
             vendor_card_id=buyer_card_a.id,
             owner_id=test_user.id,
             buyer_name=buyer_card_a.display_name,
-            list_title=owned_list.title,
         )
         assert task is not None
         assert task.assigned_to_id == test_user.id
@@ -116,6 +115,11 @@ class TestFollowupTaskService:
         assert task.source == "system"
         assert task.source_ref == f"resell_notyet:{owned_list.id}:{buyer_card_a.id}"
         assert buyer_card_a.display_name in task.title
+        # #12: this task is scoped to the buyer's vendor card and renders on the SHARED
+        # cross-trader buyer Tasks tab, so the customer-named list title ("Acme surplus")
+        # must NEVER appear in it — it references the list by the neutral id-derived label.
+        assert owned_list.title not in task.title, "customer-named list title leaked into the cross-trader task title"
+        assert f"Excess listing #{owned_list.id}" in task.title
         assert len(_tasks_for(db_session, test_user.id)) == 1
 
     def test_idempotent_same_buyer_list_owner(self, db_session, test_user, owned_list, buyer_card_a):
@@ -126,7 +130,6 @@ class TestFollowupTaskService:
                 vendor_card_id=buyer_card_a.id,
                 owner_id=test_user.id,
                 buyer_name=buyer_card_a.display_name,
-                list_title=owned_list.title,
             )
         assert len(_tasks_for(db_session, test_user.id)) == 1
 

@@ -434,7 +434,13 @@ def notify_owner_of_offer(
     list gets its own row. Does NOT commit — the caller owns the transaction boundary.
     """
     token = f"resell-offer:{excess_list.id}:{buyer_ref}"
-    subject = f"New offer from {buyer_label} on {excess_list.title}"[:500]
+    # #12: reference the list neutrally by id, NEVER the free-text title — this row carries
+    # the buyer's ``vendor_card_id`` and renders on the SHARED cross-trader buyer timeline
+    # (the vendor-card Activity tab + GET /api/vendors/{id}/activities are keyed on
+    # vendor_card_id only), so a customer-named title would leak the customer to any other
+    # trader viewing that buyer. Same anonymization gate as the T3 ``_log_outreach_activity``
+    # "list #N" fix and the non-owner "Excess listing #N" label.
+    subject = f"New offer from {buyer_label} on list #{excess_list.id}"[:500]
     existing = (
         db.query(ActivityLog)
         .filter(

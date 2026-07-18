@@ -28,7 +28,7 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
@@ -55,6 +55,7 @@ from ..services import (
 )
 from ..template_env import template_response
 from ..utils.csv_export import stream_csv
+from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["resell"])
@@ -181,9 +182,14 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
                 "list": el,
                 "display_title": _display_title(el, can_see_customer=can_see_customer),
                 "customer_name": (el.company.name if (can_see_customer and el.company) else None),
-                "coverage_filled": covered,
-                "coverage_total": total,
-                "offer_count": offer_counts.get(el.id, 0),
+                # Offer coverage + count are OWNER-PRIVATE (D2): a non-owner (the "Open to
+                # Me" lens) must not learn how many lines already have offers or how many
+                # bids are in — same competitive leak the per-line offer badge hides. Null
+                # them here so the data never reaches the template (defense-in-depth with
+                # the ``can_see_customer`` gate around the meter/badge in _lists.html).
+                "coverage_filled": covered if can_see_customer else None,
+                "coverage_total": total if can_see_customer else None,
+                "offer_count": offer_counts.get(el.id, 0) if can_see_customer else None,
                 "hours_until": _hours_until(getattr(el, "close_at", None)),
             }
         )
@@ -373,6 +379,17 @@ async def resell_lists(
         query = query.filter(ExcessList.owner_id == user.id)
         can_see_customer = True
 
+    # D2 (offer-EXISTENCE oracle): the offer-based ``needs`` triage — "lists carrying a
+    # live bid" — is the OWNER's board only. Applied in the open (offerer) lens it becomes
+    # an existence oracle: a non-owner could diff ``lens=open&needs=offers`` against plain
+    # ``lens=open`` to learn which anonymized "Excess listing #N" postings have already drawn
+    # a competing bid (``needs=take_all`` narrows it to whole-list bids) — the SAME
+    # competitive signal the coverage meter / amber badge / offer-count chip are hidden from
+    # non-owners to protect. Gate it on the one predicate (``can_see_customer``) everywhere:
+    # for a non-owner the filter never runs and the passed-through state never reflects it.
+    if not can_see_customer:
+        needs = ""
+
     if stage:
         query = query.filter(ExcessList.status == stage)
     if needs:
@@ -385,7 +402,21 @@ async def resell_lists(
             offer_lists = offer_lists.filter(ExcessOffer.scope == ExcessOfferScope.TAKE_ALL)
         query = query.filter(ExcessList.id.in_(offer_lists))
     if q:
-        query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
+        if lens == "open":
+            # #10: a non-owner must NOT be able to search the free-text title — traders name
+            # lists after the customer ("Acme Corp — surplus"), so title search is a
+            # de-anonymization oracle (a hit/miss confirms the hidden customer name). Match
+            # on PART IDENTITY instead: normalized MPN (query normalized the same way the
+            # column is) or manufacturer — both indexed (models/excess.py) — via a subquery
+            # on excess_list_id. The title ILIKE stays for the owner's mine lens only.
+            conds = [ExcessLineItem.manufacturer.ilike(f"%{escape_like(q)}%", escape="\\")]
+            norm_q = normalize_mpn_key(q)
+            if norm_q:
+                conds.append(ExcessLineItem.normalized_part_number.ilike(f"%{escape_like(norm_q)}%", escape="\\"))
+            part_match = select(ExcessLineItem.excess_list_id).where(or_(*conds))
+            query = query.filter(ExcessList.id.in_(part_match))
+        else:
+            query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
     lists = query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc()).all()
     cards = _list_cards(db, lists, can_see_customer=can_see_customer)
@@ -400,6 +431,7 @@ async def resell_lists(
             "needs": needs,
             "q": q,
             "cards": cards,
+            "can_see_customer": can_see_customer,
             "can_post": excess_service.can_post(user),
         },
     )
@@ -1317,6 +1349,13 @@ def _buyer_panel_context(
     suggestions = _suggestion_rows(db, el, owner, line_ids)
     suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
     scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
+    # Line count for the neutral outreach subject prefill (#11) — the campaign's scope:
+    # the selected lines, or the whole list. NEVER the title (which names the customer).
+    line_count = (
+        len(scope_lines)
+        if scope_lines
+        else (db.scalar(select(func.count(ExcessLineItem.id)).where(ExcessLineItem.excess_list_id == el.id)) or 0)
+    )
     return {
         "request": request,
         "user": owner,
@@ -1326,6 +1365,7 @@ def _buyer_panel_context(
         "channels": [c.value for c in ExcessOutreachChannel],
         "line_ids": line_ids or [],
         "scope_lines": scope_lines,
+        "line_count": line_count,
         "preselect_ids": preselect_ids or [],
     }
 
@@ -1533,7 +1573,6 @@ async def resell_not_yet_strip(
             vendor_card_id=b.vendor_card_id,
             owner_id=el.owner_id,
             buyer_name=b.display_name,
-            list_title=el.title,
             due_at=due,
         )
     return template_response(
@@ -1628,11 +1667,25 @@ async def resell_submit_outreach(
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 
 
-# Retry re-uses the standard offer template (the compose modal's seeded subject/body in
-# offer_buyers_modal.html) — the original campaign's subject/body are not persisted, so a
-# one-click retry re-sends with the default text. Kept in sync with that template.
-_RETRY_SUBJECT = "Excess available: {title}"
+# Retry prefers the EXACT subject/body the campaign was sent with (persisted on the row
+# since Phase 2: ``send_subject`` / ``send_body``) so the Sent-folder reconcile matches and
+# a customized send re-sends verbatim. These are only the FALLBACK for a row missing that
+# persisted text (legacy / cleared-subject rows). The subject ships EXTERNALLY to the buyer,
+# so the fallback must stay anonymized — a part-count subject, NEVER ``el.title`` (which
+# traders write as the customer name, the #11/#12 leak class the modal prefill + internal
+# ActivityLog subject already neutralized). Kept in sync with offer_buyers_modal.html.
 _RETRY_BODY = "We have the following excess available — let us know if you'd like to bid."
+
+
+def _neutral_outreach_subject(line_count: int) -> str:
+    """Neutral, part-count outreach subject — mirrors the compose-modal prefill.
+
+    Used as the retry resend's fallback subject when a row has no persisted ``send_subject``.
+    NEVER embeds ``el.title`` (the customer name), so the anonymized listing stays anonymized
+    on the external send. Matches ``offer_buyers_modal.html``'s ``Excess available: N line(s)``.
+    """
+    return f"Excess available: {line_count} line" + ("s" if line_count != 1 else "")
+
 
 # Outreach statuses a failed send can be retried FROM (a genuine send failure or an
 # interrupted/orphaned send — never a live sending/sent/engaged row).
@@ -1669,7 +1722,8 @@ async def resell_retry_outreach(
     if row.status not in _RETRYABLE_OUTREACH:
         raise HTTPException(409, "Only a failed or interrupted outreach can be retried")
 
-    subject = _RETRY_SUBJECT.format(title=el.title)
+    line_count = db.scalar(select(func.count(ExcessLineItem.id)).where(ExcessLineItem.excess_list_id == el.id)) or 0
+    subject = _neutral_outreach_subject(line_count)
     body = _RETRY_BODY
     # Optimistic flip so the tracker shows ``sending`` + self-polls to the final state.
     # Refresh ``created_at`` to now so the row is not "born stale": the nightly stale-sending

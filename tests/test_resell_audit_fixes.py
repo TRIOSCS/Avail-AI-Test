@@ -278,6 +278,36 @@ class TestM6OwnerNotification:
         assert len(notifs) == 1
         assert notifs[0].contact_name == buyer.name
 
+    def test_offer_notification_subject_omits_customer_title(self, db_session, posted_list, owner, buyer):
+        """#12: the inbound-offer owner notification is an ActivityLog carrying the
+        buyer's ``vendor_card_id``, which renders on the SHARED cross-trader buyer
+        timeline (the vendor-card Activity tab + GET /api/vendors/{id}/activities key on
+        vendor_card_id only) — so the customer-named list title must NEVER appear in its
+        subject.
+
+        It references the list by the neutral id-derived label instead (mirrors the T3
+        outreach-log fix).
+        """
+        posted_list.title = "Acme Corp — surplus FPGAs"
+        db_session.commit()
+        excess_service.submit_offer(
+            db_session,
+            list_id=posted_list.id,
+            user=buyer,
+            scope="per_line",
+            lines=[{"mpn_raw": "LM358N", "quantity": 40, "unit_price": Decimal("1.25")}],
+        )
+        notifs = _system_notifs(
+            db_session, owner_id=owner.id, list_id=posted_list.id, activity_type=ActivityType.NEW_OFFER
+        )
+        assert len(notifs) == 1
+        subject = notifs[0].subject or ""
+        assert "Acme Corp — surplus FPGAs" not in subject, (
+            "customer title leaked into the cross-trader offer notification"
+        )
+        assert f"#{posted_list.id}" in subject, "the notification should reference the list neutrally by id"
+        assert buyer.name in subject  # the buyer label is still shown
+
     def test_second_offer_same_buyer_does_not_duplicate(self, db_session, posted_list, owner, buyer):
         for _ in range(2):
             excess_service.submit_offer(
