@@ -222,6 +222,32 @@ def test_pane_missing_prepayment_404s(hub_client: TestClient):
     assert hub_client.get("/v2/partials/approvals/prepayments/999999/pane").status_code == 404
 
 
+def test_pane_restricted_non_owner_404s(db_session: Session, test_user: User):
+    """A restricted (sales) non-owner is 404'd by the plan-access gate — same gate as
+    the plan and PO panes (get_buyplan_for_user on the prepayment's plan)."""
+    from app.main import app
+
+    _bp, _line, pp, _ar = _prepay_on_line(db_session, test_user)
+    stranger = User(
+        email="stranger-pp@trioscs.com",
+        name="Stranger Sales",
+        role="sales",  # RESTRICTED_ROLES — sees only their own requisitions' plans
+        azure_id="az-stranger-pp-1",
+    )
+    db_session.add(stranger)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]
+    app.dependency_overrides[require_user] = lambda: stranger
+    try:
+        with TestClient(app) as c:
+            r = c.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+    assert r.status_code == 404
+
+
 # ── Method-adjust route ──────────────────────────────────────────────────
 
 

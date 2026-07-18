@@ -25,6 +25,7 @@ from ...constants import (
     RESTRICTED_ROLES,
     AccessKey,
     BuyPlanStatus,
+    PaymentMethod,
     UserRole,
 )
 from ...database import get_db
@@ -999,6 +1000,33 @@ async def buy_plan_confirm_po_partial(
         except StaleEditError:
             return stale_conflict_response()
 
+    # COD contradicts a live prepayment (money is already committed up front) — reject
+    # here at the route so prepayment_service stays untouched by the confirm-PO flow.
+    if payment_method == PaymentMethod.COD.value:
+        from ...constants import PrepaymentStatus
+        from ...models.quality_plan import Prepayment
+
+        live_prepayment = (
+            db.query(Prepayment.id)
+            .filter(
+                Prepayment.buy_plan_line_id == line_id,
+                Prepayment.status.in_(
+                    (
+                        PrepaymentStatus.REQUESTED.value,
+                        PrepaymentStatus.APPROVED.value,
+                        PrepaymentStatus.PAID.value,
+                    )
+                ),
+            )
+            .first()
+        )
+        if live_prepayment is not None:
+            raise HTTPException(
+                400,
+                "This line has a prepayment in progress — COD terms would contradict it. "
+                "Pick the prepaid method, or void the prepayment first.",
+            )
+
     qp_fields = {key[len("qp_") :]: value for key, value in form.multi_items() if key.startswith("qp_")}
 
     # Field-audit (2.1): diff the line's PO fields BEFORE confirm_po mutates them, then
@@ -1529,8 +1557,12 @@ async def buy_plan_edit_line_partial(
     unit_sell = _parse_optional_float(form.get("unit_sell"))
     offer_id = _parse_optional_int(form.get("offer_id"))
     # Manager edit-anything-at-verify fields (2.3) — the service refuses them for
-    # anyone but a manager/admin on a PENDING_VERIFY line.
-    po_number = (form.get("po_number") or "").strip() or None
+    # anyone but a manager/admin on a PENDING_VERIFY line. po_number keeps the
+    # present-vs-absent distinction: the field ABSENT is a no-op (None → _UNSET in the
+    # service), while present-but-EMPTY is an explicit clear of an erroneous number
+    # (audited old→"" by the service; empty-on-empty stays a no-op).
+    po_number_raw = form.get("po_number")
+    po_number = str(po_number_raw).strip() if po_number_raw is not None else None
     unit_cost = _parse_optional_float(form.get("unit_cost"))
     ship_date_str = (form.get("estimated_ship_date") or "").strip()
     estimated_ship_date = None

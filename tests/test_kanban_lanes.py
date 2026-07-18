@@ -294,6 +294,7 @@ def test_build_kanban_counts_marker_and_partial_ship(db_session: Session, test_u
         buy_plan_id=bp.id,
         buy_plan_line_id=line.id,
         edits=[FieldEdit(field="quantity", old="100", new="90")],
+        stage="verify",  # what the line-edit writers stamp for a PENDING_VERIFY save
     )
     db_session.commit()
 

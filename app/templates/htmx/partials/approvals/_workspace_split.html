@@ -39,9 +39,15 @@
   <div class="flex flex-col min-w-0 md:border-r border-line-base max-md:!w-full max-md:border-b"
        :style="'width: ' + (splitRatio * 100) + '%'">
     {# awListRefresh (fired by decide responses via HX-Trigger) repaints a fresh list.
-       Explicit hx-target="this" — never inherit (#main-content landmine). #}
+       Explicit hx-target="this" — never inherit (#main-content landmine).
+       hx-include="#aw-filters" carries the CURRENT q/scope/show_closed (the rendered
+       list's own filter form) on every refetch, so a refresh never snaps a filtered
+       or Closed view back to defaults. On first load the form doesn't exist yet, so
+       only the baked ?scope applies; on refetches the form's values are appended
+       after it and Starlette's last-value-wins resolution makes them authoritative. #}
     <div id="aw-list" class="flex-1 flex flex-col min-h-0 md:overflow-y-auto"
          hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}"
+         hx-include="#aw-filters"
          hx-trigger="load, awListRefresh from:body"
          hx-target="this"
          hx-swap="innerHTML">

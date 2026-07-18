@@ -111,12 +111,18 @@ def log_field_edits(
     buy_plan_line_id: int | None = None,
     prepayment_id: int | None = None,
     edits: list[FieldEdit],
+    stage: str | None = None,
 ) -> ActivityLog | None:
     """Write ONE FIELD_EDIT ActivityLog row for a save's batched edits.
 
     No-op (returns None, writes nothing) when *edits* is empty. summary is
     "Edited <field, field, ...>" (truncated to the 500-char column);
     details={"edits": [{field, old, new}, ...]} carries the full diff.
+
+    ``stage`` (optional) tags the row with the plan stage the save happened at —
+    the line-edit writers pass ``"verify"`` when the edited line sat at
+    PENDING_VERIFY, which is what :func:`manager_edited_line_ids` keys the kanban
+    "edited by manager" marker on (draft-stage adds/edits never mark).
     """
     if not edits:
         return None
@@ -132,6 +138,9 @@ def log_field_edits(
         if entry.get("line_id") is None:
             entry.pop("line_id", None)
         serialized.append(entry)
+    details: dict[str, Any] = {"edits": serialized}
+    if stage is not None:
+        details["stage"] = stage
     return log_activity(
         db,
         activity_type=ActivityType.FIELD_EDIT,
@@ -141,7 +150,7 @@ def log_field_edits(
         buy_plan_line_id=buy_plan_line_id,
         prepayment_id=prepayment_id,
         summary=summary[:500],
-        details={"edits": serialized},
+        details=details,
     )
 
 
@@ -194,21 +203,34 @@ def format_change_summary(rows: list[EditRow], limit: int = 25) -> str:
 
 
 def manager_edited_line_ids(db: Session, plan: BuyPlan) -> set[int]:
-    """IDs of *plan*'s lines that a manager/admin has field-edited.
+    """IDs of *plan*'s lines that a manager/admin field-edited at the VERIFY stage.
 
     Drives the kanban card's "edited by manager" marker. Same supervisor tier as
-    dependencies.is_manager_or_admin (MANAGER or ADMIN role).
+    dependencies.is_manager_or_admin (MANAGER or ADMIN role). Only rows tagged
+    details={"stage": "verify"} count — the line-edit writers stamp it when the
+    edited line sat at PENDING_VERIFY, so draft-stage adds/edits never over-mark.
+    Line attribution reads BOTH channels: the row's FK column (single-line saves)
+    AND each edit's ``line_id`` (bulk saves batch several lines under one row whose
+    FK is deliberately NULL).
     """
     rows = (
-        db.query(ActivityLog.buy_plan_line_id)
+        db.query(ActivityLog.buy_plan_line_id, ActivityLog.details)
         .join(User, User.id == ActivityLog.user_id)
         .filter(
             ActivityLog.activity_type == ActivityType.FIELD_EDIT.value,
             ActivityLog.buy_plan_id == plan.id,
-            ActivityLog.buy_plan_line_id.isnot(None),
             User.role.in_((UserRole.MANAGER.value, UserRole.ADMIN.value)),
         )
-        .distinct()
         .all()
     )
-    return {line_id for (line_id,) in rows}
+    line_ids: set[int] = set()
+    for fk_line_id, details in rows:
+        details = details or {}
+        if details.get("stage") != "verify":
+            continue
+        if fk_line_id is not None:
+            line_ids.add(fk_line_id)
+        for edit in details.get("edits", []):
+            if edit.get("line_id") is not None:
+                line_ids.add(edit["line_id"])
+    return line_ids

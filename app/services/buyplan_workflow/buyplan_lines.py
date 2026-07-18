@@ -562,13 +562,16 @@ def _apply_line_edit(
         line.unit_sell = new_sell
 
     # PO-stage fields (2.3): manager-at-verify only; every change field-diff logged.
+    # An EMPTY submitted value while a PO number exists is an explicit CLEAR (audited
+    # as old→"") — a manager must be able to blank an erroneous number; empty-on-empty
+    # stays a no-op (callers not passing the field at all leave it _UNSET/untouched).
     if po_number is not _UNSET:
         new_po = str(po_number).strip()
-        if new_po and new_po != (line.po_number or ""):
+        if new_po != (line.po_number or ""):
             if not _manager_verify_override(actor, line):
                 raise ValueError("Only a manager can edit the PO number at verify.")
-            edits.extend(diff_fields(line, {"po_number": new_po}))
-            line.po_number = new_po
+            edits.extend(diff_fields(line, {"po_number": new_po or None}))
+            line.po_number = new_po or None
 
     if estimated_ship_date is not _UNSET and estimated_ship_date is not None:
         if diff_fields(line, {"estimated_ship_date": estimated_ship_date}):
@@ -721,7 +724,9 @@ def edit_buy_plan_line(
     value). Signature stays backward-compatible for existing callers: ``None`` still
     means "unchanged" for all three kwargs (mapped internally to the "field untouched"
     sentinel), so this legacy entry point still can't CLEAR unit_sell — only bulk's JSON
-    key-presence contract can do that. Caller commits.
+    key-presence contract can do that. ``po_number=""`` (empty string, NOT None) is the
+    one explicit clear this entry point supports: a manager at verify blanking an
+    erroneous PO number (see :func:`_apply_line_edit`). Caller commits.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
@@ -732,6 +737,10 @@ def edit_buy_plan_line(
     if not line:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
 
+    # Stage tag for the audit row (2.3): captured BEFORE the edit applies — a line
+    # sitting at PENDING_VERIFY means this save is a verify-stage edit, which is what
+    # field_audit.manager_edited_line_ids keys the kanban "edited by manager" marker on.
+    stage = "verify" if line.status == BuyPlanLineStatus.PENDING_VERIFY.value else None
     edits = _apply_line_edit(
         line,
         plan,
@@ -747,7 +756,7 @@ def edit_buy_plan_line(
     _recalculate_financials(plan)
     # Field-audit (2.1): the single service choke point — one FIELD_EDIT row per save,
     # none when nothing actually changed (log_field_edits no-ops on an empty diff).
-    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=line_id, edits=edits)
+    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=line_id, edits=edits, stage=stage)
     db.flush()
     logger.info("Buy plan {} line {} edited by {}", plan_id, line_id, user.email)
     return plan
@@ -822,6 +831,11 @@ def bulk_edit_buy_plan_lines(
     known_ids = _coerce_known_line_ids(known_line_ids)
 
     existing_by_id = {ln.id: ln for ln in plan.lines}
+    # Pre-edit statuses, captured up front for the audit row's stage tag (2.3): the
+    # save counts as a verify-stage edit only when EVERY touched line sat at
+    # PENDING_VERIFY before it (added lines are AWAITING_PO by construction, so an
+    # add always disqualifies the tag — a draft-stage add must never mark).
+    pre_status = {ln.id: ln.status for ln in plan.lines}
     seen_ids: set[int] = set()
 
     # One batch query for every offer any entry references, instead of a db.get() per
@@ -934,7 +948,14 @@ def bulk_edit_buy_plan_lines(
     touched_ids = {e.line_id for e in all_edits}
     any_removed = any(e.field == "line removed" for e in all_edits)
     row_line_id = next(iter(touched_ids)) if len(touched_ids) == 1 and not any_removed else None
-    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=row_line_id, edits=all_edits)
+    # Stage tag (2.3): "verify" only when every touched line's PRE-edit status was
+    # PENDING_VERIFY (pre_status has no entry for added lines, so adds disqualify).
+    stage = (
+        "verify"
+        if all_edits and all(pre_status.get(lid) == BuyPlanLineStatus.PENDING_VERIFY.value for lid in touched_ids)
+        else None
+    )
+    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=row_line_id, edits=all_edits, stage=stage)
     # Auto-complete at service depth (mirrors verify_po in buyplan_po.py): removing the
     # last open line can leave every remaining line terminal, so this prevents an ACTIVE
     # plan getting stranded short of COMPLETED.

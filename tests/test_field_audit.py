@@ -191,14 +191,68 @@ class TestManagerEditedLineIds:
         admin = self._user(db_session, UserRole.ADMIN)
 
         edit = [FieldEdit(field="quantity", old="100", new="150")]
-        log_field_edits(db_session, user=manager, buy_plan_id=plan.id, buy_plan_line_id=line_mgr.id, edits=edit)
-        log_field_edits(db_session, user=admin, buy_plan_id=plan.id, buy_plan_line_id=line_admin.id, edits=edit)
-        log_field_edits(db_session, user=test_user, buy_plan_id=plan.id, buy_plan_line_id=line_buyer.id, edits=edit)
+        kw = dict(buy_plan_id=plan.id, edits=edit, stage="verify")
+        log_field_edits(db_session, user=manager, buy_plan_line_id=line_mgr.id, **kw)
+        log_field_edits(db_session, user=admin, buy_plan_line_id=line_admin.id, **kw)
+        log_field_edits(db_session, user=test_user, buy_plan_line_id=line_buyer.id, **kw)
         # Plan-level manager edit (no line) must not appear in the line-id set.
-        log_field_edits(db_session, user=manager, buy_plan_id=plan.id, edits=edit)
+        log_field_edits(db_session, user=manager, buy_plan_id=plan.id, edits=edit, stage="verify")
         db_session.commit()
 
         assert manager_edited_line_ids(db_session, plan) == {line_mgr.id, line_admin.id}
+
+    def test_bulk_row_line_ids_unpacked_from_edits(self, db_session: Session, test_user: User):
+        """A bulk save batches several lines under ONE row whose FK column is NULL —
+        attribution must come from each edit's line_id."""
+        req = _req(db_session, test_user)
+        plan = _plan(db_session, req)
+        line_a = _line(db_session, plan)
+        line_b = _line(db_session, plan)
+        manager = self._user(db_session, UserRole.MANAGER)
+
+        log_field_edits(
+            db_session,
+            user=manager,
+            buy_plan_id=plan.id,
+            edits=[
+                FieldEdit(field="quantity", old="100", new="150", line_id=line_a.id),
+                FieldEdit(field="unit_cost", old="1.00", new="2.00", line_id=line_b.id),
+            ],
+            stage="verify",
+        )
+        db_session.commit()
+
+        assert manager_edited_line_ids(db_session, plan) == {line_a.id, line_b.id}
+
+    def test_non_verify_stage_edits_never_mark(self, db_session: Session, test_user: User):
+        """Draft-stage manager edits (no stage tag) must not raise the kanban
+        "edited by manager" marker — only stage="verify" rows count."""
+        req = _req(db_session, test_user)
+        plan = _plan(db_session, req)
+        line = _line(db_session, plan)
+        manager = self._user(db_session, UserRole.MANAGER)
+
+        edit = [FieldEdit(field="quantity", old="100", new="150", line_id=line.id)]
+        log_field_edits(db_session, user=manager, buy_plan_id=plan.id, buy_plan_line_id=line.id, edits=edit)
+        db_session.commit()
+
+        assert manager_edited_line_ids(db_session, plan) == set()
+
+    def test_stage_kwarg_serialized_only_when_set(self, db_session: Session, test_user: User):
+        req = _req(db_session, test_user)
+        plan = _plan(db_session, req)
+        line = _line(db_session, plan)
+        edit = [FieldEdit(field="quantity", old="100", new="150")]
+
+        tagged = log_field_edits(
+            db_session, user=test_user, buy_plan_id=plan.id, buy_plan_line_id=line.id, edits=edit, stage="verify"
+        )
+        assert tagged.details["stage"] == "verify"
+
+        untagged = log_field_edits(
+            db_session, user=test_user, buy_plan_id=plan.id, buy_plan_line_id=line.id, edits=edit
+        )
+        assert "stage" not in untagged.details
 
 
 class TestLogActivityAdditiveKwargs:

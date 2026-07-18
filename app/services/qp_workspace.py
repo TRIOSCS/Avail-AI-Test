@@ -111,15 +111,41 @@ def _coerce(field: str, value: Any) -> Any:
     return value or None
 
 
+def _collect_updates(allowed: tuple[str, ...], fields: dict[str, Any]) -> dict[str, Any]:
+    """Coerce + filter a form's raw values down to the writable updates dict.
+
+    Shared by :func:`apply_qp_purchasing` / :func:`apply_qp_sales`. A field is skipped
+    (existing answer left untouched) when it is absent, when it coerces to None from a
+    blank (unanswered), or — for boolean fields — when a NON-empty value fails to parse
+    as an explicit yes/no (a forged/garbage value must never null out a stored answer).
+    """
+    updates: dict[str, Any] = {}
+    for field in allowed:
+        if field not in fields:
+            continue
+        value = _coerce(field, fields[field])
+        if value is None:
+            raw = str(fields[field] or "").strip()
+            if raw == "":
+                continue  # unanswered blank — never null out an existing answer
+            if field in _BOOL_FIELDS:
+                continue  # unparseable bool garbage — never null out an existing answer
+        updates[field] = value
+    return updates
+
+
 def qp_for_line(db: Session, plan: BuyPlan, line: BuyPlanLine) -> QualityPlan | None:
-    """The plan's QualityPlan row for *line*'s vendor (or the plan's first row when the
-    line has no vendor card / no vendor-specific row exists). Read-only lookup."""
+    """The plan's QualityPlan row for *line*'s vendor — EXACTLY the row
+    :func:`apply_qp_purchasing` will write (or None when it would create a fresh one).
+
+    Never falls back to another vendor's row: a vendor-B confirm-PO form must prefill
+    empty, not with vendor A's answers (which the save would then silently copy into a
+    fresh vendor-B row via diff-against-empty). Read-only lookup.
+    """
     vendor_card_id = line.offer.vendor_card_id if line.offer is not None else None
     query = db.query(QualityPlan).filter(QualityPlan.buy_plan_id == plan.id)
     if vendor_card_id is not None:
-        vendor_qp = query.filter(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id).first()
-        if vendor_qp is not None:
-            return vendor_qp
+        return query.filter(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id).first()
     return query.order_by(QualityPlan.id).first()
 
 
@@ -139,14 +165,7 @@ def apply_qp_purchasing(
     field-audit diff of what actually changed — the caller logs it and owns the
     flush/commit. A save that changes nothing returns an empty diff and writes nothing.
     """
-    updates: dict[str, Any] = {}
-    for field in QP_PURCHASING_FIELDS:
-        if field not in fields:
-            continue
-        value = _coerce(field, fields[field])
-        if value is None and str(fields[field] or "").strip() == "":
-            continue  # unanswered blank — never null out an existing answer
-        updates[field] = value
+    updates = _collect_updates(QP_PURCHASING_FIELDS, fields)
 
     vendor_card_id = line.offer.vendor_card_id if line.offer is not None else None
     qp = None
@@ -208,14 +227,7 @@ def apply_qp_sales(
     commit. Permission is the ROUTE's job (:func:`can_edit_qp_sales`); a save that
     changes nothing returns an empty diff and writes nothing.
     """
-    updates: dict[str, Any] = {}
-    for field in QP_SALES_FIELDS:
-        if field not in fields:
-            continue
-        value = _coerce(field, fields[field])
-        if value is None and str(fields[field] or "").strip() == "":
-            continue  # unanswered blank — never null out an existing answer
-        updates[field] = value
+    updates = _collect_updates(QP_SALES_FIELDS, fields)
 
     qp = qp_sales_row(db, plan)
     if qp is None:

@@ -151,6 +151,76 @@ def test_apply_qp_purchasing_blank_never_clears_and_noop_is_empty(db_session: Se
     assert edits2 == []
 
 
+def test_qp_prefill_never_borrows_another_vendors_row(db_session: Session, test_user: User):
+    """Two-vendor plan: vendor B's confirm-PO form must prefill EMPTY (qp_for_line
+    returns None, never vendor A's row) and B's save must write only B's values to a
+    fresh vendor-B row — vendor A's answers never silently copy across."""
+    from app.services.qp_workspace import qp_for_line
+
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line_a = _pending_verify_line(db_session, bp, rq, test_user)  # vendor A
+    line_b = _pending_verify_line(db_session, bp, rq, test_user)  # vendor B (fresh card)
+    db_session.commit()
+    assert line_a.offer.vendor_card_id != line_b.offer.vendor_card_id
+
+    qp_a, _ = apply_qp_purchasing(
+        db_session,
+        plan=bp,
+        line=line_a,
+        user=test_user,
+        fields={"purchasing_condition": "NEW", "purchasing_risk_level": "high"},
+    )
+    db_session.commit()
+
+    # Prefill for vendor B: EXACTLY the row the save would write — none yet.
+    assert qp_for_line(db_session, bp, line_b) is None
+    # And for vendor A: its own row.
+    assert qp_for_line(db_session, bp, line_a).id == qp_a.id
+
+    qp_b, edits_b = apply_qp_purchasing(
+        db_session, plan=bp, line=line_b, user=test_user, fields={"purchasing_condition": "REFURB"}
+    )
+    db_session.commit()
+
+    assert qp_b.id != qp_a.id
+    assert qp_b.vendor_card_id == line_b.offer.vendor_card_id
+    assert qp_b.purchasing_condition == "REFURB"
+    assert qp_b.purchasing_risk_level is None  # vendor A's answer never copied over
+    assert {e.field for e in edits_b} == {"purchasing_condition"}
+    db_session.refresh(qp_a)
+    assert qp_a.purchasing_condition == "NEW"  # A untouched
+    # Prefill now round-trips to the row each vendor's save wrote.
+    assert qp_for_line(db_session, bp, line_b).id == qp_b.id
+
+
+def test_apply_qp_purchasing_bool_garbage_never_nulls(db_session: Session, test_user: User):
+    """A forged/garbage value for a boolean field (coerces to None despite being
+    non-empty) must NOT null out a stored answer."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    db_session.commit()
+
+    apply_qp_purchasing(
+        db_session, plan=bp, line=line, user=test_user, fields={"purchasing_traceability_verified": "yes"}
+    )
+    db_session.commit()
+
+    qp, edits = apply_qp_purchasing(
+        db_session, plan=bp, line=line, user=test_user, fields={"purchasing_traceability_verified": "maybe??"}
+    )
+    assert edits == []
+    assert qp.purchasing_traceability_verified is True  # stored answer survives
+
+    # An explicit "no" still flips it — only unparseable garbage is skipped.
+    qp, edits = apply_qp_purchasing(
+        db_session, plan=bp, line=line, user=test_user, fields={"purchasing_traceability_verified": "no"}
+    )
+    assert {e.field for e in edits} == {"purchasing_traceability_verified"}
+    assert qp.purchasing_traceability_verified is False
+
+
 def test_apply_qp_purchasing_ignores_unknown_fields(db_session: Session, test_user: User):
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
@@ -319,6 +389,64 @@ def test_confirm_po_from_pane_invalid_method_400s(hub_client: TestClient, db_ses
     assert line.status == BuyPlanLineStatus.AWAITING_PO.value  # nothing moved
 
 
+def _live_prepayment(db: Session, bp, line, user: User, *, status: str = "requested"):
+    from decimal import Decimal
+
+    from app.models.quality_plan import Prepayment
+
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        buy_plan_line_id=line.id,
+        total_incl_fees=Decimal("500.00"),
+        currency="USD",
+        payment_method="wire",
+        vendor_name="Acme Dist",
+        status=status,
+        created_by_id=user.id,
+    )
+    db.add(pp)
+    db.commit()
+    return pp
+
+
+@pytest.mark.parametrize("pp_status", ["requested", "approved", "paid"])
+def test_confirm_po_cod_rejected_with_live_prepayment(
+    hub_client: TestClient, db_session: Session, test_user: User, pp_status: str
+):
+    """COD terms contradict a live (requested/approved/paid) prepayment — friendly 400,
+    nothing moves, prepayment_service untouched."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    _live_prepayment(db_session, bp, line, test_user, status=pp_status)
+
+    r = hub_client.post(
+        f"/v2/partials/buy-plans/{bp.id}/lines/{line.id}/confirm-po",
+        data={"origin": "approvals_workspace", "po_number": "PO-COD", "payment_method": "cod"},
+    )
+    assert r.status_code == 400
+    assert "prepayment" in r.json()["error"].lower()
+    db_session.expire_all()
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value  # nothing moved
+
+
+def test_confirm_po_cod_allowed_when_prepayment_void(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    _live_prepayment(db_session, bp, line, test_user, status="void")
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
+        r = hub_client.post(
+            f"/v2/partials/buy-plans/{bp.id}/lines/{line.id}/confirm-po",
+            data={"origin": "approvals_workspace", "po_number": "PO-COD-OK", "payment_method": "cod"},
+        )
+    assert r.status_code == 200
+    db_session.expire_all()
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
+    assert line.payment_method == "cod"
+
+
 # ── Verify from the pane ─────────────────────────────────────────────────
 
 
@@ -375,6 +503,40 @@ def test_sent_check_found_is_display_only(hub_client: TestClient, db_session: Se
     assert "PO email found" in r.text
     db_session.expire(line)
     assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value  # NEVER auto-verifies
+
+
+def test_sent_check_restricted_non_owner_404s_before_scan(db_session: Session, test_user: User):
+    """A restricted (sales) non-owner is 404'd by the plan-access gate BEFORE the
+    Graph scan ever runs (same gate as render_po_pane)."""
+    from unittest.mock import Mock
+
+    from app.main import app
+
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    stranger = User(
+        email="stranger-sales@trioscs.com",
+        name="Stranger Sales",
+        role="sales",  # RESTRICTED_ROLES — sees only their own requisitions' plans
+        azure_id="az-stranger-po-1",
+    )
+    db_session.add(stranger)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]
+    app.dependency_overrides[require_user] = lambda: stranger
+    try:
+        with TestClient(app) as c:
+            scan = Mock()
+            with patch("app.services.buyplan_workflow.verify_po_sent", scan):
+                r = c.get(f"/v2/partials/approvals/po/{line.id}/sent-check")
+    finally:
+        for dep in (get_db, require_user):
+            app.dependency_overrides.pop(dep, None)
+
+    assert r.status_code == 404
+    scan.assert_not_called()  # the gate fires before any Graph work
 
 
 def test_sent_check_unavailable_degrades(hub_client: TestClient, db_session: Session, test_user: User):

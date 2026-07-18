@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -477,6 +476,60 @@ def test_po_list_scope_mine(hub_client: TestClient, db_session: Session, test_us
     mine_txt = hub_client.get("/v2/partials/approvals/purchase-orders/list?scope=mine").text
     assert f"line-{my_line.id}" in mine_txt
     assert f"line-{o_line.id}" not in mine_txt
+
+
+def test_po_list_closed_mine_filters_before_limit(hub_client: TestClient, db_session: Session, test_user: User):
+    """Closed+Mine must filter in SQL BEFORE the 50-row limit: with 50 newer closed
+    lines belonging to someone else, the viewer's older closed line must still show
+    (a post-limit Python filter would drop it entirely)."""
+    my_req, my_q, my_rq = _req_quote(db_session, test_user)
+    my_bp = _plan(db_session, my_req, my_q, status=BuyPlanStatus.ACTIVE.value)
+    my_line = _line(
+        db_session,
+        my_bp,
+        my_rq,
+        test_user,
+        status=BuyPlanLineStatus.VERIFIED.value,
+        po_number="PO-MINE",
+        po_confirmed_at=datetime.now(UTC),
+    )
+    other = _other_user(db_session)
+    o_req, o_q, o_rq = _req_quote(db_session, other)
+    o_bp = _plan(db_session, o_req, o_q, status=BuyPlanStatus.ACTIVE.value)
+    for i in range(50):  # 50 NEWER closed lines that are not the viewer's
+        _line(
+            db_session,
+            o_bp,
+            o_rq,
+            other,
+            status=BuyPlanLineStatus.VERIFIED.value,
+            po_number=f"PO-O-{i}",
+            po_confirmed_at=datetime.now(UTC),
+        )
+    db_session.commit()
+
+    mine_txt = hub_client.get("/v2/partials/approvals/purchase-orders/list?show_closed=true&scope=mine").text
+    assert f"line-{my_line.id}" in mine_txt  # survives despite 50 newer non-mine rows
+    assert "PO-O-0" not in mine_txt
+
+
+def test_list_filters_round_trip_show_closed(hub_client: TestClient, db_session: Session, test_user: User):
+    """The #aw-filters form carries a hidden show_closed input, so a search
+    (hx-include="#aw-filters") — and the split shell's awListRefresh refetch — stays
+    inside the Closed view instead of snapping back to Live."""
+    body = hub_client.get("/v2/partials/approvals/sales-orders/list?show_closed=true&q=acme").text
+    assert 'name="show_closed" value="true"' in body
+    assert 'name="scope" value="all"' in body
+
+    live_body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    assert 'name="show_closed" value="false"' in live_body
+
+
+def test_split_refetch_includes_filter_form(hub_client: TestClient, db_session: Session, test_user: User):
+    """The split shell's #aw-list refetch must hx-include the rendered list's own
+    filter form so awListRefresh preserves q/scope/show_closed."""
+    body = hub_client.get("/v2/partials/approvals/purchase-orders").text
+    assert 'hx-include="#aw-filters"' in body
 
 
 # ── Prepayments list ─────────────────────────────────────────────────────

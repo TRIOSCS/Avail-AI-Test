@@ -269,6 +269,31 @@ class TestAttachmentsRoutes:
         r = self._upload(hub_client, db_session, {})
         assert r.status_code == 400
 
+    def test_subject_invariant_asserted_before_store(self, hub_client, db_session, test_user):
+        """validate_subject runs on the constructed kwargs BEFORE store_and_attach —
+        store_and_attach commits internally, so a broken subject must 400 without the
+        upload ever running (no row, no cloud write)."""
+        from unittest.mock import AsyncMock
+
+        _plan_and_line(db_session, test_user)
+        store = AsyncMock()
+        with (
+            patch(
+                "app.routers.htmx.approvals_hub._resolve_note_subject",
+                return_value=(None, None, None),  # a broken resolver: zero subjects
+            ),
+            patch("app.services.attachment_service.store_and_attach", store),
+        ):
+            r = hub_client.post(
+                "/v2/partials/approvals/attachments",
+                data={"buy_plan_id": "1"},
+                files={"file": ("coc.pdf", b"pdf", "application/pdf")},
+            )
+        assert r.status_code == 400
+        assert "exactly one subject" in r.json()["error"]
+        store.assert_not_awaited()  # the invariant fired BEFORE any store/commit
+        assert db_session.query(BuyPlanAttachment).count() == 0
+
     def test_delete_by_uploader_logs_removed(self, hub_client, db_session, test_user):
         bp, _line_ = _plan_and_line(db_session, test_user)
         att = BuyPlanAttachment(buy_plan_id=bp.id, file_name="old.pdf", uploaded_by_id=test_user.id)

@@ -56,6 +56,11 @@ def ensure_not_stale(obj: Any, expected: str | None) -> None:
 
     expected empty/None SKIPS the check entirely (D5 — legacy forms, objects that
     have never been updated, and callers that opt out never false-positive).
+
+    Tokens compare as exact ISO strings, so a backend that stores updated_at at
+    second resolution (no microseconds) can miss a same-second overwrite. That
+    second-resolution tolerance is ACCEPTED per design D5 — the guard targets
+    human-scale form races, not sub-second write contention.
     """
     if not expected:
         return

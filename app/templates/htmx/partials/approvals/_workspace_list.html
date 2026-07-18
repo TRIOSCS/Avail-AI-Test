@@ -51,6 +51,10 @@
          hx-include="#aw-filters"
          hx-trigger="keyup changed delay:300ms">
   <input type="hidden" name="scope" value="{{ scope }}">
+  {# Hidden show_closed keeps a search (hx-include="#aw-filters") — and the split
+     shell's awListRefresh refetch — inside the Closed view instead of snapping back
+     to Live. #}
+  <input type="hidden" name="show_closed" value="{{ 'true' if show_closed else 'false' }}">
   {# Mine/All segmented toggle — reloads THIS list at the chosen scope. #}
   <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium flex-shrink-0">
     {% for val, label in [('all', 'All'), ('mine', 'Mine')] %}

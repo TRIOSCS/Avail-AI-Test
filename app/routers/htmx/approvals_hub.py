@@ -25,7 +25,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
@@ -548,16 +548,17 @@ async def approvals_po_sent_check(
 
     Runs the existing ``verify_po_sent`` Graph scan for the line's plan and reports
     whether the buyer's sent folder contains the PO email. Detection is a signal — the
-    line only ever verifies through the gated verify_po action.
+    line only ever verifies through the gated verify_po action. Plan access rides
+    get_buyplan_for_user (same gate as render_po_pane): a restricted non-owner 404s
+    BEFORE any Graph scan runs.
     """
+    from ...dependencies import get_buyplan_for_user
     from ...services.buyplan_workflow import verify_po_sent
 
     line = db.get(BuyPlanLine, line_id)
     if line is None:
         raise HTTPException(404, "PO line not found")
-    plan = db.get(BuyPlan, line.buy_plan_id)
-    if plan is None:
-        raise HTTPException(404, "Buy plan not found")
+    plan = get_buyplan_for_user(db, user, line.buy_plan_id)
 
     try:
         results = await verify_po_sent(plan, db)
@@ -585,9 +586,11 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     Amount + payee always visible; PO#/SO# as copy chips; the payment-method dropdown
     renders on the approval card (adjustable by the approver before deciding — spec
     §7's ONE pre-approval edit); the approve button reads "OK to pay — {method}"; a
-    paid prepayment shows its wire reference.
+    paid prepayment shows its wire reference. Plan access rides get_buyplan_for_user
+    (same gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
     """
     from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
+    from ...dependencies import get_buyplan_for_user
     from ...models.quality_plan import Prepayment
     from ...services.approvals.queue import _beneficiary
     from ...services.stale_guard import stale_token
@@ -604,6 +607,7 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     )
     if pp is None:
         raise HTTPException(404, "Prepayment not found")
+    get_buyplan_for_user(db, user, pp.buy_plan_id)  # restricted non-owner → 404
 
     open_request = db.execute(
         select(ApprovalRequest)
@@ -847,9 +851,11 @@ async def approvals_add_attachment(
     """Upload a file onto a sales order / PO line / prepayment (design D3).
 
     Multipart → the shared attachment_service.store_and_attach with BuyPlanAttachment
-    and the subject's fk_field; the exactly-one-subject invariant is enforced here AND
-    re-checked via validate_subject() (the app-level stand-in for a DB CHECK). The
-    upload is ActivityLog'd (ATTACH_ADDED). Never status-locked.
+    and the subject's fk_field; the exactly-one-subject invariant is asserted via
+    validate_subject() on the constructed kwargs BEFORE store_and_attach runs (the
+    app-level stand-in for a DB CHECK — store_and_attach commits internally, so a
+    post-store check could never undo a bad row). The upload is ActivityLog'd
+    (ATTACH_ADDED). Never status-locked.
     """
     from ...constants import ActivityType, Channel
     from ...models.buy_plan import BuyPlanAttachment
@@ -870,6 +876,14 @@ async def approvals_add_attachment(
     else:
         fk_field, entity_label, entity_id = "buy_plan_id", "BuyPlans", plan_id
 
+    # Exactly-one-subject invariant, asserted on the constructed kwargs BEFORE the
+    # upload/insert — store_and_attach commits internally, so validating afterwards
+    # would leave an invalid row already persisted.
+    try:
+        BuyPlanAttachment(**{fk_field: entity_id}).validate_subject()
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
     att = await attachment_service.store_and_attach(
         db,
         model=BuyPlanAttachment,
@@ -879,7 +893,6 @@ async def approvals_add_attachment(
         file=file,
         user=user,
     )
-    att.validate_subject()  # exactly-one-subject invariant (app-level CHECK)
 
     log_activity(
         db,
@@ -1102,28 +1115,22 @@ def _po_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) 
     rows: list[WorkspaceRow] = []
 
     if show_closed:
-        closed_lines = (
-            db.execute(
-                select(BuyPlanLine)
-                .options(
-                    joinedload(BuyPlanLine.offer),
-                    joinedload(BuyPlanLine.requirement),
-                    joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.requisition),
-                )
-                .where(BuyPlanLine.status.in_(_CLOSED_LINE_STATUSES))
-                .order_by(BuyPlanLine.id.desc())
-                .limit(50)
+        closed_stmt = (
+            select(BuyPlanLine)
+            .options(
+                joinedload(BuyPlanLine.offer),
+                joinedload(BuyPlanLine.requirement),
+                joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.requisition),
             )
-            .unique()
-            .scalars()
-            .all()
+            .where(BuyPlanLine.status.in_(_CLOSED_LINE_STATUSES))
         )
+        # Mine filters in SQL BEFORE the limit — filtering the 50 newest rows in
+        # Python would hide the viewer's older closed lines entirely.
         if scope == "mine":
-            closed_lines = [
-                ln
-                for ln in closed_lines
-                if ln.buyer_id == user.id or (ln.buy_plan is not None and ln.buy_plan.submitted_by_id == user.id)
-            ]
+            closed_stmt = closed_stmt.join(BuyPlan, BuyPlan.id == BuyPlanLine.buy_plan_id).where(
+                or_(BuyPlanLine.buyer_id == user.id, BuyPlan.submitted_by_id == user.id)
+            )
+        closed_lines = db.execute(closed_stmt.order_by(BuyPlanLine.id.desc()).limit(50)).unique().scalars().all()
         rows = [_po_line_row(ln, ln.buy_plan, needs=False, closed=True) for ln in closed_lines]
         return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
 
