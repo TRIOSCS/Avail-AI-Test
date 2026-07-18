@@ -248,7 +248,17 @@ def _get_list_for_user(db: Session, list_id: int, user: User) -> tuple[ExcessLis
     el = excess_service.get_excess_list(db, list_id)
     is_owner = el.owner_id == user.id
     if not is_owner and el.status not in {s.value for s in _POSTED_STATUSES}:
-        raise HTTPException(404, "List not found")
+        # A non-owner may still reach a now-unposted list (closed/expired) IF they hold an
+        # offer on it — so a broker can view/withdraw their own bid after the posting window
+        # closes (finding #13). Drafts never carry offers, so this never reveals one. Only
+        # runs on the rare non-posted, non-owner read (posted statuses short-circuit above).
+        has_own_offer = db.scalar(
+            select(ExcessOffer.id)
+            .where(ExcessOffer.excess_list_id == el.id, ExcessOffer.submitted_by == user.id)
+            .limit(1)
+        )
+        if has_own_offer is None:
+            raise HTTPException(404, "List not found")
     return el, is_owner
 
 
@@ -503,9 +513,28 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
     }
 
     if not is_owner:
-        # Non-owner: render an empty offers view — no offer data in the response.
+        # Non-owner: render the viewer's OWN offers ONLY (finding #13). Carries NO
+        # competitor data — no other broker's bids, no best-price rollup, no coverage/counts
+        # (Phase-3 anonymization discipline). Scoped hard to submitted_by == user.id in the
+        # active-visible set; an open/late own-offer is Withdraw-able (the withdraw route
+        # already authorizes the submitter).
+        own_offers = (
+            db.scalars(
+                select(ExcessOffer)
+                .where(
+                    ExcessOffer.excess_list_id == el.id,
+                    ExcessOffer.submitted_by == user.id,
+                    ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
+                )
+                .options(joinedload(ExcessOffer.lines))
+                .order_by(ExcessOffer.created_at.desc())
+            )
+            .unique()
+            .all()
+        )
         return {
             **base,
+            "own_offers": own_offers,
             "by_line": {it.id: [] for it in items},
             "unmatched": [],
             "take_all_offers": [],
