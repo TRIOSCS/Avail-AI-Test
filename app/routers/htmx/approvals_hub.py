@@ -139,6 +139,9 @@ class WorkspaceRow:
     copy_number: str | None = None  # SO#/PO# rendered as a copy chip on the row
     order_type: str | None = None
     closed: bool = False
+    # 2.5: the plan is silently stalled — no configured approver can decide it
+    # (plan_needs_approver_reason). Rendered as an amber warning on BP-tab rows.
+    stalled: bool = False
 
 
 def _matches(q: str, *fields: str | None) -> bool:
@@ -305,8 +308,9 @@ def render_plan_pane(
     section) → lines → kanban placeholder → notes placeholder. ``lens`` only threads
     the decide form's re-render target back to the caller's tab.
     """
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
     from ...models.quality_plan import QualityPlan
+    from ...services.buyplan_workflow import plan_needs_approver_reason
     from ...services.field_audit import edits_since
     from ...services.qp_workspace import can_edit_qp_sales
     from ...services.stale_guard import stale_token
@@ -354,6 +358,11 @@ def render_plan_pane(
             ),
             # Notes + attachments (2.4): the plan-level thread.
             **_notes_ctx(db, user, plan_id=bp.id),
+            # Lifecycle controls (2.5): manager-only halt/resume/cancel/reset on the
+            # pane — same authority the existing buy_plans.py POSTs enforce.
+            "can_lifecycle": is_manager_or_admin(user),
+            # Why the plan is silently stalled for lack of a configured approver.
+            "no_approver_reason": plan_needs_approver_reason(bp, db),
         }
     )
     return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
@@ -1004,6 +1013,18 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
         ).all():
             ages[pid] = submitted_at or created_at
 
+    # Stall detection (2.5, Buy Plans lens): a PENDING plan with no configured
+    # approver sits invisibly — surface plan_needs_approver_reason on its row.
+    stalled_ids: set[int] = set()
+    if lens == "buy-plans":
+        from ...services.buyplan_workflow import plan_needs_approver_reason
+
+        pending_ids = [t.plan_id for t in tracking if t.status == BuyPlanStatus.PENDING.value]
+        if pending_ids:
+            for plan in db.execute(select(BuyPlan).where(BuyPlan.id.in_(pending_ids))).scalars():
+                if plan_needs_approver_reason(plan, db):
+                    stalled_ids.add(plan.id)
+
     rows = [
         WorkspaceRow(
             key=f"plan-{t.plan_id}",
@@ -1018,6 +1039,7 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
             copy_number=t.so_number,
             order_type=ORDER_TYPE_LABELS.get(t.order_type or "", t.order_type),
             closed=t.status in _CLOSED_PLAN_STATUSES,
+            stalled=t.plan_id in stalled_ids,
         )
         for t in tracking
     ]

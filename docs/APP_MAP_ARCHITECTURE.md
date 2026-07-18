@@ -735,3 +735,48 @@ stays as-is until post-Phase-3 parity.
   `PREPAYMENT_METHODS` (ACH in, **COD never**); router-level COD guard (friendly 400)
   before `create_prepayment` on both HTMX + JSON creates (`prepayment_service.py`
   untouched).
+
+### Phase 2 — editing layer
+
+- **Stale guard + field audit on every edit route** (`routers/htmx/buy_plans.py`):
+  `/so-number`, `/lines/add`, `/lines/{id}/edit`, `/lines/{id}/remove`,
+  `/lines/bulk`, `confirm-po` all round-trip `expected_updated_at` (narrowest-object
+  token: plan for so-number/add/bulk, line for edit/remove/confirm-po) →
+  `ensure_not_stale` → non-destructive 409. Line diffs are computed inside
+  `_apply_line_edit`'s return (`buyplan_workflow/buyplan_lines.py`) and logged at
+  service depth — ONE `FIELD_EDIT` row per save; bulk batches every touched line
+  (edits/adds/removals) into one row with per-edit `line_id` attribution
+  (`FieldEdit.line_id`). confirm-po merges the line's PO fields with the
+  QP-purchasing diff into one row.
+- **QP-sales editing**: `POST /v2/partials/approvals/plan/{id}/qp-sales`
+  (`approvals_hub.py`) → `qp_workspace.apply_qp_sales` (+ `can_edit_qp_sales`
+  matrix: draft → owner/manager, pending → MANAGER only, else locked;
+  `qp_sales_row` read helper). Inline display→edit→save editor on
+  `_pane_sales_order.html`.
+- **Two-part approve** (`buy_plan_approve_partial`): `handoff=proceed|send_back` —
+  proceed → existing approve + `write_in_app` change summary to the submitter
+  (`field_audit.format_change_summary` over `edits_since(plan, submitted_at)`);
+  send_back → existing reject→draft, blank note auto-fills `SEND_BACK_DEFAULT_NOTE`.
+  `_change_summary.html` renders "was X → now Y" in the approval block. Every
+  reject/send-back also lands its note as a decision-tagged NOTE row
+  (`workspace_notes.add_note`, `details={"decision": "rejected"|"sent_back"}`) +
+  in-app notification to the fixer (submitter / line buyer / prepay requester).
+- **Manager edit-anything at verify** (`_manager_verify_override` in
+  `buyplan_lines.py`): MANAGER/ADMIN on a PENDING_VERIFY line may change quantity
+  (cut-PO refusal relaxed) plus `po_number` / `estimated_ship_date` / `unit_cost`
+  (new `edit_buy_plan_line` kwargs). Vendor stays offer-swap-only for everyone; the
+  bulk editor keeps the strict guards. `_pane_po_line.html` manager edit form +
+  "Edits here do not change Acctivate" warning + "Edited by manager" marker
+  (`manager_edited_line_ids`).
+- **Notes + attachments** (`app/services/workspace_notes.py`: `add_note` /
+  `notes_thread` / `note_counts` — narrowest-subject scoping; never status-locked).
+  Routes in `approvals_hub.py`: `POST /v2/partials/approvals/notes`,
+  `POST /v2/partials/approvals/attachments` (multipart → shared `store_and_attach`
+  with `BuyPlanAttachment` + subject fk_field; `validate_subject()`; ATTACH_ADDED),
+  `DELETE /v2/partials/approvals/attachments/{id}` (uploader or manager;
+  ATTACH_REMOVED). `_notes_thread.html` embedded in all three panes.
+- **Lifecycle controls on the pane**: manager-only halt/resume/cancel/reset block on
+  `_pane_sales_order.html` posting the existing `buy_plans.py` routes with
+  `origin=approvals_workspace` (shared `_workspace_pane_response`).
+  `plan_needs_approver_reason` stall warnings on BP-tab list rows
+  (`WorkspaceRow.stalled`) and on the pane.

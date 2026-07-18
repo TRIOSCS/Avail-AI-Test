@@ -207,3 +207,130 @@ def test_reject_from_pane_returns_draft_pane(hub_client: TestClient, db_session:
     assert "wrong sell price" in r.text  # the note to the fixer surfaces on the pane
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.DRAFT.value
+
+
+# ── Lifecycle controls (2.5) — manager-only, origin=approvals_workspace ──
+
+
+def _manager(db_session: Session, user: User) -> None:
+    from app.constants import UserRole
+
+    user.role = UserRole.MANAGER.value
+    db_session.commit()
+
+
+def test_lifecycle_controls_manager_only(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "Plan controls" not in body  # buyer viewer → no lifecycle block
+
+    _manager(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "Plan controls" in body
+    assert f"/v2/partials/buy-plans/{bp.id}/halt" in body
+    assert f"/v2/partials/buy-plans/{bp.id}/cancel" in body
+    assert "/resume" not in body  # not halted
+    assert "/reset" not in body
+
+
+def test_halt_from_pane_rerenders_halted_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    _manager(db_session, test_user)
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    db_session.commit()
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
+        r = hub_client.post(
+            f"/v2/partials/buy-plans/{bp.id}/halt",
+            data={"origin": "approvals_workspace", "lens": "buy-plans", "reason": "customer credit hold"},
+        )
+    assert r.status_code == 200
+    assert r.headers.get("HX-Trigger") == "awListRefresh"
+    assert "Halted" in r.text and "customer credit hold" in r.text
+    db_session.expire(bp)
+    assert bp.status == BuyPlanStatus.HALTED.value
+
+
+def test_resume_from_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    _manager(db_session, test_user)
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.HALTED.value)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert f"/v2/partials/buy-plans/{bp.id}/resume" in body
+    assert f"/v2/partials/buy-plans/{bp.id}/reset" in body
+
+    r = hub_client.post(
+        f"/v2/partials/buy-plans/{bp.id}/resume",
+        data={"origin": "approvals_workspace", "lens": "buy-plans"},
+    )
+    assert r.status_code == 200
+    assert r.headers.get("HX-Trigger") == "awListRefresh"
+    db_session.expire(bp)
+    assert bp.status == BuyPlanStatus.ACTIVE.value
+
+
+def test_cancel_from_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    _manager(db_session, test_user)
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    db_session.commit()
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
+        r = hub_client.post(
+            f"/v2/partials/buy-plans/{bp.id}/cancel",
+            data={"origin": "approvals_workspace", "lens": "sales-orders", "reason": "deal lost"},
+        )
+    assert r.status_code == 200
+    assert "Cancelled" in r.text and "deal lost" in r.text
+    db_session.expire(bp)
+    assert bp.status == BuyPlanStatus.CANCELLED.value
+
+
+def test_reset_from_pane_returns_draft(hub_client: TestClient, db_session: Session, test_user: User):
+    _manager(db_session, test_user)
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.HALTED.value)
+    db_session.commit()
+
+    r = hub_client.post(
+        f"/v2/partials/buy-plans/{bp.id}/reset",
+        data={"origin": "approvals_workspace", "lens": "buy-plans"},
+    )
+    assert r.status_code == 200
+    assert "Draft — not yet submitted" in r.text
+    db_session.expire(bp)
+    assert bp.status == BuyPlanStatus.DRAFT.value
+
+
+# ── Stall warning (2.5) — plan_needs_approver_reason ─────────────────────
+
+
+def test_stalled_pending_row_warns_on_bp_tab_list(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    # Nobody holds the buy-plan approval right → the pending plan is stalled.
+    test_user.can_approve_buy_plans = False
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/buy-plans/list").text
+    assert "No approver configured — stalled" in body
+
+    test_user.can_approve_buy_plans = True
+    db_session.commit()
+    body = hub_client.get("/v2/partials/approvals/buy-plans/list").text
+    assert "No approver configured — stalled" not in body
+
+
+def test_stalled_pane_shows_warning(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    test_user.can_approve_buy_plans = False
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "Stalled — no active user holds the" in body

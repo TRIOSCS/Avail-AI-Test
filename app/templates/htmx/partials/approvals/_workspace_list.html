@@ -98,6 +98,12 @@
       {% if row.copy_number %}{{ copy_chip(row.copy_number) }}{% endif %}
       {% if row.subtitle %}<span class="text-tertiary truncate">{{ row.subtitle }}</span>{% endif %}
     </span>
+    {% if row.stalled %}
+    <span class="inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-amber-700"
+          title="This plan is waiting on an approval nobody is configured to give — fix approver rights in Admin.">
+      <span aria-hidden="true">&#9888;</span> No approver configured — stalled
+    </span>
+    {% endif %}
   </span>
   <span class="flex flex-col items-end gap-1 flex-shrink-0">
     <span class="flex items-center gap-1.5">

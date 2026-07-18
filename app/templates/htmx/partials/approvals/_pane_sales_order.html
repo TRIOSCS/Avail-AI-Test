@@ -9,7 +9,8 @@
   origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
   Receives: bp (BuyPlan), lines, lens, qp (QualityPlan|None), can_decide (bool),
             is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS),
-            can_edit_qp_sales (bool), qp_stale_token (str).
+            can_edit_qp_sales (bool), qp_stale_token (str), change_edits,
+            thread_* (notes block), can_lifecycle (bool), no_approver_reason.
   Called by: htmx/approvals_hub.py render_plan_pane (pane GET + approve re-render).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
@@ -259,6 +260,76 @@
   {% if bp.status in ('active', 'inbound') %}
   <div class="rounded-lg border border-dashed border-line-base bg-gray-50 px-3 py-4 text-xs text-gray-400 text-center">
     PO kanban lands here (Phase 3) — track this order's POs on the Purchase Orders tab meanwhile.
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {# ── Stall warning (2.5): the plan waits on an approval nobody can give ── #}
+  {% if no_approver_reason %}
+  <div class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+    &#9888; Stalled — no active user holds the
+    {{ 'buy-plan approval right' if no_approver_reason == 'buy_plan' else 'purchase-order approval right (or a high-enough limit)' }},
+    so nobody can decide this. Fix approver rights in Admin.
+  </div>
+  {% endif %}
+
+  {# ── Plan lifecycle controls (2.5) — manager-only; the EXISTING buy_plans.py
+       POSTs with origin=approvals_workspace re-render THIS pane. ── #}
+  {% if can_lifecycle %}
+  {% set _haltable = bp.status in ('pending', 'active') %}
+  {% set _resumable = bp.status == 'halted' %}
+  {% set _cancellable = bp.status not in ('completed', 'cancelled') %}
+  {% set _resettable = bp.status in ('halted', 'cancelled') %}
+  {% if _haltable or _resumable or _cancellable or _resettable %}
+  <div class="rounded-lg border border-line-base bg-white p-3" x-data="{ panel: '' }">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <span class="text-sm font-semibold text-gray-800">Plan controls</span>
+      <span class="flex items-center gap-1.5 flex-wrap">
+        {% if _haltable %}
+        <button type="button" @click="panel = panel === 'halt' ? '' : 'halt'" class="btn-secondary btn-sm">Halt</button>
+        {% endif %}
+        {% if _resumable %}
+        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/resume" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="lens" value="{{ lens }}">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Resume</button>
+        </form>
+        {% endif %}
+        {% if _resettable %}
+        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset" hx-target="#aw-pane" hx-swap="innerHTML" class="inline"
+              hx-confirm="Reset this plan to draft? The halt/cancel audit fields are cleared.">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="lens" value="{{ lens }}">
+          <button type="submit" data-loading-disable class="btn-secondary btn-sm">Reset to draft</button>
+        </form>
+        {% endif %}
+        {% if _cancellable %}
+        <button type="button" @click="panel = panel === 'cancel' ? '' : 'cancel'" class="btn-danger btn-sm">Cancel plan</button>
+        {% endif %}
+      </span>
+    </div>
+    {% if _haltable %}
+    <form x-show="panel === 'halt'" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt" hx-target="#aw-pane" hx-swap="innerHTML"
+          class="mt-2 space-y-1.5">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <textarea name="reason" rows="2" required placeholder="Why is this deal being halted?"
+                class="input input-sm w-full"></textarea>
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Confirm halt</button>
+    </form>
+    {% endif %}
+    {% if _cancellable %}
+    <form x-show="panel === 'cancel'" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel" hx-target="#aw-pane" hx-swap="innerHTML"
+          class="mt-2 space-y-1.5">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <textarea name="reason" rows="2" required placeholder="Why is this deal being cancelled?"
+                class="input input-sm w-full"></textarea>
+      <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm cancel</button>
+    </form>
+    {% endif %}
   </div>
   {% endif %}
   {% endif %}

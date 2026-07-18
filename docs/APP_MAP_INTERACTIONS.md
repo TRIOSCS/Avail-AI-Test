@@ -6593,3 +6593,28 @@ COD line (and any non-`PREPAYMENT_METHODS` method) with a friendly 400 BEFORE
 `create_prepayment` — the service and engine stay untouched; the request modal's
 method list derives from `PREPAYMENT_METHODS` (wire/PayPal/CC/ACH — COD never
 renders).
+
+**Editing layer (Phase 2).** Every edit route carries the stale guard
+(narrowest-object `expected_updated_at`; mismatch → non-destructive 409) and lands
+ONE `FIELD_EDIT` row per save: single-line edits log at service depth in
+`edit_buy_plan_line`/`add`/`remove`/`set_sales_order_number`; the bulk save batches
+all touched lines into one row (per-edit `line_id` in the details JSON); confirm-po
+merges line PO fields + QP-purchasing into one row. QP-sales answers save via
+`POST /v2/partials/approvals/plan/{id}/qp-sales` → `apply_qp_sales` (draft →
+owner/manager; pending → MANAGER only). **Approve is two-part** (spec §7):
+`handoff=proceed` → approve + the submitter's in-app change summary
+(`edits_since(plan, submitted_at)` → "was X → now Y", skipped when empty);
+`handoff=send_back` → the existing reject→draft with the summary attached (blank
+note auto-fills; manager edits persist). Every reject/send-back note-to-the-fixer
+ALSO lands as a decision-tagged NOTE row on the item's thread + a `write_in_app`
+notification to the fixer. **Manager edit-anything at verify**: a manager/admin may
+edit qty / unit cost / PO# / est ship on a PENDING_VERIFY line via
+`/lines/{id}/edit` (vendor stays offer-swap-only; bulk stays strict); the pane
+shows the Acctivate warning + "Edited by manager" marker. **Notes & attachments on
+every item** (never status-locked): `POST /v2/partials/approvals/notes` /
+`.../attachments` (shared `store_and_attach` on `BuyPlanAttachment`,
+`validate_subject`, ATTACH_ADDED/REMOVED activity; delete = uploader or manager);
+`_notes_thread.html` renders threads + files with decision-tagged rows in all three
+panes. **Lifecycle controls**: manager-only halt/resume/cancel/reset on the SO pane
+via the existing POSTs (`origin=approvals_workspace`); `plan_needs_approver_reason`
+stall warnings on BP-tab rows and the pane.

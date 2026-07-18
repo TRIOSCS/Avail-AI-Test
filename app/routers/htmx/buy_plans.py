@@ -147,6 +147,17 @@ _APPROVALS_TABS = ("my_queue", "pipeline")
 SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
 
 
+def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int, form) -> HTMLResponse:
+    """The shared origin=approvals_workspace re-render for plan lifecycle POSTs
+    (halt / resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an
+    awListRefresh nudge so the left work list repaints its status."""
+    from .approvals_hub import render_plan_pane
+
+    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
+
 def _default_lens(user: User, db: Session) -> str:
     """Pick the landing stage tab for the Approvals hub based on the user's role.
 
@@ -930,6 +941,8 @@ async def buy_plan_halt_partial(
 
     if origin == "my_queue":
         return _render_my_queue_body(request, user, db)
+    if origin == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1321,6 +1334,9 @@ async def buy_plan_cancel_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1349,6 +1365,10 @@ async def buy_plan_resume_partial(
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    form = await request.form()
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1629,5 +1649,9 @@ async def buy_plan_reset_partial(
         db.commit()
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    form = await request.form()
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
