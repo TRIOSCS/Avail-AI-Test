@@ -306,8 +306,8 @@ class TestBehaviorWeightedConfidence:
         assert scored[0]["confidence"] < 0.50
 
     def test_final_confidence_stays_within_existing_band(self, db_session: Session):
-        """Even an extreme ghost_rate must not push confidence below the existing
-        [0.30, 0.75] clamp."""
+        """Even an extreme ghost_rate must not push confidence below the existing [0.30,
+        0.75] clamp."""
         vc = self._make_vc(db_session, ghost_rate=1.0, cancellation_rate=1.0, response_rate=0.0)
         matches = [{"vendor_name": "V1", "vendor_id": vc.id, "mpn_count": 100, "manufacturer": "TI", "level": 1}]
         scored = score_affinity_matches("LM317T", matches, db_session)

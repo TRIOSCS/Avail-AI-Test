@@ -68,9 +68,9 @@ class TestTrustOrdering:
         assert EVIDENCE_TIER_BONUS["T5"] > EVIDENCE_TIER_BONUS["T7"]
 
     def test_manual_beats_scrape_at_equal_base_reliability(self):
-        """When the underlying source_type gives the same base reliability (both fall
-        to the default bucket), a T6 manual entry must score higher than a T3
-        marketplace scrape — the bug this module fixes."""
+        """When the underlying source_type gives the same base reliability (both fall to
+        the default bucket), a T6 manual entry must score higher than a T3 marketplace
+        scrape — the bug this module fixes."""
         manual = source_reliability_base("manual") + evidence_tier_bonus("T6")
         scrape = source_reliability_base("ebay") + evidence_tier_bonus("T3")
         assert manual > scrape

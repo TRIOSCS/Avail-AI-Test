@@ -170,7 +170,8 @@ class TestOfferApproval:
         assert pending_offer.approved_at is not None
 
     def test_approve_offer_triggers_proactive_rematch(self, client, pending_offer):
-        """Approval triggers the single-offer proactive re-match hook (watermark gap)."""
+        """Approval triggers the single-offer proactive re-match hook (watermark
+        gap)."""
         with patch("app.services.proactive_matching.trigger_rematch_on_offer_approval") as mock_rematch:
             resp = client.put(f"/api/offers/{pending_offer.id}/approve")
         assert resp.status_code == 200
