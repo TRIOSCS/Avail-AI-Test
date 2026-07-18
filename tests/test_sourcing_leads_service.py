@@ -15,6 +15,7 @@ from app.models.vendors import VendorCard
 from app.services.sourcing_leads import (
     BUYER_STATUSES,
     _clamp,
+    _compute_confidence,
     _compute_vendor_safety,
     _confidence_band,
     _contactability_score,
@@ -26,6 +27,7 @@ from app.services.sourcing_leads import (
     _source_reliability,
     append_lead_feedback,
     get_requisition_leads,
+    get_vendor_feedback_adjustment,
     sync_leads_for_sightings,
     update_lead_status,
     upsert_lead_from_sighting,
@@ -605,3 +607,136 @@ class TestBuyerStatuses:
     def test_all_statuses_valid(self):
         expected = {"new", "contacted", "replied", "no_stock", "has_stock", "bad_lead", "do_not_contact"}
         assert BUYER_STATUSES == expected
+
+
+class TestSourceTrustOrdering:
+    """Regression: T6 (manual buyer entry) must rank ABOVE T3 (marketplace scrape).
+
+    Before the app/source_trust.py unification, sourcing_leads._source_reliability
+    applied a -10 bonus for T6 vs +2 for T3 — a manual entry by a buyer scored WORSE
+    than an anonymous scrape. This is now fixed at the single-authority tier-bonus
+    table in app/source_trust.py.
+    """
+
+    def test_manual_entry_outranks_marketplace_scrape(self):
+        manual_reliability = _source_reliability("manual", "T6")
+        scrape_reliability = _source_reliability("ebay", "T3")
+        assert manual_reliability > scrape_reliability
+
+    def test_empty_source_type_manual_tier_outranks_scrape(self):
+        # tier_for_sighting maps an empty/unspecified source_type to T6 (manual).
+        manual_reliability = _source_reliability("", "T6")
+        scrape_reliability = _source_reliability("oemsecrets", "T3")
+        assert manual_reliability > scrape_reliability
+
+    def test_tier_bonus_ordering_matches_spec(self):
+        from app.source_trust import EVIDENCE_TIER_BONUS
+
+        assert EVIDENCE_TIER_BONUS["T1"] > EVIDENCE_TIER_BONUS["T2"]
+        assert EVIDENCE_TIER_BONUS["T2"] > EVIDENCE_TIER_BONUS["T6"]
+        assert EVIDENCE_TIER_BONUS["T6"] > EVIDENCE_TIER_BONUS["T3"]
+        assert EVIDENCE_TIER_BONUS["T3"] > EVIDENCE_TIER_BONUS["T4"]
+        assert EVIDENCE_TIER_BONUS["T4"] >= EVIDENCE_TIER_BONUS["T5"]
+        assert EVIDENCE_TIER_BONUS["T5"] > EVIDENCE_TIER_BONUS["T7"]
+
+    def test_evidence_tiers_module_reuses_source_trust_groups(self):
+        """evidence_tiers.py must not re-declare its own source category sets."""
+        from app import evidence_tiers, source_trust
+
+        assert evidence_tiers._AUTHORIZED_SOURCES is source_trust.AUTHORIZED_SOURCES
+        assert evidence_tiers._API_SOURCES is source_trust.API_SOURCES
+        assert evidence_tiers._MARKETPLACE_SOURCES is source_trust.MARKETPLACE_SOURCES
+
+
+class TestVendorFeedbackAdjustment:
+    """get_vendor_feedback_adjustment — time-decayed vendor trust feedback loop."""
+
+    def test_no_vendor_card_id_returns_neutral(self, db_session: Session):
+        adj = get_vendor_feedback_adjustment(db_session, None)
+        assert adj.confidence_penalty == 0.0
+        assert adj.safety_penalty == 0.0
+        assert adj.do_not_contact is False
+
+    def test_no_feedback_history_returns_neutral(self, db_session: Session):
+        vc = _make_vendor_card(db_session)
+        adj = get_vendor_feedback_adjustment(db_session, vc.id)
+        assert adj.confidence_penalty == 0.0
+        assert adj.do_not_contact is False
+
+    def test_bad_lead_feedback_produces_negative_penalty(self, db_session: Session):
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        vc = _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.commit()
+
+        update_lead_status(db_session, lead.id, "bad_lead")
+
+        adj = get_vendor_feedback_adjustment(db_session, vc.id)
+        assert adj.confidence_penalty < 0.0
+        assert adj.safety_penalty < 0.0
+
+    def test_do_not_contact_sets_exclusion_flag(self, db_session: Session):
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        vc = _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.commit()
+
+        update_lead_status(db_session, lead.id, "do_not_contact")
+
+        adj = get_vendor_feedback_adjustment(db_session, vc.id)
+        assert adj.do_not_contact is True
+        assert adj.confidence_penalty < 0.0
+
+    def test_old_feedback_decays_toward_zero(self, db_session: Session):
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        vc = _make_vendor_card(db_session)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        lead = upsert_lead_from_sighting(db_session, requirement, sighting)
+        db_session.commit()
+        update_lead_status(db_session, lead.id, "bad_lead")
+        recent_adj = get_vendor_feedback_adjustment(db_session, vc.id)
+
+        event = db_session.query(LeadFeedbackEvent).filter(LeadFeedbackEvent.lead_id == lead.id).first()
+        event.created_at = datetime.now(UTC) - timedelta(days=180)
+        db_session.commit()
+
+        old_adj = get_vendor_feedback_adjustment(db_session, vc.id)
+        assert abs(old_adj.confidence_penalty) < abs(recent_adj.confidence_penalty)
+
+    def test_compute_confidence_applies_feedback_penalty(self, db_session: Session):
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+        sighting = _make_sighting(db_session, req.id, requirement.id)
+        no_penalty = _compute_confidence(sighting, 80.0, 80.0, 80.0, 80.0, feedback_penalty=0.0)
+        with_penalty = _compute_confidence(sighting, 80.0, 80.0, 80.0, 80.0, feedback_penalty=-15.0)
+        assert with_penalty < no_penalty
+
+    def test_feedback_lowers_confidence_on_new_lead_for_same_vendor(self, db_session: Session):
+        """A vendor with recent bad_lead feedback on one lead scores a freshly-sighted
+        lead lower than an equivalent vendor with no feedback history."""
+        req = _make_requisition(db_session)
+        requirement = _make_requirement(db_session, req.id)
+
+        _make_vendor_card(db_session, name="feedback test vendor")
+        sighting1 = _make_sighting(db_session, req.id, requirement.id, vendor_name="Feedback Test Vendor")
+        lead1 = upsert_lead_from_sighting(db_session, requirement, sighting1)
+        db_session.commit()
+        update_lead_status(db_session, lead1.id, "bad_lead")
+
+        sighting2 = _make_sighting(
+            db_session, req.id, requirement.id, vendor_name="Feedback Test Vendor", mpn="LM317T-2"
+        )
+        lead2 = upsert_lead_from_sighting(db_session, requirement, sighting2)
+        db_session.commit()
+
+        _make_vendor_card(db_session, name="clean vendor")
+        sighting3 = _make_sighting(db_session, req.id, requirement.id, vendor_name="Clean Vendor", mpn="LM317T-3")
+        lead3 = upsert_lead_from_sighting(db_session, requirement, sighting3)
+        db_session.commit()
+
+        assert lead2.confidence_score < lead3.confidence_score

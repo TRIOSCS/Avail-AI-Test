@@ -473,9 +473,10 @@ def run_proactive_scan(db: Session) -> dict:
 
     # Oldest-first so the limit processes chronologically.
     # Gate to live offers only: pending_review/rejected/sold/won/expired are excluded.
-    # NOTE: an offer created as pending_review (excluded here) that is later approved
-    # won't be re-scanned because the watermark has already advanced past its created_at.
-    # The proper fix is a re-match hook triggered on offer approval (follow-up task).
+    # An offer created as pending_review (excluded here) that is later approved would
+    # never be picked up by this batch scan once the watermark advances past its
+    # created_at — trigger_rematch_on_offer_approval() below closes that gap with a
+    # targeted single-offer re-match, called from the offer-approval routers.
     _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
     new_offers = (
         db.query(Offer)
@@ -527,6 +528,34 @@ def run_proactive_scan(db: Session) -> dict:
         "scanned_offers": len(new_offers),
         "matches_created": total_matches,
     }
+
+
+def trigger_rematch_on_offer_approval(db: Session, offer: Offer) -> int:
+    """Targeted single-offer re-match, called by offer-approval routers.
+
+    Closes the watermark gap documented in run_proactive_scan(): a batch scan only
+    ever sees an offer once, at Offer.created_at. An offer created as pending_review
+    is excluded from the scan's live-status filter; if it's approved after the
+    watermark has advanced past its created_at, it's invisible to every future batch
+    scan too. This runs find_matches_for_offer() for that one offer instead of
+    waiting for (or forcing) a full rescan.
+
+    Uses its own commit so a re-match failure never blocks the caller's approval
+    transaction — the offer status change should succeed even if matching fails.
+    No-op for offers without a material_card_id (find_matches_for_offer requires one).
+    """
+    if not offer.material_card_id:
+        return 0
+    try:
+        matches = find_matches_for_offer(offer.id, db)
+        db.commit()
+    except Exception as exc:
+        logger.error("Targeted re-match failed for offer {}: {}", offer.id, exc)
+        db.rollback()
+        return 0
+    if matches:
+        logger.info("Targeted re-match: offer {} approval → {} matches", offer.id, len(matches))
+    return len(matches)
 
 
 # ── Match actions ────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from ..models import (
     User,
     VendorCard,
 )
+from ..source_trust import VENDOR_RELIABILITY_KNOWN_NO_SCORE, VENDOR_RELIABILITY_UNKNOWN
 
 # ── Routing maps (loaded once) ──────────────────────────────────────
 
@@ -88,9 +89,9 @@ def score_offer(
     if vendor_card and vendor_card.vendor_score is not None:
         scores["reliability"] = min(vendor_card.vendor_score, 100.0)
     elif vendor_card and vendor_card.is_new_vendor is False:
-        scores["reliability"] = 50.0  # known vendor, no score yet
+        scores["reliability"] = VENDOR_RELIABILITY_KNOWN_NO_SCORE
     else:
-        scores["reliability"] = 25.0  # unknown vendor
+        scores["reliability"] = VENDOR_RELIABILITY_UNKNOWN
 
     # ── Lead time score (0-100): parse days, shorter = better
     lead_days = _parse_lead_time_days(offer.lead_time)

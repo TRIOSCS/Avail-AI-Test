@@ -8,6 +8,7 @@ Depends on: app.services.vendor_affinity_service, SQLAlchemy test fixtures
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -260,6 +261,67 @@ def test_score_assigns_confidence():
 def test_score_empty_list():
     """score_affinity_matches returns empty list for empty input."""
     assert score_affinity_matches("LM317T", []) == []
+
+
+class TestBehaviorWeightedConfidence:
+    """score_affinity_matches(db=...) weights confidence by VendorCard behavioral
+    signals (response_rate / ghost_rate / cancellation_rate)."""
+
+    def _make_vc(self, db_session: Session, **overrides) -> VendorCard:
+        fields = {
+            "normalized_name": "behavior test vendor",
+            "display_name": "Behavior Test Vendor",
+            "created_at": datetime.now(UTC),
+        }
+        fields.update(overrides)
+        vc = VendorCard(**fields)
+        db_session.add(vc)
+        db_session.flush()
+        return vc
+
+    def test_no_db_leaves_confidence_unweighted(self):
+        """Backward compatible: omitting db skips behavioral weighting entirely."""
+        matches = [{"vendor_name": "V1", "vendor_id": 1, "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches)
+        assert scored[0]["confidence"] == pytest.approx(0.50, abs=0.001)
+
+    def test_responsive_vendor_boosted(self, db_session: Session):
+        vc = self._make_vc(db_session, response_rate=0.9)
+        matches = [{"vendor_name": "V1", "vendor_id": vc.id, "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert scored[0]["confidence"] > 0.50
+        assert "responsive" in scored[0]["reasoning"]
+
+    def test_ghosting_vendor_dampened(self, db_session: Session):
+        vc = self._make_vc(db_session, ghost_rate=0.8)
+        matches = [{"vendor_name": "V1", "vendor_id": vc.id, "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert scored[0]["confidence"] < 0.50
+        assert "ghosting" in scored[0]["reasoning"]
+
+    def test_high_cancellation_rate_dampened(self, db_session: Session):
+        vc = self._make_vc(db_session, cancellation_rate=0.6)
+        matches = [{"vendor_name": "V1", "vendor_id": vc.id, "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert scored[0]["confidence"] < 0.50
+
+    def test_final_confidence_stays_within_existing_band(self, db_session: Session):
+        """Even an extreme ghost_rate must not push confidence below the existing
+        [0.30, 0.75] clamp."""
+        vc = self._make_vc(db_session, ghost_rate=1.0, cancellation_rate=1.0, response_rate=0.0)
+        matches = [{"vendor_name": "V1", "vendor_id": vc.id, "mpn_count": 100, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert 0.30 <= scored[0]["confidence"] <= 0.75
+
+    def test_missing_vendor_card_leaves_confidence_unweighted(self, db_session: Session):
+        matches = [{"vendor_name": "V1", "vendor_id": 999999, "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert scored[0]["confidence"] == pytest.approx(0.50, abs=0.001)
+
+    def test_no_vendor_id_leaves_confidence_unweighted(self, db_session: Session):
+        matches = [{"vendor_name": "V1", "mpn_count": 1, "manufacturer": "TI", "level": 1}]
+        scored = score_affinity_matches("LM317T", matches, db_session)
+        assert scored[0]["confidence"] == pytest.approx(0.50, abs=0.001)
 
 
 # ── Orchestrator Tests ──────────────────────────────────────────────
