@@ -1246,6 +1246,51 @@ async def buy_plan_verify_po_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
+@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/receive", response_class=HTMLResponse)
+async def buy_plan_receive_line_partial(
+    request: Request,
+    plan_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manually mark a line's goods received (Approvals Workspace 3.2 — the kanban
+    Received column's backing action).
+
+    Plain ``require_user`` here — the actor gate (line buyer / manager / admin) and
+    the state gate (verified, or the paid-risk prepay state) live service-side in
+    ``mark_line_received``; idempotent (an already-received line is a no-op). Never
+    touches plan status machinery. ``origin=approvals_workspace`` re-renders the
+    workspace pane in place: with a ``lens`` the SO/BP pane (the kanban card's Mark
+    received), without one the PO-line pane.
+    """
+    from ...services.buyplan_workflow import mark_line_received
+
+    form = await request.form()
+    origin = form.get("origin", "")
+
+    try:
+        mark_line_received(plan_id, line_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    if origin == "approvals_workspace":
+        from .approvals_hub import render_plan_pane, render_po_pane
+
+        lens = str(form.get("lens") or "")
+        if lens:
+            resp = render_plan_pane(request, user, db, plan_id, lens=lens)
+        else:
+            resp = render_po_pane(request, user, db, line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
+
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue", response_class=HTMLResponse)
 async def buy_plan_flag_issue_partial(
     request: Request,
