@@ -456,6 +456,103 @@ class TestFindVendorDedupCandidates:
             assert key not in pair_keys, "Duplicate pair found"
             pair_keys.add(key)
 
+    def test_low_sighting_duplicate_beyond_old_500_cap_is_found(self, db_session):
+        """Regression for the 500-row-by-sighting_count cap: two near-duplicate,
+        near-zero-sighting vendors must still be flagged even when 500+ other,
+        much higher-sighting vendors exist in the table. Under the old
+        `.order_by(sighting_count.desc()).limit(500)` implementation these two
+        would never even be loaded, let alone compared."""
+        import random
+        from datetime import datetime
+
+        from app.models import VendorCard
+
+        # Random hex suffixes (not sequential digits) keep pairwise fuzzy scores
+        # among the noise pool well below the 85 threshold — sequential numeric
+        # suffixes ("Bulk Supplier 5" vs "Bulk Supplier 50") are near-identical
+        # strings and would themselves collide, defeating the test's purpose.
+        rng = random.Random(5)
+        for _ in range(520):
+            suffix = f"{rng.getrandbits(64):016x}"
+            db_session.add(
+                VendorCard(
+                    normalized_name=f"bulk supplier {suffix}",
+                    display_name=f"Bulk Supplier {suffix}",
+                    sighting_count=1000,
+                    created_at=datetime.now(UTC),
+                )
+            )
+        db_session.add(
+            VendorCard(
+                normalized_name="zyquin components",
+                display_name="Zyquin Components",
+                sighting_count=0,
+                created_at=datetime.now(UTC),
+            )
+        )
+        db_session.add(
+            VendorCard(
+                normalized_name="zyquin component",
+                display_name="Zyquin Component",
+                sighting_count=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+        db_session.commit()
+
+        results = find_vendor_dedup_candidates(db_session, threshold=85, limit=50)
+        names = {(r["vendor_a"]["name"], r["vendor_b"]["name"]) for r in results}
+        assert ("Zyquin Components", "Zyquin Component") in names or (
+            "Zyquin Component",
+            "Zyquin Components",
+        ) in names
+
+    def test_uses_pg_path_when_dialect_is_postgresql(self):
+        """Dispatcher routes to the pg_trgm fast path when the bound dialect is
+        postgresql, leaving the SQLite blocking fallback for everything else."""
+        from unittest.mock import patch
+
+        mock_db = MagicMock()
+        mock_db.bind = MagicMock()
+        mock_db.bind.dialect.name = "postgresql"
+
+        with patch("app.vendor_utils._find_vendor_dedup_candidates_pg", return_value=[]) as mock_pg:
+            find_vendor_dedup_candidates(mock_db)
+
+        mock_pg.assert_called_once_with(mock_db, 85, 50)
+
+    def test_pg_path_empty_pairs(self):
+        """PG path returns [] when no similar pairs are found."""
+        from app.vendor_utils import _find_vendor_dedup_candidates_pg
+
+        mock_db = MagicMock()
+        mock_q = mock_db.query.return_value
+        mock_q.filter.return_value = mock_q
+        mock_q.order_by.return_value = mock_q
+        mock_q.limit.return_value = mock_q
+        mock_q.all.return_value = []
+
+        result = _find_vendor_dedup_candidates_pg(mock_db, 85, 50)
+
+        assert result == []
+
+
+class TestVendorBlockingKey:
+    def test_blocking_key_groups_near_duplicates(self):
+        from app.vendor_utils import _vendor_blocking_key
+
+        assert _vendor_blocking_key("arrow electronics") == _vendor_blocking_key("arrow electronic")
+
+    def test_blocking_key_empty_string(self):
+        from app.vendor_utils import _vendor_blocking_key
+
+        assert _vendor_blocking_key("") == ""
+
+    def test_blocking_key_strips_spaces_before_truncating(self):
+        from app.vendor_utils import _vendor_blocking_key
+
+        assert _vendor_blocking_key("a b c d e") == "abcd"
+
 
 # ── _enrich_with_vendor_cards ─────────────────────────────────────────
 

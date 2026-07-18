@@ -35,9 +35,10 @@ class TestAgentKeyTimingAttack:
 
 
 class TestRetryAfterCap:
-    """Verify Retry-After header value is capped at 30 seconds (budget-aware — API-
-    search core Phase 0 tightened the cap from 300s so one rate-limited upstream can't
-    hold a search-concurrency slot for minutes)."""
+    """Verify Retry-After header value is capped at 8 seconds (budget-aware — the
+    interactive/requisition search's aggregate fan-out budget is
+    settings.search_total_timeout_s, 12s default, so a 30s+ sleep always outlives it and
+    gets cancelled anyway; tightened 300s -> 30s -> 8s)."""
 
     def _make_response(self, retry_after: str) -> httpx.Response:
         resp = MagicMock(spec=httpx.Response)
@@ -47,13 +48,13 @@ class TestRetryAfterCap:
     @pytest.mark.parametrize(
         ("retry_after", "expected"),
         [
-            ("10", 10.0),  # normal value passes through
+            ("5", 5.0),  # normal value passes through
             ("0.1", 1.0),  # minimum floor of 1 second
-            ("30", 30.0),  # 30 exactly passes
-            ("31", 30.0),  # just over the cap
-            ("999999", 30.0),  # extreme value capped at 30
-            ("600", 30.0),  # moderate value capped at 30
-            ("300", 30.0),  # old cap now itself capped at 30
+            ("8", 8.0),  # 8 exactly passes
+            ("9", 8.0),  # just over the cap
+            ("999999", 8.0),  # extreme value capped at 8
+            ("600", 8.0),  # moderate value capped at 8
+            ("30", 8.0),  # old cap now itself capped at 8
         ],
     )
     def test_value_clamped(self, retry_after: str, expected: float):

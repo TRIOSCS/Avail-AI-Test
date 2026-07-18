@@ -1403,6 +1403,103 @@ class TestSaveSightings:
             result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
         assert float(result[0].unit_price) == 1.25
 
+    def test_currency_conversion_before_median(self, db_session):
+        """A EUR-priced row and a USD-priced row are compared in USD, not raw numbers —
+        the currency-blind price-scoring bug.
+
+        A 1.00 EUR offer is actually MORE expensive in USD terms than 1.00 USD (EUR rate
+        > 1), so its price factor must reflect that conversion, not treat 1.00 == 1.00.
+        """
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.00,
+                "currency": "USD",
+                "qty_available": 100,
+                "confidence": 3,
+            },
+            {
+                "vendor_name": "Farnell",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.00,
+                "currency": "EUR",
+                "qty_available": 100,
+                "confidence": 3,
+            },
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        by_vendor = {s.vendor_name: s for s in result}
+        # Raw prices are untouched — currency conversion is scoring-only.
+        assert float(by_vendor["Arrow"].unit_price) == 1.0
+        assert float(by_vendor["Farnell"].unit_price) == 1.0
+        assert by_vendor["Arrow"].currency == "USD"
+        assert by_vendor["Farnell"].currency == "EUR"
+        # The EUR row converts to a HIGHER USD-equivalent price than the USD row
+        # (EUR rate > 1), so its price factor must be worse, not identical.
+        assert by_vendor["Farnell"].score_components["price"] < by_vendor["Arrow"].score_components["price"]
+
+    def test_source_age_hours_threaded_into_v2_score(self, db_session):
+        """A row tagged with a real cache age (from a Redis cache HIT upstream in
+        _fetch_fresh) gets that real age, not the hardcoded age_hours=0.0 a live fetch
+        would use — a stale-cache-served sighting scores lower freshness than a
+        genuinely fresh one."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "FreshVendor",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.0,
+                "qty_available": 100,
+                "confidence": 3,
+                "_source_age_hours": 0.0,
+            },
+            {
+                "vendor_name": "StaleCacheVendor",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.0,
+                "qty_available": 100,
+                "confidence": 3,
+                "_source_age_hours": 240.0,  # 10 days old — served from a stale cache entry
+            },
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        by_vendor = {s.vendor_name: s for s in result}
+        assert by_vendor["FreshVendor"].score_components["freshness"] == 100.0
+        assert by_vendor["StaleCacheVendor"].score_components["freshness"] < 100.0
+        assert by_vendor["StaleCacheVendor"].score < by_vendor["FreshVendor"].score
+
+    def test_internal_age_tag_stripped_from_raw_data(self, db_session):
+        """_source_age_hours is internal scoring metadata — it must not leak into the
+        persisted raw_data column (which mirrors the connector's own payload)."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.0,
+                "qty_available": 100,
+                "_source_age_hours": 12.5,
+            }
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert "_source_age_hours" not in result[0].raw_data
+
 
 # ── _propagate_vendor_emails ─────────────────────────────────────────────
 
@@ -2527,6 +2624,139 @@ class TestSearchRequirement:
             if s["vendor_name"] == "Arrow":
                 assert s["is_historical"] is False
                 assert s["is_material_history"] is False
+
+    async def test_write_chain_offloaded_to_thread(self, _mock_enrich, db_session):
+        """search_requirement's save+upsert chain runs via asyncio.to_thread
+        (_persist_search_write), not directly on the event loop — a structural guard
+        against reverting to the loop-blocking synchronous chain."""
+        import inspect
+
+        from app import search_service
+
+        src = inspect.getsource(search_service.search_requirement)
+        collapsed = " ".join(src.split())
+        assert "asyncio.to_thread( _persist_search_write" in collapsed
+
+    async def test_material_card_id_linked_after_threaded_write(self, _mock_enrich, db_session):
+        """The requirement's material_card_id is durably linked by the threaded write
+        path — re-fetching the row from a fresh session shows the link."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        req_id = req.id
+
+        mock_fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "confidence": 4,
+                "qty_available": 500,
+                "unit_price": 0.4,
+            },
+        ]
+        mock_stats = [{"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"}]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = (mock_fresh, mock_stats)
+            await search_requirement(req, db_session)
+
+        reloaded = db_session.query(Requirement).filter_by(id=req_id).one()
+        card = db_session.get(MaterialCard, reloaded.material_card_id)
+        assert card is not None
+        assert card.normalized_mpn == "lm317t"
+        assert card.display_mpn == "LM317T"
+
+
+class TestPersistSearchWrite:
+    """Unit tests for _persist_search_write, the thread-worker that owns the dominant
+    synchronous DB cost of search_requirement (PERF-3)."""
+
+    def test_missing_requirement_returns_none(self, db_session):
+        from app.search_service import _persist_search_write
+
+        result = _persist_search_write(
+            req_id=999999,
+            fresh=[],
+            to_search=["LM317T"],
+            succeeded_sources={"nexar"},
+            searched_keys={"lm317t"},
+            now=datetime.now(UTC),
+            bind=db_session.get_bind(),
+        )
+        assert result is None
+
+    def test_returns_plain_dicts_and_ids(self, db_session):
+        """No ORM object crosses the thread boundary — only dicts/ids/primitives."""
+        from app.search_service import _persist_search_write
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "confidence": 4,
+                "qty_available": 500,
+                "unit_price": 0.4,
+                "is_authorized": True,
+            }
+        ]
+        result = _persist_search_write(
+            req_id=req.id,
+            fresh=fresh,
+            to_search=["LM317T"],
+            succeeded_sources={"nexar"},
+            searched_keys={"lm317t"},
+            now=datetime.now(UTC),
+            bind=db_session.get_bind(),
+        )
+        assert result is not None
+        assert isinstance(result["sighting_dicts"], list)
+        assert isinstance(result["sighting_dicts"][0], dict)
+        assert result["sighting_dicts"][0]["vendor_name"] == "Arrow"
+        assert isinstance(result["card_ids"], list)
+        assert all(isinstance(i, int) for i in result["card_ids"])
+        assert result["primary_card_id"] in result["card_ids"]
+        assert result["requisition_id"] == reqn.id
+
+    def test_batches_existing_card_lookup_for_zero_sighting_mpns(self, db_session):
+        """A to_search MPN with no fresh sightings this round (e.g. an FRU alias that
+        returned nothing) still gets its card looked up via the pre-fetched batch, not a
+        fresh resolve_material_card() query per MPN."""
+        from app.search_service import _persist_search_write, resolve_material_card
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        # Pre-create a card for an MPN that will have zero fresh sightings.
+        existing_card = resolve_material_card("LM7805", db_session)
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "confidence": 4,
+                "qty_available": 500,
+                "unit_price": 0.4,
+            }
+        ]
+        result = _persist_search_write(
+            req_id=req.id,
+            fresh=fresh,
+            to_search=["LM317T", "LM7805"],
+            succeeded_sources={"nexar"},
+            searched_keys={"lm317t", "lm7805"},
+            now=datetime.now(UTC),
+            bind=db_session.get_bind(),
+        )
+        assert existing_card.id in result["card_ids"]
 
 
 class TestSearchThrottling:

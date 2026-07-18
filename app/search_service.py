@@ -17,6 +17,7 @@ from typing import Final
 
 import redis
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .cache.redis_probe import RedisProbe
@@ -57,6 +58,7 @@ from .services.tbf_worker.queue_manager import enqueue_for_tbf_search
 from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
 from .utils.async_helpers import safe_background_task
+from .utils.currency import to_usd
 from .utils.normalization import (
     MAX_SUBSTITUTES,
     detect_currency,
@@ -184,8 +186,14 @@ def _search_cache_key(pns: list[str], connector_names: list[str]) -> str:
     return _SEARCH_CACHE_PREFIX + hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()
 
 
-def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
-    """Return (results, source_stats) from cache or None on miss."""
+def _get_search_cache(key: str) -> tuple[list[dict], list[dict], str | None] | None:
+    """Return (results, source_stats, cached_at_iso) from cache or None on miss.
+
+    ``cached_at_iso`` is the ISO timestamp the entry was written (None for
+    legacy entries written before this field existed) — callers use it to
+    compute the REAL data age for freshness scoring instead of assuming a
+    cache hit is as fresh as a live fetch (see ``_cache_age_hours``).
+    """
     r = _get_search_redis()
     if not r:
         return None
@@ -193,7 +201,7 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
         data = r.get(key)
         if data:
             parsed = json.loads(data)
-            return parsed["results"], parsed["source_stats"]
+            return parsed["results"], parsed["source_stats"], parsed.get("cached_at")
     except redis.RedisError as e:
         logger.error("Redis error reading search cache key {}: {}", key, e)
     except Exception as e:
@@ -202,16 +210,41 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
 
 
 def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -> None:
-    """Store search results in Redis with TTL."""
+    """Store search results in Redis with TTL, stamped with the write time so a later
+    cache HIT can compute real data age instead of assuming it's brand fresh."""
     r = _get_search_redis()
     if not r:
         return
     try:
-        r.setex(key, _SEARCH_CACHE_TTL, json.dumps({"results": results, "source_stats": source_stats}))
+        payload = {
+            "results": results,
+            "source_stats": source_stats,
+            "cached_at": datetime.now(UTC).isoformat(),
+        }
+        r.setex(key, _SEARCH_CACHE_TTL, json.dumps(payload))
     except redis.RedisError as e:
         logger.error("Redis error writing search cache key {}: {}", key, e)
     except Exception as e:
         logger.warning("Search cache write failed: {}", e)
+
+
+def _cache_age_hours(cached_at_iso: str | None) -> float:
+    """Hours elapsed since a search-cache entry was written.
+
+    Returns 0.0 when ``cached_at_iso`` is missing/unparseable (legacy entry, or a
+    freshly-written one) so freshness scoring degrades gracefully rather than
+    raising. Used to give cache-served results their REAL age instead of the
+    hardcoded age_hours=0.0 a live fetch would legitimately use.
+    """
+    if not cached_at_iso:
+        return 0.0
+    try:
+        cached_at = datetime.fromisoformat(cached_at_iso)
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=UTC)
+        return max(0.0, (datetime.now(UTC) - cached_at).total_seconds() / 3600.0)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def get_all_pns(req: Requirement) -> list[str]:
@@ -432,6 +465,133 @@ def _find_affinity_in_thread(mpn: str) -> list[dict]:
         thread_db.close()
 
 
+def _persist_search_write(
+    req_id: int,
+    fresh: list[dict],
+    to_search: list[str],
+    succeeded_sources: set[str],
+    searched_keys: set[str],
+    now: datetime,
+    bind,
+) -> dict | None:
+    """Save fresh sightings + upsert material cards on a worker thread.
+
+    This is the dominant synchronous DB cost of ``search_requirement`` — bulk
+    sighting insert, tag propagation, vendor-summary rebuild (all inside
+    ``_save_sightings``), the per-MPN material-card upsert loop, and the inline
+    deterministic enrichment passes — running directly on the event loop, on
+    EVERY search, stalled every other in-flight request for its duration
+    (mirrors the vendor-affinity fix at ``_find_affinity_in_thread``, PERF-1).
+
+    Opens its OWN write session bound to *bind* entirely within the thread —
+    SQLAlchemy sessions are not thread-safe, so the caller's session never
+    crosses the boundary. Returns ONLY plain data (dicts/ids/primitives): no ORM
+    object survives the thread, since a detached instance touched from the
+    event-loop thread after the session closes would be unsafe.
+
+    Returns ``None`` when the requirement no longer exists (deleted mid-search)
+    so the caller can reproduce the original early-return behavior.
+
+    Called by: search_requirement (via asyncio.to_thread)
+    Depends on: _save_sightings, _upsert_material_card, resolve_material_card,
+                run_deterministic_passes, sighting_to_dict
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    _WriteSession = sessionmaker(bind=bind, autocommit=False, autoflush=False, expire_on_commit=False)
+    write_db = _WriteSession()
+    try:
+        write_req = write_db.get(Requirement, req_id)
+        if not write_req:
+            logger.error("Requirement {} not found in write session", req_id)
+            return None
+
+        sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
+        logger.info(f"Req {req_id} ({to_search[0]}): {len(sightings)} fresh sightings")
+
+        # Material card upsert (errors won't break search). Only upsert cards for
+        # MPNs we actually searched; cached-side cards are already surfaced via
+        # material_card_id linkage in the caller. We also need to ensure the
+        # cooldown clock advances even when a search yielded zero sightings —
+        # otherwise the next click immediately re-burns the connector quota.
+        # `_upsert_material_card` returns None when there were no sightings for
+        # that MPN, so we fall back to a card lookup/create to guarantee a card
+        # exists, then stamp it.
+        #
+        # PERF-4: batch-prefetch every to_search MPN's existing card in ONE query
+        # instead of resolve_material_card's per-MPN SELECT — avoids N sequential
+        # queries for the (common) zero-sighting-for-this-MPN fallback path.
+        norm_keys = [k for k in (normalize_mpn_key(pn) for pn in to_search) if k]
+        existing_cards = (
+            write_db.scalars(
+                select(MaterialCard).where(
+                    MaterialCard.normalized_mpn.in_(norm_keys), MaterialCard.deleted_at.is_(None)
+                )
+            ).all()
+            if norm_keys
+            else []
+        )
+        card_by_key = {c.normalized_mpn: c for c in existing_cards}
+
+        card_ids: set[int] = set()
+        primary_card_id = None
+        for pn in to_search:
+            try:
+                card = _upsert_material_card(pn, sightings, write_db, now)
+                if card is None:
+                    norm = normalize_mpn_key(pn)
+                    card = card_by_key.get(norm) or resolve_material_card(pn, write_db)
+                    if card:
+                        card_by_key[card.normalized_mpn] = card
+                if card:
+                    card_ids.add(card.id)
+                    # Stamp the cooldown clock on every searched MPN's card.
+                    if card.normalized_mpn in searched_keys:
+                        card.last_searched_at = now
+                    if pn == to_search[0] and not primary_card_id:
+                        primary_card_id = card.id
+            except Exception as e:
+                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn={} error={}", pn, e)
+                write_db.rollback()
+
+        # Link requirement to its primary material card
+        if primary_card_id and not write_req.material_card_id:
+            write_req.material_card_id = primary_card_id
+
+        # Inline deterministic passes over this search's card ids (same write
+        # session, committed with the sightings below) — decoded facets/category
+        # are queryable the moment the search returns, without waiting on the
+        # worker. NO enrich_requested_at stamp here: search flow rides the
+        # existing created_at fast lane + search_count demand ordering.
+        run_deterministic_passes(write_db, card_ids)
+
+        # Stamp per-requirement search timestamp only when the search actually
+        # succeeded. "Success" means at least one connector returned status=ok —
+        # i.e. there was a real response from an upstream API (even if it had
+        # zero matches). If every connector errored (auth failures, quota
+        # exceeded, network), we leave last_searched_at alone so the 5-minute
+        # rate guard in routers/sightings.py does not silently suppress the
+        # user's next retry.
+        if succeeded_sources:
+            write_req.last_searched_at = now
+        write_db.commit()
+
+        # Convert to plain dicts WHILE the session is still open (sighting_to_dict
+        # reads raw_data/created_at/etc off the still-attached ORM instance) — no
+        # ORM object crosses back to the event-loop thread.
+        return {
+            "sighting_dicts": [sighting_to_dict(s) for s in sightings],
+            "card_ids": sorted(card_ids),
+            "primary_card_id": primary_card_id,
+            "requisition_id": write_req.requisition_id,
+        }
+    except Exception:
+        write_db.rollback()
+        raise
+    finally:
+        write_db.close()
+
+
 async def search_requirement(req: Requirement, db: Session) -> dict:
     """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
@@ -500,321 +660,290 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     # already computed above so it's available to the merge step below.
     fresh, source_stats = await _fetch_fresh(to_search, db)
 
-    # 2. Score + save — only replace sightings from connectors that succeeded
-    # Use a dedicated DB session for writes so concurrent search_requirement()
-    # calls (via asyncio.gather) don't share a single non-thread-safe session.
-    from sqlalchemy.orm import sessionmaker
-
+    # 2. Score + save — only replace sightings from connectors that succeeded.
+    # The whole save+upsert+deterministic-pass chain is synchronous DB work with
+    # no network I/O; running it directly on the event loop stalled every other
+    # in-flight request for its duration (PERF-3). It runs on a worker thread via
+    # _persist_search_write, which opens its OWN dedicated write session bound to
+    # this session's connection — SQLAlchemy sessions are not thread-safe, so
+    # write_db is created and used ENTIRELY inside the thread (mirrors the
+    # vendor-affinity fix at _find_affinity_in_thread, PERF-1). Only plain
+    # dicts/ids cross back — no ORM object survives the thread boundary.
     req_id = req.id
-    _WriteSession = sessionmaker(bind=db.get_bind(), autocommit=False, autoflush=False, expire_on_commit=False)
-    write_db = _WriteSession()
-    try:
-        write_req = write_db.get(Requirement, req_id)
-        if not write_req:
-            logger.error("Requirement {} not found in write session", req_id)
-            return {"sightings": [], "source_stats": source_stats, "mpn_results": mpn_results}
+    succeeded_sources = {
+        stat["source"] for stat in source_stats if stat["status"] == SourceRunStatus.OK.value and not stat.get("error")
+    }
+    write_bind = db.get_bind()
+    persisted = await asyncio.to_thread(
+        _persist_search_write, req_id, fresh, to_search, succeeded_sources, searched_keys, now, write_bind
+    )
+    if persisted is None:
+        return {"sightings": [], "source_stats": source_stats, "mpn_results": mpn_results}
 
-        succeeded_sources = {
-            stat["source"]
-            for stat in source_stats
-            if stat["status"] == SourceRunStatus.OK.value and not stat.get("error")
-        }
-        sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
-        logger.info(f"Req {req_id} ({to_search[0]}): {len(sightings)} fresh sightings")
+    sighting_dicts: list[dict] = persisted["sighting_dicts"]
+    card_ids: set[int] = set(persisted["card_ids"])
+    requisition_id = persisted["requisition_id"]
 
-        # 3. Material card upsert (errors won't break search). Only upsert
-        # cards for MPNs we actually searched; cached-side cards are already
-        # surfaced via material_card_id linkage in the caller.
-        # We also need to ensure the cooldown clock advances even when a
-        # search yielded zero sightings — otherwise the next click immediately
-        # re-burns the connector quota. `_upsert_material_card` returns None
-        # when there were no sightings for that MPN, so we fall back to
-        # `resolve_material_card` to guarantee a card exists, then stamp it.
-        card_ids = set()
-        primary_card_id = None
-        for pn in to_search:
-            try:
-                card = _upsert_material_card(pn, sightings, write_db, now)
-                if card is None:
-                    card = resolve_material_card(pn, write_db)
-                if card:
-                    card_ids.add(card.id)
-                    # Stamp the cooldown clock on every searched MPN's card.
-                    if card.normalized_mpn in searched_keys:
-                        card.last_searched_at = now
-                    if pn == to_search[0] and not primary_card_id:
-                        primary_card_id = card.id
-            except Exception as e:
-                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn={} error={}", pn, e)
-                write_db.rollback()
+    # 3b. Fire background enrichment for cards without manufacturer. Async I/O
+    # (spins its own SessionLocal internally for the actual work) so it stays on
+    # the event loop; the read query it runs first is safe against the request
+    # session `db` since _persist_search_write already committed the cards.
+    await _schedule_background_enrichment(card_ids, db)
 
-        # Link requirement to its primary material card
-        if primary_card_id and not write_req.material_card_id:
-            write_req.material_card_id = primary_card_id
+    # 4. Historical vendors from material cards (read-only — uses the request
+    # session, which sees the committed writes from the thread above).
+    fresh_vendors = {d["vendor_name"].lower() for d in sighting_dicts if d.get("vendor_name")}
+    history = _get_material_history(list(card_ids), fresh_vendors, db)
 
-        # 3a. Inline deterministic passes over this search's card ids (same write
-        # session, committed with the sightings below) — decoded facets/category are
-        # queryable the moment the search returns, without waiting on the worker.
-        # NO enrich_requested_at stamp here: search flow rides the existing
-        # created_at fast lane + search_count demand ordering.
-        # DELIBERATE spec deviation: card_ids covers EVERY searched MPN's card (the
-        # spec said newly-created ids only). The passes are idempotent through the
-        # F1 ladder and to_search is small (primary + substitutes), so re-searching
-        # an old card backfills its decode at ~15ms/card — an improvement, kept.
-        run_deterministic_passes(write_db, card_ids)
+    # --- Spec-code resolver fallback (spec §6) ---
+    # Trigger only on a hard zero from the synchronous fanout AND the feature
+    # flag. The async ICS/NC workers run independently below for the primary
+    # MPN regardless of resolver outcome. Kept UNTHREADED (unlike the primary
+    # save path above): it makes its own ~60s grounded Claude call already, so
+    # it can't avoid blocking briefly regardless, and it only fires on the rare
+    # zero-hit + feature-flagged path — not worth the added complexity of a
+    # second threaded write session for a cold path. Opens its OWN write
+    # session (mirrors _persist_fru_aliases) since the thread's write_db above
+    # is already closed.
+    from .config import settings as _settings
 
-        # 3b. Fire background enrichment for cards without manufacturer
-        await _schedule_background_enrichment(card_ids, write_db)
+    resolved_dicts: list[dict] = []
+    if _settings.spec_resolver_enabled and len(sighting_dicts) == 0 and req.primary_mpn:
+        from sqlalchemy.orm import sessionmaker as _sessionmaker
 
-        # 4. Historical vendors from material cards
-        fresh_vendors = {s.vendor_name.lower() for s in sightings}
-        history = _get_material_history(list(card_ids), fresh_vendors, write_db)
+        _ResolverSession = _sessionmaker(bind=write_bind, autocommit=False, autoflush=False, expire_on_commit=False)
+        resolver_db = _ResolverSession()
+        try:
+            resolver_write_req = resolver_db.get(Requirement, req_id)
+            if resolver_write_req is None:
+                logger.warning("spec_resolver: requirement {} not found in resolver session", req_id)
+            else:
+                try:
+                    from app.services.spec_code_resolver import SpecCodeResolver
 
-        # Stamp per-requirement search timestamp only when the search
-        # actually succeeded. "Success" means at least one connector
-        # returned status=ok — i.e. there was a real response from an
-        # upstream API (even if it had zero matches). If every connector
-        # errored (auth failures, quota exceeded, network), we leave
-        # last_searched_at alone so the 5-minute rate guard in
-        # routers/sightings.py does not silently suppress the user's
-        # next retry.
-        if succeeded_sources:
-            write_req.last_searched_at = now
-        write_db.commit()
-
-        # --- Spec-code resolver fallback (spec §6) ---
-        # Trigger only on a hard zero from the synchronous fanout AND the
-        # feature flag. The async ICS/NC workers run independently below
-        # for the primary MPN regardless of resolver outcome.
-        from .config import settings as _settings
-
-        if _settings.spec_resolver_enabled and len(sightings) == 0 and write_req.primary_mpn:
-            try:
-                from app.services.spec_code_resolver import SpecCodeResolver
-
-                # resolve() owns its own persistence SAVEPOINT and releases the DB
-                # connection during the grounded LLM call, so we do NOT wrap it in a
-                # transaction here — doing so would pin a pooled connection for the
-                # call's ~60s duration. The sightings committed just above are durable
-                # and unaffected, and a concurrent-insert race is recovered inside
-                # resolve() (it reuses the winning row).
-                resolver = SpecCodeResolver(write_db)
-                resolution = await resolver.resolve(
-                    write_req.primary_mpn,
-                    oem=write_req.oem_hint or "IBM",
-                )
-            except Exception:
-                logger.warning(
-                    "spec_resolver: resolve() failed for req {} mpn {}",
-                    req_id,
-                    write_req.primary_mpn,
-                    exc_info=True,
-                )
-                resolution = None
-
-            if resolution is not None and resolution.status != "unresolved" and resolution.avl:
-                avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
-                if avl_mpns:
-                    # Issue 2 fix: AVL re-fanout must honor the same per-MPN
-                    # cooldown that the primary path applies via
-                    # ``_mpn_cooldown_partition`` above, otherwise every click on
-                    # a zero-hit spec-code burns connector quota on the same AVL
-                    # set. ``now`` is the search timestamp computed earlier in
-                    # this call.
-                    to_fetch_avl, _cached_avl = _mpn_cooldown_partition(write_db, avl_mpns, now=now)
-
-                    # Issue 3 fix: explicit try/except distinguishes "connectors
-                    # crashed" from "no AVL hits". Design intent: still enqueue
-                    # async workers + write pending bookkeeping even when the
-                    # live connectors fail — the buyer benefits from worker
-                    # output independent of connector outages.
-                    try:
-                        if to_fetch_avl:
-                            resolved_fresh, resolved_stats = await _fetch_fresh(to_fetch_avl, db)
-                        else:
-                            resolved_fresh, resolved_stats = [], []
-                    except Exception:
-                        logger.warning(
-                            "spec_resolver: AVL fanout failed for req {} (spec_code={}); "
-                            "still enqueueing workers for async pickup",
-                            req_id,
-                            write_req.primary_mpn,
-                            exc_info=True,
-                        )
-                        resolved_fresh, resolved_stats = [], []
-
-                    spec_code_tag = write_req.primary_mpn
-                    for row in resolved_fresh:
-                        row["resolved_via_spec_code"] = spec_code_tag
-                        row["source_mpn"] = row.get("mpn") or row.get("mpn_matched")
-
-                    resolved_succeeded = {
-                        stat["source"]
-                        for stat in resolved_stats
-                        if stat.get("status") == SourceRunStatus.OK.value and not stat.get("error")
-                    }
-                    if resolved_fresh:
-                        resolved_sightings = _save_sightings(resolved_fresh, write_req, write_db, resolved_succeeded)
-                        sightings.extend(resolved_sightings)
-                    else:
-                        resolved_sightings = []
-                    source_stats.extend(resolved_stats)
-                    logger.info(
-                        "spec_resolver: re-fanout produced {} sightings for req {} (spec_code={})",
-                        len(resolved_sightings),
-                        req_id,
-                        spec_code_tag,
+                    # resolve() owns its own persistence SAVEPOINT and releases the DB
+                    # connection during the grounded LLM call, so we do NOT wrap it in a
+                    # transaction here — doing so would pin a pooled connection for the
+                    # call's ~60s duration. The sightings committed just above are durable
+                    # and unaffected, and a concurrent-insert race is recovered inside
+                    # resolve() (it reuses the winning row).
+                    resolver = SpecCodeResolver(resolver_db)
+                    resolution = await resolver.resolve(
+                        resolver_write_req.primary_mpn,
+                        oem=resolver_write_req.oem_hint or "IBM",
                     )
+                except Exception:
+                    logger.warning(
+                        "spec_resolver: resolve() failed for req {} mpn {}",
+                        req_id,
+                        resolver_write_req.primary_mpn,
+                        exc_info=True,
+                    )
+                    resolution = None
 
-                    # Stamp the cooldown clock on every AVL MPN we actually
-                    # searched. Without this, ``_mpn_cooldown_partition`` keeps
-                    # returning the full AVL set as stale on every subsequent
-                    # zero-hit click and re-burns connector quota — the bug the
-                    # partition gate above is meant to prevent. Mirror the
-                    # primary path: upsert a card from the AVL sightings, fall
-                    # back to ``resolve_material_card`` when the fanout was empty
-                    # so a card always exists to carry ``last_searched_at``.
-                    for avl_pn in to_fetch_avl:
-                        try:
-                            avl_card = _upsert_material_card(avl_pn, resolved_sightings, write_db, now)
-                            if avl_card is None:
-                                avl_card = resolve_material_card(avl_pn, write_db)
-                            if avl_card:
-                                avl_card.last_searched_at = now
-                        except Exception as e:
-                            logger.error("AVL_MATERIAL_CARD_STAMP_FAIL: mpn={} error={}", avl_pn, e)
-                            write_db.rollback()
+                if resolution is not None and resolution.status != "unresolved" and resolution.avl:
+                    avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
+                    if avl_mpns:
+                        # Issue 2 fix: AVL re-fanout must honor the same per-MPN
+                        # cooldown that the primary path applies via
+                        # ``_mpn_cooldown_partition`` above, otherwise every click on
+                        # a zero-hit spec-code burns connector quota on the same AVL
+                        # set. ``now`` is the search timestamp computed earlier in
+                        # this call.
+                        to_fetch_avl, _cached_avl = _mpn_cooldown_partition(resolver_db, avl_mpns, now=now)
 
-                    # Enqueue each AVL MPN to ICS and NC workers in addition
-                    # to the primary-MPN enqueue below.
-                    for mpn in avl_mpns:
+                        # Issue 3 fix: explicit try/except distinguishes "connectors
+                        # crashed" from "no AVL hits". Design intent: still enqueue
+                        # async workers + write pending bookkeeping even when the
+                        # live connectors fail — the buyer benefits from worker
+                        # output independent of connector outages.
                         try:
-                            enqueue_for_ics_search(
-                                req_id,
-                                write_db,
-                                override_mpn=mpn,
-                                resolved_via_spec_code=spec_code_tag,
-                            )
+                            if to_fetch_avl:
+                                resolved_fresh, resolved_stats = await _fetch_fresh(to_fetch_avl, db)
+                            else:
+                                resolved_fresh, resolved_stats = [], []
                         except Exception:
                             logger.warning(
-                                "spec_resolver: ICS AVL enqueue failed for req {} mpn {}",
+                                "spec_resolver: AVL fanout failed for req {} (spec_code={}); "
+                                "still enqueueing workers for async pickup",
                                 req_id,
-                                mpn,
+                                resolver_write_req.primary_mpn,
                                 exc_info=True,
                             )
-                        try:
-                            enqueue_for_nc_search(
-                                req_id,
-                                write_db,
-                                override_mpn=mpn,
-                                resolved_via_spec_code=spec_code_tag,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "spec_resolver: NC AVL enqueue failed for req {} mpn {}",
-                                req_id,
-                                mpn,
-                                exc_info=True,
-                            )
-                        try:
-                            enqueue_for_tbf_search(
-                                req_id,
-                                write_db,
-                                override_mpn=mpn,
-                                resolved_via_spec_code=spec_code_tag,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "spec_resolver: TBF AVL enqueue failed for req {} mpn {}",
-                                req_id,
-                                mpn,
-                                exc_info=True,
-                            )
+                            resolved_fresh, resolved_stats = [], []
 
-                    # Record this requirement on the pending row so the admin
-                    # UI can show which requirements consumed each speculative
-                    # mapping (spec §4.2 ``used_in_requirement_ids``).
-                    if resolution.status == "pending":
-                        from app.models.sourcing import OemSpecCodePending
+                        spec_code_tag = resolver_write_req.primary_mpn
+                        for row in resolved_fresh:
+                            row["resolved_via_spec_code"] = spec_code_tag
+                            row["source_mpn"] = row.get("mpn") or row.get("mpn_matched")
 
-                        # Issue 1 fix: ``with_for_update`` takes a row-level lock
-                        # on PG so concurrent ``search_requirement()`` calls for
-                        # different requirements targeting the same (oem,
-                        # spec_code) serialize on this row, eliminating the
-                        # lost-update race on the JSONB list. SQLite ignores the
-                        # lock but its single-threaded execution model means the
-                        # existing test still passes.
-                        oem_normalized = (write_req.oem_hint or "IBM").strip().upper()
-                        spec_code_normalized = spec_code_tag.strip().upper()
-                        pending_row = (
-                            write_db.query(OemSpecCodePending)
-                            .filter_by(
-                                oem=oem_normalized,
-                                spec_code=spec_code_normalized,
+                        resolved_succeeded = {
+                            stat["source"]
+                            for stat in resolved_stats
+                            if stat.get("status") == SourceRunStatus.OK.value and not stat.get("error")
+                        }
+                        if resolved_fresh:
+                            resolved_sightings = _save_sightings(
+                                resolved_fresh, resolver_write_req, resolver_db, resolved_succeeded
                             )
-                            .with_for_update()
-                            .one_or_none()
+                            resolved_dicts = [sighting_to_dict(s) for s in resolved_sightings]
+                        else:
+                            resolved_sightings = []
+                        source_stats.extend(resolved_stats)
+                        logger.info(
+                            "spec_resolver: re-fanout produced {} sightings for req {} (spec_code={})",
+                            len(resolved_sightings),
+                            req_id,
+                            spec_code_tag,
                         )
-                        if pending_row is not None:
-                            used = list(pending_row.used_in_requirement_ids or [])
-                            if req_id not in used:
-                                used.append(req_id)
-                                pending_row.used_in_requirement_ids = used
-                            write_db.commit()
-        # --- end resolver block ---
 
-        # Aggregated activity-timeline entry: one row per search batch,
-        # never one per sighting. Skipped for zero-result searches so the
-        # timeline stays free of noise. Logged after the resolver fallback so
-        # the count reflects any AVL sightings the resolver appended.
-        if sightings:
-            _sighting_sources = sorted(succeeded_sources)
-            log_activity(
-                write_db,
-                activity_type=ActivityType.SIGHTING_ADDED,
-                requisition_id=write_req.requisition_id,
-                requirement_id=write_req.id,
-                user_id=None,
-                channel="system",
-                description=(
-                    f"{len(sightings)} sighting(s) added"
-                    + (f" from {', '.join(_sighting_sources)}" if _sighting_sources else "")
-                ),
-                details={"count": len(sightings), "sources": _sighting_sources},
-            )
-            write_db.commit()
+                        # Stamp the cooldown clock on every AVL MPN we actually
+                        # searched. Without this, ``_mpn_cooldown_partition`` keeps
+                        # returning the full AVL set as stale on every subsequent
+                        # zero-hit click and re-burns connector quota — the bug the
+                        # partition gate above is meant to prevent. Mirror the
+                        # primary path: upsert a card from the AVL sightings, fall
+                        # back to ``resolve_material_card`` when the fanout was empty
+                        # so a card always exists to carry ``last_searched_at``.
+                        for avl_pn in to_fetch_avl:
+                            try:
+                                avl_card = _upsert_material_card(avl_pn, resolved_sightings, resolver_db, now)
+                                if avl_card is None:
+                                    avl_card = resolve_material_card(avl_pn, resolver_db)
+                                if avl_card:
+                                    avl_card.last_searched_at = now
+                            except Exception as e:
+                                logger.error("AVL_MATERIAL_CARD_STAMP_FAIL: mpn={} error={}", avl_pn, e)
+                                resolver_db.rollback()
 
-        # Browser-automation workers: best-effort enqueue once per call. Both
-        # workers key by requirement_id and internally normalize req.primary_mpn,
-        # so per-substitute iteration would just round-trip dedup checks. Called
-        # after write_db.commit() so the worker reads the same durable state we
-        # just wrote.
-        try:
-            enqueue_for_ics_search(req_id, write_db)
-        except Exception:
-            logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
-        try:
-            enqueue_for_nc_search(req_id, write_db)
-        except Exception:
-            logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
-        try:
-            enqueue_for_tbf_search(req_id, write_db)
-        except Exception:
-            logger.warning("TBF enqueue failed for requirement {}", req_id, exc_info=True)
+                        # Enqueue each AVL MPN to ICS and NC workers in addition
+                        # to the primary-MPN enqueue below.
+                        for mpn in avl_mpns:
+                            try:
+                                enqueue_for_ics_search(
+                                    req_id,
+                                    resolver_db,
+                                    override_mpn=mpn,
+                                    resolved_via_spec_code=spec_code_tag,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "spec_resolver: ICS AVL enqueue failed for req {} mpn {}",
+                                    req_id,
+                                    mpn,
+                                    exc_info=True,
+                                )
+                            try:
+                                enqueue_for_nc_search(
+                                    req_id,
+                                    resolver_db,
+                                    override_mpn=mpn,
+                                    resolved_via_spec_code=spec_code_tag,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "spec_resolver: NC AVL enqueue failed for req {} mpn {}",
+                                    req_id,
+                                    mpn,
+                                    exc_info=True,
+                                )
+                            try:
+                                enqueue_for_tbf_search(
+                                    req_id,
+                                    resolver_db,
+                                    override_mpn=mpn,
+                                    resolved_via_spec_code=spec_code_tag,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "spec_resolver: TBF AVL enqueue failed for req {} mpn {}",
+                                    req_id,
+                                    mpn,
+                                    exc_info=True,
+                                )
 
-        # Expunge sightings so they remain usable after session close
-        for s in sightings:
-            write_db.expunge(s)
+                        # Record this requirement on the pending row so the admin
+                        # UI can show which requirements consumed each speculative
+                        # mapping (spec §4.2 ``used_in_requirement_ids``).
+                        if resolution.status == "pending":
+                            from app.models.sourcing import OemSpecCodePending
+
+                            # Issue 1 fix: ``with_for_update`` takes a row-level lock
+                            # on PG so concurrent ``search_requirement()`` calls for
+                            # different requirements targeting the same (oem,
+                            # spec_code) serialize on this row, eliminating the
+                            # lost-update race on the JSONB list. SQLite ignores the
+                            # lock but its single-threaded execution model means the
+                            # existing test still passes.
+                            oem_normalized = (resolver_write_req.oem_hint or "IBM").strip().upper()
+                            spec_code_normalized = spec_code_tag.strip().upper()
+                            pending_row = (
+                                resolver_db.query(OemSpecCodePending)
+                                .filter_by(
+                                    oem=oem_normalized,
+                                    spec_code=spec_code_normalized,
+                                )
+                                .with_for_update()
+                                .one_or_none()
+                            )
+                            if pending_row is not None:
+                                used = list(pending_row.used_in_requirement_ids or [])
+                                if req_id not in used:
+                                    used.append(req_id)
+                                    pending_row.used_in_requirement_ids = used
+                                resolver_db.commit()
+        except Exception:
+            resolver_db.rollback()
+            raise
+        finally:
+            resolver_db.close()
+    # --- end resolver block ---
+
+    all_sighting_dicts = sighting_dicts + resolved_dicts
+
+    # Aggregated activity-timeline entry: one row per search batch, never one
+    # per sighting. Skipped for zero-result searches so the timeline stays free
+    # of noise. Logged after the resolver fallback so the count reflects any
+    # AVL sightings the resolver appended.
+    if all_sighting_dicts:
+        _sighting_sources = sorted(succeeded_sources)
+        log_activity(
+            db,
+            activity_type=ActivityType.SIGHTING_ADDED,
+            requisition_id=requisition_id,
+            requirement_id=req_id,
+            user_id=None,
+            channel="system",
+            description=(
+                f"{len(all_sighting_dicts)} sighting(s) added"
+                + (f" from {', '.join(_sighting_sources)}" if _sighting_sources else "")
+            ),
+            details={"count": len(all_sighting_dicts), "sources": _sighting_sources},
+        )
+        db.commit()
+
+    # Browser-automation workers: best-effort enqueue once per call. Both
+    # workers key by requirement_id and internally normalize req.primary_mpn,
+    # so per-substitute iteration would just round-trip dedup checks. Called
+    # after the write thread's commit, so the worker reads the same durable
+    # state we just wrote.
+    try:
+        enqueue_for_ics_search(req_id, db)
     except Exception:
-        write_db.rollback()
-        raise
-    finally:
-        write_db.close()
+        logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
+    try:
+        enqueue_for_nc_search(req_id, db)
+    except Exception:
+        logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
+    try:
+        enqueue_for_tbf_search(req_id, db)
+    except Exception:
+        logger.warning("TBF enqueue failed for requirement {}", req_id, exc_info=True)
 
     # 5. Combine + sort
     results = []
-    for s in sightings:
-        d = sighting_to_dict(s)
+    for d in all_sighting_dicts:
+        d = dict(d)
         d["is_historical"] = False
         d["is_material_history"] = False
         results.append(d)
@@ -992,19 +1121,31 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
             }
         )
 
-    # 4. v2 scoring with median price context
-    prices = [r["unit_price"] for r in results if r.get("unit_price") and r["unit_price"] > 0]
-    median_price = _median(prices)
-    for r in results:
+    # 4. v2 scoring with median price context. Prices are converted to USD before
+    # the median and the per-offer comparison so a search mixing e.g. JPY and USD
+    # listings doesn't compare raw numbers across currencies (currency-blind price
+    # scoring bug). `results` is built 1:1 from `fresh` above (no filtering), so
+    # zip pairs each scored row with its source dict — `fresh`'s real freshness tag
+    # (`_source_age_hours`, 0.0 for a live fetch, >0 for a Redis-cache-served row)
+    # replaces the previously-hardcoded age_hours=0.0.
+    prices_usd = [
+        p
+        for p in (
+            to_usd(r["unit_price"], r.get("currency")) for r in results if r.get("unit_price") and r["unit_price"] > 0
+        )
+        if p is not None
+    ]
+    median_price = _median(prices_usd)
+    for r, src in zip(results, fresh):
         norm_name = normalize_vendor_name(r["vendor_name"])
         v2_total, _ = score_sighting_v2(
             vendor_score=vendor_score_map.get(norm_name),
             is_authorized=r["is_authorized"],
-            unit_price=r["unit_price"],
+            unit_price=to_usd(r["unit_price"], r.get("currency")),
             median_price=median_price,
             qty_available=r["qty_available"],
             target_qty=None,
-            age_hours=0.0,
+            age_hours=src.get("_source_age_hours", 0.0),
             has_price=r["unit_price"] is not None,
             has_qty=r["qty_available"] is not None,
             has_lead_time=r.get("lead_time_days") is not None,
@@ -1309,14 +1450,49 @@ def _make_stat(source_name: str, status: SourceRunStatus | str, error: str | Non
     return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status_str}
 
 
-def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
-    """Build enabled connectors with credentials, returning (connectors,
-    source_stats_map, disabled_sources).
+# In-process cache for the connector config lookups (disabled/errored source sets +
+# batched credentials) that _build_connectors otherwise re-queries on EVERY search.
+# 60s TTL bounds staleness: an operator who disables a source or rotates a credential
+# waits at most this long to see it take effect on the next search (or call
+# _reset_connector_config_cache() to force it immediately). A no-op under TESTING=1 so
+# tests stay deterministic without needing the reset hook.
+_CONNECTOR_CONFIG_TTL_S: Final[float] = 60.0
+_connector_config_cache: dict | None = None
+_connector_config_cache_at: float = 0.0
 
-    Sources with status='disabled' or status='error' (set by health_monitor) are
-    excluded; their entries are seeded into source_stats_map with 'disabled' or
-    'error_skipped' chips so the UI renders them.
+
+def _reset_connector_config_cache() -> None:
+    """Clear the in-process connector-config cache.
+
+    Call after any settings/credential/source-status mutation (Settings → Sources
+    enable/disable, credential rotation) so the next search sees fresh config
+    immediately instead of waiting out the 60s TTL. Also the test-fixture hook for
+    forcing a clean cache between tests that DO want to exercise the cache itself.
     """
+    global _connector_config_cache, _connector_config_cache_at
+    _connector_config_cache = None
+    _connector_config_cache_at = 0.0
+
+
+def _load_connector_config(db: Session) -> dict:
+    """Fetch the disabled/errored source sets + batched credentials _build_connectors
+    needs, from a 60s in-process cache when fresh (no-op under TESTING=1).
+
+    This is the 2-3 DB round trips _build_connectors previously ran on EVERY search
+    (including every keystroke-driven interactive MPN search) — a buyer session with
+    several searches in a row was re-querying identical, rarely-changing config each
+    time.
+    """
+    global _connector_config_cache, _connector_config_cache_at
+    testing = bool(os.environ.get("TESTING"))
+    now = time.monotonic()
+    if (
+        not testing
+        and _connector_config_cache is not None
+        and (now - _connector_config_cache_at) < _CONNECTOR_CONFIG_TTL_S
+    ):
+        return _connector_config_cache
+
     disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.DISABLED.value).all()}
     errored_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.ERROR.value).all()}
 
@@ -1339,6 +1515,28 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
             ("element14", "ELEMENT14_API_KEY"),
         ],
     )
+
+    config = {"disabled_sources": disabled_sources, "errored_sources": errored_sources, "creds": creds}
+    if not testing:
+        _connector_config_cache = config
+        _connector_config_cache_at = now
+    return config
+
+
+def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
+    """Build enabled connectors with credentials, returning (connectors,
+    source_stats_map, disabled_sources).
+
+    Sources with status='disabled' or status='error' (set by health_monitor) are
+    excluded; their entries are seeded into source_stats_map with 'disabled' or
+    'error_skipped' chips so the UI renders them. Config (disabled/errored sets +
+    credentials) comes from the 60s in-process cache in _load_connector_config —
+    connector INSTANCES below are always constructed fresh per call.
+    """
+    config = _load_connector_config(db)
+    disabled_sources = config["disabled_sources"]
+    errored_sources = config["errored_sources"]
+    creds = config["creds"]
 
     def _c(source_name, var_name):
         return creds.get((source_name, var_name))
@@ -1396,7 +1594,7 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     e14_key = _c("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
-    return connectors, source_stats_map, disabled_sources  # type: ignore[return-value]  # set holds instance-level str values
+    return connectors, source_stats_map, disabled_sources
 
 
 # Canonical display names for the live-market connectors (used by the dossier
@@ -1484,6 +1682,63 @@ def _any_pn_obsolete(db: Session, pns: list[str]) -> bool:
     )
 
 
+def _flatten_dedupe_filter_junk(raw: list[dict]) -> list[dict]:
+    """Flatten already-collected raw connector hits, dedupe by (vendor, mpn_key, sku),
+    and drop junk vendors (no-seller placeholders etc).
+
+    Shared by ``_fetch_fresh`` (multi-connector x multi-PN fan-out) and
+    ``stream_search_mpn`` (single-PN SSE fan-out) so both write byte-compatible
+    payloads into the shared 15-min search-result Redis cache (``_search_cache_key`` /
+    ``_get_search_cache`` / ``_set_search_cache``) — a streaming search's results become
+    a cache hit for a later requisition search of the same MPN, and vice versa.
+    """
+    from .shared_constants import JUNK_VENDORS
+
+    seen: set[tuple] = set()
+    out = []
+    for r in raw:
+        key = (
+            r.get("vendor_name", "").lower(),
+            normalize_mpn_key(r.get("mpn_matched", "")),
+            str(r.get("vendor_sku") or "").lower(),
+        )
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+
+
+def _aggregate_source_stats(stats_updates: list[tuple[str, int, int, str | None]]) -> dict[str, dict]:
+    """Aggregate per-connector-call (source, hits, ms, error) tuples into one row per
+    source.
+
+    A source that ran more than once in a single fan-out (e.g. multiple PNs, or
+    multiple streaming rounds) reports summed results / max latency / first error.
+    Shared by ``_fetch_fresh`` and ``stream_search_mpn`` so both compute identical
+    per-source stats for the shared search-result cache and the ApiSource telemetry
+    flush.
+    """
+    agg: dict[str, dict] = {}
+    for source_name, hit_count, elapsed_ms, error in stats_updates:
+        if not source_name:
+            continue
+        if source_name in agg:
+            agg[source_name]["results"] += hit_count
+            agg[source_name]["ms"] = max(agg[source_name]["ms"], elapsed_ms)
+            if error and not agg[source_name]["error"]:
+                agg[source_name]["error"] = error
+                agg[source_name]["status"] = SourceRunStatus.ERROR.value
+        else:
+            agg[source_name] = {
+                "source": source_name,
+                "results": hit_count,
+                "ms": elapsed_ms,
+                "error": error,
+                "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
+            }
+    return agg
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Run all enabled connectors against pns and return (results, source_stats).
 
@@ -1491,6 +1746,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     failed), 'error_skipped' (excluded because health_monitor previously flipped
     api_sources.status to 'error' — auto-recovers on next ping success), 'skipped' (no
     creds), or 'disabled' (operator turned the source off).
+
+    Each returned result dict carries ``_source_age_hours`` (0.0 for a live fetch; the
+    real elapsed time since the write for a Redis cache HIT) so scoring can give a
+    stale cache-served row honest freshness credit instead of always assuming age 0.
     """
     connectors, source_stats_map, disabled_sources = _build_connectors(db)
 
@@ -1516,11 +1775,19 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # best-effort (swallows RedisError internally), so no new exception escapes here.
     cached = await asyncio.to_thread(_get_search_cache, cache_key)
     if cached is not None:
-        cached_results, cached_stats = cached
+        cached_results, cached_stats, cached_at_iso = cached
+        cache_age_hours = _cache_age_hours(cached_at_iso)
+        for r in cached_results:
+            r["_source_age_hours"] = cache_age_hours
         # Merge cached stats with disabled/skipped entries
         cached_stats_map = {s["source"]: s for s in cached_stats}
         source_stats_map.update(cached_stats_map)
-        logger.info("Search cache HIT for {} ({} results)", pns[0] if pns else "?", len(cached_results))
+        logger.info(
+            "Search cache HIT for {} ({} results, {:.2f}h old)",
+            pns[0] if pns else "?",
+            len(cached_results),
+            cache_age_hours,
+        )
         return cached_results, list(source_stats_map.values())
 
     # Run ALL connectors × ALL part numbers in parallel.
@@ -1630,29 +1897,22 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         logger.warning("API source stats update failed: {}", e)
         db.rollback()
 
-    # Flatten and dedupe
+    # Flatten, dedupe, and drop junk vendors
     raw = []
     for result in results_lists:
         if isinstance(result, list):
             raw.extend(result)
         # If it's an exception from gather, skip it
 
-    seen = set()
-    out = []
-    for r in raw:
-        key = (
+    out = _flatten_dedupe_filter_junk(raw)
+    seen = {
+        (
             r.get("vendor_name", "").lower(),
             normalize_mpn_key(r.get("mpn_matched", "")),
             str(r.get("vendor_sku") or "").lower(),
         )
-        if key not in seen:
-            seen.add(key)
-            out.append(r)
-
-    # Filter out junk vendors — no sellers, blanks, placeholders
-    from .shared_constants import JUNK_VENDORS
-
-    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+        for r in out
+    }
 
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:
@@ -1707,8 +1967,40 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 pns[0] if pns else "?",
                 ", ".join(reasons) or "manual",
             )
-            ai_tasks = [_throttled(ai_connector, pn) for pn in pns]
-            ai_results_lists = await asyncio.gather(*ai_tasks, return_exceptions=True)
+            # Bounded budget: this gather previously ran AFTER the main
+            # asyncio.wait deadline already returned, so a slow Claude web-search
+            # call was bounded only by the connector's own 60s httpx timeout —
+            # it could hold the whole _fetch_fresh call open for a minute past
+            # every other connector. Mirror the main fan-out's cancel-on-timeout
+            # pattern (settings.ai_search_timeout_s) so one hung AI task can no
+            # longer blow the search past its intended budget.
+            ai_task_objs = [asyncio.create_task(_throttled(ai_connector, pn)) for pn in pns]
+            if ai_task_objs:
+                _ai_done, ai_pending = await asyncio.wait(ai_task_objs, timeout=settings.ai_search_timeout_s)
+            else:
+                ai_pending = set()
+            if ai_pending:
+                logger.warning(
+                    "AI search budget {:.1f}s exceeded; cancelling {}/{} pending AI task(s) for {}",
+                    settings.ai_search_timeout_s,
+                    len(ai_pending),
+                    len(ai_task_objs),
+                    pns[0] if pns else "?",
+                )
+                for t in ai_pending:
+                    t.cancel()
+                await asyncio.gather(*ai_pending, return_exceptions=True)
+                ai_budget_ms = int(settings.ai_search_timeout_s * 1000)
+                for t in ai_pending:
+                    stats_updates.append(("ai_live_web", 0, ai_budget_ms, "AI search budget exceeded"))
+
+            ai_results_lists: list = []
+            for t in ai_task_objs:
+                if t.cancelled():
+                    continue
+                exc = t.exception()
+                ai_results_lists.append(exc if exc is not None else t.result())
+
             for result in ai_results_lists:
                 if isinstance(result, list):
                     for r in result:
@@ -1731,26 +2023,17 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             )
             source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.SKIPPED)
 
-    # Build source_stats from stats_updates (connectors that actually ran)
-    # Aggregate per source (a connector may run for multiple PNs)
-    agg: dict[str, dict] = {}
-    for source_name, hit_count, elapsed_ms, error in stats_updates:
-        if source_name in agg:
-            agg[source_name]["results"] += hit_count
-            agg[source_name]["ms"] = max(agg[source_name]["ms"], elapsed_ms)
-            if error and not agg[source_name]["error"]:
-                agg[source_name]["error"] = error
-                agg[source_name]["status"] = SourceRunStatus.ERROR.value
-        else:
-            agg[source_name] = {
-                "source": source_name,
-                "results": hit_count,
-                "ms": elapsed_ms,
-                "error": error,
-                "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
-            }
+    # Build source_stats from stats_updates (connectors that actually ran),
+    # aggregated per source (a connector may run for multiple PNs).
+    agg = _aggregate_source_stats(stats_updates)
     # Merge with skipped/disabled entries
     source_stats_map.update(agg)
+
+    # Every row here came from a live connector call (or the AI gather, also live)
+    # this call — real age is 0. setdefault so a cache HIT (which returns early
+    # above, already tagged) never reaches this line.
+    for r in out:
+        r.setdefault("_source_age_hours", 0.0)
 
     # Cache results for subsequent searches of the same PNs — sync Redis SETEX
     # off the event loop so a slow Redis doesn't stall the loop (PERF-2).
@@ -1853,7 +2136,9 @@ def _save_sightings(
             date_code=clean_date_code,
             lead_time_days=clean_lead_time_days,
             lead_time=r.get("lead_time"),
-            raw_data=r,
+            # Strip the internal freshness tag (_source_age_hours) — raw_data is
+            # meant to mirror exactly what the connector returned.
+            raw_data={k: v for k, v in r.items() if k != "_source_age_hours"},
             evidence_tier=tier_for_sighting(r.get("source_type"), is_auth),
             # Spec-code resolver lineage (spec §6). Both null on the normal
             # path; populated by the search_requirement re-fanout block when
@@ -1868,20 +2153,32 @@ def _save_sightings(
         db.add(s)
         sightings.append(s)
 
-    # PR 3: Compute multi-factor v2 scores with median price context
-    prices = [s.unit_price for s in sightings if s.unit_price and s.unit_price > 0]
-    median_price = _median(prices)
+    # PR 3: Compute multi-factor v2 scores with median price context. Prices are
+    # converted to USD before the median and the per-offer comparison (currency-blind
+    # price scoring bug — a search mixing e.g. JPY and USD listings previously compared
+    # raw numbers across currencies). `sightings` is built 1:1 from `fresh` above (one
+    # Sighting appended per row, no filtering), so zip pairs each new Sighting with its
+    # source dict for the real freshness tag: age_hours=0.0 is correct for a genuinely
+    # live connector hit, but a row served from the 15-min search-result Redis cache
+    # (`_fetch_fresh`'s cache-HIT path) carries its real elapsed age in
+    # `_source_age_hours` instead of falsely scoring as brand-fresh.
+    prices_usd = [
+        p
+        for p in (to_usd(s.unit_price, s.currency) for s in sightings if s.unit_price and s.unit_price > 0)
+        if p is not None
+    ]
+    median_price = _median(prices_usd)
     target_qty = req.target_qty if req.target_qty else None
-    for s in sightings:
+    for s, r in zip(sightings, fresh):
         norm_name = s.vendor_name_normalized or ""
         v2_total, v2_comp = score_sighting_v2(
             vendor_score=vendor_score_map.get(norm_name),
             is_authorized=s.is_authorized,
-            unit_price=s.unit_price,
+            unit_price=to_usd(s.unit_price, s.currency),
             median_price=median_price,
             qty_available=s.qty_available,
             target_qty=target_qty,
-            age_hours=0.0,  # Fresh search results are age=0
+            age_hours=r.get("_source_age_hours", 0.0),
             has_price=s.unit_price is not None,
             has_qty=s.qty_available is not None,
             has_lead_time=s.lead_time_days is not None,
@@ -2802,194 +3099,262 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
             vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
             vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
 
-            # Create a task per connector, tagging with source_name
-            task_map: dict[asyncio.Task, str] = {}
-            for conn in connectors:
-                source_name = getattr(
-                    conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown")
-                )
+            # Shared 15-min search-result cache (the same one _fetch_fresh reads/writes
+            # for requisition searches — _search_cache_key is keyed on PNs + active
+            # connector set). Before this fix the interactive streaming path never
+            # consulted it, so every interactive search re-hit live supplier APIs even
+            # moments after an identical requisition (or streaming) search had already
+            # cached the answer.
+            active_names = sorted(_CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") for c in connectors)
+            shared_cache_key = _search_cache_key([mpn], active_names)
+            shared_cached = await asyncio.to_thread(_get_search_cache, shared_cache_key)
 
-                async def _run(c=conn, pn=mpn):
-                    t0 = time.time()
-                    hits = await c.search(pn)
-                    elapsed = int((time.time() - t0) * 1000)
-                    return hits, elapsed
-
-                task = asyncio.create_task(_run())
-                task_map[task] = source_name
-
-            pending = set(task_map.keys())
-
-            # Per-source telemetry accumulated across the run, flushed to ApiSource in
-            # one guarded pass after the loop (mirrors _fetch_fresh) so streaming
-            # failures/latency show up in admin health — the interactive path recorded
-            # zero telemetry before. Tuples: (source, hit_count, elapsed_ms, error).
             stats_updates: list[tuple[str, int, int, str | None]] = []
 
-            # Aggregate deadline: the interactive SSE search shares the requisition
-            # path's budget. Track the remaining budget each round; when it is spent,
-            # cancel the stragglers, publish a timeout chip for each, and stop — so one
-            # hung/rate-limited connector cannot hold the browser spinner for minutes.
-            budget_s = settings.search_total_timeout_s
-            while pending:
-                remaining = budget_s - (time.time() - t_start)
-                done, pending, timed_out = await _await_next_within_budget(pending, remaining)
+            if shared_cached is not None:
+                cached_results, cached_stats, cached_at_iso = shared_cached
+                cache_age_hours = _cache_age_hours(cached_at_iso)
+                logger.info(
+                    "Streaming search cache HIT for {} ({} results, {:.2f}h old) search_id={}",
+                    mpn,
+                    len(cached_results),
+                    cache_age_hours,
+                    search_id,
+                )
 
-                if timed_out:
-                    budget_ms = int(budget_s * 1000)
-                    logger.warning(
-                        "Streaming search budget {:.1f}s exceeded; cancelling {} pending source(s) search_id={} mpn={}",
-                        budget_s,
-                        len(timed_out),
-                        search_id,
-                        mpn,
+                on_target = []
+                for r in cached_results:
+                    r.setdefault("mpn_matched", mpn)
+                    if fuzzy_mpn_match(mpn, r.get("mpn_matched")):
+                        on_target.append(r)
+                    else:
+                        off_target_total += 1
+
+                scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
+                new_cards, _updated_cards = _incremental_dedup(scored_hits, accumulated)
+                total_results = len(on_target)
+                sources_completed = len(cached_stats)
+
+                for stat in cached_stats:
+                    await active_broker.publish(
+                        channel,
+                        "source-status",
+                        json.dumps(
+                            {
+                                "source": stat.get("source"),
+                                "status": stat.get("status", SourceRunStatus.OK.value),
+                                "error": stat.get("error"),
+                                "results": stat.get("results", 0),
+                                "ms": stat.get("ms", 0),
+                            },
+                            default=str,
+                        ),
                     )
-                    for task in timed_out:
-                        source_name = task_map[task]
-                        sources_completed += 1
-                        stats_updates.append((source_name, 0, budget_ms, "search budget exceeded"))
-                        await active_broker.publish(
-                            channel,
-                            "source-status",
-                            json.dumps(
-                                {
-                                    "source": source_name,
-                                    "status": SourceRunStatus.ERROR.value,
-                                    "error": "search budget exceeded",
-                                    "results": 0,
-                                    "ms": budget_ms,
-                                },
-                                default=str,
-                            ),
-                        )
-                    break
 
-                for task in done:
-                    source_name = task_map[task]
-                    sources_completed += 1
+                if new_cards:
+                    cards_html = _render_search_vendor_cards_html(
+                        new_cards, search_id=search_id, start_index=0, swap_oob=False
+                    )
+                    await active_broker.publish(channel, "results", cards_html)
+                # No ApiSource telemetry write on a cache hit — mirrors _fetch_fresh,
+                # which only touches ApiSource on a live fetch.
+            else:
+                # Create a task per connector, tagging with source_name
+                task_map: dict[asyncio.Task, str] = {}
+                for conn in connectors:
+                    source_name = getattr(
+                        conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown")
+                    )
 
-                    try:
-                        hits, elapsed_ms = task.result()
+                    async def _run(c=conn, pn=mpn):
+                        t0 = time.time()
+                        hits = await c.search(pn)
+                        elapsed = int((time.time() - t0) * 1000)
+                        return hits, elapsed
 
-                        # Relevance guard: keep only hits whose matched MPN is the
-                        # searched part (or a close revision of it). Keyword-matching
-                        # connectors — e.g. component distributors hit with a storage
-                        # FRU — return rows under a DIFFERENT mpn; those are catalog
-                        # noise, not offers for this part, so we exclude them rather
-                        # than render a $100 component as an "offer" for an HDD.
-                        # Cross-references (alternate/FRU part numbers) live in the
-                        # "What we know" panel, not the live-market offer list.
-                        on_target = []
-                        for r in hits:
-                            r.setdefault("mpn_matched", mpn)
-                            if fuzzy_mpn_match(mpn, r.get("mpn_matched")):
-                                on_target.append(r)
-                            else:
-                                off_target_total += 1
-                        hit_count = len(on_target)
+                    task = asyncio.create_task(_run())
+                    task_map[task] = source_name
 
-                        # Score and normalize each on-target hit
-                        scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
+                pending = set(task_map.keys())
 
-                        # Incremental dedup against accumulated results
-                        new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
+                # Raw (pre-score) on-target hits collected across the whole run — written
+                # into the shared search-result cache below in the SAME flat, unscored
+                # shape _fetch_fresh's cache-miss path produces, so a later requisition
+                # search of this MPN (or another streaming search) gets a cache HIT.
+                raw_out: list[dict] = []
 
-                        # Publish source status
-                        await active_broker.publish(
-                            channel,
-                            "source-status",
-                            json.dumps(
-                                {
-                                    "source": source_name,
-                                    "status": SourceRunStatus.OK.value,
-                                    "results": hit_count,
-                                    "ms": elapsed_ms,
-                                },
-                                default=str,
-                            ),
-                        )
+                # Aggregate deadline: the interactive SSE search shares the requisition
+                # path's budget. Track the remaining budget each round; when it is spent,
+                # cancel the stragglers, publish a timeout chip for each, and stop — so one
+                # hung/rate-limited connector cannot hold the browser spinner for minutes.
+                budget_s = settings.search_total_timeout_s
+                while pending:
+                    remaining = budget_s - (time.time() - t_start)
+                    done, pending, timed_out = await _await_next_within_budget(pending, remaining)
 
-                        # Publish new result cards (HTML for sse-swap="results" — not JSON)
-                        if new_cards:
-                            start_idx = len(accumulated) - len(new_cards)
-                            cards_html = _render_search_vendor_cards_html(
-                                new_cards,
-                                search_id=search_id,
-                                start_index=start_idx,
-                                swap_oob=False,
-                            )
-                            await active_broker.publish(channel, "results", cards_html)
-
-                        # Publish updated cards as OOB HTML so existing vendor-card nodes refresh
-                        if updated_cards:
-                            update_html = "".join(
-                                _render_search_vendor_cards_html(
-                                    [card],
-                                    search_id=search_id,
-                                    start_index=0,
-                                    swap_oob=True,
-                                )
-                                for card in updated_cards
-                            )
-                            await active_broker.publish(channel, "card-update", update_html)
-
-                        total_results += hit_count
-                        stats_updates.append((source_name, hit_count, elapsed_ms, None))
-
-                    except Exception as e:
-                        stats_updates.append((source_name, 0, 0, _redact_secrets(str(e))[:500]))
-                        logger.exception(
-                            "Streaming connector failed: source={} search_id={} mpn={}",
-                            source_name,
+                    if timed_out:
+                        budget_ms = int(budget_s * 1000)
+                        logger.warning(
+                            "Streaming search budget {:.1f}s exceeded; cancelling {} pending source(s) search_id={} mpn={}",
+                            budget_s,
+                            len(timed_out),
                             search_id,
                             mpn,
                         )
-                        await active_broker.publish(
-                            channel,
-                            "source-status",
-                            json.dumps(
-                                {
-                                    "source": source_name,
-                                    "status": SourceRunStatus.ERROR.value,
-                                    "error": _redact_secrets(str(e))[:500],
-                                    "results": 0,
-                                    "ms": 0,
-                                },
-                                default=str,
-                            ),
-                        )
+                        for task in timed_out:
+                            source_name = task_map[task]
+                            sources_completed += 1
+                            stats_updates.append((source_name, 0, budget_ms, "search budget exceeded"))
+                            await active_broker.publish(
+                                channel,
+                                "source-status",
+                                json.dumps(
+                                    {
+                                        "source": source_name,
+                                        "status": SourceRunStatus.ERROR.value,
+                                        "error": "search budget exceeded",
+                                        "results": 0,
+                                        "ms": budget_ms,
+                                    },
+                                    default=str,
+                                ),
+                            )
+                        break
 
-            # Flush per-source telemetry to ApiSource in one guarded pass (mirrors
-            # _fetch_fresh) — records searches/results/latency + errors (including
-            # budget-exceeded timeouts) so the interactive path is visible in admin
-            # health. Best-effort: a telemetry failure must never abort the search.
-            try:
-                source_names = {s[0] for s in stats_updates if s[0]}
-                src_map = (
-                    {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
-                    if source_names
-                    else {}
-                )
-                for source_name, hit_count, elapsed_ms, error in stats_updates:
-                    src = src_map.get(source_name)
-                    if not src:
-                        continue
-                    src.total_searches = (src.total_searches or 0) + 1
-                    src.total_results = (src.total_results or 0) + hit_count
-                    if not error:
-                        src.last_success = datetime.now(UTC)
-                        prev = src.avg_response_ms or elapsed_ms
-                        src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
-                        src.status = ApiSourceStatus.LIVE.value
-                        src.last_error = None
-                    else:
-                        src.last_error = error
-                        src.last_error_at = datetime.now(UTC)
-                        src.error_count_24h = (src.error_count_24h or 0) + 1
-                db.commit()
-            except Exception as e:
-                logger.warning("API source stats update failed (streaming): {}", e)
-                db.rollback()
+                    for task in done:
+                        source_name = task_map[task]
+                        sources_completed += 1
+
+                        try:
+                            hits, elapsed_ms = task.result()
+
+                            # Relevance guard: keep only hits whose matched MPN is the
+                            # searched part (or a close revision of it). Keyword-matching
+                            # connectors — e.g. component distributors hit with a storage
+                            # FRU — return rows under a DIFFERENT mpn; those are catalog
+                            # noise, not offers for this part, so we exclude them rather
+                            # than render a $100 component as an "offer" for an HDD.
+                            # Cross-references (alternate/FRU part numbers) live in the
+                            # "What we know" panel, not the live-market offer list.
+                            on_target = []
+                            for r in hits:
+                                r.setdefault("mpn_matched", mpn)
+                                if fuzzy_mpn_match(mpn, r.get("mpn_matched")):
+                                    on_target.append(r)
+                                else:
+                                    off_target_total += 1
+                            hit_count = len(on_target)
+                            raw_out.extend(on_target)
+
+                            # Score and normalize each on-target hit
+                            scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
+
+                            # Incremental dedup against accumulated results
+                            new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
+
+                            # Publish source status
+                            await active_broker.publish(
+                                channel,
+                                "source-status",
+                                json.dumps(
+                                    {
+                                        "source": source_name,
+                                        "status": SourceRunStatus.OK.value,
+                                        "results": hit_count,
+                                        "ms": elapsed_ms,
+                                    },
+                                    default=str,
+                                ),
+                            )
+
+                            # Publish new result cards (HTML for sse-swap="results" — not JSON)
+                            if new_cards:
+                                start_idx = len(accumulated) - len(new_cards)
+                                cards_html = _render_search_vendor_cards_html(
+                                    new_cards,
+                                    search_id=search_id,
+                                    start_index=start_idx,
+                                    swap_oob=False,
+                                )
+                                await active_broker.publish(channel, "results", cards_html)
+
+                            # Publish updated cards as OOB HTML so existing vendor-card nodes refresh
+                            if updated_cards:
+                                update_html = "".join(
+                                    _render_search_vendor_cards_html(
+                                        [card],
+                                        search_id=search_id,
+                                        start_index=0,
+                                        swap_oob=True,
+                                    )
+                                    for card in updated_cards
+                                )
+                                await active_broker.publish(channel, "card-update", update_html)
+
+                            total_results += hit_count
+                            stats_updates.append((source_name, hit_count, elapsed_ms, None))
+
+                        except Exception as e:
+                            stats_updates.append((source_name, 0, 0, _redact_secrets(str(e))[:500]))
+                            logger.exception(
+                                "Streaming connector failed: source={} search_id={} mpn={}",
+                                source_name,
+                                search_id,
+                                mpn,
+                            )
+                            await active_broker.publish(
+                                channel,
+                                "source-status",
+                                json.dumps(
+                                    {
+                                        "source": source_name,
+                                        "status": SourceRunStatus.ERROR.value,
+                                        "error": _redact_secrets(str(e))[:500],
+                                        "results": 0,
+                                        "ms": 0,
+                                    },
+                                    default=str,
+                                ),
+                            )
+
+                # Flush per-source telemetry to ApiSource in one guarded pass (mirrors
+                # _fetch_fresh) — records searches/results/latency + errors (including
+                # budget-exceeded timeouts) so the interactive path is visible in admin
+                # health. Best-effort: a telemetry failure must never abort the search.
+                try:
+                    source_names = {s[0] for s in stats_updates if s[0]}
+                    src_map = (
+                        {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
+                        if source_names
+                        else {}
+                    )
+                    for source_name, hit_count, elapsed_ms, error in stats_updates:
+                        src = src_map.get(source_name)
+                        if not src:
+                            continue
+                        src.total_searches = (src.total_searches or 0) + 1
+                        src.total_results = (src.total_results or 0) + hit_count
+                        if not error:
+                            src.last_success = datetime.now(UTC)
+                            prev = src.avg_response_ms or elapsed_ms
+                            src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
+                            src.status = ApiSourceStatus.LIVE.value
+                            src.last_error = None
+                        else:
+                            src.last_error = error
+                            src.last_error_at = datetime.now(UTC)
+                            src.error_count_24h = (src.error_count_24h or 0) + 1
+                    db.commit()
+                except Exception as e:
+                    logger.warning("API source stats update failed (streaming): {}", e)
+                    db.rollback()
+
+                # Write the shared search-result cache in the same flat/unscored shape
+                # _fetch_fresh's cache-miss path writes, so a later requisition search
+                # (or another streaming search) of this MPN gets a cache HIT.
+                shared_results = _flatten_dedupe_filter_junk(raw_out)
+                shared_stats = list(_aggregate_source_stats(stats_updates).values())
+                await asyncio.to_thread(_set_search_cache, shared_cache_key, shared_results, shared_stats)
 
             # Cache results for filter endpoint (15-min TTL). Also write a per-MPN
             # pointer key (search:{key}:latest → this search_id, same TTL) so the Part

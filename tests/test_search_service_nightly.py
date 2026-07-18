@@ -20,7 +20,9 @@ Called by: pytest
 Depends on: app/search_service.py, tests/conftest.py
 """
 
+import asyncio
 import os
+import time
 
 os.environ["TESTING"] = "1"
 
@@ -319,10 +321,15 @@ class TestFetchFreshCacheHit:
         mock_connector.__class__.__name__ = "NexarConnector"
 
         with patch("app.search_service._build_connectors", return_value=([mock_connector], {}, set())):
-            with patch("app.search_service._get_search_cache", return_value=(cached_results, cached_stats)):
+            with patch(
+                "app.search_service._get_search_cache",
+                return_value=(cached_results, cached_stats, "2026-01-01T00:00:00+00:00"),
+            ):
                 results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == cached_results
+        # A cache HIT tags each row with its real elapsed age instead of assuming 0.
+        assert all("_source_age_hours" in r for r in results)
         nexar_stat = next((s for s in stats if s["source"] == "nexar"), None)
         assert nexar_stat is not None
         assert nexar_stat["status"] == "ok"
@@ -445,6 +452,62 @@ class TestAiTriggerLogic:
                                         if original is not None:
                                             os.environ["TESTING"] = original
         assert isinstance(results, list)
+
+    async def test_ai_gather_bounded_by_ai_search_timeout_s(self, db_session: Session):
+        """A hung AI connector must not block _fetch_fresh past
+        settings.ai_search_timeout_s — before this fix the AI gather ran with NO
+        deadline of its own, bounded only by the connector's internal 60s httpx
+        timeout."""
+        from app.config import settings
+
+        async def _hang(pn):
+            await asyncio.sleep(30)
+            return []
+
+        mock_ai_connector = MagicMock()
+        mock_ai_connector.search = AsyncMock(side_effect=_hang)
+
+        many_results = [
+            {
+                "vendor_name": f"Vendor{i}",
+                "mpn_matched": "LM317T",
+                "qty_available": 1,
+                "unit_price": 1.0,
+                "source_type": "nexar",
+                "vendor_sku": f"SKU{i}",
+            }
+            for i in range(2)  # < 5 results so should_trigger_ai_search fires
+        ]
+
+        original_timeout = settings.ai_search_timeout_s
+        settings.ai_search_timeout_s = 0.2
+        original_testing = os.environ.get("TESTING")
+        try:
+            os.environ.pop("TESTING", None)
+            with (
+                patch("app.search_service._get_search_cache", return_value=None),
+                patch("app.search_service._set_search_cache"),
+                patch("app.search_service.get_credential", return_value="fake-ai-key"),
+                patch("app.search_service.AIWebSearchConnector", return_value=mock_ai_connector),
+                patch("app.search_service._build_connectors") as mock_build,
+            ):
+                fast_connector = MagicMock()
+                fast_connector.__class__.__name__ = "NexarConnector"
+                fast_connector.search = AsyncMock(return_value=many_results)
+                mock_build.return_value = ([fast_connector], {}, set())
+
+                start = time.monotonic()
+                results, stats = await asyncio.wait_for(_fetch_fresh(["LM317T"], db_session), timeout=5.0)
+                elapsed = time.monotonic() - start
+        finally:
+            settings.ai_search_timeout_s = original_timeout
+            if original_testing is not None:
+                os.environ["TESTING"] = original_testing
+
+        assert elapsed < 3.0, f"_fetch_fresh took {elapsed:.2f}s despite a 0.2s AI budget"
+        ai_stat = next((s for s in stats if s["source"] == "ai_live_web"), None)
+        assert ai_stat is not None
+        assert ai_stat.get("error") == "AI search budget exceeded"
 
 
 # ── _save_sightings — sourcing lead write-through exception (lines 1228-1229) ─

@@ -7,6 +7,8 @@ and _parse_retry_after helper.
 All external HTTP calls are mocked — no real API requests.
 """
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -37,8 +39,9 @@ class TestParseRetryAfter:
     @pytest.mark.parametrize(
         ("headers", "expected"),
         [
-            pytest.param({"Retry-After": "10"}, 10.0, id="numeric_header"),
+            pytest.param({"Retry-After": "5"}, 5.0, id="numeric_header"),
             pytest.param({"Retry-After": "0.5"}, 1.0, id="small_header_clamps_to_1"),
+            pytest.param({"Retry-After": "10"}, 8.0, id="header_over_cap_clamps_to_8"),
         ],
     )
     def test_explicit_value(self, headers, expected):
@@ -330,6 +333,62 @@ class TestBaseConnector429:
         c = FakeConnector(timeout=5.0, max_retries=1)
         with pytest.raises(ConnectorRateLimitError):
             await c.search("TEST123")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Retry sleeps must not hold the per-connector semaphore
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSemaphoreReleasedDuringRetrySleep:
+    @pytest.mark.asyncio
+    async def test_semaphore_released_during_429_backoff_sleep(self):
+        """The per-connector semaphore must be released during the 429 Retry-After
+        sleep, not held for its whole duration — otherwise every other concurrent call
+        to the SAME connector class queues behind one slow retry (and, transitively, the
+        caller's outer search-wide Semaphore(10))."""
+        from app.connectors.sources import BaseConnector, _connector_semaphores
+
+        class FakeConnector(BaseConnector):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.attempt = 0
+
+            async def _do_search(self, part_number):
+                if part_number == "SLOW" and self.attempt == 0:
+                    self.attempt += 1
+                    resp = _mock_response(429, headers={"Retry-After": "0.4"})
+                    raise httpx.HTTPStatusError("429", request=MagicMock(), response=resp)
+                return [{"ok": part_number}]
+
+        # Force a single-slot semaphore for this connector class — if it stayed
+        # held during the sleep, a second concurrent call would have to wait for
+        # the full 429 backoff before even attempting its own request.
+        _connector_semaphores["FakeConnector"] = asyncio.Semaphore(1)
+
+        slow = FakeConnector(timeout=5.0, max_retries=1)
+        slow._breaker.record_success()
+        fast = FakeConnector(timeout=5.0, max_retries=1)
+        fast._breaker.record_success()
+
+        async def _run_slow():
+            return await slow.search("SLOW")
+
+        async def _run_fast():
+            # Give the slow task a head start into its backoff sleep.
+            await asyncio.sleep(0.05)
+            start = time.monotonic()
+            result = await fast.search("FAST")
+            return result, time.monotonic() - start
+
+        slow_result, (fast_result, fast_elapsed) = await asyncio.gather(_run_slow(), _run_fast())
+
+        assert slow_result == [{"ok": "SLOW"}]
+        assert fast_result == [{"ok": "FAST"}]
+        # If the semaphore were held for the 0.4s backoff sleep, `fast` (starting
+        # ~0.05s in) would need to wait ~0.35s more before even starting its own
+        # call. With the fix it acquires the freed slot almost immediately.
+        assert fast_elapsed < 0.3, f"fast call took {fast_elapsed:.2f}s — semaphore was held during retry sleep"
 
 
 # ═══════════════════════════════════════════════════════════════════════
