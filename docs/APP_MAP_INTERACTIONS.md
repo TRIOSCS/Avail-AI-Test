@@ -2066,8 +2066,11 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- GET /v2/partials/resell/{id}                    (right detail: breadcrumb + chips +
     |        lazy tabs Lines · Offers · Build Bid · Outreach(owner) · Activity; customer chip owner-only)
     |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
-    |        +-- GET .../{id}/offers   (owner-only stack: pinned take-all banner +
-    |        |     per-line offer tables + unmatched queue; non-owner sees nothing)
+    |        +-- GET .../{id}/offers   (OWNER: pinned take-all banner + per-line offer tables +
+    |        |     unmatched queue [each row an "Assign to" select — finding #15]. NON-OWNER
+    |        |     (broker): their OWN offers ONLY + a Withdraw per open/late bid — NO competitor
+    |        |     data (Phase-3 anonymization); a submitter reaches it even after the window
+    |        |     closes — finding #13)
     |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
     |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
     |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
@@ -2084,6 +2087,24 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard;
     |     re-renders the WHOLE detail via [data-resell-detail-root], not just Lines, so the
     |     header Post button appears once a fresh draft has lines — RS-5)
+    +-- DRAFT-EDIT set (finding #14 / D4 — all DRAFT-only + owner-only, guarded 404→403→409 in
+    |     the service; a draft has no offers/mirror so side-effect-free except total_line_items):
+    |        +-- PATCH  /api/resell/{id}/lines/{line_id}  (excess_service.update_line; re-validates
+    |        |     quantity>0 → 400 [the model @validates 500s otherwise]; re-resolves the
+    |        |     MaterialCard when MPN/manufacturer changes; re-renders detail)
+    |        +-- DELETE /api/resell/{id}/lines/{line_id}  (excess_service.delete_line; decrements
+    |        |     total_line_items; re-renders detail)
+    |        +-- PATCH  /api/resell/{id}                   (excess_service.update_excess_list;
+    |        |     title/notes/company_id[re-validates exists]/customer_site_id; re-renders detail)
+    |        +-- DELETE /api/resell/{id}                   (excess_service.delete_excess_list; cascade
+    |        |     cleans children → refreshes My-Lists [#resell-list-body] + OOB detail-pane reset
+    |        |     [#split-right-resell] + toast + HX-Push-Url /v2/resell so a reload no longer
+    |        |     reopens the deleted list id [finding #8])
+    |        +-- GET .../{id}/edit-form, .../{id}/lines/{line_id}/edit-form (pre-filled modals)
+    |     [All four mutating routes call _get_list_for_user FIRST so a NON-owner probing a private
+    |      draft gets 404 [existence masked], not the service's 403 — matches the GET edit-form
+    |      path [finding #3]. Honest 409 copy (×3): "Posted lists are locked. Close this list and
+    |      create a new one to make changes." replaces the false "revise as a new version".]
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
     |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
     |     confirm re-renders the whole detail like add-line — RS-5)
@@ -2093,7 +2114,8 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
-    |     awards its matched lines; idempotent for an already-won offer; 409 unless the offer
+    |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
+    |     [closed/expired — awarding would reopen the dead list, finding #4]; 409 unless the offer
     |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
     |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
     |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
@@ -2107,6 +2129,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
     |     (close_at set) else collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed
     |     posting stays retired — M5). Same _award_response OOB)
+    +-- POST /api/resell/{id}/offer-lines/{offer_line_id}/assign (owner-only; finding #15;
+    |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
+    |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
+    |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
+    |     salvaged bid is awardable. GUARDED: 409 on a resolved/terminal list [awarded/closed/
+    |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
+    |     "second vector"]. Same _award_response OOB compose as award)
     +-- GET  /v2/partials/resell/{id}/build-bid          (owner-only Build-Bid tab: each line's
     |     best-offer planning price + editable "our offer"; once assembled, the clean
     |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
@@ -2127,6 +2156,11 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/close                      (owner-only; excess_service.close_list:
     |     GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the Sighting
     |     mirror [sync_list_mirror on a now-closed posting] — M5)
+    +-- POST /api/resell/{id}/close-without-bid          (owner-only; D5; excess_service.
+    |     close_list_without_bid → the TERMINAL closed state [distinct from bid_out]: same
+    |     open/collecting guard + close_at + mirror retire, but CLOSED is never swept by the
+    |     nightly expiry [only open/collecting are] and never reopens. close_list and
+    |     close_list_without_bid share _end_posting_window(target_status))
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
     |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
     |     submit_outreach [manual log]; re-renders the Outreach tracker)
@@ -2135,10 +2169,28 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     thread (_replies_context joins VendorResponse↔ExcessOutreach on graph_conversation_id,
     |     newest-first) + a "Convert to offer" quick-add. 404 when the outreach has no thread)
     +-- POST /api/resell/{id}/outreach/{oid}/offer      (RS-4, owner-only; human-reviewed
-          offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
-          via the SAME queued-never-dropped line matcher as an emailed bid + advances the
-          outreach →bid; re-renders the tracker into #tab-outreach-<id>)
+    |     offer extraction — record_response(has_offer=True) creates the inbound ExcessOffer
+    |     via the SAME queued-never-dropped line matcher as an emailed bid + advances the
+    |     outreach →bid; re-renders the tracker into #tab-outreach-<id>)
+    +-- MANUAL-CHANNEL log (finding #12, owner-only; a phone/teams/marketplace row is 'sent'
+          with NO email thread, so the conversation-keyed reply matcher can't advance it):
+          +-- POST .../{oid}/log-response  (resell_outreach_service.record_manual_response →
+          |     responded; never regresses a terminal bid/declined; 409 for an email row)
+          +-- GET  .../{oid}/log-bid-form  (reuses _reply_viewer.html — manual flag + convert_url
+          |     — as the Log-bid modal; honest 'Bid logged' toast, not 'Offer created from reply')
+          +-- POST .../{oid}/log-bid       (record_manual_response(has_offer=True) → bid + an
+                ExcessOffer via the SAME _link_inbound_offer path an emailed bid uses; 400 unless
+                the qty is positive [finding #1]; _link_inbound_offer is GATED on the same terminal
+                check as the status advance, so a replayed Log-bid on an already-bid/declined row is
+                an idempotent no-op — no duplicate offer [finding #5/#9/#10])
 ```
+
+**Triage filters (finding #16).** The left-list `stage` filter takes the usual status values
+(`open`/`collecting`/`bid_out`/`awarded`/`closed`/`expired`, each an exact `status=`) PLUS a
+synthetic `stage=live` token that widens to `[open, collecting]`. The workspace "Open" glance
+card counts open+collecting (a list flips open→collecting on its first offer but is still
+live), so it links to `stage=live` to match its count; the strict `open` pill in `_lists.html`
+keeps meaning EXACTLY `status=open`.
 
 **RS-4 reply tracking (inbound half).** The send path already stamps
 `ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the

@@ -55,13 +55,80 @@
 {% endmacro %}
 
 {% if not is_owner %}
-{# Offerer-facing: a non-owner never sees the collected offer stack. #}
-<div class="mx-auto max-w-sm text-center py-10">
-  <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-  </svg>
-  <p class="text-sm font-medium text-gray-600">Offers are private to the list owner</p>
-  <p class="text-secondary mt-1">Use “Submit offer” to send yours — the owner sees it, other brokers do not.</p>
+{# Offerer-facing: the broker sees ONLY their OWN offers on this list — never another
+   broker's bid, price, or coverage (Phase-3 anonymization). Each open/late own-offer is
+   Withdraw-able (the withdraw route authorizes the submitter). #}
+<div class="space-y-4">
+  <p class="text-secondary">Your offers on this list — private to you and the owner. Other brokers never see them.</p>
+  {% if own_offers %}
+  {% for offer in own_offers %}
+  {% set is_take_all = offer.scope == 'take_all' %}
+  {% set can_withdraw = offer.status in ['open', 'late'] %}
+  <div class="rounded-lg border border-brand-200 overflow-hidden">
+    <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-brand-100">
+      <span class="inline-flex items-center gap-2">
+        <span class="text-sm font-semibold text-gray-900">{{ 'Take-all offer' if is_take_all else 'Your offer' }}</span>
+        {% set badge = {
+          'open': 'bg-sky-50 text-sky-600 border-sky-200',
+          'late': 'bg-amber-50 text-amber-600 border-amber-200',
+          'won': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+          'lost': 'bg-gray-50 text-gray-400 border-gray-200'
+        } %}
+        <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full border capitalize {{ badge.get(offer.status, 'bg-gray-50 text-gray-500 border-gray-200') }}">
+          {{ 'Not selected' if offer.status == 'lost' else offer.status }}
+        </span>
+      </span>
+      {% if can_withdraw %}
+      <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
+              hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+              hx-confirm="Withdraw your offer? It drops out of the running."
+              data-loading-disable
+              class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
+      {% endif %}
+    </div>
+    {% if is_take_all %}
+    <div class="flex items-center justify-between px-3 py-2 text-sm">
+      <span class="text-secondary">Whole-list lump offer</span>
+      {% if offer.take_all_total_price is not none %}
+      <span class="font-semibold text-violet-700 tabular-nums">${{ "{:,.2f}".format(offer.take_all_total_price|float) }}</span>
+      {% else %}<span class="text-gray-400 italic">Price TBD</span>{% endif %}
+    </div>
+    {% else %}
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Part</th>
+          <th class="text-right">Unit $</th>
+          <th class="text-right">Qty</th>
+          <th class="text-center">Lead</th>
+          <th class="text-left">Terms</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in offer.lines %}
+        <tr>
+          <td class="font-mono">{{ line.mpn_raw }}</td>
+          <td class="text-right tabular-nums">{% if line.unit_price is not none %}${{ "{:,.4f}".format(line.unit_price|float) }}{% else %}<span class="text-gray-400">TBD</span>{% endif %}</td>
+          <td class="text-right tabular-nums">{{ "{:,}".format(line.quantity) }}</td>
+          <td class="text-center">{{ (line.lead_time_days|string ~ 'd') if line.lead_time_days is not none else '—' }}</td>
+          <td class="text-gray-500">{{ line.terms_text or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if offer.notes %}<p class="text-secondary px-3 py-2 border-t border-brand-100">{{ offer.notes }}</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="mx-auto max-w-sm text-center py-10">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+    </svg>
+    <p class="text-sm font-medium text-gray-600">You haven't offered on this list yet</p>
+    <p class="text-secondary mt-1">Use “Submit offer” to send yours — the owner sees it, other brokers do not.</p>
+  </div>
+  {% endif %}
 </div>
 
 {% else %}
@@ -184,7 +251,7 @@
       Unmatched queue ({{ unmatched|length }}) — resolve manually
     </p>
     <table class="compact-table min-w-full">
-      <thead><tr><th class="text-left">Raw MPN</th><th class="text-right">Unit $</th><th class="text-right">Qty</th><th class="text-left">Broker</th></tr></thead>
+      <thead><tr><th class="text-left">Raw MPN</th><th class="text-right">Unit $</th><th class="text-right">Qty</th><th class="text-left">Broker</th><th class="text-left">Assign to</th></tr></thead>
       <tbody>
         {% for e in unmatched %}
         <tr>
@@ -192,6 +259,24 @@
           <td class="text-right tabular-nums">{% if e.line.unit_price is not none %}${{ "{:,.4f}".format(e.line.unit_price|float) }}{% else %}—{% endif %}</td>
           <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
           <td>{{ _broker_label(e.offer, is_owner) }}</td>
+          {# Manual resolution (finding #15): point the parked line at the intended posted
+             line — it becomes a matched, awardable bid. Same OOB re-render as award. #}
+          <td>
+            {% if line_items %}
+            <form hx-post="/api/resell/{{ el.id }}/offer-lines/{{ e.line.id }}/assign"
+                  hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+                  class="inline-flex items-center gap-1">
+              <select name="target_line_item_id" required aria-label="Assign to line"
+                      class="text-xs border border-amber-300 rounded px-1 py-0.5 bg-white">
+                <option value="">Choose line…</option>
+                {% for item in line_items %}
+                <option value="{{ item.id }}">{{ item.part_number }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" data-loading-disable class="btn-primary btn-sm">Assign</button>
+            </form>
+            {% else %}<span class="text-xs text-gray-400">no lines</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

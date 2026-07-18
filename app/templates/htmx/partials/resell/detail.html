@@ -39,6 +39,23 @@
 
       {# Owner / offerer actions #}
       <div class="flex items-center gap-2 flex-shrink-0">
+        {# Draft-edit affordances (finding #14): while a list is a private draft the owner
+           can edit its header or delete it outright. Both vanish once posted (lines lock). #}
+        {% if can_see_customer and el.status == 'draft' %}
+        <button @click="$dispatch('open-modal')"
+                hx-get="/v2/partials/resell/{{ el.id }}/edit-form"
+                hx-target="#modal-content"
+                class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">
+          <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          Edit
+        </button>
+        <button hx-delete="/api/resell/{{ el.id }}"
+                hx-target="#resell-list-body"
+                hx-swap="innerHTML"
+                hx-confirm="Delete this draft list and all its lines? This can't be undone."
+                data-loading-disable
+                class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Delete</button>
+        {% endif %}
         {% if can_see_customer and el.status == 'draft' and line_count > 0 %}
         <button hx-post="/api/resell/{{ el.id }}/publish"
                 hx-target="closest [data-resell-detail-root]"
@@ -69,6 +86,16 @@
                 data-loading-disable
                 class="btn-secondary btn-sm">
           Close
+        </button>
+        {# D5: end a posting that drew no usable bid → the terminal CLOSED state (distinct
+           from the bid_out "bids went out" path above; no reopen). #}
+        <button hx-post="/api/resell/{{ el.id }}/close-without-bid"
+                hx-target="closest [data-resell-detail-root]"
+                hx-swap="outerHTML"
+                hx-confirm="Close this list without bidding? It ends for good — no bid goes out and it can't be reopened."
+                data-loading-disable
+                class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">
+          Close (no bid)
         </button>
         {% endif %}
         {% if can_offer %}

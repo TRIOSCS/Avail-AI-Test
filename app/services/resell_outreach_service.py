@@ -1014,6 +1014,53 @@ def record_response(
     return rows
 
 
+def record_manual_response(
+    db: Session,
+    *,
+    outreach: ExcessOutreach,
+    has_offer: bool = False,
+    offer_lines: list[dict] | None = None,
+    offer_notes: str | None = None,
+    commit: bool = True,
+) -> ExcessOutreach:
+    """Log a manual-channel buyer outcome directly on ONE outreach row (finding #12).
+
+    A phone/teams/marketplace touch has no email thread, so the conversation-keyed
+    ``record_response`` can never advance it — this is the manual counterpart. Advances the
+    row to ``bid`` (when the buyer bid) or ``responded``, but NEVER regresses a row already
+    in a terminal state (``bid`` / ``declined``) — same rule as ``record_response``. When
+    ``has_offer`` AND the row was not already terminal, creates the inbound ExcessOffer via
+    the SAME ``_link_inbound_offer`` path an emailed bid uses (buyer-scoped,
+    queued-never-dropped line matching, rollup recompute); a replayed Log-bid on an
+    already-terminal row is an idempotent no-op (no duplicate offer).
+    ``commit`` (default True) commits + refreshes; pass False when the caller owns the txn.
+    """
+    _terminal = {ExcessOutreachStatus.BID, ExcessOutreachStatus.DECLINED}
+    already_terminal = outreach.status in _terminal
+    if not already_terminal:
+        outreach.status = ExcessOutreachStatus.BID if has_offer else ExcessOutreachStatus.RESPONDED
+
+    # Gate the offer link on the SAME terminal check as the status advance: a replayed
+    # Log-bid on an already-BID row (or a bid logged against a DECLINED row) must NOT
+    # create a SECOND ExcessOffer for the buyer's single manual bid — otherwise the line's
+    # offer_count / best_offer_id are silently inflated with no idempotency on the row.
+    if has_offer and not already_terminal:
+        _link_inbound_offer(db, outreach, offer_lines or [], offer_notes)
+
+    if commit:
+        db.commit()
+        db.refresh(outreach)
+    else:
+        db.flush()
+    logger.info(
+        "Manually logged outreach id={} → {} (offer={})",
+        outreach.id,
+        outreach.status,
+        has_offer,
+    )
+    return outreach
+
+
 def _log_inbound_reply_activity(db: Session, *, outreach: ExcessOutreach, vr: VendorResponse) -> None:
     """Write one inbound ActivityLog for a buyer's reply on a resell outreach.
 

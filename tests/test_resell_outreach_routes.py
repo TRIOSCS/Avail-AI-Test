@@ -591,3 +591,313 @@ def test_submit_outreach_draft_list_409(client, db_session, trader_user, draft_l
 # redundant assertion theater — the posted-list success path is covered with real
 # outcome assertions by ``test_submit_outreach_log_path`` (rows/channel/target created)
 # and ``test_submit_outreach_email_path`` (sending rows + background job dispatched).
+
+
+# ── Task 5 (finding #12): manual-channel Log response / Log their bid ─────────
+# A manual-channel (phone/teams/marketplace) outreach row is created at 'sent' with no
+# graph_conversation_id, so the email reply-viewer/convert path (keyed on the thread) can
+# never advance it — it was a dead-end. The owner can now log the outcome directly on the
+# row: Log response (-> responded) or Log their bid (-> bid + an ExcessOffer via the SAME
+# convert path an emailed bid uses). The no-contact checkbox is enabled for manual channels.
+
+
+def _manual_outreach(db_session, el, owner, card, *, channel="phone", status=None):
+    from app.constants import ExcessOutreachStatus
+
+    row = ExcessOutreach(
+        excess_list_id=el.id,
+        submitted_by=owner.id,
+        target_vendor_card_id=card.id,
+        channel=channel,
+        status=status or ExcessOutreachStatus.SENT,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+    return row
+
+
+def test_log_response_flips_manual_row_to_responded(client, db_session, trader_user, posted_list):
+    buyer = _reachable_buyer(db_session, "Phone Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.RESPONDED
+    # The returned partial is the tracker (shows the buyer + summary).
+    assert "Phone Buyer" in resp.text
+
+
+def test_log_bid_creates_offer_and_flips_bid(client, db_session, trader_user, posted_list):
+    buyer = _reachable_buyer(db_session, "Teams Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="teams")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid",
+            data={"mpn_raw": "GRM188R", "quantity": "500", "unit_price": "0.88"},
+        )
+    finally:
+        restore()
+    assert resp.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.BID
+    # The bid was recorded as a real inbound ExcessOffer scoped to the buyer card.
+    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
+    assert len(offers) == 1
+    assert offers[0].offerer_vendor_card_id == buyer.id
+    offer_line = db_session.query(ExcessOfferLine).filter_by(offer_id=offers[0].id).one()
+    assert offer_line.unit_price == Decimal("0.88")
+    # The matched line got its rollup recomputed (the salvaged bid owns it).
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    assert line.best_offer_id == offers[0].id
+
+
+def test_log_bid_form_renders_convert_form(client, db_session, trader_user, posted_list):
+    """The Log-bid modal reuses the convert-to-offer form, pointed at the manual log-bid
+    route."""
+    buyer = _reachable_buyer(db_session, "Marketplace Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="marketplace")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach/{row.id}/log-bid-form")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    assert f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid" in resp.text
+    assert 'name="mpn_raw"' in resp.text  # the reused convert line form
+
+
+def test_log_bid_never_regresses_terminal_row(client, db_session, trader_user, posted_list):
+    """A row already at 'bid' is not regressed by a stray log-response."""
+    buyer = _reachable_buyer(db_session, "Done Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(
+        db_session, posted_list, trader_user, buyer, channel="phone", status=ExcessOutreachStatus.BID
+    )
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.BID  # not regressed to responded
+
+
+def test_log_bid_negative_quantity_400_not_500(client, db_session, trader_user, posted_list):
+    """A negative quantity is rejected 400 at the route — never reaches the
+    ExcessOfferLine @validates('quantity') ValueError as an unhandled 500 (finding #1).
+
+    A negative qty is NOT None, so the old ``qty is None`` guard passed it through; the
+    missing ``qty <= 0`` clause let it flow into a partial write + 500. No ExcessOffer may
+    be created and the row stays ``sent``.
+    """
+    buyer = _reachable_buyer(db_session, "Fat Finger Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid",
+            data={"mpn_raw": "GRM188R", "quantity": "-5", "unit_price": "0.88"},
+        )
+    finally:
+        restore()
+    assert resp.status_code == 400
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.SENT  # untouched — no partial write
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+
+
+def test_log_bid_double_submit_creates_no_duplicate_offer(client, db_session, trader_user, posted_list):
+    """A replayed/duplicated Log-bid POST on a now-BID row records NO second ExcessOffer
+    (finding #5/#9/#10).
+
+    The first submit advances the manual row ``sent`` → ``bid`` and links one inbound
+    offer. A second submit (double-click / racing re-render) must be idempotent: the
+    status stays ``bid`` AND ``_link_inbound_offer`` does NOT run again, so the buyer's
+    single manual bid is never inflated to two offers.
+    """
+    buyer = _reachable_buyer(db_session, "Replay Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="teams")
+    restore = _own(db_session, None, trader_user)
+    try:
+        payload = {"mpn_raw": "GRM188R", "quantity": "500", "unit_price": "0.88"}
+        first = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid", data=payload)
+        second = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid", data=payload)
+    finally:
+        restore()
+    assert first.status_code == 200 and second.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.BID
+    # Exactly ONE inbound offer — the replay did not create a second.
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 1
+
+
+def test_log_bid_on_declined_row_creates_no_offer(client, db_session, trader_user, posted_list):
+    """Log-bid on an already-DECLINED terminal row creates NO ExcessOffer and leaves the
+    row ``declined`` (finding #9/#10 — the named 'terminal-row log-bid' case).
+
+    ``record_manual_response`` protects the status from terminal regression; the offer
+    link must be gated on the same terminal check, or a declined row silently sprouts an
+    inbound bid that reads ``declined`` in the tracker.
+    """
+    buyer = _reachable_buyer(db_session, "Declined Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(
+        db_session, posted_list, trader_user, buyer, channel="marketplace", status=ExcessOutreachStatus.DECLINED
+    )
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid",
+            data={"mpn_raw": "GRM188R", "quantity": "500", "unit_price": "0.88"},
+        )
+    finally:
+        restore()
+    assert resp.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.DECLINED  # not regressed to bid
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+
+
+def test_manual_log_bid_form_uses_honest_toast_copy(client, db_session, trader_user, posted_list):
+    """The manual Log-bid modal's success toast reads honestly ('Bid logged') — NOT the
+    email-thread copy 'Offer created from reply' (finding #7).
+
+    The reply viewer is reused for the manual modal (manual=True); its convert form's
+    after-request toast must reflect the manual framing the template itself renders.
+    """
+    buyer = _reachable_buyer(db_session, "Toast Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach/{row.id}/log-bid-form")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    assert "Bid logged" in resp.text
+    assert "Offer created from reply" not in resp.text
+
+
+def test_manual_log_rejects_email_channel_row(client, db_session, trader_user, posted_list):
+    """An EMAIL-channel row must use the reply viewer, not the manual-log route →
+    409."""
+    buyer = _reachable_buyer(db_session, "Email Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="email")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
+    finally:
+        restore()
+    assert resp.status_code == 409
+
+
+def test_log_response_owner_gated(client, db_session, trader_user, posted_list):
+    """The default client user is not the owner → 403 (the row is untouched)."""
+    buyer = _reachable_buyer(db_session, "Guard Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
+    assert resp.status_code == 403
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.SENT
+
+
+def test_tracker_shows_log_actions_for_manual_sent_row(client, db_session, trader_user, posted_list):
+    """A manual 'sent' row surfaces Log-response + Log-bid affordances in the
+    tracker."""
+    buyer = _reachable_buyer(db_session, "Log Actions Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        body = client.get(f"/v2/partials/resell/{posted_list.id}/outreach").text
+    finally:
+        restore()
+    assert f"/outreach/{row.id}/log-response" in body
+    assert f"/outreach/{row.id}/log-bid-form" in body
+
+
+def test_no_contact_checkbox_enabled_for_manual_channel(client, db_session, trader_user, posted_list):
+    """The no-contact buyer checkbox is disabled ONLY for the email channel — manual
+    channels (phone/teams/marketplace) can log a touch without an email on file."""
+    no_contact = VendorCard(normalized_name="no email log buyer", display_name="No Email Log Buyer", emails=[])
+    no_contact.commodity_tags = [_CAP]
+    db_session.add(no_contact)
+    db_session.flush()
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    offer = ExcessOffer(
+        excess_list_id=posted_list.id,
+        submitted_by=trader_user.id,
+        offerer_vendor_card_id=no_contact.id,
+        scope="per_line",
+        status=ExcessOfferStatus.WON,
+    )
+    db_session.add(offer)
+    db_session.flush()
+    db_session.add(
+        ExcessOfferLine(
+            offer_id=offer.id,
+            excess_line_item_id=line.id,
+            mpn_raw=line.part_number,
+            quantity=10,
+            unit_price=Decimal("0.90"),
+            match_status=OfferLineMatchStatus.MATCHED,
+        )
+    )
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        body = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form").text
+    finally:
+        restore()
+    # The checkbox is now Alpine-gated on the channel rather than hard-disabled.
+    assert ":disabled=\"channel === 'email'\"" in body
+
+
+def test_no_contact_selection_purged_on_switch_back_to_email(client, db_session, trader_user, posted_list):
+    """Switching channel back to email PURGES any no-contact buyer already ticked on a
+    manual channel, so they are not silently emailed as a spurious failed outreach
+    (finding #6).
+
+    The channel buttons must route through a ``setChannel`` handler that drops the
+    no-contact card ids from ``selected`` (seeded as ``noContactIds``); a bare
+    ``channel = '...'`` assignment leaves the id in the hidden ``vendor_card_ids``.
+    """
+    no_contact = VendorCard(normalized_name="purge me buyer", display_name="Purge Me Buyer", emails=[])
+    no_contact.commodity_tags = [_CAP]
+    db_session.add(no_contact)
+    db_session.flush()
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    offer = ExcessOffer(
+        excess_list_id=posted_list.id,
+        submitted_by=trader_user.id,
+        offerer_vendor_card_id=no_contact.id,
+        scope="per_line",
+        status=ExcessOfferStatus.WON,
+    )
+    db_session.add(offer)
+    db_session.flush()
+    db_session.add(
+        ExcessOfferLine(
+            offer_id=offer.id,
+            excess_line_item_id=line.id,
+            mpn_raw=line.part_number,
+            quantity=10,
+            unit_price=Decimal("0.90"),
+            match_status=OfferLineMatchStatus.MATCHED,
+        )
+    )
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        body = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form").text
+    finally:
+        restore()
+    # The no-contact id is seeded for the purge, and channel switches route through it.
+    assert f"noContactIds: [{no_contact.id}]" in body or f"noContactIds: [{no_contact.id}," in body
+    assert "setChannel(" in body
+    # The bare assignment that skipped the purge is gone.
+    assert "@click=\"channel = '" not in body

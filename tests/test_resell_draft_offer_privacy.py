@@ -13,6 +13,7 @@ app.routers.resell, app.services.excess_service.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
@@ -112,6 +113,138 @@ def test_non_owner_submit_offer_on_posted_200(client, db_session, posted_list, o
     assert resp.status_code == 200
     offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
     assert len(offers) == 1
+
+
+# ── Task 1 (finding #13): the broker own-offers view + Withdraw ──────────────
+# A non-owner viewing a posted list's Offers tab sees ONLY their own offers (never
+# another broker's) — each open/late own-offer with a Withdraw button — and NO
+# competitor data (Phase-3 anonymization discipline held). The submitter can still
+# reach their own offer to withdraw it after the posting window closes (expired).
+
+
+def _broker_offer(db_session, el, broker, *, mpn="XCVU9P-2FLGA2104I", unit_price="5.00", notes=None):
+    """Submit a per-line inbound offer as *broker* via the service (the real path)."""
+    from app.services.excess_service import submit_offer
+
+    return submit_offer(
+        db_session,
+        list_id=el.id,
+        user=broker,
+        scope="per_line",
+        notes=notes,
+        lines=[{"mpn_raw": mpn, "quantity": 10, "unit_price": Decimal(unit_price)}],
+    )
+
+
+def test_non_owner_offers_tab_shows_own_offer_with_withdraw(client, db_session, posted_list, owner_user, test_user):
+    """The broker (non-owner) viewing a posted list's Offers tab sees their OWN offer
+    line + a Withdraw button pointed at that offer — not the owner's private full
+    view."""
+    assert test_user.id != owner_user.id
+    offer = _broker_offer(db_session, posted_list, test_user, mpn="XCVU9P-2FLGA2104I")
+
+    body = client.get(f"/v2/partials/resell/{posted_list.id}/offers").text
+    assert "XCVU9P-2FLGA2104I" in body  # the broker sees their own bid line
+    assert f"/offers/{offer.id}/withdraw" in body  # ...with a Withdraw action
+    # The owner-only "Offers are private" prompt is gone for a broker who has bid.
+    assert "Offers are private to the list owner" not in body
+
+
+def test_non_owner_offers_tab_hides_other_brokers_offer(
+    client, db_session, posted_list, owner_user, test_user, sales_user
+):
+    """RS-1 / Phase-3: broker A must see ONLY their own offer — never broker B's bid,
+    price, or a withdraw handle on it."""
+    # sales_user has no can_offer; make a real second BROKER instead.
+    broker_b = User(email="broker-b@trioscs.com", name="Bram Broker", role="buyer", azure_id="az-broker-b")
+    db_session.add(broker_b)
+    db_session.commit()
+
+    mine = _broker_offer(db_session, posted_list, test_user, unit_price="5.00")
+    theirs = _broker_offer(db_session, posted_list, broker_b, unit_price="999.99", notes="BROKER-B-SECRET")
+
+    body = client.get(f"/v2/partials/resell/{posted_list.id}/offers").text
+    # My own offer is present + withdrawable.
+    assert f"/offers/{mine.id}/withdraw" in body
+    # The competitor's offer, its price, its notes, and any handle on it are all absent.
+    assert "999.99" not in body, "competitor offer price leaked into the broker own-offers view"
+    assert "BROKER-B-SECRET" not in body, "competitor offer notes leaked into the broker own-offers view"
+    assert f"/offers/{theirs.id}/withdraw" not in body
+    assert f"/offers/{theirs.id}/award" not in body
+
+
+def test_non_owner_offers_view_carries_no_competitor_aggregates(client, db_session, posted_list, owner_user, test_user):
+    """The broker own-offers view must not carry owner-only aggregates: no best-price
+    marker, no Export CSV, no per-line award controls (those are the owner's view)."""
+    _broker_offer(db_session, posted_list, test_user)
+    # A competing owner-side rollup exists on the line (best price + count) — must not surface.
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    line.best_offer_unit_price = Decimal("77.7700")
+    line.offer_count = 4
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/resell/{posted_list.id}/offers").text
+    assert "77.77" not in body, "owner best-price rollup leaked to the broker"
+    assert "Export CSV" not in body, "owner-only export leaked to the broker view"
+    assert "/award" not in body, "owner award control leaked to the broker view"
+
+
+def test_submitter_reaches_and_withdraws_offer_after_expiry(client, db_session, posted_list, owner_user, test_user):
+    """A submitter with an open offer is NOT 404'd once the posting window closes
+    (expired) — they can still view AND withdraw their own bid (relaxed
+    _get_list_for_user)."""
+    offer = _broker_offer(db_session, posted_list, test_user)
+    posted_list.status = ExcessListStatus.EXPIRED
+    db_session.commit()
+
+    # The submitter reaches the (now non-posted) Offers tab instead of a 404.
+    view = client.get(f"/v2/partials/resell/{posted_list.id}/offers")
+    assert view.status_code == 200
+    assert f"/offers/{offer.id}/withdraw" in view.text
+
+    # ...and can actually withdraw it.
+    resp = client.post(f"/api/resell/{posted_list.id}/offers/{offer.id}/withdraw")
+    assert resp.status_code == 200
+    db_session.refresh(offer)
+    assert offer.status == ExcessOfferStatus.WITHDRAWN
+
+
+def test_non_submitter_still_404_on_expired_list(client, db_session, owner_user, test_company, test_user):
+    """Control: a non-owner with NO offer stays 404 on a non-posted list — the relaxation
+    only admits the actual submitter, never a general reader."""
+    assert test_user.id != owner_user.id
+    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.EXPIRED)
+    resp = client.get(f"/v2/partials/resell/{el.id}/offers")
+    assert resp.status_code == 404
+
+
+def test_post_submit_offer_shows_own_offer_not_empty_state(client, db_session, posted_list, owner_user, test_user):
+    """Post-submit re-render shows the submitter their own offer (not the empty
+    state)."""
+    resp = client.post(
+        f"/api/resell/{posted_list.id}/offers",
+        data={"scope": "per_line", "mpn_raw": "XCVU9P-2FLGA2104I", "quantity": "10", "unit_price": "5.00"},
+    )
+    assert resp.status_code == 200
+    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    assert f"/offers/{offer.id}/withdraw" in resp.text
+    assert "XCVU9P-2FLGA2104I" in resp.text
+
+
+def test_owner_offers_view_unchanged_by_broker_view(client, db_session, posted_list, owner_user, test_user):
+    """Control: the OWNER still gets the full owner offers view (Export CSV present, broker
+    empty-state absent) — Task 1 only reshapes the NON-owner branch."""
+    _broker_offer(db_session, posted_list, test_user, unit_price="5.00")
+
+    from app.dependencies import require_user
+
+    client.app.dependency_overrides[require_user] = lambda: owner_user
+    try:
+        body = client.get(f"/v2/partials/resell/{posted_list.id}/offers").text
+    finally:
+        client.app.dependency_overrides.pop(require_user, None)
+    assert "Export CSV" in body  # owner-only affordance
+    assert "Offers are private to the list owner" not in body
 
 
 def _posted_list_with_best_offer(db_session, owner, company):

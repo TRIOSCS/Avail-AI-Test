@@ -248,7 +248,17 @@ def _get_list_for_user(db: Session, list_id: int, user: User) -> tuple[ExcessLis
     el = excess_service.get_excess_list(db, list_id)
     is_owner = el.owner_id == user.id
     if not is_owner and el.status not in {s.value for s in _POSTED_STATUSES}:
-        raise HTTPException(404, "List not found")
+        # A non-owner may still reach a now-unposted list (closed/expired) IF they hold an
+        # offer on it — so a broker can view/withdraw their own bid after the posting window
+        # closes (finding #13). Drafts never carry offers, so this never reveals one. Only
+        # runs on the rare non-posted, non-owner read (posted statuses short-circuit above).
+        has_own_offer = db.scalar(
+            select(ExcessOffer.id)
+            .where(ExcessOffer.excess_list_id == el.id, ExcessOffer.submitted_by == user.id)
+            .limit(1)
+        )
+        if has_own_offer is None:
+            raise HTTPException(404, "List not found")
     return el, is_owner
 
 
@@ -390,7 +400,13 @@ async def resell_lists(
     if not can_see_customer:
         needs = ""
 
-    if stage:
+    if stage == "live":
+        # ``live`` = [open, collecting] (finding #16): the "Open" triage card counts BOTH
+        # (a list flips open→collecting on its first offer but is still live), so its filter
+        # must widen to match its count. The strict ``open`` pill keeps meaning EXACTLY
+        # status=open — only this token widens.
+        query = query.filter(ExcessList.status.in_([ExcessListStatus.OPEN, ExcessListStatus.COLLECTING]))
+    elif stage:
         query = query.filter(ExcessList.status == stage)
     if needs:
         # Lists carrying a live, unactioned offer (take_all = its whole-list slice) — the
@@ -503,9 +519,28 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
     }
 
     if not is_owner:
-        # Non-owner: render an empty offers view — no offer data in the response.
+        # Non-owner: render the viewer's OWN offers ONLY (finding #13). Carries NO
+        # competitor data — no other broker's bids, no best-price rollup, no coverage/counts
+        # (Phase-3 anonymization discipline). Scoped hard to submitted_by == user.id in the
+        # active-visible set; an open/late own-offer is Withdraw-able (the withdraw route
+        # already authorizes the submitter).
+        own_offers = (
+            db.scalars(
+                select(ExcessOffer)
+                .where(
+                    ExcessOffer.excess_list_id == el.id,
+                    ExcessOffer.submitted_by == user.id,
+                    ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
+                )
+                .options(joinedload(ExcessOffer.lines))
+                .order_by(ExcessOffer.created_at.desc())
+            )
+            .unique()
+            .all()
+        )
         return {
             **base,
+            "own_offers": own_offers,
             "by_line": {it.id: [] for it in items},
             "unmatched": [],
             "take_all_offers": [],
@@ -915,7 +950,7 @@ async def resell_add_line_form(
     el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     return template_response(
         "htmx/partials/resell/add_line_modal.html",
         {"request": request, "list_id": list_id},
@@ -988,7 +1023,7 @@ async def resell_add_line(
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     # L2: a non-positive quantity would reach the ExcessLineItem @validates("quantity")
@@ -1016,6 +1051,166 @@ async def resell_add_line(
     # draft is what makes the header Post button appear (line_count > 0), so a Lines-only
     # swap would leave the header stale and the user with no way to publish (RS-5).
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+# ── Draft editing (finding #14 / D4) — all DRAFT-only + owner-only, thin over the
+#    service guards (404 → 403 → 409). A draft has no offers/mirror, so these are
+#    side-effect-free except total_line_items. ──────────────────────────────────
+
+
+@router.get("/v2/partials/resell/{list_id}/lines/{line_id}/edit-form", response_class=HTMLResponse)
+async def resell_edit_line_form(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the pre-filled edit-line modal (owner-only, draft-only)."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    return template_response(
+        "htmx/partials/resell/edit_line_modal.html",
+        {"request": request, "list_id": list_id, "line": line},
+    )
+
+
+@router.get("/v2/partials/resell/{list_id}/edit-form", response_class=HTMLResponse)
+async def resell_edit_list_form(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the pre-filled edit-list-header modal (owner-only, draft-only)."""
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
+    companies = db.scalars(select(Company).order_by(Company.name)).all()
+    return template_response(
+        "htmx/partials/resell/edit_list_modal.html",
+        {"request": request, "list": el, "companies": companies},
+    )
+
+
+@router.patch("/api/resell/{list_id}/lines/{line_id}", response_class=HTMLResponse)
+async def resell_update_line(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    part_number: str = Form(...),
+    quantity: int = Form(...),
+    manufacturer: str = Form(""),
+    condition: str = Form("New"),
+    date_code: str = Form(""),
+    asking_price: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Edit one draft line, then re-render the whole detail panel."""
+    # 404-mask a non-owner on a private draft (existence not revealed) BEFORE the service's
+    # owner-check would 403 it — consistent with the GET edit-form path (finding #3).
+    _get_list_for_user(db, list_id, user)
+    el = excess_service.update_line(
+        db,
+        list_id,
+        line_id,
+        user,
+        part_number=part_number,
+        quantity=quantity,
+        manufacturer=manufacturer or None,
+        condition=condition or "New",
+        date_code=date_code or None,
+        asking_price=_to_decimal(asking_price),
+    )
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.delete("/api/resell/{list_id}/lines/{line_id}", response_class=HTMLResponse)
+async def resell_delete_line(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Delete one draft line, then re-render the whole detail panel."""
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
+    el = excess_service.delete_line(db, list_id, line_id, user)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.patch("/api/resell/{list_id}", response_class=HTMLResponse)
+async def resell_update_list(
+    request: Request,
+    list_id: int,
+    title: str = Form(...),
+    company_id: int = Form(...),
+    notes: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Edit a draft list's header (title/customer/notes), then re-render the detail
+    panel."""
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
+    el = excess_service.update_excess_list(db, list_id, user, title=title, notes=notes or None, company_id=company_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.delete("/api/resell/{list_id}", response_class=HTMLResponse)
+async def resell_delete_list(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Delete a whole draft list, then refresh the My-Lists left pane + reset the detail
+    pane.
+
+    Returns the refreshed My-Lists partial (primary → #resell-list-body) with an OOB
+    reset of the now-orphaned detail pane (#split-right-resell) and a confirmation
+    toast. Also pushes the workspace URL so the address bar no longer points at the now-
+    deleted list id (finding #8).
+    """
+    # 404-mask a non-owner on a private draft (finding #3).
+    _get_list_for_user(db, list_id, user)
+    excess_service.delete_excess_list(db, list_id, user)
+    lists = (
+        db.scalars(
+            select(ExcessList)
+            .options(joinedload(ExcessList.company))
+            .where(ExcessList.owner_id == user.id)
+            .order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc())
+        )
+        .unique()
+        .all()
+    )
+    resp = template_response(
+        "htmx/partials/resell/_list_after_delete.html",
+        {
+            "request": request,
+            "user": user,
+            "lens": "mine",
+            "stage": "",
+            "needs": "",
+            "q": "",
+            "cards": _list_cards(db, list(lists), can_see_customer=True),
+            "can_see_customer": True,
+            "can_post": excess_service.can_post(user),
+        },
+    )
+    # Rewrite the address bar to the workspace root — the pushed /v2/resell/{deleted_id}
+    # would otherwise reopen a 404/empty detail on reload/bookmark (finding #8).
+    resp.headers["HX-Push-Url"] = "/v2/resell"
+    return _toast(resp, "List deleted")
 
 
 @router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
@@ -1065,7 +1260,7 @@ async def resell_import_confirm(
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked; revise as a new version")
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     try:
@@ -1107,6 +1302,19 @@ async def resell_close(
     """Close a posted list (owner-only): flip to bid_out + stamp close_at, re-render
     detail."""
     el = excess_service.close_list(db, list_id, user)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.post("/api/resell/{list_id}/close-without-bid", response_class=HTMLResponse)
+async def resell_close_without_bid(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Close a posted list WITHOUT bidding (owner-only): flip to the terminal ``closed``
+    state + stamp close_at, then re-render detail (D5)."""
+    el = excess_service.close_list_without_bid(db, list_id, user)
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
@@ -1257,6 +1465,31 @@ async def resell_withdraw_offer(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
     return _toast(resp, "Offer withdrawn")
+
+
+@router.post("/api/resell/{list_id}/offer-lines/{offer_line_id}/assign", response_class=HTMLResponse)
+async def resell_assign_offer_line(
+    request: Request,
+    list_id: int,
+    offer_line_id: int,
+    target_line_item_id: int = Form(...),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Assign an unmatched offer line to a posted line (owner-only), then re-render the
+    Offers tab + OOB lines/chips.
+
+    Manual resolution of the unmatched queue (finding #15): the salvaged line becomes a
+    matched, awardable bid. The service owns the guards (404 list/offer-line/target, 403
+    non-owner) and the rollup recompute; the response is the same OOB compose the award
+    action uses so the Alpine tab state never resets.
+    """
+    excess_service.assign_offer_line(db, list_id, offer_line_id, target_line_item_id, user)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return _toast(resp, "Offer assigned to line")
 
 
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
@@ -1768,6 +2001,26 @@ def _load_outreach_for_owner(
     return el, outreach
 
 
+def _load_manual_outreach_for_owner(
+    db: Session, list_id: int, outreach_id: int, user: User
+) -> tuple[ExcessList, ExcessOutreach]:
+    """Owner-gated load of one MANUAL-channel outreach row (finding #12).
+
+    404 (not 403) when the row is missing or belongs to another list — existence is not
+    revealed. 409 for an ``email`` row: an emailed touch has a thread, so its outcome is
+    logged via the reply viewer / inbox matcher, not the manual-log path. Shared by the
+    manual log-response / log-bid routes.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    outreach = db.get(ExcessOutreach, outreach_id)
+    if outreach is None or outreach.excess_list_id != el.id:
+        raise HTTPException(404, "Outreach not found")
+    if outreach.channel == ExcessOutreachChannel.EMAIL:
+        raise HTTPException(409, "Use the reply viewer to log an email outreach's outcome")
+    return el, outreach
+
+
 @router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/reply", response_class=HTMLResponse)
 async def resell_outreach_reply(
     request: Request,
@@ -1829,6 +2082,105 @@ async def resell_outreach_convert_offer(
     resell_outreach_service.record_response(
         db,
         conversation_id=outreach.graph_conversation_id,
+        has_offer=True,
+        offer_lines=[
+            {
+                "mpn_raw": mpn_raw.strip(),
+                "quantity": qty,
+                "unit_price": _to_decimal(unit_price),
+                "lead_time_days": _to_int(lead_time_days),
+                "terms_text": terms_text or None,
+            }
+        ],
+        offer_notes=notes or None,
+    )
+
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/log-response", response_class=HTMLResponse)
+async def resell_outreach_log_response(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Log a manual-channel buyer RESPONSE (owner-only), then re-render the tracker.
+
+    The manual counterpart to the inbox reply matcher for a phone/teams/marketplace touch
+    that has no email thread: advances the row sent → responded (never regresses a terminal
+    bid/declined). 409 for an email row (use the reply viewer).
+    """
+    _el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+    resell_outreach_service.record_manual_response(db, outreach=outreach, has_offer=False)
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
+
+
+@router.get("/v2/partials/resell/{list_id}/outreach/{outreach_id}/log-bid-form", response_class=HTMLResponse)
+async def resell_outreach_log_bid_form(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the Log-their-bid modal for a manual-channel row (owner-only).
+
+    Reuses the reply viewer's convert-to-offer line form, pointed at the manual log-bid
+    route (a manual touch has no reply thread, so the ``manual`` flag renders the honest
+    "logged manually" note instead of an email thread).
+    """
+    el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+    return template_response(
+        "htmx/partials/resell/_reply_viewer.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "outreach": outreach,
+            "replies": [],
+            "manual": True,
+            "convert_url": f"/api/resell/{el.id}/outreach/{outreach.id}/log-bid",
+        },
+    )
+
+
+@router.post("/api/resell/{list_id}/outreach/{outreach_id}/log-bid", response_class=HTMLResponse)
+async def resell_outreach_log_bid(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    mpn_raw: str = Form(""),
+    quantity: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time_days: str = Form(""),
+    terms_text: str = Form(""),
+    notes: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Log a manual-channel buyer BID (owner-only): create the inbound ExcessOffer +
+    advance the row → bid, then re-render the tracker.
+
+    Reuses ``record_manual_response(has_offer=True)`` → the SAME queued-never-dropped line
+    matcher an emailed bid uses. 409 for an email row (use the reply viewer).
+    """
+    _el, outreach = _load_manual_outreach_for_owner(db, list_id, outreach_id, user)
+
+    qty = _to_int(quantity)
+    # L2: reject a non-positive quantity here (400) — mirrors resell_submit_offer. A
+    # negative qty is not None, so without the ``qty <= 0`` clause it flows into
+    # _link_inbound_offer and trips the ExcessOfferLine @validates('quantity') ValueError
+    # as an unhandled 500, after the parent ExcessOffer row was already flushed.
+    if not mpn_raw.strip() or qty is None or qty <= 0:
+        raise HTTPException(400, "A logged bid needs a part number and a positive quantity")
+
+    resell_outreach_service.record_manual_response(
+        db,
+        outreach=outreach,
         has_offer=True,
         offer_lines=[
             {

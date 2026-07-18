@@ -643,6 +643,19 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
 # direct service call is guarded even when the (defence-in-depth) router guard is bypassed.
 _ACTIONABLE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
 
+# List statuses that are TERMINAL — a closed-without-bid (D5) or nightly-expired list is
+# dead and must never be reopened. Awarding/assigning on one would flip it back to
+# ``awarded`` (and a later unaward to ``bid_out``), the exact reopen the D5 contract
+# forbids (finding #4). ``awarded`` is a RESOLVED (not terminal) state that award/unaward
+# legitimately toggle, so it is NOT in this set; assign adds it separately below.
+_TERMINAL_LIST_STATUSES = (ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED)
+
+# List statuses on which ``assign_offer_line`` (unmatched-queue resolution) is rejected:
+# the two terminal states above PLUS ``awarded`` (a resolved list whose lines are all
+# decided). Assign is only meaningful while offers are still being resolved — open,
+# collecting, or bid_out.
+_ASSIGN_BLOCKED_LIST_STATUSES = frozenset(s.value for s in (*_TERMINAL_LIST_STATUSES, ExcessListStatus.AWARDED))
+
 
 def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     """Withdraw an inbound offer and recompute the rollup of every line it touched.
@@ -676,6 +689,64 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     db.refresh(offer)
     logger.info("Withdrew ExcessOffer id={} ({} lines recomputed)", offer_id, len(affected))
     return offer
+
+
+def assign_offer_line(
+    db: Session, list_id: int, offer_line_id: int, target_line_item_id: int, owner: User
+) -> ExcessOfferLine:
+    """Assign an unmatched/ambiguous offer line to a posted line (owner-only; finding
+    #15).
+
+    The queued-never-dropped matcher parks an ``ExcessOfferLine`` whose ``mpn_raw`` didn't
+    cleanly resolve in the unmatched queue; this is the manual resolution: the owner points
+    it at the intended ``ExcessLineItem``, so the salvaged bid becomes a real matched offer
+    (and thus awardable). Sets ``excess_line_item_id`` + flips ``match_status`` → MATCHED,
+    then recomputes the target line's best-price rollup (and, on a RE-assign, the line it
+    moved off of, so the old line no longer counts the moved bid). Guards: the list exists
+    (404) + *owner* owns it (403); the list is not resolved/terminal — ``awarded``/
+    ``closed``/``expired`` reject 409 (finding #2 + the finding #4 "second vector": a
+    salvaged line on a dead list must not become awardable); the parent offer is still in
+    play (``open``/``late``) — a won/lost/withdrawn offer's line is 409 (re-pointing a won
+    offer's line would strand its award linkage); the offer line belongs to this list
+    (404); the target line is on this list (404, never another list's line). Commits.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can assign an offer line")
+    if excess_list.status in _ASSIGN_BLOCKED_LIST_STATUSES:
+        raise HTTPException(409, "This list is resolved — its offer lines can no longer be reassigned")
+
+    offer_line = db.get(ExcessOfferLine, offer_line_id)
+    if offer_line is None or offer_line.offer is None or offer_line.offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer line {offer_line_id} not found on list {list_id}")
+    if offer_line.offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
+        raise HTTPException(409, "Only an open or late offer's line can be assigned")
+
+    target = db.get(ExcessLineItem, target_line_item_id)
+    if target is None or target.excess_list_id != list_id:
+        raise HTTPException(404, f"Line {target_line_item_id} not found on list {list_id}")
+
+    previous_line_item_id = offer_line.excess_line_item_id
+    offer_line.excess_line_item_id = target.id
+    offer_line.match_status = OfferLineMatchStatus.MATCHED
+    db.flush()
+
+    # Recompute the new target, and the line it moved off of (a re-assign), so both rollups
+    # reflect the move. A first assign from the unmatched queue has no previous line.
+    if previous_line_item_id is not None and previous_line_item_id != target.id:
+        recompute_line_rollup(db, previous_line_item_id)
+    recompute_line_rollup(db, target.id)
+
+    _safe_commit(db, entity="offer line assignment")
+    db.refresh(offer_line)
+    logger.info(
+        "Assigned ExcessOfferLine id={} → line_item={} on list={} by owner={}",
+        offer_line_id,
+        target.id,
+        list_id,
+        owner.id,
+    )
+    return offer_line
 
 
 # Line statuses that are decided (no longer collecting offers) for list-status derivation.
@@ -825,6 +896,13 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     if offer.status == ExcessOfferStatus.WON:
         return offer  # idempotent — a double-award is a no-op, not a second flip
 
+    # A terminal list (closed-without-bid per D5, or nightly-expired) is dead: awarding an
+    # offer on it would reopen it to ``awarded`` (and a later unaward would step it to
+    # ``bid_out``), violating the D5 "terminal, no reopen" contract (finding #4). A late
+    # offer on such a list stays queued/reviewable but can never resurrect the posting.
+    if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}:
+        raise HTTPException(409, "This list is closed — it can't be reopened by awarding an offer")
+
     if offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
         # A lost/withdrawn offer is already closed — awarding it would resurrect a dead
         # bid (a won offer already returned above via the idempotency guard).
@@ -931,24 +1009,160 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     return offer
 
 
+# ---------------------------------------------------------------------------
+# Phase 4: Draft editing (finding #14 / D4)
+# ---------------------------------------------------------------------------
+#
+# Before a list is posted it is a private working draft the owner may correct in place;
+# once posted the lines lock. All four editors below are DRAFT-ONLY + owner-only. A draft
+# carries no offers and no Sighting mirror, so these are side-effect-free except the
+# ``total_line_items`` counter (kept in step with the actual line rows on delete).
+
+# The honest 409 the draft-lock guards raise (replaces the old, false "revise as a new
+# version" copy — there is no versioned-revise flow; the real path is close + re-create).
+_POSTED_LOCKED_MSG = "Posted lists are locked. Close this list and create a new one to make changes."
+
+
+def _require_owned_draft(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Load a list and assert *owner* may edit it as a DRAFT (404 → 403 → 409).
+
+    Shared guard for the draft-edit set: the list must exist (404), *owner* must own it
+    (403), and it must still be a draft (409, honest copy) — mirrors ``close_list``'s
+    guard order so a direct service call is protected even if the router guard is bypassed.
+    """
+    el = get_excess_list(db, list_id)
+    if el.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can edit it")
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, _POSTED_LOCKED_MSG)
+    return el
+
+
+def delete_line(db: Session, list_id: int, line_id: int, owner: User) -> ExcessList:
+    """Delete one line from a draft list (owner-only, draft-only); returns the list.
+
+    404 if the line does not exist or belongs to a different list (never touch another
+    list's line). Decrements ``total_line_items`` (floored at 0) so the counter stays in
+    step with the actual rows. Commits; returns the refreshed list for the detail re-render.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    db.delete(line)
+    el.total_line_items = max((el.total_line_items or 0) - 1, 0)
+    _safe_commit(db, entity="excess line delete")
+    db.refresh(el)
+    logger.info("Deleted ExcessLineItem id={} from draft list={} by owner={}", line_id, list_id, owner.id)
+    return el
+
+
+def update_line(
+    db: Session,
+    list_id: int,
+    line_id: int,
+    owner: User,
+    *,
+    part_number: str,
+    quantity: int,
+    manufacturer: str | None = None,
+    condition: str | None = None,
+    date_code: str | None = None,
+    asking_price: Decimal | None = None,
+) -> ExcessList:
+    """Edit one line on a draft list (owner-only, draft-only); returns the list.
+
+    404 across lists. Re-validates ``quantity > 0`` HERE (400) — otherwise it reaches the
+    ``ExcessLineItem.@validates('quantity')`` ValueError as an unhandled 500. When the part
+    number or manufacturer changes, the stale MaterialCard link is dropped and re-resolved
+    (the resolve is find-or-create and never raises on an unresolvable MPN). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    line = db.get(ExcessLineItem, line_id)
+    if line is None or line.excess_list_id != el.id:
+        raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
+    if quantity is None or quantity <= 0:
+        raise HTTPException(400, "Quantity must be a positive whole number")
+
+    identity_changed = (part_number or "").strip() != (line.part_number or "") or (manufacturer or None) != (
+        line.manufacturer or None
+    )
+    line.part_number = part_number.strip()
+    line.normalized_part_number = normalize_mpn_key(part_number) or None
+    line.quantity = quantity
+    line.manufacturer = manufacturer or None
+    line.condition = condition or "New"
+    line.date_code = date_code or None
+    line.asking_price = asking_price
+    if identity_changed:
+        # Re-resolve the material-card link off the new MPN/manufacturer (the mirror needs
+        # a correct card at post time). Drop the stale link first so the resolver runs.
+        line.material_card_id = None
+        _resolve_line_material_card(db, line)
+    _safe_commit(db, entity="excess line update")
+    db.refresh(el)
+    logger.info("Updated ExcessLineItem id={} on draft list={} by owner={}", line_id, list_id, owner.id)
+    return el
+
+
+def update_excess_list(
+    db: Session,
+    list_id: int,
+    owner: User,
+    *,
+    title: str,
+    notes: str | None = None,
+    company_id: int | None = None,
+    customer_site_id: int | None = None,
+) -> ExcessList:
+    """Edit a draft list's header (owner-only, draft-only); returns the refreshed list.
+
+    Updates ``title`` / ``notes`` / ``customer_site_id`` and, when ``company_id`` is given
+    and differs, re-points the seller company (404 if it does not exist). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    if company_id is not None and company_id != el.company_id:
+        company = db.get(Company, company_id)
+        if not company:
+            raise HTTPException(404, f"Company {company_id} not found")
+        el.company_id = company_id
+    el.title = title
+    el.notes = notes
+    el.customer_site_id = customer_site_id
+    _safe_commit(db, entity="excess list update")
+    db.refresh(el)
+    logger.info("Updated draft ExcessList id={} by owner={}", list_id, owner.id)
+    return el
+
+
+def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
+    """Delete a whole draft list (owner-only, draft-only); cascades to its children.
+
+    The ORM ``cascade="all, delete-orphan"`` on line_items/offers/customer_bids cleans the
+    children (a draft has no offers/bids, but the cascade is defence-in-depth). Commits.
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    db.delete(el)
+    _safe_commit(db, entity="excess list delete")
+    logger.info("Deleted draft ExcessList id={} by owner={}", list_id, owner.id)
+
+
 # List statuses a manual close may act on: an actively-posted window. A draft was never
 # published (nothing to close), and a bid_out/awarded/closed/expired list is already
 # resolved — re-closing it is a no-op the endpoint should reject (M5).
 _CLOSEABLE_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
-def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
-    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
+def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status: str) -> ExcessList:
+    """Close a posted list into a resolved *target_status* — owner-only — + stamp
     ``close_at``.
 
-    The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
-    ``open_at``): once the trader has assembled and sent the bid back, closing the list
-    flips it to ``bid_out`` and records ``close_at`` (Chunk E). Guards: the list must
-    exist (404), *owner* must own it (403), and the list must be actively posted
-    (``open``/``collecting``) — a draft or an already-resolved list is 409 (M5). Closing
-    RETIRES the Sighting mirror (``sync_list_mirror`` on a now-closed posting drops every
-    line's live-supply row) so a sold-through / withdrawn posting stops advertising.
-    Commits. Returns the refreshed list.
+    Shared engine for both posting-window exits: ``bid_out`` (bids went out) and ``closed``
+    (closed without bidding — D5). Guards: the list must exist (404), *owner* must own it
+    (403), and it must be actively posted (``open``/``collecting``) — a draft or an
+    already-resolved list is 409 (M5). RETIRES the Sighting mirror (``sync_list_mirror`` on
+    a now-closed posting drops every line's live-supply row — both ``bid_out`` and ``closed``
+    are in the mirror's posting-closed set). Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
@@ -956,7 +1170,7 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
     if excess_list.status not in {s.value for s in _CLOSEABLE_LIST_STATUSES}:
         raise HTTPException(409, "Only an open or collecting list can be closed")
 
-    excess_list.status = ExcessListStatus.BID_OUT
+    excess_list.status = target_status
     excess_list.close_at = datetime.now(UTC)
     db.flush()
 
@@ -968,8 +1182,34 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
 
     _safe_commit(db, entity="excess list close")
     db.refresh(excess_list)
-    logger.info("Closed ExcessList id={} (status=bid_out, mirror retired) by owner={}", list_id, owner.id)
+    logger.info("Closed ExcessList id={} (status={}, mirror retired) by owner={}", list_id, target_status, owner.id)
     return excess_list
+
+
+def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
+    ``close_at``.
+
+    The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
+    ``open_at``): once the trader has assembled and sent the bid back, closing the list
+    flips it to ``bid_out`` and records ``close_at`` (Chunk E). See ``_end_posting_window``
+    for the guards and mirror-retire behaviour.
+    """
+    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.BID_OUT)
+
+
+def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a posted list WITHOUT bidding → the terminal ``closed`` state (D5, finding
+    #14).
+
+    The deliberate "nothing came of this — end it" exit, distinct from the ``bid_out``
+    (bids went out) path: an owner ends a posting that drew no usable bid instead of leaving
+    it advertising forever. ``closed`` is TERMINAL — it is not swept by the nightly expiry
+    (only open/collecting are) and there is no reopen; it retires the mirror like any closed
+    window. Same owner + open/collecting guards as ``close_list`` (409 on a draft/resolved
+    list). Commits. Returns the refreshed list.
+    """
+    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)
 
 
 # List statuses that are still "in flight" (the posting window has not resolved) and so
