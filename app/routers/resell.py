@@ -1286,6 +1286,19 @@ async def resell_close(
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
+@router.post("/api/resell/{list_id}/close-without-bid", response_class=HTMLResponse)
+async def resell_close_without_bid(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Close a posted list WITHOUT bidding (owner-only): flip to the terminal ``closed``
+    state + stamp close_at, then re-render detail (D5)."""
+    el = excess_service.close_list_without_bid(db, list_id, user)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
 @router.post("/api/resell/{list_id}/offers", response_class=HTMLResponse)
 async def resell_submit_offer(
     request: Request,

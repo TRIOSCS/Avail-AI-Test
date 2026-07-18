@@ -1075,18 +1075,16 @@ def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
 _CLOSEABLE_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
-def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
-    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
+def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status: str) -> ExcessList:
+    """Close a posted list into a resolved *target_status* — owner-only — + stamp
     ``close_at``.
 
-    The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
-    ``open_at``): once the trader has assembled and sent the bid back, closing the list
-    flips it to ``bid_out`` and records ``close_at`` (Chunk E). Guards: the list must
-    exist (404), *owner* must own it (403), and the list must be actively posted
-    (``open``/``collecting``) — a draft or an already-resolved list is 409 (M5). Closing
-    RETIRES the Sighting mirror (``sync_list_mirror`` on a now-closed posting drops every
-    line's live-supply row) so a sold-through / withdrawn posting stops advertising.
-    Commits. Returns the refreshed list.
+    Shared engine for both posting-window exits: ``bid_out`` (bids went out) and ``closed``
+    (closed without bidding — D5). Guards: the list must exist (404), *owner* must own it
+    (403), and it must be actively posted (``open``/``collecting``) — a draft or an
+    already-resolved list is 409 (M5). RETIRES the Sighting mirror (``sync_list_mirror`` on
+    a now-closed posting drops every line's live-supply row — both ``bid_out`` and ``closed``
+    are in the mirror's posting-closed set). Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
@@ -1094,7 +1092,7 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
     if excess_list.status not in {s.value for s in _CLOSEABLE_LIST_STATUSES}:
         raise HTTPException(409, "Only an open or collecting list can be closed")
 
-    excess_list.status = ExcessListStatus.BID_OUT
+    excess_list.status = target_status
     excess_list.close_at = datetime.now(UTC)
     db.flush()
 
@@ -1106,8 +1104,34 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
 
     _safe_commit(db, entity="excess list close")
     db.refresh(excess_list)
-    logger.info("Closed ExcessList id={} (status=bid_out, mirror retired) by owner={}", list_id, owner.id)
+    logger.info("Closed ExcessList id={} (status={}, mirror retired) by owner={}", list_id, target_status, owner.id)
     return excess_list
+
+
+def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
+    ``close_at``.
+
+    The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
+    ``open_at``): once the trader has assembled and sent the bid back, closing the list
+    flips it to ``bid_out`` and records ``close_at`` (Chunk E). See ``_end_posting_window``
+    for the guards and mirror-retire behaviour.
+    """
+    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.BID_OUT)
+
+
+def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a posted list WITHOUT bidding → the terminal ``closed`` state (D5, finding
+    #14).
+
+    The deliberate "nothing came of this — end it" exit, distinct from the ``bid_out``
+    (bids went out) path: an owner ends a posting that drew no usable bid instead of leaving
+    it advertising forever. ``closed`` is TERMINAL — it is not swept by the nightly expiry
+    (only open/collecting are) and there is no reopen; it retires the mirror like any closed
+    window. Same owner + open/collecting guards as ``close_list`` (409 on a draft/resolved
+    list). Commits. Returns the refreshed list.
+    """
+    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)
 
 
 # List statuses that are still "in flight" (the posting window has not resolved) and so

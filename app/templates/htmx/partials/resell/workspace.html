@@ -63,7 +63,7 @@
       ('open', 'stage=open', 'Open', stats.open, 'Posted, awaiting offers'),
       ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
       ('take_all', 'needs=take_all', 'Take-all', stats.take_all, 'Whole-list offers'),
-      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Sent to the customer'),
+      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Collection window closed'),
       ('awarded', 'stage=awarded', 'Awarded', stats.awarded, 'Closed deals')
     ] %}
     {% for token, query, label, value, sub in glance %}

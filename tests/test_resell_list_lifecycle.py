@@ -129,6 +129,131 @@ def test_close_retires_mirror(db_session, owner, company):
     assert _sightings(db_session, company.id) == []  # closed → retired
 
 
+# ── close_list_without_bid → CLOSED terminal state (Task 3, D5) ──────
+
+
+def test_close_without_bid_on_open_flips_to_closed(db_session, owner, company):
+    """Closing an OPEN list without bidding flips it to CLOSED + stamps close_at."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)  # → open
+    assert el.status == ExcessListStatus.OPEN
+
+    closed = excess_service.close_list_without_bid(db_session, el.id, owner)
+    assert closed.status == ExcessListStatus.CLOSED
+    assert closed.close_at is not None
+
+
+def test_close_without_bid_on_collecting_flips_to_closed(db_session, owner, company):
+    """A collecting list closes without bidding → CLOSED (distinct from the bid_out
+    path)."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    el.status = ExcessListStatus.COLLECTING
+    db_session.commit()
+
+    closed = excess_service.close_list_without_bid(db_session, el.id, owner)
+    assert closed.status == ExcessListStatus.CLOSED
+
+
+def test_close_without_bid_retires_mirror(db_session, owner, company):
+    """Closing without bidding retires the live-supply Sighting mirror (terminal)."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    assert len(_sightings(db_session, company.id)) == 1
+
+    excess_service.close_list_without_bid(db_session, el.id, owner)
+
+    assert _sightings(db_session, company.id) == []
+
+
+def test_close_without_bid_rejects_draft(db_session, owner, company):
+    """A draft can't be closed-without-bid — 409, no mutation (mirrors close_list)."""
+    el = _make_list(db_session, owner, company)
+    assert el.status == ExcessListStatus.DRAFT
+    with pytest.raises(HTTPException) as exc:
+        excess_service.close_list_without_bid(db_session, el.id, owner)
+    assert exc.value.status_code == 409
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.DRAFT
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED],
+)
+def test_close_without_bid_rejects_terminal(db_session, owner, company, terminal_status):
+    """An already-resolved (incl.
+
+    already-CLOSED) list can't be re-closed — 409.
+    """
+    el = _make_list(db_session, owner, company)
+    el.status = terminal_status
+    db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        excess_service.close_list_without_bid(db_session, el.id, owner)
+    assert exc.value.status_code == 409
+
+
+def test_close_without_bid_non_owner_403(db_session, owner, other_user, company):
+    """Only the owner can close a list without bidding — 403 otherwise."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    with pytest.raises(HTTPException) as exc:
+        excess_service.close_list_without_bid(db_session, el.id, other_user)
+    assert exc.value.status_code == 403
+
+
+def test_closed_list_is_not_auto_expired(db_session, owner, company):
+    """CLOSED is terminal — a past-close_at CLOSED list is NOT swept to expired."""
+    from datetime import timedelta
+
+    el = _make_list(db_session, owner, company)
+    el.status = ExcessListStatus.CLOSED
+    el.close_at = datetime.now(UTC) - timedelta(days=2)
+    db_session.commit()
+
+    assert excess_service.expire_overdue_lists(db_session) == 0
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.CLOSED
+
+
+def test_close_without_bid_route_200_and_forbidden(client, db_session, owner, company):
+    """Owner POST closes without bidding → 200 + CLOSED; a non-owner is 403."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    el.status = ExcessListStatus.COLLECTING
+    db_session.commit()
+    el_id = el.id
+
+    # The default client user is not the owner → 403.
+    assert client.post(f"/api/resell/{el_id}/close-without-bid").status_code == 403
+
+    app.dependency_overrides[require_user] = lambda: owner
+    try:
+        resp = client.post(f"/api/resell/{el_id}/close-without-bid")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert db_session.get(ExcessList, el_id).status == ExcessListStatus.CLOSED
+
+
+def test_workspace_bid_out_subtitle_is_accurate(client, db_session, owner):
+    """The bid_out glance card no longer overstates 'Sent to the customer' (closing ends
+    the collection window — the bid-back send is a separate, later action)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: owner
+    try:
+        body = client.get("/v2/partials/resell/workspace?lens=mine").text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert "Sent to the customer" not in body
+
+
 # ── expire_overdue_lists (the nightly service) ───────────────────────
 
 
