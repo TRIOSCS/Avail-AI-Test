@@ -282,13 +282,25 @@ async def _drive_verify_po(action, db_session, mock_bg):
     if action == "reject":
         form["rejection_note"] = "bad PO"
     req = _FakeRequest(form)
+    # The reject branch now persists real rows (the 2.2 note-to-the-fixer: an
+    # ActivityLog NOTE keyed to the plan/line + the actor, and a Notification for
+    # the line's buyer), so the handler needs REAL FK targets — a bare MagicMock
+    # user / invented plan-line ids fail SQLite binding + FK enforcement.
+    actor = _make_user(db_session, email=f"verify-{action}@trioscs.com", name="Verifier", role="manager")
+    plan = _make_plan(db_session, actor.id)
+    line = _add_line(db_session, plan, buyer_id=actor.id, status="pending_verify", po_number="PO-T10")
+    stub_line = MagicMock()
+    stub_line.buyer_id = line.buyer_id
+    stub_line.buy_plan = None
     with (
-        patch("app.services.buyplan_workflow.verify_po"),
+        patch("app.services.buyplan_workflow.verify_po", return_value=stub_line),
         patch("app.services.buyplan_workflow.check_completion", return_value=None),
         patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
         patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
     ):
-        await htmx_buy_plans.buy_plan_verify_po_partial(req, plan_id=5, line_id=9, user=MagicMock(), db=db_session)
+        await htmx_buy_plans.buy_plan_verify_po_partial(
+            req, plan_id=plan.id, line_id=line.id, user=actor, db=db_session
+        )
 
 
 class TestVerifyPoWiring:
