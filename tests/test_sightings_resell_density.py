@@ -88,8 +88,10 @@ def test_resell_triage_tiles_keep_filter_links(client, db_session, test_user):
     # Offer-based tiles keep their needs= filters ...
     assert "needs=offers" in body
     assert "needs=take_all" in body
-    # ... and the status tiles keep their stage= filters.
-    assert "stage=open" in body
+    # ... and the status tiles keep their stage= filters. The "Open" tile links to the
+    # synthetic stage=live token ([open, collecting]) so its filter matches its
+    # open+collecting count (finding #16), not the strict stage=open it mismatched before.
+    assert "stage=live" in body
     assert "stage=bid_out" in body
     assert "stage=awarded" in body
     # No tile regressed to an empty stage value (the old dead-control bug).

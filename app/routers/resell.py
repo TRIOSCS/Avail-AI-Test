@@ -400,7 +400,13 @@ async def resell_lists(
     if not can_see_customer:
         needs = ""
 
-    if stage:
+    if stage == "live":
+        # ``live`` = [open, collecting] (finding #16): the "Open" triage card counts BOTH
+        # (a list flips open→collecting on its first offer but is still live), so its filter
+        # must widen to match its count. The strict ``open`` pill keeps meaning EXACTLY
+        # status=open — only this token widens.
+        query = query.filter(ExcessList.status.in_([ExcessListStatus.OPEN, ExcessListStatus.COLLECTING]))
+    elif stage:
         query = query.filter(ExcessList.status == stage)
     if needs:
         # Lists carrying a live, unactioned offer (take_all = its whole-list slice) — the

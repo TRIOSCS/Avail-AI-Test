@@ -333,6 +333,42 @@ class TestResellListFiltering:
         assert "Collecting-Widget-List" in body  # matching stage included
         assert "Awarded-Gizmo-List" not in body  # non-matching stage excluded
 
+    def test_stage_live_includes_open_and_collecting_only(self, _trader_client, db_session: Session, test_company):
+        """Task 6 (finding #16): ``stage=live`` expands to [open, collecting] — matching
+        the "Open" glance card's count — and excludes resolved (bid_out/awarded)
+        lists."""
+        client, trader = _trader_client
+        _titled_list(db_session, trader, test_company, "Live-Open-List", ExcessListStatus.OPEN)
+        _titled_list(db_session, trader, test_company, "Live-Collecting-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Live-BidOut-List", ExcessListStatus.BID_OUT)
+        _titled_list(db_session, trader, test_company, "Live-Awarded-List", ExcessListStatus.AWARDED)
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?stage=live&lens=mine").text
+        assert "Live-Open-List" in body  # open is live
+        assert "Live-Collecting-List" in body  # collecting is live
+        assert "Live-BidOut-List" not in body  # resolved — excluded
+        assert "Live-Awarded-List" not in body  # resolved — excluded
+
+    def test_stage_open_stays_strict(self, _trader_client, db_session: Session, test_company: Company):
+        """The strict ``stage=open`` pill still means EXACTLY status=open — collecting
+        is NOT overloaded into it (only the ``live`` token widens to both)."""
+        client, trader = _trader_client
+        _titled_list(db_session, trader, test_company, "Strict-Open-List", ExcessListStatus.OPEN)
+        _titled_list(db_session, trader, test_company, "Strict-Collecting-List", ExcessListStatus.COLLECTING)
+        db_session.commit()
+
+        body = client.get("/v2/partials/resell/lists?stage=open&lens=mine").text
+        assert "Strict-Open-List" in body
+        assert "Strict-Collecting-List" not in body  # collecting is NOT status=open
+
+    def test_workspace_open_card_links_to_stage_live(self, _trader_client, db_session: Session):
+        """The "Open" glance card links to stage=live (matching its open+collecting
+        count), not the strict stage=open it mismatched before."""
+        client, _trader = _trader_client
+        body = client.get("/v2/partials/resell/workspace?lens=mine").text
+        assert "lens=mine&stage=live" in body
+
     def test_lists_q_filter(self, _trader_client, db_session: Session, test_company: Company):
         """Q matches the title in the mine lens — matching title included, non-matching
         excluded (proves the search actually filters, not just returns 200)."""
