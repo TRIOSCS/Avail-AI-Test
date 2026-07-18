@@ -143,3 +143,26 @@ All datetime columns use `UTCDateTime` (`app/database.py`), which stores and
 returns **tz-aware UTC** (symmetric bind+result, maps to `TIMESTAMPTZ`). Write
 aware UTC (`datetime.now(timezone.utc)`); never strip tzinfo to "match" a column.
 New datetime columns: just use `UTCDateTime` (no `timezone=` needed).
+
+## 7. Releases = deploys
+
+- **Publishing a GitHub release is the production deploy trigger.**
+  `.github/workflows/deploy.yml` runs on `release: published`, waits for the
+  `test` and `security` check-runs to be green on the release commit, then
+  SSH-deploys to the DigitalOcean server. Never publish a release you don't
+  intend to ship.
+- **Drafts are staged automatically.** `.github/workflows/release-draft.yml`
+  fires on any push to `main` that touches `app/config.py` (and on manual
+  dispatch): it reads `APP_VERSION` and creates a **draft** release
+  `v<version>` with generated notes, unless a tag or release for that version
+  already exists. A human pressing "Publish" is what deploys — the workflow
+  never publishes. It also deletes stale **draft** releases for other versions
+  (never published ones), so at most one draft exists: the current
+  `APP_VERSION`'s. Bump `APP_VERSION` in the same PR as the work you want in
+  the next release.
+- **Tag hygiene.** Version tags referenced by a published release are
+  permanent (deleting one breaks the release and its changelog compare
+  links). Ad-hoc snapshot/backup tags follow §3: copy into the `archive/`
+  namespace, then delete the original. Duplicate version tags with no
+  release attached may be deleted outright once another surviving tag
+  points at the same commit.
