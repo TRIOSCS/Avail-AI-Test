@@ -28,7 +28,7 @@ columns loses their data (additive columns, no pre-existing consumers).
 Called by: alembic (upgrade/downgrade).
 Depends on: buy_plans_v3, buy_plan_lines, activity_log, quality_plans, prepayments, users.
 
-Revision ID: 196_approvals_workspace_foundations
+Revision ID: 196_approvals_foundations
 Revises: 195_outreach_send_subject_body
 Create Date: 2026-07-17
 """
@@ -40,7 +40,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "196_approvals_workspace_foundations"
+revision: str = "196_approvals_foundations"
 down_revision: str | None = "195_outreach_send_subject_body"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

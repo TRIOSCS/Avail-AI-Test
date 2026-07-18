@@ -1294,7 +1294,7 @@ own bespoke `@requires_postgres` test. Prioritize the ones with actual `ILIKE`/
 
 ---
 
-## Approvals Workspace additions (migration 196 `196_approvals_workspace_foundations`)
+## Approvals Workspace additions (migration 196 `196_approvals_foundations`)
 
 Single additive, reversible revision (Phase 0 of the workspace rebuild —
 `specs/approvals-workspace.md`; models in `app/models/buy_plan.py`,
