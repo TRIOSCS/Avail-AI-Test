@@ -648,5 +648,12 @@ def test_sales_order_new_stays_off_approvals_prefix(hub_client: TestClient):
 
 
 def test_buy_plans_hub_still_serves(hub_client: TestClient):
+    # The old hub keeps its own home until post-parity retirement: the full page
+    # must not have become a redirect into the workspace...
     r = hub_client.get("/v2/buy-plans", follow_redirects=False)
     assert r.status_code == 200
+    # ...and the hub partial itself must still render the two-lens hub shell.
+    partial = hub_client.get("/v2/partials/buy-plans")
+    assert partial.status_code == 200
+    assert "My Queue" in partial.text
+    assert "Pipeline" in partial.text
