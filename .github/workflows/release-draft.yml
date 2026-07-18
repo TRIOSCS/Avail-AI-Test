@@ -2,7 +2,9 @@
 #
 # What: on every push to main that touches app/config.py (or manual dispatch),
 # reads APP_VERSION and creates a DRAFT release "v<version>" with generated
-# notes — unless a tag or release for that version already exists.
+# notes — unless a tag or release for that version already exists. Also deletes
+# stale DRAFT releases for any other version (never published releases), so the
+# releases page carries at most one draft: the current APP_VERSION.
 # Why: publishing a release is the production deploy trigger (deploy.yml runs
 # on release:published). This keeps the releases page from silently lagging
 # the code: every version bump gets a ready-to-publish draft, and a human
@@ -37,6 +39,15 @@ jobs:
           VERSION=$(grep -oP '^APP_VERSION = "\K[0-9]+(\.[0-9]+)*' app/config.py)
           TAG="v$VERSION"
           echo "APP_VERSION=$VERSION -> tag $TAG"
+
+          # Stale-draft cleanup: drafts only (draft==true), never published
+          # releases. Invariant: at most one draft exists — the current TAG's.
+          gh api "repos/$REPO/releases" --paginate \
+            --jq ".[] | select(.draft==true and .tag_name!=\"$TAG\") | \"\(.id) \(.tag_name)\"" |
+          while read -r ID STALE_TAG; do
+            echo "Deleting stale draft release $STALE_TAG (id $ID)"
+            gh api -X DELETE "repos/$REPO/releases/$ID"
+          done
 
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists — nothing to draft."

@@ -141,7 +141,9 @@ New datetime columns: just use `UTCDateTime` (no `timezone=` needed).
   dispatch): it reads `APP_VERSION` and creates a **draft** release
   `v<version>` with generated notes, unless a tag or release for that version
   already exists. A human pressing "Publish" is what deploys — the workflow
-  never publishes. Bump `APP_VERSION` in the same PR as the work you want in
+  never publishes. It also deletes stale **draft** releases for other versions
+  (never published ones), so at most one draft exists: the current
+  `APP_VERSION`'s. Bump `APP_VERSION` in the same PR as the work you want in
   the next release.
 - **Tag hygiene.** Version tags referenced by a published release are
   permanent (deleting one breaks the release and its changelog compare

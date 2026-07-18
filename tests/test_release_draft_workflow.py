@@ -47,6 +47,14 @@ def test_workflow_creates_draft_not_published_release():
     assert "generate_release_notes=true" in script
 
 
+def test_workflow_deletes_only_stale_drafts_never_published_releases():
+    script = _load_workflow()["jobs"]["draft-release"]["steps"][-1]["run"]
+    delete_lines = [line for line in script.splitlines() if "-X DELETE" in line]
+    assert delete_lines, "stale-draft cleanup step is missing"
+    # The only DELETE call must be fed by a draft-only filter.
+    assert "select(.draft==true" in script
+
+
 def test_version_grep_pattern_matches_current_config():
     """If APP_VERSION's format in app/config.py changes, the workflow's grep silently
     extracts nothing — this test fails first."""
