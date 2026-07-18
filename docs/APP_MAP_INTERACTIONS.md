@@ -2202,7 +2202,7 @@ never the seller company, and never any of these owner-private aggregates:
   the amber offer-count badge, and the **"N/M awarded"** progress chip — all competitive signal,
   gated identically to the already-private per-line offer badge / best-offer price (RS-1);
   `_list_cards` also NULLs coverage/offer_count for non-owners as defense-in-depth.
-Two de-anonymization ORACLES are closed the same way: (1) the left-list `q` search filters on
+Three de-anonymization ORACLES are closed the same way: (1) the left-list `q` search filters on
 **part identity** (normalized MPN / manufacturer, both indexed) in the open lens — never the
 title, which would let a non-owner confirm a hidden customer name by hit/miss; the title ILIKE
 stays for the owner's mine lens only. (2) The outreach email **subject** prefill is neutral
@@ -2210,6 +2210,18 @@ stays for the owner's mine lens only. (2) The outreach email **subject** prefill
 buyer; and the internal per-touch **ActivityLog subject** references the list by id
 (`excess offer (list #N)`), since that log lands on the SHARED buyer vendor-card timeline.
 Reply-matching is unaffected — it keys on the PERSISTED `send_subject`, not the prefill default.
+(3) The left-list **`needs`** offer-triage filter (`needs=offers` / `needs=take_all` → lists
+carrying a live/whole-list bid) is the OWNER's board only — gated on `can_see_customer`
+(`resell.py resell_lists`), so a non-owner cannot craft `lens=open&needs=offers` and diff it
+against the plain open lens to learn which anonymized `Excess listing #N` postings have already
+drawn a bid (the offer-EXISTENCE sibling of the offer-count chip it hides).
+
+Same gate on every OTHER cross-trader writer that names the list, since each lands on a surface
+keyed only on `vendor_card_id` (the shared buyer timeline / Tasks tab): the retry resend's
+**fallback** subject is the neutral part-count default, never `el.title` (used only when a legacy
+/ cleared row has no persisted `send_subject`); the inbound-offer **owner notification**
+(`notify_owner_of_offer` → `New offer from <buyer> on list #N`); and the "not yet offered"
+**follow-up task** title (`auto_create_resell_followup_task` → `… on Excess listing #N …`).
 
 **Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
 - **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback

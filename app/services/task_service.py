@@ -741,7 +741,6 @@ def auto_create_resell_followup_task(
     vendor_card_id: int,
     owner_id: int,
     buyer_name: str,
-    list_title: str | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
     """Idempotently create the list owner's My-Day follow-up for a buyer the resell
@@ -765,8 +764,13 @@ def auto_create_resell_followup_task(
     )
     if existing:
         return existing
-    suffix = f" on {list_title}" if list_title else ""
-    title = f"Follow up: offer {buyer_name}{suffix} this round"[:255]
+    # #12: reference the list by the neutral, id-derived label — NEVER the free-text title
+    # (which traders write as the customer name). This task is scoped to the buyer's
+    # ``vendor_card_id`` and renders on the SHARED cross-trader buyer Tasks tab
+    # (get_open_tasks_for_vendor_card returns every open task on the card, no assignee
+    # filter), so a customer-named title would leak the customer to any other trader viewing
+    # that buyer. Same anonymization gate as the non-owner "Excess listing #N" label.
+    title = f"Follow up: offer {buyer_name} on Excess listing #{excess_list_id} this round"[:255]
     task = RequisitionTask(
         vendor_card_id=vendor_card_id,
         title=title,

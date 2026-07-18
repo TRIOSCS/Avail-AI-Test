@@ -275,3 +275,49 @@ def test_open_lens_hides_coverage_meter_and_offer_badge(client, db_session, owne
     finally:
         client.app.dependency_overrides.pop(require_user, None)
     assert "Offer coverage:" in mine_body, "owner must still see the coverage meter"
+
+
+def test_open_lens_needs_filter_is_not_an_offer_existence_oracle(
+    client, db_session, owner_user, test_company, test_user
+):
+    """D2 (offer-EXISTENCE oracle): the offer-based ``needs`` triage is the OWNER's
+    board only.
+
+    A non-owner on the open lens must NOT be able to narrow the anonymized listing set
+    to only postings that already carry a live bid — diffing ``lens=open&needs=offers``
+    against plain ``lens=open`` would reveal which competitors' listings have drawn interest
+    (the same signal the coverage meter / amber badge / offer-count chip hide). The ``needs``
+    filter must be a no-op for a non-owner, so the no-offer listing is STILL returned.
+    """
+    assert test_user.id != owner_user.id
+    with_offer = _posted_list_with_offers(db_session, owner_user, test_company, n_offers=1)
+    without_offer = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+
+    body = client.get("/v2/partials/resell/lists?lens=open&needs=offers").text
+    # The no-offer listing is still present — ``needs`` did not filter it out for the non-owner.
+    assert f"Excess listing #{without_offer.id}" in body, "needs=offers acted as an offer-existence oracle (open lens)"
+    assert f"Excess listing #{with_offer.id}" in body
+    # take_all is the same oracle dimension — also a no-op for the non-owner.
+    ta_body = client.get("/v2/partials/resell/lists?lens=open&needs=take_all").text
+    assert f"Excess listing #{without_offer.id}" in ta_body, "needs=take_all acted as an oracle (open lens)"
+
+
+def test_mine_lens_needs_filter_still_narrows_to_lists_with_offers(client, db_session, owner_user, test_company):
+    """Control: the ``needs=offers`` triage still narrows the OWNER's own board (mine lens)
+    to listings that carry a live offer — the gate is owner-scoped, not a blanket disable."""
+    with_offer = _posted_list_with_offers(db_session, owner_user, test_company, n_offers=1)
+    with_offer.title = "MINE-WITH-OFFER"
+    without_offer = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+    without_offer.title = "MINE-WITHOUT-OFFER"
+    db_session.commit()
+
+    from app.dependencies import require_user
+
+    client.app.dependency_overrides[require_user] = lambda: owner_user
+    try:
+        body = client.get("/v2/partials/resell/lists?lens=mine&needs=offers").text
+    finally:
+        client.app.dependency_overrides.pop(require_user, None)
+    # Owner titles render on the mine lens; only the with-offer list survives the filter.
+    assert "MINE-WITH-OFFER" in body
+    assert "MINE-WITHOUT-OFFER" not in body, "needs=offers must still narrow the owner's own board"

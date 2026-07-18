@@ -379,6 +379,17 @@ async def resell_lists(
         query = query.filter(ExcessList.owner_id == user.id)
         can_see_customer = True
 
+    # D2 (offer-EXISTENCE oracle): the offer-based ``needs`` triage — "lists carrying a
+    # live bid" — is the OWNER's board only. Applied in the open (offerer) lens it becomes
+    # an existence oracle: a non-owner could diff ``lens=open&needs=offers`` against plain
+    # ``lens=open`` to learn which anonymized "Excess listing #N" postings have already drawn
+    # a competing bid (``needs=take_all`` narrows it to whole-list bids) — the SAME
+    # competitive signal the coverage meter / amber badge / offer-count chip are hidden from
+    # non-owners to protect. Gate it on the one predicate (``can_see_customer``) everywhere:
+    # for a non-owner the filter never runs and the passed-through state never reflects it.
+    if not can_see_customer:
+        needs = ""
+
     if stage:
         query = query.filter(ExcessList.status == stage)
     if needs:
@@ -1562,7 +1573,6 @@ async def resell_not_yet_strip(
             vendor_card_id=b.vendor_card_id,
             owner_id=el.owner_id,
             buyer_name=b.display_name,
-            list_title=el.title,
             due_at=due,
         )
     return template_response(
@@ -1657,11 +1667,25 @@ async def resell_submit_outreach(
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 
 
-# Retry re-uses the standard offer template (the compose modal's seeded subject/body in
-# offer_buyers_modal.html) — the original campaign's subject/body are not persisted, so a
-# one-click retry re-sends with the default text. Kept in sync with that template.
-_RETRY_SUBJECT = "Excess available: {title}"
+# Retry prefers the EXACT subject/body the campaign was sent with (persisted on the row
+# since Phase 2: ``send_subject`` / ``send_body``) so the Sent-folder reconcile matches and
+# a customized send re-sends verbatim. These are only the FALLBACK for a row missing that
+# persisted text (legacy / cleared-subject rows). The subject ships EXTERNALLY to the buyer,
+# so the fallback must stay anonymized — a part-count subject, NEVER ``el.title`` (which
+# traders write as the customer name, the #11/#12 leak class the modal prefill + internal
+# ActivityLog subject already neutralized). Kept in sync with offer_buyers_modal.html.
 _RETRY_BODY = "We have the following excess available — let us know if you'd like to bid."
+
+
+def _neutral_outreach_subject(line_count: int) -> str:
+    """Neutral, part-count outreach subject — mirrors the compose-modal prefill.
+
+    Used as the retry resend's fallback subject when a row has no persisted ``send_subject``.
+    NEVER embeds ``el.title`` (the customer name), so the anonymized listing stays anonymized
+    on the external send. Matches ``offer_buyers_modal.html``'s ``Excess available: N line(s)``.
+    """
+    return f"Excess available: {line_count} line" + ("s" if line_count != 1 else "")
+
 
 # Outreach statuses a failed send can be retried FROM (a genuine send failure or an
 # interrupted/orphaned send — never a live sending/sent/engaged row).
@@ -1698,7 +1722,8 @@ async def resell_retry_outreach(
     if row.status not in _RETRYABLE_OUTREACH:
         raise HTTPException(409, "Only a failed or interrupted outreach can be retried")
 
-    subject = _RETRY_SUBJECT.format(title=el.title)
+    line_count = db.scalar(select(func.count(ExcessLineItem.id)).where(ExcessLineItem.excess_list_id == el.id)) or 0
+    subject = _neutral_outreach_subject(line_count)
     body = _RETRY_BODY
     # Optimistic flip so the tracker shows ``sending`` + self-polls to the final state.
     # Refresh ``created_at`` to now so the row is not "born stale": the nightly stale-sending
