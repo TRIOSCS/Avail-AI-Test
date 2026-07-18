@@ -66,15 +66,15 @@
   <div class="mt-1.5 flex flex-wrap items-center gap-1" @click.stop>
     {% if card.po_number %}{{ copy_chip(card.po_number, label='PO ' ~ card.po_number) }}{% endif %}
     {% if card.payment_method %}
-    <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-gray-100 text-gray-600 border border-gray-200">{{ card.payment_method }}</span>
+    <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase rounded bg-gray-100 text-gray-600 border border-gray-200">{{ card.payment_method }}</span>
     {% endif %}
     {% if card.prepay_state and not is_risk %}{{ prepay_state_badge(card.prepay_state) }}{% endif %}
     {% if card.issue_type %}
-    <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-rose-50 text-rose-600 border border-rose-200"
+    <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-rose-50 text-rose-600 border border-rose-200"
           title="{{ card.issue_type.replace('_', ' ') }}">Issue</span>
     {% endif %}
     {% if card.edited_by_manager %}
-    <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-violet-50 text-violet-600 border border-violet-200"
+    <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-violet-50 text-violet-600 border border-violet-200"
           title="A manager edited this line — see the audit trail.">Edited</span>
     {% endif %}
   </div>

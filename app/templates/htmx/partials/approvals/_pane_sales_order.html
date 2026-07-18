@@ -26,7 +26,7 @@
           {{ (bp.requisition.customer_name if bp.requisition else none) or 'Plan #' ~ bp.id }}
         </h2>
         {% if order_type_label %}
-        <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200">{{ order_type_label }}</span>
+        <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200">{{ order_type_label }}</span>
         {% endif %}
         {{ status_badge(bp.status) }}
       </div>
@@ -124,13 +124,13 @@
        shape, one section-sized cell) — Save posts qp-sales, stale-guarded + audited. #}
   {% macro qps_text(name, label, value) %}
   <label class="block min-w-0">
-    <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+    <span class="text-[11px] uppercase tracking-wide text-gray-400">{{ label }}</span>
     <input type="text" name="qp_{{ name }}" value="{{ value if value is not none else '' }}" class="input input-sm w-full">
   </label>
   {% endmacro %}
   {% macro qps_yn(name, label, value) %}
   <label class="block min-w-0">
-    <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+    <span class="text-[11px] uppercase tracking-wide text-gray-400">{{ label }}</span>
     <select name="qp_{{ name }}" class="input input-sm w-full">
       <option value="" {% if value is none %}selected{% endif %}>—</option>
       <option value="yes" {% if value is true %}selected{% endif %}>Yes</option>
@@ -206,7 +206,7 @@
           ('Sales notes', qp.sales_notes),
         ] %}
         <div class="min-w-0">
-          <dt class="text-gray-400 uppercase tracking-wide text-[10px]">{{ label }}</dt>
+          <dt class="text-gray-400 uppercase tracking-wide text-[11px]">{{ label }}</dt>
           <dd class="text-gray-800 break-words">{{ val if val not in (none, '') else '—' }}</dd>
         </div>
         {% endfor %}
@@ -228,7 +228,7 @@
     <div class="overflow-x-auto">
       <table class="min-w-full text-xs">
         <thead>
-          <tr class="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-line-subtle">
+          <tr class="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-b border-line-subtle">
             <th class="px-3 py-1.5">Part</th>
             <th class="px-3 py-1.5">Vendor</th>
             <th class="px-3 py-1.5 text-right">Qty × Cost</th>

@@ -16,7 +16,7 @@
       <span class="font-medium text-gray-800">{{ edit.field }}</span>
       <span>was <span class="font-mono text-rose-600">{{ edit.old or '—' }}</span>
         &rarr; now <span class="font-mono text-emerald-700">{{ edit.new or '—' }}</span></span>
-      <span class="text-[10px] text-gray-400">{{ edit.user_name or '—' }}{% if edit.at %} · {{ edit.at | timeago }}{% endif %}</span>
+      <span class="text-[11px] text-gray-400">{{ edit.user_name or '—' }}{% if edit.at %} · {{ edit.at | timeago }}{% endif %}</span>
     </li>
     {% endfor %}
   </ul>

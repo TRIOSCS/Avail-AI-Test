@@ -21,14 +21,14 @@
 
 {% macro qp_text_input(name, label, value) %}
 <label class="block min-w-0">
-  <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+  <span class="text-[11px] uppercase tracking-wide text-gray-400">{{ label }}</span>
   <input type="text" name="qp_{{ name }}" value="{{ value if value is not none else '' }}" class="input input-sm w-full">
 </label>
 {% endmacro %}
 
 {% macro qp_yn_select(name, label, value) %}
 <label class="block min-w-0">
-  <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ label }}</span>
+  <span class="text-[11px] uppercase tracking-wide text-gray-400">{{ label }}</span>
   <select name="qp_{{ name }}" class="input input-sm w-full">
     <option value="" {% if value is none %}selected{% endif %}>—</option>
     <option value="yes" {% if value is true %}selected{% endif %}>Yes</option>
@@ -48,7 +48,7 @@
         </h2>
         <span class="badge bg-brand-50 text-brand-600 border-brand-200">{{ status_label }}</span>
         {% if manager_edited %}
-        <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-violet-50 text-violet-600 border border-violet-200"
+        <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-violet-50 text-violet-600 border border-violet-200"
               title="A manager edited this line — see the audit trail.">Edited by manager</span>
         {% endif %}
       </div>
@@ -69,7 +69,7 @@
       <div class="text-sm font-semibold tabular-nums text-gray-900">${{ '{:,.2f}'.format(amount) }}</div>
       <div class="text-tertiary tabular-nums">{{ line.quantity }} × ${{ '{:,.4f}'.format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</div>
       {% if line.payment_method %}
-      <div class="mt-0.5"><span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-gray-100 text-gray-600 border border-gray-200">{{ line.payment_method }}</span></div>
+      <div class="mt-0.5"><span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase rounded bg-gray-100 text-gray-600 border border-gray-200">{{ line.payment_method }}</span></div>
       {% endif %}
     </div>
   </div>
@@ -84,15 +84,15 @@
       <div class="text-sm font-semibold text-accent-700">Confirm the PO you cut in Acctivate</div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">PO number</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">PO number</span>
           <input type="text" name="po_number" required placeholder="PO-…" class="input input-sm w-full font-mono">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Est. ship date</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Est. ship date</span>
           <input type="date" name="estimated_ship_date" class="input input-sm w-full">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Payment method</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Payment method</span>
           <select name="payment_method" required class="input input-sm w-full">
             <option value="">Select…</option>
             {% for val, label in payment_methods %}
@@ -193,23 +193,23 @@
       <input type="hidden" name="expected_updated_at" value="{{ line_stale_token }}">
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Quantity</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Quantity</span>
           <input type="number" name="quantity" min="1" step="1" value="{{ line.quantity or '' }}" class="input input-sm w-full">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Unit cost</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Unit cost</span>
           <input type="number" name="unit_cost" min="0" step="any" value="{{ line.unit_cost if line.unit_cost is not none else '' }}" class="input input-sm w-full">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Unit sell</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Unit sell</span>
           <input type="number" name="unit_sell" min="0" step="any" value="{{ line.unit_sell if line.unit_sell is not none else '' }}" class="input input-sm w-full">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">PO number</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">PO number</span>
           <input type="text" name="po_number" value="{{ line.po_number or '' }}" class="input input-sm w-full font-mono">
         </label>
         <label class="block">
-          <span class="text-[10px] uppercase tracking-wide text-gray-500">Est. ship date</span>
+          <span class="text-[11px] uppercase tracking-wide text-gray-500">Est. ship date</span>
           <input type="date" name="estimated_ship_date"
                  value="{{ line.estimated_ship_date.strftime('%Y-%m-%d') if line.estimated_ship_date else '' }}"
                  class="input input-sm w-full">
@@ -279,7 +279,7 @@
         ('Serial numbers', qp.purchasing_serial_numbers),
       ] %}
       <div class="min-w-0">
-        <dt class="text-gray-400 uppercase tracking-wide text-[10px]">{{ label }}</dt>
+        <dt class="text-gray-400 uppercase tracking-wide text-[11px]">{{ label }}</dt>
         <dd class="text-gray-800 break-words">{{ val if val not in (none, '') else '—' }}</dd>
       </div>
       {% endfor %}

@@ -32,10 +32,10 @@
       <li class="rounded-md px-2.5 py-1.5 text-xs {{ 'border border-rose-200 bg-rose-50' if decision else 'bg-gray-50' }}">
         <div class="flex items-center gap-1.5 flex-wrap">
           {% if decision %}
-          <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-rose-100 text-rose-700 border border-rose-200">{{ _DECISION_LABELS.get(decision, decision) }}</span>
+          <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-rose-100 text-rose-700 border border-rose-200">{{ _DECISION_LABELS.get(decision, decision) }}</span>
           {% endif %}
           <span class="font-medium text-gray-800">{{ note.user.name if note.user else '—' }}</span>
-          {% if note.created_at %}<span class="text-[10px] text-gray-400">{{ note.created_at | timeago }}</span>{% endif %}
+          {% if note.created_at %}<span class="text-[11px] text-gray-400">{{ note.created_at | timeago }}</span>{% endif %}
         </div>
         <p class="text-gray-700 mt-0.5 whitespace-pre-line break-words">{{ note.notes }}</p>
       </li>
@@ -58,7 +58,7 @@
           {% else %}
           <span class="text-gray-700 truncate">{{ f.file_name }}</span>
           {% endif %}
-          <span class="text-[10px] text-gray-400 flex-shrink-0">{{ f.uploaded_by.name if f.uploaded_by else '' }}</span>
+          <span class="text-[11px] text-gray-400 flex-shrink-0">{{ f.uploaded_by.name if f.uploaded_by else '' }}</span>
         </span>
         {% if can_manage_files or f.uploaded_by_id == viewer_id %}
         <button type="button"

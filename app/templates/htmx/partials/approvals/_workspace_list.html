@@ -95,7 +95,7 @@
     <span class="flex items-center gap-1.5 min-w-0">
       <span class="text-sm font-semibold text-gray-900 truncate">{{ row.title }}</span>
       {% if row.order_type %}
-      <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200 flex-shrink-0">{{ row.order_type }}</span>
+      <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200 flex-shrink-0">{{ row.order_type }}</span>
       {% endif %}
     </span>
     <span class="flex items-center gap-1.5 mt-0.5 min-w-0">
@@ -103,7 +103,7 @@
       {% if row.subtitle %}<span class="text-tertiary truncate">{{ row.subtitle }}</span>{% endif %}
     </span>
     {% if row.stalled %}
-    <span class="inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-amber-700"
+    <span class="inline-flex items-center gap-1 mt-0.5 text-[11px] font-semibold text-amber-700"
           title="This plan is waiting on an approval nobody is configured to give — fix approver rights in Admin.">
       <span aria-hidden="true">&#9888;</span> No approver configured — stalled
     </span>

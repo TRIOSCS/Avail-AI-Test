@@ -26,7 +26,7 @@
        },
        select(key, url) {
          this.sel = key; this.paneUrl = url;
-         htmx.ajax('GET', url, { target: '#aw-pane', swap: 'innerHTML' });
+         htmx.ajax('GET', url, { target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind' });
        }
      }"
      x-ref="container"
@@ -64,6 +64,9 @@
 
   {# ── Right: the detail pane ──────────────────────────────────────── #}
   <div class="flex-1 min-w-0 flex flex-col bg-white md:overflow-y-auto">
+    {# Loading bar for imperative pane loads (htmx.ajax indicator target) —
+       lives OUTSIDE #aw-pane so the innerHTML swap never removes it. #}
+    <div id="aw-pane-ind" class="htmx-indicator h-0.5 bg-accent-500 animate-pulse flex-shrink-0"></div>
     <div id="aw-pane" class="flex-1 min-h-0">
       <div class="flex flex-col items-center justify-center h-full min-h-[200px] text-gray-400 p-8">
         <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
