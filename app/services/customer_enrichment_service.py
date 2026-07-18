@@ -9,7 +9,7 @@ Priority: Assigned accounts first, then unassigned accounts.
 Called by: enrichment router endpoints, batch scheduler, the CRM auto-enrich background
            task (app/routers/crm/companies.py).
 Depends on: enrichment_service.find_suggested_contacts_with_errors (the live multi-provider
-            contact-discovery waterfall), contact_quality.py.
+            contact-discovery waterfall).
 """
 
 from datetime import UTC, datetime, timedelta

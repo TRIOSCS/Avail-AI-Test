@@ -33,7 +33,7 @@ Verdicts: **DEAD** = zero production reachability; **TEST-ONLY** = imported only
 
 | Model | Evidence |
 |---|---|
-| `FacetAudit` (`app/models/telemetry.py:45`, table `facet_audit`) | Referenced only by `app/models/__init__.py:174`. Its docstring names its writer as `app/management/audit_facets.py` ("future") — **that file does not exist**. |
+| `FacetAudit` (`app/models/telemetry.py:45`, table `facet_audits`) | Referenced only by `app/models/__init__.py:174`. Its docstring names its writer as `app/management/audit_facets.py` ("future") — **that file does not exist**. |
 | `KnowledgeConfig` (`app/models/knowledge.py:86`, table `knowledge_config`) | Referenced only by `app/models/__init__.py:100` and migrations 001/064/174. Docstring claims "Called by: services/teams_qa_service.py" — **that service does not exist**. |
 
 ### Static assets
