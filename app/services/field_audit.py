@@ -67,9 +67,10 @@ def _stringify(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=UTC)
-        return value.astimezone(UTC).isoformat()
+        # Local name keeps the datetime narrowing (re-assigning the Any-typed
+        # parameter would widen back to Any → a no-any-return mypy error).
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return aware.astimezone(UTC).isoformat()
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, Decimal):
