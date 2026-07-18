@@ -455,6 +455,13 @@ from .dependencies import can_review_qp_purchasing_section, can_review_qp_sales_
 templates.env.globals["can_review_qp_sales_section"] = can_review_qp_sales_section
 templates.env.globals["can_review_qp_purchasing_section"] = can_review_qp_purchasing_section
 
+# Stale-edit guard (Approvals Workspace D5): edit forms embed the SAME token
+# ensure_not_stale checks on the POST — {{ stale_token(obj) }} in a hidden
+# expected_updated_at input, single source of truth in services/stale_guard.py.
+from .services.stale_guard import stale_token  # noqa: E402
+
+templates.env.globals["stale_token"] = stale_token
+
 # CRM P5 trust — canonical industry pick-list exposed to the create/edit account
 # forms (single source of truth in app/constants.py; the SAME tuple the inline
 # editor + apply_company_field validate against).

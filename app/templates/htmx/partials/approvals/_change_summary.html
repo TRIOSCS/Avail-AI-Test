@@ -1,0 +1,26 @@
+{#
+  approvals/_change_summary.html — the approve-time change summary (spec §7).
+  "The change summary is the audit log, filtered": every FIELD_EDIT row on the plan
+  since submission, rendered "was X → now Y" with who/when. Empty state when nothing
+  changed — no diff engine, just the audit trail read back (field_audit.edits_since).
+  Receives: change_edits (list[field_audit.EditRow]).
+  Called by: _pane_sales_order.html (embedded in the approval block).
+  Depends on: Tailwind; |timeago filter.
+#}
+<div class="mt-2 rounded-md border border-line-subtle bg-white/70 px-2.5 py-2" data-testid="change-summary">
+  <div class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Changes since submission</div>
+  {% if change_edits %}
+  <ul class="space-y-0.5 text-xs text-gray-700">
+    {% for edit in change_edits %}
+    <li class="flex items-baseline gap-1.5 flex-wrap">
+      <span class="font-medium text-gray-800">{{ edit.field }}</span>
+      <span>was <span class="font-mono text-rose-600">{{ edit.old or '—' }}</span>
+        &rarr; now <span class="font-mono text-emerald-700">{{ edit.new or '—' }}</span></span>
+      <span class="text-[11px] text-gray-400">{{ edit.user_name or '—' }}{% if edit.at %} · {{ edit.at | timeago }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="text-xs text-gray-400">No changes since submission.</p>
+  {% endif %}
+</div>

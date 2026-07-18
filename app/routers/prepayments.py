@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
-from ..constants import ActivityType, PaymentMethod, PrepaymentStatus
+from ..constants import PREPAYMENT_METHODS, ActivityType, PaymentMethod, PrepaymentStatus
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, is_manager_or_admin, require_user
 from ..models import ActivityLog
@@ -37,11 +37,17 @@ from ..template_env import template_response
 
 router = APIRouter(tags=["prepayments"])
 
-# Payment-method options offered in the request modal (value = PaymentMethod enum value).
+# Payment-method options offered in the request modal AND accepted by the create
+# routes — derived from the frozen PREPAYMENT_METHODS list (wire / PayPal / CC / ACH;
+# COD can never appear — paying on delivery is definitionally not a prepayment).
+_METHOD_LABELS = {
+    PaymentMethod.WIRE.value: "Wire",
+    PaymentMethod.CC.value: "Credit Card",
+    PaymentMethod.PAYPAL.value: "PayPal",
+    PaymentMethod.ACH.value: "ACH",
+}
 _PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
-    (PaymentMethod.WIRE.value, "Wire"),
-    (PaymentMethod.CC.value, "Credit Card"),
-    (PaymentMethod.PAYPAL.value, "PayPal"),
+    (m.value, _METHOD_LABELS.get(m.value, m.value.title())) for m in PREPAYMENT_METHODS
 ]
 
 # Form checkbox / string truthy values ("on" from an HTML checkbox; "true"/"1" from JS).
@@ -82,6 +88,17 @@ def post_prepayment(
     Returns JSON with the prepayment_id and approval_request_id so the caller can poll
     or redirect to the approval workflow.
     """
+    # Same COD/method guards as the HTMX create (router-level — the service stays
+    # untouched): COD lines have nothing to pay in advance; only PREPAYMENT_METHODS pass.
+    if body.payment_method and body.payment_method not in {m.value for m in PREPAYMENT_METHODS}:
+        raise HTTPException(status_code=400, detail="That payment method can't be prepaid.")
+    if body.buy_plan_line_id is not None:
+        guard_line = db.get(BuyPlanLine, body.buy_plan_line_id)
+        if guard_line is not None and guard_line.payment_method == PaymentMethod.COD.value:
+            raise HTTPException(
+                status_code=400,
+                detail="This PO is COD — payment happens on delivery, so there's nothing to pay in advance.",
+            )
     try:
         prepayment, request = create_prepayment(
             db,
@@ -114,6 +131,22 @@ def post_prepayment(
 def _prepayment_toast(response: HTMLResponse, message: str, kind: str = "success") -> None:
     """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
+def _cod_guard_response(message: str) -> HTMLResponse:
+    """The friendly 400 for a blocked prepayment request (COD line / bad method).
+
+    A small inline partial (rendered into the modal body via response-targets or read
+    by tests) + a toast, with a REAL 400 status so callers and tests see the refusal —
+    unlike ``_prepayment_error_toast``'s 200-no-swap, this is a hard guard, not a
+    transient service error.
+    """
+    resp = HTMLResponse(
+        f'<div class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div>',
+        status_code=400,
+    )
+    _prepayment_toast(resp, message, "error")
+    return resp
 
 
 def _prepayment_error_toast(message: str) -> HTMLResponse:
@@ -203,6 +236,19 @@ async def prepayment_request_create(
         amount = Decimal(total_incl_fees)
     except (InvalidOperation, TypeError):
         return _prepayment_error_toast("Enter a valid prepayment amount.")
+
+    # Method must be one of the frozen prepayment methods (COD is not in the list — a
+    # forged/stale form can't smuggle it in).
+    if payment_method and payment_method not in {m.value for m in PREPAYMENT_METHODS}:
+        return _cod_guard_response("That payment method can't be prepaid — pick wire, PayPal, credit card, or ACH.")
+
+    # COD guard (spec §8): a COD line has nothing to pay in advance. Enforced HERE, in
+    # the router, BEFORE create_prepayment — prepayment_service.py stays untouched.
+    guard_line = db.get(BuyPlanLine, buy_plan_line_id)
+    if guard_line is not None and guard_line.payment_method == PaymentMethod.COD.value:
+        return _cod_guard_response(
+            "This PO is COD — payment happens on delivery, so there's nothing to pay in advance."
+        )
 
     report_sent = str(test_report_sent or "").strip().lower() in _TRUTHY
 

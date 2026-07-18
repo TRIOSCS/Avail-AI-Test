@@ -122,7 +122,22 @@ scripts/worktree-guard.sh --apply      # remove only the SAFE (clean + merged) o
   `git worktree list` should normally show only the main checkout.
 - **Stashes:** don't let them pile up — archive (§3) and clear.
 
-## 6. Schema / datetime note
+## 6. Push WIP daily — the remote is the only backup
+
+**End-of-day rule:** every branch with unpushed work gets pushed before the day
+ends (`git push -u origin <branch>`). WIP commits are fine — nobody judges a
+`wip:` message; the pushed branch IS the backup. In July 2026 a complete local
+implementation was unrecoverable from anywhere because its session ended before
+the branch was ever pushed.
+
+- **Personal OneDrive/Drive repo mirrors are NOT backup.** The OneDrive sync
+  silently froze on 2026-06-20 and nobody noticed. A sync client can stall
+  without erroring; `git push` cannot succeed silently-stale. The remote on
+  origin is the only backup that counts.
+- This complements §3: quarantine tags protect work at *deletion* time; the
+  daily push protects it every day before that.
+
+## 7. Schema / datetime note
 
 All datetime columns use `UTCDateTime` (`app/database.py`), which stores and
 returns **tz-aware UTC** (symmetric bind+result, maps to `TIMESTAMPTZ`). Write

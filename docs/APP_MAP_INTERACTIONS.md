@@ -6784,3 +6784,125 @@ no separate "sales order" gate. The QP Sales-section gate (the QualityPlan, rena
 QP-scoped approval and **leaves** the lifecycle tabs; the canonical SO# is
 `buy_plans_v3.sales_order_number` (the QP's editable `sales_so_number` input was removed and
 the column dropped).
+
+---
+
+## Approvals Workspace — flows (Phases 0–1)
+
+**One page, four lenses.** `/v2/approvals` → shell (4 pills, per-viewer badges) →
+lazy `#ap-hub-body` ← `render_tab_body(tab)` → `_workspace_split.html` (split view) →
+left `#aw-list` ← `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed`
+(re-fetches on `awListRefresh from:body`) → row click dispatches `aw-select` → right
+`#aw-pane` ← the tab's pane route. The list's oldest Needs-your-approval row
+dispatches `aw-default` once (applied only when nothing is selected) so opening a tab
+lands the approver on a decision. Legacy 3-tab keys alias throughout.
+
+**Decide loops (engine untouched).** Every pane action posts an EXISTING route with
+`origin=approvals_workspace`; the handler re-renders the pane + `HX-Trigger:
+awListRefresh`:
+- SO/BP approve/reject → `POST /v2/partials/buy-plans/{id}/approve` (engine
+  `decide()` inside) → `render_plan_pane`. Reject requires the note-to-fixer
+  (engine-enforced comment).
+- Confirm PO → `POST .../lines/{line}/confirm-po` → `confirm_po(payment_method=...)`
+  + `apply_qp_purchasing` (QP-purchasing incl. AS9120B onto the (plan, vendor) QP
+  row) + `log_field_edits` for the QP diff → `render_po_pane`.
+- Verify / send back / re-source / claim → the existing verify-po / resource / claim
+  routes → `render_po_pane`. `GET /po/{line}/sent-check` surfaces `verify_po_sent`
+  detection **display-only** (never auto-verifies).
+- Prepay decide → `POST /v2/partials/approvals/prepay-requests/{id}/decide` →
+  `render_prepayment_pane`. Approve button reads **"OK to pay — {method}"**; the
+  method dropdown on the approval card posts
+  `POST /v2/partials/approvals/prepayments/{id}/method` (approver-only,
+  REQUESTED-only, `ensure_not_stale` → non-destructive 409, audited via
+  `log_field_edits(prepayment_id=...)`).
+
+**Field-audit choke point (Phase 0.2, wired from Phase 1 onward).** Edit paths compute
+`diff_fields(obj, updates)` and write ONE `FIELD_EDIT` ActivityLog row per save via
+`log_field_edits` (`details={"edits": [...]}`, keyed by `buy_plan_id` +
+`buy_plan_line_id`/`prepayment_id`); `edits_since` backs the Phase-2 approve-time
+change summary; `manager_edited_line_ids` backs the Phase-3 kanban marker.
+
+**Stale-edit guard (Phase 0.3).** Forms embed `stale_token(obj)` (Jinja global) as
+`expected_updated_at`; handlers call `ensure_not_stale` and turn `StaleEditError`
+into `stale_conflict_response()` (409, `HX-Reswap: none`, "This changed — refresh."
+toast). Empty token skips (legacy forms never false-positive).
+
+**Order type + lite path (Phase 1.3).** The SO picker
+(`/v2/partials/buy-plans/sales-orders/new`) carries an order-type select: sourcing
+types (New/Revision) require offers and build via
+`create_sales_order_from_offers(order_type=...)`; non-sourcing types (Stock Sale /
+Testing Service / Comps) list ANY open requisition and create via
+`create_lite_sales_order` — a zero-line DRAFT plan that submits/approves/tracks
+normally but generates **zero buyer tasks** and **never auto-completes**
+(`check_completion`'s empty-lines early return). `_is_stock_sale` now lets an
+explicit STOCK_SALE order type win over the vendor-name inference so submit can't
+clobber the lite flag. The SO pane hides lines/kanban for non-sourcing types.
+
+**COD guard (Phase 1.5).** `routers/prepayments.py` blocks a prepayment request on a
+COD line (and any non-`PREPAYMENT_METHODS` method) with a friendly 400 BEFORE
+`create_prepayment` — the service and engine stay untouched; the request modal's
+method list derives from `PREPAYMENT_METHODS` (wire/PayPal/CC/ACH — COD never
+renders).
+
+**Editing layer (Phase 2).** Every edit route carries the stale guard
+(narrowest-object `expected_updated_at`; mismatch → non-destructive 409) and lands
+ONE `FIELD_EDIT` row per save: single-line edits log at service depth in
+`edit_buy_plan_line`/`add`/`remove`/`set_sales_order_number`; the bulk save batches
+all touched lines into one row (per-edit `line_id` in the details JSON); confirm-po
+merges line PO fields + QP-purchasing into one row. QP-sales answers save via
+`POST /v2/partials/approvals/plan/{id}/qp-sales` → `apply_qp_sales` (draft →
+owner/manager; pending → MANAGER only). **Approve is two-part** (spec §7):
+`handoff=proceed` → approve + the submitter's in-app change summary
+(`edits_since(plan, submitted_at)` → "was X → now Y", skipped when empty);
+`handoff=send_back` → the existing reject→draft with the summary attached (blank
+note auto-fills; manager edits persist). Every reject/send-back note-to-the-fixer
+ALSO lands as a decision-tagged NOTE row on the item's thread + a `write_in_app`
+notification to the fixer. **Manager edit-anything at verify**: a manager/admin may
+edit qty / unit cost / PO# / est ship on a PENDING_VERIFY line via
+`/lines/{id}/edit` (vendor stays offer-swap-only; bulk stays strict); the pane
+shows the Acctivate warning + "Edited by manager" marker. **Notes & attachments on
+every item** (never status-locked): `POST /v2/partials/approvals/notes` /
+`.../attachments` (shared `store_and_attach` on `BuyPlanAttachment`,
+`validate_subject`, ATTACH_ADDED/REMOVED activity; delete = uploader or manager);
+`_notes_thread.html` renders threads + files with decision-tagged rows in all three
+panes. **Lifecycle controls**: manager-only halt/resume/cancel/reset on the SO pane
+via the existing POSTs (`origin=approvals_workspace`); `plan_needs_approver_reason`
+stall warnings on BP-tab rows and the pane.
+
+**PO kanban (Phase 3, spec §6).** `render_plan_pane` builds `kanban` via
+`services/kanban_lanes.build_kanban(db, plan)` on ACTIVE/INBOUND **sourcing** orders
+only (lite plans and draft/pending/closed plans get no board); `_pane_kanban.html`
+renders it inside `_pane_sales_order.html`. Lanes are **display-only, never
+persisted**, computed per line by `kanban_lane(line_status, prepay_status,
+payment_method, received)` with this exact precedence:
+
+1. `cancelled` → hidden (no column);
+2. `resourcing` → **Re-sourcing** (the claim pool — lane renders only when populated);
+3. received (`received_at` stamped) → **Received** — paid-and-received is NOT a risk;
+4. prepayment **PAID** and `payment_method != cod` → **Paid · awaiting delivery** (the
+   RISK lane — money out before goods on any advance rail, **outranks verified**; COD
+   never enters);
+5. `verified` → **Approved**; 6. `pending_verify` → **Pending approval**;
+7. else (`awaiting_po` + `issue`) → **Awaiting PO** (issue keeps a badge, not a column).
+
+Card data is batch-resolved (no N+1): prepay badge state via
+`prepayment_state_for_lines` (read-only), amount/payee/`paid_at` off the
+most-progressed live Prepayment row, `manager_edited_line_ids` for the Edited marker,
+`note_counts` + `BuyPlanAttachment` group-counts, plan-level QP `partial_ship`. Risk
+cards show **amount + payee** on their face and age green → amber (3d) → red (7d)
+keyed on `paid_at` (shared `age_chip` thresholds). **No drag** — cards move only by
+the real actions; tapping a card `hx-get`s that line's PO pane into `#aw-pane`
+(explicit `hx-target`).
+
+**Mark received (Phase 3).** TRIO's "OPS Received (Y/N)" — no automated receiving
+event exists, so `mark_line_received(plan_id, line_id, user, db)`
+(`buyplan_workflow/buyplan_po.py`, ADDITIVE) backs the Received column: actor gate =
+the line's buyer or a manager/admin (service-side); state gate = VERIFIED **or** the
+paid-risk state (a PAID prepayment — goods can land before the verify sign-off);
+idempotent (an already-received line no-ops); stamps `received_at`/`received_by_id` +
+ONE `LINE_RECEIVED` ActivityLog row keyed to the line; **never** touches line.status
+or the plan's completion machinery (completion still runs only through `verify_po`).
+Route: `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive` (`require_user`;
+PermissionError→403, ValueError→400); `origin=approvals_workspace` re-renders the
+SO/BP pane when a `lens` rides along (the kanban card's button — the board repaints
+in place) else the PO-line pane, both with `awListRefresh`.
