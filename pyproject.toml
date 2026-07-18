@@ -119,7 +119,12 @@ module = [
     "app.services.category_normalizer",
     "app.services.buyplan_naming",
     "app.services.enrichment_credit_guard",
+    "app.services.field_audit",
+    "app.services.kanban_lanes",
+    "app.services.qp_workspace",
     "app.services.spec_tiers",
+    "app.services.stale_guard",
+    "app.services.workspace_notes",
 ]
 disable_error_code = []
 

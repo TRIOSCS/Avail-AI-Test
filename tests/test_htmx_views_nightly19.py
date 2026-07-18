@@ -117,23 +117,23 @@ class TestBuyPlansListPartial:
     @pytest.mark.parametrize(
         "url",
         [
-            # No-param → role-derived default lens; explicit lens tabs per the contract.
             pytest.param("/v2/partials/buy-plans", id="default_lens"),
             pytest.param("/v2/partials/buy-plans?lens=my_queue", id="lens_my_queue"),
             pytest.param("/v2/partials/buy-plans?lens=pipeline", id="lens_pipeline"),
         ],
     )
     def test_list_loads(self, client: TestClient, url: str):
-        """The hub shell renders: lens-tab switcher + lazy #bp-hub-body with its hx-target."""
-        resp = client.get(url)
-        assert resp.status_code == 200
-        body = resp.text
-        # Lens-tab switcher present (one button per lens).
-        assert "My Queue" in body
-        assert "Pipeline" in body
+        """The hub shell retired (spec §11.1): every old shell/lens URL 308s onto the
+        workspace shell, which renders its lazy #ap-hub-body with its hx-target."""
+        resp = client.get(url, follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        followed = client.get(url, follow_redirects=True)
+        assert followed.status_code == 200
+        body = followed.text
         # Lazy body container carries its own explicit hx-target (cards-vanish guard).
-        assert 'id="bp-hub-body"' in body
-        assert 'hx-target="#bp-hub-body"' in body
+        assert 'id="ap-hub-body"' in body
+        assert 'hx-target="#ap-hub-body"' in body
 
     def test_list_with_plan(self, client: TestClient, db_session: Session, test_requisition: Requisition):
         _make_buy_plan(db_session, test_requisition)

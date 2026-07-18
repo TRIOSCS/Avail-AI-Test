@@ -206,7 +206,8 @@ def test_buy_plan_export_is_csv_attachment(client: TestClient, db_session: Sessi
     db_session.commit()
 
     resp = client.get("/v2/partials/approvals/buy-plan/export")
-    _assert_attachment(resp, filename_contains="approvals_buy_plans_all.csv")
+    # The legacy buy-plan key aliases onto the workspace Sales Orders export.
+    _assert_attachment(resp, filename_contains="approvals_sales_orders_all.csv")
 
 
 def test_buy_plan_export_header_and_one_row_per_plan(client: TestClient, db_session: Session, test_user: User):
@@ -216,7 +217,7 @@ def test_buy_plan_export_header_and_one_row_per_plan(client: TestClient, db_sess
 
     rows = _parse_csv(client.get("/v2/partials/approvals/buy-plan/export").text)
 
-    assert rows[0] == ["Plan ID", "Customer", "Sales Order", "Status", "Value"]
+    assert rows[0] == ["Plan ID", "Customer", "Sales Order", "Order Type", "Status", "Value"]
     assert len(rows) == 2  # header + one plan
     body = "\n".join(",".join(r) for r in rows[1:])
     assert str(bp.id) in body
@@ -239,7 +240,7 @@ def test_buy_plan_export_scope_mine_filters_to_own_plans(client: TestClient, db_
     assert {str(mine.id), str(theirs.id)} <= all_ids
 
     resp = client.get("/v2/partials/approvals/buy-plan/export?scope=mine")
-    assert "approvals_buy_plans_mine.csv" in resp.headers["content-disposition"]
+    assert "approvals_sales_orders_mine.csv" in resp.headers["content-disposition"]
     mine_ids = {r[0] for r in _parse_csv(resp.text)[1:]}
     assert str(mine.id) in mine_ids
     assert str(theirs.id) not in mine_ids
@@ -324,10 +325,10 @@ def test_buy_plan_tab_renders_export_anchor(client: TestClient, db_session: Sess
     _plan(db_session, req, q)
     db_session.commit()
 
-    html = client.get("/v2/partials/approvals/buy-plan").text
+    html = client.get("/v2/partials/approvals/buy-plans/list").text
     assert "Export CSV" in html
     assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/buy-plan/export?scope=all" in html
+    assert "/v2/partials/approvals/buy-plans/export?scope=all" in html
 
 
 def test_prepayment_tab_renders_export_anchor(client: TestClient, db_session: Session, test_user: User):
@@ -336,10 +337,10 @@ def test_prepayment_tab_renders_export_anchor(client: TestClient, db_session: Se
     _resolved_prepay(db_session, bp, test_user)
     db_session.commit()
 
-    html = client.get("/v2/partials/approvals/prepayment").text
+    html = client.get("/v2/partials/approvals/prepayments/list").text
     assert "Export CSV" in html
     assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/prepayment/export?scope=all" in html
+    assert "/v2/partials/approvals/prepayments/export?scope=all" in html
 
 
 def test_po_approval_tab_renders_export_anchor(client: TestClient, db_session: Session, test_user: User):
@@ -348,10 +349,10 @@ def test_po_approval_tab_renders_export_anchor(client: TestClient, db_session: S
     _po_history(db_session, bp, test_user)
     db_session.commit()
 
-    html = client.get("/v2/partials/approvals/po-approval").text
+    html = client.get("/v2/partials/approvals/purchase-orders/list").text
     assert "Export CSV" in html
     assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/po-approval/export?scope=all" in html
+    assert "/v2/partials/approvals/purchase-orders/export?scope=all" in html
 
 
 # ══════════════════════════ Resell fixtures ══════════════════════════

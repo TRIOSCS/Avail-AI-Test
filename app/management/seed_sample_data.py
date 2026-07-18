@@ -172,8 +172,8 @@ def _seed_users(db: Session, counts: _Counts) -> dict[str, User]:
 
 # Sample-user roles redirected to the --owner user so the sample deals land in
 # THAT user's own-work lenses, keyed on the fields each lens filters:
-#   - buy-plan-line buyer_id   → buy-plans "orders" (buyer_line_queue)
-#   - buy-plan submitted_by_id → buy-plans "deals" (deals_board scope=mine)
+#   - buy-plan-line buyer_id   → Approvals PO tab "my assigned lines"
+#   - buy-plan submitted_by_id → Approvals SO/BP lists' Mine scope
 #   - excess owner_id          → resell "Open to Me"
 #   - requisition created_by   → requisitions owner-filter dropdown + the
 #                                auto-"my reqs" filter that fires only for SALES-role
@@ -911,8 +911,8 @@ def _seed_wf_c(
         db, counts, q_sent, offer=None, mpn="AVSAMPLE-CUSTOM-001", qty=10, cost=Decimal(500), sell=Decimal(600)
     )
 
-    # submitted_by_id is set even on the DRAFT so it appears in its owner's "deals"
-    # board (deals_board scope=mine filters BuyPlan.submitted_by_id == user); u_seeder
+    # submitted_by_id is set even on the DRAFT so it appears in its owner's Mine scope
+    # (the workspace lists filter BuyPlan.submitted_by_id == user); u_seeder
     # is redirected to the --owner user when that option is used.
     bp_draft = _mk_buy_plan(
         db,

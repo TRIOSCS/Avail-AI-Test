@@ -97,6 +97,17 @@ class QualityPlan(Base):
     purchasing_tpo_ship_complete = Column(Boolean, nullable=True)  # Will TPO ship complete?
     purchasing_tpo_notes = Column(Text, nullable=True)  # TPO Notes / Shipping Schedule
 
+    # ── § PURCHASING AS9120B fields (Approvals Workspace — migration 196). The
+    # counterfeit-avoidance / traceability answers the Excel QP workbook carried but the
+    # native section lacked. All nullable; written via qp_workspace.apply_qp_purchasing.
+    purchasing_traceability_verified = Column(Boolean, nullable=True)  # supply-chain traceability verified?
+    purchasing_counterfeit_risk = Column(String(50), nullable=True)  # counterfeit-risk assessment
+    purchasing_risk_level = Column(String(50), nullable=True)  # overall risk level
+    purchasing_coc_available = Column(Boolean, nullable=True)  # Certificate of Conformance available?
+    purchasing_vendor_rating = Column(String(255), nullable=True)  # vendor rating at PO time
+    purchasing_sn_previously_received = Column(Boolean, nullable=True)  # serials previously received?
+    purchasing_serial_numbers = Column(Text, nullable=True)  # serial numbers on this PO
+
     # ── Section reviewed-at/by stamps (set by the buyer's Mark-Reviewed toggle — a
     # lightweight per-section fold via toggle_section_reviewed, NOT an approver gate;
     # decision C). reviewed_by_id records who last marked the section reviewed.

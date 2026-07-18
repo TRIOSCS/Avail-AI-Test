@@ -122,9 +122,47 @@ scripts/worktree-guard.sh --apply      # remove only the SAFE (clean + merged) o
   `git worktree list` should normally show only the main checkout.
 - **Stashes:** don't let them pile up — archive (§3) and clear.
 
-## 6. Schema / datetime note
+## 6. Push WIP daily — the remote is the only backup
+
+**End-of-day rule:** every branch with unpushed work gets pushed before the day
+ends (`git push -u origin <branch>`). WIP commits are fine — nobody judges a
+`wip:` message; the pushed branch IS the backup. In July 2026 a complete local
+implementation was unrecoverable from anywhere because its session ended before
+the branch was ever pushed.
+
+- **Personal OneDrive/Drive repo mirrors are NOT backup.** The OneDrive sync
+  silently froze on 2026-06-20 and nobody noticed. A sync client can stall
+  without erroring; `git push` cannot succeed silently-stale. The remote on
+  origin is the only backup that counts.
+- This complements §3: quarantine tags protect work at *deletion* time; the
+  daily push protects it every day before that.
+
+## 7. Schema / datetime note
 
 All datetime columns use `UTCDateTime` (`app/database.py`), which stores and
 returns **tz-aware UTC** (symmetric bind+result, maps to `TIMESTAMPTZ`). Write
 aware UTC (`datetime.now(timezone.utc)`); never strip tzinfo to "match" a column.
 New datetime columns: just use `UTCDateTime` (no `timezone=` needed).
+
+## 7. Releases = deploys
+
+- **Publishing a GitHub release is the production deploy trigger.**
+  `.github/workflows/deploy.yml` runs on `release: published`, waits for the
+  `test` and `security` check-runs to be green on the release commit, then
+  SSH-deploys to the DigitalOcean server. Never publish a release you don't
+  intend to ship.
+- **Drafts are staged automatically.** `.github/workflows/release-draft.yml`
+  fires on any push to `main` that touches `app/config.py` (and on manual
+  dispatch): it reads `APP_VERSION` and creates a **draft** release
+  `v<version>` with generated notes, unless a tag or release for that version
+  already exists. A human pressing "Publish" is what deploys — the workflow
+  never publishes. It also deletes stale **draft** releases for other versions
+  (never published ones), so at most one draft exists: the current
+  `APP_VERSION`'s. Bump `APP_VERSION` in the same PR as the work you want in
+  the next release.
+- **Tag hygiene.** Version tags referenced by a published release are
+  permanent (deleting one breaks the release and its changelog compare
+  links). Ad-hoc snapshot/backup tags follow §3: copy into the `archive/`
+  namespace, then delete the original. Duplicate version tags with no
+  release attached may be deleted outright once another surviving tag
+  points at the same commit.

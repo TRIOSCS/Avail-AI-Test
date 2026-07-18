@@ -206,6 +206,9 @@ class PlanTrackingRow:
     gross_profit: Decimal | None = None
     margin_pct: Decimal | None = None
     part_count: int = 0
+    # SalesOrderType value (Approvals Workspace) — the order-type badge on list rows.
+    # Read-side only: populated straight off BuyPlan.order_type, never written here.
+    order_type: str | None = None
 
 
 def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> list[PlanTrackingRow]:
@@ -288,6 +291,7 @@ def buy_plan_tracking_rows(db: Session, user: User, *, scope: str = "all") -> li
             ),
             margin_pct=p.total_margin_pct,
             part_count=part_counts.get(p.id, 0),
+            order_type=p.order_type,
         )
         for p in plans.values()
     ]

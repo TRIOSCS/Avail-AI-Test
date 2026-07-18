@@ -1,33 +1,26 @@
 {#
-  approvals/approvals_hub.html — Approvals hub shell (3-tab decide surface).
-  Tabs: Buy Plans / Sales Orders (BUY_PLAN engine gate — approving the plan IS the SO
-  sign-off after the Phase-D SO fold, so the plan carries its SO number) · PO Approval
-  (per-line PENDING_VERIFY, not engine-backed) · Prepayment (PREPAYMENT engine gate).
-  One tab per surviving gate type;
-  the body lazy-loads the active tab partial into #ap-hub-body. This is the "browse +
-  decide + history, per gate type, org-wide" console — distinct from the Buy Plans hub's
-  personal My Queue / Pipeline surfaces (which live at /v2/buy-plans). No origination
-  ("New Buy Plan") button — that is deal creation, not a decide action.
-  Receives: active_tab (str: 'buy-plan'|'po-approval'|'prepayment'), counts (dict of
-            org-wide pending counts per tab key).
+  approvals/approvals_hub.html — Approvals Workspace shell (4-tab split-view console).
+  Tabs: Sales Orders · Buy Plans · Purchase Orders · Prepayments — four lenses on the
+  same pipeline rooted at the sales order (specs/approvals-workspace.md §5). Each pill
+  carries a per-viewer "waiting on you" badge; the active tab's split view lazy-loads
+  into #ap-hub-body. Decisions never navigate — panes decide in place.
+  Receives: active_tab (str, one of the four tab keys), tabs (list[(key, label)]),
+            badges (dict tab_key → int, items waiting on the viewer),
+            select (int|None — plan id from a /v2/buy-plans/{id} deep link; rides the
+            lazy body URL so the SO/BP list preselects that plan's pane).
   Called by: htmx/approvals_hub.py approvals_hub_shell (GET /v2/partials/approvals).
-  Depends on: HTMX, Alpine.js, Tailwind (accent/brand palette); the per-tab bodies under
-              approvals/ (lazy-loaded into #ap-hub-body) — _tab_buy_plan / _tab_po_approval
-              / _tab_prepayment.
+  Depends on: HTMX, Alpine.js, Tailwind; _workspace_split.html (lazy-loaded tab body).
 #}
 {% from "htmx/partials/shared/_macros.html" import lazy_body %}
 <title hx-swap-oob="true">Approvals — AvailAI</title>
 
 <div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
 
-  {# ── Tab switcher ──
-     Highlight is Alpine-reactive (:class on tab) so the active pill updates the instant a
-     tab is clicked — before the server swap returns — and stays correct after the
-     re-rendered hub re-inits x-data with the server tab. Mirrors the Buy Plans hub /
-     settings tab_button pattern. Active state uses accent-600 (single-accent rule). #}
-  <div class="flex flex-wrap items-center gap-2 mb-5">
-    {% for key, label in [('buy-plan', 'Buy Plans / Sales Orders'), ('po-approval', 'PO Approval'), ('prepayment', 'Prepayment')] %}
-    {% set c = counts.get(key, 0) %}
+  {# ── Tab switcher — Alpine-reactive highlight so the active pill updates the instant
+       a tab is clicked, before the server swap returns. #}
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    {% for key, label in tabs %}
+    {% set c = badges.get(key, 0) %}
     <button hx-get="/v2/partials/approvals?tab={{ key }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
@@ -43,9 +36,9 @@
     {% endfor %}
   </div>
 
-  {# ── Lazy body ── (lazy_body macro structurally enforces the explicit
-     hx-target guard — see shared/_macros.html for the landmine rationale) #}
-  {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab) %}
+  {# ── Lazy tab body ── (lazy_body macro structurally enforces the explicit hx-target
+     guard — see shared/_macros.html for the landmine rationale) #}
+  {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab ~ (('?select=' ~ select) if select else '')) %}
     <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"

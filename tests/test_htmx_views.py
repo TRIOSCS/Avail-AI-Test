@@ -211,7 +211,7 @@ class TestV2FullPages:
             ("/v2/search", "/v2/partials/search"),
             ("/v2/vendors", "/v2/partials/vendors"),
             ("/v2/customers", "/v2/partials/customers"),
-            ("/v2/buy-plans", "/v2/partials/buy-plans"),
+            ("/v2/buy-plans", "/v2/partials/approvals?tab=buy-plans"),  # 308 → /v2/approvals
             ("/v2/resell", "/v2/partials/resell/workspace"),
             ("/v2/quotes", "/v2/partials/parts/workspace"),  # 307 → /v2/requisitions
             ("/v2/settings", "/v2/partials/settings"),
@@ -1859,12 +1859,14 @@ class TestBuyPlans:
         ids=["all", "status", "mine"],
     )
     def test_list(self, client: TestClient, query: str):
-        resp = client.get(f"/v2/partials/buy-plans{query}")
-        assert resp.status_code == 200
-        # Hub shell: both lens tabs render and the body lazy-loads into #bp-hub-body.
-        assert "My Queue" in resp.text
-        assert "Pipeline" in resp.text
-        assert 'hx-target="#bp-hub-body"' in resp.text
+        # The hub shell retired (spec §11.1): its partial 308s onto the workspace
+        # shell, whose four tab pills + lazy body render after the redirect.
+        resp = client.get(f"/v2/partials/buy-plans{query}", follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        followed = client.get(f"/v2/partials/buy-plans{query}", follow_redirects=True)
+        assert followed.status_code == 200
+        assert 'hx-target="#ap-hub-body"' in followed.text
 
 
 # ══════════════════════════════════════════════════════════════════════════
