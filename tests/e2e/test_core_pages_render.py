@@ -24,7 +24,7 @@ CORE_NAV_HREFS = [
     "/v2/customers",
     "/v2/vendors",
     "/v2/materials",
-    "/v2/buy-plans",
+    "/v2/approvals",
     "/v2/proactive",
     "/v2/settings",
 ]

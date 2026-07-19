@@ -788,21 +788,24 @@ class TestCreateQuoteFromOffers:
 
 
 class TestBuyPlansListPartial:
-    """Buy Plan Deal Hub shell over the real lens contract (lens-only param)."""
+    """The retired hub shell 308s onto the workspace whatever the old lens value."""
 
     @pytest.mark.parametrize(
         "query",
-        # The lens contract is now my_queue|pipeline; every non-empty value here is an
-        # UNKNOWN lens that falls back to the role-default lens and still renders the shell.
+        # The hub retired (spec §11.1): every old shell URL — any lens value included —
+        # 308s onto the workspace shell's Buy Plans tab.
         ["", "?lens=deals", "?lens=orders", "?lens=supervise"],
         ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise_unknown"],
     )
     def test_buy_plans_list(self, client: TestClient, db_session: Session, query):
-        resp = client.get(f"/v2/partials/buy-plans{query}")
-        assert resp.status_code == 200
-        # Hub shell: lens switcher + the lazy body with its own hx-target.
-        assert 'id="bp-hub-body"' in resp.text
-        assert 'hx-target="#bp-hub-body"' in resp.text
+        resp = client.get(f"/v2/partials/buy-plans{query}", follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        followed = client.get(f"/v2/partials/buy-plans{query}", follow_redirects=True)
+        assert followed.status_code == 200
+        # Workspace shell: the lazy body with its own hx-target.
+        assert 'id="ap-hub-body"' in followed.text
+        assert 'hx-target="#ap-hub-body"' in followed.text
 
 
 # ── Section 15: sourcing workspace with filter params ────────────────

@@ -43,22 +43,16 @@ def _seed_pending_buy_plan_approval(db, user):
 
 
 class TestPinnedApprovalSection:
-    def test_full_page_threads_lens_to_lazy_partial(self, nonadmin_client):
-        """A full-page load of /v2/buy-plans?lens=pipeline threads ?lens= into the lazy
-        hub-partial URL, so a deep link / reload lands on the requested lens instead of
-        the role default. (Phase 3: the My Queue/Pipeline hub reclaimed /v2/buy-plans.)
+    def test_full_page_lens_urls_308_to_workspace(self, nonadmin_client):
+        """Old pushed /v2/buy-plans?lens= URLs 308 onto the workspace Buy Plans tab —
+        the hub retired post-parity (spec §11.1) and the lens key is dropped.
 
         (v2_page authenticates via the session cookie, so this needs nonadmin_client.)
         """
-        resp = nonadmin_client.get("/v2/buy-plans?lens=pipeline")
-        assert resp.status_code == 200
-        assert "/v2/partials/buy-plans?lens=pipeline" in resp.text
-
-    def test_full_page_ignores_unknown_lens(self, nonadmin_client):
-        """An unknown ?lens= value is dropped (no query string), not echoed verbatim."""
-        resp = nonadmin_client.get("/v2/buy-plans?lens=bogus")
-        assert resp.status_code == 200
-        assert "lens=bogus" not in resp.text
+        for lens in ("pipeline", "bogus"):
+            resp = nonadmin_client.get(f"/v2/buy-plans?lens={lens}", follow_redirects=False)
+            assert resp.status_code == 308
+            assert resp.headers["location"] == "/v2/approvals?tab=buy-plans"
 
 
 class TestBadgeMerge:

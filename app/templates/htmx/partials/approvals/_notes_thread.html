@@ -1,0 +1,97 @@
+{#
+  approvals/_notes_thread.html — the per-item notes thread + file attachments
+  (spec §7 / design D2+D3). One shared block for all three panes: the sales order,
+  each PO line, each prepayment. Decision-tagged notes (reject / send-back
+  notes-to-the-fixer) render distinctly; files list with library links; counts in
+  the header. Anyone involved can add either at ANY stage — field locks never lock
+  notes or files. Add-note / upload / delete all re-render THIS block (the routes
+  return it; forms target #aw-notes-thread with outerHTML — explicit, never inherit).
+  Receives: thread_notes (list[ActivityLog]), thread_files (list[BuyPlanAttachment]),
+            thread_subject (dict — exactly one of buy_plan_id / buy_plan_line_id /
+            prepayment_id), viewer_id (int), can_manage_files (bool).
+  Called by: _pane_sales_order.html / _pane_po_line.html / _pane_prepayment.html
+             (include) + htmx/approvals_hub.py _render_notes_thread (POST/DELETE).
+  Depends on: HTMX, Alpine.js, Tailwind; |timeago filter.
+#}
+{% set _DECISION_LABELS = {'rejected': 'Rejected', 'sent_back': 'Sent back'} %}
+<div id="aw-notes-thread" class="rounded-lg border border-line-base bg-white">
+  <div class="px-3 py-2 border-b border-line-subtle flex items-center justify-between">
+    <span class="text-sm font-semibold text-gray-800">Notes &amp; files</span>
+    <span class="text-[11px] text-gray-400 tabular-nums">
+      {{ thread_notes | length }} note{{ 's' if thread_notes | length != 1 }} ·
+      {{ thread_files | length }} file{{ 's' if thread_files | length != 1 }}
+    </span>
+  </div>
+
+  <div class="px-3 py-2 space-y-2">
+    {# ── Notes (decision-tagged rows styled distinctly) ── #}
+    {% if thread_notes %}
+    <ul class="space-y-1.5">
+      {% for note in thread_notes %}
+      {% set decision = (note.details or {}).get('decision') %}
+      <li class="rounded-md px-2.5 py-1.5 text-xs {{ 'border border-rose-200 bg-rose-50' if decision else 'bg-gray-50' }}">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          {% if decision %}
+          <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-rose-100 text-rose-700 border border-rose-200">{{ _DECISION_LABELS.get(decision, decision) }}</span>
+          {% endif %}
+          <span class="font-medium text-gray-800">{{ note.user.name if note.user else '—' }}</span>
+          {% if note.created_at %}<span class="text-[11px] text-gray-400">{{ note.created_at | timeago }}</span>{% endif %}
+        </div>
+        <p class="text-gray-700 mt-0.5 whitespace-pre-line break-words">{{ note.notes }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-xs text-gray-400">No notes yet.</p>
+    {% endif %}
+
+    {# ── Files ── #}
+    {% if thread_files %}
+    <ul class="divide-y divide-line-subtle border-t border-line-subtle pt-1">
+      {% for f in thread_files %}
+      <li class="flex items-center justify-between gap-2 py-1 text-xs">
+        <span class="min-w-0 flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+          {% if f.library_web_url %}
+          <a href="{{ f.library_web_url }}" target="_blank" rel="noopener"
+             class="text-accent-600 truncate hover:underline">{{ f.file_name }}</a>
+          {% else %}
+          <span class="text-gray-700 truncate">{{ f.file_name }}</span>
+          {% endif %}
+          <span class="text-[11px] text-gray-400 flex-shrink-0">{{ f.uploaded_by.name if f.uploaded_by else '' }}</span>
+        </span>
+        {% if can_manage_files or f.uploaded_by_id == viewer_id %}
+        <button type="button"
+                hx-delete="/v2/partials/approvals/attachments/{{ f.id }}"
+                hx-target="#aw-notes-thread" hx-swap="outerHTML"
+                hx-confirm="Remove {{ f.file_name }}?"
+                class="text-[11px] text-gray-400 hover:text-rose-600 flex-shrink-0" title="Remove this file">Remove</button>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {# ── Add note + upload — never status-locked ── #}
+    <form hx-post="/v2/partials/approvals/notes"
+          hx-target="#aw-notes-thread" hx-swap="outerHTML"
+          class="flex items-start gap-1.5 pt-1 border-t border-line-subtle">
+      {% for key, val in thread_subject.items() %}
+      <input type="hidden" name="{{ key }}" value="{{ val }}">
+      {% endfor %}
+      <textarea name="body" rows="1" required placeholder="Add a note…"
+                class="input input-sm flex-1 min-w-0"></textarea>
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm flex-shrink-0">Post</button>
+    </form>
+    <form hx-post="/v2/partials/approvals/attachments" hx-encoding="multipart/form-data"
+          hx-target="#aw-notes-thread" hx-swap="outerHTML"
+          class="flex items-center gap-1.5">
+      {% for key, val in thread_subject.items() %}
+      <input type="hidden" name="{{ key }}" value="{{ val }}">
+      {% endfor %}
+      <input type="file" name="file" required
+             class="text-xs text-gray-500 file:mr-2 file:rounded file:border-0 file:bg-brand-100 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand-700 hover:file:bg-brand-200 flex-1 min-w-0">
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm flex-shrink-0">Attach</button>
+    </form>
+  </div>
+</div>

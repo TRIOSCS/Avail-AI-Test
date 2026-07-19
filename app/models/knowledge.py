@@ -6,6 +6,13 @@ self-referential FK. Expiry logic for price/lead-time facts.
 
 Called by: services/knowledge_service.py, routers/knowledge.py
 Depends on: models/base.py, models/auth.py
+
+NOTE: this module used to also define ``KnowledgeConfig`` (table
+``knowledge_config``, a key-value config store for a planned Teams Q&A
+routing service). That service (``services/teams_qa_service.py``) was never
+built, so the model had zero readers/writers; it was removed as dead code
+(see docs/audit/2026-07-18-non-production-code-audit.md ss1) and the table
+dropped by alembic/versions/197_drop_facet_audits_kconfig.py.
 """
 
 from datetime import UTC, datetime
@@ -81,17 +88,3 @@ class KnowledgeEntry(Base):
         Index("ix_ke_expires", "expires_at", postgresql_where="expires_at IS NOT NULL"),
         Index("ix_ke_created_by", "created_by"),
     )
-
-
-class KnowledgeConfig(Base):
-    """Key-value config for knowledge ledger (e.g., daily_question_cap).
-
-    Called by: services/teams_qa_service.py
-    Depends on: models/base.py
-    """
-
-    __tablename__ = "knowledge_config"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    key = Column(String(50), unique=True, nullable=False)
-    value = Column(String(255), nullable=False)

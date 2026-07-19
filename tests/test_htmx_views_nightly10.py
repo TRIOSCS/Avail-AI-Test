@@ -94,9 +94,13 @@ class TestShellPageRouting:
     """Covers v2_page handler for all untested path variants."""
 
     def test_buy_plans_list(self, client: TestClient):
-        resp = client.get("/v2/buy-plans")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
+        # Retired hub home: 308 onto the workspace, which serves the page.
+        resp = client.get("/v2/buy-plans", follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == "/v2/approvals?tab=buy-plans"
+        followed = client.get("/v2/buy-plans", follow_redirects=True)
+        assert followed.status_code == 200
+        assert "text/html" in followed.headers["content-type"]
 
     @pytest.mark.parametrize(
         "path",

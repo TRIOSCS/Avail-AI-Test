@@ -565,3 +565,86 @@ class TestStreamSearchMpnRelevanceGuard:
 
         done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
         assert json.loads(done[0][2])["off_target"] == 0
+
+
+# ── Shared 15-min search-result cache (the same one _fetch_fresh reads/writes) ──
+
+
+class TestStreamSearchMpnSharedCache:
+    async def test_cache_hit_skips_live_fanout(self, db_session: Session):
+        """A shared cache HIT serves results without touching any connector's search() —
+        before this fix the streaming path never consulted the cache _fetch_fresh
+        reads/writes, so an interactive search always re-hit live supplier APIs even
+        moments after an identical requisition search."""
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+
+        mock_conn = MagicMock()
+        mock_conn.__class__.__name__ = "NexarConnector"
+        mock_conn.source_name = "nexar"
+        mock_conn.search = AsyncMock(return_value=[])
+
+        cached_results = [
+            {
+                "vendor_name": "CachedVendor",
+                "mpn_matched": "LM317T",
+                "qty_available": 10,
+                "unit_price": 1.0,
+                "source_type": "nexar",
+                "confidence": 3,
+            }
+        ]
+        cached_stats = [{"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"}]
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch(
+                "app.search_service._get_search_cache",
+                return_value=(cached_results, cached_stats, "2026-01-01T00:00:00+00:00"),
+            ),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+        ):
+            await stream_search_mpn("test-cache-hit", "LM317T")
+
+        mock_conn.search.assert_not_called()
+        event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
+        assert "results" in event_types
+        assert "done" in event_types
+
+    async def test_cache_miss_writes_shared_cache(self, db_session: Session):
+        """A cache MISS runs the live fan-out AND writes the shared cache in the same
+        flat/unscored shape _fetch_fresh's cache-miss path writes, so a later
+        requisition search (or another streaming search) of this MPN gets a cache
+        HIT."""
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+
+        mock_conn = MagicMock()
+        mock_conn.__class__.__name__ = "NexarConnector"
+        mock_conn.source_name = "nexar"
+        mock_conn.search = AsyncMock(
+            return_value=[{"mpn_matched": "LM317T", "vendor_name": "Arrow", "qty_available": 10, "unit_price": 1.0}]
+        )
+
+        set_calls = []
+
+        def _capture_set(key, results, stats):
+            set_calls.append((key, results, stats))
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._get_search_cache", return_value=None),
+            patch("app.search_service._set_search_cache", side_effect=_capture_set),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", return_value=([], [])),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+        ):
+            await stream_search_mpn("test-cache-miss", "LM317T")
+
+        mock_conn.search.assert_called_once()
+        assert set_calls, "shared cache was not written on a cache MISS"
+        _key, results, stats = set_calls[0]
+        assert results and results[0]["vendor_name"] == "Arrow"
+        assert stats and stats[0]["source"] == "nexar"

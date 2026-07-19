@@ -9,10 +9,10 @@ Purpose: HTTP surface for approval workflows. Returns JSON; HTMX partials can
          a buy-plan submission surfaces as a native ApprovalRequest (gate_type=buy_plan,
          subject_type=buy_plan). The old read-only buy-plan bridge has been retired.
 
-         The human-facing decide queue is the Approvals hub (3 tabs: Buy Plan / PO Approval
-         / Vendor Prepayment) at /v2/approvals — rendered by routers/htmx/approvals_hub.py
-         via services/approvals/{queue,po_queue}. This module keeps the engine's JSON
-         decide/reassign/cancel/list endpoints only.
+         The human-facing decide queue is the Approvals Workspace (4 tabs: Sales Orders /
+         Buy Plans / Purchase Orders / Prepayments) at /v2/approvals — rendered by
+         routers/htmx/approvals_hub.py via services/approvals/{queue,po_queue}. This module
+         keeps the engine's JSON decide/reassign/cancel/list endpoints only.
 
 Called by: app.main (router registration).
 Depends on: app.services.approvals.service, app.services.approvals.events,

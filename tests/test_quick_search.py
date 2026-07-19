@@ -166,3 +166,48 @@ def test_quick_search_includes_vendor_history(mock_fetch, client, db_session: Se
     hist = [s for s in data["sightings"] if s.get("is_material_history")]
     assert len(hist) >= 1
     assert hist[0]["vendor_name"] == "Old Vendor Co"
+
+
+@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+def test_quick_search_currency_conversion_affects_score(mock_fetch, client):
+    """A EUR-priced offer and a USD-priced offer at the same nominal price must not
+    score identically on price competitiveness — median + per-offer price comparisons
+    run in USD (currency-blind price scoring bug)."""
+    mock_fetch.return_value = (
+        [
+            {
+                "vendor_name": "USD Vendor",
+                "mpn_matched": "LM358DR",
+                "manufacturer": "Texas Instruments",
+                "qty_available": 1000,
+                "unit_price": 1.00,
+                "currency": "USD",
+                "source_type": "digikey",
+                "is_authorized": True,
+                "confidence": 4,
+            },
+            {
+                "vendor_name": "EUR Vendor",
+                "mpn_matched": "LM358DR",
+                "manufacturer": "Texas Instruments",
+                "qty_available": 1000,
+                "unit_price": 1.00,
+                "currency": "EUR",
+                "source_type": "digikey",
+                "is_authorized": True,
+                "confidence": 4,
+            },
+        ],
+        [{"source": "digikey", "results": 2, "ms": 100, "error": None, "status": "ok"}],
+    )
+
+    resp = client.post("/api/quick-search", json={"mpn": "LM358DR"})
+    assert resp.status_code == 200
+    data = resp.json()
+    by_vendor = {s["vendor_name"]: s for s in data["sightings"]}
+    # Raw prices are untouched on the wire — only scoring runs through FX.
+    assert by_vendor["USD Vendor"]["unit_price"] == 1.0
+    assert by_vendor["EUR Vendor"]["unit_price"] == 1.0
+    # EUR > USD in the approximate FX table, so the EUR row is the pricier one
+    # once converted and must not out-score (or tie) the USD row.
+    assert by_vendor["EUR Vendor"]["score"] != by_vendor["USD Vendor"]["score"]

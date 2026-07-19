@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..constants import OfferStatus, QuoteStatus
+from ..constants import SOURCING_ORDER_TYPES, OfferStatus, QuoteStatus, SalesOrderType
 from ..models import (
     Offer,
     Quote,
@@ -156,16 +156,23 @@ def create_sales_order_from_offers(
     sell_prices: dict[int, float],
     db: Session,
     user: User,
+    *,
+    order_type: str = SalesOrderType.NEW.value,
 ) -> BuyPlan:
     """Originate a DRAFT buy plan (Sales Order) directly from chosen RFQ offers — no
     quote.
 
     ``selections`` maps ``requirement_id -> chosen offer_id`` and ``sell_prices`` maps
-    ``requirement_id -> sell price``. Persists a DRAFT BuyPlan with ``quote_id=None`` and
-    raises ``DuplicateSalesOrderError`` (a ValueError subclass) if a non-terminal
-    (DRAFT/PENDING/ACTIVE) quote-less plan already exists for the requisition. Shares the
-    scoring/assignment/line-building core with the quote path via ``_assemble_buy_plan``.
+    ``requirement_id -> sell price``. ``order_type`` is a SOURCING SalesOrderType (New /
+    Revision — non-sourcing types take ``create_lite_sales_order`` instead; a
+    non-sourcing value here is a ValueError). Persists a DRAFT BuyPlan with
+    ``quote_id=None`` and raises ``DuplicateSalesOrderError`` (a ValueError subclass) if
+    a non-terminal (DRAFT/PENDING/ACTIVE) quote-less plan already exists for the
+    requisition. Shares the scoring/assignment/line-building core with the quote path
+    via ``_assemble_buy_plan``.
     """
+    if order_type not in {t.value for t in SOURCING_ORDER_TYPES}:
+        raise ValueError(f"Order type {order_type!r} does not source through offers — use create_lite_sales_order.")
     requisition = db.get(Requisition, requisition_id)
     if requisition is None:
         raise ValueError(f"Requisition {requisition_id} not found")
@@ -181,15 +188,73 @@ def create_sales_order_from_offers(
 
     plan = _assemble_buy_plan(requisition, selections, sell_prices, customer_region, db)
     plan.quote_id = None
+    plan.order_type = order_type
     # The originator owns the Sales Order (it is built from their own requisition), so it
     # surfaces on their "Mine" deal board and as needs_my_action while in DRAFT.
     plan.submitted_by_id = getattr(user, "id", None)
     db.add(plan)
     db.commit()
     logger.info(
-        "Created Sales Order buy plan #{} from {} selected offer(s) for requisition {} (user {})",
+        "Created Sales Order buy plan #{} ({}) from {} selected offer(s) for requisition {} (user {})",
         plan.id,
+        order_type,
         len(selections),
+        requisition_id,
+        getattr(user, "id", None),
+    )
+    return plan
+
+
+def create_lite_sales_order(
+    requisition_id: int,
+    order_type: str,
+    db: Session,
+    user: User,
+) -> BuyPlan:
+    """Originate a LITE Sales Order — a zero-line DRAFT plan for a non-sourcing order
+    type (Stock Sale / Testing Service / Comps).
+
+    The lite path (spec §3): the SO record with its fields and QP data, submitted,
+    approved, and tracked — no buy-plan lines, no PO kanban. Zero lines mean the
+    untouched approval engine generates ZERO buyer tasks on approve, and
+    ``check_completion`` never auto-completes it (its empty-lines early return).
+
+    Raises ValueError for an unknown or SOURCING order type (those must go through the
+    offer picker → ``create_sales_order_from_offers``), a missing requisition, or
+    ``DuplicateSalesOrderError`` when the requisition already has an open Sales Order.
+    """
+    valid = {t.value for t in SalesOrderType}
+    if order_type not in valid:
+        raise ValueError(f"Invalid order type: {order_type!r}. Valid: {valid}")
+    if order_type in {t.value for t in SOURCING_ORDER_TYPES}:
+        raise ValueError(f"Order type {order_type!r} sources through offers — use the offer picker.")
+
+    requisition = db.get(Requisition, requisition_id)
+    if requisition is None:
+        raise ValueError(f"Requisition {requisition_id} not found")
+
+    existing = find_open_sales_order(db, requisition_id)
+    if existing:
+        raise DuplicateSalesOrderError(existing.id, existing.status)
+
+    plan = BuyPlan(
+        requisition_id=requisition_id,
+        quote_id=None,
+        status=BuyPlanStatus.DRAFT.value,
+        order_type=order_type,
+        # is_stock_sale mirrors the declared type (D9); submit's vendor-name inference
+        # respects the explicit declaration (see buyplan_approval._is_stock_sale).
+        is_stock_sale=order_type == SalesOrderType.STOCK_SALE.value,
+        submitted_by_id=getattr(user, "id", None),
+        ai_summary="Lite sales order — no buy-plan lines (non-sourcing order type).",
+        ai_flags=[],
+    )
+    db.add(plan)
+    db.commit()
+    logger.info(
+        "Created LITE Sales Order buy plan #{} ({}) for requisition {} (user {})",
+        plan.id,
+        order_type,
         requisition_id,
         getattr(user, "id", None),
     )

@@ -281,8 +281,20 @@ search_service.py (orchestrator)
     +---> vendor_utils.py (fuzzy match, dedup vendor names)
     |       +---> DB: UPSERT vendor_cards
     |
-    +---> scoring.py (6-factor: price, qty, freshness, auth, confidence, vendor)
-    |       +---> evidence_tiers.py (assign T1-T7)
+    NOTE: MPN dedup across connector results goes through
+          `strip_packaging_suffixes()` (app/services/search_worker_base/
+          mpn_normalizer.py). It now also strips `-TRPBF`/`/TRPBF` (combined
+          tape-and-reel + lead-free), `-E3`/`-E4` (Vishay/ON Semi Pb-free grade
+          suffix), and a `[-/]TR<n>` reel-quantity pattern. It deliberately does
+          NOT strip `-13`/`-Q1`/`-EP`/bare `-T` — these mark genuinely distinct
+          SKUs (package variant, AEC-Q100 automotive grade, "Enhanced Product"
+          grade) whose stripping would wrongly merge different parts.
+          `normalize_mpn_key()` deliberately does NOT strip date codes — a
+          guardrail-tested decision, not an oversight.
+    |
+    +---> scoring.py (score_sighting_v2 — 5-factor weighted: trust 0.30, price 0.25,
+    |       qty 0.20, freshness 0.15, completeness 0.10; SIGHTING_V2_WEIGHTS)
+    |       +---> evidence_tiers.py (assign T1-T7, via app/source_trust.py)
     |
     +---> DB: UPSERT sightings (dedup by requirement + vendor + mpn)
     |
@@ -646,9 +658,18 @@ robustness items that do not change the retry/breaker/health semantics above:
 - **eBay explicit 429.** `ebay.py::_do_search` special-cased 401 and 404 but let a
   429 fall through to the generic `raise_for_status` path. It now handles 429
   explicitly like DigiKey (its OAuth-client-credentials sibling): honor Retry-After
-  (capped at 30s by `_parse_retry_after`, the Phase-1 cap) with one inline retry,
+  (capped by `_parse_retry_after`, see below) with one inline retry,
   then raise the typed `ConnectorRateLimitError` on a persistent 429. eBay now
   conforms to the 429→`ConnectorRateLimitError` row of the contract above.
+- **`_parse_retry_after` cap lowered to 8s (was 30s).** `_fetch_fresh`'s aggregate
+  fan-out budget is `settings.search_total_timeout_s` (12s default) — a 30s sleep
+  would always outlive that deadline and get cancelled anyway, so honoring an
+  upstream's longer Retry-After was pointless in the search context. Paired with
+  this, `_search_with_retry` (`app/connectors/sources.py`) now acquires the
+  per-connector semaphore ONLY around the `_do_search` HTTP call, not around the
+  retry sleep — a 429 backoff no longer pins the connector's concurrency slot (and
+  transitively the caller's search-wide `asyncio.Semaphore(10)`) while it sleeps,
+  so a slow retrying connector no longer starves its peers' throughput.
 - **Nexar empty-REST → GraphQL fall-through.** `NexarConnector._do_search` tried the
   Octopart REST v4 path first and returned its result whenever it was `not None` —
   so a 200 REST response with ZERO seller rows (`[]`) short-circuited the richer
@@ -680,6 +701,61 @@ robustness items that do not change the retry/breaker/health semantics above:
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
 `tests/test_constants.py`, `tests/test_search_streaming.py`, and
 `tests/test_health_monitor.py`.
+
+**Search fan-out performance &amp; correctness.**
+
+- **Real cache-age scoring.** Search-result Redis cache entries now carry a
+  `cached_at` timestamp; results served from cache are tagged
+  `_source_age_hours` with the real elapsed age (`_cache_age_hours`) instead of
+  a hardcoded `0.0`, so `score_sighting_v2`'s freshness factor reflects reality
+  for cache-served rows. A live fetch still tags `0.0`.
+- **Streamed results are durable.** `Sighting.requirement_id` is nullable
+  (migration 196); after a live (non-cache-hit) `stream_search_mpn` run emits
+  its terminal `done` SSE event, `_persist_interactive_sightings` runs via
+  `asyncio.to_thread` and persists the deduped results as requirement-less
+  Sightings through `_save_sightings(fresh, req=None, ...)`. Requirement-less
+  saves keep vendor-card creation, scoring/evidence tiers, material-card
+  upsert + `last_searched_at` stamping, and tag propagation, but skip lead
+  sync, vendor-summary rebuild, and unavailability suppression (all
+  requirement-scoped, NOT NULL FKs). Stale requirement-less rows are deduped
+  by `(vendor_name_normalized, normalized_mpn)` — the key is set at Sighting
+  construction, not just by the material-card backfill. Cache-hit streams
+  never re-persist. Migration 196's downgrade fails loudly if NULL rows
+  exist (documented DELETE required) rather than silently dropping data.
+- **Vendor feedback reaches live sighting scores.**
+  `get_vendor_feedback_adjustment` (sourcing_leads) is batched per distinct
+  vendor card in `_save_sightings` — one grouped query per vendor, applied via
+  `_effective_trust_score` to the vendor_score input of `score_sighting` /
+  `score_sighting_v2` (clamped 0-100); a `do_not_contact` vendor's trust input
+  is floored at ≤15 rather than the sighting being dropped.
+- **Currency-aware price scoring.** `app/utils/currency.py` (`to_usd`, static
+  approximate FX table, SCORING-ONLY — never invoicing/PO/customer-facing
+  price) converts `unit_price` to USD before computing the median-price
+  baseline and the per-offer price-competitiveness comparison, so listings in
+  EUR/GBP/JPY/etc. no longer get compared as raw numbers against USD listings.
+- **Shared single-MPN search cache.** `stream_search_mpn` now reads/writes the
+  same shared `search:`-prefixed Redis cache key used by the batch search path
+  (via the shared helpers `_flatten_dedupe_filter_junk` / `_aggregate_source_stats`),
+  instead of maintaining its own cache.
+- **Bounded AI web-search gather.** The "smart AI trigger" web-search gather in
+  `_fetch_fresh` is now bounded by `settings.ai_search_timeout_s` (default 20.0,
+  separate from `search_total_timeout_s` — the AI gather starts its own clock
+  after conventional connectors finish). Previously bounded only by the
+  connector's own 60s httpx timeout, so one slow Claude web-search call could
+  hold `_fetch_fresh` open for a minute past every other connector. Pending
+  tasks past the budget are cancelled and recorded in `stats_updates` with an
+  "AI search budget exceeded" error.
+- **Post-search persistence off the event loop.** The post-search DB write
+  (`_persist_search_write`) now runs via `asyncio.to_thread` with its own
+  dedicated write session (SQLAlchemy sessions are not thread-safe, so it
+  cannot reuse the request session) and batched material-card existence
+  checks, keeping the event loop free during the write.
+- **`_build_connectors` config cache.** `_load_connector_config` now caches the
+  disabled/errored source sets + batched credentials `_build_connectors`
+  otherwise re-queried on every search, behind a 60s in-process TTL
+  (`_CONNECTOR_CONFIG_TTL_S`) — a no-op under `TESTING=1`. Connector INSTANCES
+  are still built fresh per call; `_reset_connector_config_cache()` forces
+  immediate freshness after a Settings → Sources credential/status mutation.
 
 ### Browser-worker carve-out
 
@@ -1272,7 +1348,12 @@ the `rfqVendorModal` section below) is fed from four sources:
    render a bordered indigo "affinity" chip + confidence % + reasoning in
    `title`. The button lives INSIDE its own swap target
    (`#rfq-affinity-section`), so the response replaces it — a second click
-   cannot duplicate rows.
+   cannot duplicate rows. `score_affinity_matches` (`vendor_affinity_service.py`) now
+   takes an optional `db` and multiplies the AI base confidence by a behavioral
+   multiplier from `VendorCard`: `response_rate` (+/-0.20), `ghost_rate` (-0.25),
+   `cancellation_rate` (-0.15); multiplier clamped `[0.5, 1.5]`, final confidence
+   re-clamped to the existing `[0.30, 0.75]` band. `db=None` (no card lookup) leaves
+   the multiplier at 1.0.
 3. **Any-vendor autocomplete.** A debounced input against the existing
    `GET /api/autocomplete/names` (vendors filtered client-side from the mixed
    response; the endpoint is not forked). Picking a result POSTs
@@ -1695,9 +1776,9 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |   route depends on require_buyplan_approver (403 otherwise), approve_buy_plan re-checks
     |   the predicate, and the detail/supervise templates hide the controls via the
     |   can_approve_buy_plans Jinja global. Reject requires a reason (service-enforced, 400 on
-    |   blank) and stamps approved_by/approved_at + sends the plan back to draft; the hub
-    |   blocker reads that stamp to mark a rejected draft "rejected — resubmit" (vs a fresh
-    |   draft's "ready to submit"). submit_buy_plan clears the prior decision on resubmit.
+    |   blank) and stamps approved_by/approved_at + sends the plan back to draft; the workspace
+    |   pane's approval block + decision-tagged notes carry the sent-back story (the retired
+    |   hub blocker strings are gone). submit_buy_plan clears the prior decision on resubmit.
     |   approve AND reject each write a BUYPLAN_APPROVED/BUYPLAN_REJECTED ActivityLog (plan-scoped).
     |
     |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(PO approver)--> verified
@@ -1705,7 +1786,7 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |  Flag/Resolve issue: flag_line_issue: awaiting_po|pending_verify --> issue (buyer). resolve_line_issue:
     |                      issue --> awaiting_po (clears issue + PO-confirm fields), POST .../lines/{id}/resolve-issue,
     |                      _can_halt-gated (supervisor/ops) — the buyer who raised it can't self-resolve, so
-    |                      flagged lines route to the supervisor My Queue "flagged" kind. Without resolve, ISSUE
+    |                      flagged ISSUE lines surface on the workspace PO tab for supervisors. Without resolve, ISSUE
     |                      was a dead-end (badge only; resource_line rejects it).
     |  SO fold (Phase D):  the single manager approval IS the SO sign-off — _run_approve_side_effects
     |                      stamps so_status=approved + so_verified_by/at at approval time; there is no
@@ -1729,13 +1810,14 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      and detail/PO-Approval-tab hide the buttons via the new can_verify_po_line(user,line)
     |                      Jinja global. Approve AND reject each write a PO_LINE_VERIFIED/PO_LINE_REJECTED
     |                      ActivityLog (line-scoped, reject logged before the po_number reset).
-    |  No-approver stall:  Phase 3 makes this per-PENDING_VERIFY-line: plan_needs_approver_reason and
-    |                      buyplan_hub._query_stuck_no_approver_plans flag a plan if any cut PO line has no
-    |                      amount-eligible approver (has_eligible_approver(PURCHASE_ORDER, _line_amount)),
-    |                      replacing the old plan-total>=threshold heuristic. Amber banner + my_queue no_approver.
-    |  Approvals console:  Phase 3 splits the old blended "Approvals" page into (a) the Buy Plans hub
-    |                      (My Queue/Pipeline lenses) reclaiming the non-redirected /v2/buy-plans, and (b) a new
-    |                      3-tab console at /v2/approvals (routers/htmx/approvals_hub.py): Buy Plan
+    |  No-approver stall:  Phase 3 makes this per-PENDING_VERIFY-line: plan_needs_approver_reason flags a
+    |                      plan if any cut PO line has no amount-eligible approver
+    |                      (has_eligible_approver(PURCHASE_ORDER, _line_amount)), replacing the old
+    |                      plan-total>=threshold heuristic. Amber banner on detail + the workspace
+    |                      BP-tab row/pane stall warnings.
+    |  Approvals console:  Phase 3 split the old blended "Approvals" page into the Buy Plans hub (since
+    |                      RETIRED post-parity — /v2/buy-plans 308s to the workspace) and the console
+    |                      at /v2/approvals (routers/htmx/approvals_hub.py, now the Workspace): Buy Plan
     |                      (approvals + lifecycle-status tracking via buy_plan_tracking_rows), PO Approval
     |                      (services/approvals/po_queue.build_po_queue_view — pending_verify lines + PO_LINE_*
     |                      /POCancellation history, NOT ApprovalRequest-backed), Prepayment (PREPAYMENT gate via
@@ -1750,9 +1832,8 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      eager-loads vendor_card + buy_plan→requisition + buy_plan_line→offer (no N+1). The tab
     |                      renders a LOUD amber warning above Approve when test_report_sent is False, wires the
     |                      beneficiary/Review→ to subject_href, and a self-documenting resolved row (approved-by +
-    |                      amount + PO#). My Queue prepay parity: buyplan_hub._prepay_rows carries the same fields
-    |                      (extra.*), value = the AUTHORISED total_incl_fees (not plan cost), same warning + a
-    |                      Review drill-through.
+    |                      amount + PO#). The workspace prepayment pane/rows carry the same cash-first fields
+    |                      (value = the AUTHORISED total_incl_fees, not plan cost) with the same warning.
     |  Prepay on PO:        prepayment_service.prepayment_state_for_lines(db, line_ids) → {line_id:
     |                      'requested'|'approved'} in ONE query (ApprovalRequest⨝Prepayment, status in
     |                      REQUESTED/APPROVED, buy_plan_line_id in ids; approved wins). Fed into the plan-detail ctx
@@ -1888,165 +1969,58 @@ webhook-gated) + **email and a Teams DM** (honor `users.notify_resource_alert_en
 in-app row + channel card are the always-on delivery floor). Each channel isolates its own
 failures; the POST returns immediately (fire-and-forget own-session).
 
-The pooled line surfaces in the **"Needs Re-sourcing"** lens (`resourcing_pool_queue`,
-shown to PO-cutters) + adds to the buy-plans badge via `BuyplanResourcingSource` (ACTION,
-pool-wide). Any PO-cutter **Claims** it (`claim_line` — atomic guarded UPDATE, first-to-claim
-wins, loser → 409) which returns it to `awaiting_po` under the new owner for the normal PO
-flow. See APP_MAP_DATABASE `po_cancellations`.
+The pooled line surfaces on the **Approvals Workspace PO tab** (the claimable
+re-sourcing pool in `_po_rows`, shown org-wide; the SO-pane kanban's Re-sourcing lane
+carries the claim button too) + adds to the buy-plans badge via `BuyplanResourcingSource`
+(ACTION, pool-wide). Any PO-cutter **Claims** it (`claim_line` — atomic guarded UPDATE,
+first-to-claim wins, loser → 409) which returns it to `awaiting_po` under the new owner for
+the normal PO flow. See APP_MAP_DATABASE `po_cancellations`.
 
-**Approvals module — two-lens read flow (Approvals rework Phase F-2).** `/v2/approvals` is
-its own primary-nav tab (legacy `/v2/buy-plans` 302-redirects to it, preserving `?lens=`)
-rendering a **two-lens** shell (`partials/buy_plans/hub.html`): a switcher over **My Queue** +
-**Pipeline** + a lazy `#bp-hub-body` that loads the active lens body. The shell route
-`GET /v2/partials/approvals?lens=` (alias `/v2/partials/buy-plans`) resolves the lens
-(`my_queue`/`pipeline`), falling back to a **role-derived default** (`_default_lens`):
-managers/admins/ops → **Pipeline** (the Phase C 4-stage deal board), everyone else
-(buyers/sales/traders) → **My Queue** (the Phase B role-aware "what needs YOU now" surface).
-`GET /v2/partials/approvals/{tab}` (`approvals_tab_partial`) dispatches the dash-cased lens to
-`_render_my_queue_body` / `_render_pipeline_body`; **any other value 404s** (the retired-lens
-guard). URL paths are dash-cased; lens keys are underscored.
+**Buy Plans hub — RETIRED post-parity (spec §11.1).** The two-lens hub at
+`/v2/buy-plans` (My Queue + Pipeline, Approvals rework Phases A–F) retired once the
+Approvals Workspace reached capability parity — the mapping and the accepted gaps are
+pinned in `docs/APPROVALS_PARITY_CHECKLIST.md`. What replaced what:
 
-**Phase F-2 retirement.** The old five lifecycle stage lenses (Sales Orders / Buy Plans /
-Purchase Orders / Vendor Prepayments / Supervise) and their standalone body routes
-(`/v2/partials/buy-plans/{orders,board,resource,archive,supervise}`) were **removed** once
-F-1 restored full capability parity onto My Queue + Pipeline. The per-gate pinned "Pending
-approvals" sections, the `_tab_*`/`_pending_section`/`approvals/_macros` templates, the
-`_board`/`_orders_queue`/`_resource_queue`/`_supervise`/`_archive*` work-surface templates,
-the `_TAB_APPROVE_ATTR` map, and the `origin=supervise|queue|resource` action-return branches
-went with them (`origin=my_queue` survives). The per-gate approvals queue is now reached only
-through the engine queue API (`GET /v2/approvals/requests`).
+- **Full page** `/v2/buy-plans[?lens=]` → **308** to `/v2/approvals?tab=buy-plans`;
+  `/v2/buy-plans/{id}` → **308** to `/v2/approvals?tab=buy-plans&select={id}`
+  (`htmx_views.buy_plans_hub_retired_redirect`). `?select=` threads full page →
+  shell → tab body → list; the SO/BP list dispatches that plan's pane as the default
+  selection (access-checked via `get_buyplan_for_user`; unknown/inaccessible ids fall
+  back silently to the oldest needs-approval default).
+- **Partials**: `GET /v2/partials/buy-plans` → 308 `/v2/partials/approvals?tab=buy-plans`
+  (`?new=1` → 308 the origination picker); `/{my-queue,pipeline}` → 308
+  `/v2/partials/approvals/buy-plans[?scope=]`; `/pipeline-archive` → 308
+  `/v2/partials/approvals/buy-plans/list?show_closed=true`. Unknown lens values 404.
+- **My Queue rows** → every workspace list's **"Needs your approval"** group (oldest
+  default-selected); buyer cut-PO / claim / flagged / re-sourcing rows → the PO tab;
+  drafts + halted → the SO/BP lists (Mine scope); `no_approver` → the BP-tab
+  row/pane stall warnings (`plan_needs_approver_reason`).
+- **Pipeline board + Done archive** → the SO/BP work lists (status badges, search,
+  Mine/All, the Closed filter) + the SO-pane kanban (`_pane_kanban.html`) for per-line
+  progress. The metric strip / `open_avg_margin` aggregate was **consciously dropped**
+  (per-deal margin still shows on the SO pane header — see the checklist rationale).
+- **Origination** → the workspace lists' "New sales order" button loads the SELF-HOSTED
+  picker (`_sales_order_new.html`, `#so-origination` outerHTML swaps, Cancel → the
+  workspace shell) straight into `#main-content`.
+- **Deleted read models** (`services/buyplan_hub.py` slimmed): `my_queue`/`QueueRow`,
+  `deals_board`, `completed_archive`, `open_avg_margin`, `supervise_overview`,
+  `buyer_line_queue`/`team_line_queue`/`resourcing_pool_queue`,
+  `_query_stuck_no_approver_plans` + private helpers. Survivors: `_customer_name`,
+  `_age_hours`, `_line_mpn`, `_query_po_pending_verify` (+ `_LINE_PLAN_LOADS`) —
+  imported by `services/approvals/po_queue.build_po_queue_view`.
+- **Deleted templates**: `buy_plans/hub.html`, `approvals/_surface_my_queue.html`,
+  `approvals/_surface_pipeline.html`, `approvals/_pipeline_macros.html`,
+  `approvals/_pipeline_archive_rows.html`.
+- **origin=my_queue** action-return branches deleted (stale posts fall through to the
+  detail partial); `prepay_request_decide` without an origin renders the workspace
+  Prepayments tab body.
 
-**Pipeline visibility (role-scoped).** The Pipeline board + its Done archive are scope-gated
-by `_can_see_all_deals` (= `_can_resource` PO-cutters — buyers/managers/admins — OR an ops
-verification-group member; broader than `_can_supervise` by including buyers). Those users
-**default to `scope=all`** and get an **All deals / Mine** toggle (reloads `#bp-hub-body`,
-`hx-push-url="false"`); sales/traders are **locked to `scope=mine`** with no toggle. The board
-(`_render_pipeline_body`) and its lazy Done page (`GET /v2/partials/approvals/pipeline-archive`)
-route the requested `scope` through `_resolve_deal_scope(scope, can_see_all)` — empty/unknown →
-the role default, and `all` requested without visibility is forced to `mine` (no leak).
+**Flagged-issue honesty (surviving).** The detail page's "AI Insights" indicator shows the
+worst flag's verbatim reason via `buyplan_naming.summarize_top_flag(bp.ai_flags)`
+(critical → warning → info) — it states WHAT is wrong, not just a count.
+`buyplan_naming.build_card_title` remains the shared one-string title helper for any
+caller that wants `{SalesOrder#} - {Customer} - {Owner} - {Type}`.
 
-```
-GET /v2/partials/approvals?lens=          (shell: My Queue + Pipeline switcher + lazy #bp-hub-body)
-    |
-    +-- my_queue   --> GET /partials/approvals/my-queue   (_render_my_queue_body)
-    |                   buyplan_hub.my_queue — the role-aware "what needs YOU now" QueueRow list
-    |                   (+ open_avg_margin). Inline approve / verify-po (origin=my_queue) + the
-    |                   prepay decide route re-render THIS body into #bp-hub-body.
-    +-- pipeline   --> GET /partials/approvals/pipeline?scope=  (_render_pipeline_body)
-                        buyplan_hub.deals_board called ONCE PER COLUMN with an explicit status
-                        filter — Build=[DRAFT], Approve=[PENDING], Purchase=[ACTIVE],
-                        Halted=[HALTED] — + completed_archive for the collapsed Done column
-                        (lazy "Load older" via GET /partials/approvals/pipeline-archive). Same
-                        _resolve_deal_scope + All/Mine toggle (reloads #bp-hub-body,
-                        hx-push-url=false). Cards via the deal_card macro (4-pip
-                        "who-has-the-ball" stepper). See the Pipeline surface note.
-```
-
-**`supervise_overview` read model (lens RETIRED in F-2).** The Supervise lens + its
-`_supervise.html` template were retired in Phase F-2 (My Queue covers the supervisor triage),
-but `services/buyplan_hub.supervise_overview` **survives as an independently unit-tested read
-model** (no route caller; `tests/test_buyplan_hub_supervise.py` + `test_buyplan_supervise_queue.py`
-pin its contract). It returns `{strip, queue}`: the source queries (approvals, halted, overdue
-POs, PO-verify, flagged) reshaped into ONE flat list of **uniform row dicts** keyed by `kind`
-(`halted`/`flagged`/`overdue`/`approve`/`verify_po`), each carrying `label, priority, plan_id,
-line_id, customer_name, so_number, mpn, vendor_name, owner_name, owner_role` (`AM` for plan
-kinds / `Buyer` for line kinds), `value` + `margin_pct` (the parent plan's deal totals),
-`waiting_since` (the age/sort clock — `plan.created_at` for approve/halted,
-`coalesce(line.last_nudge_at, plan.approved_at)` for overdue, `line.created_at` for
-verify_po/flagged) and `issue_reason` (flagged only). The list is sorted `(priority,
-waiting_since)` — risk-first (`halted→flagged→overdue→approve→verify_po`), oldest-first within
-each tier (`_QUEUE_PRIORITY` / `_QUEUE_LABEL` module consts). The live "what needs YOU now"
-surface is now **My Queue** (`my_queue` / `_surface_my_queue.html`, below).
-
-**My Queue surface (Approvals rework Phase B — UI over the Phase A foundation).** The
-`my_queue` lens renders `approvals/_surface_my_queue.html` via `_render_my_queue_body` (the
-`approvals_tab_partial` dispatch branch, shared by the approve / verify-po handlers when an
-inline button posts `origin=my_queue` so the action re-renders the refreshed queue into
-`#bp-hub-body`). The surface is one calm header (`{n} items need you` / `You're all caught
-up` + money subline + Alpine `qf` filter chips with live counts) over ONE hero card of
-uniform rows. Each row is a CSS grid (`16px 84px 1fr auto auto auto auto`): a **3-band risk
-dot** (At-risk `bg-rose-500` = halted/returned/overdue; Decide `bg-accent-500` =
-approve/prepay; Routine `bg-brand-400` = verify/claim/cut-po/draft) + uppercase
-microlabel · customer · muted secondary line · age (>72h amber) · value · margin badge
-(`badge-success ≥30 / badge-warning ≥15 / badge-danger`) · action rail. Two kinds carry
-**inline one-click actions** (`plan_approve` → Approve/Review, `po_verify` → Verify/Reject)
-posting the existing routes with `hx-push-url="false"` + `hx-target="#bp-hub-body"`; every
-other kind is a **whole-row link** to its detail screen (where its form / multi-step action
-lives), trailing `{action} →`. There is NO colored left rail (the dot + risk-first sort
-already encode risk). `prepay_approve` now carries inline **Approve / Reject-with-reason** posting the new
-`POST /v2/partials/approvals/prepay-requests/{id}/decide` (wraps `approvals.service.decide`
-and re-renders the My Queue body; reject requires a comment → 400 otherwise, 403 for a
-non-recipient — authz is enforced inside `decide`). The supervisor-only **`flagged`** kind
-(P2, ISSUE lines via the shared `_query_flagged_lines`) and kicked-back `cut_po` rows surface
-the issue / PO-rejection reason inline (rose); the header adds `· N% avg margin`
-(`open_avg_margin`) and a rose `N kicked back` tally (Phase F-1 parity restoration).
-
-**Pipeline surface (Approvals rework Phase C — the 4-stage deal board).** The `pipeline`
-lens renders `approvals/_surface_pipeline.html` via `_render_pipeline_body` (the
-`approvals_tab_partial` dispatch branch). It shows the deal flow as cards in the four
-canonical stages **Build → Approve → Purchase → Done** (retiring the Draft/Pending/Active
-vocabulary). Three columns are visible (Build / Approve / Purchase) with a **collapsed Done
-summary bar** below (Alpine `x-show`, default closed). Each column is ONE
-`buyplan_hub.deals_board` call with an explicit status filter (`[DRAFT]`, `[PENDING]`,
-`[ACTIVE]`);
-Done is `completed_archive`. Cards render through the shared `deal_card` macro
-(`approvals/_pipeline_macros.html`): the signature **4-pip "who-has-the-ball" stepper**
-(`●●○○` — done pips `bg-brand-500`, the single live ball `bg-accent-500`, upcoming hollow
-`border-brand-200`) computed from the card's `status`→stage index (DRAFT 0 / PENDING 1 /
-ACTIVE 2 / COMPLETED 3) now sits ALONGSIDE the **restored blocker line +
-verified/total PO-progress bar + headline MPN + cut-PO#(s) + a rose `Returned` badge**
-(distinguishing a kicked-back DRAFT from a fresh one — Phase F-1 parity restoration), plus
-Customer + tabular value + a muted `SO · owner` line + ONE margin-health badge + the `stock`
-chip; a card needing the viewer's action (own DRAFT) gains a `ring-accent-400` (not amber).
-Scope is role-resolved exactly like the board (`_resolve_deal_scope` + `_can_see_all_deals`);
-the **Mine/All toggle** reloads this body in place (`hx-target="#bp-hub-body"`,
-`hx-push-url="false"`). A light `metric_strip` macro shows the open count + value + `· N% avg margin`
-(`open_avg_margin`). A rose **Halted column** renders for `can_see_all_deals` viewers (so
-buyers regain halted visibility); the Done section pages via
-`GET /v2/partials/approvals/pipeline-archive` (`_pipeline_archive_rows.html` — a
-self-replacing **Load older** button consuming `archive.next_offset`) (Phase F-1).
-
-**My Queue foundation (Approvals rework Phase A — the service-layer read model).**
-`buyplan_hub.my_queue(db, user) -> list[QueueRow]` is the role-aware "what needs YOU now"
-read model. The six source queries supervise composes are extracted into module-level
-`_query_*` helpers (`_query_approval_plans`, `_query_so_pending_plans`,
-`_query_halted_plans`, `_query_overdue_lines`, `_query_po_pending_verify`,
-`_query_flagged_lines`) and `supervise_overview` now CALLS them (return shape unchanged);
-`my_queue` reuses those plus `_query_resourcing_pool`,
-`_query_owner_draft_plans`, `_query_buyer_awaiting_po_lines` — single source of truth, so a
-workflow change just stops a builder emitting a kind. `QueueRow` is a frozen dataclass
-(`kind, priority, label, plan_id, line_id, customer_name, primary_mpn, tso, value,
-age_hours, is_overdue, action_url, action_label, detail_href, extra`); Jinja (Phase B) will
-consume ONLY `QueueRow` — all ORM access stays in the service. Kinds + risk-first priorities
-(`_QUEUE_PRIORITY`/`_QUEUE_LABEL`, distinct from supervise's `_SUPERVISE_QUEUE_*`): halted 1,
-plan_returned 2, plan_approve/prepay_approve 3, po_verify 4, claim 5, cut_po_overdue 6,
-cut_po 7, plan_draft 9; sorted `(priority, -age_hours)` (risk-first, oldest-first
-within a tier). Role gating: halted = own plans (supervisor=manager/admin/ops sees all);
-plan_draft/plan_returned = own DRAFTs (split by `_is_returned`); plan_approve =
-`can_approve_buy_plans`; prepay_approve = the engine's `_actionable_request_ids` filtered to
-the PREPAYMENT gate (NOT re-queried); po_verify = `can_approve_purchase_orders` or ops
-member; claim/cut_po/cut_po_overdue = PO-cutters (buyer/manager/admin), buyer-scoped
-by `buyer_id`. The overdue-PO SLA is single-sourced in `_nudge_cutoff()`/`_line_overdue()`
-(the same rule `_query_overdue_lines` encodes in SQL); cut_po vs cut_po_overdue is the
-Python split on that rule, computed in the row builder.
-
-**Deal-card naming + de-noised tiles.** `services/buyplan_naming.build_card_title` remains
-the single shared title helper — `_deal_card` still computes the canonical
-`{SalesOrder#} - {Customer} - {Owner} - {Type}` title into `card_title` for any caller
-that wants the one-string form — but the **de-noised board card** (`_board.html`, shared by
-the Buy Plans / Sales Orders / Supervise surfaces) now renders **discrete fields** instead:
-a bold **Customer** headline, then a muted `SO {tso} · {owner_name}` line (Owner = the
-Account Manager / `BuyPlan.submitted_by`), the value + one margin badge, and a light
-part/PO fact line. The unified supervise queue rows likewise use discrete fields (kind
-pill + customer + middot fact line), not `card_title`. `_deal_card` still exposes `tso`
-(`sales_order_number`), `po_numbers` (distinct `BuyPlanLine.po_number`s — OUR vendor POs,
-not `customer_po_number`) and `primary_mpn` so the tile shows the deal at a glance without
-opening it. **Flagged-issue honesty:**
-`supervise_overview` flagged rows carry `issue_reason` (`buyplan_hub._issue_reason`:
-buyer's `issue_note` when set, else the humanised `issue_type`); the detail page's
-"AI Insights" indicator shows the worst flag's verbatim reason via
-`buyplan_naming.summarize_top_flag(bp.ai_flags)` (critical → warning → info) — both state
-WHAT is wrong, not just a count.
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
 its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →
@@ -2371,6 +2345,18 @@ newest active offers for every card touched by the completed buy plan, so new
 proactive matches surface on the Proactive tab without waiting for the daily cron.
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
+
+**Immediate re-match on offer approval.**
+`proactive_matching.trigger_rematch_on_offer_approval(db, offer)` closes a separate
+watermark gap: a batch scan only ever sees an offer once, at `Offer.created_at`; an
+offer created `pending_review` is excluded from the scan's live-status filter, so if
+it's approved after the watermark has advanced past its `created_at`, it stays
+invisible to every future batch scan too. The hook runs a targeted single-offer
+`find_matches_for_offer(offer.id, db)` in its own commit/rollback (a re-match failure
+never blocks the caller's approval transaction) and is a no-op for offers without a
+`material_card_id`. Wired into all three offer-approval paths: the htmx offers CRUD
+`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and
+`approve_offer` (`app/routers/crm/offers.py`).
 
 **Hotlist → Proactive (monitor without purchase history).** The CPH path returns
 no matches when a customer has never bought the part (`_find_matches` needs CPH
@@ -3186,6 +3172,11 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
   with empty `hx-vals` ids. Now rewritten against the nested shape, with a "suggested keep"
   hint (keeper = higher-sighting side, ties→`vendor_a`), matching the Company loop.
+  `find_vendor_dedup_candidates` is now dialect-dispatched like the Company scanner:
+  **PostgreSQL** = pg_trgm self-join on `normalized_name` via `func.similarity()` over
+  the `ix_vendor_cards_name_trgm` GIN index — full-table coverage, no 500-row cap;
+  **SQLite/fallback** = buckets candidates by a cheap first-4-chars blocking key on the
+  normalized name before the pairwise scan.
 - **Honest scan-error state:** the data-ops route runs each dedup scan inside its own
   `try/except` via the shared `_render_data_ops(request, user, db)` helper, which sets a
   per-scan `vendor_scan_failed`/`company_scan_failed` flag. A scan that RAISES renders a
@@ -5277,7 +5268,6 @@ fast_search(query, db, user)  — one universal entity search, grouped results:
 unified_score_service.py (top-level, monthly)
     |
     +---> avail_score_service.py (behavior + outcomes)
-    |       +---> engagement_scorer.py
     |       +---> activity_quality_service.py
     |       +---> response_analytics.py
     |
@@ -5290,22 +5280,24 @@ unified_score_service.py (top-level, monthly)
             |       +---> cancellation_rate, quote_conversion
             +---> vendor_metrics_snapshot (DB)
 
-SIGHTING SCORING (per search result):
-    scoring.py
-        +---> price competitiveness
-        +---> quantity match
-        +---> freshness (recency)
-        +---> authorized distributor bonus
-        +---> source confidence
-        +---> vendor reliability (from vendor_score)
+SIGHTING SCORING (per search result, score_sighting_v2, app/scoring.py):
+    scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS):
+        +---> trust        0.30  (authorized=95, else vendor_score, else 35 new-vendor baseline)
+        +---> price         0.25  (median/unit ratio, capped 0-100)
+        +---> qty           0.20  (coverage of target_qty, or flat 60 if qty known but no target)
+        +---> freshness     0.15  (100 - age_hours/24*5; missing = 25)
+        +---> completeness  0.10  (price/qty/lead_time/condition fields present)
 
-LEAD SCORING (per sourcing lead):
+LEAD SCORING (per sourcing lead, app/services/sourcing_leads.py):
+    SourcingLead.confidence_score = sighting*0.5 + source_reliability*0.2 +
+        freshness*0.15 + contactability*0.1 + historical*0.05, plus an ADDITIVE
+        vendor-feedback adjustment (see "Vendor Feedback Loop" below).
     sourcing_score.py
         +---> freshness_score
-        +---> source_reliability_score
+        +---> source_reliability_score  (app/source_trust.py base + evidence-tier bonus)
         +---> contactability_score
         +---> historical_success_score
-        +---> vendor_safety_score --> prospect_signals.py
+        +---> vendor_safety_score --> prospect_signals.py (+ vendor-feedback do_not_contact override)
 
 PROSPECT SCORING:
     prospect_scoring.py
@@ -5323,6 +5315,57 @@ ACTIVITY SCORECARD (per-user leaderboard, on-demand read):
         +---> 4 GROUP BY queries total (no per-user N+1); range:
               this_week / this_month (default) / this_quarter / all_time
 ```
+
+### Source Trust Authority (`app/source_trust.py`)
+
+Single authority for source-type reliability + evidence-tier trust, replacing scattered
+per-caller constants. Pure data/lookup module, no I/O.
+
+- `SOURCE_RELIABILITY_BASE` — source_type -> base reliability (0-100): authorized/API
+  aggregators (digikey/mouser/farnell/element14/nexar/octopart) = 90; `avail_history`/
+  `salesforce` = 85; **`brokerbin`/`sourcengine` = 80** (new API-marketplace bucket — they
+  are direct API connectors, previously mis-bucketed with scraped marketplaces at 72);
+  scraped marketplaces (netcomponents/icsource/thebrokersite) = 72; `ai`/`web` = 40;
+  default 60.
+- `EVIDENCE_TIER_BONUS` — bonus/penalty on top of the base, ordering
+  **T1 (+8) > T2 (+5) > T6 (+3) > T3 (+2) > T4 (0) > T5 (−5) > T7 (−15)**. Deliberate
+  correction: T6 (manual buyer entry) moved from −10 to +3 — a human-verified manual
+  entry now outranks T3 (anonymous marketplace scrape).
+- Source-type category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/
+  `EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
+  assignment) and `services/sourcing_leads.py` (`_source_reliability` = base + tier
+  bonus) share one membership list instead of drifting copies.
+- `VENDOR_RELIABILITY_UNKNOWN` (25.0) / `VENDOR_RELIABILITY_KNOWN_NO_SCORE` (50.0) —
+  reliability fallbacks consumed by `services/buyplan_scoring.py`'s `score_offer`
+  vendor-reliability component when a vendor has no computed `vendor_score` yet.
+
+### Vendor Feedback Loop (sourcing leads)
+
+`services/sourcing_leads.get_vendor_feedback_adjustment(db, vendor_card_id)` rolls up a
+vendor's buyer `LeadFeedbackEvent` history (joined through `SourcingLead`) into a
+time-decayed adjustment — one grouped query, no N+1:
+
+```
+get_vendor_feedback_adjustment(db, vendor_card_id)
+    +---> SELECT LeadFeedbackEvent ⋈ SourcingLead WHERE vendor_card_id = ...
+    |       AND created_at >= now - 270d   (FEEDBACK_LOOKBACK_DAYS, ~3 half-lives)
+    +---> per event: decay = 0.5 ** (age_days / 90)   (FEEDBACK_HALF_LIFE_DAYS)
+    |       confidence_penalty += weight[status] * decay
+    |       safety_penalty     += weight[status] * decay
+    +---> do_not_contact = True if ANY event has status == "do_not_contact"
+    |       (NOT decayed — a standing buyer instruction, never fades)
+    return VendorFeedbackAdjustment(confidence_penalty, safety_penalty, do_not_contact)
+```
+
+Applied ADDITIVELY (not weighted further) so a `do_not_contact`/repeated `bad_lead`
+history from THIS vendor meaningfully drags the score rather than being diluted:
+- `_compute_confidence` adds `feedback.confidence_penalty` after the weighted sum
+  (`sighting*0.5 + source_reliability*0.2 + freshness*0.15 + contactability*0.1 +
+  historical*0.05`).
+- `_compute_vendor_safety` adds `feedback.safety_penalty`; a `do_not_contact` event on
+  ANY of this vendor's leads forces `safety_score <= 15` and appends the
+  `buyer_marked_do_not_contact` flag — this override never decays, unlike the rest of
+  the adjustment.
 
 ### CRM -> Activity Scorecard Tab (`/v2/partials/crm/scorecard`, ALL users)
 
@@ -6534,11 +6577,11 @@ neither `check_completion` nor the stock-sale auto-complete job
 (`inventory_jobs._job_stock_autocomplete`, which skips-and-continues on a refused plan) can
 complete past an undecided PO. The stall detectors are per-line too:
 `plan_needs_approver_reason` returns `"purchase_order"` when any PENDING_VERIFY line's
-amount has no eligible approver (`has_eligible_approver(PURCHASE_ORDER, _line_amount)`),
-and `buyplan_hub._query_stuck_no_approver_plans` flags ACTIVE plans the same way.
+amount has no eligible approver (`has_eligible_approver(PURCHASE_ORDER, _line_amount)`) —
+the predicate behind the workspace BP-tab stall warnings.
 `routing._eligible_approvers`'s `PURCHASE_ORDER` branch stays (it powers those per-line
-checks); the Approvals-hub Purchase Orders tab is history-only (no new gate rows are ever
-created).
+checks); the workspace Purchase Orders tab's history feed is decision-log-backed (no new
+gate rows are ever created).
 
 **QP native sections (QP Phase C2b):** the QP detail (`qp/detail.html`) `{% include %}`s four
 section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_section_serial.html`,
@@ -6622,17 +6665,17 @@ BOTH `list_requests` (`_restricted_visibility_clause`) and `get_request`
 (`_can_view_request`; 404-not-403 so existence isn't leaked, mirroring
 `require_requisition_access`). approve/reject still act only for an eligible PENDING recipient
 (`decide()`). The legacy
-`GET /v2/approvals/queue` still **302-redirects** to `/v2/buy-plans?lens=approvals` (which 302s
-on to the hub, where the unknown lens falls back to the role default).
+`GET /v2/approvals/queue` redirect is long gone; any stale `/v2/buy-plans*` URL now
+**308s** to `/v2/approvals?tab=buy-plans` (the hub retired post-parity).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the
 **`buy-plans`** tab, so its "awaiting me" count merges onto the Approvals nav badge.
 
 **Sales Order origination from RFQ offers (SP-2).** A buy plan no longer requires a
-customer quote: `buy_plans_v3.quote_id` is **nullable** (migration 163). The Approvals hub
-shell carries a persistent **"New Buy Plan"** button (`partials/buy_plans/hub.html`, F-1; it
-survives every lens switch)
-→ `GET /v2/partials/approvals/sales-orders/new` (`sales_order_new`,
-`partials/approvals/_sales_order_new.html`), a dual-mode surface: first a **requisition
+customer quote: `buy_plans_v3.quote_id` is **nullable** (migration 163). The workspace
+SO/BP lists carry the **"New sales order"** button
+→ `GET /v2/partials/buy-plans/sales-orders/new` (`sales_order_new`,
+`partials/approvals/_sales_order_new.html` — SELF-HOSTED in `#so-origination`, loaded into
+`#main-content`), a dual-mode surface: first a **requisition
 picker** scoped to the viewer's accessible requisitions that have ≥1 ACTIVE offer, then a
 per-requirement **offer + sell-price** form (seeded via `get_builder_data` +
 `apply_smart_defaults`). Submit `POST /v2/partials/approvals/sales-orders/create` runs
@@ -6642,13 +6685,134 @@ quote-required) sharing the `_assemble_buy_plan` core — producing a **DRAFT, q
 buy plan and swapping its detail view in with `HX-Push-Url`. A requisition-keyed dup guard
 (`find_open_sales_order` → raises `DuplicateSalesOrderError`, a `ValueError` carrying
 `existing_plan_id`) stops a second open SO for the same requisition; the route catches it
-specifically (curated 400 for other `ValueError`s). After F-2 the per-status board filtering
-lives in the **Pipeline** lens, which calls the backward-compatible `deals_board(..., statuses=…)`
-param once per column (Build=[DRAFT] / Approve=[PENDING] / Purchase=[ACTIVE,INBOUND] /
-Halted=[HALTED]). The BUY_PLAN approval gate (`TAB_GATE["sales_orders"] =
+specifically (curated 400 for other `ValueError`s). Per-status filtering now lives in the
+workspace lists' status badges + Live/Closed filter (the Pipeline lens and `deals_board`
+retired with the hub). The BUY_PLAN approval gate (`TAB_GATE["sales_orders"] =
 ApprovalGateType.BUY_PLAN`, `can_approve_buy_plans`) still exists in the engine — there is
 no separate "sales order" gate. The QP Sales-section gate (the QualityPlan, renamed
 `SALES_ORDER`→`QP_SALES`, column `can_approve_qp_sales`, migration 164) is a distinct,
 QP-scoped approval and **leaves** the lifecycle tabs; the canonical SO# is
 `buy_plans_v3.sales_order_number` (the QP's editable `sales_so_number` input was removed and
 the column dropped).
+
+---
+
+## Approvals Workspace — flows (Phases 0–1)
+
+**One page, four lenses.** `/v2/approvals` → shell (4 pills, per-viewer badges) →
+lazy `#ap-hub-body` ← `render_tab_body(tab)` → `_workspace_split.html` (split view) →
+left `#aw-list` ← `GET /v2/partials/approvals/{tab}/list?q&scope&show_closed`
+(re-fetches on `awListRefresh from:body`) → row click dispatches `aw-select` → right
+`#aw-pane` ← the tab's pane route. The list's oldest Needs-your-approval row
+dispatches `aw-default` once (applied only when nothing is selected) so opening a tab
+lands the approver on a decision. Legacy 3-tab keys alias throughout.
+
+**Decide loops (engine untouched).** Every pane action posts an EXISTING route with
+`origin=approvals_workspace`; the handler re-renders the pane + `HX-Trigger:
+awListRefresh`:
+- SO/BP approve/reject → `POST /v2/partials/buy-plans/{id}/approve` (engine
+  `decide()` inside) → `render_plan_pane`. Reject requires the note-to-fixer
+  (engine-enforced comment).
+- Confirm PO → `POST .../lines/{line}/confirm-po` → `confirm_po(payment_method=...)`
+  + `apply_qp_purchasing` (QP-purchasing incl. AS9120B onto the (plan, vendor) QP
+  row) + `log_field_edits` for the QP diff → `render_po_pane`.
+- Verify / send back / re-source / claim → the existing verify-po / resource / claim
+  routes → `render_po_pane`. `GET /po/{line}/sent-check` surfaces `verify_po_sent`
+  detection **display-only** (never auto-verifies).
+- Prepay decide → `POST /v2/partials/approvals/prepay-requests/{id}/decide` →
+  `render_prepayment_pane`. Approve button reads **"OK to pay — {method}"**; the
+  method dropdown on the approval card posts
+  `POST /v2/partials/approvals/prepayments/{id}/method` (approver-only,
+  REQUESTED-only, `ensure_not_stale` → non-destructive 409, audited via
+  `log_field_edits(prepayment_id=...)`).
+
+**Field-audit choke point (Phase 0.2, wired from Phase 1 onward).** Edit paths compute
+`diff_fields(obj, updates)` and write ONE `FIELD_EDIT` ActivityLog row per save via
+`log_field_edits` (`details={"edits": [...]}`, keyed by `buy_plan_id` +
+`buy_plan_line_id`/`prepayment_id`); `edits_since` backs the Phase-2 approve-time
+change summary; `manager_edited_line_ids` backs the Phase-3 kanban marker.
+
+**Stale-edit guard (Phase 0.3).** Forms embed `stale_token(obj)` (Jinja global) as
+`expected_updated_at`; handlers call `ensure_not_stale` and turn `StaleEditError`
+into `stale_conflict_response()` (409, `HX-Reswap: none`, "This changed — refresh."
+toast). Empty token skips (legacy forms never false-positive).
+
+**Order type + lite path (Phase 1.3).** The SO picker
+(`/v2/partials/buy-plans/sales-orders/new`) carries an order-type select: sourcing
+types (New/Revision) require offers and build via
+`create_sales_order_from_offers(order_type=...)`; non-sourcing types (Stock Sale /
+Testing Service / Comps) list ANY open requisition and create via
+`create_lite_sales_order` — a zero-line DRAFT plan that submits/approves/tracks
+normally but generates **zero buyer tasks** and **never auto-completes**
+(`check_completion`'s empty-lines early return). `_is_stock_sale` now lets an
+explicit STOCK_SALE order type win over the vendor-name inference so submit can't
+clobber the lite flag. The SO pane hides lines/kanban for non-sourcing types.
+
+**COD guard (Phase 1.5).** `routers/prepayments.py` blocks a prepayment request on a
+COD line (and any non-`PREPAYMENT_METHODS` method) with a friendly 400 BEFORE
+`create_prepayment` — the service and engine stay untouched; the request modal's
+method list derives from `PREPAYMENT_METHODS` (wire/PayPal/CC/ACH — COD never
+renders).
+
+**Editing layer (Phase 2).** Every edit route carries the stale guard
+(narrowest-object `expected_updated_at`; mismatch → non-destructive 409) and lands
+ONE `FIELD_EDIT` row per save: single-line edits log at service depth in
+`edit_buy_plan_line`/`add`/`remove`/`set_sales_order_number`; the bulk save batches
+all touched lines into one row (per-edit `line_id` in the details JSON); confirm-po
+merges line PO fields + QP-purchasing into one row. QP-sales answers save via
+`POST /v2/partials/approvals/plan/{id}/qp-sales` → `apply_qp_sales` (draft →
+owner/manager; pending → MANAGER only). **Approve is two-part** (spec §7):
+`handoff=proceed` → approve + the submitter's in-app change summary
+(`edits_since(plan, submitted_at)` → "was X → now Y", skipped when empty);
+`handoff=send_back` → the existing reject→draft with the summary attached (blank
+note auto-fills; manager edits persist). Every reject/send-back note-to-the-fixer
+ALSO lands as a decision-tagged NOTE row on the item's thread + a `write_in_app`
+notification to the fixer. **Manager edit-anything at verify**: a manager/admin may
+edit qty / unit cost / PO# / est ship on a PENDING_VERIFY line via
+`/lines/{id}/edit` (vendor stays offer-swap-only; bulk stays strict); the pane
+shows the Acctivate warning + "Edited by manager" marker. **Notes & attachments on
+every item** (never status-locked): `POST /v2/partials/approvals/notes` /
+`.../attachments` (shared `store_and_attach` on `BuyPlanAttachment`,
+`validate_subject`, ATTACH_ADDED/REMOVED activity; delete = uploader or manager);
+`_notes_thread.html` renders threads + files with decision-tagged rows in all three
+panes. **Lifecycle controls**: manager-only halt/resume/cancel/reset on the SO pane
+via the existing POSTs (`origin=approvals_workspace`); `plan_needs_approver_reason`
+stall warnings on BP-tab rows and the pane.
+
+**PO kanban (Phase 3, spec §6).** `render_plan_pane` builds `kanban` via
+`services/kanban_lanes.build_kanban(db, plan)` on ACTIVE/INBOUND **sourcing** orders
+only (lite plans and draft/pending/closed plans get no board); `_pane_kanban.html`
+renders it inside `_pane_sales_order.html`. Lanes are **display-only, never
+persisted**, computed per line by `kanban_lane(line_status, prepay_status,
+payment_method, received)` with this exact precedence:
+
+1. `cancelled` → hidden (no column);
+2. `resourcing` → **Re-sourcing** (the claim pool — lane renders only when populated);
+3. received (`received_at` stamped) → **Received** — paid-and-received is NOT a risk;
+4. prepayment **PAID** and `payment_method != cod` → **Paid · awaiting delivery** (the
+   RISK lane — money out before goods on any advance rail, **outranks verified**; COD
+   never enters);
+5. `verified` → **Approved**; 6. `pending_verify` → **Pending approval**;
+7. else (`awaiting_po` + `issue`) → **Awaiting PO** (issue keeps a badge, not a column).
+
+Card data is batch-resolved (no N+1): prepay badge state via
+`prepayment_state_for_lines` (read-only), amount/payee/`paid_at` off the
+most-progressed live Prepayment row, `manager_edited_line_ids` for the Edited marker,
+`note_counts` + `BuyPlanAttachment` group-counts, plan-level QP `partial_ship`. Risk
+cards show **amount + payee** on their face and age green → amber (3d) → red (7d)
+keyed on `paid_at` (shared `age_chip` thresholds). **No drag** — cards move only by
+the real actions; tapping a card `hx-get`s that line's PO pane into `#aw-pane`
+(explicit `hx-target`).
+
+**Mark received (Phase 3).** TRIO's "OPS Received (Y/N)" — no automated receiving
+event exists, so `mark_line_received(plan_id, line_id, user, db)`
+(`buyplan_workflow/buyplan_po.py`, ADDITIVE) backs the Received column: actor gate =
+the line's buyer or a manager/admin (service-side); state gate = VERIFIED **or** the
+paid-risk state (a PAID prepayment — goods can land before the verify sign-off);
+idempotent (an already-received line no-ops); stamps `received_at`/`received_by_id` +
+ONE `LINE_RECEIVED` ActivityLog row keyed to the line; **never** touches line.status
+or the plan's completion machinery (completion still runs only through `verify_po`).
+Route: `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive` (`require_user`;
+PermissionError→403, ValueError→400); `origin=approvals_workspace` re-renders the
+SO/BP pane when a `lens` rides along (the kanban card's button — the board repaints
+in place) else the PO-line pane, both with `awListRefresh`.

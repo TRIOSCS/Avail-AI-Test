@@ -43,6 +43,8 @@ from ..constants import (
     BuyPlanLineStatus,
     BuyPlanStatus,
     LineIssueType,
+    PaymentMethod,
+    SalesOrderType,
     SOVerificationStatus,
 )
 from ..database import UTCDateTime
@@ -54,8 +56,10 @@ __all__ = [
     "BuyPlanLineStatus",
     "BuyPlanStatus",
     "LineIssueType",
+    "SalesOrderType",
     "SOVerificationStatus",
     "BuyPlan",
+    "BuyPlanAttachment",
     "BuyPlanLine",
     "VerificationGroupMember",
 ]
@@ -129,6 +133,11 @@ class BuyPlan(Base):
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)
 
+    # ── Order type (Approvals Workspace — migration 196). SalesOrderType vocabulary;
+    # server_default 'new' so every pre-existing row reads as a New order (stock sales
+    # backfilled to 'stock_sale' from is_stock_sale in the migration).
+    order_type = Column(String(20), nullable=False, default=SalesOrderType.NEW.value, server_default="new")
+
     # ── Timestamps
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
@@ -159,7 +168,15 @@ class BuyPlan(Base):
             raise ValueError(f"Invalid buy plan status: {value!r}. Valid: {valid}")
         return value
 
+    @validates("order_type")
+    def _validate_order_type(self, _key, value):
+        valid = {e.value for e in SalesOrderType}
+        if value and value not in valid:
+            raise ValueError(f"Invalid order type: {value!r}. Valid: {valid}")
+        return value
+
     __table_args__ = (
+        Index("ix_bpv3_order_type", "order_type"),
         Index("ix_bpv3_status", "status"),
         Index("ix_bpv3_so_status", "so_status"),
         Index("ix_bpv3_quote", "quote_id"),
@@ -221,6 +238,17 @@ class BuyPlanLine(Base):
     sales_note = Column(Text)
     manager_note = Column(Text)
 
+    # ── Payment method (Approvals Workspace — migration 196). PaymentMethod
+    # vocabulary (PO lines accept all 5 incl. COD — see PO_LINE_PAYMENT_METHODS).
+    # Nullable: recorded at confirm-PO time; legacy lines have none.
+    payment_method = Column(String(20), nullable=True)
+
+    # ── Receiving (Approvals Workspace — migration 196). Stamped by
+    # mark_line_received (buyplan_workflow/buyplan_po.py, Phase 3) — a manual
+    # "mark received" event; never changes plan status.
+    received_at = Column(UTCDateTime, nullable=True)
+    received_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # ── Timestamps
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
@@ -238,6 +266,16 @@ class BuyPlanLine(Base):
     offer = relationship("Offer", foreign_keys=[offer_id])
     buyer = relationship("User", foreign_keys=[buyer_id])
     po_verified_by = relationship("User", foreign_keys=[po_verified_by_id])
+    received_by = relationship("User", foreign_keys=[received_by_id])
+
+    @property
+    def is_received(self) -> bool:
+        """True once the goods on this line have been marked received (received_at
+        stamped by mark_line_received).
+
+        Drives the kanban RECEIVED lane.
+        """
+        return self.received_at is not None
 
     @property
     def has_cut_po(self) -> bool:
@@ -266,6 +304,13 @@ class BuyPlanLine(Base):
             raise ValueError(f"Invalid line issue type: {value!r}. Valid: {valid}")
         return value
 
+    @validates("payment_method")
+    def _validate_payment_method(self, _key, value):
+        valid = {e.value for e in PaymentMethod}
+        if value and value not in valid:
+            raise ValueError(f"Invalid payment method: {value!r}. Valid: {valid}")
+        return value
+
     __table_args__ = (
         Index("ix_bpl_buy_plan", "buy_plan_id"),
         Index("ix_bpl_requirement", "requirement_id"),
@@ -274,6 +319,70 @@ class BuyPlanLine(Base):
         Index("ix_bpl_offer", "offer_id"),
         Index("ix_bpl_plan_requirement", "buy_plan_id", "requirement_id"),
         Index("ix_bpl_nudge_status", "status", "last_nudge_at"),
+    )
+
+
+# ── Buy Plan Attachment ─────────────────────────────────────────────
+
+
+class BuyPlanAttachment(Base):
+    """File attachment on a buy plan, a buy-plan line, or a prepayment (stored in
+    OneDrive or the company SharePoint library — mirrors CompanyAttachment).
+
+    One table, three nullable subject FKs — EXACTLY ONE must be set (app-validated;
+    call validate_subject() before insert — the attachment routes and
+    attachment_service.store_and_attach writers own enforcement, there is no DB CHECK).
+    All three FKs cascade: an attachment row has no meaning once its subject is gone.
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/services/attachment_service.py, approvals-workspace attachment
+               routes (Phase 2.4)
+    Depends on: BuyPlan, BuyPlanLine, Prepayment (models.quality_plan), User
+    """
+
+    __tablename__ = "buy_plan_attachments"
+
+    id = Column(Integer, primary_key=True)
+
+    # ── Subject (exactly one set — see validate_subject)
+    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="CASCADE"), nullable=True)
+    buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="CASCADE"), nullable=True)
+    prepayment_id = Column(Integer, ForeignKey("prepayments.id", ondelete="CASCADE"), nullable=True)
+
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+
+    buy_plan = relationship("BuyPlan", foreign_keys=[buy_plan_id])
+    buy_plan_line = relationship("BuyPlanLine", foreign_keys=[buy_plan_line_id])
+    prepayment = relationship("Prepayment", foreign_keys=[prepayment_id])
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    def validate_subject(self) -> None:
+        """Raise ValueError unless EXACTLY ONE subject FK is set.
+
+        App-level stand-in for a DB CHECK constraint — every write path MUST call this
+        before flush (single choke point: the Phase 2.4 attachment routes).
+        """
+        set_count = sum(1 for v in (self.buy_plan_id, self.buy_plan_line_id, self.prepayment_id) if v is not None)
+        if set_count != 1:
+            raise ValueError(
+                f"BuyPlanAttachment requires exactly one subject FK set, got {set_count} "
+                "(buy_plan_id / buy_plan_line_id / prepayment_id)"
+            )
+
+    __table_args__ = (
+        Index("ix_bp_attachments_plan", "buy_plan_id"),
+        Index("ix_bp_attachments_line", "buy_plan_line_id"),
+        Index("ix_bp_attachments_prepayment", "prepayment_id"),
     )
 
 

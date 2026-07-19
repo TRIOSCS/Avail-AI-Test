@@ -211,15 +211,25 @@ class BaseConnector(ABC):
         + retry/breaker bookkeeping are otherwise identical to ``search``. Reach this via
         the module-level ``run_health_probe`` seam, never directly.
         """
-        # Per-connector concurrency limit — avoids hammering one API
-        async with self._semaphore:
-            return await self._search_with_retry(part_number)
+        return await self._search_with_retry(part_number)
 
     async def _search_with_retry(self, part_number: str) -> list[dict]:
+        """Retry loop with per-connector concurrency limiting.
+
+        The semaphore is acquired ONLY around the actual HTTP call
+        (``self._do_search``), not around the whole retry loop — a 429 backoff or
+        exponential-backoff sleep here can be several seconds, and holding the
+        per-connector concurrency slot (and, transitively, the caller's outer
+        search-wide ``asyncio.Semaphore(10)``) for that whole sleep starves every
+        OTHER connector call waiting on the same slot for no reason. Re-acquiring
+        per attempt means a slow retrying connector no longer blocks its peers'
+        throughput during backoff.
+        """
         last_err: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                result = await self._do_search(part_number)
+                async with self._semaphore:
+                    result = await self._do_search(part_number)
                 self._breaker.record_success()
                 return result
             except ConnectorError:
@@ -244,6 +254,8 @@ class BaseConnector(ABC):
                         f"retry after {retry_after:.1f}s (attempt {attempt + 1}/{self.max_retries + 1})"
                     )
                     if attempt < self.max_retries:
+                        # Semaphore already released above — this sleep no longer
+                        # pins a concurrency slot.
                         await asyncio.sleep(retry_after)
                         last_err = e
                         continue
@@ -313,11 +325,14 @@ def _parse_retry_after(response: httpx.Response) -> float:
     header = response.headers.get("Retry-After", "")
     if header:
         try:
-            # Cap at 30s: the retry loop sleeps this inline while holding the
-            # connector's semaphore + concurrency slot, so an upstream advertising a
-            # multi-minute Retry-After must not pin those resources (and the search's
-            # aggregate deadline would cancel the task long before a 300s sleep anyway).
-            return min(max(float(header), 1.0), 30.0)
+            # Cap at 8s: search_service._fetch_fresh's aggregate fan-out budget is
+            # settings.search_total_timeout_s (12s default) — a 30s sleep here would
+            # always outlive that deadline and get cancelled anyway, so honoring an
+            # upstream's longer Retry-After is pointless in the search context. The
+            # retry loop no longer holds the connector's semaphore during this sleep
+            # (see _search_with_retry), so the cap is purely about not burning the
+            # search's own wall-clock budget on a wait that can't pay off.
+            return min(max(float(header), 1.0), 8.0)
         except ValueError:
             pass
     # No header or unparseable — default to 5s + jitter

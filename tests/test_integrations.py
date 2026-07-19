@@ -1,59 +1,12 @@
-"""Tests for integrations bundle — Charts, Presence, ACS, Call Records.
+"""Tests for integrations bundle — Charts, ACS, Call Records.
 
 Called by: pytest
-Depends on: app.routers.crm.views, app.services.presence_service
+Depends on: app.routers.crm.views
 """
 
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import engine  # noqa: F401
-
-
-class TestPresenceService:
-    """Test Teams presence detection."""
-
-    async def test_get_presence_returns_status(self):
-        """get_presence returns availability string."""
-        from app.services.presence_service import get_presence
-
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={"availability": "Available"})
-
-        result = await get_presence("user@example.com", mock_gc)
-        assert result == "Available"
-
-    async def test_get_presence_caches_result(self):
-        """Repeated calls use cache, not API."""
-        from app.services.presence_service import _presence_cache, get_presence
-
-        _presence_cache.clear()
-
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={"availability": "Away"})
-
-        await get_presence("cached@example.com", mock_gc)
-        await get_presence("cached@example.com", mock_gc)
-
-        # Only one API call despite two get_presence calls
-        assert mock_gc.get_json.call_count == 1
-
-    @pytest.mark.parametrize(
-        ("status", "expected"),
-        [
-            ("Available", "bg-emerald-400"),
-            ("Away", "bg-amber-400"),
-            ("Busy", "bg-rose-400"),
-            (None, "bg-gray-300"),
-        ],
-    )
-    def test_presence_color(self, status, expected):
-        """presence_color maps each availability status to its badge color."""
-        from app.services.presence_service import presence_color
-
-        assert presence_color(status) == expected
 
 
 class TestPerformanceMetricsEndpoint:

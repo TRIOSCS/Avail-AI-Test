@@ -109,7 +109,7 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
-| requirement_id | FK -> requirements (CASCADE) | |
+| requirement_id | FK -> requirements (CASCADE), **nullable** | Migration 196: NULL = interactive/streamed search discovery (no requisition context). Requirement-less rows are deduped by (vendor_name_normalized, normalized_mpn) on re-persist; requirement-scoped steps (lead sync, vendor-summary rebuild, unavailability suppression) are skipped for them |
 | material_card_id | FK -> material_cards | |
 | vendor_name | String 255 | |
 | vendor_name_normalized | String 255, indexed | |
@@ -1202,9 +1202,8 @@ Lineage columns added to existing tables: `requirements.oem_hint`; `sightings.re
 **`commodity_spec_schemas`** — Parametric filter definitions per commodity
 **`material_spec_facets`** — Parametric values per material card
 **`reconcile_runs`** — Durable per-run tallies for `reconcile_decoded_facets` (migration 104)
-**`facet_audits`** — Per-row facet-accuracy verdicts (migration 104)
 
-> **Trust telemetry tables (trust architecture §1.2, migration 104):** `reconcile_runs` persists one row per `app/management/reconcile_decoded_facets.py` execution — `mode` ('dry-run'|'apply'), `sources`/`keys` (JSONB lists — the run scope), `by_class` (JSONB `{failure_class: {action: count}}`) and `totals` (JSONB `{cards, facets, corrected, deleted, unchanged, skipped, failed}`), indexed on `ran_at`. Both prior reconcile rounds' apply tallies were runtime-log-only and are unrecoverable; every run (dry-run AND apply) now leaves a queryable row, written via `record_reconcile_run` (flush-only; the CLI owns the commit — a dry-run commits the report row AFTER its facet-write rollback). `facet_audits` stores one verdict per audited facet row for the volume-weighted accuracy audits — `card_id` (no FK, survives card deletion), `category`/`spec_key`/`value`/`source`, and `verdict` (`correct`|`wrong`|`unverifiable`), indexed on `audited_at`, `card_id`, and `(category, spec_key)`. The closed verdict vocabulary is pinned at the DB level by `CHECK ck_facet_audits_verdict` AND the model's `@validates("verdict")` (the model guard only catches ORM writers; the CHECK catches everything). `facet_audits` lands in this migration so the Phase-2.2 audit harness needs no second one. Models: `app/models/telemetry.py` (`ReconcileRun`, `FacetAudit`). Downgrade drops both tables (telemetry, not source data — acceptable loss on rollback).
+> **Trust telemetry table (trust architecture §1.2, migration 104):** `reconcile_runs` persists one row per `app/management/reconcile_decoded_facets.py` execution — `mode` ('dry-run'|'apply'), `sources`/`keys` (JSONB lists — the run scope), `by_class` (JSONB `{failure_class: {action: count}}`) and `totals` (JSONB `{cards, facets, corrected, deleted, unchanged, skipped, failed}`), indexed on `ran_at`. Both prior reconcile rounds' apply tallies were runtime-log-only and are unrecoverable; every run (dry-run AND apply) now leaves a queryable row, written via `record_reconcile_run` (flush-only; the CLI owns the commit — a dry-run commits the report row AFTER its facet-write rollback). Model: `app/models/telemetry.py` (`ReconcileRun`). Migration 104 also created a `facet_audits` table + `FacetAudit` model for a planned Phase-2.2 volume-weighted accuracy audit harness (`app/management/audit_facets.py`) that was never built; both were removed as dead code (zero readers/writers — docs/audit/2026-07-18-non-production-code-audit.md §1) and the table dropped by migration 196.
 
 > **Brand canonicalization (OPTIMIZATION_PLAN §1.5B, migration 106 — data-only on the `manufacturers` lookup table):** the live brand facet wasted 7 of its top-20 slots on duplicates: the HPE family split four ways (Hewlett Packard Enterprise / HP / HPE / HEWLETT PACKARD — selecting "HP" silently missed the ~4,400 HPE-labeled cards) and `Texas Instruments (TI)` duplicated `Texas Instruments`. Migration 106 (1) renames the canonical `Hewlett Packard Enterprise` row to `HPE` and merges its alias list to `["Hewlett Packard Enterprise", "HP", "Hewlett Packard", "Hewlett-Packard"]` (matching the updated `startup._seed_manufacturers` seed — defensive against the seed/migration race: if a fresh `HPE` row already exists, the legacy long-name row is DELETEd and the survivor's aliases reasserted) and (2) adds the `Texas Instruments (TI)` alias to `Texas Instruments`. The Dell family (Dell Technologies / DELL / Dell) needs no table change — the existing `Dell Technologies` row's `Dell` alias already folds both case variants (lookup is case-insensitive). Downgrade restores the prior canonical name + alias lists exactly. This migration corrects the lookup VOCABULARY only; the per-card `material_cards.manufacturer`/`brand` value rewrites (folding live duplicates + NULLing the "(TP,F)" ingest-leak fragments) are an operator action via `app/management/normalize_manufacturers.py --apply` (dry-run gated), run post-deploy — NOT part of the migration.
 
@@ -1291,3 +1290,48 @@ SQLite) — those are listed for completeness/auditability, not because each nee
 own bespoke `@requires_postgres` test. Prioritize the ones with actual `ILIKE`/
 `similarity()`/`tsvector` *query* logic (`services/*`, `routers/*`, `search_service.py`,
 `vendor_utils.py`, `company_utils.py`) over pure-model JSONB declarations.
+
+---
+
+## Approvals Workspace additions (migration 196 `196_approvals_foundations`)
+
+Single additive, reversible revision (Phase 0 of the workspace rebuild —
+`specs/approvals-workspace.md`; models in `app/models/buy_plan.py`,
+`app/models/quality_plan.py`, `app/models/intelligence.py`):
+
+**`buy_plans_v3`**
+| Column | Type | Notes |
+|--------|------|-------|
+| order_type | String 20 NOT NULL, server_default `'new'`, indexed (`ix_bpv3_order_type`) | `SalesOrderType` enum: `new`\|`revision`\|`testing_service`\|`comps`\|`stock_sale` (validated on the model). Backfilled `stock_sale` where `is_stock_sale` was true. Sourcing types (`SOURCING_ORDER_TYPES` = NEW/REVISION) go through the offer picker; the rest take the lite zero-line path. |
+
+**`buy_plan_lines`**
+| Column | Type | Notes |
+|--------|------|-------|
+| payment_method | String 20, nullable | `PaymentMethod` (now + `ach`, `cod`); recorded at confirm-PO (`PO_LINE_PAYMENT_METHODS` = cc/paypal/wire/ach/cod). COD lines are excluded from prepayment (router guard) and the future risk lane. |
+| received_at / received_by_id | UTCDateTime / FK users SET NULL, nullable | Stamped by the Phase-3 `mark_line_received` action; `is_received` property drives the kanban RECEIVED lane. |
+
+**`activity_log`**
+| Column | Type | Notes |
+|--------|------|-------|
+| buy_plan_line_id | FK buy_plan_lines SET NULL, nullable, indexed | Per-line notes threads + `FIELD_EDIT` audit rows (design D2/D4). |
+| prepayment_id | FK prepayments SET NULL, nullable, indexed | Per-prepayment notes/audit (e.g. the approver method-adjust). |
+
+New `ActivityType` values (≤20 chars): `field_edit` (ONE batched row per save,
+`details={"edits": [{field, old, new}, ...]}` — written by
+`field_audit.log_field_edits`), `line_received`, `attach_added`, `attach_removed`.
+
+**`quality_plans`** — seven nullable PURCHASING AS9120B columns (the Excel workbook
+fields the native section lacked; written via `qp_workspace.apply_qp_purchasing`):
+`purchasing_traceability_verified` (Bool), `purchasing_counterfeit_risk` (String 50),
+`purchasing_risk_level` (String 50), `purchasing_coc_available` (Bool),
+`purchasing_vendor_rating` (String 255), `purchasing_sn_previously_received` (Bool),
+`purchasing_serial_numbers` (Text).
+
+**`buy_plan_attachments`** (NEW) — one polymorphic-ish attachment table for the
+workspace (mirrors `CompanyAttachment`): three nullable CASCADE subject FKs
+(`buy_plan_id` / `buy_plan_line_id` / `prepayment_id`) of which **exactly one** must
+be set (app-validated via `BuyPlanAttachment.validate_subject()` — no DB CHECK), plus
+`file_name` (String 500 NOT NULL), `library_item_id`/`library_drive_id`/
+`library_web_url`/`thumbnail_url`/`content_type`/`size_bytes`, `uploaded_by_id`
+(FK users SET NULL), `created_at`; indexed on all three subject FKs. Write paths land
+in Phase 2.4 (reusing `attachment_service.store_and_attach`).

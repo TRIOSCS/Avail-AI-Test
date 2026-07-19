@@ -218,6 +218,20 @@ class TestMPNNormalizer:
             ("lm358/tr", "LM358"),
             ("lm358-nopb", "LM358"),
             ("  LM 358 /TR  ", "LM358"),
+            # New packaging/compliance suffixes (must merge)
+            ("LM317-TRPBF", "LM317"),
+            ("TPS54331/TRPBF", "TPS54331"),
+            ("MAX232CPE+TR", "MAX232CPE"),
+            ("SS14-E3", "SS14"),
+            ("SS14-E4", "SS14"),
+            ("LM358D/TR7", "LM358D"),
+            ("ADP3338AKCZ-3.3-TR13", "ADP3338AKCZ-3.3"),
+            ("lm358d/tr7", "LM358D"),
+            # Ambiguous suffixes deliberately preserved (must NOT merge)
+            ("LM317T-13", "LM317T-13"),
+            ("TPS54331-Q1", "TPS54331-Q1"),
+            ("LM317T-EP", "LM317T-EP"),
+            ("LM317T", "LM317T"),
         ],
         ids=[
             "empty_string",
@@ -241,10 +255,35 @@ class TestMPNNormalizer:
             "case_insensitive_suffix_strip_slash",
             "case_insensitive_suffix_strip_nopb",
             "combined_whitespace_and_suffix",
+            "strip_trpbf_dash",
+            "strip_trpbf_slash",
+            "strip_maxim_plus_tr",
+            "strip_vishay_e3",
+            "strip_vishay_e4",
+            "strip_tr_reel_size_slash",
+            "strip_tr_reel_size_dash_with_decimal_base",
+            "strip_tr_reel_size_case_insensitive",
+            "preserve_bare_digit_suffix_13",
+            "preserve_automotive_q1_grade",
+            "preserve_enhanced_product_ep",
+            "preserve_bare_t_package_code",
         ],
     )
     def test_strip_packaging_suffixes(self, mpn, expected):
         assert self._normalize(mpn) == expected
+
+    def test_lm317t_and_lm317_are_distinct_parts(self):
+        """LM317T's trailing "T" is a TO-220 package code, not a reel suffix — must NOT
+        collapse to the same normalized key as LM317."""
+        assert self._normalize("LM317T") != self._normalize("LM317")
+
+    def test_q1_and_non_q1_grades_stay_distinct(self):
+        """-Q1 (AEC-Q100 automotive grade) is a different sellable SKU."""
+        assert self._normalize("TPS54331-Q1") != self._normalize("TPS54331")
+
+    def test_ep_and_non_ep_grades_stay_distinct(self):
+        """-EP (TI Enhanced Product) is a different sellable SKU."""
+        assert self._normalize("LM317T-EP") != self._normalize("LM317T")
 
 
 # ---------------------------------------------------------------------------

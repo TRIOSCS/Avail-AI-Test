@@ -7,7 +7,7 @@ the role×status edit gate, and the salesperson/manager line add/edit/remove API
 (epic I) — plus its bulk "save all" counterpart (``bulk_edit_buy_plan_lines``) — and
 the Sales Order number editor (epic J).
 
-Called by: routers/htmx/buy_plans.py, services/buyplan_service.py, services/buyplan_hub.py
+Called by: routers/htmx/buy_plans.py, services/buyplan_hub.py
 Depends on: buyplan_scoring (assign_buyer, score_offer), buyplan_approval
     (_recalculate_financials, _cancel_open_prepayment_requests_for_plan, _can_halt,
     check_completion), po_cancellation_service, constants.OfferStatus
@@ -24,6 +24,7 @@ from ...constants import OfferStatus, UserRole
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 from ..buyplan_scoring import assign_buyer, score_offer
+from ..field_audit import FieldEdit, diff_fields, log_field_edits
 from .buyplan_approval import (
     _can_halt,
     _cancel_open_prepayment_requests_for_plan,
@@ -467,6 +468,17 @@ def _resolve_offer(db: Session, offer_id: int, offer_lookup: dict[int, Offer] | 
     return db.get(Offer, offer_id)
 
 
+def _manager_verify_override(actor: User | None, line: BuyPlanLine) -> bool:
+    """Spec §7 "manager edit-anything at verify": a MANAGER/ADMIN editing a line that
+    sits at PENDING_VERIFY may change what the cut-PO guards otherwise refuse (quantity)
+    and the PO-stage fields (po_number / estimated_ship_date / unit_cost).
+
+    Mike's call: the field audit covers it. Vendor/offer is NOT part of the override —
+    offer-swap-only for everyone, and never after a cut PO.
+    """
+    return actor is not None and _is_manager_or_admin(actor) and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
+
+
 def _apply_line_edit(
     line: BuyPlanLine,
     plan: BuyPlan,
@@ -475,8 +487,12 @@ def _apply_line_edit(
     offer_id: Any = _UNSET,
     quantity: Any = _UNSET,
     unit_sell: Any = _UNSET,
+    po_number: Any = _UNSET,
+    estimated_ship_date: Any = _UNSET,
+    unit_cost: Any = _UNSET,
+    actor: User | None = None,
     offer_lookup: dict[int, Offer] | None = None,
-) -> None:
+) -> list[FieldEdit]:
     """Apply qty/offer/sell edits to *line*, shared by :func:`edit_buy_plan_line` and
     the bulk "save all" edit path.
 
@@ -494,8 +510,21 @@ def _apply_line_edit(
         fractional values) and must be positive.
       - ``unit_sell``: never gated by :func:`_has_cut_po` (it never touches the PO).
         ``None`` clears it; any other value sets it.
+      - ``po_number`` / ``estimated_ship_date`` / ``unit_cost`` (2.3): editable ONLY
+        under the :func:`_manager_verify_override` (manager/admin on a PENDING_VERIFY
+        line — "edit anything at verify", audit covers it); anyone else passing them
+        gets a ValueError. The same override relaxes the cut-PO ``quantity`` refusal.
+        Vendor stays offer-swap-only for EVERYONE and never changes after a cut PO.
     Recomputes ``line.margin_pct`` at the end. No commit/flush/recalc — caller's job.
+
+    Returns the field-audit diff of what ACTUALLY changed (Approvals Workspace 2.1):
+    one :class:`FieldEdit` per changed field — ``vendor`` (old/new vendor names, an
+    offer swap), ``quantity``, ``unit_sell``. The CALLER logs it (single-line paths one
+    row per save via :func:`log_field_edits`; bulk batches every line's diff into ONE
+    row). A no-op resend returns an empty list so no audit row is written.
     """
+    edits: list[FieldEdit] = []
+
     if offer_id is not _UNSET:
         offer_id_int = int(offer_id)
         if offer_id_int != line.offer_id:
@@ -505,6 +534,10 @@ def _apply_line_edit(
             if not offer:
                 raise ValueError(f"Offer {offer_id} not found")
             _ensure_offer_attachable(offer, plan, line.requirement_id)
+            old_vendor = (line.offer.vendor_name if line.offer is not None else None) or (
+                str(line.offer_id) if line.offer_id else ""
+            )
+            edits.append(FieldEdit(field="vendor", old=old_vendor, new=offer.vendor_name or str(offer.id)))
             line.offer_id = offer.id
             line.unit_cost = float(offer.unit_price) if offer.unit_price is not None else None
             # Stale-score fix: an offer swap must re-score the line against the NEW
@@ -518,19 +551,64 @@ def _apply_line_edit(
     if quantity is not _UNSET:
         quantity_int = _require_int_quantity(quantity)
         if quantity_int != line.quantity:
-            if _has_cut_po(line):
+            if _has_cut_po(line) and not _manager_verify_override(actor, line):
                 raise ValueError("Cannot change the quantity after a PO is cut on this line.")
             if quantity_int <= 0:
                 raise ValueError("Quantity must be a positive whole number.")
+            edits.extend(diff_fields(line, {"quantity": quantity_int}))
             line.quantity = quantity_int
 
     if unit_sell is not _UNSET:
-        line.unit_sell = float(unit_sell) if unit_sell is not None else None
+        new_sell = float(unit_sell) if unit_sell is not None else None
+        edits.extend(diff_fields(line, {"unit_sell": new_sell}))
+        line.unit_sell = new_sell
+
+    # PO-stage fields (2.3): manager-at-verify only; every change field-diff logged.
+    # An EMPTY submitted value while a PO number exists is an explicit CLEAR (audited
+    # as old→"") — a manager must be able to blank an erroneous number; empty-on-empty
+    # stays a no-op (callers not passing the field at all leave it _UNSET/untouched).
+    if po_number is not _UNSET:
+        new_po = str(po_number).strip()
+        if new_po != (line.po_number or ""):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the PO number at verify.")
+            edits.extend(diff_fields(line, {"po_number": new_po or None}))
+            line.po_number = new_po or None
+
+    if estimated_ship_date is not _UNSET and estimated_ship_date is not None:
+        if diff_fields(line, {"estimated_ship_date": estimated_ship_date}):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the estimated ship date at verify.")
+            edits.extend(diff_fields(line, {"estimated_ship_date": estimated_ship_date}))
+            line.estimated_ship_date = estimated_ship_date
+
+    if unit_cost is not _UNSET and unit_cost is not None:
+        new_cost = float(unit_cost)
+        if diff_fields(line, {"unit_cost": new_cost}):
+            if not _manager_verify_override(actor, line):
+                raise ValueError("Only a manager can edit the unit cost at verify.")
+            edits.extend(diff_fields(line, {"unit_cost": new_cost}))
+            line.unit_cost = new_cost
 
     line.margin_pct = _line_margin_pct(
         float(line.unit_sell) if line.unit_sell is not None else None,
         float(line.unit_cost) if line.unit_cost is not None else None,
     )
+    return edits
+
+
+def _line_audit_label(line: BuyPlanLine) -> str:
+    """Short human label for a line in "line added"/"line removed" audit edits (part ·
+    vendor · ×qty) — plain strings, so it survives the line's deletion."""
+    mpn = None
+    if line.requirement is not None:
+        mpn = line.requirement.primary_mpn
+    if not mpn and line.offer is not None:
+        mpn = line.offer.mpn
+    vendor = line.offer.vendor_name if line.offer is not None else None
+    bits = [b for b in (mpn, vendor) if b]
+    label = " · ".join(bits) or f"line {line.id}"
+    return f"{label} ×{line.quantity}" if line.quantity else label
 
 
 def _build_new_line(
@@ -608,9 +686,19 @@ def add_buy_plan_line(
         raise ValueError(f"Buy plan {plan_id} not found")
     _ensure_can_edit_lines(user, plan)
 
-    plan.lines.append(_build_new_line(plan, requirement_id, offer_id, quantity, unit_sell, db))
+    new_line = _build_new_line(plan, requirement_id, offer_id, quantity, unit_sell, db)
+    plan.lines.append(new_line)
     _recalculate_financials(plan)
     db.flush()
+    # Field-audit (2.1): one row per save. The flush above assigned new_line.id, so the
+    # row attributes to the created line via its FK column.
+    log_field_edits(
+        db,
+        user=user,
+        buy_plan_id=plan.id,
+        buy_plan_line_id=new_line.id,
+        edits=[FieldEdit(field="line added", old="", new=_line_audit_label(new_line))],
+    )
     logger.info("Buy plan {} line added by {} (req {}, offer {})", plan_id, user.email, requirement_id, offer_id)
     return plan
 
@@ -624,6 +712,9 @@ def edit_buy_plan_line(
     quantity: int | None = None,
     unit_sell: float | None = None,
     offer_id: int | None = None,
+    po_number: str | None = None,
+    estimated_ship_date: datetime | None = None,
+    unit_cost: float | None = None,
 ) -> BuyPlan:
     """Edit a line's qty / sell price / vendor(offer) and recompute the header rollups.
 
@@ -635,7 +726,9 @@ def edit_buy_plan_line(
     value). Signature stays backward-compatible for existing callers: ``None`` still
     means "unchanged" for all three kwargs (mapped internally to the "field untouched"
     sentinel), so this legacy entry point still can't CLEAR unit_sell — only bulk's JSON
-    key-presence contract can do that. Caller commits.
+    key-presence contract can do that. ``po_number=""`` (empty string, NOT None) is the
+    one explicit clear this entry point supports: a manager at verify blanking an
+    erroneous PO number (see :func:`_apply_line_edit`). Caller commits.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
     if not plan:
@@ -646,15 +739,26 @@ def edit_buy_plan_line(
     if not line:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
 
-    _apply_line_edit(
+    # Stage tag for the audit row (2.3): captured BEFORE the edit applies — a line
+    # sitting at PENDING_VERIFY means this save is a verify-stage edit, which is what
+    # field_audit.manager_edited_line_ids keys the kanban "edited by manager" marker on.
+    stage = "verify" if line.status == BuyPlanLineStatus.PENDING_VERIFY.value else None
+    edits = _apply_line_edit(
         line,
         plan,
         db,
         offer_id=offer_id if offer_id is not None else _UNSET,
         quantity=quantity if quantity is not None else _UNSET,
         unit_sell=unit_sell if unit_sell is not None else _UNSET,
+        po_number=po_number if po_number is not None else _UNSET,
+        estimated_ship_date=estimated_ship_date if estimated_ship_date is not None else _UNSET,
+        unit_cost=unit_cost if unit_cost is not None else _UNSET,
+        actor=user,
     )
     _recalculate_financials(plan)
+    # Field-audit (2.1): the single service choke point — one FIELD_EDIT row per save,
+    # none when nothing actually changed (log_field_edits no-ops on an empty diff).
+    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=line_id, edits=edits, stage=stage)
     db.flush()
     logger.info("Buy plan {} line {} edited by {}", plan_id, line_id, user.email)
     return plan
@@ -729,6 +833,11 @@ def bulk_edit_buy_plan_lines(
     known_ids = _coerce_known_line_ids(known_line_ids)
 
     existing_by_id = {ln.id: ln for ln in plan.lines}
+    # Pre-edit statuses, captured up front for the audit row's stage tag (2.3): the
+    # save counts as a verify-stage edit only when EVERY touched line sat at
+    # PENDING_VERIFY before it (added lines are AWAITING_PO by construction, so an
+    # add always disqualifies the tag — a draft-stage add must never mark).
+    pre_status = {ln.id: ln.status for ln in plan.lines}
     seen_ids: set[int] = set()
 
     # One batch query for every offer any entry references, instead of a db.get() per
@@ -748,6 +857,11 @@ def bulk_edit_buy_plan_lines(
                 select(Offer).options(joinedload(Offer.vendor_card)).where(Offer.id.in_(offer_ids))
             ).scalars()
         }
+
+    # Field-audit (2.1): every entry's diff batches into ONE FIELD_EDIT row per save
+    # (D4); each edit carries its line_id since one row can span several lines.
+    all_edits: list[FieldEdit] = []
+    added_lines: list[BuyPlanLine] = []
 
     for entry in lines_payload:
         if not isinstance(entry, dict):
@@ -780,7 +894,11 @@ def bulk_edit_buy_plan_lines(
                     quantity_kw = _UNSET
 
                 unit_sell_kw = entry.get("unit_sell") if "unit_sell" in entry else _UNSET
-                _apply_line_edit(
+                # NO actor pass-through: the bulk (whole-plan) editor keeps the strict
+                # cut-PO guards for everyone — the manager-at-verify override (2.3) is
+                # scoped to the single-line PO-pane edit path (edit_buy_plan_line),
+                # where the edit targets one PENDING_VERIFY line deliberately.
+                line_edits = _apply_line_edit(
                     line,
                     plan,
                     db,
@@ -789,6 +907,7 @@ def bulk_edit_buy_plan_lines(
                     unit_sell=unit_sell_kw,
                     offer_lookup=offer_lookup,
                 )
+                all_edits.extend(FieldEdit(field=e.field, old=e.old, new=e.new, line_id=line_id) for e in line_edits)
             else:
                 new_line = _build_new_line(
                     plan,
@@ -800,6 +919,7 @@ def bulk_edit_buy_plan_lines(
                     offer_lookup=offer_lookup,
                 )
                 plan.lines.append(new_line)
+                added_lines.append(new_line)
         except (TypeError, KeyError) as e:
             raise ValueError(f"Malformed line payload: {e}") from e
 
@@ -814,10 +934,30 @@ def bulk_edit_buy_plan_lines(
             continue
         if known_ids is not None and line.id not in known_ids:
             continue
+        all_edits.append(FieldEdit(field="line removed", old=_line_audit_label(line), new="", line_id=line.id))
         plan.lines.remove(line)
 
     _recalculate_financials(plan)
     db.flush()
+    # Field-audit (2.1): the adds got their ids at the flush above; log the ONE batched
+    # row for this save (edits + adds + removals). When the save touched exactly one
+    # surviving line, the row's FK column attributes it directly; a multi-line save
+    # attributes per-edit via each edit's line_id instead (removed lines only ever use
+    # the JSON line_id — their FK row is gone).
+    all_edits.extend(
+        FieldEdit(field="line added", old="", new=_line_audit_label(nl), line_id=nl.id) for nl in added_lines
+    )
+    touched_ids = {e.line_id for e in all_edits}
+    any_removed = any(e.field == "line removed" for e in all_edits)
+    row_line_id = next(iter(touched_ids)) if len(touched_ids) == 1 and not any_removed else None
+    # Stage tag (2.3): "verify" only when every touched line's PRE-edit status was
+    # PENDING_VERIFY (pre_status has no entry for added lines, so adds disqualify).
+    stage = (
+        "verify"
+        if all_edits and all(pre_status.get(lid) == BuyPlanLineStatus.PENDING_VERIFY.value for lid in touched_ids)
+        else None
+    )
+    log_field_edits(db, user=user, buy_plan_id=plan.id, buy_plan_line_id=row_line_id, edits=all_edits, stage=stage)
     # Auto-complete at service depth (mirrors verify_po in buyplan_po.py): removing the
     # last open line can leave every remaining line terminal, so this prevents an ACTIVE
     # plan getting stranded short of COMPLETED.
@@ -852,8 +992,12 @@ def remove_buy_plan_line(plan_id: int, line_id: int, user: User, db: Session) ->
     if _has_cut_po(line):
         raise ValueError("Cannot remove a line once a PO is cut on it.")
 
+    # Field-audit (2.1): capture the label BEFORE removal; the removed line's id rides
+    # the JSON edit (line_id), never the FK column — the line row is gone after this.
+    removal_edit = FieldEdit(field="line removed", old=_line_audit_label(line), new="", line_id=line.id)
     plan.lines.remove(line)
     _recalculate_financials(plan)
+    log_field_edits(db, user=user, buy_plan_id=plan.id, edits=[removal_edit])
     db.flush()
     check_completion(plan_id, db)
     logger.info("Buy plan {} line {} removed by {}", plan_id, line_id, user.email)
@@ -876,8 +1020,13 @@ def set_sales_order_number(plan_id: int, sales_order_number: str | None, user: U
     if plan.status in _LOCKED_EDIT_STATUSES:
         raise ValueError(f"Cannot edit the Sales Order number on a {plan.status} plan.")
 
-    plan.sales_order_number = (sales_order_number or "").strip() or None
+    new_value = (sales_order_number or "").strip() or None
+    # Field-audit (2.1): diff BEFORE the assignment; a resend of the current SO#
+    # writes no row (log_field_edits no-ops on an empty diff).
+    edits = diff_fields(plan, {"sales_order_number": new_value})
+    plan.sales_order_number = new_value
     plan.updated_at = datetime.now(UTC)
+    log_field_edits(db, user=user, buy_plan_id=plan.id, edits=edits)
     db.flush()
     logger.info("Buy plan {} SO number set to {!r} by {}", plan_id, plan.sales_order_number, user.email)
     return plan

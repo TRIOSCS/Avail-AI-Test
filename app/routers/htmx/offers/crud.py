@@ -373,6 +373,11 @@ async def review_offer(
     db.commit()
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
 
+    if action == "approve":
+        from ....services.proactive_matching import trigger_rematch_on_offer_approval
+
+        trigger_rematch_on_offer_approval(db, offer)
+
     # Return refreshed offers tab
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -783,6 +788,10 @@ async def promote_offer_htmx(
 
     db.commit()
     logger.info("Offer {} promoted by {}", offer_id, user.email)
+
+    from ....services.proactive_matching import trigger_rematch_on_offer_approval
+
+    trigger_rematch_on_offer_approval(db, offer)
 
     return await _offer_review_queue(request=request, user=user, db=db)
 

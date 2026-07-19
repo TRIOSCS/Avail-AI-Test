@@ -10,11 +10,10 @@ Covers the rework contract (replaces the retired tests/test_sp3_po_receiving.py)
     dollar amount (and can_verify_po_line mirrors the same check for the UI);
   - verify_po writes a durable ActivityLog row (PO_LINE_VERIFIED / PO_LINE_REJECTED);
   - plan_needs_approver_reason's "purchase_order" stall is per PENDING_VERIFY line, not
-    the plan total;
-  - buyplan_hub._query_stuck_no_approver_plans flags ACTIVE plans per-line the same way.
+    the plan total (the workspace BP-tab stall warnings key off this predicate).
 
 Called by: pytest
-Depends on: conftest (db_session), app.services.buyplan_workflow, app.services.buyplan_hub,
+Depends on: conftest (db_session), app.services.buyplan_workflow,
             app.services.approvals.service, app.dependencies,
             app.models.{approvals,buy_plan,auth,quotes,sourcing,intelligence}.
 """
@@ -43,7 +42,6 @@ from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.services.approvals.service import decide as svc_decide
-from app.services.buyplan_hub import _query_stuck_no_approver_plans
 from app.services.buyplan_workflow import (
     _complete_plan,
     check_completion,
@@ -302,9 +300,10 @@ def test_plan_needs_approver_reason_purchase_order_is_per_line(db_session: Sessi
     assert plan_needs_approver_reason(plan, db_session) is None
 
 
-def test_query_stuck_no_approver_plans_purchase_order_per_line(db_session: Session) -> None:
-    """The hub stall query flags an ACTIVE plan when any PENDING_VERIFY line's amount
-    has no eligible approver; an eligible approver (or no pending line) clears it."""
+def test_plan_needs_approver_reason_purchase_order_clears_with_unlimited_approver(db_session: Session) -> None:
+    """The per-line PURCHASE_ORDER stall (the predicate behind the workspace BP-tab
+    stall warnings) flags an ACTIVE plan when any PENDING_VERIFY line's amount has no
+    eligible approver; an eligible approver (or no pending line) clears it."""
     # A buy-plan approver exists so the BUY_PLAN branch stays quiet.
     capped = _make_user(
         db_session,
@@ -319,13 +318,9 @@ def test_query_stuck_no_approver_plans_purchase_order_per_line(db_session: Sessi
     quiet = _make_plan(db_session, capped, total_cost=1_000_000.0)
     _make_line(db_session, quiet, status=BuyPlanLineStatus.AWAITING_PO.value)
 
-    flagged = _query_stuck_no_approver_plans(db_session)
-    assert [p.id for p in flagged] == [stuck.id]
-
-    # Owner scoping still applies (another owner sees nothing).
-    other = _make_user(db_session)
-    assert _query_stuck_no_approver_plans(db_session, owner_id=other.id) == []
+    assert plan_needs_approver_reason(stuck, db_session) == "purchase_order"
+    assert plan_needs_approver_reason(quiet, db_session) is None
 
     # An unlimited approver covers the line → nothing is stuck.
     _make_user(db_session, can_approve_purchase_orders=True)
-    assert _query_stuck_no_approver_plans(db_session) == []
+    assert plan_needs_approver_reason(stuck, db_session) is None

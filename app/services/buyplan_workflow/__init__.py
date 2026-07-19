@@ -18,7 +18,7 @@ production code or tests reach via ``app.services.buyplan_workflow.<name>`` so n
 caller needs to change its import path.
 
 Called by: routers/htmx/buy_plans.py, routers/htmx_views.py, routers/prepayments.py,
-    services/buyplan_service.py, services/buyplan_hub.py, services/approvals/service.py,
+    services/buyplan_hub.py, services/approvals/service.py,
     jobs/inventory_jobs.py, startup.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """
@@ -73,6 +73,7 @@ from .buyplan_po import (
     _line_amount,
     _log_po_line_activity,
     confirm_po,
+    mark_line_received,
     verify_po,
     verify_po_sent,
 )
@@ -117,6 +118,7 @@ __all__ = [
     "flag_line_issue",
     "generate_case_report",
     "halt_plan",
+    "mark_line_received",
     "plan_needs_approver_reason",
     "remove_buy_plan_line",
     "reset_buy_plan_to_draft",

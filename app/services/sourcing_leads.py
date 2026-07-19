@@ -22,15 +22,18 @@ Depends on:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.sourcing import Requirement, Sighting
 from app.models.sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead
 from app.models.vendors import VendorCard
 from app.scoring import explain_lead
+from app.source_trust import evidence_tier_bonus, source_reliability_base
 from app.utils.normalization import normalize_mpn_key
 from app.vendor_utils import normalize_vendor_name
 
@@ -87,22 +90,12 @@ def _safety_band(score: float, has_vendor_data: bool = True) -> str:
 
 
 def _source_reliability(source_type: str, evidence_tier: str | None) -> float:
-    source_type = (source_type or "").lower()
-    if source_type in {"digikey", "mouser", "farnell", "element14", "nexar", "octopart"}:
-        base = 90
-    elif source_type in {"netcomponents", "icsource", "thebrokersite", "brokerbin", "sourcengine"}:
-        base = 72
-    elif source_type in {"salesforce", "avail_history"}:
-        base = 85
-    elif source_type in {"ai", "web"}:
-        base = 40
-    else:
-        base = 60
+    """Base source reliability + evidence-tier bonus, clamped 0-100.
 
-    if evidence_tier and evidence_tier.upper().startswith("T"):
-        tier = evidence_tier.upper()
-        tier_bonus = {"T1": 8, "T2": 5, "T3": 2, "T4": 0, "T5": -5, "T6": -10, "T7": -15}.get(tier, 0)
-        base += tier_bonus
+    Both tables are the single-authority ones in app.source_trust — see that module
+    for the T1..T7 trust ordering (T6 manual entry ranks above T3 marketplace scrape).
+    """
+    base = source_reliability_base(source_type) + evidence_tier_bonus(evidence_tier)
     return _clamp(float(base))
 
 
@@ -152,25 +145,132 @@ def _historical_success_score(vendor_card: VendorCard | None) -> float:
     return _clamp(score)
 
 
+# ---------------------------------------------------------------------------
+# Vendor feedback loop — buyer outcome events (LeadFeedbackEvent / buyer_status)
+# aggregated per vendor and time-decayed, feeding back into confidence and safety.
+# ---------------------------------------------------------------------------
+
+FEEDBACK_HALF_LIFE_DAYS = 90.0
+FEEDBACK_LOOKBACK_DAYS = 270  # ~3 half-lives; older events contribute negligibly anyway
+
+_FEEDBACK_CONFIDENCE_WEIGHT: dict[str, float] = {
+    "bad_lead": -6.0,
+    "no_stock": -3.0,
+    "do_not_contact": -15.0,
+    "has_stock": 2.0,
+}
+_FEEDBACK_SAFETY_WEIGHT: dict[str, float] = {
+    "bad_lead": -8.0,
+    "no_stock": -2.0,
+    "do_not_contact": -25.0,
+}
+_NEGATIVE_FEEDBACK_STATUSES = {"bad_lead", "no_stock", "do_not_contact"}
+
+
+@dataclass(frozen=True)
+class VendorFeedbackAdjustment:
+    """Time-decayed rollup of a vendor's buyer feedback history.
+
+    confidence_penalty / safety_penalty are signed point adjustments (negative =
+    penalty, positive = boost) meant to be added directly to a 0-100 score before
+    clamping. do_not_contact is True if the vendor has ANY do_not_contact feedback event
+    on record (not decayed — a standing buyer instruction, not a fading signal).
+    """
+
+    confidence_penalty: float
+    safety_penalty: float
+    do_not_contact: bool
+    weighted_negative_events: float
+
+
+_NO_FEEDBACK_ADJUSTMENT = VendorFeedbackAdjustment(0.0, 0.0, False, 0.0)
+
+
+def get_vendor_feedback_adjustment(db: Session, vendor_card_id: int | None) -> VendorFeedbackAdjustment:
+    """Aggregate a vendor's recent LeadFeedbackEvent history into a scoring adjustment.
+
+    One grouped-scope query per call (joins LeadFeedbackEvent -> SourcingLead,
+    filtered to this vendor and a bounded lookback window) — not a query per event
+    or per lead, so callers can invoke this once per vendor per lead upsert without
+    N+1 risk. Events decay exponentially with a 90-day half-life so a bad_lead from
+    8 months ago barely moves the needle while one from last week dominates.
+
+    Exposed (not prefixed `_`) so other write paths — e.g. the live sighting scoring
+    path in search_service.py — can wire the same adjustment into score_sighting_v2's
+    trust factor without duplicating the aggregation query.
+    """
+    if not vendor_card_id:
+        return _NO_FEEDBACK_ADJUSTMENT
+
+    cutoff = _now_utc() - timedelta(days=FEEDBACK_LOOKBACK_DAYS)
+    rows = db.execute(
+        select(LeadFeedbackEvent.status, LeadFeedbackEvent.created_at)
+        .join(SourcingLead, LeadFeedbackEvent.lead_id == SourcingLead.id)
+        .where(
+            SourcingLead.vendor_card_id == vendor_card_id,
+            LeadFeedbackEvent.created_at >= cutoff,
+        )
+    ).all()
+    if not rows:
+        return _NO_FEEDBACK_ADJUSTMENT
+
+    confidence_penalty = 0.0
+    safety_penalty = 0.0
+    weighted_negative = 0.0
+    do_not_contact = False
+
+    for status, created_at in rows:
+        if status == "do_not_contact":
+            do_not_contact = True
+        age_days = max(((_now_utc() - _as_utc(created_at)).total_seconds() / 86400.0), 0.0)
+        decay = 0.5 ** (age_days / FEEDBACK_HALF_LIFE_DAYS)
+        confidence_penalty += _FEEDBACK_CONFIDENCE_WEIGHT.get(status, 0.0) * decay
+        safety_penalty += _FEEDBACK_SAFETY_WEIGHT.get(status, 0.0) * decay
+        if status in _NEGATIVE_FEEDBACK_STATUSES:
+            weighted_negative += decay
+
+    return VendorFeedbackAdjustment(
+        confidence_penalty=round(confidence_penalty, 2),
+        safety_penalty=round(safety_penalty, 2),
+        do_not_contact=do_not_contact,
+        weighted_negative_events=round(weighted_negative, 2),
+    )
+
+
 def _compute_confidence(
     sighting: Sighting,
     source_reliability: float,
     freshness: float,
     contactability: float,
     historical: float,
+    feedback_penalty: float = 0.0,
 ) -> float:
     base = float(sighting.score if sighting.score is not None else (sighting.confidence or 0.0) * 100.0)
     weighted = (
         (base * 0.5) + (source_reliability * 0.2) + (freshness * 0.15) + (contactability * 0.1) + (historical * 0.05)
     )
+    # Vendor feedback penalty is applied directly (not weighted down further) so a
+    # do_not_contact / repeated bad_lead history from THIS vendor meaningfully drags
+    # down confidence rather than being diluted by the 0.2 source_reliability weight.
+    weighted += feedback_penalty
     return round(_clamp(weighted), 1)
 
 
-def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float) -> tuple[float, list[str], str]:
+def _compute_vendor_safety(
+    vendor_card: VendorCard | None,
+    contactability: float,
+    feedback_penalty: float = 0.0,
+    feedback_do_not_contact: bool = False,
+) -> tuple[float, list[str], str]:
     """Compute vendor safety score, flags, and summary.
 
     Uses VendorCard enrichment data to surface identity/trust signals per the vendor
     safety model spec. Uses caution language — signals, not accusations.
+
+    feedback_penalty / feedback_do_not_contact come from get_vendor_feedback_adjustment
+    — the vendor-wide, time-decayed rollup of buyer LeadFeedbackEvent history. A
+    do_not_contact event on ANY of this vendor's leads forces the score into high_risk
+    territory here, even if this particular lead was never flagged.
     """
     score = 50.0
     flags: list[str] = []
@@ -255,6 +355,14 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
         score -= 10
         if "conflicting_contact_info" not in flags:
             flags.append("limited_verified_contact_channels")
+
+    score += feedback_penalty
+    if feedback_do_not_contact:
+        # Standing buyer instruction from feedback history — force high_risk
+        # regardless of how favorable the other signals look.
+        score = min(score, 15.0)
+        if "buyer_marked_do_not_contact" not in flags:
+            flags.append("buyer_marked_do_not_contact")
 
     has_vendor_data = vendor_card is not None
     score = round(_clamp(score), 1)
@@ -416,12 +524,17 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
 
     matched_part_norm = normalize_mpn_key(matched_part) or matched_part.lower()
     vendor_card = _find_vendor_card(db, vendor_normalized)
+    feedback = get_vendor_feedback_adjustment(db, vendor_card.id if vendor_card else None)
     source_reliability = _source_reliability(sighting.source_type, sighting.evidence_tier)
     freshness = _freshness_score(sighting.created_at)
     contactability = _contactability_score(sighting, vendor_card)
     historical = _historical_success_score(vendor_card)
-    confidence_score = _compute_confidence(sighting, source_reliability, freshness, contactability, historical)
-    safety_score, safety_flags, safety_summary = _compute_vendor_safety(vendor_card, contactability)
+    confidence_score = _compute_confidence(
+        sighting, source_reliability, freshness, contactability, historical, feedback.confidence_penalty
+    )
+    safety_score, safety_flags, safety_summary = _compute_vendor_safety(
+        vendor_card, contactability, feedback.safety_penalty, feedback.do_not_contact
+    )
 
     lead = (
         db.query(SourcingLead)

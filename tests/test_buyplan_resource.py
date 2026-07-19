@@ -23,7 +23,7 @@ from app.constants import (
 )
 from app.models import Offer, POCancellation, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
-from app.services.buyplan_hub import resourcing_pool_queue
+from app.routers.htmx.approvals_hub import _po_rows
 from app.services.buyplan_workflow import claim_line, resource_line
 
 
@@ -290,7 +290,11 @@ class TestClaimLine:
 
 
 class TestResourcingPoolQueue:
-    def test_lists_open_pool_line_with_canceled_vendor(
+    """The re-sourcing pool surfaces on the Approvals Workspace PO tab (the hub's
+    ``resourcing_pool_queue`` retired with its surface — the workspace ``_po_rows`` now
+    carries the claimable pool)."""
+
+    def test_lists_open_pool_line_on_the_workspace_po_tab(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):
         plan = _make_plan(db_session, test_quote, test_requisition)
@@ -300,14 +304,14 @@ class TestResourcingPoolQueue:
         resource_line(plan.id, line.id, LineResourceReason.SOLD_ELSEWHERE.value, "gone", test_user, db_session)
         db_session.commit()
 
-        rows = resourcing_pool_queue(db_session)
-        assert len(rows) == 1
-        row = rows[0]
-        assert row["line_id"] == line.id
-        assert row["plan_id"] == plan.id
-        assert row["mpn"] == requirement.primary_mpn
-        assert row["canceled_vendor"] == offer.vendor_name
-        assert row["reason_code"] == LineResourceReason.SOLD_ELSEWHERE.value
+        rows = _po_rows(db_session, test_user, q="", scope="all", show_closed=False)
+        pooled = [r for r in rows if r.key == f"line-{line.id}"]
+        assert len(pooled) == 1
+        row = pooled[0]
+        assert row.status == BuyPlanLineStatus.RESOURCING.value
+        assert row.status_label == "Re-sourcing"
+        assert requirement.primary_mpn in row.title
+        assert row.pane_url == f"/v2/partials/approvals/po/{line.id}/pane"
 
     def test_claimed_line_leaves_the_pool(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
@@ -322,7 +326,9 @@ class TestResourcingPoolQueue:
         claim_line(plan.id, line.id, claimer, db_session)
         db_session.commit()
 
-        assert resourcing_pool_queue(db_session) == []
+        rows = _po_rows(db_session, test_user, q="", scope="all", show_closed=False)
+        pooled = [r for r in rows if r.status == BuyPlanLineStatus.RESOURCING.value]
+        assert pooled == []
 
 
 class TestResourcingAlertSource:
