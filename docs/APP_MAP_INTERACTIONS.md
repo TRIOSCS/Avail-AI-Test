@@ -5268,7 +5268,6 @@ fast_search(query, db, user)  — one universal entity search, grouped results:
 unified_score_service.py (top-level, monthly)
     |
     +---> avail_score_service.py (behavior + outcomes)
-    |       +---> engagement_scorer.py
     |       +---> activity_quality_service.py
     |       +---> response_analytics.py
     |

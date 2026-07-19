@@ -38,14 +38,6 @@ app.availai.net {
 		respond 403
 	}
 
-	# Service worker — never cache
-	@sw path /static/sw.js
-	handle @sw {
-		header Cache-Control "no-cache, must-revalidate"
-		root * /srv
-		file_server
-	}
-
 	# Vite-hashed assets (fingerprinted filenames) — immutable long cache
 	@hashed path /static/assets/*
 	handle @hashed {

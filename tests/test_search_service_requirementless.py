@@ -10,7 +10,7 @@ Covers:
 
 Called by: pytest
 Depends on: app/search_service.py, app/models/sourcing.py (Sighting.requirement_id
-            nullable, migration 197_sighting_req_id_nullable)
+            nullable, migration 198_sighting_req_id_nullable)
 """
 
 from datetime import UTC, datetime

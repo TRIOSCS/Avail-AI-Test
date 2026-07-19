@@ -235,7 +235,7 @@ class Manufacturer(Base):
 class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)
-    # Nullable (migration 197_sighting_req_id_nullable): requirement-less
+    # Nullable (migration 198_sighting_req_id_nullable): requirement-less
     # rows represent interactive/global "quick search" discoveries persisted by
     # stream_search_mpn (app/search_service.py) — never tied to a Requisition.
     # The FK's ondelete="CASCADE" is preserved: NULL values are simply exempt

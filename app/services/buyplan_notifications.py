@@ -15,7 +15,7 @@ Handles notifications for all buy plan state transitions:
 - Cancelled → in-app + Teams to submitter (lines cascade-cancelled)
 - Nudge (buyer / ops) → reminder when a line sits unconfirmed past its SLA
 
-Called by: routers/htmx_views.py, jobs/inventory_jobs.py, buyplan_service.py
+Called by: routers/htmx_views.py, jobs/inventory_jobs.py, buyplan_workflow/*
 Depends on: models, config, utils/graph_client, teams_notifications
 """
 

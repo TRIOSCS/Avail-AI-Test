@@ -18,7 +18,7 @@ production code or tests reach via ``app.services.buyplan_workflow.<name>`` so n
 caller needs to change its import path.
 
 Called by: routers/htmx/buy_plans.py, routers/htmx_views.py, routers/prepayments.py,
-    services/buyplan_service.py, services/buyplan_hub.py, services/approvals/service.py,
+    services/buyplan_hub.py, services/approvals/service.py,
     jobs/inventory_jobs.py, startup.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """

@@ -23,8 +23,8 @@ before downgrading. Once no NULL rows remain, the column reverts to NOT NULL.
 Called by: alembic (upgrade/downgrade).
 Depends on: sightings (created in 001_initial_schema).
 
-Revision ID: 197_sighting_req_id_nullable
-Revises: 196_approvals_foundations
+Revision ID: 198_sighting_req_id_nullable
+Revises: 197_drop_facet_audits_kconfig
 Create Date: 2026-07-18
 """
 
@@ -34,8 +34,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "197_sighting_req_id_nullable"
-down_revision = "196_approvals_foundations"
+revision = "198_sighting_req_id_nullable"
+down_revision = "197_drop_facet_audits_kconfig"
 branch_labels = None
 depends_on = None
 
@@ -49,7 +49,7 @@ def downgrade() -> None:
     null_count = bind.execute(sa.text("SELECT COUNT(*) FROM sightings WHERE requirement_id IS NULL")).scalar()
     if null_count:
         raise RuntimeError(
-            f"Cannot downgrade 197_sighting_req_id_nullable: {null_count} sighting "
+            f"Cannot downgrade 198_sighting_req_id_nullable: {null_count} sighting "
             "row(s) have requirement_id IS NULL (requirement-less interactive/global search "
             "sightings). Re-imposing NOT NULL would violate the constraint, and this "
             "migration will not silently delete that data. Either remove them explicitly "
