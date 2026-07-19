@@ -30,7 +30,7 @@ from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector, _redact_secrets
 from .constants import FRU_ALIAS_SOURCE, ActivityType, ApiSourceStatus, SourceRunStatus
-from .database import SessionLocal
+from .database import SessionLocal, engine
 from .models import (
     ApiSource,
     MaterialCard,
@@ -53,7 +53,7 @@ from .services.fru_matrix_service import get_search_aliases
 from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
-from .services.sourcing_leads import sync_leads_for_sightings
+from .services.sourcing_leads import get_vendor_feedback_adjustment, sync_leads_for_sightings
 from .services.tbf_worker.queue_manager import enqueue_for_tbf_search
 from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
@@ -585,6 +585,56 @@ def _persist_search_write(
             "primary_card_id": primary_card_id,
             "requisition_id": write_req.requisition_id,
         }
+    except Exception:
+        write_db.rollback()
+        raise
+    finally:
+        write_db.close()
+
+
+def _persist_interactive_sightings(
+    mpn: str,
+    raw_hits: list[dict],
+    succeeded_sources: set[str],
+    now: datetime,
+    bind,
+) -> dict | None:
+    """Persist a live interactive/global search's on-target hits as requirement-less
+    Sightings — same write-session pattern as ``_persist_search_write``, minus every
+    requirement-scoped step (there is no Requirement row for an interactive search).
+
+    Opens its OWN write session bound to *bind*, entirely within the calling
+    thread (mirrors ``_persist_search_write`` — SQLAlchemy sessions are not
+    thread-safe). Returns ``None`` when there is nothing to persist.
+
+    Called by: stream_search_mpn (via asyncio.to_thread, AFTER the terminal "done"
+               SSE event so persistence never delays the stream). Never called for
+               a cache-hit stream.
+    Depends on: _save_sightings (req=None path), _upsert_material_card,
+                resolve_material_card, run_deterministic_passes
+    """
+    if not raw_hits:
+        return None
+
+    from sqlalchemy.orm import sessionmaker
+
+    _WriteSession = sessionmaker(bind=bind, autocommit=False, autoflush=False, expire_on_commit=False)
+    write_db = _WriteSession()
+    try:
+        sightings = _save_sightings(raw_hits, None, write_db, succeeded_sources)
+        logger.info("Interactive search {}: persisted {} requirement-less sighting(s)", mpn, len(sightings))
+
+        card = _upsert_material_card(mpn, sightings, write_db, now)
+        if card is None:
+            card = resolve_material_card(mpn, write_db)
+        card_ids: set[int] = {card.id} if card else set()
+        if card:
+            card.last_searched_at = now
+
+        run_deterministic_passes(write_db, card_ids)
+        write_db.commit()
+
+        return {"sighting_count": len(sightings), "card_ids": sorted(card_ids)}
     except Exception:
         write_db.rollback()
         raise
@@ -2045,40 +2095,119 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
 def _save_sightings(
     fresh: list[dict],
-    req: Requirement,
+    req: Requirement | None,
     db: Session,
     succeeded_sources: set[str] | None = None,
 ) -> list[Sighting]:
+    """Save fresh connector hits as Sighting rows, scored + deduped.
+
+    ``req`` is optional: when ``None`` the sightings are requirement-less
+    (interactive/global "quick search" discoveries persisted by
+    ``stream_search_mpn``). In that case every requirement-scoped step — lead
+    sync, requirement-level dedup/stamping, vendor-summary rebuild — is skipped
+    since those tables' FKs are non-nullable; dedup instead runs against
+    existing requirement-less rows by (vendor, mpn). Vendor-card creation,
+    material-card upsert (by the caller), scoring, evidence tiers, and tag
+    propagation all still run either way.
+    """
     from .models import VendorCard
 
-    # Build vendor-name → vendor_score lookup (only for vendors in results)
+    requirement_id = req.id if req is not None else None
+
+    # Build vendor-name → (vendor_score, vendor_card_id) lookup (only for
+    # vendors in results).
     needed_names = {normalize_vendor_name((r.get("vendor_name") or "").strip()) for r in fresh if r.get("vendor_name")}
     needed_names.discard("")
     if needed_names:
         vendor_cards = (
-            db.query(VendorCard.normalized_name, VendorCard.vendor_score)
+            db.query(VendorCard.normalized_name, VendorCard.vendor_score, VendorCard.id)
             .filter(VendorCard.normalized_name.in_(needed_names))
             .all()
         )
         vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+        vendor_id_map = {vc.normalized_name: vc.id for vc in vendor_cards}
     else:
         vendor_score_map = {}
+        vendor_id_map = {}
+
+    # Batch the vendor feedback adjustment: ONE get_vendor_feedback_adjustment
+    # call per DISTINCT vendor_card in this save, never per sighting — a save
+    # with 200 sightings across 5 vendors issues 5 feedback queries, not 200.
+    distinct_vendor_ids = {vc_id for vc_id in vendor_id_map.values() if vc_id}
+    feedback_by_vendor_id = {vc_id: get_vendor_feedback_adjustment(db, vc_id) for vc_id in distinct_vendor_ids}
+
+    def _effective_trust_score(norm_name: str) -> float | None:
+        """Vendor trust score with the vendor's feedback adjustment applied.
+
+        A do_not_contact vendor is floor-scored (trust <= 15), not dropped — the
+        sighting still surfaces, but scores low enough that it never outranks a clean
+        vendor's identical listing.
+        """
+        base = vendor_score_map.get(norm_name)
+        if base is None:
+            return None
+        base_score = float(base)
+        adj = feedback_by_vendor_id.get(vendor_id_map.get(norm_name))
+        if adj is None:
+            return base_score
+        adjusted = max(0.0, min(100.0, base_score + adj.confidence_penalty))
+        if adj.do_not_contact:
+            adjusted = min(adjusted, 15.0)
+        return adjusted
 
     # Connector-aware delete: only remove sightings from sources that returned
     # results.  Sightings from failed/timed-out connectors are preserved.
     # Map nexar → {nexar, octopart} since Octopart results come via NexarConnector
     _SOURCE_ALIASES = {"nexar": {"nexar", "octopart"}}
     expanded: set[str] = set()
-    if succeeded_sources:
+    if req is not None and succeeded_sources:
         for s in succeeded_sources:
             expanded.update(_SOURCE_ALIASES.get(s, {s}))
-        db.query(Sighting).filter(
-            Sighting.requirement_id == req.id,
-            Sighting.source_type.in_(expanded),
-        ).delete(synchronize_session="fetch")
-    else:
-        # Fallback: no source info → wipe all (legacy behaviour)
-        db.query(Sighting).filter_by(requirement_id=req.id).delete()
+
+    def _delete_stale_before_insert() -> None:
+        """Delete sightings the fresh batch is about to replace.
+
+        Requirement-scoped: connector-aware delete (only sources that
+        returned results this run). Requirement-less: dedup existing
+        requirement-less rows by (vendor, mpn) — delete the stale row, keep
+        the fresh one, mirroring the "keep fresh" merge policy used below for
+        requirement-scoped saves. Re-callable (used again on the row-by-row
+        retry path below, since a rolled-back commit undoes this delete too).
+        """
+        if req is not None:
+            if succeeded_sources:
+                db.query(Sighting).filter(
+                    Sighting.requirement_id == requirement_id,
+                    Sighting.source_type.in_(expanded),
+                ).delete(synchronize_session="fetch")
+            else:
+                # Fallback: no source info → wipe all (legacy behaviour)
+                db.query(Sighting).filter_by(requirement_id=requirement_id).delete()
+            return
+
+        incoming_keys = {
+            (normalize_vendor_name((r.get("vendor_name") or "").strip()), normalize_mpn_key(r.get("mpn_matched") or ""))
+            for r in fresh
+        }
+        incoming_keys = {k for k in incoming_keys if k[0] and k[1]}
+        if not incoming_keys:
+            return
+        vendor_norms = {k[0] for k in incoming_keys}
+        mpn_keys = {k[1] for k in incoming_keys}
+        stale_candidates = (
+            db.query(Sighting)
+            .filter(
+                Sighting.requirement_id.is_(None),
+                Sighting.vendor_name_normalized.in_(vendor_norms),
+                Sighting.normalized_mpn.in_(mpn_keys),
+            )
+            .all()
+        )
+        stale_ids = [c.id for c in stale_candidates if (c.vendor_name_normalized, c.normalized_mpn) in incoming_keys]
+        if stale_ids:
+            db.query(Sighting).filter(Sighting.id.in_(stale_ids)).delete(synchronize_session="fetch")
+
+    _delete_stale_before_insert()
     db.flush()
 
     sightings = []
@@ -2116,12 +2245,16 @@ def _save_sightings(
 
         is_auth = r.get("is_authorized", False)
         s = Sighting(
-            requirement_id=req.id,
+            requirement_id=requirement_id,
             vendor_name=clean_vendor,
             vendor_name_normalized=normalize_vendor_name(clean_vendor),
             vendor_email=r.get("vendor_email"),
             vendor_phone=r.get("vendor_phone"),
             mpn_matched=clean_mpn,
+            # Set the dedup key at insert — the material-card upsert's backfill
+            # (which only fills when missing) can be skipped on failure, and the
+            # requirement-less stale-row dedup above filters on this column.
+            normalized_mpn=normalize_mpn_key(clean_mpn) if clean_mpn else None,
             material_card_id=r.get("material_card_id"),
             manufacturer=r.get("manufacturer"),
             qty_available=clean_qty,
@@ -2149,7 +2282,7 @@ def _save_sightings(
             created_at=datetime.now(UTC),
         )
         norm_name = normalize_vendor_name(clean_vendor)
-        s.score = score_sighting(vendor_score_map.get(norm_name), s.is_authorized)
+        s.score = score_sighting(_effective_trust_score(norm_name), s.is_authorized)
         db.add(s)
         sightings.append(s)
 
@@ -2168,11 +2301,11 @@ def _save_sightings(
         if p is not None
     ]
     median_price = _median(prices_usd)
-    target_qty = req.target_qty if req.target_qty else None
+    target_qty = (req.target_qty if req.target_qty else None) if req is not None else None
     for s, r in zip(sightings, fresh):
         norm_name = s.vendor_name_normalized or ""
         v2_total, v2_comp = score_sighting_v2(
-            vendor_score=vendor_score_map.get(norm_name),
+            vendor_score=_effective_trust_score(norm_name),
             is_authorized=s.is_authorized,
             unit_price=to_usd(s.unit_price, s.currency),
             median_price=median_price,
@@ -2190,7 +2323,11 @@ def _save_sightings(
     # Re-apply durable vendor+part unavailability knowledge before the rows
     # commit — a re-search (delete + recreate) must never resurrect a dead
     # vendor. Policy overrides O1/O2 are evaluated per row inside the service.
-    apply_to_fresh_sightings(db, req, sightings)
+    # Requirement-scoped only: the suppression matrix logs against a real
+    # requirement (see vendor_unavailability._release_record) and requires
+    # requirement.primary_mpn for its candidate-key fallback.
+    if req is not None:
+        apply_to_fresh_sightings(db, req, sightings)
 
     try:
         db.commit()
@@ -2199,16 +2336,9 @@ def _save_sightings(
         # one-by-one, skipping any rows that violate constraints.
         logger.warning(f"Bulk sighting commit failed ({e}), retrying row-by-row")
         db.rollback()
-        # Re-delete old sightings (rollback undid the delete above)
-        if succeeded_sources and expanded:
-            db.query(Sighting).filter(
-                Sighting.requirement_id == req.id,
-                Sighting.source_type.in_(expanded),
-            ).delete(synchronize_session="fetch")
-            db.flush()
-        else:
-            db.query(Sighting).filter_by(requirement_id=req.id).delete()
-            db.flush()
+        # Re-delete old/stale sightings — rollback undid the delete above.
+        _delete_stale_before_insert()
+        db.flush()
         saved = []
         for s in sightings:
             try:
@@ -2221,13 +2351,15 @@ def _save_sightings(
         db.commit()
         sightings = saved
 
-    # Dedup: if a vendor+MPN exists in both old (preserved) and fresh, keep fresh
-    if succeeded_sources and expanded:
+    # Dedup: if a vendor+MPN exists in both old (preserved) and fresh, keep fresh.
+    # Requirement-scoped only — the requirement-less path already deleted its
+    # stale (vendor, mpn) matches up front in _delete_stale_before_insert.
+    if req is not None and succeeded_sources and expanded:
         fresh_keys = {(s.vendor_name.lower(), (s.mpn_matched or "").lower()) for s in sightings}
         old = (
             db.query(Sighting)
             .filter(
-                Sighting.requirement_id == req.id,
+                Sighting.requirement_id == requirement_id,
                 ~Sighting.source_type.in_(expanded),
             )
             .all()
@@ -2240,11 +2372,13 @@ def _save_sightings(
     # Propagate vendor emails from search results to VendorContact records
     _propagate_vendor_emails(sightings, db)
 
-    # Write-through canonical sourcing leads + evidence without changing read paths.
-    try:
-        sync_leads_for_sightings(db, req, sightings)
-    except Exception:
-        logger.warning("Sourcing lead write-through failed for requirement {}", req.id, exc_info=True)
+    # Write-through canonical sourcing leads + evidence without changing read
+    # paths. Requirement-scoped only — SourcingLead.requirement_id is NOT NULL.
+    if req is not None:
+        try:
+            sync_leads_for_sightings(db, req, sightings)
+        except Exception:
+            logger.warning("Sourcing lead write-through failed for requirement {}", req.id, exc_info=True)
 
     # Tag propagation: propagate material card tags to vendor entities
     try:
@@ -2278,10 +2412,12 @@ def _save_sightings(
     except Exception:
         logger.warning("Tag propagation failed for sightings", exc_info=True)
 
-    # Rebuild vendor-level sighting summaries for aggregated display
-    from .services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
+    # Rebuild vendor-level sighting summaries for aggregated display.
+    # Requirement-scoped only — VendorSightingSummary.requirement_id is NOT NULL.
+    if req is not None:
+        from .services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
 
-    rebuild_vendor_summaries_from_sightings(db, req.id, sightings)
+        rebuild_vendor_summaries_from_sightings(db, requirement_id, sightings)
 
     return sightings  # type: ignore[return-value]  # mypy misinfers element type via ORM columns
 
@@ -3039,8 +3175,14 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
     hanging indefinitely (the same user-visible symptom as the original
     request-session bug).
 
+    A live (non-cache-hit) run also persists its on-target hits as
+    requirement-less Sightings via ``_persist_interactive_sightings``, fired
+    with ``asyncio.to_thread`` AFTER the terminal "done" event so persistence
+    never delays SSE output. A cache-hit run does NOT re-persist.
+
     Called by: routers/htmx_views.py::search_run (POST /v2/partials/search/run)
-    Depends on: _build_connectors, _incremental_dedup, services/sse_broker.broker
+    Depends on: _build_connectors, _incremental_dedup, services/sse_broker.broker,
+                _persist_interactive_sightings
     """
     # Allow test mocks to override the broker via module-level patching
     import app.search_service as _self_mod
@@ -3056,6 +3198,8 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
     off_target_total = 0  # hits excluded by the relevance guard (different MPN)
     sources_completed = 0
     t_start = time.time()
+    # Set only on a live (non-cache-hit) run — (hits_to_persist, succeeded_source_names).
+    persist_payload: tuple[list[dict], set[str]] | None = None
 
     db = None
     try:
@@ -3356,6 +3500,13 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                 shared_stats = list(_aggregate_source_stats(stats_updates).values())
                 await asyncio.to_thread(_set_search_cache, shared_cache_key, shared_results, shared_stats)
 
+                # Persist after the stream finishes: a live run's deduped on-target
+                # hits become requirement-less Sightings (fired post-"done" below).
+                # A cache-hit run (the `if` branch above) never reaches here, so it
+                # never re-persists the same results.
+                succeeded_source_names = {s[0] for s in stats_updates if s[0] and not s[3]}
+                persist_payload = (shared_results, succeeded_source_names)
+
             # Cache results for filter endpoint (15-min TTL). Also write a per-MPN
             # pointer key (search:{key}:latest → this search_id, same TTL) so the Part
             # Dossier market section can find the freshest run for an MPN without knowing
@@ -3390,6 +3541,28 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                     default=str,
                 ),
             )
+
+            # Persist AFTER the terminal "done" event so this never delays SSE
+            # output. Best-effort: a persistence failure must not affect a
+            # search the buyer already saw complete. Never runs on a cache hit.
+            if persist_payload is not None:
+                hits_to_persist, succeeded_source_names = persist_payload
+                if hits_to_persist:
+                    try:
+                        await asyncio.to_thread(
+                            _persist_interactive_sightings,
+                            mpn,
+                            hits_to_persist,
+                            succeeded_source_names,
+                            datetime.now(UTC),
+                            engine,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Interactive sighting persistence failed: search_id={} mpn={}",
+                            search_id,
+                            mpn,
+                        )
         finally:
             db.close()
     except Exception as e:

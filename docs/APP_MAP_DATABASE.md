@@ -109,7 +109,7 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
-| requirement_id | FK -> requirements (CASCADE) | |
+| requirement_id | FK -> requirements (CASCADE), **nullable** | Migration 196: NULL = interactive/streamed search discovery (no requisition context). Requirement-less rows are deduped by (vendor_name_normalized, normalized_mpn) on re-persist; requirement-scoped steps (lead sync, vendor-summary rebuild, unavailability suppression) are skipped for them |
 | material_card_id | FK -> material_cards | |
 | vendor_name | String 255 | |
 | vendor_name_normalized | String 255, indexed | |
