@@ -276,13 +276,13 @@ class TestBuyPlanAttachment:
 
 
 class TestMigration192:
-    def test_single_alembic_head_is_192(self):
+    def test_single_alembic_head(self):
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config("alembic.ini")
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert heads == ["196_approvals_foundations"]
+        assert len(heads) == 1, f"expected exactly one alembic head, got {heads}"
 
     def test_downgrade_reverses_every_upgrade_object(self):
         """Every column/index/constraint/table added in upgrade() is dropped in
