@@ -302,9 +302,10 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     otherwise — mirrors ``excess_service.close_list``: re-publishing an already-posted or
     resolved list would reopen a decided posting and re-mirror sold-through supply). Sets
     ``status=open``, stamps both ``open_at`` (the posting-window start, Chunk E) and
-    ``updated_at``, clears any stale ``close_at`` (an open posting must not advertise a
-    leftover close time), then runs ``sync_list_mirror`` so the posted lines surface to the
-    matcher. Commits. Returns the refreshed list.
+    ``updated_at``, PRESERVES a future ``close_at`` (the D1 owner-set posting deadline) and
+    clears only a stale/past one (an open posting must not advertise a lapsed close time),
+    then runs ``sync_list_mirror`` so the posted lines surface to the matcher. Commits.
+    Returns the refreshed list.
     """
     from .excess_service import get_excess_list
 
@@ -314,7 +315,15 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     now = datetime.now(UTC)
     excess_list.status = ExcessListStatus.OPEN
     excess_list.open_at = now
-    excess_list.close_at = None
+    # Preserve a future create/draft-set deadline so the nightly expiry backstop has a real
+    # window; clear only a stale (past/now) one. SQLite strips tzinfo, so stamp UTC before
+    # comparing (mirrors resell._hours_until / excess_service._validate_draft_close_at).
+    if excess_list.close_at is not None:
+        close_at = excess_list.close_at
+        if close_at.tzinfo is None:
+            close_at = close_at.replace(tzinfo=UTC)
+        if close_at <= now:
+            excess_list.close_at = None
     excess_list.updated_at = now
     db.flush()
 

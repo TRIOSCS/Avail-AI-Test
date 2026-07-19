@@ -383,13 +383,40 @@ def test_publish_rejects_non_draft(db_session: Session, status):
     assert el.status == status  # no mutation on the rejected publish
 
 
-def test_publish_clears_stale_close_at(db_session: Session):
-    """A draft that somehow carries a leftover ``close_at`` gets it cleared on publish —
-    an open posting must not advertise a stale close time."""
+def test_publish_preserves_future_close_at(db_session: Session):
+    """A draft carrying a FUTURE ``close_at`` keeps it on publish (T1/#8 fix) — the
+    posting deadline the owner set at create must survive so the nightly expiry backstop
+    has a real window to act on.
+
+    (Was: publish unconditionally nulled close_at.)
+    """
+    from datetime import timedelta
+
     company = _make_company(db_session)
     owner = _make_user(db_session)
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.close_at = datetime.now(UTC)
+    future = datetime.now(UTC) + timedelta(days=4)
+    el.close_at = future
+    db_session.commit()
+
+    publish_list(db_session, el.id, owner)
+
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.OPEN
+    stored = el.close_at if el.close_at.tzinfo else el.close_at.replace(tzinfo=UTC)
+    assert abs((stored - future).total_seconds()) < 2
+    assert el.open_at is not None
+
+
+def test_publish_nulls_stale_close_at(db_session: Session):
+    """A draft that somehow carries a STALE (past) ``close_at`` gets it cleared on
+    publish — an open posting must not advertise a lapsed close time."""
+    from datetime import timedelta
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
 
     publish_list(db_session, el.id, owner)

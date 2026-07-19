@@ -4,7 +4,8 @@
   onto EXISTING status_badge keys (open→sky, collecting→sourcing, bid_out→quoted,
   awarded→won, draft→muted) — no new colors (spec §"Design consistency").
   Receives: cards [{list, display_title, customer_name, coverage_filled,
-            coverage_total, offer_count, hours_until}], lens, stage, needs, q,
+            coverage_total, offer_count, hours_until, is_live, close_at_display}],
+            lens, stage, needs, q,
             can_see_customer (owner-only coverage/offer gate — D2), can_post, user.
   Called by: resell.resell_lists.
 #}
@@ -87,8 +88,12 @@
         </span>
         {% endif %}
         {% endif %}
-        {% if c.hours_until is not none %}
+        {# Countdown ONLY while live (open/collecting); a resolved list shows a muted
+           "closed {date}" and NEVER a red "Overdue" (finding #8). #}
+        {% if c.is_live and c.hours_until is not none %}
         <span class="ml-auto">{{ time_text(c.hours_until) }}</span>
+        {% elif not c.is_live and c.close_at_display %}
+        <span class="ml-auto text-gray-400">closed {{ c.close_at_display }}</span>
         {% endif %}
       </div>
     </a>

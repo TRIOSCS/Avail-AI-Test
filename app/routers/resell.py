@@ -98,6 +98,12 @@ def _file_extension(filename: str) -> str:
     return "." + filename.rsplit(".", 1)[-1].lower()
 
 
+# List statuses whose posting window is still LIVE (counting down). Only these render the
+# ``closes {countdown}`` chip; a resolved list (bid_out/awarded/closed/expired) must never
+# show the red "Overdue" the shared time_text macro emits for a past deadline (finding #8).
+_LIVE_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
+
+
 def _hours_until(close_at: datetime | None) -> float | None:
     """Hours until *close_at* (negative = overdue), or None when no close date.
 
@@ -109,6 +115,48 @@ def _hours_until(close_at: datetime | None) -> float | None:
     if close_at.tzinfo is None:
         close_at = close_at.replace(tzinfo=UTC)
     return (close_at - datetime.now(UTC)).total_seconds() / 3600.0
+
+
+def _is_live(el: ExcessList) -> bool:
+    """True while the list's posting window is live (open/collecting only).
+
+    Gates the countdown chip at the resell-template level (the shared ``time_text`` macro is
+    NEVER edited — it's used by requisitions too). A resolved list is not live, so its chip
+    renders a muted ``closed {date}`` instead of a red "Overdue".
+    """
+    return el.status in {s.value for s in _LIVE_STATUSES}
+
+
+def _close_at_display(close_at: datetime | None) -> str | None:
+    """Coarse ``Mon DD`` label for a resolved list's muted "closed on" chip (or None).
+
+    Tolerates naive datetimes by stamping UTC (SQLite strips tzinfo), mirroring
+    ``_hours_until``. Not an urgency signal — just when the window closed.
+    """
+    if close_at is None:
+        return None
+    if close_at.tzinfo is None:
+        close_at = close_at.replace(tzinfo=UTC)
+    return close_at.strftime("%b %d")
+
+
+def _parse_close_at(raw: str) -> datetime | None:
+    """Parse the D1 ``datetime-local`` form value into a tz-aware UTC instant (or None).
+
+    An empty field means "no deadline". A ``datetime-local`` input carries a naive
+    wall-clock string (``2026-07-20T15:30``); we stamp UTC so the service's future-check has
+    a tz-aware value. A malformed string is a 400 (the service enforces future+non-past).
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid offer-close date/time") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def _offer_coverage(items: list[ExcessLineItem]) -> tuple[int, int]:
@@ -191,6 +239,10 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
                 "coverage_total": total if can_see_customer else None,
                 "offer_count": offer_counts.get(el.id, 0) if can_see_customer else None,
                 "hours_until": _hours_until(getattr(el, "close_at", None)),
+                # Chip gate (finding #8): countdown only while live; a resolved list shows a
+                # muted "closed {date}" (never a red "Overdue").
+                "is_live": _is_live(el),
+                "close_at_display": _close_at_display(getattr(el, "close_at", None)),
             }
         )
     return cards
@@ -307,6 +359,10 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
         "can_offer": excess_service.can_offer(user) and el.owner_id != user.id,
         "shape": "single" if len(items) == 1 else "table",
         "hours_until": _hours_until(getattr(el, "close_at", None)),
+        # Chip gate (finding #8): countdown only while live; a resolved list shows a muted
+        # "closed {date}" (never a red "Overdue").
+        "is_live": _is_live(el),
+        "close_at_display": _close_at_display(getattr(el, "close_at", None)),
         "is_posted": el.status in {s.value for s in _POSTED_STATUSES},
     }
 
@@ -990,10 +1046,15 @@ async def resell_create_list(
     title: str = Form(...),
     company_id: int = Form(...),
     notes: str = Form(""),
+    close_at: str = Form(""),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Create a new excess list (owner = current user); re-render the My-Lists list."""
+    """Create a new excess list (owner = current user); re-render the My-Lists list.
+
+    ``close_at`` is the optional D1 "Offers close by" ``datetime-local`` value (a naive
+    wall-clock string) — parsed to a tz-aware UTC instant; the service rejects a past one.
+    """
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     excess_service.create_excess_list(
@@ -1002,6 +1063,7 @@ async def resell_create_list(
         company_id=company_id,
         owner_id=user.id,
         notes=notes or None,
+        close_at=_parse_close_at(close_at),
     )
     return await resell_lists(request, lens="mine", stage="", q="", user=user, db=db)
 

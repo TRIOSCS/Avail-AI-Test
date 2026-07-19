@@ -188,6 +188,30 @@ def _parse_import_row(raw_row: dict) -> tuple[dict | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
+# Identity sentinel for update_excess_list: distinguishes "caller did not pass close_at"
+# (leave the stored deadline untouched — the draft-edit form carries no deadline input) from
+# an explicit ``None`` (clear the deadline). A plain ``None`` default cannot express both.
+# Compared with ``is`` (identity), never equality, so only this exact object counts as unset.
+_UNSET_CLOSE_AT: datetime = datetime.min.replace(tzinfo=UTC)
+
+
+def _validate_draft_close_at(close_at: datetime | None) -> datetime | None:
+    """Validate an owner-set posting-window deadline (the D1 "Offers close by" input).
+
+    A deadline must be a FUTURE, timezone-aware instant: a naive datetime is an ambiguous
+    wall-clock (rejected), and a past/now instant has nothing to count down to (rejected).
+    ``None`` is allowed and means "no deadline". Returns the value unchanged on success;
+    raises ``HTTPException(400)`` otherwise. Mirrors the tz-tolerance the chip helpers use.
+    """
+    if close_at is None:
+        return None
+    if close_at.tzinfo is None:
+        raise HTTPException(400, "Offer-close deadline must include a timezone")
+    if close_at <= datetime.now(UTC):
+        raise HTTPException(400, "Offer-close deadline must be in the future")
+    return close_at
+
+
 def create_excess_list(
     db: Session,
     *,
@@ -197,14 +221,19 @@ def create_excess_list(
     customer_site_id: int | None = None,
     notes: str | None = None,
     source_filename: str | None = None,
+    close_at: datetime | None = None,
 ) -> ExcessList:
     """Create a new excess inventory list.
 
-    Validates that company_id exists; raises 404 if not.
+    Validates that company_id exists (404 if not) and that an optional posting-window
+    ``close_at`` deadline is future + tz-aware (400 otherwise — see
+    ``_validate_draft_close_at``). The deadline is stored on the draft and PRESERVED by
+    ``publish_list`` so the nightly expiry backstop has a real window to act on.
     """
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, f"Company {company_id} not found")
+    close_at = _validate_draft_close_at(close_at)
 
     excess_list = ExcessList(
         title=title,
@@ -213,6 +242,7 @@ def create_excess_list(
         customer_site_id=customer_site_id,
         notes=notes,
         source_filename=source_filename,
+        close_at=close_at,
     )
     db.add(excess_list)
     _safe_commit(db, entity="excess list")
@@ -1114,11 +1144,15 @@ def update_excess_list(
     notes: str | None = None,
     company_id: int | None = None,
     customer_site_id: int | None = None,
+    close_at: datetime | None = _UNSET_CLOSE_AT,
 ) -> ExcessList:
     """Edit a draft list's header (owner-only, draft-only); returns the refreshed list.
 
     Updates ``title`` / ``notes`` / ``customer_site_id`` and, when ``company_id`` is given
-    and differs, re-points the seller company (404 if it does not exist). Commits.
+    and differs, re-points the seller company (404 if it does not exist). ``close_at`` is
+    draft-scope with the same future+tz-aware 400 validation as create; passing ``None``
+    CLEARS the deadline. It defaults to a sentinel so a header edit that carries no deadline
+    input (the current draft-edit form) leaves any stored deadline untouched. Commits.
     """
     el = _require_owned_draft(db, list_id, owner)
     if company_id is not None and company_id != el.company_id:
@@ -1129,6 +1163,8 @@ def update_excess_list(
     el.title = title
     el.notes = notes
     el.customer_site_id = customer_site_id
+    if close_at is not _UNSET_CLOSE_AT:
+        el.close_at = _validate_draft_close_at(close_at)
     _safe_commit(db, entity="excess list update")
     db.refresh(el)
     logger.info("Updated draft ExcessList id={} by owner={}", list_id, owner.id)
