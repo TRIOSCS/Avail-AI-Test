@@ -4,7 +4,7 @@ Split from the former monolithic `buyplan_workflow.py` (P4.3) along the "reporti
 seam: buyer-assignment favoritism analytics and the post-completion case report.
 
 Called by: services/buyplan_workflow/buyplan_approval.py (generate_case_report on
-    completion), services/buyplan_service.py (re-export barrel), tests
+    completion), tests
 Depends on: models (BuyPlan, BuyPlanLine, Offer, Quote, User)
 """
 

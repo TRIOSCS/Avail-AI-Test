@@ -111,9 +111,9 @@ jobs:
 
             if [ -n "$HEALTHY" ]; then
               echo "=== Refresh host systemd workers (no-op if not on this host) ==="
-              cp deploy/avail-ics-worker.service deploy/avail-nc-worker.service /etc/systemd/system/ 2>/dev/null || true
+              cp deploy/avail-nc-worker.service deploy/avail-ics-worker.service deploy/avail-tbf-worker.service deploy/avail-xvfb.service /etc/systemd/system/ 2>/dev/null || true
               systemctl daemon-reload 2>/dev/null || true
-              systemctl restart avail-ics-worker avail-nc-worker 2>/dev/null || true
+              systemctl restart avail-xvfb avail-nc-worker avail-ics-worker avail-tbf-worker 2>/dev/null || true
               find /root/backups -name "avail_*.sql" -mtime +7 -delete 2>/dev/null || true
               find /root/backups -maxdepth 1 -name "code_*" -mtime +7 -exec rm -rf {} + 2>/dev/null || true
               find /root/backups -name "prev_commit_*.txt" -mtime +7 -delete 2>/dev/null || true

@@ -1,6 +1,6 @@
 """tests/test_tbf_worker_coverage.py — Coverage tests for tbf_worker modules.
 
-Covers scheduler, human_behavior, monitoring, search_engine, session_manager, worker
+Covers scheduler, search_engine, session_manager, worker
 without touching any real browser/network/DB calls.
 
 Called by: pytest
@@ -149,121 +149,6 @@ class TestSearchScheduler:
             ):
                 mock_dt.now.return_value = fake_dt
                 assert s.is_business_hours() is True
-
-
-# ─── HumanBehavior ──────────────────────────────────────────────────────────
-
-
-class TestHumanBehavior:
-    @pytest.mark.asyncio
-    async def test_random_delay(self):
-        from app.services.tbf_worker.human_behavior import HumanBehavior
-
-        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            await HumanBehavior.random_delay(0.1, 0.3)
-        mock_sleep.assert_awaited_once()
-        # delay should be between min and max
-        call_arg = mock_sleep.call_args[0][0]
-        assert 0.1 <= call_arg <= 0.3
-
-    @pytest.mark.asyncio
-    async def test_human_type_types_each_char(self):
-        from app.services.tbf_worker.human_behavior import HumanBehavior
-
-        page = MagicMock()
-        page.keyboard = MagicMock()
-        page.keyboard.type = AsyncMock()
-        locator = MagicMock()
-        locator.click = AsyncMock()
-
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            await HumanBehavior.human_type(page, locator, "ABC")
-
-        assert page.keyboard.type.call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_human_click_with_bounding_box(self):
-        from app.services.tbf_worker.human_behavior import HumanBehavior
-
-        page = MagicMock()
-        page.mouse = MagicMock()
-        page.mouse.click = AsyncMock()
-        locator = AsyncMock()
-        locator.bounding_box = AsyncMock(return_value={"x": 10, "y": 20, "width": 100, "height": 50})
-
-        await HumanBehavior.human_click(page, locator)
-        page.mouse.click.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_human_click_without_bounding_box(self):
-        from app.services.tbf_worker.human_behavior import HumanBehavior
-
-        page = MagicMock()
-        locator = AsyncMock()
-        locator.bounding_box = AsyncMock(return_value=None)
-        locator.click = AsyncMock()
-
-        await HumanBehavior.human_click(page, locator)
-        locator.click.assert_awaited_once()
-
-
-# ─── Monitoring ─────────────────────────────────────────────────────────────
-
-
-class TestMonitoring:
-    def test_monitoring_exports(self):
-        from app.services.tbf_worker.monitoring import (
-            capture_sentry_error,
-            capture_sentry_message,
-            check_html_structure_hash,
-            log_daily_report,
-        )
-
-        assert callable(capture_sentry_error)
-        assert callable(capture_sentry_message)
-        assert callable(check_html_structure_hash)
-        assert callable(log_daily_report)
-
-    def test_log_daily_report(self):
-        from app.services.tbf_worker.monitoring import log_daily_report
-
-        # Call with the correct signature for the base function
-        log_daily_report(
-            searches_completed=5,
-            sightings_created=10,
-            parts_gated_out=0,
-            parts_deduped=0,
-            failed_searches=0,
-            queue_remaining=0,
-            circuit_breaker_status="closed",
-        )
-
-    def test_check_html_structure_hash_empty(self):
-        from app.services.tbf_worker.monitoring import check_html_structure_hash
-
-        # Returns the 16-char structure-hash string (contract is `-> str`).
-        result = check_html_structure_hash("<html><body></body></html>", "TEST_MPN")
-        assert isinstance(result, str)
-        assert len(result) == 16
-
-    def test_capture_sentry_error_no_sentry(self):
-        from app.services.tbf_worker.monitoring import capture_sentry_error
-
-        # Should not raise even when sentry SDK is not available
-        with patch("app.services.search_worker_base.monitoring.logger"):
-            try:
-                capture_sentry_error("test error")
-            except Exception:
-                pass  # Sentry might not be configured — we just need the line covered
-
-    def test_capture_sentry_message_no_sentry(self):
-        from app.services.tbf_worker.monitoring import capture_sentry_message
-
-        with patch("app.services.search_worker_base.monitoring.logger"):
-            try:
-                capture_sentry_message("test message")
-            except Exception:
-                pass
 
 
 # ─── SearchEngine ────────────────────────────────────────────────────────────

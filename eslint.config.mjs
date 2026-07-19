@@ -67,18 +67,6 @@ export default [
     },
   },
   {
-    // Service worker has its own globals
-    files: ['app/static/**/sw.js', 'app/static/public/sw.js'],
-    languageOptions: {
-      globals: {
-        self: 'readonly',
-        caches: 'readonly',
-        clients: 'readonly',
-        skipWaiting: 'readonly',
-      },
-    },
-  },
-  {
     // Ignore build output and vendor files
     ignores: [
       'app/static/dist/**',

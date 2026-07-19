@@ -7,7 +7,7 @@ the role×status edit gate, and the salesperson/manager line add/edit/remove API
 (epic I) — plus its bulk "save all" counterpart (``bulk_edit_buy_plan_lines``) — and
 the Sales Order number editor (epic J).
 
-Called by: routers/htmx/buy_plans.py, services/buyplan_service.py, services/buyplan_hub.py
+Called by: routers/htmx/buy_plans.py, services/buyplan_hub.py
 Depends on: buyplan_scoring (assign_buyer, score_offer), buyplan_approval
     (_recalculate_financials, _cancel_open_prepayment_requests_for_plan, _can_halt,
     check_completion), po_cancellation_service, constants.OfferStatus

@@ -2,7 +2,7 @@
 
 Covers every module: worker, search_engine, session_manager, result_parser,
 queue_manager, sighting_writer, ai_gate, circuit_breaker, scheduler,
-human_behavior, config, monitoring, mpn_normalizer, __main__.
+human_behavior, config, mpn_normalizer, __main__.
 
 Called by: pytest
 Depends on: conftest.py, ics_worker modules
@@ -19,14 +19,6 @@ from app.models import IcsSearchQueue, IcsWorkerStatus, Requirement, Sighting
 from app.services.ics_worker.circuit_breaker import CircuitBreaker
 from app.services.ics_worker.config import IcsConfig
 from app.services.ics_worker.human_behavior import HumanBehavior
-from app.services.ics_worker.monitoring import (
-    _get_hash_set,
-    _known_html_hashes,
-    capture_sentry_error,
-    capture_sentry_message,
-    check_html_structure_hash,
-    log_daily_report,
-)
 from app.services.ics_worker.mpn_normalizer import strip_packaging_suffixes as normalize_mpn
 from app.services.ics_worker.queue_manager import (
     enqueue_for_ics_search,
@@ -651,70 +643,6 @@ class TestHumanBehavior:
 
         await HumanBehavior.human_click(page, locator)
         locator.click.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# MONITORING
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestMonitoring:
-    def setup_method(self):
-        _known_html_hashes.clear()
-
-    def test_log_daily_report(self):
-        log_daily_report(
-            searches_completed=10,
-            sightings_created=50,
-            parts_gated_out=5,
-            parts_deduped=3,
-            failed_searches=1,
-            queue_remaining=20,
-            circuit_breaker_status="closed",
-        )
-
-    def test_capture_sentry_error_with_sdk(self):
-        mock_sdk = MagicMock()
-        with patch.dict("sys.modules", {"sentry_sdk": mock_sdk}):
-            capture_sentry_error(ValueError("test"), {"mpn": "STM32"})
-            mock_sdk.capture_exception.assert_called_once()
-
-    def test_capture_sentry_error_no_sdk(self):
-        with patch.dict("sys.modules", {"sentry_sdk": None}):
-            capture_sentry_error(ValueError("test"))
-
-    def test_capture_sentry_message_with_sdk(self):
-        mock_sdk = MagicMock()
-        with patch.dict("sys.modules", {"sentry_sdk": mock_sdk}):
-            capture_sentry_message("test message", level="info", context={"key": "val"})
-            mock_sdk.capture_message.assert_called_once()
-
-    def test_capture_sentry_message_no_sdk(self):
-        with patch.dict("sys.modules", {"sentry_sdk": None}):
-            capture_sentry_message("test message")
-
-    def test_check_html_structure_hash_empty(self):
-        assert check_html_structure_hash("", "TEST") == ""
-
-    def test_check_html_structure_hash_first_time(self):
-        html = "<table><tr><td>data</td></tr></table>"
-        h = check_html_structure_hash(html, "STM32")
-        assert len(h) == 16
-        assert h in _get_hash_set("ICS")
-
-    def test_check_html_structure_hash_known(self):
-        html = "<table><tr><td>data</td></tr></table>"
-        h1 = check_html_structure_hash(html, "STM32")
-        h2 = check_html_structure_hash(html, "LM317")
-        assert h1 == h2
-
-    def test_check_html_structure_hash_new_structure_warns(self):
-        html1 = "<table><tr><td>data</td></tr></table>"
-        check_html_structure_hash(html1, "STM32")
-
-        html2 = "<div class='new'><span>different</span></div>"
-        h2 = check_html_structure_hash(html2, "LM317")
-        assert h2 in _get_hash_set("ICS")
 
 
 # ═══════════════════════════════════════════════════════════════════════

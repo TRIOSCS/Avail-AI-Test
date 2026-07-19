@@ -97,7 +97,7 @@ from .intelligence import (
 )
 
 # Knowledge Ledger
-from .knowledge import KnowledgeConfig, KnowledgeEntry  # noqa: F401
+from .knowledge import KnowledgeEntry  # noqa: F401
 
 # NetComponents Search
 from .nc_search_log import NcSearchLog  # noqa: F401
@@ -170,8 +170,8 @@ from .tbf_search_log import TbfSearchLog  # noqa: F401
 from .tbf_search_queue import TbfSearchQueue  # noqa: F401
 from .tbf_worker_status import TbfWorkerStatus  # noqa: F401
 
-# Trust telemetry (durable reconcile tallies + facet-audit verdicts)
-from .telemetry import FacetAudit, ReconcileRun  # noqa: F401
+# Trust telemetry (durable reconcile tallies)
+from .telemetry import ReconcileRun  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # Unified Score (cross-role leaderboard)
