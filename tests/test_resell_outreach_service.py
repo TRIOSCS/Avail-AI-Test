@@ -507,6 +507,34 @@ class TestRecordResponse:
         db_session.refresh(excess_list)
         assert excess_list.status == ExcessListStatus.COLLECTING
 
+    @pytest.mark.parametrize("bad_qty", [0, -5])
+    def test_reply_with_non_positive_quantity_rejected(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+        bad_qty: int,
+    ):
+        """Non-positive inbound offer-line quantity is rejected before any row is built.
+
+        A clear ValueError is raised up front: a 0 is not silently promoted to 1 by the
+        old ``or 1`` coercion, and a negative never reaches the ExcessOfferLine
+        ``@validates`` 500 mid-write (finding: silent-failure a, service root-cause).
+        """
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+        with pytest.raises(ValueError):
+            svc.record_response(
+                db_session,
+                conversation_id="conv-1",
+                has_offer=True,
+                offer_lines=[{"mpn_raw": "LM358N", "quantity": bad_qty, "unit_price": "1.25"}],
+            )
+        # No partial ExcessOffer was left behind by the rejected link.
+        db_session.rollback()
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).count() == 0
+
     def test_reply_declined_advances_to_declined(
         self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, trader: User
     ):

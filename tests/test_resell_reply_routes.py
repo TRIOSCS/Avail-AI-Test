@@ -222,3 +222,35 @@ class TestConvertToOfferRoute:
             data={"mpn_raw": "LM358N", "quantity": "10"},
         )
         assert resp.status_code == 403
+
+    def test_zero_quantity_rejected_not_silently_promoted(
+        self, client, db_session: Session, test_user: User, buyer_card: VendorCard
+    ):
+        """Quantity=0 → 400 (mirrors log-bid).
+
+        The old ``qty is None`` guard let 0 through,
+        then ``row.get('quantity') or 1`` silently promoted it to 1 — no offer may be
+        created (finding: silent-failure a).
+        """
+        el = _list(db_session, test_user)
+        row = _outreach(db_session, el, buyer_card, test_user)
+        resp = client.post(
+            f"/api/resell/{el.id}/outreach/{row.id}/offer",
+            data={"mpn_raw": "LM358N", "quantity": "0"},
+        )
+        assert resp.status_code == 400
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == el.id).count() == 0
+
+    def test_negative_quantity_rejected_400_not_500(
+        self, client, db_session: Session, test_user: User, buyer_card: VendorCard
+    ):
+        """quantity=-5 → 400 at the route — never a partial write + ExcessOfferLine
+        @validates('quantity') ValueError surfacing as an unhandled 500."""
+        el = _list(db_session, test_user)
+        row = _outreach(db_session, el, buyer_card, test_user)
+        resp = client.post(
+            f"/api/resell/{el.id}/outreach/{row.id}/offer",
+            data={"mpn_raw": "LM358N", "quantity": "-5"},
+        )
+        assert resp.status_code == 400
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == el.id).count() == 0

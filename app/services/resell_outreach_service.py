@@ -512,8 +512,7 @@ async def _finalize_outreach_send(
 ) -> list[ExcessOutreach]:
     """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
     status. Shared by :func:`submit_outreach_email` (inline) and
-    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup
-    live.
+    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup live.
 
     Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
     the live RFQ tracking path is untouched). Graph ids do NOT come back in
@@ -839,8 +838,8 @@ async def retry_outreach_send(
     token: str,
     session_factory=None,
 ) -> None:
-    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, resend
-    only if the original never actually went out (the double-send guard).
+    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, resend only
+    if the original never actually went out (the double-send guard).
 
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
@@ -1157,8 +1156,7 @@ def _match_outreach(
     conversation_id: str | None,
     message_id: str | None,
 ) -> list[ExcessOutreach]:
-    """Match a reply to outreach rows — conversation id (whole thread) then message
-    id.
+    """Match a reply to outreach rows — conversation id (whole thread) then message id.
 
     Conversation id is the preferred key (matches all rows on the thread, like RFQ
     Tier-1 fan-out); message id is the exact-touch fallback. Vendor-scoped by
@@ -1191,6 +1189,16 @@ def _link_inbound_offer(
     by them). Flushes; the caller commits.
     """
     excess_list = db.get(ExcessList, outreach.excess_list_id)
+
+    # Reject a non-positive / non-integer offer-line quantity BEFORE any row is created, so a
+    # bad line neither silently promotes 0->1 (the old ``or 1`` coercion) nor reaches the
+    # ExcessOfferLine @validates('quantity') as a cryptic 500 mid-write (after the parent
+    # ExcessOffer was already flushed). Both router entry points (convert-to-offer, log-bid)
+    # already return 400 for this; this is the shared service-level root-cause guard.
+    for row in offer_lines:
+        qty = row.get("quantity")
+        if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+            raise ValueError(f"Inbound offer line quantity must be a positive integer, got {qty!r}")
 
     # An inbound reply landing after the posting window closed is flagged ``late`` (never
     # dropped) — same rule as the User-driven submit_offer path.
@@ -1237,7 +1245,7 @@ def _link_inbound_offer(
                 offer_id=offer.id,
                 excess_line_item_id=matched_id,
                 mpn_raw=mpn_raw,
-                quantity=row.get("quantity") or 1,
+                quantity=row["quantity"],  # validated positive int (guarded above)
                 unit_price=_as_decimal(row.get("unit_price")),
                 lead_time_days=row.get("lead_time_days"),
                 terms_text=row.get("terms_text"),

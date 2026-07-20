@@ -2177,8 +2177,12 @@ async def resell_outreach_convert_offer(
     el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
 
     qty = _to_int(quantity)
-    if not mpn_raw.strip() or qty is None:
-        raise HTTPException(400, "A converted offer needs a part number and quantity")
+    # L2: reject a non-positive quantity here (400) — mirrors resell_submit_offer / log-bid.
+    # A negative qty is not None, so without the ``qty <= 0`` clause it flows into
+    # _link_inbound_offer and trips the ExcessOfferLine @validates('quantity') ValueError as
+    # an unhandled 500, while a 0 was silently promoted to 1 by the old ``or 1`` coercion.
+    if not mpn_raw.strip() or qty is None or qty <= 0:
+        raise HTTPException(400, "A converted offer needs a part number and a positive quantity")
 
     resell_outreach_service.record_response(
         db,
