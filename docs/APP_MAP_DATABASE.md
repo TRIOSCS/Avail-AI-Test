@@ -122,6 +122,7 @@ Written by `services.user_admin.record_user_audit` (caller commits); surfaced by
 | evidence_tier | String 4 | T1-T7 |
 | is_authorized | Boolean | Authorized distributor? |
 | source_company_id | FK -> companies | |
+| excess_line_item_id | FK -> excess_line_items (SET NULL), nullable, indexed (`ix_sightings_excess_line_item`) | Migration 199: the specific excess line a `customer_excess` mirror row shadows. The line-identity key for the mirror upsert/retire (`excess_mirror._find_mirror`) so two duplicate-part lines on ONE list (same `material_card_id`) each keep a DISTINCT Sighting instead of collapsing (finding #18). NULL for every non-excess sighting; SET NULL on line delete (teardown removes the shadow explicitly) |
 
 > **Router note:** `sightings_list()` and `sightings_detail()` in `app/routers/sightings.py` build a `link_map` dict (MPN string → MaterialCard.id) by querying `material_cards` with `normalize_mpn_key()`. The map is passed to the template context so the `mpn_chips` macro can link MPN chips to material card detail pages.
 
@@ -878,7 +879,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `unaward_offer` (the explicit inverse — never a silent auto-swap to a new winner: 409 if
 > not won, reverts offer->`open` + lines->`available`, recomputes rollups + buyer score
 > (full-history recompute self-heals `wins` back down), re-mirrors the lines, and steps the
-> list off `awarded` -> `bid_out` (close_at set) else `collecting`; `POST /api/resell/{id}/offers/{offer_id}/unaward`).
+> list off `awarded` -> `bid_out` (posting window CLOSED — `close_at` in the past) else `collecting`
+> (a bare truthy `close_at` is NOT closed: Phase 5 preserves a FUTURE deadline through publish, so the
+> step-back is time-based via `_posting_window_closed`); `POST /api/resell/{id}/offers/{offer_id}/unaward`).
 > Award never auto-marks the losing offers `lost` (`ExcessOfferStatus.LOST` stays
 > defined-but-unassigned) — "not selected" is a pure render decision (line awarded + this
 > row's offer != won). `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
@@ -888,7 +891,8 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
 > `sync_list_mirror`/`publish_list` are the dual-write owners (`publish_list` is GUARDED
 > to `draft` — 409 otherwise, so a resolved posting can't be re-opened and re-mirrored —
-> and clears any stale `close_at` on publish) — every active posted
+> PRESERVES a future `close_at` posting deadline and clears only a stale/past one on
+> publish, Phase 5) — every active posted
 > `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
 > `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
 > NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
@@ -896,11 +900,15 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `is_scratch=True` "Customer Excess (list N)" requisition+requirement (found by the
 > deterministic name; hidden from sales views by the existing
 > `Requisition.is_scratch.is_(False)` filter). The mirror upserts by
-> `(source_company_id, material_card_id)` — NOT the connector-aware
-> delete-by-`(requirement_id, source_type)` path — so a re-publish updates the row and
-> never wipes a sibling list's `customer_excess` sightings. `retire_line` deletes the
-> mirror on award / withdraw / qty->0. Lines whose MPN won't resolve to a MaterialCard
-> are skipped (the upsert key needs the card), never raised.
+> `Sighting.excess_line_item_id` (the line's own id, migration 199) — NOT the connector-aware
+> delete-by-`(requirement_id, source_type)` path — so a re-publish updates the line's own row,
+> never wipes a sibling list's `customer_excess` sightings, and keeps two duplicate-part lines
+> on ONE list (same `material_card_id`) as DISTINCT Sightings (finding #18). `retire_line`
+> deletes only the line's own mirror on award / withdraw / qty->0; `teardown_list_mirror`
+> (Phase 5) bulk-deletes the WHOLE mirror + the virtual requisition/requirement on list/company
+> DELETION (wired into `delete_companies`, `seed_resell_demo._reset`, `delete_excess_list`), keyed
+> on the virtual `requirement_id` so it is robust to NULL card/company links. Lines whose MPN
+> won't resolve to a MaterialCard are skipped, never raised.
 >
 > Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
 > `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`

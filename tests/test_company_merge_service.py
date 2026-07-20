@@ -6,8 +6,11 @@ and deletes the removed company while preserving all data.
 
 import pytest
 
-from app.models import Company, CustomerSite
-from app.services.company_merge_service import merge_companies
+from app.models import Company, CustomerSite, User
+from app.models.sourcing import Requisition, Sighting
+from app.services.company_merge_service import delete_companies, merge_companies
+from app.services.excess_mirror import _virtual_req_name, publish_list
+from app.services.excess_service import create_excess_list, import_line_items
 
 
 def _make_pair(db_session, keep_kwargs, remove_kwargs):
@@ -166,6 +169,39 @@ def test_merge_reassign_failure_aborts_and_preserves_remove(db_session):
     db_session.rollback()
     # The removed company must still exist — merge aborted before deleting it.
     assert db_session.get(Company, remove_id) is not None
+
+
+def test_delete_companies_tears_down_excess_mirror(db_session):
+    """Deleting a company whose excess list was published/mirrored must DELETE its
+    customer_excess Sightings AND the virtual scratch Requisition/Requirement — not
+    leave them advertising live supply with a NULLed company (P2 strand fix)."""
+    owner = User(email="del-owner@trioscs.com", name="Del Owner", role="trader", azure_id="del-owner-1")
+    db_session.add(owner)
+    keep, remove = _make_pair(db_session, {"name": "Strand Corp"}, {"name": "Strand Corp Dup"})
+    db_session.commit()
+
+    el = create_excess_list(db_session, title="Excess", company_id=keep.id, owner_id=owner.id)
+    import_line_items(db_session, el.id, [{"part_number": "LM358N", "quantity": "100"}])
+    publish_list(db_session, el.id, owner)
+    virtual_name = _virtual_req_name(el)
+
+    def _mirror_rows():
+        return (
+            db_session.query(Sighting)
+            .filter(Sighting.source_type == "customer_excess", Sighting.source_company_id == keep.id)
+            .count()
+        )
+
+    assert _mirror_rows() == 1
+    assert db_session.query(Requisition).filter(Requisition.name == virtual_name).count() == 1
+
+    delete_companies(keep.id, remove.id, db_session)
+    db_session.commit()
+
+    assert db_session.get(Company, keep.id) is None
+    # The mirror rows are DELETED (not NULL-detached) and the virtual req is gone.
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+    assert db_session.query(Requisition).filter(Requisition.name == virtual_name).count() == 0
 
 
 def test_merge_renames_colliding_sites(db_session):

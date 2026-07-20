@@ -3,7 +3,8 @@
   Single-line quick-add path this slice; the paste/upload funnel reuses the same
   import_preview grid. Price is OPTIONAL (a broker may bid "take-all, price TBD").
   The service enforces can_offer + the self-offer guard.
-  Receives: list (ExcessList), display_title (anonymized label — non-owner viewer).
+  Receives: list (ExcessList), display_title (anonymized label — non-owner viewer),
+            companies (for the optional buyer-attribution select).
   Called by: resell.resell_offer_form.
 #}
 {% set el = list %}
@@ -65,6 +66,16 @@
         <input type="number" name="take_all_total_price" step="0.01" min="0" class="input" placeholder="optional — leave blank for price TBD">
       </div>
       <p class="text-secondary">A take-all offer binds every line, all-or-nothing — it pins above the lines as the headline.</p>
+    </div>
+
+    {# Optional buyer attribution (#17): naming the buyer links the offer to a VendorCard so
+       the win-hook scores them on award. Mirrors the create-modal company select. #}
+    <div>
+      <label class="form-label">Buyer (optional)</label>
+      <select name="buyer_company_id" class="input">
+        <option value="">Buyer (optional)…</option>
+        {% for c in companies %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
     </div>
 
     <div>

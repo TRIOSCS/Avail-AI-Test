@@ -44,6 +44,9 @@ class ExcessListUpdate(BaseModel):
         Literal["draft", "active", "bidding", "closed", "expired", "open", "collecting", "bid_out", "awarded"] | None
     ) = None
     notes: str | None = None
+    # Optional posting-window deadline (D1 "Offers close by"); future + tz-aware validation
+    # lives in the service (_validate_draft_close_at), not the schema.
+    close_at: datetime | None = None
 
 
 class ExcessListResponse(BaseModel):

@@ -328,6 +328,9 @@ def _reset(db: Session) -> None:
     """Delete the demo lists (cascades to lines + offers) and the demo users/company."""
     lists = db.query(ExcessList).filter(ExcessList.title.in_(_DEMO_TITLES)).all()
     for el in lists:
+        # Delete the Sighting mirror + virtual scratch req before the list, else its
+        # customer_excess sightings would strand (advertising deleted demo supply).
+        excess_mirror.teardown_list_mirror(db, el)
         db.delete(el)
     db.commit()
     for email in (_TRADER_EMAIL, _BROKER_EMAIL):

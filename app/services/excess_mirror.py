@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..constants import (
@@ -124,24 +125,20 @@ def ensure_virtual_requirement(db: Session, excess_list: ExcessList) -> Requirem
     return requirement
 
 
-def _find_mirror(
-    db: Session, source_company_id: int | None, material_card_id: int, requirement_id: int
-) -> Sighting | None:
-    """Find the existing mirrored Sighting for the upsert key.
+def _find_mirror(db: Session, excess_line_item_id: int) -> Sighting | None:
+    """Find the existing mirrored Sighting for one excess LINE.
 
-    Upsert key is ``(source_company_id, material_card_id, requirement_id)`` scoped to
-    ``source_type='customer_excess'`` — the explicit key that sidesteps the connector-
-    aware delete-by-(requirement_id, source_type) dedup trap. Including ``requirement_id``
-    (one per list's virtual requirement) ensures two lists for the same company+part
-    each keep their own distinct Sighting rather than collapsing into one row.
+    The upsert key is the line's own id (``excess_line_item_id``) scoped to
+    ``source_type='customer_excess'`` — the explicit, line-identity key that sidesteps the
+    connector-aware delete-by-(requirement_id, source_type) dedup trap AND keeps two
+    duplicate-part lines on one list (same company+material_card+virtual requirement) as
+    DISTINCT Sightings instead of collapsing them into one row (finding #18, migration 199).
     """
     return (
         db.query(Sighting)
         .filter(
             Sighting.source_type == "customer_excess",
-            Sighting.source_company_id == source_company_id,
-            Sighting.material_card_id == material_card_id,
-            Sighting.requirement_id == requirement_id,
+            Sighting.excess_line_item_id == excess_line_item_id,
         )
         .order_by(Sighting.id.asc())
         .first()
@@ -158,11 +155,11 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
     ``normalized_mpn`` (via ``normalize_mpn_key``) for matcher linkage, a synthesized
     internal ``vendor_name`` (NEVER the customer name), and qty/condition from the line.
 
-    Upserts by ``(source_company_id, material_card_id)`` — a re-sync UPDATES the existing
-    row instead of inserting a duplicate, and never deletes sibling ``customer_excess``
-    rows. Returns the Sighting, or ``None`` when the line has no MaterialCard (the upsert
-    key needs one; an unresolvable MPN is skipped, never raised). Flushes; does NOT
-    commit.
+    Upserts by ``excess_line_item_id`` (the line's own id) — a re-sync UPDATES the line's
+    own row instead of inserting a duplicate, never deletes a sibling ``customer_excess``
+    row, and keeps two duplicate-part lines on one list as distinct Sightings (#18). Returns
+    the Sighting, or ``None`` when the line has no MaterialCard (the row still needs one for
+    matcher linkage; an unresolvable MPN is skipped, never raised). Flushes; does NOT commit.
     """
     excess_list = line.excess_list or db.get(ExcessList, line.excess_list_id)
     if excess_list is None:  # pragma: no cover - defensive
@@ -197,7 +194,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         "date_code": line.date_code,
     }
 
-    existing = _find_mirror(db, excess_list.company_id, line.material_card_id, requirement.id)
+    existing = _find_mirror(db, line.id)
     if existing is None:
         sighting = sighting_from_row(requirement.id, row)
     else:
@@ -218,6 +215,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
 
     # Excess-specific columns sighting_from_row does not set.
     sighting.source_company_id = excess_list.company_id
+    sighting.excess_line_item_id = line.id
     sighting.material_card_id = line.material_card_id
     sighting.normalized_mpn = norm_key or None
 
@@ -231,21 +229,81 @@ def retire_line(db: Session, line: ExcessLineItem) -> None:
     """Retire (delete) the mirrored Sighting for *line* on award / withdraw / qty→0.
 
     Deletes the row outright (consistent with how ``_save_sightings`` removes stale
-    sightings — the matcher reads live rows, never a soft-deleted excess shadow). A
-    no-op when the line has no mirror or no MaterialCard. Flushes; does NOT commit.
+    sightings — the matcher reads live rows, never a soft-deleted excess shadow). Looked up
+    by the line's own id, so retiring ONE duplicate-part line deletes only ITS Sighting and
+    leaves the twin line's row live (#18, migration 199). A no-op when the line has no
+    mirror. Flushes; does NOT commit.
     """
-    if line.material_card_id is None:
-        return
-    excess_list = line.excess_list or db.get(ExcessList, line.excess_list_id)
-    if excess_list is None:
-        return
-    company_id = excess_list.company_id
-    requirement = ensure_virtual_requirement(db, excess_list)
-    existing = _find_mirror(db, company_id, line.material_card_id, requirement.id)
+    existing = _find_mirror(db, line.id)
     if existing is not None:
         db.delete(existing)
         db.flush()
         logger.info("excess-mirror: retired sighting {} for line {}", existing.id, line.id)
+
+
+def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
+    """Delete a list's ENTIRE Sighting mirror + its virtual scratch requisition — for
+    list/company DELETION only.
+
+    Looks up the per-list virtual Requisition by its deterministic name
+    (``_virtual_req_name``), then, leaf→root (SQLite FKs are enforced in tests):
+      1. bulk-deletes every ``customer_excess`` Sighting hanging on that requisition's
+         Requirement(s) — keyed on ``requirement_id`` (always set), so it is robust to
+         ``material_card_id`` / ``source_company_id`` being NULL, unlike ``retire_line``;
+      2. deletes the virtual Requirement(s) and the Requisition, so no orphan scratch req
+         survives to advertise deleted supply.
+
+    Scoped STRICTLY to *excess_list*'s own virtual req — a sibling list for the same company
+    owns a DISTINCT virtual req and is untouched (never wipe by company). Must run BEFORE the
+    ``ExcessList`` / company rows are deleted (it needs ``excess_list.id``). A no-op (all
+    zeros) when the list was never mirrored (draft). Flushes; the CALLER commits. Do NOT call
+    on close/expire — a closed list can be reopened via unaward and re-mirrors; teardown is
+    strictly for DELETION. Returns ``{"sightings": int, "requirements": int, "requisitions": int}``.
+    """
+    name = _virtual_req_name(excess_list)
+    req = (
+        db.execute(
+            select(Requisition)
+            .where(Requisition.is_scratch.is_(True), Requisition.name == name)
+            .order_by(Requisition.id.asc())
+        )
+        .scalars()
+        .first()
+    )
+    if req is None:
+        return {"sightings": 0, "requirements": 0, "requisitions": 0}
+
+    requirement_ids = list(
+        db.execute(select(Requirement.id).where(Requirement.requisition_id == req.id)).scalars().all()
+    )
+    sightings_deleted = 0
+    if requirement_ids:
+        sightings_deleted = (
+            db.execute(
+                delete(Sighting)
+                .where(
+                    Sighting.source_type == "customer_excess",
+                    Sighting.requirement_id.in_(requirement_ids),
+                )
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            or 0
+        )
+    requirements_deleted = (
+        db.execute(
+            delete(Requirement).where(Requirement.requisition_id == req.id).execution_options(synchronize_session=False)
+        ).rowcount
+        or 0
+    )
+    db.execute(delete(Requisition).where(Requisition.id == req.id).execution_options(synchronize_session=False))
+    db.flush()
+    logger.info(
+        "excess-mirror: tore down list {} mirror ({} sightings, {} requirements, 1 requisition)",
+        excess_list.id,
+        sightings_deleted,
+        requirements_deleted,
+    )
+    return {"sightings": sightings_deleted, "requirements": requirements_deleted, "requisitions": 1}
 
 
 def _line_is_active(line: ExcessLineItem) -> bool:
@@ -302,9 +360,10 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     otherwise — mirrors ``excess_service.close_list``: re-publishing an already-posted or
     resolved list would reopen a decided posting and re-mirror sold-through supply). Sets
     ``status=open``, stamps both ``open_at`` (the posting-window start, Chunk E) and
-    ``updated_at``, clears any stale ``close_at`` (an open posting must not advertise a
-    leftover close time), then runs ``sync_list_mirror`` so the posted lines surface to the
-    matcher. Commits. Returns the refreshed list.
+    ``updated_at``, PRESERVES a future ``close_at`` (the D1 owner-set posting deadline) and
+    clears only a stale/past one (an open posting must not advertise a lapsed close time),
+    then runs ``sync_list_mirror`` so the posted lines surface to the matcher. Commits.
+    Returns the refreshed list.
     """
     from .excess_service import get_excess_list
 
@@ -314,7 +373,15 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     now = datetime.now(UTC)
     excess_list.status = ExcessListStatus.OPEN
     excess_list.open_at = now
-    excess_list.close_at = None
+    # Preserve a future create/draft-set deadline so the nightly expiry backstop has a real
+    # window; clear only a stale (past/now) one. SQLite strips tzinfo, so stamp UTC before
+    # comparing (mirrors resell._hours_until / excess_service._validate_draft_close_at).
+    if excess_list.close_at is not None:
+        close_at = excess_list.close_at
+        if close_at.tzinfo is None:
+            close_at = close_at.replace(tzinfo=UTC)
+        if close_at <= now:
+            excess_list.close_at = None
     excess_list.updated_at = now
     db.flush()
 

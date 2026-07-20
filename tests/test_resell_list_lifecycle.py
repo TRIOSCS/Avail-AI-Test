@@ -257,21 +257,30 @@ def test_workspace_bid_out_subtitle_is_accurate(client, db_session, owner):
 # ── expire_overdue_lists (the nightly service) ───────────────────────
 
 
-def _overdue_open_list(db: Session, owner: User, company: Company) -> ExcessList:
-    """A published (open) list whose close_at deadline is already in the past."""
-    el = _make_list(db, owner, company)
-    publish_list(db, el.id, owner)  # → open, mirrored
-    el.close_at = datetime.now(UTC) - timedelta(hours=1)
-    db.commit()
-    return el
+def _published_list_with_deadline(
+    db: Session, owner: User, company: Company, *, parts=("LM358N",)
+) -> tuple[ExcessList, datetime]:
+    """A published (open) list whose REAL, create-set + publish-preserved close_at is in
+    the near future — the nightly sweep is then driven with a ``now=`` past that
+    deadline, so no hand-set past close_at is needed (T1: the deadline flows create →
+    publish → expiry)."""
+    close = datetime.now(UTC) + timedelta(hours=1)
+    el = create_excess_list(db, title="Excess", company_id=company.id, owner_id=owner.id, close_at=close)
+    import_line_items(db, el.id, [{"part_number": p, "quantity": "100"} for p in parts])
+    publish_list(db, el.id, owner)  # → open, mirrored; close_at PRESERVED (the T1 fix)
+    db.refresh(el)
+    assert el.close_at is not None  # the create-set deadline survived publishing
+    return el, close
 
 
 def test_expire_overdue_flips_and_retires(db_session, owner, company):
-    """A past-close_at open list expires and its mirror is retired."""
-    el = _overdue_open_list(db_session, owner, company)
+    """A published open list whose (preserved) close_at has lapsed expires + retires its
+    mirror — driven by evaluating the nightly sweep at a ``now`` past the real
+    deadline."""
+    el, close = _published_list_with_deadline(db_session, owner, company)
     assert len(_sightings(db_session, company.id)) == 1
 
-    n = excess_service.expire_overdue_lists(db_session)
+    n = excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2))
 
     assert n == 1
     db_session.refresh(el)
@@ -310,9 +319,10 @@ def test_expire_skips_resolved_lists(db_session, owner, company):
 
 def test_expire_is_idempotent(db_session, owner, company):
     """A second run finds nothing left to expire."""
-    _overdue_open_list(db_session, owner, company)
-    assert excess_service.expire_overdue_lists(db_session) == 1
-    assert excess_service.expire_overdue_lists(db_session) == 0
+    _el, close = _published_list_with_deadline(db_session, owner, company)
+    later = close + timedelta(hours=2)
+    assert excess_service.expire_overdue_lists(db_session, now=later) == 1
+    assert excess_service.expire_overdue_lists(db_session, now=later) == 0
 
 
 # ── Nightly job + registration ───────────────────────────────────────
@@ -321,7 +331,11 @@ def test_expire_is_idempotent(db_session, owner, company):
 async def test_nightly_job_expires_overdue(db_session, owner, company):
     """The job runs expire_overdue_lists against a fresh session (SessionLocal
     patched)."""
-    el = _overdue_open_list(db_session, owner, company)
+    el, _close = _published_list_with_deadline(db_session, owner, company)
+    # The job uses the real clock (no now-override), so simulate the deadline lapsing after
+    # publish — the deadline is still a genuine create-set + publish-preserved value.
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
     from app.jobs.resell_jobs import _job_expire_resell_lists
 
     list_id = el.id

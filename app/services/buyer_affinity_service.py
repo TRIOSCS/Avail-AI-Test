@@ -380,6 +380,15 @@ def recompute_buyer_score(db: Session, vendor_card_id: int) -> BuyerScore:
     Upserts the single BuyerScore row for the card (1:1 on vendor_card_id), never
     duplicating. Flushes; the caller commits (so the win hook and the nightly batch
     can both batch their commits). Returns the row.
+
+    Denominator note (finding #17, resolved in Phase-5 plan): the ``response_rate``
+    denominator counts every GENUINELY-sent outreach — including a manual-log touch
+    (``status=SENT`` with ``sent_at=None``, e.g. a phone / teams / marketplace contact),
+    which is a real offer we made and must not be dropped. Only ``_NOT_SENT_STATUSES``
+    (SENDING / FAILED / INTERRUPTED) are excluded — those never reached the buyer. The
+    finding's original ask to exclude ``sent_at``-NULL rows is SUPERSEDED: it would wrongly
+    drop real manual touches. (The nightly backstop ``recompute_all_buyer_scores`` reconciles
+    every buyer regardless, so a missed on-win/on-send hook cannot leave a row stale.)
     """
     offers = db.query(ExcessOffer).filter(ExcessOffer.offerer_vendor_card_id == vendor_card_id).all()
     offers_received = len(offers)

@@ -188,6 +188,30 @@ def _parse_import_row(raw_row: dict) -> tuple[dict | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
+# Identity sentinel for update_excess_list: distinguishes "caller did not pass close_at"
+# (leave the stored deadline untouched — the draft-edit form carries no deadline input) from
+# an explicit ``None`` (clear the deadline). A plain ``None`` default cannot express both.
+# Compared with ``is`` (identity), never equality, so only this exact object counts as unset.
+_UNSET_CLOSE_AT: datetime = datetime.min.replace(tzinfo=UTC)
+
+
+def _validate_draft_close_at(close_at: datetime | None) -> datetime | None:
+    """Validate an owner-set posting-window deadline (the D1 "Offers close by" input).
+
+    A deadline must be a FUTURE, timezone-aware instant: a naive datetime is an ambiguous
+    wall-clock (rejected), and a past/now instant has nothing to count down to (rejected).
+    ``None`` is allowed and means "no deadline". Returns the value unchanged on success;
+    raises ``HTTPException(400)`` otherwise. Mirrors the tz-tolerance the chip helpers use.
+    """
+    if close_at is None:
+        return None
+    if close_at.tzinfo is None:
+        raise HTTPException(400, "Offer-close deadline must include a timezone")
+    if close_at <= datetime.now(UTC):
+        raise HTTPException(400, "Offer-close deadline must be in the future")
+    return close_at
+
+
 def create_excess_list(
     db: Session,
     *,
@@ -197,14 +221,19 @@ def create_excess_list(
     customer_site_id: int | None = None,
     notes: str | None = None,
     source_filename: str | None = None,
+    close_at: datetime | None = None,
 ) -> ExcessList:
     """Create a new excess inventory list.
 
-    Validates that company_id exists; raises 404 if not.
+    Validates that company_id exists (404 if not) and that an optional posting-window
+    ``close_at`` deadline is future + tz-aware (400 otherwise — see
+    ``_validate_draft_close_at``). The deadline is stored on the draft and PRESERVED by
+    ``publish_list`` so the nightly expiry backstop has a real window to act on.
     """
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, f"Company {company_id} not found")
+    close_at = _validate_draft_close_at(close_at)
 
     excess_list = ExcessList(
         title=title,
@@ -213,6 +242,7 @@ def create_excess_list(
         customer_site_id=customer_site_id,
         notes=notes,
         source_filename=source_filename,
+        close_at=close_at,
     )
     db.add(excess_list)
     _safe_commit(db, entity="excess list")
@@ -480,6 +510,7 @@ def submit_offer(
     valid_until: datetime | None = None,
     lines: list[dict] | None = None,
     take_all_total_price: Decimal | None = None,
+    buyer_company_id: int | None = None,
 ) -> ExcessOffer:
     """Submit an inbound offer (a broker's offer to BUY) on a posted excess list.
 
@@ -491,6 +522,12 @@ def submit_offer(
     ``ambiguous``). Unmatched/ambiguous rows keep ``mpn_raw`` and are QUEUED for manual
     resolution — never dropped. Affected matched lines get their best-price rollup
     recomputed.
+
+    ``buyer_company_id`` (optional, D1/#17 UI half): when a trader attributes the offer to a
+    buyer company, it is canonicalized to a VendorCard via ``counterparty_card`` and stored
+    on ``offerer_vendor_card_id`` so the award win-hook (``recompute_buyer_score_on_win``)
+    scores the buyer. When unset, ``offerer_vendor_card_id`` stays None (no regression — the
+    offer still wins, just unattributed).
 
     Guards (raise HTTPException, never silent): the list must exist (404); *user* must
     have ``can_offer`` (403); and *user* must not own the list — self-offer blocked
@@ -508,9 +545,19 @@ def submit_offer(
 
     scope_value = ExcessOfferScope(scope).value  # raises ValueError on a bad scope
 
+    # Buyer attribution (optional): canonicalize the named buyer company to its VendorCard so
+    # the award win-hook can score it. Lazy import breaks the excess_service ↔
+    # resell_outreach_service cycle (resell_outreach_service imports excess_service at top).
+    offerer_vendor_card_id: int | None = None
+    if buyer_company_id is not None:
+        from .resell_outreach_service import counterparty_card
+
+        offerer_vendor_card_id = counterparty_card(db, company_id=buyer_company_id).id
+
     offer = ExcessOffer(
         excess_list_id=list_id,
         submitted_by=user.id,
+        offerer_vendor_card_id=offerer_vendor_card_id,
         scope=scope_value,
         notes=notes,
         valid_until=valid_until,
@@ -950,6 +997,28 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     return offer
 
 
+def _posting_window_closed(excess_list: ExcessList, *, now: datetime | None = None) -> bool:
+    """True when the list's posting window has genuinely closed as of *now*.
+
+    The window is closed when its ``close_at`` deadline has PASSED — whether stamped by an
+    explicit ``close_list`` (which records ``close_at`` = the moment of closing, always in
+    the past by the time we read it) or a create-set deadline that has since lapsed. A
+    *future* ``close_at`` is NOT closed: the window is still live and collecting.
+
+    A truthy ``close_at`` alone stopped being proof of closure once Phase 5 preserved a
+    future create-set deadline through ``excess_mirror.publish_list`` (findings #1/#3);
+    this time check restores the invariant ``unaward_offer`` relies on. Tolerates naive
+    datetimes by stamping UTC (SQLite strips tzinfo), mirroring ``publish_list`` /
+    ``resell._hours_until``.
+    """
+    close_at = excess_list.close_at
+    if close_at is None:
+        return False
+    if close_at.tzinfo is None:
+        close_at = close_at.replace(tzinfo=UTC)
+    return close_at <= (now or datetime.now(UTC))
+
+
 def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     """Reverse an award — the explicit inverse of :func:`award_offer`.
 
@@ -991,11 +1060,16 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     recompute_buyer_score_on_win(db, offer)
 
     # Step the list status back off ``awarded`` BEFORE re-mirroring so the mirror re-sync
-    # sees the reverted posting status (M5): a list stepping back to ``collecting``
-    # re-advertises its now-live lines, while one stepping back to ``bid_out`` (a window
-    # that had already closed) stays retired — a closed posting never re-advertises.
+    # sees the reverted posting status (M5): a list whose window is still open steps back to
+    # ``collecting`` and re-advertises its now-live lines, while one whose window has already
+    # closed (its ``close_at`` deadline has passed) steps to ``bid_out`` and stays retired —
+    # a closed posting never re-advertises. The window-closed test is time-based, NOT a bare
+    # ``close_at`` truthiness check: Phase 5 preserves a FUTURE create-set deadline through
+    # publish, so a truthy ``close_at`` no longer implies the window closed (findings #1/#3).
     if excess_list.status == ExcessListStatus.AWARDED:
-        excess_list.status = ExcessListStatus.BID_OUT if excess_list.close_at else ExcessListStatus.COLLECTING
+        excess_list.status = (
+            ExcessListStatus.BID_OUT if _posting_window_closed(excess_list) else ExcessListStatus.COLLECTING
+        )
 
     from . import excess_mirror
 
@@ -1114,11 +1188,15 @@ def update_excess_list(
     notes: str | None = None,
     company_id: int | None = None,
     customer_site_id: int | None = None,
+    close_at: datetime | None = _UNSET_CLOSE_AT,
 ) -> ExcessList:
     """Edit a draft list's header (owner-only, draft-only); returns the refreshed list.
 
     Updates ``title`` / ``notes`` / ``customer_site_id`` and, when ``company_id`` is given
-    and differs, re-points the seller company (404 if it does not exist). Commits.
+    and differs, re-points the seller company (404 if it does not exist). ``close_at`` is
+    draft-scope with the same future+tz-aware 400 validation as create; passing ``None``
+    CLEARS the deadline. It defaults to a sentinel so a header edit that carries no deadline
+    input (the current draft-edit form) leaves any stored deadline untouched. Commits.
     """
     el = _require_owned_draft(db, list_id, owner)
     if company_id is not None and company_id != el.company_id:
@@ -1129,6 +1207,8 @@ def update_excess_list(
     el.title = title
     el.notes = notes
     el.customer_site_id = customer_site_id
+    if close_at is not _UNSET_CLOSE_AT:
+        el.close_at = _validate_draft_close_at(close_at)
     _safe_commit(db, entity="excess list update")
     db.refresh(el)
     logger.info("Updated draft ExcessList id={} by owner={}", list_id, owner.id)
@@ -1139,9 +1219,15 @@ def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
     """Delete a whole draft list (owner-only, draft-only); cascades to its children.
 
     The ORM ``cascade="all, delete-orphan"`` on line_items/offers/customer_bids cleans the
-    children (a draft has no offers/bids, but the cascade is defence-in-depth). Commits.
+    children (a draft has no offers/bids, but the cascade is defence-in-depth). Tears down
+    the Sighting mirror first (a no-op for a draft — never published/mirrored — but makes the
+    "no stranded mirror on delete" guarantee explicit and survives any future loosening).
+    Commits.
     """
     el = _require_owned_draft(db, list_id, owner)
+    from . import excess_mirror
+
+    excess_mirror.teardown_list_mirror(db, el)
     db.delete(el)
     _safe_commit(db, entity="excess list delete")
     logger.info("Deleted draft ExcessList id={} by owner={}", list_id, owner.id)

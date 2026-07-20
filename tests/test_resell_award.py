@@ -244,6 +244,65 @@ class TestAwardOfferService:
         assert score.offers_received == 1
         assert score.wins == 1
 
+    def test_ui_submit_with_buyer_company_scores_on_award(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        seller_company: Company,
+    ):
+        """End-to-end (finding #17 UI half): a UI-submit offer attributed to a buyer
+        company resolves offerer_vendor_card_id, and awarding it WRITES a BuyerScore for
+        that card — the gap the whole finding is about (previously NULL card → no score
+        on manual offers)."""
+        excess_list.status = ExcessListStatus.OPEN
+        buyer_company = Company(name="UI Buyer Co")
+        db_session.add(buyer_company)
+        db_session.commit()
+
+        offer = excess_service.submit_offer(
+            db_session,
+            list_id=excess_list.id,
+            user=broker,
+            scope="per_line",
+            lines=[{"mpn_raw": cap_line.part_number, "quantity": 10, "unit_price": Decimal("0.80")}],
+            buyer_company_id=buyer_company.id,
+        )
+        assert offer.offerer_vendor_card_id is not None
+        card_id = offer.offerer_vendor_card_id
+
+        result = excess_service.award_offer(db_session, offer.id, owner)
+
+        assert result.status == ExcessOfferStatus.WON
+        # The win-hook fired for the attributed buyer — a BuyerScore now exists.
+        score = db_session.query(BuyerScore).filter_by(vendor_card_id=card_id).one()
+        assert score.wins == 1
+
+    def test_ui_submit_without_buyer_company_wins_without_score(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A UI-submit offer with NO buyer attribution leaves offerer_vendor_card_id
+        None and still awards (no regression) — just no BuyerScore, exactly as
+        before."""
+        excess_list.status = ExcessListStatus.OPEN
+        db_session.commit()
+
+        offer = excess_service.submit_offer(
+            db_session,
+            list_id=excess_list.id,
+            user=broker,
+            scope="per_line",
+            lines=[{"mpn_raw": cap_line.part_number, "quantity": 10, "unit_price": Decimal("0.80")}],
+        )
+        assert offer.offerer_vendor_card_id is None
+
+        result = excess_service.award_offer(db_session, offer.id, owner)
+
+        assert result.status == ExcessOfferStatus.WON
+        assert db_session.query(BuyerScore).count() == 0
+
     def test_award_with_no_canonical_buyer_wins_without_score(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
@@ -533,6 +592,41 @@ class TestUnawardOfferService:
         excess_service.unaward_offer(db_session, offer.id, owner)
 
         assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1
+
+    def test_unaward_future_deadline_list_steps_to_collecting_and_re_mirrors(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A D1 list published with a FUTURE 'Offers close by' deadline, awarded then
+        unawarded, steps back to COLLECTING and re-advertises its supply — NOT bid_out.
+
+        Findings #1/#3: once Phase 5 preserves a create-set future ``close_at`` through
+        publish, a truthy ``close_at`` is no longer proof the posting window was closed.
+        The window here never closed (its deadline is still in the future), so reversing
+        the award must re-open the list to ``collecting`` and re-mirror its live supply —
+        not strand it in ``bid_out`` with its mirror retired.
+        """
+        from datetime import datetime, timedelta
+
+        excess_list.close_at = datetime.now(UTC) + timedelta(days=3)
+        db_session.commit()
+        publish_list(db_session, excess_list.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.close_at is not None  # future deadline preserved through publish
+
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.AWARDED  # precondition
+        assert _customer_excess_sightings(db_session, excess_list.company_id) == []  # retired on award
+
+        excess_service.unaward_offer(db_session, offer.id, owner)
+
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.COLLECTING  # window still open → re-advertise
+        assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1  # re-mirrored
 
     def test_unaward_by_non_owner_forbidden(
         self,

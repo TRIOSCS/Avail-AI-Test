@@ -312,6 +312,71 @@ def test_collecting_list_stays_collecting_on_subsequent_offer(db_session: Sessio
 
 
 # ---------------------------------------------------------------------------
+# UI-submit offer attribution (finding #17, UI half) — buyer_company_id
+# ---------------------------------------------------------------------------
+
+
+def test_submit_offer_with_buyer_company_attributes_card(db_session: Session):
+    """A UI-submit offer with buyer_company_id resolves offerer_vendor_card_id via
+    counterparty_card — the attribution that lets the win-hook score a manual offer."""
+    from app.services.resell_outreach_service import counterparty_card
+
+    company = _make_company(db_session, name="Attr Seller")
+    owner = _make_user(db_session, email="attr-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="attr-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = ExcessListStatus.OPEN
+    buyer_company = _make_company(db_session, name="Attr Buyer Co")
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all", buyer_company_id=buyer_company.id)
+
+    assert offer.offerer_vendor_card_id is not None
+    expected = counterparty_card(db_session, company_id=buyer_company.id)
+    assert offer.offerer_vendor_card_id == expected.id
+
+
+def test_submit_offer_without_buyer_company_leaves_card_none(db_session: Session):
+    """No buyer attribution → offerer_vendor_card_id stays None (no regression — award
+    still works, just no score, exactly as before)."""
+    company = _make_company(db_session, name="NoAttr Seller")
+    owner = _make_user(db_session, email="noattr-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="noattr-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = ExcessListStatus.OPEN
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert offer.offerer_vendor_card_id is None
+
+
+def test_offer_form_renders_buyer_select(client, db_session: Session):
+    """The submit-offer form renders the optional buyer <select> with company options
+    (mirrors the create-modal company select; headless assert)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    company = _make_company(db_session, name="Form Seller")
+    owner = _make_user(db_session, email="form-owner@test.com", role="sales")
+    viewer = _make_user(db_session, email="form-viewer@test.com", role="trader")  # non-owner offerer
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = ExcessListStatus.OPEN
+    _make_company(db_session, name="Form Buyer Co")
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: viewer
+    try:
+        resp = client.get(f"/v2/partials/resell/{el.id}/offer-form")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+    assert resp.status_code == 200
+    assert 'name="buyer_company_id"' in resp.text
+    assert "Form Buyer Co" in resp.text
+
+
+# ---------------------------------------------------------------------------
 # Late-offer flagging (M3): an offer landing after the posting window closed
 # ---------------------------------------------------------------------------
 

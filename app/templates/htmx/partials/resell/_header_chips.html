@@ -6,7 +6,7 @@
   and in _award_response.html (the hx-swap-oob wrapper), mirroring prospecting/
   _action_oob.html's #prospect-stats pattern (no duplicate id, idempotent re-swap).
   Receives: list, can_see_customer, line_count, offer_count, awarded_line_count,
-            hours_until.
+            hours_until, is_live, close_at_display.
   Called by: detail.html, _award_response.html.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, time_text %}
@@ -43,8 +43,13 @@
   {{ awarded_line_count }}/{{ line_count }} awarded
 </span>
 {% endif %}
-{% if hours_until is not none %}
+{# Posting-window chip — countdown ONLY while live (open/collecting); a resolved list shows
+   a muted "closed {date}" and NEVER a red "Overdue" (finding #8; the shared time_text macro
+   is gated here, never edited). #}
+{% if is_live and hours_until is not none %}
 <span class="inline-flex items-center gap-1">closes {{ time_text(hours_until) }}</span>
+{% elif not is_live and close_at_display %}
+<span class="inline-flex items-center gap-1 text-gray-400">closed {{ close_at_display }}</span>
 {% endif %}
 {% if can_see_customer and el.owner %}
 <span class="text-gray-400">· {{ el.owner.name }}</span>

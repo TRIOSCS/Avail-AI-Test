@@ -98,10 +98,15 @@ class TestResellJobs:
         scheduler = MagicMock()
         settings = MagicMock()
         register_resell_jobs(scheduler, settings)
-        # Two lifecycle jobs: the list-expiry backstop + the stale-'sending' sweeper.
-        assert scheduler.add_job.call_count == 2
+        # Three lifecycle jobs: list-expiry backstop + stale-'sending' sweeper +
+        # the Phase-5 nightly BuyerScore recompute backstop (finding #17).
+        assert scheduler.add_job.call_count == 3
         job_ids = {c.kwargs.get("id") for c in scheduler.add_job.call_args_list}
-        assert job_ids == {"expire_resell_lists", "sweep_stale_sending_outreach"}
+        assert job_ids == {
+            "expire_resell_lists",
+            "sweep_stale_sending_outreach",
+            "recompute_buyer_scores",
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────

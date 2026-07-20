@@ -270,6 +270,14 @@ class Sighting(Base):
     # v2.0: Excess list differentiation — links sighting to originating customer company
     source_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
+    # Phase 5 (migration 199): the specific ExcessLineItem a customer_excess mirror row
+    # shadows. It is the line-identity disambiguator for the mirror upsert/retire so two
+    # duplicate-part lines on ONE list (same material_card) each keep a DISTINCT Sighting
+    # instead of collapsing into one row (finding #18). ondelete="SET NULL" so deleting a
+    # line detaches the shadow rather than cascade-deleting it (teardown removes it
+    # explicitly). NULL for every non-excess sighting.
+    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"), nullable=True)
+
     # NC integration: when the source data was fetched
     source_searched_at = Column(UTCDateTime)
 
@@ -331,6 +339,7 @@ class Sighting(Base):
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
         Index("ix_sightings_material_card", "material_card_id"),
+        Index("ix_sightings_excess_line_item", "excess_line_item_id"),
         Index("ix_sightings_mpn_vendor_norm", "normalized_mpn", "vendor_name_normalized"),
         # Raw-DDL indexes reconciled into the model so the drift gate sees them (#464):
         # a vendor-email pg_trgm GIN index (warm-intro lookup) + plain btree indexes.

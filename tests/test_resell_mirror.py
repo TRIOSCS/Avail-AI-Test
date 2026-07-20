@@ -37,11 +37,13 @@ from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.services.excess_mirror import (
+    _virtual_req_name,
     ensure_virtual_requirement,
     mirror_line,
     publish_list,
     retire_line,
     sync_list_mirror,
+    teardown_list_mirror,
 )
 from app.services.excess_service import create_excess_list, import_line_items
 from app.utils.normalization import normalize_mpn_key
@@ -269,6 +271,94 @@ def test_same_company_same_part_two_lists_no_collapse(db_session: Session):
 
 
 # ---------------------------------------------------------------------------
+# Within-list line identity (finding #18) — duplicate-part lines each keep a
+# distinct Sighting, keyed on excess_line_item_id (migration 199).
+# ---------------------------------------------------------------------------
+
+
+def _dup_part_list(db_session: Session, company: Company, owner: User) -> ExcessList:
+    """A single list with TWO lines for the SAME part (same material_card), distinct
+    qty."""
+    el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=owner.id)
+    import_line_items(
+        db_session,
+        el.id,
+        [
+            {"part_number": "LM358N", "quantity": "50"},
+            {"part_number": "LM358N", "quantity": "75"},
+        ],
+    )
+    return el
+
+
+def test_within_list_two_lines_same_part_two_sightings(db_session: Session):
+    """Two lines on ONE list with the SAME part/material_card but distinct qty → TWO
+    distinct Sightings (was: collapsed into one row, hiding live supply).
+
+    Finding #18.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    lines = _lines(db_session, el)
+    assert len(lines) == 2
+    assert lines[0].material_card_id == lines[1].material_card_id  # same card — the trap
+
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 2, f"Expected 2 sightings (one per line), got {len(rows)}"
+    assert {r.qty_available for r in rows} == {50, 75}
+    # Each Sighting is keyed to its OWN line.
+    assert {r.excess_line_item_id for r in rows} == {lines[0].id, lines[1].id}
+
+
+def test_resync_dup_part_lines_update_not_duplicate(db_session: Session):
+    """Re-syncing duplicate-part lines UPDATES each line's own Sighting (still 2
+    rows)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    lines = _lines(db_session, el)
+    lines[0].quantity = 111
+    db_session.commit()
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 2  # updated in place, not duplicated
+    assert {r.qty_available for r in rows} == {111, 75}
+
+
+def test_retire_one_twin_leaves_sibling_sighting(db_session: Session):
+    """Retiring ONE duplicate-part line deletes ONLY its own Sighting; the twin survives
+    (was: shared-row deletion wiped both).
+
+    Finding #18.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    first, second = _lines(db_session, el)
+    retire_line(db_session, first)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 1
+    assert rows[0].excess_line_item_id == second.id
+    assert rows[0].qty_available == 75
+
+
+# ---------------------------------------------------------------------------
 # retire_line — award / withdraw / qty→0
 # ---------------------------------------------------------------------------
 
@@ -310,6 +400,134 @@ def test_sync_retires_awarded_line(db_session: Session):
     assert len(rows) == 1
     surviving_line = _lines(db_session, el)[1]
     assert rows[0].material_card_id == surviving_line.material_card_id
+
+
+# ---------------------------------------------------------------------------
+# teardown_list_mirror — list/company DELETION (P2 strand fix)
+# ---------------------------------------------------------------------------
+
+
+def _virtual_req(db: Session, el: ExcessList) -> Requisition | None:
+    return (
+        db.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name == _virtual_req_name(el))
+        .one_or_none()
+    )
+
+
+def test_teardown_deletes_mirror_and_virtual_req(db_session: Session):
+    """Tearing down a published list's mirror DELETES its customer_excess Sightings AND
+    the virtual scratch Requisition/Requirement (no orphan advertising live supply)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N", "MAX232"])
+    publish_list(db_session, el.id, owner)
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+    req = _virtual_req(db_session, el)
+    assert req is not None
+    req_id = req.id  # capture before teardown deletes + expires the row
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert _customer_excess_sightings(db_session, company.id) == []
+    assert _virtual_req(db_session, el) is None
+    assert db_session.query(Requirement).filter(Requirement.requisition_id == req_id).count() == 0
+
+
+def test_teardown_scoped_to_one_list(db_session: Session):
+    """Teardown of ONE list leaves a SIBLING list's mirror + virtual req intact (each
+    list owns a distinct virtual req — never wipe by company)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el_a = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el_b = _make_list_with_lines(db_session, owner, company, ["MAX232"])
+    publish_list(db_session, el_a.id, owner)
+    publish_list(db_session, el_b.id, owner)
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    teardown_list_mirror(db_session, el_a)
+    db_session.commit()
+
+    # Only B's sighting + virtual req survive.
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 1
+    assert _virtual_req(db_session, el_a) is None
+    assert _virtual_req(db_session, el_b) is not None
+
+
+def test_teardown_robust_to_null_material_card(db_session: Session):
+    """Teardown deletes a mirror Sighting even when material_card_id/source_company_id
+    are NULL (retire_line, which keys on the card, could not) — it keys on the virtual
+    req id."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    publish_list(db_session, el.id, owner)
+    # Simulate a mirror row whose card + company links were later NULLed (SET NULL cascades).
+    row = _customer_excess_sightings(db_session, company.id)[0]
+    row.material_card_id = None
+    row.source_company_id = None
+    db_session.commit()
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert _virtual_req(db_session, el) is None
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+
+
+def test_teardown_noop_on_unpublished_draft(db_session: Session):
+    """A draft never mirrored → teardown is an idempotent no-op (no virtual req to
+    remove)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+
+    result = teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert result["sightings"] == 0
+    assert result["requisitions"] == 0
+    # A second call is still a clean no-op.
+    assert teardown_list_mirror(db_session, el)["requisitions"] == 0
+
+
+def test_delete_excess_list_leaves_no_mirror(db_session: Session):
+    """delete_excess_list runs teardown (no-op for a draft) then deletes — no orphan
+    req."""
+    from app.services.excess_service import delete_excess_list
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el_id = el.id
+
+    delete_excess_list(db_session, el_id, owner)
+
+    assert db_session.get(ExcessList, el_id) is None
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+
+
+def test_seed_resell_demo_reset_tears_down_mirror(db_session: Session):
+    """`seed_resell_demo --reset` deletes every demo list's mirror — zero
+    customer_excess Sightings + no leftover virtual scratch Requisition after a
+    seed→reset cycle."""
+    from app.management import seed_resell_demo
+
+    seed_resell_demo.seed(db_session)
+    # The demo builds mirrored postings, so customer_excess sightings exist post-seed.
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() > 0
+
+    seed_resell_demo._reset(db_session)
+
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+    leftover = (
+        db_session.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name.like("Customer Excess (list %"))
+        .count()
+    )
+    assert leftover == 0
 
 
 # ---------------------------------------------------------------------------
@@ -383,13 +601,40 @@ def test_publish_rejects_non_draft(db_session: Session, status):
     assert el.status == status  # no mutation on the rejected publish
 
 
-def test_publish_clears_stale_close_at(db_session: Session):
-    """A draft that somehow carries a leftover ``close_at`` gets it cleared on publish —
-    an open posting must not advertise a stale close time."""
+def test_publish_preserves_future_close_at(db_session: Session):
+    """A draft carrying a FUTURE ``close_at`` keeps it on publish (T1/#8 fix) — the
+    posting deadline the owner set at create must survive so the nightly expiry backstop
+    has a real window to act on.
+
+    (Was: publish unconditionally nulled close_at.)
+    """
+    from datetime import timedelta
+
     company = _make_company(db_session)
     owner = _make_user(db_session)
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.close_at = datetime.now(UTC)
+    future = datetime.now(UTC) + timedelta(days=4)
+    el.close_at = future
+    db_session.commit()
+
+    publish_list(db_session, el.id, owner)
+
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.OPEN
+    stored = el.close_at if el.close_at.tzinfo else el.close_at.replace(tzinfo=UTC)
+    assert abs((stored - future).total_seconds()) < 2
+    assert el.open_at is not None
+
+
+def test_publish_nulls_stale_close_at(db_session: Session):
+    """A draft that somehow carries a STALE (past) ``close_at`` gets it cleared on
+    publish — an open posting must not advertise a lapsed close time."""
+    from datetime import timedelta
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
 
     publish_list(db_session, el.id, owner)

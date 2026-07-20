@@ -1,6 +1,6 @@
-"""Resell background jobs — auto-expire stale excess-list postings + sweep stale sends.
+"""Resell background jobs — expire stale postings, sweep stale sends, reconcile scores.
 
-Two nightly backstops for the Resell lifecycle:
+Three nightly backstops for the Resell lifecycle:
   - M5 list-expiry: an ``open``/``collecting`` ExcessList whose ``close_at`` deadline has
     passed without being awarded or closed is flipped to ``expired`` and its Sighting
     live-mirror retired, so a lapsed posting stops advertising supply and drops out of the
@@ -9,10 +9,13 @@ Two nightly backstops for the Resell lifecycle:
     staleness threshold (its background send job died mid-flight) is flipped to
     ``interrupted`` so it stops polling and becomes retryable — never resent here (the
     manual retry path does the Sent-folder lookup before any resend).
+  - BuyerScore reconcile: recompute every buyer's scorecard so a BuyerScore row can never
+    silently drift from truth when an on-win / on-send hook is missed (finding #17 core).
 
 Called by: app/jobs/__init__.py via register_resell_jobs()
 Depends on: app.database (SessionLocal), app.services.excess_service (expire_overdue_lists),
-    app.services.resell_outreach_service (sweep_stale_sending_outreach), app.scheduler
+    app.services.resell_outreach_service (sweep_stale_sending_outreach),
+    app.services.buyer_affinity_service (recompute_all_buyer_scores), app.scheduler
     (_traced_job)
 """
 
@@ -37,6 +40,12 @@ def register_resell_jobs(scheduler, settings):
         id="sweep_stale_sending_outreach",
         name="Sweep stale 'sending' resell outreach",
     )
+    scheduler.add_job(
+        _job_recompute_buyer_scores,
+        CronTrigger(hour=2, minute=35),
+        id="recompute_buyer_scores",
+        name="Recompute resell BuyerScores",
+    )
 
 
 @_traced_job
@@ -59,6 +68,34 @@ async def _job_expire_resell_lists():
         db.rollback()
     except Exception as e:
         logger.exception(f"Resell list expiry error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_recompute_buyer_scores():
+    """Daily — reconcile every buyer's BuyerScore against ground truth (finding #17
+    core).
+
+    Delegates to ``buyer_affinity_service.recompute_all_buyer_scores`` (walks every
+    VendorCard with an ExcessOffer or ExcessOutreach and upserts its scorecard). The
+    backstop for a missed on-win / on-send hook — idempotent (the rollup reads full
+    history), so a double-run is harmless.
+    """
+    from ..database import SessionLocal
+    from ..services.buyer_affinity_service import recompute_all_buyer_scores
+
+    db = SessionLocal()
+    try:
+        count = recompute_all_buyer_scores(db)
+        if count:
+            logger.info(f"Nightly buyer-score backstop recomputed {count} buyer(s)")
+    except sqlalchemy.exc.SQLAlchemyError as e:
+        logger.error(f"Resell buyer-score backstop DB error: {e}")
+        db.rollback()
+    except Exception as e:
+        logger.exception(f"Resell buyer-score backstop error: {e}")
         db.rollback()
     finally:
         db.close()

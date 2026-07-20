@@ -2083,7 +2083,8 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
     |     confirm re-renders the whole detail like add-line — RS-5)
     +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror;
-    |     GUARDED to draft [409 otherwise — no re-open of a resolved posting] + clears stale close_at)
+    |     GUARDED to draft [409 otherwise — no re-open of a resolved posting]; PRESERVES a future
+    |     close_at, clears only a stale one [Phase 5])
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
@@ -2101,8 +2102,10 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
     |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
     |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
-    |     (close_at set) else collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed
-    |     posting stays retired — M5). Same _award_response OOB)
+    |     (posting window CLOSED — close_at in the PAST, via _posting_window_closed; NOT bare
+    |     close_at truthiness, since Phase 5 preserves a FUTURE deadline through publish) else
+    |     collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed posting stays retired,
+    |     while a still-open future-deadline list re-advertises — M5, findings #1/#3). Same _award_response OOB)
     +-- POST /api/resell/{id}/offer-lines/{offer_line_id}/assign (owner-only; finding #15;
     |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
@@ -2205,6 +2208,35 @@ The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
 `excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
 to `expired` and retires their mirror; the left-list stage filter now offers the `closed` /
 `expired` stages (the status badges already rendered them).
+
+**Phase 5 (posting window + scoring + mirror identity).** Four related fixes:
+- *Posting-deadline entry point + chip fix (finding #8, D1).* `create_excess_list` /
+  `update_excess_list` accept an optional future+tz-aware `close_at` (400 on naive/past via
+  `_validate_draft_close_at`); the create modal exposes it as an optional "Offers close by"
+  `datetime-local`. `publish_list` now PRESERVES a future `close_at` (was: nulled it), so the
+  nightly expiry backstop finally has real windows. The resell chip context exposes `is_live`
+  (open/collecting only) + `close_at_display`; `_header_chips.html`/`_lists.html` render the
+  countdown ONLY while live and a muted "closed {date}" once resolved — never a red "Overdue"
+  on a resolved list (the shared `time_text` macro is gated at the resell-template level, never
+  edited). `_close_at_display` returns the label ONLY for a PAST `close_at`: a non-live list
+  holding a FUTURE create-set deadline (a draft with an "Offers close by" next week, or an
+  awarded list whose deadline survived publish) shows NO "closed {future date}" chip (finding #2).
+- *Mirror line-identity (finding #18, migration 199).* `sightings.excess_line_item_id`
+  (FK, indexed) is the mirror upsert/retire key — two duplicate-part lines on one list keep
+  distinct Sightings and one award/withdraw no longer wipes the twin.
+- *Mirror teardown on delete (P2).* `excess_mirror.teardown_list_mirror` deletes a list's whole
+  mirror + its virtual scratch requisition; wired into `delete_companies`,
+  `seed_resell_demo._reset`, and `delete_excess_list` so deletion never strands mirror rows.
+  NOT called on close/expire (a closed list can reopen via unaward and re-mirror).
+- *Nightly BuyerScore backstop + UI-submit attribution (finding #17).*
+  `_job_recompute_buyer_scores` (02:35) → `buyer_affinity_service.recompute_all_buyer_scores`
+  reconciles every buyer's scorecard so a missed on-win/on-send hook can't leave a row stale
+  (the three nightly resell jobs run at 02:15/02:25/02:35 to avoid collision). The `response_rate`
+  denominator KEEPS counting a manual-log SENT touch (`sent_at=None`); only SENDING/FAILED/
+  INTERRUPTED are excluded. The submit-offer form gains an optional buyer `<select>` →
+  `submit_offer(buyer_company_id=...)` resolves `offerer_vendor_card_id` via `counterparty_card`,
+  so the award win-hook (`recompute_buyer_score_on_win`) now fires for UI-submitted manual offers;
+  unattributed offers stay None and still award (no regression).
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
