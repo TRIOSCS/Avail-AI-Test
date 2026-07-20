@@ -187,6 +187,9 @@ class ExcessOffer(Base):
     __table_args__ = (
         Index("ix_excess_offers_list", "excess_list_id"),
         Index("ix_excess_offers_status", "status"),
+        # Hot index (migration 200): the buyer-affinity last-bid + who-to-offer history
+        # queries and the award win-hook all filter/join on the canonical buyer card.
+        Index("ix_excess_offers_vendor_card", "offerer_vendor_card_id"),
     )
 
 
@@ -392,6 +395,9 @@ class ExcessOutreach(Base):
         Index("ix_excess_outreach_vendor_card", "target_vendor_card_id"),
         Index("ix_excess_outreach_status", "status"),
         Index("ix_excess_outreach_conversation", "graph_conversation_id"),
+        # Hot index (migration 200): the reply adapter matches a buyer reply on the exact
+        # message id (the fallback key when a conversation id is absent).
+        Index("ix_excess_outreach_message", "graph_message_id"),
     )
 
 
