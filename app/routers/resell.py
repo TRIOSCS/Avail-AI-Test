@@ -918,6 +918,10 @@ async def resell_assemble_bid(
         raise HTTPException(400, "Invalid bid payload") from exc
     if not isinstance(raw, list) or not raw:
         raise HTTPException(400, "Select at least one line to assemble a bid")
+    # Silent-failure c: guard EVERY element is a dict before the s.get(...) comprehension —
+    # a payload like [1, 2] or ["x"] otherwise raises AttributeError as an unhandled 500.
+    if not all(isinstance(s, dict) for s in raw):
+        raise HTTPException(400, "Invalid bid payload")
 
     selections = [
         {

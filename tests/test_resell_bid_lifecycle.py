@@ -279,8 +279,7 @@ def _sent_ok(email: str):
 
 
 async def test_send_bid_back_flips_to_sent(db_session, owner, seller_company, priced_list):
-    """A confirmed send flips draft→sent, stamps sent_at, and attaches the clean
-    PDF."""
+    """A confirmed send flips draft→sent, stamps sent_at, and attaches the clean PDF."""
     _seed_site_email(db_session, seller_company, "buyer@initech.com")
     bid = _assemble(db_session, priced_list, owner)
 
@@ -316,8 +315,7 @@ async def test_send_bid_back_requires_draft(db_session, owner, seller_company, p
 
 
 async def test_send_bid_back_no_email_422(db_session, owner, priced_list):
-    """No customer contact email on file → 422 (never email nobody), bid stays
-    draft."""
+    """No customer contact email on file → 422 (never email nobody), bid stays draft."""
     bid = _assemble(db_session, priced_list, owner)
     with pytest.raises(HTTPException) as exc:
         await bid_back_service.send_bid_back(
@@ -474,6 +472,26 @@ def test_reject_route(client, db_session, owner, priced_list):
         assert resp.status_code == 200
         db_session.refresh(bid)
         assert bid.status == CustomerBidStatus.REJECTED
+    finally:
+        restore()
+
+
+@pytest.mark.parametrize("bad_payload", ["[1, 2]", '["x", "y"]', "[null]"])
+def test_assemble_bid_non_dict_elements_rejected_400_not_500(client, db_session, owner, priced_list, bad_payload):
+    """Silent-failure c: a JSON list whose elements are not dicts → 400, never an
+    AttributeError 500 from the ``s.get(...)`` comprehension."""
+    import json as _json
+
+    from app.main import app
+
+    restore = _own(app, owner)
+    try:
+        resp = client.post(
+            f"/api/resell/{priced_list.id}/bid",
+            data={"selections_json": bad_payload},
+        )
+        assert resp.status_code == 400
+        assert "error" in _json.loads(resp.text)
     finally:
         restore()
 
