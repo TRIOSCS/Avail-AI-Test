@@ -104,19 +104,24 @@ def _form_int(form, key: str, default: int = 0) -> int:
     return int(raw) if raw.isdigit() else default
 
 
-def _contacts_list_response(request: Request, user: User, db: Session, form) -> HTMLResponse:
-    """Re-render the global contacts list from the hx-included filter fields."""
+def _contacts_list_response(request: Request, user: User, db: Session, form, prefix: str = "") -> HTMLResponse:
+    """Re-render the global contacts list from the hx-included filter fields.
+
+    prefix: read filter values from prefixed form keys (e.g. "filter_search") — used by
+    the origin=contacts edit-modal save, whose form carries its own contact_role field
+    and so namespaces the list filters to avoid the name collision.
+    """
     ctx = _base_ctx(request, user, "crm")
     ctx.update(
         customer_contacts_list_ctx(
             db,
             user,
-            search=(form.get("search") or "").strip(),
-            company_id=_form_int(form, "company_id"),
-            contact_role=(form.get("contact_role") or "").strip(),
-            cadence_state=(form.get("cadence_state") or "").strip(),
-            limit=_form_int(form, "limit", 50),
-            offset=_form_int(form, "offset", 0),
+            search=(form.get(f"{prefix}search") or "").strip(),
+            company_id=_form_int(form, f"{prefix}company_id"),
+            contact_role=(form.get(f"{prefix}contact_role") or "").strip(),
+            cadence_state=(form.get(f"{prefix}cadence_state") or "").strip(),
+            limit=_form_int(form, f"{prefix}limit", 50),
+            offset=_form_int(form, f"{prefix}offset", 0),
         )
     )
     ctx["contact_roles"] = CANONICAL_ROLES
@@ -1329,6 +1334,13 @@ async def contact_edit_form_company_scoped(
     request: Request,
     company_id: int,
     contact_id: int,
+    origin: str = "",
+    filter_search: str = "",
+    filter_company_id: int = Query(0, ge=0),
+    filter_contact_role: str = "",
+    filter_cadence_state: str = "",
+    filter_limit: int = Query(50, ge=1, le=200),
+    filter_offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1339,6 +1351,10 @@ async def contact_edit_form_company_scoped(
     /contacts/{contact_id}/edit and targets #contacts-tab-list — the canonical swap
     target for the Contacts tab. The former site-scoped edit-form route and
     contact_edit_modal.html have been retired.
+
+    origin=contacts: called from the global /v2/contacts list's per-row Edit button. The
+    form then targets #main-content and carries the filter_* values as hidden inputs so
+    the save re-renders the global list with the caller's filters intact.
     """
     # Validate the contact belongs to a site that belongs to this company
     contact = (
@@ -1376,6 +1392,15 @@ async def contact_edit_form_company_scoped(
             "sites": [],
             "roles": CANONICAL_ROLES,
             "site_contacts_for_select": site_contacts_for_select,
+            "origin": origin if origin == "contacts" else "",
+            "list_filters": {
+                "search": filter_search,
+                "company_id": filter_company_id,
+                "contact_role": filter_contact_role,
+                "cadence_state": filter_cadence_state,
+                "limit": filter_limit,
+                "offset": filter_offset,
+            },
         },
     )
 
@@ -1561,8 +1586,10 @@ async def edit_site_contact(
     """Update editable contact fields and return refreshed Contacts tab grouped list.
 
     Writes contact_role (validated via _validate_role; blank→NULL, unknown→400),
-    is_priority, and linkedin_url. Always renders #contacts-tab-list — the Sites tab no
-    longer carries a contact editor.
+    is_priority, and linkedin_url. Renders #contacts-tab-list — the Sites tab no longer
+    carries a contact editor. When the form carries origin=contacts (the global
+    /v2/contacts list's Edit modal), re-renders the global contacts list instead, scoped
+    to the filter_* fields the modal carried through.
     """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -1623,4 +1650,8 @@ async def edit_site_contact(
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
+    if (form.get("origin") or "") == "contacts":
+        resp = _contacts_list_response(request, user, db, form, prefix="filter_")
+        resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": f"Updated {contact.full_name or 'contact'}"}})
+        return resp
     return _render_contacts_list(request, user, company, db)

@@ -4,7 +4,7 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.116.0
+anthropic==0.117.0
     # via -r requirements.in
 anyio==4.13.0
     # via
@@ -59,7 +59,7 @@ docstring-parser==0.18.0
     # via anthropic
 et-xmlfile==2.0.0
     # via openpyxl
-fastapi==0.139.0
+fastapi==0.139.2
     # via
     #   -r requirements.in
     #   sentry-sdk
@@ -170,7 +170,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.65.0
+sentry-sdk[fastapi]==2.66.0
     # via -r requirements.in
 slowapi==0.1.10
     # via -r requirements.in
