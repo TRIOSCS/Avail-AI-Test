@@ -2499,12 +2499,19 @@ linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
 
 **Resell hot-path performance (Phase 6a — pure refactors, no behavior change).**
 `buyer_affinity_service.rank_buyers_for` (#19) now narrows the candidate universe in SQL to
-(won-offer history ∪ commodity-tag overlap ∪ top-`limit*3` engagement) instead of hydrating
-every non-blacklisted VendorCard: the tag-overlap branch is dialect-split —
-PostgreSQL uses the JSONB `?|` any-key operator on the existing GIN index
-`ix_vendor_cards_commodity_tags_gin` (migration 082, no new index), SQLite keeps the Python
-set-intersection fallback (`_tag_overlap_candidate_ids`) — and only the 4 read columns are
-projected. `resell_outreach_service` (#20) precomputes the offered-lines snapshot ONCE per
+(won-offer history ∪ commodity-tag overlap ∪ reachable-engagement tiebreak) instead of hydrating
+every non-blacklisted VendorCard, and only the 4 read columns are projected. The tag-overlap
+branch is dialect-split and CASE-INSENSITIVE (`commodity_tags` are stored verbatim by the LLM
+material-analysis writers — Title/mixed case, only `str().strip()` — so an exact-case match
+would silently drop a real commodity buyer on Postgres): PostgreSQL uses a correlated `EXISTS`
+over `jsonb_array_elements_text(commodity_tags)` that lowercases each stored element and matches
+it against the lowercased target set (the JSONB `?|` any-key operator is exact/case-sensitive and
+the GIN index `ix_vendor_cards_commodity_tags_gin` can't serve a `lower()` match, so this narrows
+via a scan — still only overlapping cards return); SQLite keeps the Python set-intersection
+fallback (`_tag_overlap_candidate_ids`, which already lowercases both sides). The cold engagement
+tiebreak is filled by `_top_reachable_engagement_ids`, which pages cards in `engagement_score`
+order THROUGH the reachability gate until it has up to `limit` reachable ids — a fixed `limit*3`
+cap taken BEFORE that gate would starve the panel when the top band is mostly unreachable/DNC. `resell_outreach_service` (#20) precomputes the offered-lines snapshot ONCE per
 campaign (`_campaign_parts_snapshot` → `whole_list_snapshot` + `by_line`) instead of a
 per-(buyer×line) `ExcessLineItem` query, with `_parts_snapshot` now an in-memory lookup and a
 SINGLE row flush after the per-buyer loop (the same-buyer dedup is kept in-memory since

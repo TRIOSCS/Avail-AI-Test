@@ -42,7 +42,7 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from loguru import logger
-from sqlalchemy import Text, cast
+from sqlalchemy import Text, any_, cast, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
@@ -194,41 +194,94 @@ def _tag_overlap_candidate_ids(db: Session, target_commodities: set[str]) -> set
 
     The genuine tag-overlap candidate branch of :func:`rank_buyers_for` (finding #19) — the
     replacement for the old ``commodity_tags.isnot(None)`` predicate, which matched every
-    card's default ``[]`` and so narrowed nothing. Dialect-branched:
+    card's default ``[]`` and so narrowed nothing. Dialect-branched, CASE-INSENSITIVE on both
+    dialects so it stays a superset of the ranking loop's lowercased tier check:
 
-    - **PostgreSQL:** the JSONB ``?|`` (any-key) operator ``commodity_tags ?| target[]``,
-      which uses the existing GIN index ``ix_vendor_cards_commodity_tags_gin`` (migration
-      082 — no new index). ``?|`` is exact / case-sensitive; ``commodity_tags`` are stored
-      as canonical lowercase commodity slugs (``specialty_detector.detect_commodities_from_text``
-      lowercases, and they share ``MaterialCard.category``'s vocabulary — the source of
-      ``target_commodities``), so the target array is passed in BOTH its original and
-      lowercased casing to stay a superset of the case-insensitive Python tier check the
-      ranking loop applies.
+    - **PostgreSQL:** a correlated ``EXISTS`` over ``jsonb_array_elements_text(commodity_tags)``
+      that lowercases each STORED tag element and matches it against the lowercased target set
+      (``lower(elem) = ANY(target_lower[])``). This is case-insensitive by construction: the
+      JSONB ``?|`` operator is exact / case-sensitive, but ``commodity_tags`` are NOT stored as
+      canonical lowercase slugs — the LLM material-analysis writers (``vendor_analysis_service``
+      / ``customer_analysis_service``) persist them verbatim with only ``str().strip()`` (Title /
+      mixed case, e.g. ``["Capacitors"]``), while ``target_commodities`` is the lowercase
+      ``MaterialCard.category`` slug. A ``?|`` push-down would silently drop a mixed-case buyer
+      that genuinely buys the commodity; lowercasing the stored element side fixes that at the
+      query layer (it also handles legacy rows written before any normalization). The GIN index
+      ``ix_vendor_cards_commodity_tags_gin`` can't serve a ``lower()`` match, so this narrows via
+      a scan — still a genuine SQL-side narrowing (only overlapping cards return), not a load of
+      every card into Python.
     - **SQLite / other:** a bounded Python set-intersection over the tagged cards (the
-      cross-DB fallback the in-memory test suite exercises).
+      cross-DB fallback the in-memory test suite exercises), which already lowercases both sides.
     """
     if not target_commodities:
         return set()
     bind = db.get_bind()
     dialect = bind.dialect.name if bind is not None else ""
     if dialect == "postgresql":
-        target_array = sorted({c for c in target_commodities} | {c.lower() for c in target_commodities})
-        rows = (
-            db.query(VendorCard.id)
-            .filter(
-                VendorCard.is_blacklisted.is_(False),
-                VendorCard.commodity_tags.op("?|")(cast(target_array, ARRAY(Text))),
-            )
-            .all()
+        target_lower = sorted({c.lower() for c in target_commodities})
+        elem = func.jsonb_array_elements_text(VendorCard.commodity_tags).table_valued("value")
+        overlap_exists = (
+            select(elem.c.value).where(func.lower(elem.c.value) == any_(cast(target_lower, ARRAY(Text)))).exists()
         )
+        rows = db.query(VendorCard.id).filter(VendorCard.is_blacklisted.is_(False), overlap_exists).all()
         return {cid for (cid,) in rows}
-    target_lower = {c.lower() for c in target_commodities}
+    target_lower_set = {c.lower() for c in target_commodities}
     rows = (
         db.query(VendorCard.id, VendorCard.commodity_tags)
         .filter(VendorCard.is_blacklisted.is_(False), VendorCard.commodity_tags.isnot(None))
         .all()
     )
-    return {cid for cid, tags in rows if tags and ({str(t).lower() for t in tags} & target_lower)}
+    return {cid for cid, tags in rows if tags and ({str(t).lower() for t in tags} & target_lower_set)}
+
+
+def _top_reachable_engagement_ids(db: Session, *, exclude_ids: set[int], needed: int) -> set[int]:
+    """The top ``needed`` REACHABLE engagement-scored buyer card ids, in descending
+    score.
+
+    The cold engagement tiebreak of :func:`rank_buyers_for`. Pages non-blacklisted,
+    engagement-scored cards by ``engagement_score`` DESC and applies the reachability gate
+    per page, WIDENING past an unreachable / DNC-heavy top band until ``needed`` reachable ids
+    are collected or the engagement-scored pool is exhausted.
+
+    Why paged-then-filtered instead of a fixed ``LIMIT needed*3``: a static cap taken BEFORE
+    the reachability gate starves the panel whenever more than the headroom of the top band is
+    unreachable — common in a broker CRM where many high-engagement cards have no resolvable /
+    non-DNC contact. Selecting the top band first would then discard every candidate and the
+    lower reachable buyers (which the pre-#19 un-capped load surfaced) would never load. Paging
+    keeps the working set bounded (it stops as soon as ``needed`` reachable ids are found) while
+    guaranteeing the tiebreak is never starved while reachable engagement buyers exist.
+
+    ``exclude_ids`` are cards already selected by a stronger tier (history / tag-overlap); they
+    are skipped so the reachable-``needed`` budget isn't spent on cards that are candidates
+    anyway. Returns a set (order-free — the caller re-sorts every candidate by tier then score).
+    """
+    if needed <= 0:
+        return set()
+    collected: set[int] = set()
+    offset = 0
+    page = max(needed * 3, needed)
+    while len(collected) < needed:
+        rows = (
+            db.query(VendorCard.id)
+            .filter(VendorCard.is_blacklisted.is_(False), VendorCard.engagement_score.isnot(None))
+            .order_by(VendorCard.engagement_score.desc().nullslast(), VendorCard.id)
+            .offset(offset)
+            .limit(page)
+            .all()
+        )
+        if not rows:
+            break
+        offset += len(rows)
+        batch = [cid for (cid,) in rows if cid not in exclude_ids]
+        reachable = _reachable_card_ids(db, batch)
+        for cid in batch:  # rows are score-ordered, so this keeps the top-`needed` by score
+            if cid in reachable:
+                collected.add(cid)
+                if len(collected) >= needed:
+                    break
+        if len(rows) < page:
+            break  # pool exhausted — no more engagement-scored cards to page
+    return collected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -308,26 +361,21 @@ def rank_buyers_for(
     # commodity tag OVERLAPPING the target commodities, OR carries an engagement score — so
     # the working set is bounded to exactly that union instead of loading every VendorCard
     # into Python (finding #19). The old ``commodity_tags.isnot(None)`` predicate matched the
-    # default ``[]`` and narrowed nothing; the genuine tag-overlap is now pushed into SQL
-    # (Postgres JSONB ``?|`` on the GIN index, SQLite Python fallback — see
-    # ``_tag_overlap_candidate_ids``), and the cold engagement tier is capped to ``limit*3``
-    # by score (the whole result is capped at ``limit``, so 3× headroom always fills the tier
-    # after unreachable/DNC filtering).
+    # default ``[]`` and narrowed nothing; the genuine (case-insensitive) tag-overlap is now
+    # pushed into SQL (Postgres correlated EXISTS, SQLite Python fallback — see
+    # ``_tag_overlap_candidate_ids``). The cold engagement tier is filled by paging cards in
+    # score order THROUGH the reachability gate (``_top_reachable_engagement_ids``) until it has
+    # up to ``limit`` reachable ids — a fixed ``limit*3`` cap taken before that gate would starve
+    # the panel when the top band is mostly unreachable/DNC. Gathering ``limit`` reachable
+    # engagement ids (excluding the stronger tiers) is enough headroom: worst case the history/
+    # tag tiers contribute nothing and the engagement tier alone must fill all ``limit`` slots.
     history_ids = bought_part_buyers | commodity_offer_buyers
     tag_overlap_ids = _tag_overlap_candidate_ids(db, target_commodities)
+    priority_ids = history_ids | tag_overlap_ids
 
-    engagement_ids: set[int] = set()
-    if limit > 0:
-        engagement_rows = (
-            db.query(VendorCard.id)
-            .filter(VendorCard.is_blacklisted.is_(False), VendorCard.engagement_score.isnot(None))
-            .order_by(VendorCard.engagement_score.desc().nullslast())
-            .limit(limit * 3)
-            .all()
-        )
-        engagement_ids = {cid for (cid,) in engagement_rows}
+    engagement_ids = _top_reachable_engagement_ids(db, exclude_ids=priority_ids, needed=limit) if limit > 0 else set()
 
-    candidate_ids = history_ids | tag_overlap_ids | engagement_ids
+    candidate_ids = priority_ids | engagement_ids
     if not candidate_ids:
         return []
 

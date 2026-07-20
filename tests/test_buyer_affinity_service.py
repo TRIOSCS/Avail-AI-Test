@@ -107,6 +107,21 @@ def _reachable_card(db: Session, name: str, *, engagement: float | None = None) 
     return vc
 
 
+def _unreachable_card(db: Session, name: str, *, engagement: float | None = None) -> VendorCard:
+    """A buyer card with NO VendorContact email — the RFQ reachability gate drops it
+    (used to prove the cold engagement tier still fills the panel past an unreachable
+    top band)."""
+    vc = VendorCard(
+        normalized_name=name.lower(),
+        display_name=name,
+        emails=[],
+        engagement_score=engagement,
+    )
+    db.add(vc)
+    db.flush()
+    return vc
+
+
 @pytest.fixture()
 def excess_list(db_session: Session, seller_company: Company, trader: User) -> ExcessList:
     el = ExcessList(company_id=seller_company.id, owner_id=trader.id, title="C Excess")
@@ -869,14 +884,37 @@ class TestCandidateNarrowing:
     def test_engagement_tier_still_fills_to_limit(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
     ):
-        """The engagement tier is capped to ``limit*3`` in SQL but still fills the panel
-        to ``limit`` — the cold tiebreak is never starved."""
+        """The cold engagement tiebreak fills the panel to ``limit`` when reachable
+        engagement buyers exist — it is never starved."""
         for i in range(10):
             _reachable_card(db_session, f"Eng {i}", engagement=float(i))
         db_session.commit()
         ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id, limit=3)
         assert len(ranked) == 3
         assert all(r.rank_reason == "engagement" for r in ranked)
+
+    def test_engagement_tier_fills_past_unreachable_top_band(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """The engagement tiebreak must still fill to ``limit`` when the highest-scored
+        engagement band is ENTIRELY unreachable and the reachable buyers sit below it.
+
+        Finding: selecting the top ``limit*3`` engagement cards BEFORE the reachability gate
+        starves the panel when >2/3 of that top band is unreachable/DNC (common in a broker
+        CRM). With ``limit=2`` the top 6 by score are unreachable; three reachable buyers
+        rank 7-9. The panel must surface 2 reachable engagement buyers, not 0.
+        """
+        for i in range(6):  # top limit*3 by score — all unreachable (no contact)
+            _unreachable_card(db_session, f"Unreach {i}", engagement=100.0 - i)
+        for i in range(3):  # lower-scored but reachable — must fill the panel
+            _reachable_card(db_session, f"Reach Eng {i}", engagement=float(3 - i))
+        db_session.commit()
+
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id, limit=2)
+
+        assert len(ranked) == 2, "the panel must fill from the reachable band below the top"
+        assert all(r.rank_reason == "engagement" for r in ranked)
+        assert all(not r.display_name.startswith("Unreach") for r in ranked)
 
 
 @requires_postgres
@@ -918,3 +956,41 @@ class TestPostgresTagOverlapPushdown:
         ids = {r.vendor_card_id for r in ranked}
         assert overlap.id in ids
         assert non_overlap.id not in ids
+
+    def test_jsonb_pushdown_matches_mixed_case_stored_tags(self, pg_session: Session):
+        """The ``?|`` candidate push-down must be CASE-INSENSITIVE against stored tags.
+
+        Finding: ``commodity_tags`` are written verbatim by the LLM material-analysis writers
+        (vendor_/customer_analysis_service — only ``str().strip()``, NO lowercasing), so a
+        real buyer's tag is Title/mixed case (``["Capacitors"]``) while the target category is
+        the canonical lowercase slug (``"capacitors"``). A case-sensitive push-down drops that
+        buyer from the panel on Postgres even though it genuinely buys the commodity — the
+        SQLite Python fallback lowercases both sides and would hide the regression. A buyer
+        with a mixed-case overlapping tag, no history and no engagement MUST be suggested.
+        """
+        co = Company(name="PG MixedCase Seller")
+        pg_session.add(co)
+        pg_session.flush()
+        owner = User(email="pg-mixed-trader@trioscs.com", name="PG Mixed Trader", role="trader", azure_id="pg-mix-001")
+        pg_session.add(owner)
+        pg_session.flush()
+        el = ExcessList(company_id=co.id, owner_id=owner.id, title="PG MixedCase Excess")
+        pg_session.add(el)
+        pg_session.flush()
+        mc = _material_card(pg_session, "GRM188R", _CAP)  # category == "capacitors" (lowercase slug)
+        li = ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="GRM188R",
+            quantity=100,
+            material_card_id=mc.id,
+            asking_price=Decimal("1.00"),
+        )
+        pg_session.add(li)
+        pg_session.flush()
+
+        mixed = _reachable_card(pg_session, "PG MixedCase")
+        mixed.commodity_tags = ["Capacitors"]  # Title case, exactly as the LLM writer stores it
+        pg_session.commit()
+
+        ranked = svc.rank_buyers_for(pg_session, excess_list_id=el.id)
+        assert mixed.id in {r.vendor_card_id for r in ranked}
