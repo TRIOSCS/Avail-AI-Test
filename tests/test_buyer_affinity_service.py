@@ -412,6 +412,56 @@ class TestRecomputeBuyerScore:
         assert score.wins == 0
         assert score.response_rate is None or score.response_rate == Decimal("0.00")
 
+    def test_manual_log_sent_touch_counts_but_failed_excluded(
+        self, db_session: Session, excess_list: ExcessList, trader: User
+    ):
+        """Denominator decision (#17, resolved in-plan): a manual-log SENT touch — a
+        genuine phone/teams/marketplace contact written status=SENT with sent_at=None —
+        MUST count in the response_rate denominator; a FAILED/SENDING/INTERRUPTED row
+        must NOT (it never reached the buyer).
+
+        One manual SENT + one RESPONDED + one FAILED → 1/2 = 0.50 (proves the manual
+        SENT counted AND the FAILED was excluded).
+        """
+        buyer = _reachable_card(db_session, "Manual Buyer")
+        now = datetime.now(UTC)
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="phone",  # manual-log touch: genuinely contacted, no send timestamp
+                status=ExcessOutreachStatus.SENT,
+                sent_at=None,
+            )
+        )
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="email",
+                status=ExcessOutreachStatus.RESPONDED,
+                sent_at=now - timedelta(days=1),
+            )
+        )
+        db_session.add(
+            ExcessOutreach(
+                excess_list_id=excess_list.id,
+                target_vendor_card_id=buyer.id,
+                submitted_by=trader.id,
+                channel="email",
+                status=ExcessOutreachStatus.FAILED,
+                send_error="did not send",
+                created_at=now,
+            )
+        )
+        db_session.commit()
+
+        score = svc.recompute_buyer_score(db_session, buyer.id)
+        # sent = manual-log SENT + RESPONDED = 2 (FAILED excluded); responded = 1 → 0.50.
+        assert score.response_rate == Decimal("0.50")
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  overlap_warning
