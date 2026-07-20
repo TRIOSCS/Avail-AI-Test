@@ -12,7 +12,7 @@ pytest-cov>=7.1.0
 pytest-xdist>=3.8.0
 responses>=0.26.2
 freezegun>=1.5.5
-schemathesis>=4.22.4
+schemathesis>=4.24.0
 nest_asyncio>=1.6.0
 
 # E2E / Playwright
@@ -25,7 +25,7 @@ itsdangerous>=2.1.0
 pybreaker>=1.4.1
 
 # Linting
-ruff>=0.15.21
+ruff>=0.15.22
 
 # Type checking
 mypy>=2.3.0
@@ -44,4 +44,4 @@ ipdb>=0.13.13
 
 # Lockfile management — compiles requirements*.in -> requirements*.txt.
 # Pinned in the lock so CI's drift-gate uses the same compiler version we do.
-pip-tools>=7.5.3
+pip-tools>=7.6.0
