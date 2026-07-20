@@ -31,7 +31,7 @@
   <form hx-post='/v2/partials/customers/{{ company.id }}/contacts'
         hx-target='#contacts-tab-list'
         hx-swap='innerHTML'
-        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
         data-loading-disable
         x-data='{"newSite": false}'
         class='space-y-3'>
@@ -40,7 +40,7 @@
   <form hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ contact.id }}/edit'
         hx-target='{{ "#main-content" if _from_contacts else "#contacts-tab-list" }}'
         hx-swap='innerHTML'
-        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
         data-loading-disable
         class='space-y-3'>
     {% if _from_contacts %}
@@ -83,17 +83,22 @@
     {% endif %}
 
     {# ── Core contact fields ─────────────────────────────────────────────── #}
+    {# Legacy contacts hold their name only in full_name (first/last columns NULL).
+       Prefill from a first-space split so the form shows the real name and an
+       untouched save round-trips it exactly via _recompose_full_name (single-space
+       join) instead of 400ing on two empty name fields. #}
+    {% set _legacy_name = (contact.full_name or '').split(' ', 1) if contact and not contact.first_name and not contact.last_name else [] %}
     <div class='grid grid-cols-2 gap-2'>
       <div>
         <label class='form-label'>First Name <span class='text-rose-500'>*</span></label>
         <input type='text' name='first_name'
-               value='{{ (contact.first_name if contact else "") | e }}'
+               value='{{ ((contact.first_name or _legacy_name[0]|default("")) if contact else "") | e }}'
                class='input'>
       </div>
       <div>
         <label class='form-label'>Last Name</label>
         <input type='text' name='last_name'
-               value='{{ (contact.last_name if contact else "") | e }}'
+               value='{{ ((contact.last_name or _legacy_name[1]|default("")) if contact else "") | e }}'
                class='input'>
       </div>
     </div>
@@ -101,21 +106,21 @@
     <div>
       <label class='form-label'>Title</label>
       <input type='text' name='title'
-             value='{{ (contact.title if contact else "") | e }}'
+             value='{{ ((contact.title or "") if contact else "") | e }}'
              class='input'>
     </div>
 
     <div>
       <label class='form-label'>Email</label>
       <input type='email' name='email'
-             value='{{ (contact.email if contact else "") | e }}'
+             value='{{ ((contact.email or "") if contact else "") | e }}'
              class='input'>
     </div>
 
     <div>
       <label class='form-label'>Phone</label>
       <input type='tel' name='phone'
-             value='{{ (contact.phone if contact else "") | e }}'
+             value='{{ ((contact.phone or "") if contact else "") | e }}'
              class='input'>
     </div>
 
@@ -123,13 +128,13 @@
       <div>
         <label class='form-label'>Secondary Email</label>
         <input type='email' name='secondary_email' maxlength='255'
-               value='{{ (contact.secondary_email if contact else "") | e }}'
+               value='{{ ((contact.secondary_email or "") if contact else "") | e }}'
                class='input'>
       </div>
       <div>
         <label class='form-label'>Secondary Phone</label>
         <input type='tel' name='secondary_phone' maxlength='100'
-               value='{{ (contact.secondary_phone if contact else "") | e }}'
+               value='{{ ((contact.secondary_phone or "") if contact else "") | e }}'
                class='input'>
       </div>
     </div>
@@ -156,7 +161,7 @@
     <div>
       <label class='form-label'>WeChat ID</label>
       <input type='text' name='wechat_id' maxlength='100'
-             value='{{ (contact.wechat_id if contact else "") | e }}'
+             value='{{ ((contact.wechat_id or "") if contact else "") | e }}'
              class='input'>
     </div>
 
@@ -197,7 +202,7 @@
     <div>
       <label class='form-label'>LinkedIn URL</label>
       <input type='url' name='linkedin_url' maxlength='500'
-             value='{{ (contact.linkedin_url if contact else "") | e }}'
+             value='{{ ((contact.linkedin_url or "") if contact else "") | e }}'
              placeholder='https://linkedin.com/in/…'
              class='input'>
     </div>
@@ -206,7 +211,7 @@
     <div>
       <label class='form-label'>Notes</label>
       <textarea name='notes' rows='2'
-                class='input'>{{ (contact.notes if contact else "") | e }}</textarea>
+                class='input'>{{ ((contact.notes or "") if contact else "") | e }}</textarea>
     </div>
 
     <div class='flex justify-end gap-2 pt-1'>

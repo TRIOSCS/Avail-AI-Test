@@ -60,7 +60,9 @@
        drag-to-move + drag-to-resize with its size/position remembered. All ~13
        modals share this one wrapper; behavior lives in resizableModal()
        (htmx_app.js). On phones it renders as a full-width bottom sheet (CSS). ── #}
-  <div x-data="resizableModal()" x-show="open" x-cloak x-transition
+  {# Opacity-only, fast: the default x-transition scales the whole fixed layer,
+     which reads as a sluggish open/close on modest hardware. #}
+  <div x-data="resizableModal()" x-show="open" x-cloak x-transition.opacity.duration.100ms
        @open-modal.window="onOpen($event.detail)"
        @close-modal.window="onClose()"
        @keydown.escape.window="onClose()"

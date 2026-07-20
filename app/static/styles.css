@@ -74,6 +74,7 @@
   .badge-warning { @apply badge bg-amber-50 text-amber-700 border-amber-200; }
   .badge-danger  { @apply badge bg-rose-50 text-rose-700 border-rose-200; }
   .badge-info    { @apply badge bg-brand-100 text-brand-700 border-brand-200; }
+  .badge-neutral { @apply badge bg-gray-100 text-gray-600 border-gray-200; }
 
   /* ── Cards — resting surfaces. Border is brand-200 (the dominant card
      border) so cards never depend on the legacy border-gray override. ── */
@@ -655,6 +656,11 @@ table {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+/* While content is empty (fetch in flight) hold a sane panel height so the modal
+   never flashes as a grip+close sliver, and the loading spinner has room to show. */
+.modal-content-region:empty {
+  min-height: 180px;
 }
 /* Visible drag-to-move grip — a flex child at the top of .modal-shell (NOT an absolute
    overlay), so it occupies its own space and the modal's title/controls sit cleanly below

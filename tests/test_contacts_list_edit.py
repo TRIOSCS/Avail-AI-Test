@@ -156,3 +156,115 @@ class TestContactsListReadability:
         assert "DNC" in body
         assert "Priority contact" in body
         assert "HQ" in body
+
+
+@pytest.fixture()
+def legacy_contact(db_session: Session, test_company: Company, test_user: User) -> SiteContact:
+    """A legacy contact: name lives only in full_name (first/last NULL), all else NULL."""
+    test_company.account_owner_id = test_user.id
+    site = CustomerSite(company_id=test_company.id, site_name="Legacy Plant", site_type="plant", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    contact = SiteContact(
+        customer_site_id=site.id,
+        full_name="David Tuckman",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(contact)
+    db_session.commit()
+    db_session.refresh(contact)
+    return contact
+
+
+@pytest.fixture()
+def unrelated_client(db_session: Session):
+    """TestClient authenticated as a buyer who owns NO companies/sites."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    stranger = User(
+        email="stranger_contacts_edit@example.com",
+        name="Stranger",
+        role="buyer",
+        azure_id="stranger-azure-contacts-edit",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(stranger)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: stranger
+    app.dependency_overrides[require_admin] = lambda: stranger
+    app.dependency_overrides[require_buyer] = lambda: stranger
+    app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+    with TestClient(app) as c:
+        yield c
+
+    for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+        app.dependency_overrides.pop(dep, None)
+
+
+class TestEditFormAuthz:
+    """The edit-form GET must gate on can_manage_account like its save-path peer."""
+
+    def test_unrelated_rep_gets_404(self, unrelated_client, test_company, owned_contact):
+        resp = unrelated_client.get(f"/v2/partials/customers/{test_company.id}/contacts/{owned_contact.id}/edit-form")
+        assert resp.status_code == 404
+
+    def test_owner_still_gets_200(self, client, test_company, owned_contact):
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{owned_contact.id}/edit-form")
+        assert resp.status_code == 200
+
+
+class TestNullFieldPrefill:
+    """NULL columns must prefill as '' — never the literal string 'None'."""
+
+    def test_null_fields_never_render_none(self, client, test_company, legacy_contact):
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{legacy_contact.id}/edit-form")
+        assert resp.status_code == 200
+        assert "value='None'" not in resp.text
+        assert ">None</textarea>" not in resp.text
+
+    def test_legacy_full_name_prefills_name_fields(self, client, test_company, legacy_contact):
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{legacy_contact.id}/edit-form")
+        assert "value='David'" in resp.text
+        assert "value='Tuckman'" in resp.text
+
+    def test_untouched_save_round_trips_legacy_name(self, client, db_session, test_company, legacy_contact):
+        """Submitting the form exactly as prefilled must not corrupt the name or 400."""
+        site_id = legacy_contact.customer_site_id
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{site_id}/contacts/{legacy_contact.id}/edit",
+            data={
+                "first_name": "David",
+                "last_name": "Tuckman",
+                "title": "",
+                "email": "",
+                "phone": "",
+                "notes": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        refreshed = db_session.get(SiteContact, legacy_contact.id)
+        assert refreshed.full_name == "David Tuckman"
+        assert refreshed.first_name == "David"
+        assert refreshed.last_name == "Tuckman"
+        assert refreshed.email is None
+
+    def test_single_token_legacy_name_prefills_first_only(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id
+        site = CustomerSite(company_id=test_company.id, site_name="S2", site_type="office", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(customer_site_id=site.id, full_name="Cher", created_at=datetime.now(UTC))
+        db_session.add(contact)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 200
+        assert "value='Cher'" in resp.text
+        assert "value='None'" not in resp.text

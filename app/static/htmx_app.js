@@ -844,6 +844,16 @@ Alpine.data('sourcingWorkspace', (selectedLeadId, leadIds) => ({
  */
 const MODAL_GEOM_KEY = 'avail_modal_geom';
 const MODAL_DESKTOP_MQ = '(min-width: 1024px)';
+// Saved panel sizes below this are junk (a bar, not a modal) — ignore on restore.
+const MODAL_MIN_SAVED_W = 320;
+const MODAL_MIN_SAVED_H = 240;
+
+// Geometry memory is keyed per modal (numeric path segments normalized), so a size
+// the user gave one modal never cramps a different one that shares the host.
+function modalGeomBucketKey(url) {
+    if (!url) return '';
+    return url.split('?')[0].replace(/\/\d+(?=\/|$)/g, '/:id');
+}
 
 Alpine.data('resizableModal', () => ({
     open: false,
@@ -851,6 +861,7 @@ Alpine.data('resizableModal', () => ({
     custom: false,            // true once the user has dragged/resized this bucket
     width: 0, height: 0, left: 0, top: 0,
     isDesktop: window.matchMedia(MODAL_DESKTOP_MQ).matches,
+    bucketKey: '',            // per-modal geometry identity, from the opened url
     _drag: null,
     _mq: null,
     _onMQ: null,
@@ -860,7 +871,8 @@ Alpine.data('resizableModal', () => ({
     _boundCancel: null,
 
     get bucket() {
-        return this.wide ? 'wide' : 'lg';
+        const size = this.wide ? 'wide' : 'lg';
+        return this.bucketKey ? `${size}:${this.bucketKey}` : size;
     },
 
     init() {
@@ -894,11 +906,30 @@ Alpine.data('resizableModal', () => ({
     // Called from @open-modal — preserves the existing {url, wide} dispatch contract.
     onOpen(detail) {
         this.wide = !!(detail && detail.wide);
+        this.bucketKey = modalGeomBucketKey(detail && detail.url);
         this.open = true;
         this.isDesktop = this._mq ? this._mq.matches : window.matchMedia(MODAL_DESKTOP_MQ).matches;
         this._restore();
+        // Drop the previous modal's DOM so the panel never flashes stale content
+        // while the new form is in flight.
+        const content = document.getElementById('modal-content');
+        if (content) content.replaceChildren();
         if (detail && detail.url) {
-            htmx.ajax('GET', detail.url, { target: '#modal-content', swap: 'innerHTML', indicator: '#modal-loading' });
+            // htmx.ajax has no `indicator` option — drive the spinner class by hand.
+            const loading = document.getElementById('modal-loading');
+            if (loading) loading.classList.add('htmx-request');
+            Promise.resolve(htmx.ajax('GET', detail.url, { target: '#modal-content', swap: 'innerHTML' }))
+                .then(() => {
+                    // Land the user in the form: focus its first field unless the loaded
+                    // content already claimed focus (or we're on mobile, where focusing
+                    // would pop the keyboard).
+                    if (!this.isDesktop || !content || content.contains(document.activeElement)) return;
+                    const field = content.querySelector(
+                        'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
+                    );
+                    if (field) field.focus();
+                })
+                .finally(() => { if (loading) loading.classList.remove('htmx-request'); });
         }
     },
 
@@ -921,7 +952,7 @@ Alpine.data('resizableModal', () => ({
             return;
         }
         const saved = this._readAll()[this.bucket];
-        if (saved && saved.w && saved.h) {
+        if (saved && saved.w >= MODAL_MIN_SAVED_W && saved.h >= MODAL_MIN_SAVED_H) {
             const g = clampToViewport(saved, window.innerWidth, window.innerHeight);
             this.width = g.w; this.height = g.h; this.left = g.l; this.top = g.t;
             this.custom = true;

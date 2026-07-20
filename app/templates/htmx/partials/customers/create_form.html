@@ -16,7 +16,7 @@
     <form hx-post="/v2/partials/customers/create"
           hx-target="#cdm-detail"
           hx-swap="innerHTML"
-          hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+          hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
           data-loading-disable
           class="space-y-4">
 

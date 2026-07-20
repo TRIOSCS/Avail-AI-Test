@@ -124,3 +124,114 @@ describe('resizableModal — pointercancel teardown (fix c)', () => {
     expect(target.releasePointerCapture).toHaveBeenCalled();
   });
 });
+
+describe('resizableModal — per-modal geometry buckets (edit-modal glitch fix)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('derives the bucket from the opened URL with numeric ids normalized', () => {
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/7/contacts/32/edit-form?origin=contacts&filter_limit=50' });
+    expect(m.bucket).toBe('lg:/v2/partials/customers/:id/contacts/:id/edit-form');
+  });
+
+  it('keeps wide and standard buckets for the same URL separate', () => {
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/foo/9/picker', wide: true });
+    expect(m.bucket).toBe('wide:/v2/partials/foo/:id/picker');
+  });
+
+  it('falls back to the legacy size bucket when opened without a url', () => {
+    const m = makeModal();
+    m.init();
+    m.onOpen({});
+    expect(m.bucket).toBe('lg');
+  });
+
+  it('does not apply geometry saved by a DIFFERENT modal', () => {
+    localStorage.setItem(
+      'avail_modal_geom',
+      JSON.stringify({ 'lg:/v2/partials/other/create-form': { w: 380, h: 260, l: 900, t: 700 } }),
+    );
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
+    expect(m.custom).toBe(false);
+  });
+
+  it('ignores legacy shared-bucket entries (bare "lg" key) when a url is present', () => {
+    localStorage.setItem('avail_modal_geom', JSON.stringify({ lg: { w: 380, h: 260, l: 900, t: 700 } }));
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
+    expect(m.custom).toBe(false);
+  });
+
+  it('still restores geometry saved for the SAME modal', () => {
+    localStorage.setItem(
+      'avail_modal_geom',
+      JSON.stringify({ 'lg:/v2/partials/customers/:id/contacts/:id/edit-form': { w: 600, h: 500, l: 100, t: 100 } }),
+    );
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/5/contacts/9/edit-form?origin=contacts' });
+    expect(m.custom).toBe(true);
+    expect(m.width).toBe(600);
+    expect(m.height).toBe(500);
+  });
+
+  it('ignores degenerate saved sizes below the sane minimum', () => {
+    localStorage.setItem(
+      'avail_modal_geom',
+      JSON.stringify({ 'lg:/v2/partials/customers/:id/contacts/:id/edit-form': { w: 200, h: 120, l: 10, t: 10 } }),
+    );
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/5/contacts/9/edit-form' });
+    expect(m.custom).toBe(false);
+  });
+});
+
+describe('resizableModal — onOpen loading behavior (edit-modal glitch fix)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML =
+      '<div id="modal-loading"></div><div id="modal-content"><form id="stale-form"><input name="stale"></form></div>';
+  });
+
+  it('clears the previous modal content and toggles the spinner across the fetch', async () => {
+    const htmxMod = (await import('htmx.org')).default as any;
+    let resolveAjax: () => void = () => {};
+    htmxMod.ajax.mockReturnValue(new Promise<void>((r) => { resolveAjax = r; }));
+
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
+
+    const content = document.getElementById('modal-content')!;
+    const loading = document.getElementById('modal-loading')!;
+    expect(content.children.length).toBe(0); // stale form dropped before fetch lands
+    expect(loading.classList.contains('htmx-request')).toBe(true); // spinner visible
+
+    resolveAjax();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loading.classList.contains('htmx-request')).toBe(false);
+  });
+
+  it('focuses the first visible field of the loaded content on desktop', async () => {
+    const htmxMod = (await import('htmx.org')).default as any;
+    htmxMod.ajax.mockImplementation(() => {
+      document.getElementById('modal-content')!.innerHTML =
+        '<form><input type="hidden" name="origin"><input name="first_name"></form>';
+      return Promise.resolve();
+    });
+
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect((document.activeElement as HTMLInputElement).name).toBe('first_name');
+  });
+});

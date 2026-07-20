@@ -1369,6 +1369,10 @@ async def contact_edit_form_company_scoped(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    # 404 (not 403) to match company_detail_partial: out-of-scope accounts must be
+    # indistinguishable from missing ones, and this form leaks full contact PII.
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     # Same-company contacts for reports_to select, excluding self
     site_contacts_for_select = (
         db.query(SiteContact)

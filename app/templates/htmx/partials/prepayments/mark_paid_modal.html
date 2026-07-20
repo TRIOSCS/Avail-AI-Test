@@ -27,7 +27,7 @@
         hx-target='#ap-hub-body'
         hx-swap='innerHTML'
         hx-push-url='false'
-        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
         data-loading-disable
         class='space-y-3'>
     <input type='hidden' name='scope' value='{{ scope }}'>

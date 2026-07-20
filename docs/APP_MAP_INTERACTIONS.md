@@ -3311,7 +3311,26 @@ UI for uploading a vendor's stock list. All three are thin routes in
   `filter_*` values (namespaced to dodge the form's own `contact_role` field);
   `edit_site_contact` detects `origin=contacts` and re-renders THIS list via
   `_contacts_list_response(..., prefix="filter_")` (filters + paging intact, toast via
-  `HX-Trigger`) instead of the company Contacts-tab grouped list.
+  `HX-Trigger`) instead of the company Contacts-tab grouped list. The edit-form GET
+  gates on `can_manage_account` (404, matching `company_detail_partial`) like its
+  save-path peer. The form prefills NULL columns as `''` (never the literal `None`)
+  and, for legacy contacts whose name lives only in `full_name`, splits it on the
+  first space into the first/last inputs so an untouched save round-trips exactly.
+  Row links/buttons carry `@keyup.stop` in addition to `@click.stop` so Enter on a
+  focused child never double-fires the row's account navigation.
+
+  **Global modal host** (`base.html` + `resizableModal()` in `htmx_app.js`): on
+  `open-modal {url}` it clears the previous modal's DOM, hand-toggles the
+  `#modal-loading` spinner around the `htmx.ajax` fetch (htmx.ajax has no
+  `indicator` option), holds a 180px min-height while `#modal-content` is empty
+  (no grip+close "sliver" flash), and focuses the first field of the loaded form
+  on desktop. Geometry memory (`avail_modal_geom`) is keyed **per modal** —
+  `lg|wide` + the opened URL with numeric ids normalized to `:id` — so a size
+  saved for one modal never cramps another; degenerate saved sizes (<320×240)
+  are ignored. Modal close-after-save uses plain JS
+  `this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))` inside
+  `hx-on::after-request` — Alpine's `$dispatch` is undefined in hx-on context
+  (htmx evals it as plain JS; see CLAUDE.md anti-patterns).
 - **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
   — global vendor-contacts list, the HTML twin of `GET /api/vendor-contacts/bulk`
   (`vendor_contacts.py`). View-open (`require_user`; vendor data is not tenant-scoped);
