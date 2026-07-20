@@ -507,7 +507,6 @@ def submit_offer(
     user: User,
     scope: str,
     notes: str | None = None,
-    valid_until: datetime | None = None,
     lines: list[dict] | None = None,
     take_all_total_price: Decimal | None = None,
     buyer_company_id: int | None = None,
@@ -560,7 +559,6 @@ def submit_offer(
         offerer_vendor_card_id=offerer_vendor_card_id,
         scope=scope_value,
         notes=notes,
-        valid_until=valid_until,
         status=offer_status_for_list(excess_list.status),
         take_all_total_price=take_all_total_price if scope_value == ExcessOfferScope.TAKE_ALL else None,
     )

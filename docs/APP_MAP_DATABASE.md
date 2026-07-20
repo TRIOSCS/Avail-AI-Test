@@ -944,8 +944,8 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 **`excess_offers`** — Inbound broker offer to BUY a posted list (the Resell offer model; replaced the dropped `bids`)
 - excess_list_id -> excess_lists (CASCADE), submitted_by -> users
 - offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
-- scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
-- status: open -> won -> lost -> expired -> withdrawn (late = post-close, queued)
+- scope: per_line | take_all; take_all_total_price (lump, take_all only)
+- status: open -> won -> lost -> withdrawn (late = post-close, queued); `valid_until` dropped (migration 201, D6 dead column)
 - ix_excess_offers_vendor_card on offerer_vendor_card_id (migration 200) — the buyer-affinity last-bid / who-to-offer history queries + award win-hook all filter/join on the canonical buyer card
 
 **`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
