@@ -12,8 +12,7 @@
    height cap). autoSelectFirst loads the first account into the detail pane on mount
    when nothing is selected. #}
 <div id="cdm-workspace" class="flex flex-col"
-     x-data="{ selectedId: null, autoSelectFirst() { if (this.selectedId !== null) return; const detail = this.$el.querySelector('#cdm-detail'); if (!detail || !detail.querySelector('[data-cdm-empty]')) return; const first = this.$el.querySelector('#cdm-list [role=\'button\'][hx-get]'); if (first) first.click() } }"
-     x-init="$nextTick(() => autoSelectFirst())">
+     x-data="{ selectedId: {{ companies[0].id if companies else 'null' }} }">
 
   {# List-refresh hook — the create/edit-account modals fire HX-Trigger=cdmListRefresh on
      success; this hidden element reloads the left account list (honoring the live filters)
@@ -246,9 +245,21 @@
          @keydown.left.prevent="leftWidth = Math.max(20, leftWidth - 2); localStorage.setItem('avail_split_cdm', leftWidth)"
          @keydown.right.prevent="leftWidth = Math.min(70, leftWidth + 2); localStorage.setItem('avail_split_cdm', leftWidth)"></div>
 
-    {# Right panel: account detail #}
+    {# Right panel: account detail. When the workspace has accounts, deterministically
+       auto-load the first one on mount via an htmx load trigger (fires reliably after
+       htmx processes the swapped-in content — no Alpine x-init/htmx-binding race). The
+       row's selectedId is pre-set in the x-data above so it highlights to match. #}
     <div id="cdm-detail" class="w-full md:w-auto md:flex-1 bg-white min-w-0 p-4">
+      {% if companies %}
+      <div hx-get="/v2/partials/customers/{{ companies[0].id }}"
+           hx-trigger="load"
+           hx-target="#cdm-detail"
+           hx-swap="innerHTML">
+        {% include "htmx/partials/customers/_detail_empty.html" %}
+      </div>
+      {% else %}
       {% include "htmx/partials/customers/_detail_empty.html" %}
+      {% endif %}
     </div>
 
   </div>
