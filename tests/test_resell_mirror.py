@@ -269,6 +269,94 @@ def test_same_company_same_part_two_lists_no_collapse(db_session: Session):
 
 
 # ---------------------------------------------------------------------------
+# Within-list line identity (finding #18) — duplicate-part lines each keep a
+# distinct Sighting, keyed on excess_line_item_id (migration 199).
+# ---------------------------------------------------------------------------
+
+
+def _dup_part_list(db_session: Session, company: Company, owner: User) -> ExcessList:
+    """A single list with TWO lines for the SAME part (same material_card), distinct
+    qty."""
+    el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=owner.id)
+    import_line_items(
+        db_session,
+        el.id,
+        [
+            {"part_number": "LM358N", "quantity": "50"},
+            {"part_number": "LM358N", "quantity": "75"},
+        ],
+    )
+    return el
+
+
+def test_within_list_two_lines_same_part_two_sightings(db_session: Session):
+    """Two lines on ONE list with the SAME part/material_card but distinct qty → TWO
+    distinct Sightings (was: collapsed into one row, hiding live supply).
+
+    Finding #18.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    lines = _lines(db_session, el)
+    assert len(lines) == 2
+    assert lines[0].material_card_id == lines[1].material_card_id  # same card — the trap
+
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 2, f"Expected 2 sightings (one per line), got {len(rows)}"
+    assert {r.qty_available for r in rows} == {50, 75}
+    # Each Sighting is keyed to its OWN line.
+    assert {r.excess_line_item_id for r in rows} == {lines[0].id, lines[1].id}
+
+
+def test_resync_dup_part_lines_update_not_duplicate(db_session: Session):
+    """Re-syncing duplicate-part lines UPDATES each line's own Sighting (still 2
+    rows)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    lines = _lines(db_session, el)
+    lines[0].quantity = 111
+    db_session.commit()
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 2  # updated in place, not duplicated
+    assert {r.qty_available for r in rows} == {111, 75}
+
+
+def test_retire_one_twin_leaves_sibling_sighting(db_session: Session):
+    """Retiring ONE duplicate-part line deletes ONLY its own Sighting; the twin survives
+    (was: shared-row deletion wiped both).
+
+    Finding #18.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _dup_part_list(db_session, company, owner)
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    first, second = _lines(db_session, el)
+    retire_line(db_session, first)
+    db_session.commit()
+
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 1
+    assert rows[0].excess_line_item_id == second.id
+    assert rows[0].qty_available == 75
+
+
+# ---------------------------------------------------------------------------
 # retire_line — award / withdraw / qty→0
 # ---------------------------------------------------------------------------
 

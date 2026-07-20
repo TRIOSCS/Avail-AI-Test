@@ -124,24 +124,20 @@ def ensure_virtual_requirement(db: Session, excess_list: ExcessList) -> Requirem
     return requirement
 
 
-def _find_mirror(
-    db: Session, source_company_id: int | None, material_card_id: int, requirement_id: int
-) -> Sighting | None:
-    """Find the existing mirrored Sighting for the upsert key.
+def _find_mirror(db: Session, excess_line_item_id: int) -> Sighting | None:
+    """Find the existing mirrored Sighting for one excess LINE.
 
-    Upsert key is ``(source_company_id, material_card_id, requirement_id)`` scoped to
-    ``source_type='customer_excess'`` — the explicit key that sidesteps the connector-
-    aware delete-by-(requirement_id, source_type) dedup trap. Including ``requirement_id``
-    (one per list's virtual requirement) ensures two lists for the same company+part
-    each keep their own distinct Sighting rather than collapsing into one row.
+    The upsert key is the line's own id (``excess_line_item_id``) scoped to
+    ``source_type='customer_excess'`` — the explicit, line-identity key that sidesteps the
+    connector-aware delete-by-(requirement_id, source_type) dedup trap AND keeps two
+    duplicate-part lines on one list (same company+material_card+virtual requirement) as
+    DISTINCT Sightings instead of collapsing them into one row (finding #18, migration 199).
     """
     return (
         db.query(Sighting)
         .filter(
             Sighting.source_type == "customer_excess",
-            Sighting.source_company_id == source_company_id,
-            Sighting.material_card_id == material_card_id,
-            Sighting.requirement_id == requirement_id,
+            Sighting.excess_line_item_id == excess_line_item_id,
         )
         .order_by(Sighting.id.asc())
         .first()
@@ -158,11 +154,11 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
     ``normalized_mpn`` (via ``normalize_mpn_key``) for matcher linkage, a synthesized
     internal ``vendor_name`` (NEVER the customer name), and qty/condition from the line.
 
-    Upserts by ``(source_company_id, material_card_id)`` — a re-sync UPDATES the existing
-    row instead of inserting a duplicate, and never deletes sibling ``customer_excess``
-    rows. Returns the Sighting, or ``None`` when the line has no MaterialCard (the upsert
-    key needs one; an unresolvable MPN is skipped, never raised). Flushes; does NOT
-    commit.
+    Upserts by ``excess_line_item_id`` (the line's own id) — a re-sync UPDATES the line's
+    own row instead of inserting a duplicate, never deletes a sibling ``customer_excess``
+    row, and keeps two duplicate-part lines on one list as distinct Sightings (#18). Returns
+    the Sighting, or ``None`` when the line has no MaterialCard (the row still needs one for
+    matcher linkage; an unresolvable MPN is skipped, never raised). Flushes; does NOT commit.
     """
     excess_list = line.excess_list or db.get(ExcessList, line.excess_list_id)
     if excess_list is None:  # pragma: no cover - defensive
@@ -197,7 +193,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         "date_code": line.date_code,
     }
 
-    existing = _find_mirror(db, excess_list.company_id, line.material_card_id, requirement.id)
+    existing = _find_mirror(db, line.id)
     if existing is None:
         sighting = sighting_from_row(requirement.id, row)
     else:
@@ -218,6 +214,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
 
     # Excess-specific columns sighting_from_row does not set.
     sighting.source_company_id = excess_list.company_id
+    sighting.excess_line_item_id = line.id
     sighting.material_card_id = line.material_card_id
     sighting.normalized_mpn = norm_key or None
 
@@ -231,17 +228,12 @@ def retire_line(db: Session, line: ExcessLineItem) -> None:
     """Retire (delete) the mirrored Sighting for *line* on award / withdraw / qty→0.
 
     Deletes the row outright (consistent with how ``_save_sightings`` removes stale
-    sightings — the matcher reads live rows, never a soft-deleted excess shadow). A
-    no-op when the line has no mirror or no MaterialCard. Flushes; does NOT commit.
+    sightings — the matcher reads live rows, never a soft-deleted excess shadow). Looked up
+    by the line's own id, so retiring ONE duplicate-part line deletes only ITS Sighting and
+    leaves the twin line's row live (#18, migration 199). A no-op when the line has no
+    mirror. Flushes; does NOT commit.
     """
-    if line.material_card_id is None:
-        return
-    excess_list = line.excess_list or db.get(ExcessList, line.excess_list_id)
-    if excess_list is None:
-        return
-    company_id = excess_list.company_id
-    requirement = ensure_virtual_requirement(db, excess_list)
-    existing = _find_mirror(db, company_id, line.material_card_id, requirement.id)
+    existing = _find_mirror(db, line.id)
     if existing is not None:
         db.delete(existing)
         db.flush()
