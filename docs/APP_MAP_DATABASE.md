@@ -879,7 +879,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > `unaward_offer` (the explicit inverse — never a silent auto-swap to a new winner: 409 if
 > not won, reverts offer->`open` + lines->`available`, recomputes rollups + buyer score
 > (full-history recompute self-heals `wins` back down), re-mirrors the lines, and steps the
-> list off `awarded` -> `bid_out` (close_at set) else `collecting`; `POST /api/resell/{id}/offers/{offer_id}/unaward`).
+> list off `awarded` -> `bid_out` (posting window CLOSED — `close_at` in the past) else `collecting`
+> (a bare truthy `close_at` is NOT closed: Phase 5 preserves a FUTURE deadline through publish, so the
+> step-back is time-based via `_posting_window_closed`); `POST /api/resell/{id}/offers/{offer_id}/unaward`).
 > Award never auto-marks the losing offers `lost` (`ExcessOfferStatus.LOST` stays
 > defined-but-unassigned) — "not selected" is a pure render decision (line awarded + this
 > row's offer != won). `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and

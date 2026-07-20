@@ -593,6 +593,41 @@ class TestUnawardOfferService:
 
         assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1
 
+    def test_unaward_future_deadline_list_steps_to_collecting_and_re_mirrors(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """A D1 list published with a FUTURE 'Offers close by' deadline, awarded then
+        unawarded, steps back to COLLECTING and re-advertises its supply — NOT bid_out.
+
+        Findings #1/#3: once Phase 5 preserves a create-set future ``close_at`` through
+        publish, a truthy ``close_at`` is no longer proof the posting window was closed.
+        The window here never closed (its deadline is still in the future), so reversing
+        the award must re-open the list to ``collecting`` and re-mirror its live supply —
+        not strand it in ``bid_out`` with its mirror retired.
+        """
+        from datetime import datetime, timedelta
+
+        excess_list.close_at = datetime.now(UTC) + timedelta(days=3)
+        db_session.commit()
+        publish_list(db_session, excess_list.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.close_at is not None  # future deadline preserved through publish
+
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.AWARDED  # precondition
+        assert _customer_excess_sightings(db_session, excess_list.company_id) == []  # retired on award
+
+        excess_service.unaward_offer(db_session, offer.id, owner)
+
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.COLLECTING  # window still open → re-advertise
+        assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1  # re-mirrored
+
     def test_unaward_by_non_owner_forbidden(
         self,
         db_session: Session,

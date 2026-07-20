@@ -997,6 +997,28 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     return offer
 
 
+def _posting_window_closed(excess_list: ExcessList, *, now: datetime | None = None) -> bool:
+    """True when the list's posting window has genuinely closed as of *now*.
+
+    The window is closed when its ``close_at`` deadline has PASSED — whether stamped by an
+    explicit ``close_list`` (which records ``close_at`` = the moment of closing, always in
+    the past by the time we read it) or a create-set deadline that has since lapsed. A
+    *future* ``close_at`` is NOT closed: the window is still live and collecting.
+
+    A truthy ``close_at`` alone stopped being proof of closure once Phase 5 preserved a
+    future create-set deadline through ``excess_mirror.publish_list`` (findings #1/#3);
+    this time check restores the invariant ``unaward_offer`` relies on. Tolerates naive
+    datetimes by stamping UTC (SQLite strips tzinfo), mirroring ``publish_list`` /
+    ``resell._hours_until``.
+    """
+    close_at = excess_list.close_at
+    if close_at is None:
+        return False
+    if close_at.tzinfo is None:
+        close_at = close_at.replace(tzinfo=UTC)
+    return close_at <= (now or datetime.now(UTC))
+
+
 def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     """Reverse an award — the explicit inverse of :func:`award_offer`.
 
@@ -1038,11 +1060,16 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     recompute_buyer_score_on_win(db, offer)
 
     # Step the list status back off ``awarded`` BEFORE re-mirroring so the mirror re-sync
-    # sees the reverted posting status (M5): a list stepping back to ``collecting``
-    # re-advertises its now-live lines, while one stepping back to ``bid_out`` (a window
-    # that had already closed) stays retired — a closed posting never re-advertises.
+    # sees the reverted posting status (M5): a list whose window is still open steps back to
+    # ``collecting`` and re-advertises its now-live lines, while one whose window has already
+    # closed (its ``close_at`` deadline has passed) steps to ``bid_out`` and stays retired —
+    # a closed posting never re-advertises. The window-closed test is time-based, NOT a bare
+    # ``close_at`` truthiness check: Phase 5 preserves a FUTURE create-set deadline through
+    # publish, so a truthy ``close_at`` no longer implies the window closed (findings #1/#3).
     if excess_list.status == ExcessListStatus.AWARDED:
-        excess_list.status = ExcessListStatus.BID_OUT if excess_list.close_at else ExcessListStatus.COLLECTING
+        excess_list.status = (
+            ExcessListStatus.BID_OUT if _posting_window_closed(excess_list) else ExcessListStatus.COLLECTING
+        )
 
     from . import excess_mirror
 

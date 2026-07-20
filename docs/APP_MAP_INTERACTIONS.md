@@ -2102,8 +2102,10 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
     |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
     |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
-    |     (close_at set) else collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed
-    |     posting stays retired — M5). Same _award_response OOB)
+    |     (posting window CLOSED — close_at in the PAST, via _posting_window_closed; NOT bare
+    |     close_at truthiness, since Phase 5 preserves a FUTURE deadline through publish) else
+    |     collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed posting stays retired,
+    |     while a still-open future-deadline list re-advertises — M5, findings #1/#3). Same _award_response OOB)
     +-- POST /api/resell/{id}/offer-lines/{offer_line_id}/assign (owner-only; finding #15;
     |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
@@ -2216,7 +2218,9 @@ to `expired` and retires their mirror; the left-list stage filter now offers the
   (open/collecting only) + `close_at_display`; `_header_chips.html`/`_lists.html` render the
   countdown ONLY while live and a muted "closed {date}" once resolved — never a red "Overdue"
   on a resolved list (the shared `time_text` macro is gated at the resell-template level, never
-  edited).
+  edited). `_close_at_display` returns the label ONLY for a PAST `close_at`: a non-live list
+  holding a FUTURE create-set deadline (a draft with an "Offers close by" next week, or an
+  awarded list whose deadline survived publish) shows NO "closed {future date}" chip (finding #2).
 - *Mirror line-identity (finding #18, migration 199).* `sightings.excess_line_item_id`
   (FK, indexed) is the mirror upsert/retire key — two duplicate-part lines on one list keep
   distinct Sightings and one award/withdraw no longer wipes the twin.

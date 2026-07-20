@@ -230,10 +230,17 @@ def test_is_live_only_open_collecting(db_session: Session, status, expected_live
     assert _is_live(el) is expected_live
 
 
-def test_close_at_display_formats_and_handles_none():
+def test_close_at_display_past_only():
+    """The muted 'closed {date}' label renders only for a window that has ACTUALLY
+    closed — None for no deadline AND for a still-future deadline (finding #2: a draft
+    or awarded list holding a future create-set close_at must not read 'closed
+    {future}')."""
     assert _close_at_display(None) is None
-    label = _close_at_display(datetime(2026, 7, 20, 15, 30, tzinfo=UTC))
-    assert label == "Jul 20"
+    # A future deadline has not closed → there is no "closed on" date to show.
+    assert _close_at_display(datetime.now(UTC) + timedelta(days=3)) is None
+    # A past deadline formats as a coarse "Mon DD" label.
+    past = datetime.now(UTC) - timedelta(days=10)
+    assert _close_at_display(past) == past.strftime("%b %d")
 
 
 def test_resolved_list_card_is_not_live_no_overdue(db_session: Session):
@@ -255,6 +262,40 @@ def test_resolved_list_card_is_not_live_no_overdue(db_session: Session):
     card = cards[0]
     assert card["is_live"] is False
     assert card["close_at_display"] is not None
+
+
+def test_future_deadline_non_live_list_has_no_closed_label(db_session: Session):
+    """A non-live list holding a FUTURE close_at must NOT render a muted 'closed {future
+    date}' chip — the window has not closed yet (finding #2).
+
+    Two concrete leaks this guards: a DRAFT with an 'Offers close by' next week (never
+    opened), and an AWARDED list whose create-set future deadline survived publish. Both
+    are ``is_live=False`` with a future ``close_at``; neither has a real 'closed on' date.
+    """
+    company = _make_company(db_session)
+    owner = _make_user(db_session, email="future-nonlive@test.com")
+    draft = ExcessList(
+        company_id=company.id,
+        owner_id=owner.id,
+        title="Future Draft",
+        status=ExcessListStatus.DRAFT,
+        close_at=datetime.now(UTC) + timedelta(days=5),
+    )
+    awarded = ExcessList(
+        company_id=company.id,
+        owner_id=owner.id,
+        title="Future Awarded",
+        status=ExcessListStatus.AWARDED,
+        close_at=datetime.now(UTC) + timedelta(days=5),
+    )
+    db_session.add_all([draft, awarded])
+    db_session.commit()
+
+    cards = {c["list"].id: c for c in _list_cards(db_session, [draft, awarded], can_see_customer=True)}
+    assert cards[draft.id]["is_live"] is False
+    assert cards[draft.id]["close_at_display"] is None
+    assert cards[awarded.id]["is_live"] is False
+    assert cards[awarded.id]["close_at_display"] is None
 
 
 def test_live_list_card_is_live(db_session: Session):

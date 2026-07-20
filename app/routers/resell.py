@@ -130,6 +130,12 @@ def _is_live(el: ExcessList) -> bool:
 def _close_at_display(close_at: datetime | None) -> str | None:
     """Coarse ``Mon DD`` label for a resolved list's muted "closed on" chip (or None).
 
+    Returns a label ONLY for a window that has ACTUALLY closed — a ``close_at`` in the
+    past. A missing deadline OR a still-future one yields None: a non-live list holding a
+    future create-set deadline (a draft with an 'Offers close by' next week, or an awarded
+    list whose deadline survived publish) has no "closed on" date and must not render
+    "closed {future date}" (finding #2).
+
     Tolerates naive datetimes by stamping UTC (SQLite strips tzinfo), mirroring
     ``_hours_until``. Not an urgency signal — just when the window closed.
     """
@@ -137,6 +143,8 @@ def _close_at_display(close_at: datetime | None) -> str | None:
         return None
     if close_at.tzinfo is None:
         close_at = close_at.replace(tzinfo=UTC)
+    if close_at > datetime.now(UTC):
+        return None
     return close_at.strftime("%b %d")
 
 
