@@ -510,6 +510,7 @@ def submit_offer(
     valid_until: datetime | None = None,
     lines: list[dict] | None = None,
     take_all_total_price: Decimal | None = None,
+    buyer_company_id: int | None = None,
 ) -> ExcessOffer:
     """Submit an inbound offer (a broker's offer to BUY) on a posted excess list.
 
@@ -521,6 +522,12 @@ def submit_offer(
     ``ambiguous``). Unmatched/ambiguous rows keep ``mpn_raw`` and are QUEUED for manual
     resolution — never dropped. Affected matched lines get their best-price rollup
     recomputed.
+
+    ``buyer_company_id`` (optional, D1/#17 UI half): when a trader attributes the offer to a
+    buyer company, it is canonicalized to a VendorCard via ``counterparty_card`` and stored
+    on ``offerer_vendor_card_id`` so the award win-hook (``recompute_buyer_score_on_win``)
+    scores the buyer. When unset, ``offerer_vendor_card_id`` stays None (no regression — the
+    offer still wins, just unattributed).
 
     Guards (raise HTTPException, never silent): the list must exist (404); *user* must
     have ``can_offer`` (403); and *user* must not own the list — self-offer blocked
@@ -538,9 +545,19 @@ def submit_offer(
 
     scope_value = ExcessOfferScope(scope).value  # raises ValueError on a bad scope
 
+    # Buyer attribution (optional): canonicalize the named buyer company to its VendorCard so
+    # the award win-hook can score it. Lazy import breaks the excess_service ↔
+    # resell_outreach_service cycle (resell_outreach_service imports excess_service at top).
+    offerer_vendor_card_id: int | None = None
+    if buyer_company_id is not None:
+        from .resell_outreach_service import counterparty_card
+
+        offerer_vendor_card_id = counterparty_card(db, company_id=buyer_company_id).id
+
     offer = ExcessOffer(
         excess_list_id=list_id,
         submitted_by=user.id,
+        offerer_vendor_card_id=offerer_vendor_card_id,
         scope=scope_value,
         notes=notes,
         valid_until=valid_until,

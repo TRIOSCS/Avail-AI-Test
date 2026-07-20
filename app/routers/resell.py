@@ -1030,10 +1030,18 @@ async def resell_offer_form(
     if el.status not in {s.value for s in _POSTED_STATUSES}:
         raise HTTPException(404, "List not found")
     # Only ever rendered to a non-owner (is_owner 403s above), so the header shows the
-    # anonymized label — never the seller-named free-text title.
+    # anonymized label — never the seller-named free-text title. ``companies`` backs the
+    # optional buyer-attribution select (#17 UI half) — the same CRM company list the create
+    # modal exposes, not competitor-offer data (no can_see_customer leak).
+    companies = db.scalars(select(Company).order_by(Company.name)).all()
     return template_response(
         "htmx/partials/resell/offer_form.html",
-        {"request": request, "list": el, "display_title": _display_title(el, can_see_customer=is_owner)},
+        {
+            "request": request,
+            "list": el,
+            "display_title": _display_title(el, can_see_customer=is_owner),
+            "companies": companies,
+        },
     )
 
 
@@ -1392,6 +1400,7 @@ async def resell_submit_offer(
     lead_time_days: str = Form(""),
     terms_text: str = Form(""),
     take_all_total_price: str = Form(""),
+    buyer_company_id: int | None = Form(None),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
@@ -1434,6 +1443,7 @@ async def resell_submit_offer(
         notes=notes or None,
         lines=lines,
         take_all_total_price=_to_decimal(take_all_total_price) if scope == ExcessOfferScope.TAKE_ALL else None,
+        buyer_company_id=buyer_company_id,
     )
 
     el = excess_service.get_excess_list(db, list_id)
