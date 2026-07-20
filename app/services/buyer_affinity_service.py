@@ -42,7 +42,8 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from loguru import logger
-from sqlalchemy import or_
+from sqlalchemy import Text, cast
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
 from ..constants import ExcessOfferStatus, ExcessOutreachStatus
@@ -187,6 +188,49 @@ def _reachable_card_ids(db: Session, card_ids: list[int]) -> set[int]:
     return non_dnc
 
 
+def _tag_overlap_candidate_ids(db: Session, target_commodities: set[str]) -> set[int]:
+    """Non-blacklisted buyer card ids whose ``commodity_tags`` overlap the target
+    commodities.
+
+    The genuine tag-overlap candidate branch of :func:`rank_buyers_for` (finding #19) — the
+    replacement for the old ``commodity_tags.isnot(None)`` predicate, which matched every
+    card's default ``[]`` and so narrowed nothing. Dialect-branched:
+
+    - **PostgreSQL:** the JSONB ``?|`` (any-key) operator ``commodity_tags ?| target[]``,
+      which uses the existing GIN index ``ix_vendor_cards_commodity_tags_gin`` (migration
+      082 — no new index). ``?|`` is exact / case-sensitive; ``commodity_tags`` are stored
+      as canonical lowercase commodity slugs (``specialty_detector.detect_commodities_from_text``
+      lowercases, and they share ``MaterialCard.category``'s vocabulary — the source of
+      ``target_commodities``), so the target array is passed in BOTH its original and
+      lowercased casing to stay a superset of the case-insensitive Python tier check the
+      ranking loop applies.
+    - **SQLite / other:** a bounded Python set-intersection over the tagged cards (the
+      cross-DB fallback the in-memory test suite exercises).
+    """
+    if not target_commodities:
+        return set()
+    bind = db.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        target_array = sorted({c for c in target_commodities} | {c.lower() for c in target_commodities})
+        rows = (
+            db.query(VendorCard.id)
+            .filter(
+                VendorCard.is_blacklisted.is_(False),
+                VendorCard.commodity_tags.op("?|")(cast(target_array, ARRAY(Text))),
+            )
+            .all()
+        )
+        return {cid for (cid,) in rows}
+    target_lower = {c.lower() for c in target_commodities}
+    rows = (
+        db.query(VendorCard.id, VendorCard.commodity_tags)
+        .filter(VendorCard.is_blacklisted.is_(False), VendorCard.commodity_tags.isnot(None))
+        .all()
+    )
+    return {cid for cid, tags in rows if tags and ({str(t).lower() for t in tags} & target_lower)}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  RANK BUYERS
 # ═══════════════════════════════════════════════════════════════════════
@@ -260,16 +304,45 @@ def rank_buyers_for(
         commodity_offer_buyers = {cid for (cid,) in rows}
 
     # ── Candidate universe: non-blacklisted buyer cards that could PLAUSIBLY rank. ──
-    # A card only survives the ranking loop below if it is a Tier-1/2 history buyer, is
-    # commodity-tagged, OR carries an engagement score — so we bound the query to exactly
-    # that set instead of loading every VendorCard into Python (Item-0). The commodity-tag
-    # JSON column is matched in Python (cross-DB safe), but the SQL pre-filter keeps only
-    # cards that have *some* tags / score / history, capping the working set.
+    # A card only survives the ranking loop below if it is a Tier-1/2 history buyer, has a
+    # commodity tag OVERLAPPING the target commodities, OR carries an engagement score — so
+    # the working set is bounded to exactly that union instead of loading every VendorCard
+    # into Python (finding #19). The old ``commodity_tags.isnot(None)`` predicate matched the
+    # default ``[]`` and narrowed nothing; the genuine tag-overlap is now pushed into SQL
+    # (Postgres JSONB ``?|`` on the GIN index, SQLite Python fallback — see
+    # ``_tag_overlap_candidate_ids``), and the cold engagement tier is capped to ``limit*3``
+    # by score (the whole result is capped at ``limit``, so 3× headroom always fills the tier
+    # after unreachable/DNC filtering).
     history_ids = bought_part_buyers | commodity_offer_buyers
-    candidate_filters = [VendorCard.engagement_score.isnot(None), VendorCard.commodity_tags.isnot(None)]
-    if history_ids:
-        candidate_filters.append(VendorCard.id.in_(list(history_ids)))
-    candidates = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False), or_(*candidate_filters)).all()
+    tag_overlap_ids = _tag_overlap_candidate_ids(db, target_commodities)
+
+    engagement_ids: set[int] = set()
+    if limit > 0:
+        engagement_rows = (
+            db.query(VendorCard.id)
+            .filter(VendorCard.is_blacklisted.is_(False), VendorCard.engagement_score.isnot(None))
+            .order_by(VendorCard.engagement_score.desc().nullslast())
+            .limit(limit * 3)
+            .all()
+        )
+        engagement_ids = {cid for (cid,) in engagement_rows}
+
+    candidate_ids = history_ids | tag_overlap_ids | engagement_ids
+    if not candidate_ids:
+        return []
+
+    # Project only the 4 columns the ranking reads (not full ORM rows), re-applying the
+    # blacklist gate so a blacklisted Tier-1/2 history buyer is still excluded.
+    candidates = (
+        db.query(
+            VendorCard.id,
+            VendorCard.display_name,
+            VendorCard.engagement_score,
+            VendorCard.commodity_tags,
+        )
+        .filter(VendorCard.is_blacklisted.is_(False), VendorCard.id.in_(list(candidate_ids)))
+        .all()
+    )
 
     reachable = _reachable_card_ids(db, [c.id for c in candidates])
     if not reachable:

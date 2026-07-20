@@ -39,7 +39,7 @@ from app.models.excess import (
 from app.models.intelligence import MaterialCard
 from app.models.vendors import VendorContact
 from app.services import buyer_affinity_service as svc
-from tests.conftest import engine
+from tests.conftest import engine, requires_postgres
 
 _ = engine
 
@@ -805,3 +805,116 @@ class TestItem0Bounds:
         db_session.commit()
         ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id, limit=2)
         assert len(ranked) == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  #19 — candidate narrowing + SQL tier push-down
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCandidateNarrowing:
+    def test_candidate_set_excludes_pure_noise_cards(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, monkeypatch
+    ):
+        """#19: the candidate universe handed to the reachability gate is the genuine
+        (history ∪ tag-overlap ∪ top-engagement) union — NOT every non-blacklisted card.
+
+        A card with a genuinely overlapping commodity tag is a candidate; 30 pure-noise
+        cards (empty ``[]`` tags, no engagement, no history) are NOT — proving the old
+        ``commodity_tags.isnot(None)`` predicate (which matched the default ``[]``) no
+        longer drags every card through the reachability gate + ranking loop.
+        """
+        real = _reachable_card(db_session, "Real Overlap")  # engagement None
+        real.commodity_tags = [_CAP]
+        for i in range(30):
+            _reachable_card(db_session, f"Noise {i}")  # [] tags, no engagement, no history
+        db_session.commit()
+
+        handed: list[list[int]] = []
+        original = svc._reachable_card_ids
+
+        def _spy(db, card_ids):
+            handed.append(list(card_ids))
+            return original(db, card_ids)
+
+        monkeypatch.setattr(svc, "_reachable_card_ids", _spy)
+
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id)
+
+        assert real.id in {r.vendor_card_id for r in ranked}
+        assert handed, "the reachability gate should run once over the candidate union"
+        candidate_ids = set(handed[0])
+        assert real.id in candidate_ids
+        # The 30 noise cards must NOT be candidates — the gate sees only the real overlap buyer.
+        assert len(candidate_ids) < 5, f"candidate set not narrowed: {len(candidate_ids)} cards handed to gate"
+
+    def test_non_overlapping_tag_without_engagement_or_history_dropped(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """A card tagged only for a NON-target commodity, with no engagement and no
+        history, is not returned (behavior preserved: dropped by the ranking loop
+        before, now excluded at the candidate stage); an overlapping card is still
+        returned."""
+        overlap = _reachable_card(db_session, "Overlap Cap")
+        overlap.commodity_tags = [_CAP, "resistors"]
+        non_overlap = _reachable_card(db_session, "Only Conn")
+        non_overlap.commodity_tags = [_CONN]
+        db_session.commit()
+
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id)
+        ids = {r.vendor_card_id for r in ranked}
+        assert overlap.id in ids
+        assert non_overlap.id not in ids
+
+    def test_engagement_tier_still_fills_to_limit(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """The engagement tier is capped to ``limit*3`` in SQL but still fills the panel
+        to ``limit`` — the cold tiebreak is never starved."""
+        for i in range(10):
+            _reachable_card(db_session, f"Eng {i}", engagement=float(i))
+        db_session.commit()
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id, limit=3)
+        assert len(ranked) == 3
+        assert all(r.rank_reason == "engagement" for r in ranked)
+
+
+@requires_postgres
+class TestPostgresTagOverlapPushdown:
+    """The PostgreSQL-only JSONB ``?|`` candidate push-down (skipped on SQLite)."""
+
+    def test_jsonb_any_key_selects_only_overlapping_buyers(self, pg_session: Session):
+        """On real PostgreSQL the ``?|`` push-down (GIN-indexed candidate branch)
+        selects exactly the commodity-overlapping buyers; a non-overlapping, engagement-
+        less, history-less card is excluded — proving the PG branch matches the SQLite
+        fallback."""
+        co = Company(name="PG Seller")
+        pg_session.add(co)
+        pg_session.flush()
+        owner = User(email="pg-affinity-trader@trioscs.com", name="PG Trader", role="trader", azure_id="pg-aff-001")
+        pg_session.add(owner)
+        pg_session.flush()
+        el = ExcessList(company_id=co.id, owner_id=owner.id, title="PG Excess")
+        pg_session.add(el)
+        pg_session.flush()
+        mc = _material_card(pg_session, "GRM188R", _CAP)
+        li = ExcessLineItem(
+            excess_list_id=el.id,
+            part_number="GRM188R",
+            quantity=100,
+            material_card_id=mc.id,
+            asking_price=Decimal("1.00"),
+        )
+        pg_session.add(li)
+        pg_session.flush()
+
+        overlap = _reachable_card(pg_session, "PG Overlap")
+        overlap.commodity_tags = [_CAP]
+        non_overlap = _reachable_card(pg_session, "PG NonOverlap")
+        non_overlap.commodity_tags = [_CONN]
+        pg_session.commit()
+
+        ranked = svc.rank_buyers_for(pg_session, excess_list_id=el.id)
+        ids = {r.vendor_card_id for r in ranked}
+        assert overlap.id in ids
+        assert non_overlap.id not in ids
