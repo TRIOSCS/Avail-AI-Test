@@ -1534,94 +1534,106 @@ class TestAwardRaceConcurrency:
     def test_concurrent_award_serialized_one_wins_one_409(self, pg_engine):
         session_factory = sessionmaker(bind=pg_engine, autoflush=False, expire_on_commit=True)
 
-        # ── Seed one list + one line + two open offers (distinct buyer cards) ──
-        setup = session_factory()
+        # The ENTIRE body is wrapped so ``_truncate_all`` runs even when an assertion below
+        # raises. This test exists to catch a lock regression, and on that regression the
+        # pass/fail assertions raise BEFORE any success-path cleanup would run — leaving the
+        # seeded rows on the session-scoped ``pg_engine`` to pollute every later
+        # ``@requires_postgres`` test. Cleanup MUST be on the outer ``finally``, not the
+        # success path, so a real regression fails THIS test only and cascades to no other.
         try:
-            owner = User(email="race-owner@trioscs.com", name="Race Owner", role="trader", azure_id="race-owner-001")
-            setup.add(owner)
-            setup.flush()
-            co = Company(name="Race Seller Co")
-            setup.add(co)
-            setup.flush()
-            el = ExcessList(
-                company_id=co.id, owner_id=owner.id, title="Race Excess", status=ExcessListStatus.COLLECTING
-            )
-            setup.add(el)
-            setup.flush()
-            mc = MaterialCard(normalized_mpn="grm188r", display_mpn="GRM188R", category="capacitors")
-            setup.add(mc)
-            setup.flush()
-            line = ExcessLineItem(
-                excess_list_id=el.id,
-                part_number="GRM188R",
-                quantity=1000,
-                material_card_id=mc.id,
-                asking_price=Decimal("1.00"),
-            )
-            setup.add(line)
-            setup.flush()
-            card_a = _buyer_card(setup, "Race Buyer A")
-            card_b = _buyer_card(setup, "Race Buyer B")
-            offer_a = _open_offer(
-                setup, excess_list=el, submitter=owner, line=line, buyer=card_a, unit_price=Decimal("0.80")
-            )
-            offer_b = _open_offer(
-                setup, excess_list=el, submitter=owner, line=line, buyer=card_b, unit_price=Decimal("0.90")
-            )
-            setup.commit()
-            owner_id, line_id = owner.id, line.id
-            offer_a_id, offer_b_id = offer_a.id, offer_b.id
-            card_ids = [card_a.id, card_b.id]
-        finally:
-            setup.close()
-
-        # ── Two workers race the award, released together by the barrier ──
-        barrier = threading.Barrier(2)
-        results: dict[str, tuple[str, object]] = {}
-
-        def _worker(name: str, offer_id: int) -> None:
-            worker_db = session_factory()
+            # ── Seed one list + one line + two open offers (distinct buyer cards) ──
+            setup = session_factory()
             try:
-                worker_owner = worker_db.get(User, owner_id)
-                barrier.wait(timeout=20)
-                try:
-                    res = excess_service.award_offer(worker_db, offer_id, worker_owner)
-                    results[name] = ("won", res.status)
-                except HTTPException as exc:
-                    results[name] = ("http", exc.status_code)
-                except Exception as exc:  # pragma: no cover - surfaced in the assert below
-                    results[name] = ("error", repr(exc))
+                owner = User(
+                    email="race-owner@trioscs.com", name="Race Owner", role="trader", azure_id="race-owner-001"
+                )
+                setup.add(owner)
+                setup.flush()
+                co = Company(name="Race Seller Co")
+                setup.add(co)
+                setup.flush()
+                el = ExcessList(
+                    company_id=co.id, owner_id=owner.id, title="Race Excess", status=ExcessListStatus.COLLECTING
+                )
+                setup.add(el)
+                setup.flush()
+                mc = MaterialCard(normalized_mpn="grm188r", display_mpn="GRM188R", category="capacitors")
+                setup.add(mc)
+                setup.flush()
+                line = ExcessLineItem(
+                    excess_list_id=el.id,
+                    part_number="GRM188R",
+                    quantity=1000,
+                    material_card_id=mc.id,
+                    asking_price=Decimal("1.00"),
+                )
+                setup.add(line)
+                setup.flush()
+                card_a = _buyer_card(setup, "Race Buyer A")
+                card_b = _buyer_card(setup, "Race Buyer B")
+                offer_a = _open_offer(
+                    setup, excess_list=el, submitter=owner, line=line, buyer=card_a, unit_price=Decimal("0.80")
+                )
+                offer_b = _open_offer(
+                    setup, excess_list=el, submitter=owner, line=line, buyer=card_b, unit_price=Decimal("0.90")
+                )
+                setup.commit()
+                owner_id, line_id = owner.id, line.id
+                offer_a_id, offer_b_id = offer_a.id, offer_b.id
+                card_ids = [card_a.id, card_b.id]
             finally:
-                worker_db.close()
+                setup.close()
 
-        t1 = threading.Thread(target=_worker, args=("a", offer_a_id))
-        t2 = threading.Thread(target=_worker, args=("b", offer_b_id))
-        t1.start()
-        t2.start()
-        t1.join(timeout=25)
-        t2.join(timeout=25)
+            # ── Two workers race the award, released together by the barrier ──
+            barrier = threading.Barrier(2)
+            results: dict[str, tuple[str, object]] = {}
 
-        # ── Exactly one won; the other got a 409 (never a double-award, never an error) ──
-        assert set(results) == {"a", "b"}, f"a worker did not finish: {results}"
-        won = [n for n, r in results.items() if r[0] == "won"]
-        http = [r[1] for r in results.values() if r[0] == "http"]
-        errors = [r for r in results.values() if r[0] == "error"]
-        assert not errors, f"unexpected worker error: {results}"
-        assert len(won) == 1, f"expected exactly ONE award to win, got {results}"
-        assert http == [409], f"expected the loser to raise HTTPException(409), got {results}"
+            def _worker(name: str, offer_id: int) -> None:
+                worker_db = session_factory()
+                try:
+                    worker_owner = worker_db.get(User, owner_id)
+                    barrier.wait(timeout=20)
+                    try:
+                        res = excess_service.award_offer(worker_db, offer_id, worker_owner)
+                        results[name] = ("won", res.status)
+                    except HTTPException as exc:
+                        results[name] = ("http", exc.status_code)
+                    except Exception as exc:  # pragma: no cover - surfaced in the assert below
+                        results[name] = ("error", repr(exc))
+                finally:
+                    worker_db.close()
 
-        # ── Final DB state: the line is awarded ONCE, exactly one offer WON, score fires once ──
-        check = session_factory()
-        try:
-            assert check.get(ExcessLineItem, line_id).status == ExcessLineItemStatus.AWARDED
-            won_offers = [
-                oid for oid in (offer_a_id, offer_b_id) if check.get(ExcessOffer, oid).status == ExcessOfferStatus.WON
-            ]
-            assert won_offers == won_offers[:1], f"expected exactly one WON offer, got {won_offers}"
-            assert len(won_offers) == 1
-            scores = check.query(BuyerScore).filter(BuyerScore.vendor_card_id.in_(card_ids)).all()
-            assert len(scores) == 1, f"the win-hook must fire once (one BuyerScore), got {len(scores)}"
-            assert scores[0].wins == 1
+            t1 = threading.Thread(target=_worker, args=("a", offer_a_id))
+            t2 = threading.Thread(target=_worker, args=("b", offer_b_id))
+            t1.start()
+            t2.start()
+            t1.join(timeout=25)
+            t2.join(timeout=25)
+
+            # ── Exactly one won; the other got a 409 (never a double-award, never an error) ──
+            assert set(results) == {"a", "b"}, f"a worker did not finish: {results}"
+            won = [n for n, r in results.items() if r[0] == "won"]
+            http = [r[1] for r in results.values() if r[0] == "http"]
+            errors = [r for r in results.values() if r[0] == "error"]
+            assert not errors, f"unexpected worker error: {results}"
+            assert len(won) == 1, f"expected exactly ONE award to win, got {results}"
+            assert http == [409], f"expected the loser to raise HTTPException(409), got {results}"
+
+            # ── Final DB state: the line is awarded ONCE, exactly one offer WON, score fires once ──
+            check = session_factory()
+            try:
+                assert check.get(ExcessLineItem, line_id).status == ExcessLineItemStatus.AWARDED
+                won_offers = [
+                    oid
+                    for oid in (offer_a_id, offer_b_id)
+                    if check.get(ExcessOffer, oid).status == ExcessOfferStatus.WON
+                ]
+                assert won_offers == won_offers[:1], f"expected exactly one WON offer, got {won_offers}"
+                assert len(won_offers) == 1
+                scores = check.query(BuyerScore).filter(BuyerScore.vendor_card_id.in_(card_ids)).all()
+                assert len(scores) == 1, f"the win-hook must fire once (one BuyerScore), got {len(scores)}"
+                assert scores[0].wins == 1
+            finally:
+                check.close()
         finally:
-            check.close()
             self._truncate_all(pg_engine)
