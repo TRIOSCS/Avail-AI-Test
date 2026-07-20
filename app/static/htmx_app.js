@@ -1044,13 +1044,17 @@ Alpine.data('resizableModal', () => ({
 Alpine.data('contactsView', () => ({
   q: '',
   siteFilter: '',
+  // Label state for the Expand/Collapse-all toggle. The actual per-row `open` state
+  // lives on each <tbody data-contact-row>; the toggle drives them via window events.
+  allOpen: false,
   init() {
     // Pre-select site filter when the tab was opened via a "View N contacts →" link.
     const initialSite = this.$root.getAttribute('data-initial-site');
     if (initialSite) this.siteFilter = initialSite;
     this.apply();
-    // Re-filter after a CRUD swap replaces the inner #contacts-tab-list rows.
-    this._onSettle = () => this.apply();
+    // Re-filter after a CRUD swap replaces the inner #contacts-tab-list rows. The
+    // fresh rows render collapsed, so reset the toggle label to match.
+    this._onSettle = () => { this.allOpen = false; this.apply(); };
     this.$root.addEventListener('htmx:afterSettle', this._onSettle);
   },
   destroy() {

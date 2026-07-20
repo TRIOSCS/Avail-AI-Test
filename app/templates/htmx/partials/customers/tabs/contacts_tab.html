@@ -61,6 +61,13 @@
         {% endif %}
       </div>
       <div class="flex items-center gap-2 flex-shrink-0">
+        {# Expand / collapse every contact's detail drawer at once. Dispatches window
+           events the per-row <tbody> listens for (@expand-all / @collapse-all). #}
+        <button type="button"
+                @click="allOpen = !allOpen; $dispatch(allOpen ? 'expand-all' : 'collapse-all')"
+                class="btn-secondary btn-sm"
+                :aria-pressed="allOpen ? 'true' : 'false'"
+                x-text="allOpen ? 'Collapse all' : 'Expand all'">Expand all</button>
         {# "Find contacts" — only shown when a domain/website is available #}
         {% set company_domain = company.domain or company.website %}
         {% if company_domain %}

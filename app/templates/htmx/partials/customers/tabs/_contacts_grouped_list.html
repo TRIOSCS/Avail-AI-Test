@@ -90,10 +90,19 @@
              classList.toggle('hidden') on the data-contact-row element.
              Multiple <tbody> per table is valid HTML5.
              data-contact-search must be lowercase (JS does .includes(needle) on it).
-             data-site-id enables the per-site dropdown filter. #}
+             data-site-id enables the per-site dropdown filter.
+
+             x-data='{open:false}' lives HERE (not on the inner <tr>) because the
+             contact_row macro emits the summary row and the detail-drawer row as two
+             SIBLING <tr>s — Alpine scope reaches descendants, not siblings, so `open`
+             must be owned by the element that contains BOTH. @expand-all/@collapse-all
+             window events let the toolbar's Expand/Collapse-all toggle drive every row. #}
           {% for row in sorted_rows %}
             {% set _cname = (row.contact.full_name if row.contact else row.site.contact_name) or '' %}
             <tbody data-contact-row
+                   x-data="{open:false}"
+                   @expand-all.window="open=true"
+                   @collapse-all.window="open=false"
                    data-site-id="{{ grp_site.id if grp_site else 0 }}"
                    data-contact-search="{{ _cname | lower }}">
               {{ contact_row(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new', _roles, row.recent_note) }}
