@@ -188,15 +188,32 @@ def _target_line_ids(
     return list(line_item_ids)
 
 
-def _parts_snapshot(db: Session, excess_list: ExcessList, line_id: int | None) -> list[dict]:
-    """The offered-lines snapshot stored on ExcessOutreach.parts_included.
+def _campaign_parts_snapshot(db: Session, excess_list: ExcessList) -> tuple[list[dict], dict[int, list[dict]]]:
+    """Precompute the campaign's offered-lines snapshot in ONE query (finding #20).
 
-    One entry for the specific line, or the whole list for a whole-list touch.
+    Returns ``(whole_list_snapshot, by_line)``: ``whole_list_snapshot`` is the list's full
+    parts snapshot (the whole-list-touch ``parts_included`` payload); ``by_line`` maps each
+    line id to that line's single-entry snapshot (the per-line-touch payload). Both preserve
+    the EXACT ``parts_included`` dict keys (``part_number``, ``quantity``, ``line_item_id``)
+    persisted on ExcessOutreach and read back by the retry / reply paths — batching changes
+    only the query count, never the stored payload.
     """
-    q = db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id)
-    if line_id is not None:
-        q = q.filter(ExcessLineItem.id == line_id)
-    return [{"part_number": li.part_number, "quantity": li.quantity, "line_item_id": li.id} for li in q.all()]
+    whole_list_snapshot = [
+        {"part_number": li.part_number, "quantity": li.quantity, "line_item_id": li.id}
+        for li in db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id).all()
+    ]
+    by_line = {snap["line_item_id"]: [snap] for snap in whole_list_snapshot}
+    return whole_list_snapshot, by_line
+
+
+def _parts_snapshot(whole_list_snapshot: list[dict], by_line: dict[int, list[dict]], line_id: int | None) -> list[dict]:
+    """In-memory ``parts_included`` lookup over the precomputed campaign snapshot.
+
+    The whole-list snapshot for a whole-list touch (``line_id`` None), else the specific
+    line's single-entry snapshot (empty when the line is not on the list). Pure in-memory —
+    no query (the campaign snapshot was fetched once by :func:`_campaign_parts_snapshot`).
+    """
+    return whole_list_snapshot if line_id is None else by_line.get(line_id, [])
 
 
 def _has_live_recent_outreach(
@@ -230,11 +247,18 @@ def _make_outreach_rows(
     channel: str,
     line_ids: list[int | None],
     status: str,
+    whole_list_snapshot: list[dict],
+    by_line: dict[int, list[dict]],
     sent_at: datetime | None = None,
     send_subject: str | None = None,
     send_body: str | None = None,
 ) -> list[ExcessOutreach]:
-    """Create (and flush) one ExcessOutreach row per line id for a single buyer.
+    """Create one ExcessOutreach row per line id for a single buyer (does NOT flush).
+
+    ``whole_list_snapshot`` / ``by_line`` are the precomputed campaign snapshot
+    (:func:`_campaign_parts_snapshot`); each row's ``parts_included`` is looked up in-memory
+    (no per-line query). The caller owns the flush — a SINGLE flush after the per-buyer loop
+    assigns every id at once instead of one round-trip per buyer (finding #20).
 
     ``send_subject`` / ``send_body`` persist the EXACT text an email campaign was sent
     with (email path only) so the retry double-send guard can match the delivered message
@@ -249,14 +273,13 @@ def _make_outreach_rows(
             submitted_by=owner.id,
             channel=channel,
             status=status,
-            parts_included=_parts_snapshot(db, excess_list, line_id),
+            parts_included=_parts_snapshot(whole_list_snapshot, by_line, line_id),
             sent_at=sent_at,
             send_subject=send_subject,
             send_body=send_body,
         )
         db.add(row)
         rows.append(row)
-    db.flush()
     return rows
 
 
@@ -345,6 +368,7 @@ def submit_outreach(
     excess_list = _guard_owner(db, list_id, owner)
     channel_value = ExcessOutreachChannel(channel).value  # raises ValueError on a bad channel
     line_ids = _target_line_ids(db, excess_list, scope, line_item_ids)
+    whole_list_snapshot, by_line = _campaign_parts_snapshot(db, excess_list)
 
     all_rows: list[ExcessOutreach] = []
     for buyer in buyers:
@@ -357,6 +381,8 @@ def submit_outreach(
             channel=channel_value,
             line_ids=line_ids,
             status=ExcessOutreachStatus.SENT,
+            whole_list_snapshot=whole_list_snapshot,
+            by_line=by_line,
         )
         all_rows.extend(rows)
         _log_outreach_activity(
@@ -407,20 +433,29 @@ def enqueue_outreach_email(
     """
     excess_list = _guard_owner(db, list_id, owner)
     line_ids = _target_line_ids(db, excess_list, scope, line_item_ids)
+    whole_list_snapshot, by_line = _campaign_parts_snapshot(db, excess_list)
     cutoff = datetime.now(UTC) - _DUPLICATE_SUBMIT_WINDOW
 
     all_rows: list[ExcessOutreach] = []
-    plan: list[dict] = []
+    # Collect (plan-stub, rows) so the plan's ``row_ids`` are captured AFTER a SINGLE flush
+    # (a per-buyer flush inside _make_outreach_rows would be one round-trip per buyer).
+    pending_plan: list[tuple[dict, list[ExcessOutreach]]] = []
+    # Lines already scheduled per card WITHIN this submit — preserves the old per-buyer-flush
+    # dedup (two buyer entries canonicalizing to the same card) now that row creation flushes
+    # once at the end: with autoflush off, the DB dedup query cannot see the unflushed rows.
+    scheduled: dict[int, set[int | None]] = {}
     for buyer in buyers:
         card = _resolve_buyer_card(db, buyer)
         email = buyer.get("email") or _primary_email(card)
-        # Campaign idempotency: drop the line ids this buyer already has a LIVE
-        # (sending/sent) row for within the dedup window, so a re-submit makes no duplicate
-        # row / send. A buyer with nothing fresh left is skipped entirely.
+        seen = scheduled.setdefault(card.id, set())
+        # Campaign idempotency: drop the line ids this buyer already has a LIVE (sending/sent)
+        # row for within the dedup window, OR already scheduled earlier in THIS submit, so a
+        # re-submit makes no duplicate row / send. A buyer with nothing fresh left is skipped.
         fresh_line_ids = [
             lid
             for lid in line_ids
-            if not _has_live_recent_outreach(db, list_id=excess_list.id, card_id=card.id, line_id=lid, cutoff=cutoff)
+            if lid not in seen
+            and not _has_live_recent_outreach(db, list_id=excess_list.id, card_id=card.id, line_id=lid, cutoff=cutoff)
         ]
         if not fresh_line_ids:
             logger.info(
@@ -429,8 +464,10 @@ def enqueue_outreach_email(
                 excess_list.id,
             )
             continue
-        # Offered-parts snapshot for THIS buyer's fresh lines (drives the email body).
-        parts = [p["part_number"] for lid in fresh_line_ids for p in _parts_snapshot(db, excess_list, lid)]
+        seen.update(fresh_line_ids)
+        # Offered-parts snapshot for THIS buyer's fresh lines (drives the email body) — read
+        # from the precomputed campaign snapshot, no per-line query.
+        parts = [p["part_number"] for lid in fresh_line_ids for p in _parts_snapshot(whole_list_snapshot, by_line, lid)]
         rows = _make_outreach_rows(
             db,
             excess_list=excess_list,
@@ -441,9 +478,14 @@ def enqueue_outreach_email(
             status=ExcessOutreachStatus.SENDING,
             send_subject=subject,
             send_body=body,
+            whole_list_snapshot=whole_list_snapshot,
+            by_line=by_line,
         )
         all_rows.extend(rows)
-        plan.append({"card_id": card.id, "email": email, "row_ids": [r.id for r in rows], "parts": parts})
+        pending_plan.append(({"card_id": card.id, "email": email, "parts": parts}, rows))
+
+    db.flush()  # single flush assigns every row id at once
+    plan: list[dict] = [{**stub, "row_ids": [r.id for r in rows]} for stub, rows in pending_plan]
 
     db.commit()
     for row in all_rows:
@@ -470,7 +512,8 @@ async def _finalize_outreach_send(
 ) -> list[ExcessOutreach]:
     """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
     status. Shared by :func:`submit_outreach_email` (inline) and
-    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup live.
+    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup
+    live.
 
     Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
     the live RFQ tracking path is untouched). Graph ids do NOT come back in
@@ -796,8 +839,8 @@ async def retry_outreach_send(
     token: str,
     session_factory=None,
 ) -> None:
-    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, resend only
-    if the original never actually went out (the double-send guard).
+    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, resend
+    only if the original never actually went out (the double-send guard).
 
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
@@ -1114,7 +1157,8 @@ def _match_outreach(
     conversation_id: str | None,
     message_id: str | None,
 ) -> list[ExcessOutreach]:
-    """Match a reply to outreach rows — conversation id (whole thread) then message id.
+    """Match a reply to outreach rows — conversation id (whole thread) then message
+    id.
 
     Conversation id is the preferred key (matches all rows on the thread, like RFQ
     Tier-1 fan-out); message id is the exact-touch fallback. Vendor-scoped by
