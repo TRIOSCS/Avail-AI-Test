@@ -663,7 +663,7 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
     """
     import os as _os
 
-    from ..file_utils import extract_mpns_with_rows, parse_tabular_file
+    from ..file_utils import ParseError, extract_mpns_with_rows, parse_tabular_file
     from ..search_service import resolve_material_card, run_deterministic_passes
     from ..utils.normalization import normalize_mpn
 
@@ -678,7 +678,12 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
     if len(content) > 10_000_000:
         raise HTTPException(413, "File too large -- 10MB maximum")
 
-    rows = parse_tabular_file(content, file.filename or "")
+    # A corrupt/unreadable file raises ParseError (distinct from an empty one) so we tell the
+    # user the file couldn't be read rather than the misleading "No part numbers found".
+    try:
+        rows = parse_tabular_file(content, file.filename or "")
+    except ParseError as exc:
+        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
     mpn_rows = extract_mpns_with_rows(rows)
     if not mpn_rows:
         raise HTTPException(400, "No part numbers found in file")

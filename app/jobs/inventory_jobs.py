@@ -575,9 +575,15 @@ async def _download_and_import_stock_list(
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
     """Parse a stock list file (CSV/XLSX) into rows with mpn, qty, price,
     manufacturer."""
-    from ..file_utils import normalize_stock_row, parse_tabular_file
+    from ..file_utils import ParseError, normalize_stock_row, parse_tabular_file
 
-    raw_rows = parse_tabular_file(file_bytes, filename)
+    try:
+        raw_rows = parse_tabular_file(file_bytes, filename)
+    except ParseError as e:
+        # Background job: a corrupt file can't prompt a user — log distinctly and skip it
+        # (the caller already treats an empty parse as "no valid rows"), never crash the job.
+        logger.warning(f"Stock file parse failed, skipping ({filename}): {e}")
+        return []
     rows = []
     for r in raw_rows:
         parsed = normalize_stock_row(r)

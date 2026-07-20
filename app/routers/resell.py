@@ -42,7 +42,7 @@ from ..constants import (
 )
 from ..database import get_db
 from ..dependencies import require_access, require_fresh_token
-from ..file_utils import parse_tabular_file
+from ..file_utils import ParseError, parse_tabular_file
 from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
 from ..services import (
@@ -1343,7 +1343,13 @@ async def resell_import_preview(
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, "File too large")
-    rows = parse_tabular_file(content, filename)
+    # Silent-failure e: a corrupt/unreadable file raises ParseError (distinct from a
+    # genuinely-empty one) so we can tell the user which of the two actually happened,
+    # instead of collapsing both to "No data rows found".
+    try:
+        rows = parse_tabular_file(content, filename)
+    except ParseError as exc:
+        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
     if not rows:
         raise HTTPException(400, "No data rows found")
     result = excess_service.preview_import(rows)

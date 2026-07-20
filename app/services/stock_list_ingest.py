@@ -113,10 +113,18 @@ def ingest_stock_list(
     """
     clean_vendor = validate_upload(filename, vendor_name, content)
 
-    from ..file_utils import normalize_stock_row, parse_tabular_file
+    from ..file_utils import ParseError, normalize_stock_row, parse_tabular_file
     from ..search_service import run_deterministic_passes
 
-    rows = parse_tabular_file(content, filename or "upload.csv")
+    # A corrupt/unreadable file becomes a caller-recoverable validation error (both upload
+    # routes already translate StockListValidationError into a clean user-facing message),
+    # never a silent empty ingest or an unhandled 500.
+    try:
+        rows = parse_tabular_file(content, filename or "upload.csv")
+    except ParseError as exc:
+        raise StockListValidationError(
+            "We couldn't read this file — it may be corrupt or not a valid spreadsheet"
+        ) from exc
 
     norm_vendor = normalize_vendor_name(clean_vendor)
     vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()

@@ -638,6 +638,46 @@ def test_import_confirm_clean_import_no_toast(client, db_session, trader_user, e
         app.dependency_overrides.pop(require_user, None)
 
 
+def test_import_preview_corrupt_file_distinct_error(client, db_session, trader_user, empty_draft_list):
+    """Silent-failure e: a corrupt/unreadable spreadsheet gives a DISTINCT 'couldn't read
+    this file' error — no longer indistinguishable from a genuinely-empty file (both used
+    to collapse to 'No data rows found' after parse_tabular_file swallowed the error)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    corrupt_xlsx = b"not html and not a valid xlsx at all"  # openpyxl raises → ParseError
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/resell/{empty_draft_list.id}/import-preview",
+            files={"file": ("broken.xlsx", corrupt_xlsx, "application/vnd.ms-excel")},
+        )
+        assert resp.status_code == 400
+        msg = resp.json()["error"].lower()
+        assert "couldn't read" in msg or "could not read" in msg
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_import_preview_genuinely_empty_file_says_no_rows(client, db_session, trader_user, empty_draft_list):
+    """A readable-but-empty file (header only, no data rows) still says 'No data rows
+    found' — distinct from the corrupt-file error."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    empty_csv = b"part_number,quantity\n"  # valid CSV, header only → parses to []
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/resell/{empty_draft_list.id}/import-preview",
+            files={"file": ("empty.csv", empty_csv, "text/csv")},
+        )
+        assert resp.status_code == 400
+        assert "no data rows" in resp.json()["error"].lower()
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
 def test_import_preview_zero_valid_rows_offers_retry(client, db_session, trader_user, empty_draft_list):
     """RS-6: an all-errors import preview still renders a re-upload/back affordance.
 

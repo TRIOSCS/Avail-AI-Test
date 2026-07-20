@@ -1,8 +1,13 @@
 """Shared file parsing utilities for CSV/Excel imports.
 
-Used by:
-  - main.py: upload_requirements, import_stock_list
-  - scheduler.py: _parse_stock_list_file
+``parse_tabular_file`` raises :class:`ParseError` on a hard parse failure (corrupt
+bytes / not a valid spreadsheet), distinct from a genuinely-empty file (``[]``); every
+caller must handle it. Used by:
+  - routers/resell.py: import preview
+  - routers/materials.py: import_material_cards
+  - routers/requisitions/requirements.py: requirement + stock-list uploads
+  - jobs/inventory_jobs.py: _parse_stock_file (legacy fallback)
+  - services/stock_list_ingest.py: ingest_stock_list
 """
 
 import csv
@@ -10,6 +15,16 @@ import io
 from typing import Any
 
 from loguru import logger
+
+
+class ParseError(Exception):
+    """Raised when a tabular upload cannot be read at all (corrupt bytes / not a valid
+    spreadsheet).
+
+    Distinguishes a HARD parse failure from a genuinely-empty-but-readable file: the
+    former raises this, the latter returns ``[]``. Callers translate it into a distinct
+    user-facing message ("we couldn't read this file") vs. "No data rows found".
+    """
 
 
 def _looks_like_html(content: bytes) -> bool:
@@ -69,7 +84,9 @@ def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
     """Parse CSV/TSV/Excel file bytes into a list of row dicts.
 
     All header keys are stripped and lowercased. All values are stripped strings.
-    Returns empty list on parse failure (logs warning).
+    Raises :class:`ParseError` on a HARD parse failure (corrupt bytes / not a valid
+    spreadsheet) so a corrupt upload is distinguishable from a genuinely-empty file (which
+    returns ``[]``). Callers must handle ``ParseError``.
     """
     fname = (filename or "").lower()
     rows = []
@@ -87,6 +104,7 @@ def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
             rows = _parse_csv(content, delimiter)
     except Exception as e:
         logger.warning(f"File parse error ({filename}): {e}")
+        raise ParseError(f"Could not parse {filename or 'file'}: {e}") from e
 
     return rows
 
