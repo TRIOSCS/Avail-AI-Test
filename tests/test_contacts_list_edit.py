@@ -218,6 +218,9 @@ class TestEditFormAuthz:
     def test_owner_still_gets_200(self, client, test_company, owned_contact):
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{owned_contact.id}/edit-form")
         assert resp.status_code == 200
+        # The gate lets the owner through AND the form renders the contact's data.
+        assert "Jane" in resp.text
+        assert "jane@acme-electronics.com" in resp.text
 
 
 class TestNullFieldPrefill:
