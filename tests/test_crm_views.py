@@ -2495,7 +2495,8 @@ class TestEditContact:
     def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
         """GET edit-form renders form pre-populated with contact fields (company-scoped
         route)."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        # Owner set: the edit-form GET now gates on can_manage_account (404 otherwise).
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         # Company-scoped route (no site_id): replaces the retired site-scoped route.
         resp = client.get(f"/v2/partials/customers/{company.id}/contacts/{contact.id}/edit-form")
         assert resp.status_code == 200

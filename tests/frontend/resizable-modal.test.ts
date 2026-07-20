@@ -200,23 +200,31 @@ describe('resizableModal — onOpen loading behavior (edit-modal glitch fix)', (
       '<div id="modal-loading"></div><div id="modal-content"><form id="stale-form"><input name="stale"></form></div>';
   });
 
-  it('clears the previous modal content and toggles the spinner across the fetch', async () => {
+  it('clears the previous modal content before the fetch lands', async () => {
     const htmxMod = (await import('htmx.org')).default as any;
-    let resolveAjax: () => void = () => {};
-    htmxMod.ajax.mockReturnValue(new Promise<void>((r) => { resolveAjax = r; }));
+    htmxMod.ajax.mockReturnValue(new Promise<void>(() => {})); // never resolves
 
     const m = makeModal();
     m.init();
     m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
 
-    const content = document.getElementById('modal-content')!;
-    const loading = document.getElementById('modal-loading')!;
-    expect(content.children.length).toBe(0); // stale form dropped before fetch lands
-    expect(loading.classList.contains('htmx-request')).toBe(true); // spinner visible
+    expect(document.getElementById('modal-content')!.children.length).toBe(0);
+  });
 
-    resolveAjax();
-    await new Promise((r) => setTimeout(r, 0));
-    expect(loading.classList.contains('htmx-request')).toBe(false);
+  it('drives the spinner via htmx.ajax indicator (not a hand-rolled toggle)', async () => {
+    const htmxMod = (await import('htmx.org')).default as any;
+    htmxMod.ajax.mockClear();
+    htmxMod.ajax.mockReturnValue(Promise.resolve());
+
+    const m = makeModal();
+    m.init();
+    m.onOpen({ url: '/v2/partials/customers/1/contacts/2/edit-form' });
+
+    expect(htmxMod.ajax).toHaveBeenCalledWith(
+      'GET',
+      '/v2/partials/customers/1/contacts/2/edit-form',
+      expect.objectContaining({ indicator: '#modal-loading', target: '#modal-content' }),
+    );
   });
 
   it('focuses the first visible field of the loaded content on desktop', async () => {

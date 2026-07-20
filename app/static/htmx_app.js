@@ -911,25 +911,28 @@ Alpine.data('resizableModal', () => ({
         this.isDesktop = this._mq ? this._mq.matches : window.matchMedia(MODAL_DESKTOP_MQ).matches;
         this._restore();
         // Drop the previous modal's DOM so the panel never flashes stale content
-        // while the new form is in flight.
+        // while the new form is in flight (the :empty min-height keeps the panel
+        // from collapsing to a grip+close sliver meanwhile).
         const content = document.getElementById('modal-content');
         if (content) content.replaceChildren();
         if (detail && detail.url) {
-            // htmx.ajax has no `indicator` option — drive the spinner class by hand.
-            const loading = document.getElementById('modal-loading');
-            if (loading) loading.classList.add('htmx-request');
-            Promise.resolve(htmx.ajax('GET', detail.url, { target: '#modal-content', swap: 'innerHTML' }))
-                .then(() => {
-                    // Land the user in the form: focus its first field unless the loaded
-                    // content already claimed focus (or we're on mobile, where focusing
-                    // would pop the keyboard).
-                    if (!this.isDesktop || !content || content.contains(document.activeElement)) return;
-                    const field = content.querySelector(
-                        'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
-                    );
-                    if (field) field.focus();
-                })
-                .finally(() => { if (loading) loading.classList.remove('htmx-request'); });
+            // indicator: toggles #modal-loading's htmx-request class for the spinner.
+            Promise.resolve(
+                htmx.ajax('GET', detail.url, {
+                    target: '#modal-content',
+                    swap: 'innerHTML',
+                    indicator: '#modal-loading',
+                }),
+            ).then(() => {
+                // Land the user in the form: focus its first field unless the loaded
+                // content already claimed focus (or we're on mobile, where focusing
+                // would pop the keyboard).
+                if (!this.isDesktop || !content || content.contains(document.activeElement)) return;
+                const field = content.querySelector(
+                    'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
+                );
+                if (field) field.focus();
+            });
         }
     },
 
