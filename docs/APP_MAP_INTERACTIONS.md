@@ -3305,6 +3305,13 @@ UI for uploading a vendor's stock list. All three are thin routes in
   dropdown is built from the
   same visibility scope. `require_user`. Reached via the "All contacts" link in
   `customers/list.html`.
+  Rows surface priority (star) / DNC / Archived flags, the contact's site under the
+  company name, and mailto:/tel: links. A per-row Edit (pencil) button opens the shared
+  `customers/tabs/_contact_form.html` edit modal with `origin=contacts` + the live
+  `filter_*` values (namespaced to dodge the form's own `contact_role` field);
+  `edit_site_contact` detects `origin=contacts` and re-renders THIS list via
+  `_contacts_list_response(..., prefix="filter_")` (filters + paging intact, toast via
+  `HX-Trigger`) instead of the company Contacts-tab grouped list.
 - **`GET /v2/vendor-contacts`** (`vendor_contacts_partial` → `vendors/contacts_list.html`)
   — global vendor-contacts list, the HTML twin of `GET /api/vendor-contacts/bulk`
   (`vendor_contacts.py`). View-open (`require_user`; vendor data is not tenant-scoped);

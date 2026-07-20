@@ -13,6 +13,10 @@
    In edit mode: hx-posts to /v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit
    Both target #contacts-tab-list + swap=innerHTML + close-modal on success.
 
+   origin=contacts (edit mode, from the global /v2/contacts list): targets
+   #main-content instead and carries hidden origin + filter_* inputs (list_filters)
+   so edit_site_contact re-renders the global contacts list with filters intact.
+
    Called by:
      GET /v2/partials/customers/{company_id}/contacts/add-form
      GET /v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form
@@ -32,12 +36,19 @@
         x-data='{"newSite": false}'
         class='space-y-3'>
   {% else %}
+  {% set _from_contacts = origin is defined and origin == 'contacts' %}
   <form hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ contact.id }}/edit'
-        hx-target='#contacts-tab-list'
+        hx-target='{{ "#main-content" if _from_contacts else "#contacts-tab-list" }}'
         hx-swap='innerHTML'
         hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
         data-loading-disable
         class='space-y-3'>
+    {% if _from_contacts %}
+    <input type='hidden' name='origin' value='contacts'>
+    {% for k, v in (list_filters or {}).items() %}
+    <input type='hidden' name='filter_{{ k }}' value='{{ v }}'>
+    {% endfor %}
+    {% endif %}
   {% endif %}
 
     {# ── Site selection (add mode only) ─────────────────────────────────── #}
