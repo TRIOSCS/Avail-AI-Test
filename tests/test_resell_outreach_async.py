@@ -26,6 +26,7 @@ Depends on: app.services.resell_outreach_service, app.routers.resell, tests.conf
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.constants import ActivityType, ExcessListStatus, ExcessOutreachStatus
@@ -210,6 +211,116 @@ class TestEnqueueOutreachEmail:
         assert group["email"] == "sales@asyncbuyer.com"
         assert group["row_ids"] == [row.id]
         assert group["parts"] == ["LM358N"]
+
+
+# ── #20: offered-lines snapshot is precomputed ONCE per campaign ──────
+
+
+class TestOutreachSnapshotBatching:
+    """#20: the ``parts_included`` offered-lines snapshot is precomputed ONCE per
+    campaign (one ``excess_line_items`` scan), not re-queried per (buyer × line)."""
+
+    @staticmethod
+    def _seed_multi(db: Session, posted_list: ExcessList) -> tuple[list[ExcessLineItem], list[VendorCard]]:
+        lines = []
+        for pn, qty in (("LM358N", 100), ("NE555P", 200), ("TL072", 300)):
+            li = ExcessLineItem(excess_list_id=posted_list.id, part_number=pn, quantity=qty)
+            db.add(li)
+            lines.append(li)
+        cards = []
+        for i in range(3):
+            vc = VendorCard(
+                normalized_name=f"batch buyer {i}", display_name=f"Batch Buyer {i}", emails=[f"b{i}@ba.com"]
+            )
+            db.add(vc)
+            cards.append(vc)
+        db.commit()
+        for obj in (*lines, *cards):
+            db.refresh(obj)
+        return lines, cards
+
+    def test_line_item_snapshot_query_runs_once_per_campaign(
+        self, db_session: Session, posted_list: ExcessList, trader: User
+    ):
+        _lines, cards = self._seed_multi(db_session, posted_list)
+
+        selects: list[str] = []
+
+        def _on_exec(conn, cursor, statement, params, context, executemany):
+            if statement.lstrip()[:6].upper() == "SELECT" and "excess_line_items" in statement:
+                selects.append(statement)
+
+        bind = db_session.get_bind()
+        event.listen(bind, "before_cursor_execute", _on_exec)
+        try:
+            with (
+                patch("app.email_service.send_batch_rfq", AsyncMock()),
+                patch("app.email_service._find_sent_message", AsyncMock()),
+            ):
+                rows, _plan = svc.enqueue_outreach_email(
+                    db_session,
+                    list_id=posted_list.id,
+                    owner=trader,
+                    buyers=[{"vendor_card_id": c.id} for c in cards],
+                    scope="per_line",
+                    subject="Excess available",
+                    body="Surplus stock.",
+                )
+        finally:
+            event.remove(bind, "before_cursor_execute", _on_exec)
+
+        # 3 buyers × 3 lines: the old per-(buyer×line) _parts_snapshot issued ~18 line-item
+        # SELECTs; the batched snapshot precomputes once (plus _target_line_ids' validation
+        # scan) — constant, independent of buyer/line count.
+        assert len(selects) <= 3, f"line-item snapshot not batched: {len(selects)} SELECTs\n" + "\n".join(selects)
+        assert len(rows) == 9  # 3 buyers × 3 lines
+
+    def test_parts_included_payload_byte_identical_email(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """The batched snapshot preserves the EXACT parts_included dict keys/values that
+        the retry + reply paths read back."""
+        with (
+            patch("app.email_service.send_batch_rfq", AsyncMock()),
+            patch("app.email_service._find_sent_message", AsyncMock()),
+        ):
+            rows, _ = svc.enqueue_outreach_email(
+                db_session,
+                list_id=posted_list.id,
+                owner=trader,
+                buyers=[{"vendor_card_id": buyer_card.id}],
+                scope="per_line",
+                subject="s",
+                body="b",
+            )
+        assert len(rows) == 1
+        assert rows[0].parts_included == [{"part_number": "LM358N", "quantity": 500, "line_item_id": line_item.id}]
+
+    def test_parts_included_payload_manual_whole_list(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Manual-log whole-list touch: parts_included is the whole-list snapshot with the
+        exact keys (unchanged by the batching)."""
+        rows = svc.submit_outreach(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            channel="phone",
+        )
+        assert len(rows) == 1
+        assert rows[0].parts_included == [{"part_number": "LM358N", "quantity": 500, "line_item_id": line_item.id}]
 
 
 # ── Task 6: campaign idempotency (a double-submit makes no duplicate) ─

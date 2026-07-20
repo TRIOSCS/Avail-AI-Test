@@ -1,8 +1,8 @@
 """test_resell_reply_routes.py — Route/render + helper tests for RS-4 reply tracking.
 
 Covers the new owner-gated reply surface on resell detail:
-  - ``_replies_context`` joins VendorResponse ↔ ExcessOutreach on graph_conversation_id
-    (newest-first, threads without a conversation id excluded);
+  - ``_conversation_replies`` loads ONE conversation's VendorResponse rows on
+    graph_conversation_id (newest-first, narrow single-conversation query);
   - the reply-viewer route (403 non-owner, 404 when no thread, 200 renders the thread);
   - the convert-to-offer route (creates a matched inbound ExcessOffer + advances the
     outreach to ``bid``; owner-gated).
@@ -15,11 +15,12 @@ Called by: pytest. Depends on: app.routers.resell, tests.conftest.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.models import Company, ExcessList, ExcessOutreach, User, VendorCard, VendorResponse
 from app.models.excess import ExcessLineItem, ExcessOffer, ExcessOfferLine
-from app.routers.resell import _replies_context
+from app.routers.resell import _conversation_replies
 from app.utils.normalization import normalize_mpn_key
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -86,29 +87,60 @@ def _reply(db, conv, *, received_at, body="We'll take them.", email="sales@buyer
     return vr
 
 
-# ── _replies_context (test 7) ────────────────────────────────────────
+# ── _conversation_replies (test 7) ───────────────────────────────────
 
 
-class TestRepliesContext:
-    def test_joins_and_orders_newest_first(self, db_session: Session, test_user: User, buyer_card: VendorCard):
+class TestConversationReplies:
+    def test_returns_only_target_conversation_newest_first(
+        self, db_session: Session, test_user: User, buyer_card: VendorCard
+    ):
+        """The reply viewer's narrow single-conversation query loads ONLY the target
+        conversation's VendorResponse rows (finding 3), newest-first — a second
+        conversation's replies never load, and a None/unmatched id returns []."""
         el = _list(db_session, test_user)
-        a = _outreach(db_session, el, buyer_card, test_user, conv="cA", msg="mA")
+        _outreach(db_session, el, buyer_card, test_user, conv="cA", msg="mA")
         _outreach(db_session, el, buyer_card, test_user, conv="cB", msg="mB")
-        # An outreach with NO conversation id must be excluded from the map.
-        _outreach(db_session, el, buyer_card, test_user, conv=None, msg="mC")
 
         now = datetime.now(UTC)
         older = _reply(db_session, "cA", received_at=now - timedelta(hours=2), body="first")
         newer = _reply(db_session, "cA", received_at=now - timedelta(hours=1), body="second")
         _reply(db_session, "cB", received_at=now, body="onB")
 
-        ctx = _replies_context(db_session, el)
+        replies = _conversation_replies(db_session, "cA")
+        # ONLY conversation cA, newest-first.
+        assert [r.id for r in replies] == [newer.id, older.id]
+        # A different conversation is scoped out; a None/unmatched id returns [].
+        assert [r.body for r in _conversation_replies(db_session, "cB")] == ["onB"]
+        assert _conversation_replies(db_session, None) == []
+        assert _conversation_replies(db_session, "no-such-conv") == []
 
-        assert set(ctx.keys()) == {"cA", "cB"}  # conv=None excluded
-        assert ctx["cA"]["outreach"].id == a.id
-        # Newest-first ordering within a conversation.
-        assert [r.id for r in ctx["cA"]["replies"]] == [newer.id, older.id]
-        assert len(ctx["cB"]["replies"]) == 1
+    def test_query_is_scoped_to_one_conversation(self, db_session: Session, test_user: User, buyer_card: VendorCard):
+        """The VendorResponse SELECT filters on the single graph_conversation_id — it
+        does NOT scan the whole list's conversations (the old whole-list map is
+        retired)."""
+        el = _list(db_session, test_user)
+        _outreach(db_session, el, buyer_card, test_user, conv="cA", msg="mA")
+        _outreach(db_session, el, buyer_card, test_user, conv="cB", msg="mB")
+        now = datetime.now(UTC)
+        for i in range(4):
+            _reply(db_session, "cB", received_at=now - timedelta(hours=i), body=f"b{i}")
+        _reply(db_session, "cA", received_at=now, body="onA")
+
+        statements: list[str] = []
+
+        def _on(conn, cursor, statement, params, context, executemany):
+            if "vendor_responses" in statement.lower() and statement.lstrip()[:6].upper() == "SELECT":
+                statements.append(statement)
+
+        bind = db_session.get_bind()
+        event.listen(bind, "before_cursor_execute", _on)
+        try:
+            replies = _conversation_replies(db_session, "cA")
+        finally:
+            event.remove(bind, "before_cursor_execute", _on)
+
+        assert [r.body for r in replies] == ["onA"]  # cB's four replies never load
+        assert len(statements) == 1
 
 
 # ── reply-viewer route (test 8) ──────────────────────────────────────
@@ -190,3 +222,35 @@ class TestConvertToOfferRoute:
             data={"mpn_raw": "LM358N", "quantity": "10"},
         )
         assert resp.status_code == 403
+
+    def test_zero_quantity_rejected_not_silently_promoted(
+        self, client, db_session: Session, test_user: User, buyer_card: VendorCard
+    ):
+        """Quantity=0 → 400 (mirrors log-bid).
+
+        The old ``qty is None`` guard let 0 through,
+        then ``row.get('quantity') or 1`` silently promoted it to 1 — no offer may be
+        created (finding: silent-failure a).
+        """
+        el = _list(db_session, test_user)
+        row = _outreach(db_session, el, buyer_card, test_user)
+        resp = client.post(
+            f"/api/resell/{el.id}/outreach/{row.id}/offer",
+            data={"mpn_raw": "LM358N", "quantity": "0"},
+        )
+        assert resp.status_code == 400
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == el.id).count() == 0
+
+    def test_negative_quantity_rejected_400_not_500(
+        self, client, db_session: Session, test_user: User, buyer_card: VendorCard
+    ):
+        """quantity=-5 → 400 at the route — never a partial write + ExcessOfferLine
+        @validates('quantity') ValueError surfacing as an unhandled 500."""
+        el = _list(db_session, test_user)
+        row = _outreach(db_session, el, buyer_card, test_user)
+        resp = client.post(
+            f"/api/resell/{el.id}/outreach/{row.id}/offer",
+            data={"mpn_raw": "LM358N", "quantity": "-5"},
+        )
+        assert resp.status_code == 400
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == el.id).count() == 0

@@ -14,12 +14,14 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
-from app.models.excess import ExcessLineItem, ExcessList
+from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer
 from app.schemas.excess import (
     ExcessLineItemCreate,
     ExcessListCreate,
     ExcessListResponse,
     ExcessListUpdate,
+    ExcessOfferCreate,
+    ExcessOfferResponse,
 )
 from tests.conftest import engine
 
@@ -95,6 +97,21 @@ class TestExcessListModel:
 
     def test_default_total_line_items_is_zero(self, excess_list: ExcessList):
         assert excess_list.total_line_items == 0
+
+
+class TestExcessOfferValidUntilDropped:
+    """D6: the dead ``excess_offers.valid_until`` column is dropped (migration 201) — the
+    model column and both unused schema fields go with it, or the fresh-DB drift gate
+    would emit a remove_column diff and fail."""
+
+    def test_model_has_no_valid_until_column(self):
+        assert "valid_until" not in ExcessOffer.__table__.columns
+
+    def test_create_schema_has_no_valid_until(self):
+        assert "valid_until" not in ExcessOfferCreate.model_fields
+
+    def test_response_schema_has_no_valid_until(self):
+        assert "valid_until" not in ExcessOfferResponse.model_fields
 
 
 class TestExcessLineItemModel:

@@ -101,6 +101,13 @@ class TestParseQuantity:
             pytest.param("abc", None, id="invalid_string"),
             pytest.param("", None, id="empty_string"),
             pytest.param("  50  ", 50, id="whitespace"),
+            pytest.param("2147483647", 2147483647, id="int4_max_ok"),
+            pytest.param("3000000000", None, id="int4_overflow_skipped"),
+            pytest.param("1e30", None, id="exp_overflow_skipped"),
+            pytest.param("inf", None, id="infinity_skipped"),
+            pytest.param("1e999", None, id="huge_exponent_skipped"),
+            pytest.param("-inf", None, id="negative_infinity_skipped"),
+            pytest.param("nan", None, id="nan_skipped"),
         ],
     )
     def test_parse_quantity(self, raw, expected):

@@ -15,6 +15,7 @@ import pytest
 os.environ["TESTING"] = "1"
 
 from app.file_utils import (
+    ParseError,
     _looks_like_html,
     _parse_html_table,
     extract_mpns,
@@ -340,15 +341,18 @@ class TestParseTabularFileHtmlBranches:
         rows = parse_tabular_file(self._HTML, "data.csv")
         assert len(rows) == 1
 
-    def test_exception_in_excel_parse_returns_empty(self):
-        # Invalid xlsx bytes → openpyxl raises → exception handler (lines 87-88)
-        rows = parse_tabular_file(b"not html and not valid xlsx at all", "data.xlsx")
-        assert rows == []
+    def test_exception_in_excel_parse_raises_parse_error(self):
+        # Invalid xlsx bytes → openpyxl raises → the parser signals a HARD failure with a
+        # typed ParseError (distinct from a genuinely-empty file that returns []).
+        with pytest.raises(ParseError):
+            parse_tabular_file(b"not html and not valid xlsx at all", "data.xlsx")
 
-    def test_exception_with_mock_returns_empty(self):
-        with patch("app.file_utils._parse_excel", side_effect=RuntimeError("corrupt")):
-            rows = parse_tabular_file(b"definitely not html content", "stock.xls")
-        assert rows == []
+    def test_exception_with_mock_raises_parse_error(self):
+        with (
+            patch("app.file_utils._parse_excel", side_effect=RuntimeError("corrupt")),
+            pytest.raises(ParseError),
+        ):
+            parse_tabular_file(b"definitely not html content", "stock.xls")
 
 
 # ═══════════════════════════════════════════════════════════════════════

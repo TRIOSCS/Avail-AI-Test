@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import (
+    PG_INT4_MAX,
     ActivityType,
     ExcessLineItemStatus,
     ExcessListStatus,
@@ -134,14 +135,20 @@ def _normalize_row(raw: dict) -> dict:
 
 
 def _parse_quantity(value) -> int | None:
-    """Parse a quantity value, returning None if invalid."""
+    """Parse a quantity value, returning None if invalid.
+
+    None (→ a skipped import row) for a non-positive value, one above the Postgres INT4
+    ceiling, or a non-finite float (``"inf"`` / ``"1e999"`` parse to ``inf`` and raise
+    OverflowError inside ``int(float(...))``) — so an out-of-range cell is counted as a
+    skipped row instead of overflowing the INT4 column as an unhandled 500 on import.
+    """
     if value is None:
         return None
     try:
         qty = int(float(str(value).strip().replace(",", "")))
-        return qty if qty > 0 else None
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return None
+    return qty if 0 < qty <= PG_INT4_MAX else None
 
 
 def _parse_price(value) -> Decimal | None:
@@ -507,7 +514,6 @@ def submit_offer(
     user: User,
     scope: str,
     notes: str | None = None,
-    valid_until: datetime | None = None,
     lines: list[dict] | None = None,
     take_all_total_price: Decimal | None = None,
     buyer_company_id: int | None = None,
@@ -560,7 +566,6 @@ def submit_offer(
         offerer_vendor_card_id=offerer_vendor_card_id,
         scope=scope_value,
         notes=notes,
-        valid_until=valid_until,
         status=offer_status_for_list(excess_list.status),
         take_all_total_price=take_all_total_price if scope_value == ExcessOfferScope.TAKE_ALL else None,
     )

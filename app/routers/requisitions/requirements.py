@@ -516,10 +516,10 @@ async def upload_requirements(
         raise HTTPException(413, "File too large — 10MB maximum")
     fname = (file.filename or "").lower()
     try:
-        from ...file_utils import parse_tabular_file
+        from ...file_utils import ParseError, parse_tabular_file
 
         rows = parse_tabular_file(content, fname)
-    except (ValueError, KeyError, TypeError) as e:
+    except (ParseError, ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, f"Could not parse file: {str(e)[:200]}") from e
 
     created = 0
@@ -1042,9 +1042,12 @@ async def import_stock_list(
         raise HTTPException(400, "Uploaded file has no filename")
     fname = file.filename.lower()
 
-    from ...file_utils import parse_tabular_file
+    from ...file_utils import ParseError, parse_tabular_file
 
-    rows = parse_tabular_file(content, fname)
+    try:
+        rows = parse_tabular_file(content, fname)
+    except ParseError as exc:
+        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
 
     from ...file_utils import normalize_stock_row
     from ...utils.normalization import normalize_condition as norm_cond

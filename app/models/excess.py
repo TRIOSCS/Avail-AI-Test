@@ -153,8 +153,7 @@ class ExcessOffer(Base):
     offerer_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
     scope = Column(String(20), default="per_line")  # per_line, take_all
     take_all_total_price = Column(Numeric(12, 4), nullable=True)  # lump sum, take_all only
-    valid_until = Column(UTCDateTime, nullable=True)
-    status = Column(String(20), default="open")  # open, won, lost, expired, withdrawn, late
+    status = Column(String(20), default="open")  # open, won, lost, withdrawn, late
     notes = Column(Text, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
@@ -187,6 +186,9 @@ class ExcessOffer(Base):
     __table_args__ = (
         Index("ix_excess_offers_list", "excess_list_id"),
         Index("ix_excess_offers_status", "status"),
+        # Hot index (migration 200): the buyer-affinity last-bid + who-to-offer history
+        # queries and the award win-hook all filter/join on the canonical buyer card.
+        Index("ix_excess_offers_vendor_card", "offerer_vendor_card_id"),
     )
 
 
@@ -392,6 +394,9 @@ class ExcessOutreach(Base):
         Index("ix_excess_outreach_vendor_card", "target_vendor_card_id"),
         Index("ix_excess_outreach_status", "status"),
         Index("ix_excess_outreach_conversation", "graph_conversation_id"),
+        # Hot index (migration 200): the reply adapter matches a buyer reply on the exact
+        # message id (the fallback key when a conversation id is absent).
+        Index("ix_excess_outreach_message", "graph_message_id"),
     )
 
 

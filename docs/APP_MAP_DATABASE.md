@@ -184,6 +184,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | classification | String 50 | offer\|stock_list\|ooo\|spam |
 | status | String 50, default `new` | new\|parsed\|reviewed\|rejected\|flagged (VendorResponseStatus — the review queue) |
 | message_id | String 255, unique | |
+| graph_conversation_id | String 500 | ix_vr_conversation (migration 200) — the resell reply viewer's single-conversation query (`_conversation_replies`) + `record_response` whole-thread match |
 
 **`requisition_attachments`** — Files attached to a requisition (Migration 126: renamed `onedrive_item_id`→`library_item_id`, `onedrive_url`→`library_web_url`; added `library_drive_id`)
 | Column | Type | Notes |
@@ -943,8 +944,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 **`excess_offers`** — Inbound broker offer to BUY a posted list (the Resell offer model; replaced the dropped `bids`)
 - excess_list_id -> excess_lists (CASCADE), submitted_by -> users
 - offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
-- scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
-- status: open -> won -> lost -> expired -> withdrawn (late = post-close, queued)
+- scope: per_line | take_all; take_all_total_price (lump, take_all only)
+- status: open -> won -> lost -> withdrawn (late = post-close, queued); `valid_until` dropped (migration 201, D6 dead column)
+- ix_excess_offers_vendor_card on offerer_vendor_card_id (migration 200) — the buyer-affinity last-bid / who-to-offer history queries + award win-hook all filter/join on the canonical buyer card
 
 **`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
 - offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
@@ -970,6 +972,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - send_error (Text, nullable; migration 194) — persisted send-failure reason on failed/interrupted rows (or a "reply-matching degraded" note on a delivered row whose Graph-id lookup came back empty); NULL on a clean send. Surfaced in the tracker cell + the CSV export "Note" column so a failed/interrupted (or delivered-but-degraded) row is never silent
 - send_subject / send_body (Text, nullable; migration 195) — the EXACT subject/body an email campaign was sent with, so a one-click Retry matches an already-delivered CUSTOMIZED-subject message in the double-send guard (email_service._find_sent_message is an exact-subject match) and a legitimate resend reuses the original wording; NULL on manual-log + legacy email rows
 - graph_message_id / graph_conversation_id (email only), parts_included (JSON), sent_at
+- ix_excess_outreach_message on graph_message_id (migration 200) — the reply adapter's exact-message-id match fallback (graph_conversation_id already indexed by ix_excess_outreach_conversation)
 - No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning). Same-campaign double-submits are deduped in enqueue (skip a buyer with a live sending/sent row on the same list+line within a 1h window). Downstream "was this buyer genuinely offered?" readers (offered tally, response_rate denominator, last_offered_at, don't-forget nudge, tracker, AND the team-overlap advisory overlap_warning / overlap_warnings_for) exclude the not-sent set {sending, failed, interrupted} via buyer_affinity_service._NOT_SENT_STATUSES
 
 **`buyer_scores`** — Per-buyer "good bidder" rollup (migration 133; inverts the vendor scorecard)

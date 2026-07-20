@@ -322,4 +322,7 @@ class VendorResponse(Base):
         Index("ix_vr_vendor_name", "vendor_name"),
         Index("ix_vr_received_email", "received_at", "vendor_email"),
         Index("ix_vr_received_status", "received_at", "status"),
+        # Hot index (migration 200): the resell reply viewer + record_response match a
+        # buyer reply on graph_conversation_id (the whole-thread key, like RFQ Tier-1).
+        Index("ix_vr_conversation", "graph_conversation_id"),
     )

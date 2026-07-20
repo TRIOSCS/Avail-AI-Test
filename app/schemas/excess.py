@@ -181,7 +181,6 @@ class ExcessOfferCreate(BaseModel):
 
     scope: Literal["per_line", "take_all"] = "per_line"
     take_all_total_price: float | None = Field(default=None, ge=0)
-    valid_until: datetime | None = None
     notes: str | None = None
     offerer_company_id: int | None = None
     offerer_vendor_card_id: int | None = None
@@ -198,7 +197,6 @@ class ExcessOfferResponse(BaseModel):
     offerer_vendor_card_id: int | None = None
     scope: Literal["per_line", "take_all"]
     take_all_total_price: float | None = None
-    valid_until: datetime | None = None
     status: str
     notes: str | None = None
     lines: list[ExcessOfferLineResponse] = Field(default_factory=list)
