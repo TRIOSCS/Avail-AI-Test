@@ -332,14 +332,20 @@ def _require_owner(el: ExcessList, user: User) -> None:
         raise HTTPException(403, "Only the list owner can edit it")
 
 
-def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+def _detail_context(
+    request: Request, db: Session, el: ExcessList, user: User, *, items: list[ExcessLineItem] | None = None
+) -> dict:
     """Build the shared detail context: chips + adaptive-shape flags.
 
     The adaptive rule (spec §"Flexible detail"): ``shape`` is ``single`` for a
     one-line deal (one card, no table chrome), ``table`` otherwise; ``take_all``
     offers render as a pinned banner above the lines regardless of shape.
+
+    ``items`` may be passed in preloaded so a combined render (``_award_response_context``)
+    runs the line-items SELECT once instead of once here AND once in ``_offers_context``.
     """
-    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    if items is None:
+        items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
     can_see_customer = el.owner_id == user.id
     offer_count = db.query(func.count(ExcessOffer.id)).filter(ExcessOffer.excess_list_id == el.id).scalar() or 0
     take_all_count = (
@@ -562,16 +568,22 @@ async def resell_lines(
     return template_response("htmx/partials/resell/_lines.html", _detail_context(request, db, el, user))
 
 
-def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+def _offers_context(
+    request: Request, db: Session, el: ExcessList, user: User, *, items: list[ExcessLineItem] | None = None
+) -> dict:
     """Build the Offers tab context — per-line offer stacks + pinned take-all banners.
 
     Offers are the owner's private view: a non-owner gets an empty stack (the template
     renders the "offers are private" state instead). ``take_all_blocked`` is True once any
     line is already awarded, which disables a whole-list take-all award (it would collide
     with the per-line winner). Caller must have already authorized access to *el*.
+
+    ``items`` may be passed in preloaded so a combined render (``_award_response_context``)
+    runs the line-items SELECT once instead of once here AND once in ``_detail_context``.
     """
     is_owner = el.owner_id == user.id
-    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    if items is None:
+        items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
     take_all_blocked = any(it.status == ExcessLineItemStatus.AWARDED for it in items)
     base = {
         "request": request,
@@ -612,6 +624,14 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
             "is_owner": False,
         }
 
+    # Eager-load the broker identity + matched line the template reads (the same joinedloads
+    # as the CSV-export twin), so the owner render never N+1s per offer/line (finding 1).
+    # Kept db.query() — legacy auto-uniques the ``lines`` collection joinedload.
+    _offer_eager = (
+        joinedload(ExcessOffer.offerer_company),
+        joinedload(ExcessOffer.offerer_vendor_card),
+        joinedload(ExcessOffer.lines).joinedload(ExcessOfferLine.excess_line_item),
+    )
     take_all_offers = (
         db.query(ExcessOffer)
         .filter(
@@ -619,6 +639,7 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
             ExcessOffer.scope == ExcessOfferScope.TAKE_ALL,
             ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
         )
+        .options(*_offer_eager)
         .order_by(ExcessOffer.created_at.desc())
         .all()
     )
@@ -634,6 +655,7 @@ def _offers_context(request: Request, db: Session, el: ExcessList, user: User) -
             ExcessOffer.scope == ExcessOfferScope.PER_LINE,
             ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
         )
+        .options(*_offer_eager)
         .all()
     )
     for offer in per_line_offers:
@@ -661,8 +683,15 @@ def _award_response_context(request: Request, db: Session, el: ExcessList, user:
     the Lines tab (awarded/withdrawn pills) and the header chips (the awarded-count chip +
     list-status badge) — so awarding never resets the Alpine ``tab`` state. Merging the
     two contexts is safe: the shared keys (request/user/list/line_items/shape) are equal.
+
+    Both sub-contexts run the identical ExcessLineItem SELECT, so load the line items ONCE
+    here and thread them into both — the combined render issues the line-items query once.
     """
-    return {**_detail_context(request, db, el, user), **_offers_context(request, db, el, user)}
+    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    return {
+        **_detail_context(request, db, el, user, items=items),
+        **_offers_context(request, db, el, user, items=items),
+    }
 
 
 @router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
@@ -1689,6 +1718,14 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
     rows = (
         db.query(ExcessOutreach)
         .filter(ExcessOutreach.excess_list_id == el.id)
+        # Eager-load the buyer / line / sender the template reads (the same joinedloads as
+        # the CSV-export twin) so this render — which runs inside the 3s tracker poll — never
+        # N+1s per row (finding 2). All many-to-one, so no .unique() is needed.
+        .options(
+            joinedload(ExcessOutreach.target_vendor_card),
+            joinedload(ExcessOutreach.excess_line_item),
+            joinedload(ExcessOutreach.submitted_by_user),
+        )
         .order_by(ExcessOutreach.created_at.desc(), ExcessOutreach.id.desc())
         .all()
     )
@@ -1724,41 +1761,25 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
     }
 
 
-def _replies_context(db: Session, el: ExcessList) -> dict[str, dict]:
-    """Map each of the list's outreach conversations to its buyer replies.
+def _conversation_replies(db: Session, conversation_id: str | None) -> list[VendorResponse]:
+    """The buyer's inbound replies on ONE outreach conversation, newest-first.
 
-    Joins the buyer's inbound emails (``VendorResponse``, one per received message, written
-    by the inbox poll and carrying the reply body) back to the ``ExcessOutreach`` they
-    answered — on the shared ``graph_conversation_id`` the send path stamped. Returns
-    ``{conversation_id: {"outreach": ExcessOutreach, "replies": [VendorResponse, …]}}`` with
-    replies newest-first, so the reply viewer can render one conversation's thread. Only
-    outreach rows with a conversation id participate (an unstamped row has no thread to show).
+    Narrow replacement for the old whole-list ``_replies_context`` map: the reply viewer
+    renders a SINGLE conversation, so query only the ``VendorResponse`` rows on this
+    ``graph_conversation_id`` (served by ``ix_vr_conversation``, migration 200) instead of
+    building the map for every conversation on the list. ``VendorResponse`` is the buyer's
+    inbound email (one per received message, written by the inbox poll, carrying the reply
+    body), joined back to the outreach on the shared ``graph_conversation_id`` the send path
+    stamped. Returns [] for a None / unmatched id (an unstamped row has no thread to show).
     """
-    outreach_rows = (
-        db.query(ExcessOutreach)
-        .filter(
-            ExcessOutreach.excess_list_id == el.id,
-            ExcessOutreach.graph_conversation_id.isnot(None),
-        )
+    if not conversation_id:
+        return []
+    return (
+        db.query(VendorResponse)
+        .filter(VendorResponse.graph_conversation_id == conversation_id)
+        .order_by(VendorResponse.received_at.desc())
         .all()
     )
-    owning: dict[str, ExcessOutreach] = {}
-    for row in outreach_rows:
-        # Per-line campaigns write several rows on one conversation; keep the first as the
-        # display anchor (they share buyer + list, which is all the viewer reads).
-        owning.setdefault(row.graph_conversation_id, row)
-
-    replies: dict[str, list[VendorResponse]] = {}
-    if owning:
-        for vr in (
-            db.query(VendorResponse)
-            .filter(VendorResponse.graph_conversation_id.in_(list(owning.keys())))
-            .order_by(VendorResponse.received_at.desc())
-            .all()
-        ):
-            replies.setdefault(vr.graph_conversation_id, []).append(vr)
-
-    return {conv: {"outreach": owning[conv], "replies": replies.get(conv, [])} for conv in owning}
 
 
 @router.get("/v2/partials/resell/{list_id}/offer-buyers-form", response_class=HTMLResponse)
@@ -2118,7 +2139,7 @@ async def resell_outreach_reply(
     outreach has no email thread.
     """
     el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
-    ctx = _replies_context(db, el).get(outreach.graph_conversation_id, {})
+    replies = _conversation_replies(db, outreach.graph_conversation_id)
     return template_response(
         "htmx/partials/resell/_reply_viewer.html",
         {
@@ -2126,7 +2147,7 @@ async def resell_outreach_reply(
             "user": user,
             "list": el,
             "outreach": outreach,
-            "replies": ctx.get("replies", []),
+            "replies": replies,
         },
     )
 

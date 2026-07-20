@@ -19,11 +19,20 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from app.constants import ExcessListStatus, ExcessOfferStatus
-from app.models import Company, MaterialCard, User
-from app.models.excess import ExcessLineItem, ExcessList, ExcessOfferLine
+from app.constants import (
+    ExcessListStatus,
+    ExcessOfferScope,
+    ExcessOfferStatus,
+    ExcessOutreachChannel,
+    ExcessOutreachStatus,
+    OfferLineMatchStatus,
+)
+from app.models import Company, MaterialCard, User, VendorCard
+from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
+from app.routers.resell import _award_response_context, _offers_context, _outreach_tracker_context
 from app.services.excess_service import (
     confirm_import,
     create_excess_list,
@@ -410,3 +419,166 @@ def test_offer_on_open_list_is_on_time(db_session: Session, open_status):
     offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
 
     assert offer.status == ExcessOfferStatus.OPEN
+
+
+# ---------------------------------------------------------------------------
+# T3 — N+1 / joinedload regression guards (resell router context builders)
+# ---------------------------------------------------------------------------
+
+
+def _count_queries(db: Session, fn) -> int:
+    """Count SQL statements executed on the session's engine while ``fn`` runs."""
+    bind = db.get_bind()
+    seen = {"n": 0}
+
+    def _on(*_a, **_k):
+        seen["n"] += 1
+
+    event.listen(bind, "after_cursor_execute", _on)
+    try:
+        fn()
+    finally:
+        event.remove(bind, "after_cursor_execute", _on)
+    return seen["n"]
+
+
+def _seed_per_line_offers(db, el, submitter, line, *, n, tag):
+    """Seed ``n`` per-line offers, each with a DISTINCT offerer company + card (so a
+    per-offer lazy load is a real query, not an identity-map hit)."""
+    for i in range(n):
+        oc = Company(name=f"Offerer-{tag}-{i}")
+        db.add(oc)
+        db.flush()
+        vc = VendorCard(normalized_name=f"offerer-{tag}-{i}", display_name=f"Offerer {tag} {i}")
+        db.add(vc)
+        db.flush()
+        offer = ExcessOffer(
+            excess_list_id=el.id,
+            submitted_by=submitter.id,
+            offerer_company_id=oc.id,
+            offerer_vendor_card_id=vc.id,
+            scope=ExcessOfferScope.PER_LINE,
+            status=ExcessOfferStatus.OPEN,
+        )
+        db.add(offer)
+        db.flush()
+        db.add(
+            ExcessOfferLine(
+                offer_id=offer.id,
+                excess_line_item_id=line.id,
+                mpn_raw=line.part_number,
+                quantity=10,
+                unit_price=Decimal("0.50"),
+                match_status=OfferLineMatchStatus.MATCHED,
+            )
+        )
+    db.commit()
+
+
+def test_offers_context_no_n_plus_1_across_offers(db_session: Session):
+    """Owner Offers render: the SELECT count is INDEPENDENT of the offer count — the
+    export-twin joinedloads (offerer_company / offerer_vendor_card / lines→excess_line_item)
+    kill the per-offer/-line lazy loads (finding 1)."""
+    owner = _make_user(db_session, email="offers-perf-owner@t.com")
+    company = _make_company(db_session, name="OffersPerf Seller")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
+    broker = _make_user(db_session, email="offers-perf-broker@t.com", role="buyer")
+
+    def _build_and_walk():
+        ctx = _offers_context(None, db_session, el, owner)
+        # Touch every relationship the _offers.html template reads, forcing any lazy load.
+        for offer in ctx["take_all_offers"]:
+            _ = (offer.offerer_company, offer.offerer_vendor_card)
+        for entries in ctx["by_line"].values():
+            for e in entries:
+                _ = (e["offer"].offerer_company, e["offer"].offerer_vendor_card, e["line"].excess_line_item)
+        for e in ctx["unmatched"]:
+            _ = (e["offer"].offerer_company, e["offer"].offerer_vendor_card, e["line"].excess_line_item)
+
+    _seed_per_line_offers(db_session, el, broker, line, n=1, tag="a")
+    db_session.expire_all()
+    one = _count_queries(db_session, _build_and_walk)
+
+    _seed_per_line_offers(db_session, el, broker, line, n=3, tag="b")
+    db_session.expire_all()
+    four = _count_queries(db_session, _build_and_walk)
+
+    assert four == one, f"offers-tab N+1: 1 offer={one} queries, 4 offers={four}"
+
+
+def test_award_response_context_loads_line_items_once(db_session: Session):
+    """The award/unaward response merges _detail_context + _offers_context — each used
+    to run the identical ExcessLineItem SELECT.
+
+    Threading the preloaded items makes the standalone line-items SELECT run ONCE for
+    the render.
+    """
+    owner = _make_user(db_session, email="award-perf-owner@t.com")
+    company = _make_company(db_session, name="AwardPerf Seller")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N", "NE555P"])
+    db_session.expire_all()
+
+    selects: list[str] = []
+
+    def _on(conn, cursor, statement, params, context, executemany):
+        if "from excess_line_items" in statement.lower():
+            selects.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", _on)
+    try:
+        _award_response_context(None, db_session, el, owner)
+    finally:
+        event.remove(bind, "before_cursor_execute", _on)
+
+    assert len(selects) == 1, f"line-items loaded {len(selects)}× in award-response\n" + "\n".join(selects)
+
+
+def test_tracker_context_no_n_plus_1_across_rows(db_session: Session):
+    """Owner Outreach tracker render (runs inside the 3s poll): the SELECT count is
+    INDEPENDENT of the row count — the export-twin joinedloads (target_vendor_card /
+    excess_line_item / submitted_by_user) kill the per-row lazy loads (finding 2)."""
+    owner = _make_user(db_session, email="tracker-perf-owner@t.com")
+    company = _make_company(db_session, name="TrackerPerf Seller")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+
+    def _add_rows(n, tag):
+        # DISTINCT card + line + submitter per row so a per-row lazy load is a real query,
+        # not an identity-map hit (a shared object would false-green the N+1).
+        for i in range(n):
+            vc = VendorCard(normalized_name=f"tk-{tag}-{i}", display_name=f"TK {tag} {i}")
+            li = ExcessLineItem(excess_list_id=el.id, part_number=f"PN-{tag}-{i}", quantity=10)
+            u = User(email=f"tk-sub-{tag}-{i}@t.com", name=f"Sub {tag}{i}", role="trader", azure_id=f"az-tk-{tag}-{i}")
+            db_session.add_all([vc, li, u])
+            db_session.flush()
+            db_session.add(
+                ExcessOutreach(
+                    excess_list_id=el.id,
+                    excess_line_item_id=li.id,
+                    target_vendor_card_id=vc.id,
+                    submitted_by=u.id,
+                    channel=ExcessOutreachChannel.EMAIL,
+                    status=ExcessOutreachStatus.SENT,
+                )
+            )
+        db_session.commit()
+
+    def _build_and_walk():
+        ctx = _outreach_tracker_context(None, db_session, el, owner)
+        for r in ctx["rows"]:
+            _ = (
+                r.target_vendor_card.display_name if r.target_vendor_card else None,
+                r.excess_line_item.part_number if r.excess_line_item else None,
+                r.submitted_by_user.name if r.submitted_by_user else None,
+            )
+
+    _add_rows(1, "a")
+    db_session.expire_all()
+    one = _count_queries(db_session, _build_and_walk)
+
+    _add_rows(3, "b")
+    db_session.expire_all()
+    four = _count_queries(db_session, _build_and_walk)
+
+    assert four == one, f"tracker N+1: 1 row={one} queries, 4 rows={four}"

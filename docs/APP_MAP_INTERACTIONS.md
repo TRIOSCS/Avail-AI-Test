@@ -2497,6 +2497,27 @@ Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id
 Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
 linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
 
+**Resell hot-path performance (Phase 6a — pure refactors, no behavior change).**
+`buyer_affinity_service.rank_buyers_for` (#19) now narrows the candidate universe in SQL to
+(won-offer history ∪ commodity-tag overlap ∪ top-`limit*3` engagement) instead of hydrating
+every non-blacklisted VendorCard: the tag-overlap branch is dialect-split —
+PostgreSQL uses the JSONB `?|` any-key operator on the existing GIN index
+`ix_vendor_cards_commodity_tags_gin` (migration 082, no new index), SQLite keeps the Python
+set-intersection fallback (`_tag_overlap_candidate_ids`) — and only the 4 read columns are
+projected. `resell_outreach_service` (#20) precomputes the offered-lines snapshot ONCE per
+campaign (`_campaign_parts_snapshot` → `whole_list_snapshot` + `by_line`) instead of a
+per-(buyer×line) `ExcessLineItem` query, with `_parts_snapshot` now an in-memory lookup and a
+SINGLE row flush after the per-buyer loop (the same-buyer dedup is kept in-memory since
+autoflush is off); the persisted `parts_included` keys are byte-identical. `routers/resell.py`
+adds the CSV-export twin joinedloads to the owner Offers render (`_offers_context`:
+offerer_company / offerer_vendor_card / lines→excess_line_item) and the Outreach tracker render
+(`_outreach_tracker_context`: target_vendor_card / excess_line_item / submitted_by_user, inside
+the 3s poll); `_award_response_context` loads the line items once and threads them into both
+`_detail_context` + `_offers_context` (one line-items SELECT for the combined render); and the
+reply viewer replaced the whole-list `_replies_context` map with a narrow
+`_conversation_replies(db, conversation_id)` single-conversation query (served by
+`ix_vr_conversation`, migration 200).
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```
