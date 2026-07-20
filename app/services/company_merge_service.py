@@ -11,6 +11,7 @@ Depends on: models
 from datetime import UTC
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Company, CustomerSite, SiteContact
@@ -232,6 +233,17 @@ def delete_companies(id_a: int, id_b: int, db: Session) -> dict:
         raise ValueError("One or both companies not found")
 
     ids = [id_a, id_b]
+
+    # Tear down each company's excess-list Sighting mirror FIRST: its customer_excess rows
+    # (+ the virtual scratch reqs) must be DELETED, not left advertising live supply with a
+    # NULLed source_company_id after the generic detach below. Scoped per-list (each list
+    # owns a distinct virtual req — never wipe by company). Runs before the ExcessList rows
+    # are purged, since teardown needs each list's id.
+    from .excess_mirror import teardown_list_mirror
+
+    excess_lists = db.execute(select(ExcessList).where(ExcessList.company_id.in_(ids))).scalars().all()
+    for el in excess_lists:
+        teardown_list_mirror(db, el)
 
     # Detach soft references (nullable / SET NULL) — these records outlive the company.
     # Fail CLOSED: a detach error re-raises so the route rolls back rather than deleting

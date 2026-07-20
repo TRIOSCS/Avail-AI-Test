@@ -1175,9 +1175,15 @@ def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
     """Delete a whole draft list (owner-only, draft-only); cascades to its children.
 
     The ORM ``cascade="all, delete-orphan"`` on line_items/offers/customer_bids cleans the
-    children (a draft has no offers/bids, but the cascade is defence-in-depth). Commits.
+    children (a draft has no offers/bids, but the cascade is defence-in-depth). Tears down
+    the Sighting mirror first (a no-op for a draft — never published/mirrored — but makes the
+    "no stranded mirror on delete" guarantee explicit and survives any future loosening).
+    Commits.
     """
     el = _require_owned_draft(db, list_id, owner)
+    from . import excess_mirror
+
+    excess_mirror.teardown_list_mirror(db, el)
     db.delete(el)
     _safe_commit(db, entity="excess list delete")
     logger.info("Deleted draft ExcessList id={} by owner={}", list_id, owner.id)

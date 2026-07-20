@@ -37,11 +37,13 @@ from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.services.excess_mirror import (
+    _virtual_req_name,
     ensure_virtual_requirement,
     mirror_line,
     publish_list,
     retire_line,
     sync_list_mirror,
+    teardown_list_mirror,
 )
 from app.services.excess_service import create_excess_list, import_line_items
 from app.utils.normalization import normalize_mpn_key
@@ -398,6 +400,134 @@ def test_sync_retires_awarded_line(db_session: Session):
     assert len(rows) == 1
     surviving_line = _lines(db_session, el)[1]
     assert rows[0].material_card_id == surviving_line.material_card_id
+
+
+# ---------------------------------------------------------------------------
+# teardown_list_mirror — list/company DELETION (P2 strand fix)
+# ---------------------------------------------------------------------------
+
+
+def _virtual_req(db: Session, el: ExcessList) -> Requisition | None:
+    return (
+        db.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name == _virtual_req_name(el))
+        .one_or_none()
+    )
+
+
+def test_teardown_deletes_mirror_and_virtual_req(db_session: Session):
+    """Tearing down a published list's mirror DELETES its customer_excess Sightings AND
+    the virtual scratch Requisition/Requirement (no orphan advertising live supply)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N", "MAX232"])
+    publish_list(db_session, el.id, owner)
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+    req = _virtual_req(db_session, el)
+    assert req is not None
+    req_id = req.id  # capture before teardown deletes + expires the row
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert _customer_excess_sightings(db_session, company.id) == []
+    assert _virtual_req(db_session, el) is None
+    assert db_session.query(Requirement).filter(Requirement.requisition_id == req_id).count() == 0
+
+
+def test_teardown_scoped_to_one_list(db_session: Session):
+    """Teardown of ONE list leaves a SIBLING list's mirror + virtual req intact (each
+    list owns a distinct virtual req — never wipe by company)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el_a = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el_b = _make_list_with_lines(db_session, owner, company, ["MAX232"])
+    publish_list(db_session, el_a.id, owner)
+    publish_list(db_session, el_b.id, owner)
+    assert len(_customer_excess_sightings(db_session, company.id)) == 2
+
+    teardown_list_mirror(db_session, el_a)
+    db_session.commit()
+
+    # Only B's sighting + virtual req survive.
+    rows = _customer_excess_sightings(db_session, company.id)
+    assert len(rows) == 1
+    assert _virtual_req(db_session, el_a) is None
+    assert _virtual_req(db_session, el_b) is not None
+
+
+def test_teardown_robust_to_null_material_card(db_session: Session):
+    """Teardown deletes a mirror Sighting even when material_card_id/source_company_id
+    are NULL (retire_line, which keys on the card, could not) — it keys on the virtual
+    req id."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    publish_list(db_session, el.id, owner)
+    # Simulate a mirror row whose card + company links were later NULLed (SET NULL cascades).
+    row = _customer_excess_sightings(db_session, company.id)[0]
+    row.material_card_id = None
+    row.source_company_id = None
+    db_session.commit()
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert _virtual_req(db_session, el) is None
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+
+
+def test_teardown_noop_on_unpublished_draft(db_session: Session):
+    """A draft never mirrored → teardown is an idempotent no-op (no virtual req to
+    remove)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+
+    result = teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert result["sightings"] == 0
+    assert result["requisitions"] == 0
+    # A second call is still a clean no-op.
+    assert teardown_list_mirror(db_session, el)["requisitions"] == 0
+
+
+def test_delete_excess_list_leaves_no_mirror(db_session: Session):
+    """delete_excess_list runs teardown (no-op for a draft) then deletes — no orphan
+    req."""
+    from app.services.excess_service import delete_excess_list
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el_id = el.id
+
+    delete_excess_list(db_session, el_id, owner)
+
+    assert db_session.get(ExcessList, el_id) is None
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+
+
+def test_seed_resell_demo_reset_tears_down_mirror(db_session: Session):
+    """`seed_resell_demo --reset` deletes every demo list's mirror — zero
+    customer_excess Sightings + no leftover virtual scratch Requisition after a
+    seed→reset cycle."""
+    from app.management import seed_resell_demo
+
+    seed_resell_demo.seed(db_session)
+    # The demo builds mirrored postings, so customer_excess sightings exist post-seed.
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() > 0
+
+    seed_resell_demo._reset(db_session)
+
+    assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
+    leftover = (
+        db_session.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name.like("Customer Excess (list %"))
+        .count()
+    )
+    assert leftover == 0
 
 
 # ---------------------------------------------------------------------------

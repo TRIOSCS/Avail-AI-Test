@@ -12,9 +12,8 @@
 - Status/enum values ALWAYS from `app/constants.py`. Use `db.get(Model, id)`, 2.0-style selects, `HTTPException` guards.
 - **Migration id ≤ 32 chars** (staging `alembic_version` is VARCHAR(32)). Claim the number in `MIGRATION_NUMBERS_IN_FLIGHT.txt` in the same commit; verify `alembic heads` == single head.
 - **Never edit the shared `time_text` macro** (`_macros.html`) — it's used by requisitions too. Gate the chip at the resell template level.
-- No new UI *conventions*; the only net-new UI is the optional "Offers close by" date input on the existing create modal (D1-approved) — no other UI additions in this phase.
-- After changes, update `docs/APP_MAP_INTERACTIONS.md` (posting-deadline flow + mirror line-identity + teardown + nightly buyer-score job) and `docs/APP_MAP_DATABASE.md` (new `sightings.excess_line_item_id`).
-- **Out of scope this phase (surfaced to user as a decision after ship):** attributing UI-*direct*-submitted offers to a VendorCard (needs a new buyer selector on `offer_form.html` — UI approval required). The attributed path (outreach→reply→offer) already sets `offerer_vendor_card_id` and fires on-win; UI-direct-submit stays unattributed until that decision. The nightly backstop (Task 4) reconciles every buyer regardless.
+- No new UI *conventions* — reuse the existing `create_modal.html` `<select name="company_id">` pattern for the two net-new inputs: the optional "Offers close by" date on the create modal (D1, Task 1) and the optional "Buyer" selector on the offer form (Task 5). No other UI additions.
+- After changes, update `docs/APP_MAP_INTERACTIONS.md` (posting-deadline flow + mirror line-identity + teardown + nightly buyer-score job + UI-submit offer attribution) and `docs/APP_MAP_DATABASE.md` (new `sightings.excess_line_item_id`).
 
 ---
 
@@ -71,9 +70,23 @@
 
 ---
 
+### Task 5: UI-submit offer attribution → BuyerScore fires on manual offers (finding #17, UI half)
+
+**Files:** `app/templates/htmx/partials/resell/offer_form.html` (new optional buyer `<select>`), `app/routers/resell.py` (`resell_submit_offer` — accept `buyer_company_id`; the view rendering the offer form must pass a `companies` list, reusing the create-modal context source), `app/services/excess_service.py` (`submit_offer` — accept + resolve the buyer), `app/services/resell_outreach_service.py` (reuse `counterparty_card`); Tests: `tests/test_resell_award.py` (new end-to-end submit→award→score case), `tests/test_resell_offers.py`.
+
+**Interfaces:**
+- Produces: `offer_form.html` gains an optional `<select name="buyer_company_id" class="input">` — mirrors the `create_modal.html` `company_id` select exactly (default `<option value="">Buyer (optional)…</option>` + the same company options), labeled "Buyer (optional)". The context that renders the offer form passes `companies` (reuse whatever `create_modal`'s render context uses — do not invent a new query if one exists).
+- `resell_submit_offer` accepts `buyer_company_id: int | None = Form(None)` and threads it into `submit_offer`.
+- `submit_offer(..., buyer_company_id: int | None = None)`: when set, resolve `offer.offerer_vendor_card_id = counterparty_card(db, company_id=buyer_company_id).id` (the existing canonicalizer that get-or-creates a VendorCard from a company); when unset, leave it `None` (no regression — award still works, just no score, exactly as today). This makes `recompute_buyer_score_on_win` (already wired at award) FIRE for manual offers attributed to a buyer.
+- Anonymization: the buyer selector is on the OWNER-facing / submitter offer form only; it exposes the CRM company list (companies the trader already sees), not competitor-offer data — no `can_see_customer` leak. Confirm the offer form is not rendered to a non-owner competitor in a way that would leak the list.
+
+- [ ] Failing tests first: (a) `excess_service.submit_offer(..., buyer_company_id=<company>)` sets `offerer_vendor_card_id` to the resolved card; award that offer → a `BuyerScore` row is written for that card (the gap the whole finding is about — previously NULL card → no score); (b) `submit_offer` with no `buyer_company_id` leaves `offerer_vendor_card_id=None` and award still succeeds (no regression); (c) the offer form renders the buyer `<select>` with the company options (headless assert). → red → implement → green → commit.
+
+---
+
 ## Self-Review
-- **Coverage:** #8 (T1), #18 (T2), P2 teardown (T3), #17 nightly backstop core (T4). ✓
+- **Coverage:** #8 (T1), #18 (T2), P2 teardown (T3), #17 nightly backstop (T4), #17 UI-submit attribution (T5). ✓ — finding #17 now fully closed.
 - **Migration:** exactly one (199, additive Sighting FK), id 27 chars ≤ 32, claimed in-flight, single head. ✓
-- **No unapproved UI:** only the D1-approved optional "Offers close by" input; UI-submit offer attribution explicitly deferred to a user decision. ✓
-- **Anonymization/guards preserved:** no change to `can_see_customer`, owner/draft guards, or terminal-status guards from Phases 1-4. ✓
+- **UI:** two net-new inputs, both reusing the existing `create_modal` `<select>` pattern (no new convention). ✓
+- **Anonymization/guards preserved:** no change to `can_see_customer`, owner/draft, or terminal-status guards from Phases 1-4; the buyer selector exposes only the CRM company list the trader already sees. ✓
 - **Shared macro untouched:** chip gated at the resell-template level. ✓

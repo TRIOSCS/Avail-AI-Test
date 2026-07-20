@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..constants import (
@@ -238,6 +239,71 @@ def retire_line(db: Session, line: ExcessLineItem) -> None:
         db.delete(existing)
         db.flush()
         logger.info("excess-mirror: retired sighting {} for line {}", existing.id, line.id)
+
+
+def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
+    """Delete a list's ENTIRE Sighting mirror + its virtual scratch requisition — for
+    list/company DELETION only.
+
+    Looks up the per-list virtual Requisition by its deterministic name
+    (``_virtual_req_name``), then, leaf→root (SQLite FKs are enforced in tests):
+      1. bulk-deletes every ``customer_excess`` Sighting hanging on that requisition's
+         Requirement(s) — keyed on ``requirement_id`` (always set), so it is robust to
+         ``material_card_id`` / ``source_company_id`` being NULL, unlike ``retire_line``;
+      2. deletes the virtual Requirement(s) and the Requisition, so no orphan scratch req
+         survives to advertise deleted supply.
+
+    Scoped STRICTLY to *excess_list*'s own virtual req — a sibling list for the same company
+    owns a DISTINCT virtual req and is untouched (never wipe by company). Must run BEFORE the
+    ``ExcessList`` / company rows are deleted (it needs ``excess_list.id``). A no-op (all
+    zeros) when the list was never mirrored (draft). Flushes; the CALLER commits. Do NOT call
+    on close/expire — a closed list can be reopened via unaward and re-mirrors; teardown is
+    strictly for DELETION. Returns ``{"sightings": int, "requirements": int, "requisitions": int}``.
+    """
+    name = _virtual_req_name(excess_list)
+    req = (
+        db.execute(
+            select(Requisition)
+            .where(Requisition.is_scratch.is_(True), Requisition.name == name)
+            .order_by(Requisition.id.asc())
+        )
+        .scalars()
+        .first()
+    )
+    if req is None:
+        return {"sightings": 0, "requirements": 0, "requisitions": 0}
+
+    requirement_ids = list(
+        db.execute(select(Requirement.id).where(Requirement.requisition_id == req.id)).scalars().all()
+    )
+    sightings_deleted = 0
+    if requirement_ids:
+        sightings_deleted = (
+            db.execute(
+                delete(Sighting)
+                .where(
+                    Sighting.source_type == "customer_excess",
+                    Sighting.requirement_id.in_(requirement_ids),
+                )
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            or 0
+        )
+    requirements_deleted = (
+        db.execute(
+            delete(Requirement).where(Requirement.requisition_id == req.id).execution_options(synchronize_session=False)
+        ).rowcount
+        or 0
+    )
+    db.execute(delete(Requisition).where(Requisition.id == req.id).execution_options(synchronize_session=False))
+    db.flush()
+    logger.info(
+        "excess-mirror: tore down list {} mirror ({} sightings, {} requirements, 1 requisition)",
+        excess_list.id,
+        sightings_deleted,
+        requirements_deleted,
+    )
+    return {"sightings": sightings_deleted, "requirements": requirements_deleted, "requisitions": 1}
 
 
 def _line_is_active(line: ExcessLineItem) -> bool:
