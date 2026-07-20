@@ -535,6 +535,32 @@ class TestRecordResponse:
         db_session.rollback()
         assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).count() == 0
 
+    @pytest.mark.parametrize("bad_qty", [3_000_000_000, 9_999_999_999])
+    def test_reply_with_overflow_quantity_rejected(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+        bad_qty: int,
+    ):
+        """An inbound offer-line quantity above the Postgres INT4 ceiling is rejected up
+        front — the shared ``_link_inbound_offer`` guard now bounds the value, so an AI-
+        extracted whale quantity from the inbox path never reaches the ExcessOfferLine
+        INSERT as a NumericValueOutOfRange 500 (SQLite masks the 32-bit bound in
+        tests)."""
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+        with pytest.raises(ValueError):
+            svc.record_response(
+                db_session,
+                conversation_id="conv-1",
+                has_offer=True,
+                offer_lines=[{"mpn_raw": "LM358N", "quantity": bad_qty, "unit_price": "1.25"}],
+            )
+        db_session.rollback()
+        assert db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).count() == 0
+
     def test_reply_declined_advances_to_declined(
         self, db_session: Session, excess_list: ExcessList, buyer_card: VendorCard, trader: User
     ):

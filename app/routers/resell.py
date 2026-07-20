@@ -32,6 +32,8 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
+    PG_INT4_MAX,
+    PG_INT4_MIN,
     AccessKey,
     ExcessLineItemStatus,
     ExcessListStatus,
@@ -2360,10 +2362,18 @@ def _to_decimal(value: str | None) -> Decimal | None:
 
 
 def _to_int(value: str | None) -> int | None:
-    """Parse an optional integer string → int, or None when blank/invalid."""
+    """Parse an optional integer string → int, or None when blank/invalid.
+
+    Returns None for anything that cannot land in a Postgres INT4 column — an
+    unparseable value, a non-finite float (``"inf"`` / ``"1e999"`` parse to ``inf`` and
+    raise OverflowError inside ``int(float(...))``), or a value outside the signed 32-bit
+    range — so a fat-fingered quantity/id trips the caller's ``is None`` guard (HTTP 400)
+    instead of overflowing the column as an unhandled 500 at flush time.
+    """
     if value is None or str(value).strip() == "":
         return None
     try:
-        return int(float(str(value).strip().replace(",", "")))
-    except (ValueError, TypeError):
+        parsed = int(float(str(value).strip().replace(",", "")))
+    except (ValueError, TypeError, OverflowError):
         return None
+    return parsed if PG_INT4_MIN <= parsed <= PG_INT4_MAX else None

@@ -17,6 +17,16 @@ from enum import StrEnum, nonmember
 
 MAX_ATTACHMENT_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
+# ---------------------------------------------------------------------------
+# PostgreSQL INT4 bounds (every Integer column: ids, quantities, lead-time days)
+# ---------------------------------------------------------------------------
+# A value outside this signed 32-bit range overflows the column on INSERT/compare
+# (psycopg NumericValueOutOfRange → an unhandled 500 at flush time), so string
+# parsers that feed INT4 columns reject out-of-range values up front instead. SQLite
+# has no 32-bit bound, so this only bites on real Postgres (tests mask it).
+PG_INT4_MAX: int = 2_147_483_647
+PG_INT4_MIN: int = -2_147_483_648
+
 ALLOWED_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset(
     {
         ".pdf",

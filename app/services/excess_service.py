@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import (
+    PG_INT4_MAX,
     ActivityType,
     ExcessLineItemStatus,
     ExcessListStatus,
@@ -134,14 +135,20 @@ def _normalize_row(raw: dict) -> dict:
 
 
 def _parse_quantity(value) -> int | None:
-    """Parse a quantity value, returning None if invalid."""
+    """Parse a quantity value, returning None if invalid.
+
+    None (→ a skipped import row) for a non-positive value, one above the Postgres INT4
+    ceiling, or a non-finite float (``"inf"`` / ``"1e999"`` parse to ``inf`` and raise
+    OverflowError inside ``int(float(...))``) — so an out-of-range cell is counted as a
+    skipped row instead of overflowing the INT4 column as an unhandled 500 on import.
+    """
     if value is None:
         return None
     try:
         qty = int(float(str(value).strip().replace(",", "")))
-        return qty if qty > 0 else None
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return None
+    return qty if 0 < qty <= PG_INT4_MAX else None
 
 
 def _parse_price(value) -> Decimal | None:

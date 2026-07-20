@@ -49,6 +49,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..constants import (
+    PG_INT4_MAX,
     ActivityType,
     Channel,
     Direction,
@@ -1190,15 +1191,17 @@ def _link_inbound_offer(
     """
     excess_list = db.get(ExcessList, outreach.excess_list_id)
 
-    # Reject a non-positive / non-integer offer-line quantity BEFORE any row is created, so a
-    # bad line neither silently promotes 0->1 (the old ``or 1`` coercion) nor reaches the
-    # ExcessOfferLine @validates('quantity') as a cryptic 500 mid-write (after the parent
-    # ExcessOffer was already flushed). Both router entry points (convert-to-offer, log-bid)
-    # already return 400 for this; this is the shared service-level root-cause guard.
+    # Reject a non-positive / non-integer / out-of-INT4-range offer-line quantity BEFORE any
+    # row is created, so a bad line neither silently promotes 0->1 (the old ``or 1`` coercion)
+    # nor reaches the ExcessOfferLine INSERT as a cryptic 500 mid-write (a @validates('quantity')
+    # ValueError for <=0, or a psycopg NumericValueOutOfRange for a value past the INT4 ceiling —
+    # e.g. an AI-extracted whale quantity from the inbox path — after the parent ExcessOffer was
+    # already flushed). The router entry points (convert-to-offer, log-bid, submit-offer) return
+    # 400 via ``_to_int``; this is the shared service-level root-cause guard for every caller.
     for row in offer_lines:
         qty = row.get("quantity")
-        if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
-            raise ValueError(f"Inbound offer line quantity must be a positive integer, got {qty!r}")
+        if not isinstance(qty, int) or isinstance(qty, bool) or not 0 < qty <= PG_INT4_MAX:
+            raise ValueError(f"Inbound offer line quantity must be a positive INT4 integer, got {qty!r}")
 
     # An inbound reply landing after the posting window closed is flagged ``late`` (never
     # dropped) — same rule as the User-driven submit_offer path.

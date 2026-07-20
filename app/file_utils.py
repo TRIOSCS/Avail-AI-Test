@@ -4,7 +4,7 @@
 bytes / not a valid spreadsheet), distinct from a genuinely-empty file (``[]``); every
 caller must handle it. Used by:
   - routers/resell.py: import preview
-  - routers/materials.py: import_material_cards
+  - routers/materials.py: import_part_numbers
   - routers/requisitions/requirements.py: requirement + stock-list uploads
   - jobs/inventory_jobs.py: _parse_stock_file (legacy fallback)
   - services/stock_list_ingest.py: ingest_stock_list

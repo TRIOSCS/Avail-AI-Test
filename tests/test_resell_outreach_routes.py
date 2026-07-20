@@ -713,6 +713,93 @@ def test_log_bid_negative_quantity_400_not_500(client, db_session, trader_user, 
     assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
 
 
+@pytest.mark.parametrize(
+    "bad_qty",
+    ["3000000000", "1e30", "9999999999999"],
+    ids=["int4_overflow", "exp_overflow", "huge_digits"],
+)
+def test_log_bid_overflow_quantity_400_not_500(client, db_session, trader_user, posted_list, bad_qty):
+    """A quantity larger than the Postgres INT4 ceiling is rejected 400 at the route —
+    never reaches the ExcessOfferLine INSERT as an unhandled NumericValueOutOfRange 500.
+
+    ``_to_int`` parses "3000000000"/"1e30" into a huge positive int that passed the
+    ``qty <= 0`` guard and only blew up on the INT4 column at flush time (masked by SQLite,
+    which has no 32-bit bound). ``_to_int`` now returns None for an out-of-INT4-range value,
+    so the ``qty is None`` guard rejects it up front. No ExcessOffer may be created and the
+    row stays ``sent``.
+    """
+    buyer = _reachable_buyer(db_session, "Whale Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid",
+            data={"mpn_raw": "GRM188R", "quantity": bad_qty, "unit_price": "0.88"},
+        )
+    finally:
+        restore()
+    assert resp.status_code == 400
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.SENT  # untouched — no partial write
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "bad_qty",
+    ["inf", "1e999", "-inf", "nan"],
+    ids=["infinity", "huge_exponent_to_inf", "negative_infinity", "nan"],
+)
+def test_log_bid_nonfinite_quantity_400_not_500(client, db_session, trader_user, posted_list, bad_qty):
+    """A non-finite quantity ("inf"/"1e999"/"-inf"/"nan") is rejected 400 at the route —
+    never raises an unhandled OverflowError out of the route before the guard runs.
+
+    ``int(float("inf"))`` raises OverflowError (and ``int(float("nan"))`` a ValueError);
+    ``_to_int`` now catches both and returns None, so the ``qty is None`` guard rejects the
+    row instead of a 500 escaping to the global handler. No ExcessOffer is created.
+    """
+    buyer = _reachable_buyer(db_session, "Inf Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="phone")
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach/{row.id}/log-bid",
+            data={"mpn_raw": "GRM188R", "quantity": bad_qty, "unit_price": "0.88"},
+        )
+    finally:
+        restore()
+    assert resp.status_code == 400
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.SENT
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("500", 500),
+        ("1,000", 1000),
+        ("100.9", 100),
+        ("", None),
+        ("abc", None),
+        ("3000000000", None),  # > INT4 max → None (finding: overflow 500)
+        ("-3000000000", None),  # < INT4 min → None (underflow guard)
+        ("2147483647", 2147483647),  # exactly INT4 max is fine
+        ("inf", None),  # OverflowError inside int(float(...)) → None
+        ("1e999", None),  # parses to inf → None
+        ("-inf", None),
+        ("nan", None),
+    ],
+)
+def test_to_int_bounds_int4_and_swallows_nonfinite(raw, expected):
+    """``_to_int`` returns None for anything that can't be stored in a Postgres INT4
+    column (out of range, or a non-finite float that raises OverflowError) — the shared
+    parser root-cause for the convert/log-bid/submit-offer quantity 400-not-500
+    guards."""
+    from app.routers.resell import _to_int
+
+    assert _to_int(raw) == expected
+
+
 def test_log_bid_double_submit_creates_no_duplicate_offer(client, db_session, trader_user, posted_list):
     """A replayed/duplicated Log-bid POST on a now-BID row records NO second ExcessOffer
     (finding #5/#9/#10).
