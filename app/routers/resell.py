@@ -1374,11 +1374,19 @@ async def resell_import_confirm(
         rows = json.loads(rows_json)
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(400, "Invalid import payload") from exc
-    excess_service.confirm_import(db, list_id, rows)
+    result = excess_service.confirm_import(db, list_id, rows)
     # Re-render the WHOLE detail so the header Post button appears once the draft has
     # lines — a Lines-only swap leaves the header stale (RS-5).
     el = excess_service.get_excess_list(db, list_id)
-    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+    resp = template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+    # Silent-failure b: confirm_import re-validates every row server-side and discards any
+    # with a blank part number or non-positive/invalid quantity. Surface that discard count
+    # via a warning toast (same HX-Trigger channel as _toast) rather than dropping it silently.
+    skipped = result.get("skipped", 0)
+    if skipped > 0:
+        message = f"{skipped} row(s) skipped (invalid quantity or blank part number)"
+        resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "warning"}})
+    return resp
 
 
 @router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)
