@@ -150,26 +150,28 @@
         </div>
       </div>
 
-      {# MIDDLE: decision stat cluster — Win / Rev 90d / Last req as label/value pairs.
-         One numeric language (.h4 label over .figure-accent value, tabular-nums built in)
-         so the figures that drive a call read first; a single left divider replaces the
-         old dot-run. #}
-      <div class="flex items-center gap-x-5 border-l border-line-subtle pl-4 min-w-0">
-        <div class="flex flex-col leading-tight">
+      {# MIDDLE: decision stat cluster — Win / Rev 90d / Last req, collapsed to one
+         compact single-line row (ISS-027.3): label + value share a baseline instead
+         of stacking on two lines, tightening the vertical footprint above the
+         contact list. A single left divider replaces the old dot-run. #}
+      <div class="flex items-center gap-x-4 border-l border-line-subtle pl-3 min-w-0">
+        <div class="flex items-baseline gap-1">
           <span class="h4">Win</span>
           <span class="figure-accent text-sm font-semibold">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
         </div>
-        <div class="flex flex-col leading-tight">
+        <div class="flex items-baseline gap-1">
           <span class="h4">Rev 90d</span>
           <span class="figure-accent text-sm font-semibold">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
         </div>
-        <div class="flex flex-col leading-tight">
+        <div class="flex items-baseline gap-1">
           <span class="h4">Last req</span>
           <span class="figure-accent text-sm font-semibold">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
         </div>
       </div>
 
-      {# RIGHT: type badge + enrich + Add Contact + kebab #}
+      {# RIGHT: type badge + completeness badge + Enrich = the 2-3 primary actions
+         (ISS-027.1). Cadence & settings, Edit account, Merge duplicate, and Archive
+         are secondary/overflow actions — relocated into the kebab, nothing removed. #}
       <div class="flex items-center gap-2 flex-shrink-0">
         {% if company.account_type %}
         {{ account_type_badge(company.account_type) }}
@@ -188,24 +190,7 @@
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
-        {# Cadence & settings — VISIBLE labeled affordance (no longer kebab-buried).
-           Toggles the collapsible cadence/tier/disposition block below; aria-expanded
-           reflects state for assistive tech. #}
-        <button type="button"
-                @click="showAcctSettings = !showAcctSettings"
-                :aria-expanded="showAcctSettings"
-                aria-controls="acct-settings-{{ company.id }}"
-                aria-label="Cadence &amp; settings"
-                title="Cadence &amp; settings"
-                :class="showAcctSettings ? 'bg-accent-50 text-accent-700 border-accent-200' : 'text-gray-600 border-gray-200 hover:bg-gray-50'"
-                class="inline-flex items-center rounded-lg border p-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-          </svg>
-          <span class="sr-only">Cadence &amp; settings</span>
-        </button>
-        {# Kebab — overflow actions (Merge duplicate) #}
+        {# Kebab — overflow actions: Cadence & settings, Edit account, Merge duplicate, Archive #}
         <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
           <button @click.stop="open = !open" type="button"
                   class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500"
@@ -219,6 +204,17 @@
           <div x-show="open" x-cloak
                role="menu"
                class="absolute right-0 top-full mt-1 w-44 bg-white border border-line-base rounded-lg shadow-float z-20 py-1 text-xs text-left">
+            {# Cadence & settings — moved here from a standalone header button
+               (ISS-027.1). Toggles the collapsible cadence/tier/disposition block
+               below; aria-expanded reflects state for assistive tech. Reaches
+               showAcctSettings from the enclosing account-header x-data scope. #}
+            <button type="button"
+                    @click.stop="showAcctSettings = !showAcctSettings; open = false"
+                    :aria-expanded="showAcctSettings ? 'true' : 'false'"
+                    aria-controls="acct-settings-{{ company.id }}"
+                    role="menuitem"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Cadence &amp; settings</button>
+            <div class="border-t border-gray-100 my-1"></div>
             {# Edit account — opens the full account edit form as a modal. Most fields are
                also inline-editable in the header/settings grid, so the full form is an
                overflow action alongside Merge/Archive. #}
