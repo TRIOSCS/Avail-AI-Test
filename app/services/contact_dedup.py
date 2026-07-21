@@ -1,5 +1,5 @@
-"""contact_dedup.py — shared normalization for AI/provider "Find Contacts" dedup
-against already-saved contacts (ISS-025).
+"""contact_dedup.py — shared normalization for AI/provider "Find Contacts" dedup against
+already-saved contacts (ISS-025).
 
 Both the vendor Find Contacts worker (``routers/htmx/vendors._run_vendor_find_contacts``)
 and the customer suggested-contacts status route
@@ -26,7 +26,10 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize_contact_email(email: str | None) -> str:
-    """Lowercase + strip for case-insensitive email dedup. Empty/None -> ''."""
+    """Lowercase + strip for case-insensitive email dedup.
+
+    Empty/None -> ''.
+    """
     return (email or "").strip().lower()
 
 
@@ -41,9 +44,9 @@ def existing_contact_keys(rows: Iterable[Any]) -> tuple[set[str], set[str]]:
     """Build (existing_emails, existing_names) normalized sets from ORM rows exposing
     ``.email`` / ``.full_name`` (VendorContact, ProspectContact, SiteContact).
 
-    Both sets are populated independently per row (a row with an email still
-    contributes its normalized name), since the name fallback must match against
-    every existing contact's name, not only email-less ones.
+    Both sets are populated independently per row (a row with an email still contributes
+    its normalized name), since the name fallback must match against every existing
+    contact's name, not only email-less ones.
     """
     emails: set[str] = set()
     names: set[str] = set()

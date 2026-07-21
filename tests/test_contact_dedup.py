@@ -1,5 +1,5 @@
-"""tests/test_contact_dedup.py — unit tests for app/services/contact_dedup.py
-(ISS-025 shared normalization for Find Contacts dedup against saved contacts).
+"""tests/test_contact_dedup.py — unit tests for app/services/contact_dedup.py (ISS-025
+shared normalization for Find Contacts dedup against saved contacts).
 
 Called by: pytest
 Depends on: app.services.contact_dedup

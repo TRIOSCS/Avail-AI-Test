@@ -330,8 +330,8 @@ def test_poller_drops_suggestion_matching_existing_contact_name_when_no_email(cl
 
 
 def test_poller_all_suggestions_deduped_renders_none_found(client, db_session, test_user):
-    """Every suggestion matches an existing contact -> the panel renders the neutral
-    'No contacts found' state, not stale duplicates."""
+    """Every suggestion matches an existing contact -> the panel renders the neutral 'No
+    contacts found' state, not stale duplicates."""
     company = _make_company(db_session, test_user, name="AllDup Co", domain="alldup.com")
     _make_site_contact(db_session, company, full_name="Solo Contact", email="solo@alldup.com")
 

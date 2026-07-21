@@ -161,8 +161,8 @@ class TestManagerAccessDefault:
 
 class TestCanExportBulkDataJinjaGlobal:
     """can_export_bulk_data — the Jinja global the list toolbars call directly — must
-    mirror user_has_access for real users AND degrade to False (never raise) for a
-    non-User stand-in, so template-compilation smoke tests rendering with a bare/fake
+    mirror user_has_access for real users AND degrade to False (never raise) for a non-
+    User stand-in, so template-compilation smoke tests rendering with a bare/fake
     context never blow up."""
 
     def test_true_for_manager(self, manager_user):
