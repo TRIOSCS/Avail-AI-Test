@@ -47,25 +47,32 @@ _VALID_CUSTOMER_TABS = frozenset(
 )
 
 
-def _company_quotes_query(db: Session, company):
+def _company_quotes_query(db: Session, company, *, req_ids=None):
     """Quotes belonging to an account: union of quotes linked via the
     company's customer sites OR via the company's requisitions (the latter
     catches quotes whose customer_site_id is NULL). Returns a Query, or None
     when the account can own no quotes (no sites and no requisitions).
     Called by: company_detail_partial (count), company_tab (quotes + activity).
+
+    ``req_ids`` may be pre-supplied by a caller that already computed the account's
+    matching requisition ids (e.g. _render_company_detail computes them once and
+    reuses across the count + quotes + buy-plans lookups). When omitted, the same
+    unindexable lower(trim(customer_name)) match is recomputed here (unchanged for
+    the _shared_tabs callers, which pass no req_ids).
     """
     site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company.id).all()]
-    req_ids = [
-        r.id
-        for r in db.query(Requisition.id)
-        .filter(
-            or_(
-                Requisition.company_id == company.id,
-                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+    if req_ids is None:
+        req_ids = [
+            r.id
+            for r in db.query(Requisition.id)
+            .filter(
+                or_(
+                    Requisition.company_id == company.id,
+                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+                )
             )
-        )
-        .all()
-    ]
+            .all()
+        ]
     conds = []
     if site_ids:
         conds.append(Quote.customer_site_id.in_(site_ids))
@@ -76,23 +83,27 @@ def _company_quotes_query(db: Session, company):
     return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
 
 
-def _company_buy_plans_query(db: Session, company):
+def _company_buy_plans_query(db: Session, company, *, req_ids=None):
     """Buy plans belonging to an account: all buy-plans whose requisition links
     to the company (via company_id FK or customer_name match). Returns a Query,
     or None when the account has no requisitions.
     Called by: company_detail_partial (count), company_tab (buy_plans).
+
+    ``req_ids`` may be pre-supplied (see _company_quotes_query / _render_company_detail);
+    when omitted the same match is recomputed here (unchanged for _shared_tabs callers).
     """
-    req_ids = [
-        r.id
-        for r in db.query(Requisition.id)
-        .filter(
-            or_(
-                Requisition.company_id == company.id,
-                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+    if req_ids is None:
+        req_ids = [
+            r.id
+            for r in db.query(Requisition.id)
+            .filter(
+                or_(
+                    Requisition.company_id == company.id,
+                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+                )
             )
-        )
-        .all()
-    ]
+            .all()
+        ]
     if not req_ids:
         return None
     return (
@@ -149,29 +160,30 @@ async def _render_company_detail(
 
     sites = [s for s in (company.sites or []) if s.is_active]
 
-    # Count open requisitions — use company_id FK if available, fall back to name match
-    open_req_count = (
-        db.query(sqlfunc.count(Requisition.id))
+    # Requisitions belonging to this account: company_id FK OR normalized
+    # customer_name match. The name match — lower(trim(customer_name)) — is
+    # unindexable, so run it ONCE here and reuse the id set for the open-req
+    # count and the quote / buy-plan lookups below (was 3 identical scans per
+    # render; now 1). Status is filtered in Python for the count so no extra
+    # scan is needed; StrEnum members compare equal to the stored String value,
+    # matching the previous SQL `status IN (...)` exactly (incl. NULL -> excluded).
+    _matching_reqs = (
+        db.query(Requisition.id, Requisition.status)
         .filter(
             or_(
                 Requisition.company_id == company.id,
                 sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-            ),
-            Requisition.status.in_(
-                [
-                    RequisitionStatus.OPEN,
-                    RequisitionStatus.DRAFT,
-                ]
-            ),
+            )
         )
-        .scalar()
-        or 0
+        .all()
     )
+    _req_ids = [r.id for r in _matching_reqs]
+    open_req_count = sum(1 for r in _matching_reqs if r.status in (RequisitionStatus.OPEN, RequisitionStatus.DRAFT))
 
-    _cq = _company_quotes_query(db, company)
+    _cq = _company_quotes_query(db, company, req_ids=_req_ids)
     quote_count = _cq.count() if _cq is not None else 0
 
-    _bpq = _company_buy_plans_query(db, company)
+    _bpq = _company_buy_plans_query(db, company, req_ids=_req_ids)
     buy_plan_count = _bpq.count() if _bpq is not None else 0
 
     # Cadence card + commercial strip context
