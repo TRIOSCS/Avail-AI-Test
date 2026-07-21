@@ -161,6 +161,36 @@ def _clear_8x8_token_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_run_registries():
+    """Reset every in-process run registry before AND after each test.
+
+    The enrich/discovery pollers coordinate through process-wide ``_state`` dicts
+    (``begin``/``finish``/``consume_outcome``). A test that monkeypatches the
+    background runner to a no-op leaves its company/card/vendor id stuck RUNNING —
+    and since the per-test row cleanup lets SQLite reuse integer ids, a later test
+    in the same xdist worker collides with the stale entry: ``begin()`` refuses,
+    the poller never reaches 286, and the test fails only under full-suite
+    ordering (e.g. TestC4SuggestedContactsUI after the suggested-contacts IDOR
+    tests). Clearing all five registries per test removes the whole class.
+    """
+    from app.services.company_enrich_runs import company_enrich_runs
+    from app.services.contact_discovery_runs import contact_discovery_runs
+    from app.services.material_enrich_runs import crosses_runs, enrich_runs
+    from app.services.vendor_contact_runs import vendor_contact_runs
+
+    registries = (contact_discovery_runs, company_enrich_runs, enrich_runs, crosses_runs, vendor_contact_runs)
+
+    def _reset() -> None:
+        for reg in registries:
+            with reg._lock:
+                reg._state.clear()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _clear_anthropic_client_cache():
     """Clear the shared Anthropic SDK client cache before and after each test.
 

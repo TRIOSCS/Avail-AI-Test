@@ -687,21 +687,34 @@ def _latest_contact_notes(db: Session, contact_ids: list[int]) -> dict[int, str]
         return {}
     from ..models.intelligence import ActivityLog
 
-    rows = (
-        db.query(ActivityLog.site_contact_id, ActivityLog.notes, ActivityLog.created_at)
-        .filter(
+    # Reduce "newest note per contact" in the DB so only N rows (one per contact)
+    # are fetched instead of the full note history. row_number() over
+    # (partition by contact, order by created_at DESC, id DESC) ranks each
+    # contact's notes newest-first; keeping rn == 1 yields exactly one row each.
+    # The `notes != ""` guard mirrors the old Python `and notes` truthiness check:
+    # an empty-string note was skipped so the loop fell through to the newest
+    # NON-empty note — excluding "" here makes rn == 1 land on that same row.
+    ranked = (
+        select(
+            ActivityLog.site_contact_id,
+            ActivityLog.notes,
+            func.row_number()
+            .over(
+                partition_by=ActivityLog.site_contact_id,
+                order_by=(ActivityLog.created_at.desc(), ActivityLog.id.desc()),
+            )
+            .label("rn"),
+        )
+        .where(
             ActivityLog.site_contact_id.in_(contact_ids),
             ActivityLog.activity_type == "note",
             ActivityLog.notes.isnot(None),
+            ActivityLog.notes != "",
         )
-        .order_by(ActivityLog.site_contact_id, ActivityLog.created_at.desc())
-        .all()
+        .subquery()
     )
-    latest: dict[int, str] = {}
-    for site_contact_id, notes, _created in rows:
-        # Rows are ordered newest-first per contact; keep the first seen for each.
-        if site_contact_id not in latest and notes:
-            latest[site_contact_id] = notes
+    result_rows = db.execute(select(ranked.c.site_contact_id, ranked.c.notes).where(ranked.c.rn == 1)).all()
+    latest: dict[int, str] = {row.site_contact_id: row.notes for row in result_rows}
     return latest
 
 

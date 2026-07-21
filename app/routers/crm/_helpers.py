@@ -53,16 +53,24 @@ def record_changes(
             )
 
 
-def quote_to_dict(q: Quote, db=None) -> dict:
-    """Serialize a Quote to API response dict."""
+def quote_to_dict(q: Quote, db=None, cards: dict | None = None) -> dict:
+    """Serialize a Quote to API response dict.
+
+    ``cards`` is an optional prefetched ``{material_card_id: MaterialCard}`` map. When
+    supplied (list views batch-load every referenced card in one IN query — see
+    ``list_quotes``), the per-quote MaterialCard lookup is skipped, eliminating the N+1.
+    When omitted, a single ``db`` query resolves this quote's cards (unchanged single-quote
+    behavior).
+    """
     enriched_items = q.line_items or []
-    if db and enriched_items:
+    if (db is not None or cards is not None) and enriched_items:
         try:
             card_ids = [li.get("material_card_id") for li in enriched_items if li.get("material_card_id")]
             if card_ids:
-                from ...models import MaterialCard
+                if cards is None:
+                    from ...models import MaterialCard
 
-                cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
+                    cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
                 enriched_items = []
                 for li in q.line_items or []:
                     item = dict(li)
