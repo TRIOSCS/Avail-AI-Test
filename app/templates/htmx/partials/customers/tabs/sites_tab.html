@@ -26,7 +26,7 @@
           hx-target="#sites-list"
           hx-swap="beforeend"
           data-loading-disable
-          @htmx:after-request="if(event.detail.successful) { this.reset(); showForm = false }"
+          @htmx:after-request="if(event.detail.successful) { $el.reset(); showForm = false }"
           class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
       <input aria-label="Site Name" type="text" name="site_name" required placeholder="Site Name"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded input-focus">

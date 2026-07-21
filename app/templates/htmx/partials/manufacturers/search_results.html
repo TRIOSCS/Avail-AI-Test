@@ -22,12 +22,16 @@
   {% endfor %}
 {% elif q %}
   <div class="px-3 py-1.5 text-xs text-gray-400">No match for "{{ q }}"</div>
+  {# q|tojson emits wrapping double-quotes that would close a double-quoted onclick attr
+     (breaking the whole handler — 'Unexpected token }'), so stash it in a single-quoted
+     data- attr and JSON.parse it in the handler — the same pattern the match rows use. #}
   <div class="px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 cursor-pointer transition-colors"
        hx-post="/v2/partials/manufacturers/add"
-       hx-vals='{"name": "{{ q }}"}'
+       hx-vals='{"name": {{ q|tojson }}}'
        hx-swap="outerHTML"
        data-loading-disable
-       onclick="var self=this, qVal={{ q|tojson }}; setTimeout(function(){ {{ mfr_picker_apply('self', 'qVal') }} }, 100)">
+       data-mfr-q='{{ q|tojson }}'
+       onclick="var self=this, qVal=JSON.parse(this.dataset.mfrQ); setTimeout(function(){ {{ mfr_picker_apply('self', 'qVal') }} }, 100)">
     + Add "{{ q }}" as new manufacturer
   </div>
 {% else %}
