@@ -2394,7 +2394,7 @@ class TestEditSite:
 
     def test_get_site_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
         """GET edit-form route renders a form pre-populated with site fields."""
-        company, site = self._make_company_with_site(db_session)
+        company, site = self._make_company_with_site(db_session, owner=test_user)
         resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/edit-form")
         assert resp.status_code == 200
         assert "HQ" in resp.text
@@ -4395,6 +4395,7 @@ class TestCompanyPhase0FormFields:
         co = Company(
             name="EditFields Co",
             is_active=True,
+            account_owner_id=test_user.id,
             legal_name="EditFields Corporation",
             employee_size="51-200",
             revenue_range="$1M-$10M",
@@ -4431,6 +4432,7 @@ class TestCompanyPhase0FormFields:
         co = Company(
             name="Prefill Co",
             is_active=True,
+            account_owner_id=test_user.id,
             legal_name="Prefill Legal LLC",
             hq_city="Portland",
             credit_terms="Net 45",
@@ -5153,21 +5155,21 @@ class TestWS4AccountModalFields:
 
     def test_edit_form_renders_domain_input(self, client: TestClient, db_session: Session, test_user: User):
         """GET edit-form contains input[name=domain]."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
         assert resp.status_code == 200
         assert 'name="domain"' in resp.text
 
     def test_edit_form_renders_linkedin_url_input(self, client: TestClient, db_session: Session, test_user: User):
         """GET edit-form contains input[name=linkedin_url]."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
         assert resp.status_code == 200
         assert 'name="linkedin_url"' in resp.text
 
     def test_edit_form_renders_account_type_select(self, client: TestClient, db_session: Session, test_user: User):
         """GET edit-form contains select[name=account_type] with canonical options."""
-        co = self._make_company(db_session)
+        co = self._make_company(db_session, account_owner_id=test_user.id)
         resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
         assert resp.status_code == 200
         assert 'name="account_type"' in resp.text
@@ -5176,7 +5178,7 @@ class TestWS4AccountModalFields:
 
     def test_edit_form_prefills_domain(self, client: TestClient, db_session: Session, test_user: User):
         """Edit form pre-fills domain with existing value."""
-        co = self._make_company(db_session, domain="prefill-domain.com")
+        co = self._make_company(db_session, domain="prefill-domain.com", account_owner_id=test_user.id)
         resp = client.get(f"/v2/partials/customers/{co.id}/edit-form")
         assert resp.status_code == 200
         assert "prefill-domain.com" in resp.text
@@ -5243,6 +5245,8 @@ class TestWS4SiteEditModal:
     def test_site_edit_modal_renders_owner_select(self, client: TestClient, db_session: Session, test_user: User):
         """GET site edit-form contains select[name=owner_id]."""
         co, site = self._make_company_with_site(db_session)
+        co.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.get(f"/v2/partials/customers/{co.id}/sites/{site.id}/edit-form")
         assert resp.status_code == 200
         assert "name='owner_id'" in resp.text or 'name="owner_id"' in resp.text

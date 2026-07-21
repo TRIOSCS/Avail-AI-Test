@@ -547,6 +547,11 @@ async def contacts_tab_add_form(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    # 404 (not 403) to match contact_edit_form_company_scoped: this form leaks the
+    # company/site roster and the full user list, so out-of-scope accounts must be
+    # indistinguishable from missing ones.
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
 
     active_sites = (
         db.query(CustomerSite)
@@ -810,6 +815,11 @@ async def contacts_tab_suggested(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    # 404 (not 403) to match contact_edit_form_company_scoped: this trigger spends paid
+    # enrichment credits and returns contact PII, so gate it to account managers and keep
+    # out-of-scope accounts indistinguishable from missing ones.
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
 
     if not domain:
         domain = company.domain or company.website or ""
@@ -854,6 +864,11 @@ async def contacts_tab_suggested_status(
     if not company:
         # Polling sub-resource: htmx neither swaps nor cancels an `every 2s` poll on a 4xx,
         # so a 404 would leave the panel hammering this route. 286 stops it; empty clears it.
+        return HTMLResponse("", status_code=286)
+    if not can_manage_account(user, company, db):
+        # Out-of-scope poller: this route streams discovered contact PII. Deny by stopping
+        # the poll with an empty body — indistinguishable from a missing/consumed run (286),
+        # never leaking whether a run exists for someone else's account.
         return HTMLResponse("", status_code=286)
 
     if contact_discovery_runs.is_running(company_id):
@@ -1042,6 +1057,11 @@ async def contact_field_edit_form(
     )
     if not contact:
         raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    # 404 (not 403) to match contact_edit_form_company_scoped: this widget leaks the
+    # contact field value, so out-of-scope accounts must be indistinguishable from missing.
+    if company is None or not can_manage_account(user, company, db):
+        raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
     extra: dict = {}
     return template_response(
@@ -1081,6 +1101,11 @@ async def contact_field_display(
         .first()
     )
     if not contact:
+        raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    # 404 (not 403) to match contact_edit_form_company_scoped: this span leaks the
+    # contact field value, so out-of-scope accounts must be indistinguishable from missing.
+    if company is None or not can_manage_account(user, company, db):
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
     return template_response(
@@ -1425,7 +1450,12 @@ async def contact_files_modal(
     if not contact:
         raise HTTPException(404, "Contact not found")
     site = db.get(CustomerSite, contact.customer_site_id)
-    if not site or not db.get(Company, site.company_id):
+    company = db.get(Company, site.company_id) if site else None
+    if not site or company is None:
+        raise HTTPException(404, "Contact not found")
+    # 404 (not 403) to match contact_edit_form_company_scoped: this modal shell leaks
+    # contact PII, so out-of-scope accounts must be indistinguishable from missing.
+    if not can_manage_account(user, company, db):
         raise HTTPException(404, "Contact not found")
     return template_response(
         "htmx/partials/customers/_contact_files_modal.html",
@@ -1495,8 +1525,13 @@ async def contact_notes_modal(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    # 404 (not 403) to match contact_edit_form_company_scoped: the notes feed is contact
+    # PII, so out-of-scope accounts must be indistinguishable from missing. can_manage_account
+    # was previously only a display flag, leaving the feed readable cross-tenant.
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     contact = _contact_under_company(db, company_id, contact_id)
-    return _render_contact_notes_modal(request, company, contact, db, can_manage=can_manage_account(user, company, db))
+    return _render_contact_notes_modal(request, company, contact, db, can_manage=True)
 
 
 @router.get(
@@ -1517,6 +1552,10 @@ async def contact_history_modal(
     """
     company = db.get(Company, company_id)
     if not company:
+        raise HTTPException(404, "Company not found")
+    # 404 (not 403) to match contact_edit_form_company_scoped: field-change history holds
+    # old/new contact PII, so out-of-scope accounts must be indistinguishable from missing.
+    if not can_manage_account(user, company, db):
         raise HTTPException(404, "Company not found")
     contact = _contact_under_company(db, company_id, contact_id)
     history = field_history_for(db, ENTITY_CONTACT, contact.id)

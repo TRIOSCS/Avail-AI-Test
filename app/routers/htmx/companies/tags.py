@@ -39,6 +39,8 @@ async def company_segment_tags_partial(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     tags = list_company_segment_tags(company_id=company_id, db=db)
     all_segment_tags = list_all_segment_tags(db=db)
     return template_response(

@@ -810,6 +810,8 @@ async def company_dup_suggestion(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
 
     # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
     # already honors the auto_keep heuristic; here we only need the OTHER side as the
@@ -853,6 +855,8 @@ async def company_name_suggestion(
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
         raise HTTPException(404, "Company not found")
 
     suggested = suggest_clean_company_name(company.name or "")
@@ -1165,6 +1169,8 @@ async def company_edit_form(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     users = (
         db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
     )
@@ -1280,6 +1286,8 @@ async def company_field_edit_form(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     meta = EDITABLE_ACCOUNT_FIELDS[field]
     return template_response(
         "htmx/partials/customers/_field_edit.html",
@@ -1311,6 +1319,8 @@ async def company_field_display(
         raise HTTPException(404, f"Unknown editable field: {field!r}")
     company = db.get(Company, company_id)
     if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
         raise HTTPException(404, "Company not found")
     meta = EDITABLE_ACCOUNT_FIELDS[field]
     return template_response(

@@ -68,7 +68,9 @@ class TestCreateCompany:
 
 
 class TestEditCompany:
-    def test_edit_form_renders(self, client: TestClient, test_company: Company):
+    def test_edit_form_renders(self, client: TestClient, test_company: Company, test_user: User, db_session: Session):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.get(
             f"/v2/partials/customers/{test_company.id}/edit-form",
             headers={"HX-Request": "true"},
@@ -132,12 +134,19 @@ class TestEditSite:
         assert resp.status_code == 404
 
     def test_edit_form_targets_tab_panel_not_shell(
-        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite
+        self,
+        client: TestClient,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+        test_user: User,
+        db_session: Session,
     ):
         """F1: the site-edit modal must swap the Sites tab panel (#company-tab-content),
         NOT #main-content. The edit handler returns the sites_tab fragment (same as a
         Sites-tab click); targeting #main-content replaced the whole page/workspace shell
         with a bare sites list, wiping the header, tabs, and account list."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.get(
             f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit-form",
             headers={"HX-Request": "true"},

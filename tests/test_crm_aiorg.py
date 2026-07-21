@@ -198,9 +198,10 @@ class TestDataOpsReviewQueue:
 
 
 class TestDupSuggestionRoute:
-    def test_returns_merge_affordance_when_near_dup(self, client: TestClient, db_session: Session):
+    def test_returns_merge_affordance_when_near_dup(self, client: TestClient, db_session: Session, test_user: User):
         keep = _make_company(db_session, "Beta Corporation", sites=2)
         _make_company(db_session, "Beta Corp", sites=1)
+        keep.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
 
         resp = client.get(f"/v2/partials/customers/{keep.id}/dup-suggestion", headers={"HX-Request": "true"})
@@ -209,8 +210,9 @@ class TestDupSuggestionRoute:
         # Reuses the merge-form flow.
         assert "/merge-form" in resp.text or "merge-preview" in resp.text
 
-    def test_empty_when_no_dup(self, client: TestClient, db_session: Session):
+    def test_empty_when_no_dup(self, client: TestClient, db_session: Session, test_user: User):
         solo = _make_company(db_session, "Singular Unique Industries")
+        solo.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{solo.id}/dup-suggestion", headers={"HX-Request": "true"})
         assert resp.status_code == 200
@@ -227,9 +229,10 @@ class TestDupSuggestionRoute:
 
 
 class TestNameSuggestionChip:
-    def test_surfaces_suggestion_for_suffix_heavy_name(self, client: TestClient, db_session: Session):
+    def test_surfaces_suggestion_for_suffix_heavy_name(self, client: TestClient, db_session: Session, test_user: User):
         # "Inc." is stripped but the rest of the (multi-word, display-cased) name is kept.
         c = _make_company(db_session, "Mouser Electronics, Inc.")
+        c.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{c.id}/name-suggestion", headers={"HX-Request": "true"})
         assert resp.status_code == 200
@@ -237,8 +240,9 @@ class TestNameSuggestionChip:
         assert "Mouser Electronics" in resp.text
         assert f"/v2/partials/customers/{c.id}/apply-name" in resp.text
 
-    def test_empty_when_name_already_clean(self, client: TestClient, db_session: Session):
+    def test_empty_when_name_already_clean(self, client: TestClient, db_session: Session, test_user: User):
         c = _make_company(db_session, "Phoenix Trading")
+        c.account_owner_id = test_user.id  # owner passes can_manage_account gate
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{c.id}/name-suggestion", headers={"HX-Request": "true"})
         assert resp.status_code == 200

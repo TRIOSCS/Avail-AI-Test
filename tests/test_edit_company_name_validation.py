@@ -18,9 +18,14 @@ from app.models import Company, User
 
 
 class TestEditCompanyNameRequiredAttr:
-    def test_edit_form_name_input_has_required(self, client: TestClient, test_company: Company):
+    def test_edit_form_name_input_has_required(
+        self, client: TestClient, test_company: Company, test_user: User, db_session: Session
+    ):
         """The rendered edit form's name input must include ``required`` so a blank name
         can't be silently submitted (parity with the create form)."""
+        # test_user owns test_company so can_manage_account passes.
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
         resp = client.get(
             f"/v2/partials/customers/{test_company.id}/edit-form",
             headers={"HX-Request": "true"},

@@ -14,7 +14,13 @@ from ...constants import (
     UserRole,
 )
 from ...database import get_db
-from ...dependencies import require_access, require_buyer, require_requisition_access, require_user
+from ...dependencies import (
+    is_manager_or_admin,
+    require_access,
+    require_buyer,
+    require_requisition_access,
+    require_user,
+)
 from ...models import (
     ActivityLog,
     ChangeLog,
@@ -779,6 +785,24 @@ async def get_changelog(
     """Fetch change history for an entity."""
     if entity_type not in ("offer", "requirement", "requisition"):
         raise HTTPException(400, "Invalid entity_type")
+    from ...models import Requisition
+
+    # Gate on the owning requisition so change history (which may include pricing,
+    # terms and PII) isn't readable across requisitions by restricted roles.
+    if entity_type == "offer":
+        offer = db.get(Offer, entity_id)
+        if not offer:
+            raise HTTPException(404, "Not found")
+        require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
+    elif entity_type == "requirement":
+        requirement = db.get(Requirement, entity_id)
+        if not requirement:
+            raise HTTPException(404, "Not found")
+        require_requisition_access(db, requirement.requisition_id, user, label="Requirement")
+    else:
+        if db.get(Requisition, entity_id) is None:
+            raise HTTPException(404, "Not found")
+        require_requisition_access(db, entity_id, user, label="Requisition")
     rows = (
         db.query(ChangeLog)
         .filter(ChangeLog.entity_type == entity_type, ChangeLog.entity_id == entity_id)
@@ -816,6 +840,7 @@ async def list_offer_attachments(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     return attachment_service.attachment_list_response(
         request, kind="offer", entity_id=offer_id, rows=offer.attachments
     )
@@ -952,6 +977,8 @@ async def list_review_queue(
     Called by: frontend review queue panel
     Depends on: Offer model with evidence_tier column
     """
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Forbidden")
     offers = (
         db.query(Offer)
         .filter(

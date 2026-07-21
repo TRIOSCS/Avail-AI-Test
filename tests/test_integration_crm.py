@@ -32,9 +32,16 @@ def test_create_company_missing_name(client):
     assert resp.status_code == 422  # Pydantic validation rejects missing required field
 
 
-def test_list_companies(client):
-    client.post("/api/companies", json={"name": "ListCo Alpha"})
-    client.post("/api/companies?force=true", json={"name": "ListCo Beta"})
+def test_list_companies(client, db_session, test_user):
+    from app.models import Company
+
+    alpha = client.post("/api/companies", json={"name": "ListCo Alpha"}).json()
+    beta = client.post("/api/companies?force=true", json={"name": "ListCo Beta"}).json()
+    # create_company assigns no owner; own both so they pass the rep-scoped visibility
+    # filter on the list endpoint (phase1-authz IDOR fix), matching test_update_company.
+    for created in (alpha, beta):
+        db_session.get(Company, created["id"]).account_owner_id = test_user.id
+    db_session.commit()
     resp = client.get("/api/companies")
     assert resp.status_code == 200
     names = [c["name"] for c in resp.json()["items"]]

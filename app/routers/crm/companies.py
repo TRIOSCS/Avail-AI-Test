@@ -12,7 +12,7 @@ from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
 from ...constants import RequisitionStatus
 from ...database import get_db
-from ...dependencies import can_manage_account, require_user
+from ...dependencies import can_manage_account, is_manager_or_admin, require_user
 from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
@@ -102,8 +102,16 @@ async def list_companies(
     @cached_endpoint(
         prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag", "limit", "offset"]
     )
-    def _fetch(search, owner_id, unassigned, tag, limit, offset, db):
+    def _fetch(search, owner_id, unassigned, tag, limit, offset, db, user):
         query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
+        # Rep-scoped visibility: non-managers see only accounts they own or collaborate on
+        # (mirrors the /v2/contacts list + cdm_company_query). Managers/admins see all.
+        # `user` is a real _fetch param (not a closure) so @cached_endpoint folds user.id
+        # into the cache key and reps never receive each other's scoped result set.
+        from ...services.crm_service import company_visibility_predicate
+
+        if not is_manager_or_admin(user):
+            query = query.filter(company_visibility_predicate(user))
         if search.strip():
             sb = SearchBuilder(search.strip())
             query = query.filter(sb.ilike_filter(Company.name))
@@ -189,6 +197,7 @@ async def list_companies(
         limit=limit,
         offset=offset,
         db=db,
+        user=user,
     )
 
 
@@ -229,6 +238,9 @@ async def get_company(
         .first()
     )
     if not company:
+        raise HTTPException(404, "Company not found")
+    # Match company_detail_partial: out-of-scope accounts are indistinguishable from missing.
+    if not can_manage_account(user, company, db):
         raise HTTPException(404, "Company not found")
 
     @cached_endpoint(prefix="company_detail", ttl_hours=1, key_params=["company_id"])
