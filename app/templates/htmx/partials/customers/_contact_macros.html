@@ -115,7 +115,9 @@
                    reports-to · LinkedIn · management actions (kebab)
 
    Clock honesty: NULL last_outbound_at → "—"  (NEVER "never replied").
-   Alpine: x-data='{open:false}' on the outer <tr> wrapper (single-quoted attr).
+   Alpine: the `open` drawer state is owned by the enclosing <tbody data-contact-row>
+   (see _contacts_grouped_list.html) because the summary row and the drawer row are
+   siblings — a <tr>-local x-data would not reach the sibling drawer.
 #}
 {% if legacy %}
   {# ── Legacy site-level row ─────────────────────────────────────── #}
@@ -123,7 +125,7 @@
   {% set _ltitle = site.contact_title or '' %}
   {% set _lphone = site.contact_phone %}
   {% set _lemail = site.contact_email %}
-  <tr x-data='{open:false}' class='group cursor-pointer' @click='open=!open'>
+  <tr class='group cursor-pointer' @click='open=!open'>
     <td class='td-label font-medium text-gray-900 whitespace-nowrap'>
       <span class='flex items-center gap-1'>
         {{ _lname }}
@@ -227,7 +229,7 @@
     'operations':     'bg-gray-100 text-gray-600'
   } %}
 
-  <tr x-data='{open:false}' class='group cursor-pointer' @click='open=!open'>
+  <tr class='group cursor-pointer' @click='open=!open'>
     {# Name cell — name · primary star · role chip · status badges #}
     <td class='td-label'>
       <div class='flex items-center gap-1.5 min-w-0'>
