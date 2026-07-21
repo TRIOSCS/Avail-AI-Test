@@ -1,0 +1,33 @@
+{#
+  resell/upload_bids_modal.html — Upload Bids modal (owner-only): a compiled sheet with
+  SEVERAL bidders' filled-in bid-sheet rows concatenated together — each distinct Bidder
+  name becomes its own inbound offer on confirm. Mirrors add_line_modal.html's modal shell
+  + the Lines tab's auto-submit-on-select file input.
+  Receives: list_id.
+  Called by: resell.resell_bids_upload_form.
+#}
+<div class="p-5">
+  <h3 class="h2 mb-1" id="modal-title">Upload bids</h3>
+  <p class="text-secondary mb-4">
+    Upload one compiled sheet — several bidders' filled-in copies of the bid sheet,
+    concatenated together. Each row's Bidder becomes its own offer once you confirm.
+  </p>
+  <div id="bid-upload-area">
+    <form hx-post="/api/resell/{{ list_id }}/bids/upload-preview"
+          hx-encoding="multipart/form-data"
+          hx-target="#bid-upload-area"
+          hx-swap="innerHTML"
+          data-loading-disable>
+      <label class="flex items-center justify-center gap-2 px-3 py-4 text-sm text-brand-600 bg-gray-50 border border-dashed border-brand-200 rounded-lg cursor-pointer hover:bg-brand-50 transition-colors">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+        <span>Choose a compiled bid sheet (CSV / Excel)</span>
+        <input type="file" name="file" accept=".csv,.tsv,.xlsx,.xls" class="hidden"
+               aria-label="Upload compiled bid sheet"
+               @change="if ($el.files.length) $el.closest('form').requestSubmit()">
+      </label>
+    </form>
+  </div>
+  <div class="modal-footer">
+    <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+  </div>
+</div>

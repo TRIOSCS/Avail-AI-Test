@@ -215,7 +215,7 @@ def _bid_number(bid: CustomerBid) -> str:
     return f"BID-{bid.id}"
 
 
-def _guard_bid_for_owner(db: Session, *, list_id: int, bid_id: int, owner: User) -> tuple[ExcessList, CustomerBid]:
+def guard_bid_for_owner(db: Session, *, list_id: int, bid_id: int, owner: User) -> tuple[ExcessList, CustomerBid]:
     """Load a bid + its list, enforcing owner-only + belongs-to-list (raise, never
     silent).
 
@@ -334,7 +334,7 @@ async def send_bid_back(
 ) -> CustomerBid:
     """Email the clean bid-back PDF to the seller and flip the bid ``draft -> sent``.
 
-    Owner-only (via :func:`_guard_bid_for_owner`). Guards: the bid must be a ``draft``
+    Owner-only (via :func:`guard_bid_for_owner`). Guards: the bid must be a ``draft``
     (409 otherwise — a sent/decided bid is not re-sendable; re-assemble first to bump the
     revision) and carry at least one line (409). The seller contact email must resolve
     (422 otherwise — never email nobody). Reuses ``email_service.send_batch_rfq`` in its
@@ -344,7 +344,7 @@ async def send_bid_back(
     does the status flip and ``sent_at`` stamp — a failed send raises 502 and leaves the
     bid a draft. Commits. Returns the refreshed bid.
     """
-    excess_list, bid = _guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
+    excess_list, bid = guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
     if bid.status != CustomerBidStatus.DRAFT:
         raise HTTPException(409, "Only a draft bid can be sent — re-assemble to revise a sent bid")
     if not bid.lines:
@@ -417,7 +417,7 @@ def record_bid_response(
     re-decide a terminal bid). Stamps ``responded_at`` + ``responded_by_id`` (who/when).
     Commits. Returns the refreshed bid.
     """
-    _excess_list, bid = _guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
+    _excess_list, bid = guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
     if bid.status != CustomerBidStatus.SENT:
         raise HTTPException(409, "Only a sent bid can be accepted or rejected")
 

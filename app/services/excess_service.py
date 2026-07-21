@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import (
     PG_INT4_MAX,
+    PG_INT4_MIN,
     ActivityType,
     ExcessLineItemStatus,
     ExcessListStatus,
@@ -507,6 +508,40 @@ def notify_owner_of_offer(
     )
 
 
+def _index_lines_by_norm_mpn(items: list[ExcessLineItem]) -> dict[str, list[ExcessLineItem]]:
+    """Index a list's posted line items by normalized part number.
+
+    Shared by :func:`submit_offer` and the bid-sheet upload path (:func:`preview_bid_upload`
+    / :func:`upload_bids`) so both entry points classify an inbound MPN against the SAME
+    index — one line ends up in every bucket its normalized part number produces, so a
+    posting with two lines sharing an MPN is correctly flagged ambiguous by either caller.
+    """
+    by_norm: dict[str, list[ExcessLineItem]] = {}
+    for li in items:
+        key = li.normalized_part_number or normalize_mpn_key(li.part_number)
+        if key:
+            by_norm.setdefault(key, []).append(li)
+    return by_norm
+
+
+def _classify_mpn_match(by_norm: dict[str, list[ExcessLineItem]], mpn_raw: str) -> tuple[str, int | None]:
+    """Classify one ``mpn_raw`` against an indexed posting: matched / unmatched /
+    ambiguous.
+
+    Part-number-only matching (price never affects it) — exactly one candidate line →
+    matched (its id); zero → unmatched; more than one → ambiguous. Unmatched/ambiguous
+    are QUEUED by the caller, never dropped (spec §"Offer collection"). Shared by
+    :func:`submit_offer` and the bid-sheet upload path so both classify identically.
+    """
+    norm_key = normalize_mpn_key(mpn_raw)
+    candidates = by_norm.get(norm_key, []) if norm_key else []
+    if len(candidates) == 1:
+        return OfferLineMatchStatus.MATCHED, candidates[0].id
+    if len(candidates) > 1:
+        return OfferLineMatchStatus.AMBIGUOUS, None
+    return OfferLineMatchStatus.UNMATCHED, None
+
+
 def submit_offer(
     db: Session,
     *,
@@ -576,26 +611,13 @@ def submit_offer(
     if scope_value == ExcessOfferScope.PER_LINE:
         # Index the posting's lines by normalized part number to classify each row.
         posted = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
-        by_norm: dict[str, list[ExcessLineItem]] = {}
-        for li in posted:
-            key = li.normalized_part_number or normalize_mpn_key(li.part_number)
-            if key:
-                by_norm.setdefault(key, []).append(li)
+        by_norm = _index_lines_by_norm_mpn(posted)
 
         for row in lines or []:
             mpn_raw = (row.get("mpn_raw") or "").strip()
-            norm_key = normalize_mpn_key(mpn_raw)
-            candidates = by_norm.get(norm_key, []) if norm_key else []
-            if len(candidates) == 1:
-                match_status = OfferLineMatchStatus.MATCHED
-                matched_id = candidates[0].id
+            match_status, matched_id = _classify_mpn_match(by_norm, mpn_raw)
+            if matched_id is not None:
                 affected_line_item_ids.add(matched_id)
-            elif len(candidates) > 1:
-                match_status = OfferLineMatchStatus.AMBIGUOUS  # queued, never dropped
-                matched_id = None
-            else:
-                match_status = OfferLineMatchStatus.UNMATCHED  # queued, never dropped
-                matched_id = None
 
             db.add(
                 ExcessOfferLine(
@@ -687,6 +709,326 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
         item.best_offer_unit_price,
         item.best_offer_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Compiled multi-bidder bid-sheet upload (the owner ingests SEVERAL bidders' filled-in
+# copies of the blank bid sheet at once, one row per bidder's line). Header detection is
+# tolerant like the intake importer's ``_HEADER_MAP``; matching REUSES the same
+# ``_index_lines_by_norm_mpn`` / ``_classify_mpn_match`` helpers ``submit_offer`` uses, plus
+# an exact Line ID match that wins when present and valid for THIS list.
+# ---------------------------------------------------------------------------
+
+_BID_HEADER_MAP: dict[str, str] = {
+    "bidder": "bidder",
+    "buyer": "bidder",
+    "broker": "bidder",
+    "line id": "line_id",
+    "line_id": "line_id",
+    "lineid": "line_id",
+    "part number": "part_number",
+    "part_number": "part_number",
+    "mpn": "part_number",
+    "pn": "part_number",
+    "offer qty": "quantity",
+    "offer_qty": "quantity",
+    "quantity": "quantity",
+    "qty": "quantity",
+    "unit price": "unit_price",
+    "unit_price": "unit_price",
+    "price": "unit_price",
+    "lead time (days)": "lead_time_days",
+    "lead time": "lead_time_days",
+    "lead_time_days": "lead_time_days",
+    "lead time days": "lead_time_days",
+    "notes": "notes",
+    "note": "notes",
+}
+
+# Preview/confirm row classification labels (NOT persisted — a preview-only audit label
+# for the multi-bidder grid; the persisted field is ExcessOfferLine.match_status).
+_ROW_CLASS_LINE_ID = "line_id_match"
+_ROW_CLASS_MPN = "mpn_match"
+
+
+def _normalize_bid_row(raw_row: dict) -> dict:
+    """Map a bid-sheet row's header-varied keys onto the canonical field names.
+
+    Idempotent: canonical keys (``bidder``, ``part_number``, ...) map to themselves, so a
+    row already carrying canonical fields (the confirm round-trip payload) normalizes
+    unchanged. Mirrors ``_normalize_row``'s tolerant-header pattern for the intake importer.
+    """
+    result: dict = {}
+    for key, value in raw_row.items():
+        canonical = _BID_HEADER_MAP.get(str(key).strip().lower())
+        if canonical and canonical not in result:
+            result[canonical] = value
+    return result
+
+
+def _parse_optional_int(value) -> int | None:
+    """Parse an optional integer cell (Line ID / Lead Time) — None when blank/invalid,
+    never coerced.
+
+    Allows zero/negative (Lead Time may be 0; Line ID is a real row id).
+    """
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = int(float(str(value).strip().replace(",", "")))
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return parsed if PG_INT4_MIN <= parsed <= PG_INT4_MAX else None
+
+
+def _classify_bid_row(
+    raw_row: dict,
+    *,
+    posted_by_id: dict[int, ExcessLineItem],
+    by_norm: dict[str, list[ExcessLineItem]],
+) -> tuple[dict | None, str | None]:
+    """Classify ONE bid-sheet row against a list's CURRENT lines.
+
+    Returns ``(fields, None)`` for an accepted row, or ``(None, reason)`` for a rejected
+    one — never coerced (phase-6b lesson: a bad quantity is rejected, not defaulted).
+    Shared by :func:`preview_bid_upload` (first pass) and :func:`upload_bids` (server-side
+    re-classification on confirm — mirrors ``confirm_import``'s L3 re-validation, so a
+    tampered or stale client payload can never fabricate a match).
+
+    Resolution order: a Line ID that resolves to a line ON THIS LIST wins outright
+    (``line_id_match``) — even over a disagreeing Part Number text. An invalid Line ID
+    (blank, or belonging to another list) is treated as absent and falls back to the Part
+    Number MPN match (``mpn_match``: matched/unmatched/ambiguous, via
+    ``_classify_mpn_match``). A row with neither a valid Line ID nor a Part Number has
+    nothing to identify the part and is rejected (the "take-all" shape is out of scope for
+    a per-line compiled sheet).
+    """
+    row = _normalize_bid_row(raw_row)
+    bidder = (row.get("bidder") or "").strip()
+    if not bidder:
+        return None, "missing bidder"
+
+    qty = _parse_quantity(row.get("quantity"))
+    if qty is None:
+        return None, "missing or invalid quantity"
+
+    line_id = _parse_optional_int(row.get("line_id"))
+    part_number = (row.get("part_number") or "").strip()
+    target_item = posted_by_id.get(line_id) if line_id is not None else None
+
+    if target_item is not None:
+        classification = _ROW_CLASS_LINE_ID
+        match_status: str = OfferLineMatchStatus.MATCHED
+        matched_id: int | None = target_item.id
+        mpn_raw = part_number or target_item.part_number
+    elif part_number:
+        classification = _ROW_CLASS_MPN
+        match_status, matched_id = _classify_mpn_match(by_norm, part_number)
+        mpn_raw = part_number
+    else:
+        return None, "no Line ID or part number"
+
+    return {
+        "bidder": bidder,
+        "classification": classification,
+        "match_status": match_status,
+        "excess_line_item_id": matched_id,
+        "mpn_raw": mpn_raw,
+        "quantity": qty,
+        "unit_price": _parse_price(row.get("unit_price")),
+        "lead_time_days": _parse_optional_int(row.get("lead_time_days")),
+        "terms_text": (row.get("notes") or "").strip() or None,
+    }, None
+
+
+def preview_bid_upload(db: Session, list_id: int, rows: list[dict]) -> dict:
+    """Classify uploaded compiled-bid-sheet rows for the multi-bidder preview grid.
+
+    Read-only (no writes/commits). Groups ACCEPTED rows by bidder name for the grid;
+    REJECTED rows (missing bidder, missing/invalid/non-positive quantity, or no Line
+    ID/Part Number to identify the part) are listed with a reason — never silently
+    coerced. ``carry_rows`` is the JSON-safe canonical payload the confirm form round-trips
+    back to :func:`upload_bids`, which RE-CLASSIFIES it fresh (never trusts this preview's
+    derived ``match_status``/``excess_line_item_id`` — mirrors ``confirm_import``'s L3
+    discipline).
+    """
+    posted = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
+    posted_by_id = {it.id: it for it in posted}
+    by_norm = _index_lines_by_norm_mpn(posted)
+
+    accepted: list[dict] = []
+    rejected: list[dict] = []
+    for i, raw in enumerate(rows, start=1):
+        normalized = _normalize_bid_row(raw)
+        fields, reason = _classify_bid_row(raw, posted_by_id=posted_by_id, by_norm=by_norm)
+        if fields is None:
+            rejected.append({"row": i, "bidder": (normalized.get("bidder") or "").strip(), "reason": reason})
+            continue
+        fields["row"] = i
+        accepted.append(fields)
+
+    by_bidder: dict[str, list[dict]] = {}
+    for a in accepted:
+        by_bidder.setdefault(a["bidder"], []).append(a)
+
+    carry_rows = [
+        {
+            "bidder": a["bidder"],
+            "part_number": a["mpn_raw"],
+            "quantity": a["quantity"],
+            "unit_price": float(a["unit_price"]) if a["unit_price"] is not None else None,
+            "lead_time_days": a["lead_time_days"],
+            "notes": a["terms_text"],
+            "line_id": a["excess_line_item_id"],
+        }
+        for a in accepted
+    ]
+
+    return {
+        "accepted": accepted,
+        "rejected": rejected,
+        "by_bidder": by_bidder,
+        "bidder_count": len(by_bidder),
+        "accepted_count": len(accepted),
+        "rejected_count": len(rejected),
+        "carry_rows": carry_rows,
+    }
+
+
+# List statuses whose posting window accepts an owner-ingested compiled bid sheet — the
+# SAME posted-status set the router enforces on ``submit_offer`` (draft lists have no
+# finalized lines to bid on yet).
+_UPLOAD_POSTED_STATUSES = (
+    ExcessListStatus.OPEN,
+    ExcessListStatus.COLLECTING,
+    ExcessListStatus.BID_OUT,
+    ExcessListStatus.AWARDED,
+)
+
+
+def upload_bids(
+    db: Session,
+    *,
+    list_id: int,
+    user: User,
+    rows: list[dict],
+) -> dict:
+    """Ingest a compiled multi-bidder bid sheet into inbound ExcessOffers (owner-only).
+
+    *rows* are the canonical accepted rows carried forward from :func:`preview_bid_upload`
+    (bidder/part_number/quantity/unit_price/lead_time_days/notes/line_id) — RE-CLASSIFIED
+    here fresh against the list's CURRENT lines via :func:`_classify_bid_row` (never trusts
+    the client's pre-computed classification). Rows are grouped by bidder name; each
+    distinct bidder becomes ONE ``ExcessOffer(scope=PER_LINE)`` whose counterparty
+    VendorCard is resolved/created via ``resell_outreach_service.resolve_bidder_card``
+    (reused on the shared ``normalize_vendor_name`` key, never duplicated), with one
+    ``ExcessOfferLine`` per accepted row — matched/unmatched/ambiguous rows are all KEPT
+    (queued), never dropped. Affected matched lines get their best-price rollup recomputed
+    exactly like :func:`submit_offer`.
+
+    Guards (raise HTTPException, never silent): the list must exist (404); *user* must own
+    it (403 — the uploader ingests ON BEHALF OF external bidders, so ``can_offer``/self-
+    offer guards do not apply here); the list must be posted (400 with a fix-it message —
+    unlike the non-owner submit_offer gate there is no draft to camouflage from the owner);
+    *rows* — and the accepted subset after re-classification — must not be empty (400).
+
+    Returns ``{offers_created, lines_created, unmatched, rejected}``.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if user.id != excess_list.owner_id:
+        raise HTTPException(403, "Only the list owner can upload a compiled bid sheet")
+    if excess_list.status not in {s.value for s in _UPLOAD_POSTED_STATUSES}:
+        # Only the verified owner can reach this branch (403 above fires first), so a
+        # camouflage 404 would be lying to the one user who can see the draft. Tell them
+        # what to do instead.
+        raise HTTPException(400, "Post the list before uploading bids — offers are only collected on a posted list")
+    if not rows:
+        raise HTTPException(400, "No rows to upload")
+
+    posted = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
+    posted_by_id = {it.id: it for it in posted}
+    by_norm = _index_lines_by_norm_mpn(posted)
+
+    accepted_by_bidder: dict[str, list[dict]] = {}
+    rejected_count = 0
+    for raw in rows:
+        fields, reason = _classify_bid_row(raw, posted_by_id=posted_by_id, by_norm=by_norm)
+        if fields is None:
+            rejected_count += 1
+            logger.warning("upload_bids rejected a row on ExcessList id={}: {}", list_id, reason)
+            continue
+        accepted_by_bidder.setdefault(fields["bidder"], []).append(fields)
+
+    if not accepted_by_bidder:
+        raise HTTPException(400, "No valid bid rows to upload")
+
+    from .resell_outreach_service import resolve_bidder_card
+
+    offer_status = offer_status_for_list(excess_list.status)
+    offers_created = 0
+    lines_created = 0
+    unmatched_count = 0
+    affected_line_item_ids: set[int] = set()
+
+    for bidder_name, bidder_rows in accepted_by_bidder.items():
+        card = resolve_bidder_card(db, bidder_name)
+        offer = ExcessOffer(
+            excess_list_id=list_id,
+            submitted_by=user.id,
+            offerer_vendor_card_id=card.id,
+            scope=ExcessOfferScope.PER_LINE,
+            status=offer_status,
+            notes="Uploaded bid sheet",
+        )
+        db.add(offer)
+        db.flush()  # need offer.id before attaching lines
+
+        for fields in bidder_rows:
+            matched_id = fields["excess_line_item_id"]
+            if matched_id is not None:
+                affected_line_item_ids.add(matched_id)
+            else:
+                unmatched_count += 1
+            db.add(
+                ExcessOfferLine(
+                    offer_id=offer.id,
+                    excess_line_item_id=matched_id,
+                    mpn_raw=fields["mpn_raw"],
+                    quantity=fields["quantity"],
+                    unit_price=fields["unit_price"],
+                    lead_time_days=fields["lead_time_days"],
+                    terms_text=fields["terms_text"],
+                    match_status=fields["match_status"],
+                )
+            )
+            lines_created += 1
+        offers_created += 1
+
+    db.flush()  # persist lines so the rollup query sees them
+    for line_item_id in affected_line_item_ids:
+        recompute_line_rollup(db, line_item_id)
+
+    # Any first offer on an OPEN list signals active collection — flip to COLLECTING
+    # (mirrors submit_offer).
+    if excess_list.status == ExcessListStatus.OPEN:
+        excess_list.status = ExcessListStatus.COLLECTING
+
+    _safe_commit(db, entity="uploaded bid sheet")
+    logger.info(
+        "Uploaded bid sheet on ExcessList id={} by user={}: {} offers, {} lines, {} unmatched, {} rejected",
+        list_id,
+        user.id,
+        offers_created,
+        lines_created,
+        unmatched_count,
+        rejected_count,
+    )
+    return {
+        "offers_created": offers_created,
+        "lines_created": lines_created,
+        "unmatched": unmatched_count,
+        "rejected": rejected_count,
+    }
 
 
 # Offer statuses an award / withdraw may act on: an inbound bid still in play. A won offer

@@ -2087,6 +2087,34 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     close_at, clears only a stale one [Phase 5])
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    +-- GET  /v2/partials/resell/{id}/bid-sheet          (owner-only; blank bid-sheet CSV —
+    |     one row per ACTIVE [available/bidding] line + empty Bidder/Offer Qty/Unit Price/
+    |     Lead Time/Notes columns so several bidders' filled-in copies concatenate into one
+    |     compiled sheet for /bids/upload-preview. Same owner gate as offers/export)
+    +-- GET  /v2/partials/resell/{id}/bids/upload-form   (owner-only; renders the Upload Bids
+    |     modal — file input auto-submits to upload-preview)
+    +-- POST /api/resell/{id}/bids/upload-preview        (owner-only; posted-lists-only [400
+    |     with a "post the list first" fix-it message — only the owner can reach it, so no
+    |     draft-camouflage 404]; same extension/size/ParseError guards as
+    |     import-preview; excess_service.preview_bid_upload classifies each row — Line ID
+    |     match [wins outright, even over a disagreeing Part Number] → mpn_match [via the
+    |     SHARED _index_lines_by_norm_mpn/_classify_mpn_match helpers submit_offer uses:
+    |     matched/unmatched/ambiguous] → rejected [missing bidder, missing/invalid/non-
+    |     positive quantity, or neither a valid Line ID nor a Part Number — the take-all
+    |     shape is out of scope, never coerced]. Renders bid_upload_preview.html grouped by
+    |     bidder with a carry_rows_json hidden field for the confirm round-trip)
+    +-- POST /api/resell/{id}/bids/upload-confirm        (owner-only; excess_service.upload_bids
+    |     RE-CLASSIFIES every carried row fresh against the list's CURRENT lines [never
+    |     trusts the preview's derived match_status — mirrors confirm_import's L3
+    |     discipline]; groups accepted rows by bidder name, resolves/creates ONE VendorCard
+    |     per bidder via resell_outreach_service.resolve_bidder_card [reused on the shared
+    |     normalize_vendor_name key, never duplicated; new cards tagged
+    |     source="resell_bid_upload"], creates one ExcessOffer[scope=PER_LINE,
+    |     notes="Uploaded bid sheet"] + one ExcessOfferLine per row per bidder
+    |     [unmatched/ambiguous rows KEPT, never dropped], recomputes the best-price rollup
+    |     for matched lines exactly like submit_offer. 400 on empty/all-rejected rows.
+    |     Re-renders the Offers tab [#tab-offers-<id>, same _offers_context resell_offers
+    |     uses] + HX-Trigger showToast "N bid(s) uploaded (M lines, K unmatched, J rejected)")
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
@@ -2124,6 +2152,12 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     NEW customer_bids row [revision+1, draft] and leaves the answered row untouched — D3;
     |     re-renders the tab — M4)
     +-- GET  /api/resell/{id}/bid/{bid_id}/pdf           (owner-only clean bid PDF, whitelist only)
+    +-- GET  /api/resell/{id}/bid/{bid_id}/csv           (owner-only clean bid CSV — the
+    |     spreadsheet twin of the PDF; guarded via bid_back_service.guard_bid_for_owner;
+    |     built ONLY from bid_back_export_context [Part Number/Manufacturer/Condition/
+    |     Quantity/Unit Price/Extended Price] + a trailing Total row — never the inbound
+    |     offer/rollup/vendor fields, so no broker/trader/seller identity leaks in.
+    |     Filename from the sanitized bid number, e.g. BID-42.csv)
     +-- POST /api/resell/{id}/bid/{bid_id}/send          (owner-only; bid_back_service.send_bid_back:
     |     resolve_seller_contact → email the clean PDF via send_batch_rfq [no requisition,
     |     PDF as the sole attachment] → draft→sent + stamp sent_at ONLY on a confirmed send;
@@ -5873,7 +5907,7 @@ shared helper:
 | Materials | `GET /v2/partials/materials/export` | `routers/htmx/materials.py` |
 | Requisitions | `GET /v2/partials/requisitions/export` | `routers/htmx/requisitions.py` |
 | Vendors | `GET /v2/partials/vendors/export` | `routers/htmx/vendors.py` |
-| Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` | `routers/resell.py` |
+| Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` + `.../bid-sheet` (blank bid sheet) + `GET /api/resell/{list_id}/bid/{bid_id}/csv` (clean bid-back CSV) | `routers/resell.py` |
 | Approvals | `GET /v2/partials/approvals/{tab}/export` | `routers/htmx/approvals_hub.py` |
 
 The **Sightings board** export (`GET /v2/sightings/export`, `routers/sightings.py`)
