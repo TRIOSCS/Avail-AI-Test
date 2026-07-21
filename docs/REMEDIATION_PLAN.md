@@ -334,10 +334,12 @@ drafted only after collection closes and each item is verified against current c
   1. **Consolidate header actions** — keep 2–3 primary buttons (e.g. Enrich, Add
      Contact); move the rest into the existing kebab menu
      (`app/templates/htmx/partials/customers/detail.html`, ~18 button sites today).
-  2. **Quiet the badges/pills** — contact rows show role + DNC only; per-contact
-     completeness % (`_contact_macros.html:252-257`) becomes a subtle dot or
-     hover/edit-only; the account-level completeness badge (`detail.html:179-185`)
-     remains the single summary signal.
+  2. **Quiet the badges/pills** — contact rows show role + DNC only. The per-contact
+     "NN%" text pill after the name (`_contact_macros.html:252-257`) is REMOVED and
+     replaced by a small segmented hashmark bar at the FAR RIGHT of the row, colored
+     on a yellow→green scale by completeness (refined by user 2026-07-21; tooltip
+     keeps the % + missing-fields detail). The account-level completeness badge
+     (`detail.html:179-185`) remains the single summary signal.
   3. **Collapse the metric strip** — header stats to one compact row or behind a
      toggle, freeing above-the-fold space for the contact list.
   4. **Lighter site sections** — section headers slim to name + city; cadence dot
