@@ -360,6 +360,65 @@ existing tests).
 - **Fix shape:** frontend-only template work (`frontend-design` + `htmx` skills);
   no route or data changes; before/after review per screen with the user.
 
+### ISS-028: Relocate bulk data export to an admin-only Settings section
+- **Reported:** 2026-07-21 (user note — revises shipped ISS-022 after review)
+- **Area:** CRM / backend + frontend (authz, settings)
+- **Severity:** P1 (tightens the data-exfiltration control)
+- **Decision (user):** all bulk data export moves to a separate admin-only menu in
+  Settings; export controls must NOT appear anywhere else in the app. Exception:
+  quote building and other customer-facing document generation stay in the app
+  (unchanged, `EXPORT_DATA`).
+- **Fix shape:**
+  - Remove `EXPORT_BULK_DATA` from MANAGER defaults (admin-only; per-user override
+    remains possible via the admin users panel, mirroring `manage_connectors`).
+  - Delete the export buttons from the vendors/requisitions/sightings/customers
+    list toolbars (added in ISS-022) — no export UI outside Settings.
+  - New Settings "Data export" page (admin-gated, existing settings patterns)
+    linking the five dataset exports; exports from there are full-dataset
+    (default params), no longer tied to on-screen filters.
+  - Routes keep their URLs and `require_access(EXPORT_BULK_DATA)` gates.
+  - Update role-matrix/toolbar tests; add settings-page tests.
+
+### ISS-029: Contact role field — more options + write-in
+- **Reported:** 2026-07-21 (user note — CRM walkthrough)
+- **Area:** CRM / frontend + backend
+- **Severity:** P2
+- **Symptom:** the contact form's role dropdown offers only 5 canonical values
+  (`ContactRole`: buyer/manager/engineer/planner/other, `app/constants.py:888`),
+  while legacy rows hold 8 richer roles (buyer_po, specifier, ap_payer, logistics,
+  exec, technical, decision_maker, operations) that display but cannot be re-saved.
+- **Fix shape:** promote the legacy roles into `ContactRole` as first-class options
+  (matching their existing display labels); selecting "Other" reveals a free-text
+  write-in (Alpine show/hide) stored in the same `site_contacts.contact_role`
+  String(50) column; write path accepts canonical values or the custom string;
+  role pill renders custom values verbatim. Update the roles Jinja global /
+  CANONICAL_ROLES plumbing and tests.
+
+### ISS-030: Customer Activity feed shows notes from ALL user emails (scoping leak)
+- **Reported:** 2026-07-21 (user note — CRM walkthrough; "deep dive this")
+- **Area:** CRM (activity timeline / email mining)
+- **Severity:** P1 (wrong data on customer pages; privacy/noise)
+- **Symptom:** the Activity section on a customer surfaces notes for the user's
+  emails broadly, not just correspondence with that customer.
+- **Required behavior (user):** activity must show ONLY real interactions to/from
+  the customer — logged calls, emails with the customer's contacts/domain, and
+  other real-life customer touchpoints. "Really tight and stable."
+- **Evidence (user-supplied feed screenshot text, 2026-07-21):** a single customer
+  account's feed contained, alongside real customer threads: internal task-assignment
+  notifications, calendar-invite acceptances for internal 1:1s, an out-of-office
+  auto-reply, bounce/system messages, blank-subject "insufficient content" items,
+  internal ops correspondence (inventory field exam, back-order reports), and test
+  notes ("test"/"testttt") — i.e. the user's whole mailbox is being attributed to
+  the account.
+- **Filtering rules implied:** (a) include an email only when a counterparty
+  address matches the customer's contact emails or company domain(s); (b) exclude
+  auto-generated classes even when the sender matches: calendar responses, OOO,
+  bounces/DSNs, system notifications; (c) internal-colleague mail (own org domain)
+  is never customer activity; (d) presentation must be "clean readable and useful"
+  — collapse noise, meaningful summaries, no "insufficient content" filler rows.
+- **Status:** deep-dive investigation in progress — root cause, matching rules,
+  and fix plan to be appended here.
+
 ---
 
 ## Phased Plan
