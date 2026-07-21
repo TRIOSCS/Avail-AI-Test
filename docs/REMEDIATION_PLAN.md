@@ -231,6 +231,50 @@ drafted only after collection closes and each item is verified against current c
 - **Resolution:** lockfile bumped to fast-uri 3.1.4 via `npm audit fix` on this branch;
   audit now reports 0 vulnerabilities. **FIXED in this PR.**
 
+### ISS-022: Bulk data exports must be manager/admin-only (anti data-theft)
+- **Reported:** 2026-07-21 (user note — CRM walkthrough)
+- **Area:** CRM / backend (authz)
+- **Severity:** P1 (data-exfiltration control)
+- **Symptom:** any interactive role can export accounts, contacts, vendors, and
+  requirements. Current state (verified: yes):
+  - `AccessKey.EXPORT_DATA` gate exists but `ROLE_ACCESS_DEFAULTS`
+    (`app/constants.py:409-422`) grants it to buyer/sales/trader/manager — blocks nobody.
+  - Ungated entirely (only `require_user`): vendors export
+    (`app/routers/htmx/vendors.py:254`), requisitions export
+    (`app/routers/htmx/requisitions.py:459`), sightings export
+    (`app/routers/sightings.py:792`).
+  - Gated: CRM companies/contacts CSV (`app/routers/crm/export.py:143,175`),
+    quote-builder Excel/PDF (`app/routers/quote_builder.py:262,298`).
+- **Decision (user, 2026-07-21):** split the gate. Bulk dataset exports (companies,
+  contacts, vendors, requirements, sightings) → manager+admin only. Quote-builder
+  Excel/PDF (single-deal customer documents) stay open to sales.
+- **Fix shape:** new capability key (e.g. `EXPORT_BULK_DATA`) defaulting to
+  MANAGER/ADMIN; apply to the five dataset export routes (incl. the three ungated
+  ones); leave `EXPORT_DATA` on quote docs; hide export buttons in templates for
+  users without the key (same source-of-truth pattern as `has_buyer_role`).
+
+### ISS-023: AI-assisted import for CRM data (feature)
+- **Reported:** 2026-07-21 (user note — CRM walkthrough)
+- **Area:** CRM (feature request)
+- **Severity:** P2 (wanted capability, not a defect)
+- **Note:** while exports get locked down (ISS-022), imports must stay broadly
+  available and should be AI-assisted — e.g. upload a spreadsheet/CSV of
+  accounts/contacts/vendors and have AI map columns, normalize, dedupe against
+  existing records before insert. Scope/spec TBD in planning phase.
+
+### ISS-024: Remove duplicate "+ add here" affordance on customer Contacts tab
+- **Reported:** 2026-07-21 (user note — CRM walkthrough; explicit approval to remove)
+- **Area:** CRM / frontend
+- **Severity:** P3 (UI cleanup)
+- **Symptom:** the Contacts tab has both "+ Add Contact" (controls bar,
+  `app/templates/htmx/partials/customers/tabs/contacts_tab.html:83`) and a per-site
+  "+ add here" in each section header
+  (`.../customers/tabs/_contacts_grouped_list.html:69`) that open the same form.
+- **Fix shape:** remove "+ add here" (and its `preselect_site_id` plumbing in
+  `app/routers/htmx/companies/contacts.py:545` /
+  `_contact_form.html:62` if then unused); keep "+ Add Contact"; form's site select
+  defaults to HQ/first site. (verified: yes)
+
 ---
 
 ## Phased Plan
