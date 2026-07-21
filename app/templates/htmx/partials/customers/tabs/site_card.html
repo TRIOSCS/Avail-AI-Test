@@ -43,9 +43,7 @@
       {% if s.contact_phone %}
       <div><span class="text-gray-600">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
       {% endif %}
-      {% if s.payment_terms %}
-      <div><span class="text-gray-600">Terms:</span> {{ s.payment_terms }}</div>
-      {% endif %}
+      {# Payment terms not shown — managed in the ERP (ISS-031). #}
     </div>
 
     {# Contact count + link to Contacts tab — NOT an inline editor #}

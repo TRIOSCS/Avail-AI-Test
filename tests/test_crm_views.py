@@ -2406,11 +2406,11 @@ class TestEditSite:
         resp = client.get(f"/v2/partials/customers/{company.id}/sites/99999/edit-form")
         assert resp.status_code == 404
 
-    def test_post_site_edit_persists_payment_terms_and_address(
+    def test_post_site_edit_persists_address_and_preserves_payment_terms(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit saves payment_terms + address fields; re-rendered sites tab shows
-        new values."""
+        """POST edit saves address fields; payment_terms is ERP-managed (ISS-031) —
+        the route must IGNORE a posted value and preserve what's stored."""
         from app.models.crm import CustomerSite
 
         company, site = self._make_company_with_site(db_session, owner=test_user)
@@ -2433,7 +2433,8 @@ class TestEditSite:
         db_session.expire_all()
         updated = db_session.query(CustomerSite).filter(CustomerSite.id == site.id).first()
         assert updated is not None
-        assert updated.payment_terms == "Net60"
+        assert updated.payment_terms == "Net30"  # unchanged despite posted Net60
+        assert updated.shipping_terms == "DAP"
         assert updated.address_line1 == "456 New Ave"
         assert updated.city == "Cambridge"
         assert updated.state == "MA"

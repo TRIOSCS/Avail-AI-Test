@@ -98,13 +98,10 @@
               {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
             {% endif %}
-            {# Primary contact — account-level #}
+            {# Primary contact — account-level (no empty-state affordance; ISS-031) #}
             {% if company.primary_contact %}
               {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
               <span>Primary: <span class="font-medium text-gray-700">{{ company.primary_contact.full_name }}</span></span>
-            {% else %}
-              {% if company.domain or company.industry or company.hq_city %}<span class="text-gray-300">·</span>{% endif %}
-              <span class="text-gray-400 italic">+ Add primary contact</span>
             {% endif %}
             {# Parent company #}
             {% if company.parent_company %}

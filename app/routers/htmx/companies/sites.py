@@ -390,7 +390,8 @@ async def edit_site(
     site.zip = form.get("zip", "").strip() or None
     site.country = form.get("country", "").strip() or None
     site.site_type = form.get("site_type", "").strip() or None
-    site.payment_terms = form.get("payment_terms", "").strip() or None
+    # payment_terms is deliberately NOT written here — the field is managed in the
+    # ERP and has no CRM edit surface (ISS-031); existing column values are preserved.
     site.shipping_terms = form.get("shipping_terms", "").strip() or None
     site.notes = form.get("notes", "").strip() or None
     owner_id = form.get("owner_id", "")

@@ -443,6 +443,27 @@ existing tests).
   Blast radius: vendor tab shares only the missing meaningful filter; digest + JSON
   API already correct.
 
+### ISS-031: Remove "Add primary contact" header affordance + payment terms from accounts
+- **Reported:** 2026-07-21 (user notes — CRM walkthrough; explicit removal approval)
+- **Area:** CRM / frontend
+- **Severity:** P3 (UI cleanup)
+- **Done (this branch):**
+  - "+ Add primary contact" placeholder removed from the account header meta line
+    (`customers/detail.html:101-108`); "Primary: <name>" still shows when set.
+  - Payment terms removed from the account Sites surface: card display
+    (`site_card.html`), edit input (`site_edit_modal.html`), AND the write
+    assignment in `app/routers/htmx/companies/sites.py:393` — removing only the
+    input would have NULLed stored values on every site save. Column + data
+    preserved; ERP is the source of truth. Quote payment terms (customer-facing
+    documents) untouched.
+
+### NOTE-A: "Park in prospecting" ownership semantics (confirmed correct, no change)
+- **Verified 2026-07-21:** manual park (`prospect_reclamation.py:33` →
+  send-to-prospecting, `companies/core.py:260`) clears `account_owner_id`, stamps
+  `ownership_cleared_at`, pools the account as claimable with NO cooldown — any
+  sales rep may pick it up immediately. Rep can park own accounts; manager/admin
+  any. Matches intended design per user.
+
 ---
 
 ## Phased Plan
