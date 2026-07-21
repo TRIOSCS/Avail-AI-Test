@@ -670,10 +670,15 @@ class TestCapabilityGating:
             _drop_overrides(c)
 
     def test_export_companies_200_for_manager_default(self, db_session, manager_user):
-        # Manager holds EXPORT_BULK_DATA by default (ISS-022).
+        # Manager holds EXPORT_BULK_DATA by default (ISS-022). Assert the actual CSV
+        # stream (headers + column row), not just the status code.
         c = _client_as(db_session, manager_user)
         try:
-            assert c.get("/v2/customers/export.csv").status_code == 200
+            resp = c.get("/v2/customers/export.csv")
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/csv")
+            assert "customers.csv" in resp.headers["content-disposition"]
+            assert resp.text.splitlines()[0].split(",")[0].strip('"') == "name"
         finally:
             _drop_overrides(c)
 

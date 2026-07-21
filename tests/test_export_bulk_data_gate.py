@@ -58,6 +58,16 @@ _DENIED_ROLES = ("buyer", "sales", "trader")
 _ALLOWED_ROLES = ("manager", "admin")
 
 
+def _assert_csv_export(resp, filename: str, first_col: str):
+    """A granted export must stream a real CSV attachment, not merely answer 200 —
+    assert the download headers and that the header row leads with the expected
+    column."""
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert filename in resp.headers["content-disposition"]
+    assert resp.text.splitlines()[0].split(",")[0].strip('"') == first_col
+
+
 class TestCompaniesExportGate:
     @pytest.mark.parametrize("role", _DENIED_ROLES)
     def test_companies_csv_403_for_non_manager(self, db_session, _role_users, role):
@@ -71,7 +81,7 @@ class TestCompaniesExportGate:
     def test_companies_csv_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            assert c.get("/v2/customers/export.csv").status_code == 200
+            _assert_csv_export(c.get("/v2/customers/export.csv"), "customers.csv", "name")
         finally:
             _drop_overrides(c)
 
@@ -87,7 +97,9 @@ class TestCompaniesExportGate:
     def test_contacts_csv_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            assert c.get("/v2/customers/contacts/export.csv").status_code == 200
+            _assert_csv_export(
+                c.get("/v2/customers/contacts/export.csv"), "contacts.csv", "full_name"
+            )
         finally:
             _drop_overrides(c)
 
@@ -105,7 +117,7 @@ class TestVendorsExportGate:
     def test_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            assert c.get("/v2/partials/vendors/export").status_code == 200
+            _assert_csv_export(c.get("/v2/partials/vendors/export"), "vendors_export.csv", "Vendor")
         finally:
             _drop_overrides(c)
 
@@ -123,7 +135,9 @@ class TestRequisitionsExportGate:
     def test_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            assert c.get("/v2/partials/requisitions/export").status_code == 200
+            _assert_csv_export(
+                c.get("/v2/partials/requisitions/export"), "requisitions_export.csv", "Name"
+            )
         finally:
             _drop_overrides(c)
 
@@ -141,7 +155,9 @@ class TestSightingsExportGate:
     def test_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            assert c.get("/v2/sightings/export").status_code == 200
+            _assert_csv_export(
+                c.get("/v2/sightings/export"), "sightings_export.csv", "Requirement ID"
+            )
         finally:
             _drop_overrides(c)
 
