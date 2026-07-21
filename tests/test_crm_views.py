@@ -4207,15 +4207,17 @@ class TestFullWidthContactsForwardLayout:
         assert "data-outreach-log" in html
 
     def test_workspace_auto_select_marker_present(self, client: TestClient, db_session: Session, test_user: User):
-        """The workspace auto-selects the first account over the untouched empty state
-        only — gated on the [data-cdm-empty] marker and a null selectedId."""
-        c = Company(name="AutoSelect Co", is_active=True)
+        """The workspace deterministically auto-loads the first account's detail on
+        mount via an htmx load trigger (replaced the racy Alpine autoSelectFirst) — the
+        [data-cdm-empty] placeholder stays inside the loader until it fires."""
+        c = Company(name="AutoSelect Co", is_active=True, account_owner_id=test_user.id)
         db_session.add(c)
         db_session.commit()
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
         html = resp.text
-        assert "autoSelectFirst" in html
+        assert 'hx-trigger="load"' in html
+        assert f"/v2/partials/customers/{c.id}" in html
         assert "data-cdm-empty" in html
 
     def test_vendor_detail_drops_max_width_cap(self, client: TestClient, db_session: Session, test_user: User):
