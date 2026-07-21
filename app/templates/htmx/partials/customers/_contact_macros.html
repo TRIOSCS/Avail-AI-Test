@@ -249,14 +249,10 @@
         {% if contact.is_archived %}
         <span class='badge bg-gray-100 text-gray-600 border-gray-200 flex-shrink-0'>Archived</span>
         {% endif %}
-        {# CRM P5 trust — completeness pill (only when incomplete; mirrors the role/DNC pills). #}
+        {# CRM P5 trust — completeness is scored here but rendered as a segmented
+           hashmark bar at the far right of the row (see the w-20 action cell
+           below), not as a text pill next to the name. #}
         {% set _compl = crm_completeness(contact) %}
-        {% if _compl.pct < 100 %}
-        <span class='flex-shrink-0 {% if _compl.pct >= 50 %}badge-warning{% else %}badge-danger{% endif %}'
-              title='Profile {{ _compl.pct }}% complete{% if _compl.missing %} — missing: {{ _compl.missing|join(", ") }}{% endif %}'>
-          {{ _compl.pct }}%
-        </span>
-        {% endif %}
       </div>
     </td>
     {# Title cell #}
@@ -321,9 +317,25 @@
         <span class="text-gray-300 text-[11px]">—<span class="sr-only"> no data</span></span>
       {% endif %}
     </td>
-    {# Expand chevron + kebab menu #}
-    <td class='w-14 text-right' @click.stop=''>
-      <div class='flex items-center justify-end gap-1'>
+    {# Completeness bar + expand chevron + kebab menu #}
+    <td class='w-20 text-right' @click.stop=''>
+      <div class='flex items-center justify-end gap-1.5'>
+        {# CRM P5 trust — segmented completeness bar (replaces the old "NN%" text
+           pill; ISS-027.2). 5 thin segments filled proportionally to _compl.pct,
+           colored on a yellow→green scale. Shown only when incomplete — the
+           account-level completeness badge (detail.html) is the single 100%-shown
+           summary signal. Tooltip carries the same percent + missing-fields detail
+           the old pill's title attribute had. #}
+        {% if _compl.pct < 100 %}
+        {% set _bar_color = 'bg-amber-400' if _compl.pct < 50 else ('bg-lime-400' if _compl.pct < 80 else 'bg-emerald-500') %}
+        {% set _filled_segs = (_compl.pct / 20.0) | round | int %}
+        <div class='flex items-center gap-[1.5px] flex-shrink-0'
+             title='Profile {{ _compl.pct }}% complete{% if _compl.missing %} — missing: {{ _compl.missing|join(", ") }}{% endif %}'>
+          {% for i in range(5) %}
+          <span class='block h-2.5 w-1 rounded-sm {% if i < _filled_segs %}{{ _bar_color }}{% else %}bg-gray-200{% endif %}'></span>
+          {% endfor %}
+        </div>
+        {% endif %}
         {# Kebab #}
         <div class='relative inline-block' x-data='{"km":false}' @click.outside='km=false'>
           <button @click.stop='km=!km' type='button'

@@ -26,9 +26,9 @@ from sqlalchemy import case, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import RESTRICTED_ROLES, OfferCondition, RequisitionStatus, SourcingStatus, TaskStatus
+from ...constants import RESTRICTED_ROLES, AccessKey, OfferCondition, RequisitionStatus, SourcingStatus, TaskStatus
 from ...database import get_db
-from ...dependencies import require_requisition_access, require_user
+from ...dependencies import require_access, require_requisition_access, require_user
 from ...models import (
     Company,
     CustomerSite,
@@ -466,16 +466,16 @@ async def requisitions_export(
     date_to: str = "",
     sort: str = "created_at",
     sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     db: Session = Depends(get_db),
 ):
     """Stream every list-matching requisition as a CSV download (attachment, no
     pagination).
 
-    Same auth (require_user) and same filter params as the list route (GET
-    /v2/partials/requisitions) — the export mirrors the list's active view
-    (search/status/owner/urgency/date-range) including the restricted-role ownership
-    boundary.
+    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filter params as
+    the list route (GET /v2/partials/requisitions) — the export mirrors the list's
+    active view (search/status/owner/urgency/date-range) including the restricted-role
+    ownership boundary.
     """
     return stream_csv(
         "requisitions_export.csv",

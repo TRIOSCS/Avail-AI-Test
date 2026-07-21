@@ -59,10 +59,10 @@
               @change='newSite = ($el.value === "__new__")'
               class='input'>
         {% if sites %}
-          {# preselect_site_id (from "+ add here") wins; else first HQ / first site. #}
+          {# Defaults to first HQ site, else the first site in the list. #}
           {% for s in sites %}
           <option value='{{ s.id }}'
-            {% if preselect_site_id is defined and preselect_site_id %}{% if s.id == preselect_site_id %}selected{% endif %}{% elif s.site_type == 'hq' or loop.first %}selected{% endif %}>
+            {% if s.site_type == 'hq' or loop.first %}selected{% endif %}>
             {{ s.site_name }}{% if s.site_type == 'hq' %} (HQ){% endif %}
           </option>
           {% endfor %}

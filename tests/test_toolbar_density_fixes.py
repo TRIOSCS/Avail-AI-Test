@@ -18,7 +18,7 @@ onto fewer rows / relabelled, never removed):
 Each case also asserts the key controls all still render (no loss).
 
 Called by: pytest autodiscovery
-Depends on: conftest.py fixtures (client, db_session, test_company)
+Depends on: conftest.py fixtures (client, manager_client, db_session, test_company)
 """
 
 import os
@@ -100,8 +100,11 @@ class TestAccountsUtilityRow:
         assert "/v2/partials/customers/create-form" in html
         assert 'hx-target="#modal-content"' in html
 
-    def test_no_utility_control_loss(self, client, test_company):
-        html = client.get("/v2/partials/customers", headers=_HX).text
+    def test_no_utility_control_loss(self, manager_client, test_company):
+        # ISS-022: Export CSV / Export contacts are manager/admin only
+        # (can_export_bulk_data) — use a manager client so this "no control loss on
+        # the fold" pin still covers those two utilities.
+        html = manager_client.get("/v2/partials/customers", headers=_HX).text
         # Saved views + new + all export/import utilities all survive the fold.
         assert "+ Save view" in html
         assert "All contacts" in html
@@ -116,3 +119,12 @@ class TestAccountsUtilityRow:
         assert 'name="disposition"' in html
         assert "My accounts" in html
         assert "Has open reqs" in html
+
+    def test_export_csv_hidden_for_buyer(self, client, test_company):
+        """ISS-022: a plain buyer (no EXPORT_BULK_DATA) never sees the bulk export
+        controls; the non-gated utilities are unaffected."""
+        html = client.get("/v2/partials/customers", headers=_HX).text
+        assert "Export CSV" not in html
+        assert "Export contacts" not in html
+        assert "Import CSV" in html
+        assert "All contacts" in html

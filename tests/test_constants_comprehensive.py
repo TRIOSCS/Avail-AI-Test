@@ -391,7 +391,10 @@ def test_capability_access_keys():
     assert isinstance(CAPABILITY_ACCESS_KEYS, tuple)
     assert AccessKey.SEND_RFQ in CAPABILITY_ACCESS_KEYS
     assert AccessKey.OPS_VERIFICATION in CAPABILITY_ACCESS_KEYS
-    assert len(CAPABILITY_ACCESS_KEYS) == 5
+    # ISS-022: EXPORT_BULK_DATA (manager+admin-only bulk dataset exports) added to the
+    # six capability keys.
+    assert AccessKey.EXPORT_BULK_DATA in CAPABILITY_ACCESS_KEYS
+    assert len(CAPABILITY_ACCESS_KEYS) == 6
 
 
 def test_role_access_defaults():
@@ -408,6 +411,10 @@ def test_role_access_defaults():
     # Buyer gets interactive defaults (not ops_verification)
     assert AccessKey.OPS_VERIFICATION not in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
     assert AccessKey.SEND_RFQ in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
+    # ISS-022: manager alone among interactive roles additionally holds
+    # EXPORT_BULK_DATA (bulk dataset exports); buyer does not.
+    assert AccessKey.EXPORT_BULK_DATA in ROLE_ACCESS_DEFAULTS[UserRole.MANAGER]
+    assert AccessKey.EXPORT_BULK_DATA not in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
 
 
 # ---------------------------------------------------------------------------

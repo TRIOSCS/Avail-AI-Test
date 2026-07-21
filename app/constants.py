@@ -353,6 +353,10 @@ class AccessKey(StrEnum):
     EXPORT_DATA = "export_data"
     MANAGE_CONNECTORS = "manage_connectors"
     OPS_VERIFICATION = "ops_verification"
+    # Bulk dataset exports (companies, contacts, vendors, requisitions, sightings) —
+    # manager/admin only (ISS-022). Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA:
+    # single-deal quote-builder Excel/PDF exports stay open to sales via EXPORT_DATA.
+    EXPORT_BULK_DATA = "export_bulk_data"
 
 
 # Partition of AccessKey into the two families above. Module keys gate nav-section
@@ -376,6 +380,7 @@ CAPABILITY_ACCESS_KEYS = (
     AccessKey.EXPORT_DATA,
     AccessKey.MANAGE_CONNECTORS,
     AccessKey.OPS_VERIFICATION,
+    AccessKey.EXPORT_BULK_DATA,
 )
 
 
@@ -419,7 +424,9 @@ ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
     UserRole.BUYER: _INTERACTIVE_DEFAULTS,
     UserRole.SALES: _INTERACTIVE_DEFAULTS,
     UserRole.TRADER: _INTERACTIVE_DEFAULTS,
-    UserRole.MANAGER: _INTERACTIVE_DEFAULTS,
+    # Managers additionally get EXPORT_BULK_DATA (ISS-022) — bulk dataset exports
+    # (companies, contacts, vendors, requisitions, sightings) are manager+admin only.
+    UserRole.MANAGER: _INTERACTIVE_DEFAULTS | {AccessKey.EXPORT_BULK_DATA},
     UserRole.ADMIN: frozenset(AccessKey),  # admin has everything
     UserRole.AGENT: frozenset(),  # service account: no interactive access
 }

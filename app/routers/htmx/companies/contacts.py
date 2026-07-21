@@ -883,6 +883,25 @@ async def contacts_tab_suggested_status(
         # stop polling and clear the panel.
         return HTMLResponse("", status_code=286)
 
+    # ISS-025: drop any suggestion that already matches a saved SiteContact for this
+    # company (case-insensitive email, or normalized-name fallback when the suggestion
+    # has no email) — re-running discovery must not keep re-surfacing people already on
+    # file.
+    from ....services.contact_dedup import existing_contact_keys, is_existing_contact
+
+    existing_contacts = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id == company_id)
+        .all()
+    )
+    existing_emails, existing_names = existing_contact_keys(existing_contacts)
+    suggested = [
+        c
+        for c in outcome.suggested
+        if not is_existing_contact(c.get("email"), c.get("full_name"), existing_emails, existing_names)
+    ]
+
     active_sites = (
         db.query(CustomerSite)
         .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
@@ -893,7 +912,7 @@ async def contacts_tab_suggested_status(
     ctx.update(
         {
             "company": company,
-            "suggested": outcome.suggested,
+            "suggested": suggested,
             "errored_providers": outcome.errored_providers,
             "active_sites": active_sites,
         }

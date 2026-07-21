@@ -24,8 +24,9 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from ...constants import AccessKey
 from ...database import get_db
-from ...dependencies import require_admin, require_prospect_site_access, require_user
+from ...dependencies import require_access, require_admin, require_prospect_site_access, require_user
 from ...models import Offer, Sighting, SourcingLead, User, VendorCard
 from ...models.enrichment import ProspectContact
 from ...models.vendors import VendorContact
@@ -156,6 +157,7 @@ async def vendors_list_partial(
     ctx.update(
         {
             "vendors": vendors,
+            "user": user,  # Export CSV toolbar button gates on can_export_bulk_data(user)
             "q": q,
             "hide_blacklisted": hide_blacklisted,
             "include_archived": include_archived,
@@ -259,14 +261,14 @@ async def vendors_export(
     my_only: bool = False,
     sort: str = "sighting_count",
     dir: str = "desc",
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     db: Session = Depends(get_db),
 ):
     """Stream every list-matching vendor as a CSV download (attachment, no pagination).
 
-    Same auth (require_user) and same filter params as the list route
-    (GET /v2/partials/vendors) — the export mirrors the list's active view
-    (search/hide-blacklisted/show-archived/my-vendors).
+    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filter params as
+    the list route (GET /v2/partials/vendors) — the export mirrors the list's active
+    view (search/hide-blacklisted/show-archived/my-vendors).
     """
     return stream_csv(
         "vendors_export.csv",
@@ -1090,16 +1092,28 @@ async def _run_vendor_find_contacts(vendor_id: int, keywords: str | None) -> Non
             return
 
         from app.services.ai_service import enrich_contacts_websearch
+        from app.services.contact_dedup import existing_contact_keys, is_existing_contact
 
         web_results = await enrich_contacts_websearch(vendor.display_name, vendor.domain, keywords, limit=10)
 
-        # Dedup within this batch and save as ProspectContact records.
+        # Existing contacts for this vendor — both prior AI-discovered ProspectContact
+        # rows and real VendorContact rows — so re-running discovery never re-suggests
+        # (or re-persists) someone already on file (ISS-025).
+        existing_rows = list(db.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_id)) + list(
+            db.query(VendorContact).filter(VendorContact.vendor_card_id == vendor_id)
+        )
+        existing_emails, existing_names = existing_contact_keys(existing_rows)
+
+        # Dedup within this batch and against existing contacts, then save the
+        # survivors as ProspectContact records.
         seen: set[str] = set()
         new_count = 0
         for c in web_results:
             email = (c.get("email") or "").lower()
             key = email if email else c.get("full_name", "").lower()
             if key and key in seen:
+                continue
+            if is_existing_contact(c.get("email"), c.get("full_name"), existing_emails, existing_names):
                 continue
             seen.add(key)
 

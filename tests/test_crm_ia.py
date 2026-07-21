@@ -369,8 +369,12 @@ class TestSiteCardNavFixes:
         # The old broken form (unescaped " inside double-quoted attr) must be gone.
         assert """x-text="q ? '"' + q + '"'""" not in src
 
-    # Blocker 5 — company_tab contacts branch accepts site_id query param
-    def test_company_tab_contacts_preselects_site(self, client, db_session: Session, test_user: User):
+    # Blocker 5 (superseded by ISS-024) — company_tab contacts branch still accepts
+    # an optional site_id query param without error, but no longer preselects a
+    # site: the per-site "+ add here" affordance (and its preselect_site_id /
+    # data-initial-site plumbing) is retired. The single add-contact entry point
+    # is the "+ Add Contact" button in the controls bar.
+    def test_company_tab_contacts_ignores_stale_site_id_param(self, client, db_session: Session, test_user: User):
         co = _make_company(db_session, name="PreSelectSite Co", owner_id=test_user.id, site_count=2)
         s1 = _make_site(db_session, co, site_name="Alpha")
         s2 = _make_site(db_session, co, site_name="Beta")
@@ -380,8 +384,11 @@ class TestSiteCardNavFixes:
 
         resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts?site_id={s1.id}")
         assert resp.status_code == 200
-        # data-initial-site attribute carries the preselected site id.
-        assert f'data-initial-site="{s1.id}"' in resp.text
+        # ISS-024: no per-site preselect attribute/affordance remains.
+        assert "data-initial-site" not in resp.text
+        assert "+ add here" not in resp.text
+        assert "Alpha Person" in resp.text
+        assert "Beta Person" in resp.text
 
     # Finding 7 — active contact count excludes archived contacts
     def test_detail_contact_count_excludes_archived(self, client, db_session: Session, test_user: User):
