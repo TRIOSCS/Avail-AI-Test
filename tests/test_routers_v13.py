@@ -260,11 +260,16 @@ def test_vendor_activity_status(client, test_vendor_card):
 
 
 def test_log_email_click(client):
-    """POST /api/activities/email logs an email click event."""
+    """POST /api/activities/email logs an email click event.
+
+    Uses a non-junk domain: example.com is on JUNK_DOMAINS (a placeholder/generic
+    domain), so an unmatched click there is correctly "no_match" under the ISS-030
+    write-time filter, not "logged".
+    """
     resp = client.post(
         "/api/activities/email",
         json={
-            "email": "vendor@example.com",
+            "email": "vendor@realvendorparts.com",
             "subject": "Re: RFQ LM317T",
         },
     )

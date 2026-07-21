@@ -859,13 +859,14 @@ async def poll_inbox(
             nested = db.begin_nested()
             # ONE VendorResponse per message (it is per-message, not per-
             # requisition); contact_id anchors to the first matched contact.
+            body_content = msg.get("body", {}).get("content", msg.get("bodyPreview", ""))
             vr = VendorResponse(
                 requisition_id=matched_req_id,
                 contact_id=matched_contacts[0].id if matched_contacts else None,
                 vendor_name=sender.get("name", email_addr),
                 vendor_email=email_addr,
                 subject=subj,
-                body=msg.get("body", {}).get("content", msg.get("bodyPreview", "")),
+                body=body_content,
                 message_id=msg_id,
                 graph_conversation_id=conv_id,
                 scanned_by_user_id=scanned_by_user_id,
@@ -876,18 +877,22 @@ async def poll_inbox(
             db.add(vr)
             db.flush()
 
-            # Activity timeline: log the inbound vendor reply so it appears on
-            # the requisition Activity tab. Dedups on external_id=msg_id.
-            log_email_activity(
-                user_id=scanned_by_user_id,
-                direction="received",
-                email_addr=email_addr,
-                subject=subj,
-                external_id=msg_id,
-                contact_name=sender.get("name"),
-                db=db,
-                requisition_id=matched_req_id,
-            )
+            # Activity timeline: log the inbound vendor reply so it appears on the
+            # requisition Activity tab. Dedups on external_id=msg_id. Auto-replies (OOO/
+            # vacation/bounce/NDR) are not genuine correspondence — skip logging them so
+            # they never leak onto a customer's Activity tab (ISS-030). The VendorResponse
+            # row above still records the raw message for the RFQ classifier either way.
+            if not _is_auto_reply(subj, body_content):
+                log_email_activity(
+                    user_id=scanned_by_user_id,
+                    direction="received",
+                    email_addr=email_addr,
+                    subject=subj,
+                    external_id=msg_id,
+                    contact_name=sender.get("name"),
+                    db=db,
+                    requisition_id=matched_req_id,
+                )
 
             # H2: Record in processed_messages for cross-type dedup
             db.add(
@@ -1216,6 +1221,14 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
 # NOISE_DOMAINS and NOISE_PREFIXES are imported from shared_constants
 # (as JUNK_DOMAINS / JUNK_EMAIL_PREFIXES) at the top of this file.
 
+# Exchange auto-generates one NDR/bounce mailbox per org with a random hex suffix
+# appended to a fixed prefix (e.g. "MicrosoftExchange329e71ec88ae4615bbc36ab6ce41109e@
+# own-domain.com") — JUNK_EMAIL_PREFIXES can't list it as an exact local-part match
+# because the suffix varies per tenant. poll_inbox does not fetch the Graph
+# internetMessageHeaders needed for a proper NDR/Content-Type: report header check, so
+# this conservative startswith() on the fixed prefix is the local heuristic (ISS-030).
+_EXCHANGE_NDR_LOCAL_PREFIX = "microsoftexchange"
+
 
 def _is_noise_email(email: str) -> bool:
     """Check if an email address is likely non-vendor noise."""
@@ -1224,7 +1237,10 @@ def _is_noise_email(email: str) -> bool:
     local, domain = email.split("@", 1)
     if domain.lower() in NOISE_DOMAINS:
         return True
-    if local.lower() in NOISE_PREFIXES:
+    local_lower = local.lower()
+    if local_lower in NOISE_PREFIXES:
+        return True
+    if local_lower.startswith(_EXCHANGE_NDR_LOCAL_PREFIX):
         return True
     return False
 

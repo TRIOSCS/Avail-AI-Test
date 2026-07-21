@@ -2567,6 +2567,42 @@ Self-invalidating: the service regens automatically when `basis_last_activity_at
 `basis_activity_count` changes on next view — no write-path hooks needed.
 `?force=1` bypasses both the cooldown and the basis freshness check.
 
+**8b. Company/vendor Activity tab scoping (ISS-030 fix).** `routers/htmx/_shared_tabs.py`'s
+`company_tab`/`vendor_tab` "activity" branches now source their `ActivityLog` rows through the
+same `activity_service` read helpers as the digest above — `get_company_activities(company_id,
+db, limit=50, meaningful_only=True, exclude_types={ActivityType.RFQ_SENT})` and
+`get_vendor_activities(vendor_card_id, db, limit=50, meaningful_only=True)` — instead of a
+hand-rolled query. The company branch previously OR'd `ActivityLog.company_id == id` with
+`requisition_id.in_(company's req ids)` with no quality filter, which leaked internal
+colleagues' RFQ-thread replies, vendor replies, and unrelated requisition events onto the
+customer's page; it is now scoped strictly to `company_id` (the RFQ-contact merge — pulling
+`RfqContact` rows per linked requisition — is unchanged, since `RfqContact` is a distinct table
+with its own scoping). `meaningful_only=True` also enforces the AI quality gate
+(`activity_quality_service`'s `is_meaningful=False` classification) that the tab previously
+rendered around. `get_company_activities` gained `exclude_types` so the RFQ_SENT-vs-RfqContact
+double-show suppression stays a query-time filter (applied before `limit`) instead of a
+post-fetch Python filter.
+
+Write-time filters close the gap the read-time fix opens: `log_email_activity()` now skips
+writing a row (returns `None`) when the counterparty is an own-domain (`settings.own_domains`)
+or junk (`JUNK_DOMAINS`/`JUNK_EMAIL_PREFIXES` from `shared_constants.py`) address that doesn't
+independently resolve via `match_email_to_entity` — mirroring `log_meeting_activity`'s existing
+`_is_internal_email`/`_is_junk_email` gate (now shared module-level helpers instead of
+per-function nested closures). `email_service.poll_inbox()` skips logging (not just contact
+progression) when `_is_auto_reply()` matches an inbound message's subject/body (OOO/vacation/
+bounce), and `_is_noise_email()` gained a conservative `microsoftexchange`-local-part prefix
+check for Exchange NDR mailboxes (their hex suffix is tenant-random, so it can't be an exact
+`JUNK_EMAIL_PREFIXES` entry). `jobs/email_jobs.scan_sent_folder()`'s legacy CREATE fallback
+(when no send-time row exists to reconcile) now resolves the first recipient via
+`match_email_to_entity` and stamps `company_id`/`vendor_card_id` instead of leaving both NULL.
+
+`app/management/reattribute_activity.py` (dry-run by default, `--apply` to write, `--limit` to
+cap the scan) backfills historical rows left over from before these write-time filters existed:
+`ActivityLog` rows with `requisition_id` set but `company_id`/`vendor_card_id` both NULL are
+re-resolved via `match_email_to_entity` on `contact_email`; rows whose counterparty is
+own-domain/junk are flagged `is_meaningful=False` instead of attributed. No deletions;
+idempotent (an already-attributed row falls out of the candidate query on the next pass).
+
 ---
 
 ### 8a. AI Insights refresh — interactive Claude budget (P2.8)

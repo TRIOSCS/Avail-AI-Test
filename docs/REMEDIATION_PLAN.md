@@ -442,6 +442,13 @@ existing tests).
   misattributed rows; (d) close the test gap (leak-scenario row must be excluded).
   Blast radius: vendor tab shares only the missing meaningful filter; digest + JSON
   API already correct.
+- **IMPLEMENTED on this branch (2026-07-21):** company tab now uses
+  `get_company_activities(meaningful_only=True, exclude_types={RFQ_SENT})`; vendor
+  tab gained the meaningful filter; write-time own-domain/junk gate in
+  `log_email_activity`; auto-reply skip + Exchange-NDR detection in `poll_inbox`;
+  `scan_sent_folder` resolves entity attribution; backfill command
+  `python -m app.management.reattribute_activity` (dry-run default, `--apply`).
+  Run the backfill once post-deploy to clean existing misattributed rows.
 
 ### ISS-031: Remove "Add primary contact" header affordance + payment terms from accounts
 - **Reported:** 2026-07-21 (user notes — CRM walkthrough; explicit removal approval)
