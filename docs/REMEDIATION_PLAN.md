@@ -275,6 +275,26 @@ drafted only after collection closes and each item is verified against current c
   `_contact_form.html:62` if then unused); keep "+ Add Contact"; form's site select
   defaults to HQ/first site. (verified: yes)
 
+### ISS-025: "Find Contacts" suggests contacts that already exist in the system
+- **Reported:** 2026-07-21 (user note — CRM walkthrough)
+- **Area:** CRM (contact discovery)
+- **Severity:** P2
+- **Symptom:** AI/provider contact discovery re-suggests people who are already
+  saved contacts. Both surfaces affected (verified: yes):
+  - Vendor Find Contacts tab: `_run_vendor_find_contacts`
+    (`app/routers/htmx/vendors.py:1067`) dedupes only within the current batch
+    (local `seen` set) before inserting `ProspectContact` rows — no check against
+    the vendor's existing prospect/real contacts, so re-runs duplicate suggestions.
+  - Customer Contacts tab suggested-contacts: `_run_contact_discovery`
+    (`app/routers/htmx/companies/contacts.py:756`) calls the provider waterfall
+    with no DB access, and the `_suggested_contacts.html` panel renders results
+    unfiltered against the company's existing `Contact` rows.
+- **Fix shape:** before persisting (vendor) / rendering (customer), drop any
+  suggestion whose email matches an existing contact case-insensitively, with a
+  name-based fallback for suggestions lacking an email (use `fuzzy_score_vendor()`-style
+  normalization, not inline fuzzy). Applies to both ProspectContact and real
+  contact tables for the entity.
+
 ---
 
 ## Phased Plan
