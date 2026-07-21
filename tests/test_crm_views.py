@@ -2409,8 +2409,8 @@ class TestEditSite:
     def test_post_site_edit_persists_address_and_preserves_payment_terms(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit saves address fields; payment_terms is ERP-managed (ISS-031) —
-        the route must IGNORE a posted value and preserve what's stored."""
+        """POST edit saves address fields; payment_terms is ERP-managed (ISS-031) — the
+        route must IGNORE a posted value and preserve what's stored."""
         from app.models.crm import CustomerSite
 
         company, site = self._make_company_with_site(db_session, owner=test_user)
