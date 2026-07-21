@@ -295,6 +295,33 @@ drafted only after collection closes and each item is verified against current c
   normalization, not inline fuzzy). Applies to both ProspectContact and real
   contact tables for the entity.
 
+### ISS-026: Archive-only data policy — eliminate hard deletes for non-admins
+- **Reported:** 2026-07-21 (user note — CRM walkthrough)
+- **Area:** platform-wide (data integrity / authz)
+- **Severity:** P1 (irrecoverable data loss is possible today)
+- **Symptom:** users can permanently destroy CRM data (emails, names, accounts,
+  phone numbers, contacts, etc.). Survey (verified: yes): **51 `db.delete()` call
+  sites** across `app/routers/` + `app/services/` — companies core/sites/tags,
+  vendor contacts, vendors, requirements, quotes, offers, quality plans, spec
+  codes, and more. Archive columns exist only in `app/models/crm.py`; vendors
+  already support `include_archived` filtering.
+- **Decision (user, 2026-07-21):** archive-only for all users — archiving removes
+  from view but is recoverable. Admins alone keep a separate, audited hard-delete
+  (for junk/test records and privacy-removal requests).
+- **Fix shape:**
+  - Add `archived_at` / `archived_by_id` (nullable) to entities that lack them
+    (Alembic migration with rollback).
+  - Convert every non-admin delete endpoint to archive; default all list/detail
+    queries to exclude archived rows; add an "Archived" recovery view per module
+    with un-archive.
+  - Admin hard-delete: `require_admin`, confirmation, and a `UserAdminAudit`-style
+    audit row.
+  - Guardrail test: assert no router outside `app/routers/admin/` calls
+    `db.delete()` on protected entities (allow-list for genuinely ephemeral rows,
+    e.g. drafts/join rows, decided at implementation).
+- **Note:** interacts with ISS-022 (same anti-data-loss/theft theme) and the
+  Safety rule (backup exists via db-backup service; recovery path documented).
+
 ---
 
 ## Phased Plan
