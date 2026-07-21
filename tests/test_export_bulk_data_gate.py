@@ -97,9 +97,7 @@ class TestCompaniesExportGate:
     def test_contacts_csv_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            _assert_csv_export(
-                c.get("/v2/customers/contacts/export.csv"), "contacts.csv", "full_name"
-            )
+            _assert_csv_export(c.get("/v2/customers/contacts/export.csv"), "contacts.csv", "full_name")
         finally:
             _drop_overrides(c)
 
@@ -135,9 +133,7 @@ class TestRequisitionsExportGate:
     def test_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            _assert_csv_export(
-                c.get("/v2/partials/requisitions/export"), "requisitions_export.csv", "Name"
-            )
+            _assert_csv_export(c.get("/v2/partials/requisitions/export"), "requisitions_export.csv", "Name")
         finally:
             _drop_overrides(c)
 
@@ -155,9 +151,7 @@ class TestSightingsExportGate:
     def test_200_for_manager_admin(self, db_session, _role_users, role):
         c = _client_as(db_session, _role_users[role])
         try:
-            _assert_csv_export(
-                c.get("/v2/sightings/export"), "sightings_export.csv", "Requirement ID"
-            )
+            _assert_csv_export(c.get("/v2/sightings/export"), "sightings_export.csv", "Requirement ID")
         finally:
             _drop_overrides(c)
 
