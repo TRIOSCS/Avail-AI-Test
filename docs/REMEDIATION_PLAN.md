@@ -322,6 +322,33 @@ drafted only after collection closes and each item is verified against current c
 - **Note:** interacts with ISS-022 (same anti-data-loss/theft theme) and the
   Safety rule (backup exists via db-backup service; recovery path documented).
 
+### ISS-027: CRM account/contacts UI de-clutter (user-approved redesign pass)
+- **Reported:** 2026-07-21 (user note — CRM walkthrough; explicit approval for all
+  sub-items, satisfies the UI-guardrail rule)
+- **Area:** CRM / frontend
+- **Severity:** P2 (UX)
+- **Symptom:** account detail page feels busy: ~18 top-level buttons/actions in the
+  header, contact rows stack 3+ pills (role, DNC, completeness %), a header metric
+  strip, and heavy per-site section chrome.
+- **Approved sub-items:**
+  1. **Consolidate header actions** — keep 2–3 primary buttons (e.g. Enrich, Add
+     Contact); move the rest into the existing kebab menu
+     (`app/templates/htmx/partials/customers/detail.html`, ~18 button sites today).
+  2. **Quiet the badges/pills** — contact rows show role + DNC only; per-contact
+     completeness % (`_contact_macros.html:252-257`) becomes a subtle dot or
+     hover/edit-only; the account-level completeness badge (`detail.html:179-185`)
+     remains the single summary signal.
+  3. **Collapse the metric strip** — header stats to one compact row or behind a
+     toggle, freeing above-the-fold space for the contact list.
+  4. **Lighter site sections** — section headers slim to name + city; cadence dot
+     moves to hover (`_contacts_grouped_list.html`); builds on ISS-024's
+     "+ add here" removal.
+  5. **Aesthetic look-and-feel pass** — overall visual cleanup with clear
+     separation of data groups (spacing/dividers/hierarchy), consistent with
+     existing Tailwind patterns; no new UI conventions.
+- **Fix shape:** frontend-only template work (`frontend-design` + `htmx` skills);
+  no route or data changes; before/after review per screen with the user.
+
 ---
 
 ## Phased Plan
