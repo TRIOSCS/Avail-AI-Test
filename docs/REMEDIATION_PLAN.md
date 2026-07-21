@@ -416,8 +416,32 @@ existing tests).
   bounces/DSNs, system notifications; (c) internal-colleague mail (own org domain)
   is never customer activity; (d) presentation must be "clean readable and useful"
   — collapse noise, meaningful summaries, no "insufficient content" filler rows.
-- **Status:** deep-dive investigation in progress — root cause, matching rules,
-  and fix plan to be appended here.
+- **Root cause (deep dive, verified 2026-07-21):**
+  1. **Read-time OR-leak:** the company Activity tab query
+     (`app/routers/htmx/_shared_tabs.py:346-360`) ORs
+     `ActivityLog.company_id == id` with `requisition_id.in_(company's reqs)` and
+     applies NO `is_meaningful` filter — pulling in internal colleagues' replies on
+     RFQ threads, vendor replies, sent-folder rows, and system events. It is a third
+     divergent reimplementation; `get_company_activities()` and
+     `get_account_timeline()` (`app/services/activity_service.py:781,861`) are both
+     correctly scoped.
+  2. **Quality gate unenforced:** the AI quality pass
+     (`activity_quality_service.py`) already scores OOO/bounces/blank rows
+     `is_meaningful=False` with `quality_classification`, but the tab renders them
+     anyway ("No interaction details available" filler).
+  3. **Write-time gaps:** `log_email_activity()` lacks the `own_domains`/junk
+     pre-filter that `log_meeting_activity()` has; `_is_auto_reply()` exists but only
+     gates resell progression, not logging; Exchange NDR/bounce senders evade
+     `_is_noise_email()`; `scan_sent_folder()` writes rows with requisition_id but
+     never resolves company/vendor attribution.
+- **Fix plan:** (a) replace the tab query with
+  `get_company_activities(meaningful_only=True)` — kills the OR-leak and enforces
+  the gate in one change (RFQ-contact merge logic stays); (b) write-time: own-domain
+  + auto-reply + NDR filters in `log_email_activity`/`poll_inbox`, entity resolution
+  in `scan_sent_folder`; (c) management backfill to re-attribute/flag existing
+  misattributed rows; (d) close the test gap (leak-scenario row must be excluded).
+  Blast radius: vendor tab shares only the missing meaningful filter; digest + JSON
+  API already correct.
 
 ---
 
