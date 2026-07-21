@@ -3087,6 +3087,25 @@ rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. E
 isn't leaked), matching their mutating siblings in the same submodule. Regression coverage:
 `tests/test_authz_offers_partials_idor.py`.
 
+**Read-IDOR closure — CRM read endpoints (Wave 1, `fix/crm-authz-wave1`).** A module-wide sweep
+found 23 CRM GET/read endpoints returning scoped data (contact/company/site PII, financials) with
+only `require_user` while their mutating peers gated. Each now gates: the company/site/contact
+read partials (`company_edit_form`, `company_field_edit_form`/`_display`, `company_dup_suggestion`,
+`company_name_suggestion` in core.py; `site_contacts_list`, `site_edit_form` in sites.py;
+`contacts_tab_add_form`, `contact_field_edit_form`/`_display`, `contact_notes_modal`,
+`contact_history_modal`, `contact_files_modal`, and the `suggested-contacts` trigger/status in
+contacts.py; `company_segment_tags_partial` in tags.py) load the owning `Company` and
+`can_manage_account(user, company, db)` → **404** (matching `company_detail_partial`; the
+suggested-contacts *poller* returns an empty `286` to stop polling instead). The JSON API
+`GET /api/companies/{id}` → 404 via `can_manage_account`; `GET /api/companies` list filters on
+`company_visibility_predicate` for non-managers (and threads `user` into the cached `_fetch` so
+`@cached_endpoint` folds `user.id` into the key — no cross-rep cache bleed); `crm/offers.py`
+`get_changelog`/`list_offer_attachments` require `require_requisition_access`, `list_review_queue`
+is `is_manager_or_admin`-only; `crm/enrichment.py` `enrich_vendor_card`/`get_suggested_contacts`
+require `require_buyer`. Managers/admins bypass throughout. Regression coverage: seven new
+`tests/test_*_idor.py` / `test_enrichment_authz.py` modules (stranger 404/403/286 + owner 200 with
+content asserts).
+
 **Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
 contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
 ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring

@@ -108,14 +108,18 @@ class TestCreateOffer:
 
 
 class TestReviewQueue:
-    def test_list_review_queue_empty(self, client):
+    def test_list_review_queue_empty(self, client, db_session, test_user):
         """GET /api/offers/review-queue returns empty list when no T4 offers."""
+        test_user.role = "manager"  # review queue is manager/admin-only
+        db_session.commit()
         resp = client.get("/api/offers/review-queue")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_list_review_queue_with_t4_offer(self, client, db_session, test_user):
         """GET /api/offers/review-queue returns T4 pending_review offers."""
+        test_user.role = "manager"  # review queue is manager/admin-only
+        db_session.commit()
         offer = _make_committed_offer(db_session, test_user.id, status="pending_review", evidence_tier="T4")
 
         resp = client.get("/api/offers/review-queue")
@@ -125,6 +129,8 @@ class TestReviewQueue:
 
     def test_list_review_queue_excludes_non_t4(self, client, db_session, test_user):
         """Review queue does not include active (non-T4) offers."""
+        test_user.role = "manager"  # review queue is manager/admin-only
+        db_session.commit()
         _make_committed_offer(db_session, test_user.id, status="active", evidence_tier="T5")
 
         resp = client.get("/api/offers/review-queue")

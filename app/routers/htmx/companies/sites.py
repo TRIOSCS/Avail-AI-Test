@@ -173,6 +173,8 @@ async def site_contacts_list(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        raise HTTPException(404, "Company not found")
     return _render_contacts_list(request, user, company, db)
 
 
@@ -349,6 +351,9 @@ async def site_edit_form(
     """Return modal edit form for a customer site."""
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.get(Company, company_id)
+    if company is None or not can_manage_account(user, company, db):
         raise HTTPException(404, "Site not found")
     users = db.query(User).order_by(User.name).all()
     return template_response(

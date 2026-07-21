@@ -458,6 +458,7 @@ class TestCustomerSites:
         assert resp.status_code == 200
 
     def test_site_contacts_list(self, client, db_session: Session, test_user: User, test_company):
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
         site = _company_site(db_session, test_company)
         db_session.commit()
 

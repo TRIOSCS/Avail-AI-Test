@@ -257,7 +257,7 @@ async def enrich_vendor_card(
     card_id: int,
     request: Request,
     payload: EnrichDomainRequest = EnrichDomainRequest(),
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
     """Enrich a vendor card with external data.
@@ -302,7 +302,7 @@ async def get_suggested_contacts(
     domain: str = "",
     name: str = "",
     title: str = "",
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
     """Find suggested contacts at a company from enrichment providers."""

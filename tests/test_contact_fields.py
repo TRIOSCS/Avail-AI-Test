@@ -418,8 +418,12 @@ class TestContactInlineEdit:
 class TestContactFormOwnerSelect:
     """Phase 1 ownership cleanup: per-contact owner picker is removed from add/edit forms."""
 
-    def test_add_form_does_not_render_owner_picker(self, client: TestClient, test_company: Company, test_user: User):
+    def test_add_form_does_not_render_owner_picker(
+        self, client: TestClient, db_session: Session, test_company: Company, test_user: User
+    ):
         """Add-form GET must NOT contain contact_owner_id (picker removed)."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/add-form")
         assert resp.status_code == 200
         assert "contact_owner_id" not in resp.text
@@ -437,8 +441,12 @@ class TestContactFormOwnerSelect:
         assert resp.status_code == 200
         assert "contact_owner_id" not in resp.text
 
-    def test_add_form_renders_first_last_inputs(self, client: TestClient, test_company: Company):
+    def test_add_form_renders_first_last_inputs(
+        self, client: TestClient, db_session: Session, test_company: Company, test_user: User
+    ):
         """Add form renders first_name and last_name inputs (not full_name)."""
+        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
         resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/add-form")
         assert resp.status_code == 200
         # Template uses single-quoted attributes

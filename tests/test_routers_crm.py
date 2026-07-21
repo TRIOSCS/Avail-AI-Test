@@ -248,14 +248,14 @@ class TestCompanies:
         assert isinstance(data["items"], list)
         assert "total" in data
 
-    def test_list_companies_with_data(self, client, db_session, test_company):
-        resp = client.get("/api/companies")
+    def test_list_companies_with_data(self, admin_client, db_session, test_company):
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
-    def test_list_companies_search(self, client, db_session, test_company):
-        resp = client.get("/api/companies", params={"search": "Acme"})
+    def test_list_companies_search(self, admin_client, db_session, test_company):
+        resp = admin_client.get("/api/companies", params={"search": "Acme"})
         assert resp.status_code == 200
         names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
@@ -294,9 +294,9 @@ class TestCompanies:
 
 
 class TestCompanyDetail:
-    def test_get_company_basic(self, client, db_session, test_company, test_customer_site):
+    def test_get_company_basic(self, admin_client, db_session, test_company, test_customer_site):
         """GET /api/companies/{id} returns company with sites."""
-        resp = client.get(f"/api/companies/{test_company.id}")
+        resp = admin_client.get(f"/api/companies/{test_company.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == test_company.id
@@ -314,7 +314,7 @@ class TestCompanyDetail:
         resp = client.get("/api/companies/999999")
         assert resp.status_code == 404
 
-    def test_get_company_sites_include_contacts(self, client, db_session, test_company, test_customer_site):
+    def test_get_company_sites_include_contacts(self, admin_client, db_session, test_company, test_customer_site):
         """Site contacts are nested under each site."""
         sc = SiteContact(
             customer_site_id=test_customer_site.id,
@@ -325,7 +325,7 @@ class TestCompanyDetail:
         db_session.add(sc)
         db_session.commit()
 
-        resp = client.get(f"/api/companies/{test_company.id}")
+        resp = admin_client.get(f"/api/companies/{test_company.id}")
         assert resp.status_code == 200
         data = resp.json()
         site = [s for s in data["sites"] if s["site_name"] == "Acme HQ"][0]
@@ -333,7 +333,7 @@ class TestCompanyDetail:
         contact_names = [c["full_name"] for c in site["contacts"]]
         assert "Bob Smith" in contact_names
 
-    def test_get_company_open_reqs_count(self, client, db_session, test_company, test_customer_site, test_user):
+    def test_get_company_open_reqs_count(self, admin_client, db_session, test_company, test_customer_site, test_user):
         """open_reqs count is aggregated per site."""
         req = Requisition(
             name="REQ-DETAIL-001",
@@ -345,20 +345,20 @@ class TestCompanyDetail:
         db_session.add(req)
         db_session.commit()
 
-        resp = client.get(f"/api/companies/{test_company.id}")
+        resp = admin_client.get(f"/api/companies/{test_company.id}")
         assert resp.status_code == 200
         data = resp.json()
         site = [s for s in data["sites"] if s["site_name"] == "Acme HQ"][0]
         assert site["open_reqs"] >= 1
 
-    def test_get_company_inactive_sites_excluded(self, client, db_session, test_company):
+    def test_get_company_inactive_sites_excluded(self, admin_client, db_session, test_company):
         """Inactive sites are filtered out of the response."""
         active = CustomerSite(company_id=test_company.id, site_name="Active Branch", is_active=True)
         inactive = CustomerSite(company_id=test_company.id, site_name="Closed Branch", is_active=False)
         db_session.add_all([active, inactive])
         db_session.commit()
 
-        resp = client.get(f"/api/companies/{test_company.id}")
+        resp = admin_client.get(f"/api/companies/{test_company.id}")
         assert resp.status_code == 200
         data = resp.json()
         site_names = [s["site_name"] for s in data["sites"]]
@@ -524,9 +524,9 @@ class TestQuotes:
 
 
 class TestCompaniesAdditional:
-    def test_list_companies_unassigned(self, client, db_session, test_company):
+    def test_list_companies_unassigned(self, admin_client, db_session, test_company):
         """Filter companies with no account_owner_id."""
-        resp = client.get("/api/companies", params={"unassigned": 1})
+        resp = admin_client.get("/api/companies", params={"unassigned": 1})
         assert resp.status_code == 200
         data = resp.json()["items"]
         # test_company has no account_owner_id, so it should appear
@@ -573,9 +573,9 @@ class TestCompaniesAdditional:
                 assert "sites" not in c
                 assert "site_count" in c
 
-    def test_list_companies_pagination(self, client, db_session, test_company):
+    def test_list_companies_pagination(self, admin_client, db_session, test_company):
         """Pagination params limit and offset work correctly."""
-        resp = client.get("/api/companies", params={"limit": 1, "offset": 0})
+        resp = admin_client.get("/api/companies", params={"limit": 1, "offset": 0})
         assert resp.status_code == 200
         data = resp.json()
         assert data["limit"] == 1
@@ -583,9 +583,9 @@ class TestCompaniesAdditional:
         assert data["total"] >= 1
         assert len(data["items"]) <= 1
 
-    def test_list_companies_response_shape(self, client, db_session, test_company):
+    def test_list_companies_response_shape(self, admin_client, db_session, test_company):
         """List response includes open_req_count and site_count, not sites."""
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         data = resp.json()
         assert "items" in data
@@ -596,7 +596,7 @@ class TestCompaniesAdditional:
         assert "sites" not in item
 
     def test_list_companies_revenue_90d_with_won_quote(
-        self, client, db_session, test_company, test_customer_site, test_user
+        self, admin_client, db_session, test_company, test_customer_site, test_user
     ):
         """revenue_90d reflects sum of Quote.subtotal for won requisitions in last 90
         days."""
@@ -619,7 +619,7 @@ class TestCompaniesAdditional:
         db_session.add(q)
         db_session.commit()
 
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         items = resp.json()["items"]
         match = [i for i in items if i["id"] == test_company.id]
@@ -627,7 +627,7 @@ class TestCompaniesAdditional:
         assert match[0]["revenue_90d"] == 5000.0
 
     def test_list_companies_revenue_90d_uses_status_enum(
-        self, client, db_session, test_company, test_customer_site, test_user
+        self, admin_client, db_session, test_company, test_customer_site, test_user
     ):
         """revenue_90d filter must use the RequisitionStatus.WON StrEnum constant, not a
         raw 'won' string.
@@ -654,15 +654,15 @@ class TestCompaniesAdditional:
         db_session.add(q)
         db_session.commit()
 
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         match = [i for i in resp.json()["items"] if i["id"] == test_company.id]
         assert len(match) == 1
         assert match[0]["revenue_90d"] == 4200.0
 
-    def test_list_companies_revenue_90d_zero_when_no_won(self, client, db_session, test_company):
+    def test_list_companies_revenue_90d_zero_when_no_won(self, admin_client, db_session, test_company):
         """Companies with no won quotes should have revenue_90d=0."""
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         items = resp.json()["items"]
         match = [i for i in items if i["id"] == test_company.id]
@@ -670,7 +670,7 @@ class TestCompaniesAdditional:
         assert match[0]["revenue_90d"] == 0
 
     def test_list_companies_revenue_90d_excludes_old(
-        self, client, db_session, test_company, test_customer_site, test_user
+        self, admin_client, db_session, test_company, test_customer_site, test_user
     ):
         """Quotes older than 90 days should not count toward revenue_90d."""
         req = Requisition(
@@ -692,7 +692,7 @@ class TestCompaniesAdditional:
         db_session.add(q)
         db_session.commit()
 
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         items = resp.json()["items"]
         match = [i for i in items if i["id"] == test_company.id]
@@ -2460,27 +2460,27 @@ class TestHistoricalOffersSubstitutes:
 
 
 class TestCompanyTags:
-    def test_list_companies_includes_tags(self, client, db_session, test_company):
+    def test_list_companies_includes_tags(self, admin_client, db_session, test_company):
         """brand_tags and commodity_tags are returned in list response."""
         test_company.brand_tags = ["IBM", "HP"]
         test_company.commodity_tags = ["Server"]
         db_session.commit()
 
-        resp = client.get("/api/companies")
+        resp = admin_client.get("/api/companies")
         assert resp.status_code == 200
         data = resp.json()["items"]
         comp = [c for c in data if c["name"] == "Acme Electronics"][0]
         assert comp["brand_tags"] == ["IBM", "HP"]
         assert comp["commodity_tags"] == ["Server"]
 
-    def test_list_companies_tag_filter(self, client, db_session, test_company):
+    def test_list_companies_tag_filter(self, admin_client, db_session, test_company):
         """Tag query param filters companies by brand/commodity tags."""
         test_company.brand_tags = ["IBM", "HP"]
         test_company.commodity_tags = ["Server"]
         db_session.commit()
 
         # Should match
-        resp = client.get("/api/companies", params={"tag": "IBM"})
+        resp = admin_client.get("/api/companies", params={"tag": "IBM"})
         assert resp.status_code == 200
         names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
@@ -2494,12 +2494,12 @@ class TestCompanyTags:
         assert resp.status_code == 200
         assert resp.json()["items"] == []
 
-    def test_list_companies_tag_filter_commodity(self, client, db_session, test_company):
+    def test_list_companies_tag_filter_commodity(self, admin_client, db_session, test_company):
         """Tag filter matches commodity_tags too."""
         test_company.commodity_tags = ["Networking"]
         db_session.commit()
 
-        resp = client.get("/api/companies", params={"tag": "network"})
+        resp = admin_client.get("/api/companies", params={"tag": "network"})
         assert resp.status_code == 200
         names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
