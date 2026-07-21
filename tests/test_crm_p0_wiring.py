@@ -311,6 +311,67 @@ class TestTaskEditRoute:
         )
         assert resp.status_code == 404
 
+    def test_edit_form_response_preserves_swap_target_account(
+        self,
+        client,
+        owned_company: Company,
+        company_task: RequisitionTask,
+    ):
+        """Edit-form fragment must re-carry id="account-tasks-{id}" at its root.
+
+        The Edit button outerHTML-swaps the #account-tasks-{id} container for this
+        fragment; without the id, the form's Save/Cancel hx-targets match nothing and
+        htmx aborts (htmx:targetError) before issuing any request.
+        """
+        resp = client.get(f"/v2/partials/tasks/{company_task.id}/edit-form")
+        assert resp.status_code == 200
+        assert f'id="account-tasks-{owned_company.id}"' in resp.text
+
+    def test_edit_form_response_preserves_swap_target_contact(
+        self,
+        client,
+        contact_with_task,
+    ):
+        """Contact-scoped edit-form must re-carry id="contact-tasks-{contact_id}" at its
+        root (same swap-target invariant as the account variant)."""
+        contact = contact_with_task["contact"]
+        task = contact_with_task["task"]
+        resp = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
+        assert resp.status_code == 200
+        assert f'id="contact-tasks-{contact.id}"' in resp.text
+
+    def test_post_edit_invalid_date_preserves_swap_target(
+        self,
+        client,
+        owned_company: Company,
+        company_task: RequisitionTask,
+    ):
+        """A due_at validation error must return the id-bearing edit form, not a bare
+        <p> — the Save button outerHTML-swaps #account-tasks-{id}, so an id-less
+        fragment would destroy the container and dead-end the widget."""
+        resp = client.post(
+            f"/v2/partials/tasks/{company_task.id}/edit",
+            data={"title": "Title", "due_at": "not-a-date"},
+        )
+        assert resp.status_code == 200
+        assert f'id="account-tasks-{owned_company.id}"' in resp.text
+        assert "Invalid date format." in resp.text
+
+    def test_post_edit_empty_title_preserves_swap_target(
+        self,
+        client,
+        owned_company: Company,
+        company_task: RequisitionTask,
+    ):
+        """An empty-title validation error must also return the id-bearing edit form."""
+        resp = client.post(
+            f"/v2/partials/tasks/{company_task.id}/edit",
+            data={"title": ""},
+        )
+        assert resp.status_code == 200
+        assert f'id="account-tasks-{owned_company.id}"' in resp.text
+        assert "Title is required." in resp.text
+
     def test_post_edit_updates_due_at(
         self,
         client,
