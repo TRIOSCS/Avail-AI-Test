@@ -5,8 +5,10 @@ Verifiable, surface-by-surface map of every capability of the retired Buy Plans 
 (`/v2/approvals`: Sales Orders · Buy Plans · Purchase Orders · Prepayments).
 Spec: `specs/approvals-workspace.md` §11.1 ("old Buy Plans hub retires after parity").
 
-**This PR is blocked on Mike's parity sign-off.** Prepare-only; do not merge before
-he approves. Legend: ☑ built and verified in the workspace · ☐ needs check / gap.
+**Merged 2026-07-18 (PR #759) with Mike's parity sign-off.** The organizational
+cutover is tracked separately in `docs/APPROVALS_WORKSPACE_PILOT.md` (Teams forms /
+QP workbooks stay authoritative until Mike declares cutover after the pilot).
+Legend: ☑ built and verified in the workspace · ☐ needs check / gap.
 One conscious gap remains: the org-wide `open_avg_margin` metric strip, dropped with
 rationale (see Margin metrics below). The deep-link preselection gap is closed —
 `/v2/buy-plans/{id}` now lands on its plan via `?select=`.

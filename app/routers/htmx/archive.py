@@ -541,6 +541,44 @@ async def delete_task_endpoint(
     return HTMLResponse("")
 
 
+def _render_task_edit_form(request: Request, user: User, db: Session, task: RequisitionTask, error: str | None = None):
+    """Render the inline edit form (vendor or customer variant) for a CRM task.
+
+    Shared by the GET edit-form route and the POST edit validation-error branches:
+    the form is outerHTML-swapped over the #…-tasks-{id} container, so every
+    response along the edit flow (including errors) must be this id-bearing
+    fragment — a bare fragment would destroy the swap target and dead-end the
+    widget.
+    """
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    # Vendor task: resolve vendor_id (vendor_card_id direct, or via vendor_contact)
+    if is_vendor_task:
+        from app.models.vendors import VendorContact as _VendorContact
+
+        vendor_id = task.vendor_card_id
+        if not vendor_id and task.vendor_contact_id:
+            vc = db.get(_VendorContact, task.vendor_contact_id)
+            if vc:
+                vendor_id = vc.vendor_card_id
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["task"] = task
+        ctx["vendor_id"] = vendor_id or 0
+        ctx["error"] = error
+        return template_response("htmx/partials/vendors/tabs/_vendor_task_edit_form.html", ctx)
+    # Resolve the real company_id: account task has it directly; for a contact task
+    # we walk contact → site → company so the cancel button has a valid URL.
+    real_company_id = task.company_id
+    if not real_company_id and task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        if contact and contact.customer_site:
+            real_company_id = contact.customer_site.company_id
+    ctx = _base_ctx(request, user, "customers")
+    ctx["task"] = task
+    ctx["company_id"] = real_company_id or 0
+    ctx["error"] = error
+    return template_response("htmx/partials/customers/_task_edit_form.html", ctx)
+
+
 @router.get("/v2/partials/tasks/{task_id}/edit-form", response_class=HTMLResponse)
 async def task_edit_form(
     request: Request,
@@ -559,30 +597,7 @@ async def task_edit_form(
 
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
-    # Vendor task: resolve vendor_id (vendor_card_id direct, or via vendor_contact)
-    if is_vendor_task:
-        from app.models.vendors import VendorContact as _VendorContact
-
-        vendor_id = task.vendor_card_id
-        if not vendor_id and task.vendor_contact_id:
-            vc = db.get(_VendorContact, task.vendor_contact_id)
-            if vc:
-                vendor_id = vc.vendor_card_id
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["task"] = task
-        ctx["vendor_id"] = vendor_id or 0
-        return template_response("htmx/partials/vendors/tabs/_vendor_task_edit_form.html", ctx)
-    # Resolve the real company_id: account task has it directly; for a contact task
-    # we walk contact → site → company so the cancel button has a valid URL.
-    real_company_id = task.company_id
-    if not real_company_id and task.site_contact_id:
-        contact = db.get(SiteContact, task.site_contact_id)
-        if contact and contact.customer_site:
-            real_company_id = contact.customer_site.company_id
-    ctx = _base_ctx(request, user, "customers")
-    ctx["task"] = task
-    ctx["company_id"] = real_company_id or 0
-    return template_response("htmx/partials/customers/_task_edit_form.html", ctx)
+    return _render_task_edit_form(request, user, db, task)
 
 
 @router.post("/v2/partials/tasks/{task_id}/edit", response_class=HTMLResponse)
@@ -613,8 +628,10 @@ async def edit_task_endpoint(
         raise HTTPException(400, "Not a CRM task")
     if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
+    # Validation errors re-render the id-bearing edit form (NOT a bare <p>): the
+    # response outerHTML-swaps the #…-tasks-{id} container, which must survive.
     if not title.strip():
-        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+        return _render_task_edit_form(request, user, db, task, error="Title is required.")
     # Parse due_at: empty string → explicit clear (None); non-empty → parse.
     due_dt = None
     if due_at.strip():
@@ -622,7 +639,7 @@ async def edit_task_endpoint(
             d = date.fromisoformat(due_at.strip())
             due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
         except ValueError:
-            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date format.</p>')
+            return _render_task_edit_form(request, user, db, task, error="Invalid date format.")
     # Set both controlled fields directly so an empty due_at clears the existing value.
     # (update_task skips None values to avoid mass-assignment; bypass that for explicit edits.)
     task.title = title.strip()

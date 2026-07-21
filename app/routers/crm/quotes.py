@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus
@@ -139,7 +140,23 @@ async def list_quotes(req_id: int, user: User = Depends(require_user), db: Sessi
         .order_by(Quote.revision.desc())
         .all()
     )
-    return [quote_to_dict(q, db) for q in quotes]
+    # Batch-load every MaterialCard referenced across all quotes' line_items in ONE IN
+    # query, then serialize against the shared map (kills the per-quote N+1). The caller
+    # passes cards= WITHOUT db, so no per-quote query can fire. Uses the 2.0
+    # select()/db.scalars() form so the legacy Query-API ratchet count does not rise.
+    from ...models import MaterialCard
+
+    cards: dict = {}
+    try:
+        card_ids = {
+            li.get("material_card_id") for q in quotes for li in (q.line_items or []) if li.get("material_card_id")
+        }
+        if card_ids:
+            cards = {c.id: c for c in db.scalars(select(MaterialCard).where(MaterialCard.id.in_(card_ids))).all()}
+    except Exception:
+        logger.warning("Batch MaterialCard enrichment failed for req {}, returning raw items", req_id)
+        cards = {}
+    return [quote_to_dict(q, cards=cards) for q in quotes]
 
 
 @router.post("/api/requisitions/{req_id}/quote")

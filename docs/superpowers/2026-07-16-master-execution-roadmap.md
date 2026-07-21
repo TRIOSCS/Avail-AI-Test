@@ -50,13 +50,18 @@ These are pre-resolved so the plan has no TBDs; confirm or redirect and I execut
 ## Phase 1 — Security & launch hardening (2–3 d)
 **Goal:** close the "reads-as-done-but-isn't" cluster before multi-user go-live. Mostly small, highest stakes. Live-verify each (401/403/429/boot behavior) on staging.
 
+> **Status audit 2026-07-21 (code-verified on main):** four of the five code rows below
+> have since shipped — ✅ marks each with its landing site. The only code row still open
+> is the **Graph-webhook edge IP allowlist** (Caddyfile has no webhook matcher). The
+> three ops-secrets rows are server-side `.env` state and cannot be verified from the repo.
+
 | Item | Why it matters | Approach | Size | Migration |
 |---|---|---|---|---|
-| **Lock down `/docs` `/redoc` `/openapi.json`** | Full internal API surface (741 paths) served unauth through the public edge | Env-gate the FastAPI constructor to `…=None` in prod (or admin-gated Swagger) **and** add the 3 paths to Caddy `@blocked`; test 401/404 | S | — |
-| **Register the global rate limiter** | `SlowAPIMiddleware` never added → the 120/min default is dead; only ~41 routes throttle | `add_middleware(SlowAPIASGIMiddleware)` guarded by `rate_limit_enabled`; confirm Caddy forwards real client IP; live-verify a 429 | S | — |
-| **Stop silent admin re-promotion** | A demoted admin in `ADMIN_EMAILS` is re-promoted on next login | Persistent per-user `admin_opt_out` flag gated at `auth.py:155` (or true first-boot-only bootstrap) + re-login regression test | M | **yes** (opt-out flag) |
-| **Graph-webhook edge IP allowlist** (HIGH-SEC-4) | App-layer token check shipped; the prescribed edge allowlist never did → routes edge-reachable | Caddy named matcher for `/api/webhooks/graph\|teams\|acs` gated by a Microsoft ServiceTag IP snapshot (acs already fails closed on secret) | M | — |
-| **Password-login fail-boot guard** (blocker #1) | Only the log severity was raised; the boot guard was dropped | Boot `RuntimeError` unless `ALLOW_PASSWORD_LOGIN_RISK=true` + `deploy.sh` preflight assertion; gated so staging (accepted risk) still boots | S | — |
+| ✅ DONE — **Lock down `/docs` `/redoc` `/openapi.json`** | Full internal API surface (741 paths) served unauth through the public edge | Shipped both layers: Caddy `@blocked` (`Caddyfile:36`) + app-layer gate on `expose_api_docs` (default False, `app/main.py:243-245`) | S | — |
+| ✅ DONE — **Register the global rate limiter** | `SlowAPIMiddleware` never added → the 120/min default is dead; only ~41 routes throttle | Shipped: `app.add_middleware(SlowAPIMiddleware)` in the `rate_limit_enabled` block (`app/main.py:252-262`) | S | — |
+| ✅ DONE — **Stop silent admin re-promotion** | A demoted admin in `ADMIN_EMAILS` is re-promoted on next login | Shipped: `users.admin_bootstrap_opted_out` (migration 190), promotion gate `app/routers/auth.py:154`, Users-tab demotion latch `app/routers/admin/users.py:283`, regression tests | M | **yes** (migr 190) |
+| **Graph-webhook edge IP allowlist** (HIGH-SEC-4) — STILL OPEN | App-layer token check shipped; the prescribed edge allowlist never did → routes edge-reachable | Caddy named matcher for `/api/webhooks/graph\|teams\|acs` gated by a Microsoft ServiceTag IP snapshot (acs already fails closed on secret) | M | — |
+| ✅ DONE — **Password-login fail-boot guard** (blocker #1) | Only the log severity was raised; the boot guard was dropped | Shipped: boot `RuntimeError` unless `ALLOW_PASSWORD_LOGIN_RISK=true` (`app/startup.py:120-141`), `deploy.sh:78-81` preflight, `tests/test_auth_password_guard.py` | S | — |
 | **Set `ENCRYPTION_SALT` on staging** | Unset → legacy static salt fallback; untracked sibling of REDIS_PASSWORD/BACKUP_GPG | Ops: `openssl rand` → `.env` → `python -m app.management.rotate_encryption_salt` → recreate app+worker. Coordinated window. | S (ops) | — |
 | **Set `REDIS_PASSWORD`** (carried) | Redis unauthenticated on staging | Coordinated `.env` + host-worker restart window | S (ops) | — |
 | **Encrypt on-disk backups** (carried, `BACKUP_GPG_PASSPHRASE`) | Backups stored unencrypted (Spaces upload OK) | Set passphrase; verify the backup job encrypts + a restore round-trips | S (ops) | — |

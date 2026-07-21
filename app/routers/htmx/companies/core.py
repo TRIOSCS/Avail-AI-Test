@@ -813,24 +813,45 @@ async def company_dup_suggestion(
     if not can_manage_account(user, company, db):
         raise HTTPException(404, "Company not found")
 
-    # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
-    # already honors the auto_keep heuristic; here we only need the OTHER side as the
-    # merge-away candidate.
+    # Only THIS company's single best near-dup is needed, so key the lookup on its own
+    # normalized_name instead of generating the global dedup candidate set. On Postgres
+    # that is one trgm-index probe (% operator over ix_companies_normalized_name_trgm),
+    # not a whole-table self-join + aggregate join. SQLite (tests) has no pg_trgm, so it
+    # keeps the original rapidfuzz scan; its tables are tiny and behavior is unchanged.
+    match = None
+    norm = company.normalized_name
     try:
-        candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            if company.is_active and norm:
+                sim = sqlfunc.similarity(Company.normalized_name, norm)
+                row = (
+                    db.query(Company.id, Company.name, sim.label("sim"))
+                    .filter(
+                        Company.id != company_id,
+                        Company.is_active.is_(True),
+                        Company.normalized_name.isnot(None),
+                        Company.normalized_name != "",
+                        Company.normalized_name.op("%")(norm),
+                        sim >= (85 / 100.0),
+                    )
+                    .order_by(sim.desc())
+                    .first()
+                )
+                if row is not None:
+                    match = {"id": row.id, "name": row.name, "score": int(round(row.sim * 100))}
+        else:
+            candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+            for pair in candidates:
+                a, b = pair["company_a"], pair["company_b"]
+                if a["id"] == company_id:
+                    match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
+                    break
+                if b["id"] == company_id:
+                    match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
+                    break
     except Exception as e:  # pragma: no cover - defensive, mirrors data-ops scan guard
         logger.warning("dup-suggestion scan failed for company {}: {}", company_id, e)
         return HTMLResponse("")
-
-    match = None
-    for pair in candidates:
-        a, b = pair["company_a"], pair["company_b"]
-        if a["id"] == company_id:
-            match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
-            break
-        if b["id"] == company_id:
-            match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
-            break
 
     if not match:
         return HTMLResponse("")
@@ -1175,7 +1196,10 @@ async def company_edit_form(
         db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
     )
     all_companies = (
-        db.query(Company).filter(Company.id != company_id, Company.is_active.is_(True)).order_by(Company.name).all()
+        db.query(Company.id, Company.name)
+        .filter(Company.id != company_id, Company.is_active.is_(True))
+        .order_by(Company.name)
+        .all()
     )
     return template_response(
         "htmx/partials/customers/edit_form.html",

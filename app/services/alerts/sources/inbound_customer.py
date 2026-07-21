@@ -94,5 +94,8 @@ class InboundCustomerSource(AlertSource):
         return self._eligible_query(db, user).count()
 
     def new_items_for_user(self, db: Session, user: User) -> list[AlertItem]:
-        activities = self._eligible_query(db, user).all()
-        return [AlertItem(ref_id=a.id, anchor=f"company-{a.company_id}") for a in activities]
+        # Markers consume only the id (ref) + company_id (anchor); project those two
+        # columns instead of hydrating the full, wide (text/JSON-bearing) ActivityLog
+        # entity for every recent inbound row on each account-list refresh.
+        rows = self._eligible_query(db, user).with_entities(ActivityLog.id, ActivityLog.company_id).all()
+        return [AlertItem(ref_id=row.id, anchor=f"company-{row.company_id}") for row in rows]

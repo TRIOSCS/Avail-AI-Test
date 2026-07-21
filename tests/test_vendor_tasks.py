@@ -460,6 +460,44 @@ class TestVendorTaskEditForm:
         )
         assert "contact-tasks-None" not in body, "Edit form must not reference #contact-tasks-None for vendor tasks"
 
+    def test_vendor_task_edit_form_preserves_swap_target(
+        self, client, db_session: Session, vendor_card: VendorCard, test_user
+    ):
+        """Edit-form fragment must re-carry id="vendor-tasks-{id}" at its root.
+
+        The Edit button outerHTML-swaps the #vendor-tasks-{id} container for this
+        fragment; without the id, the form's Save/Cancel hx-targets match nothing and
+        htmx aborts (htmx:targetError) before issuing any request.
+        """
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Edit me",
+            created_by=test_user.id,
+        )
+        response = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
+        assert response.status_code == 200
+        assert f'id="vendor-tasks-{vendor_card.id}"' in response.text
+
+    def test_vendor_task_edit_error_preserves_swap_target(
+        self, client, db_session: Session, vendor_card: VendorCard, test_user
+    ):
+        """POST edit validation error must return the id-bearing edit form, not a bare
+        <p> that would outerHTML-destroy #vendor-tasks-{id}."""
+        task = create_vendor_task(
+            db_session,
+            vendor_card_id=vendor_card.id,
+            title="Edit me",
+            created_by=test_user.id,
+        )
+        response = client.post(
+            f"/v2/partials/tasks/{task.id}/edit",
+            data={"title": "Edit me", "due_at": "not-a-date"},
+        )
+        assert response.status_code == 200
+        assert f'id="vendor-tasks-{vendor_card.id}"' in response.text
+        assert "Invalid date format." in response.text
+
 
 # ---------------------------------------------------------------------------
 # Finding 2: vendor_contact-only task complete/delete re-renders correctly
