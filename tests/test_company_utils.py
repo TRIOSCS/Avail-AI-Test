@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.company_utils import find_company_dedup_candidates, normalize_company_name
+from app.company_utils import find_company_dedup_candidates, find_company_dup_match, normalize_company_name
 from app.models import Company, CustomerSite
 
 
@@ -188,3 +188,61 @@ def test_find_company_dedup_candidates_pg_empty_pairs():
     result = _find_company_dedup_candidates_pg(mock_db, 85, 50)
 
     assert result == []
+
+
+# ── find_company_dup_match (anchored single-company lookup) ──────────────────
+
+
+class TestFindCompanyDupMatch:
+    def _make_company(self, db, name, is_active=True):
+        c = Company(name=name, is_active=is_active, created_at=datetime.now(UTC))
+        db.add(c)
+        db.flush()
+        return c
+
+    def test_returns_best_match_above_threshold(self, db_session):
+        target = self._make_company(db_session, "Arrow Electronics")
+        partner = self._make_company(db_session, "Arrow Electronic")
+        self._make_company(db_session, "Zeta Industries")
+        db_session.commit()
+
+        match = find_company_dup_match(db_session, target.id, target.normalized_name, threshold=80)
+        assert match is not None
+        assert match["id"] == partner.id
+        assert match["name"] == "Arrow Electronic"
+        assert match["score"] >= 80
+
+    def test_excludes_self(self, db_session):
+        only = self._make_company(db_session, "Solo Industries")
+        db_session.commit()
+        assert find_company_dup_match(db_session, only.id, only.normalized_name) is None
+
+    def test_excludes_inactive(self, db_session):
+        target = self._make_company(db_session, "Arrow Electronics")
+        self._make_company(db_session, "Arrow Electronic", is_active=False)
+        db_session.commit()
+        assert find_company_dup_match(db_session, target.id, target.normalized_name, threshold=80) is None
+
+    def test_none_below_threshold(self, db_session):
+        target = self._make_company(db_session, "Acme Corporation")
+        self._make_company(db_session, "Zeta Industries")
+        db_session.commit()
+        assert find_company_dup_match(db_session, target.id, target.normalized_name, threshold=85) is None
+
+    def test_none_when_normalized_name_falsy(self, db_session):
+        assert find_company_dup_match(db_session, 123, "") is None
+        assert find_company_dup_match(db_session, 123, None) is None
+
+    def test_pg_query_shape_uses_trgm_operator(self, db_session):
+        """Compile the PG-path query with the postgresql dialect: the trgm `%`
+        operator (rendered `%%` under pyformat) + similarity() in both WHERE and
+        ORDER BY must appear — SQLite masks PG-invalid SQL, so pin the shape."""
+        from sqlalchemy.dialects import postgresql
+
+        from app.company_utils import _dup_match_pg_query
+
+        sql = str(_dup_match_pg_query(db_session, 1, "acme", 85).statement.compile(dialect=postgresql.dialect()))
+        assert "companies.normalized_name %% " in sql
+        assert "similarity(companies.normalized_name" in sql
+        assert "ORDER BY similarity(companies.normalized_name" in sql
+        assert "companies.is_active IS true" in sql or "companies.is_active IS 1" in sql
