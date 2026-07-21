@@ -1,8 +1,14 @@
 {# _vendor_task_edit_form.html — Inline edit form for an existing vendor task.
-   Receives: task (RequisitionTask), vendor_id (int)
-   Called by: GET /v2/partials/tasks/{task_id}/edit-form (vendor branch)
+   Receives: task (RequisitionTask), vendor_id (int),
+             error (str|None, validation message from POST edit error branches)
+   Called by: GET /v2/partials/tasks/{task_id}/edit-form (vendor branch),
+              POST /v2/partials/tasks/{task_id}/edit (validation errors)
    Depends on: POST /v2/partials/tasks/{task_id}/edit
 #}
+{# Root div re-carries the id of the container this fragment outerHTML-replaces
+   (#vendor-tasks-{id}) — without it the Save/Cancel hx-targets match nothing and
+   htmx aborts (htmx:targetError) before any request. Classes mirror _vendor_tasks.html. #}
+<div id="vendor-tasks-{{ vendor_id }}" class="bg-white rounded-xl shadow-card border border-brand-200 p-4">
 <form hx-post="/v2/partials/tasks/{{ task.id }}/edit"
       hx-target="#vendor-tasks-{{ vendor_id }}"
       hx-swap="outerHTML"
@@ -15,7 +21,9 @@
          value="{{ task.due_at.strftime('%Y-%m-%d') if task.due_at else '' }}"
          class="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
          aria-label="Due date">
-  <div id="task-edit-error-{{ task.id }}"></div>
+  <div id="task-edit-error-{{ task.id }}">
+    {% if error %}<p class="text-xs text-rose-600">{{ error }}</p>{% endif %}
+  </div>
   <div class="flex gap-2">
     <button type="submit"
             class="btn btn-primary btn-sm">Save</button>
@@ -26,3 +34,4 @@
             class="btn btn-secondary btn-sm">Cancel</button>
   </div>
 </form>
+</div>
