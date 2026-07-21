@@ -20,7 +20,7 @@
         hx-target="{{ target }}"
         hx-swap="{{ swap }}"
         hx-vals='{"flt_status": "{{ flt_status|default('') }}"}'
-        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
         data-loading-disable
         class="space-y-3">
     <div>

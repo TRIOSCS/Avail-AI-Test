@@ -21,7 +21,7 @@
 
   <form hx-post='/v2/partials/quotes/{{ quote.id }}/edit'
         hx-target='#main-content'
-        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
         data-loading-disable
         class='space-y-3'>
 

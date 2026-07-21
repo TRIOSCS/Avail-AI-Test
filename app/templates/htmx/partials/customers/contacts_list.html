@@ -185,20 +185,22 @@
             </td>
             <td class="table-cell text-sm">{% if c.contact_role %}<span class="chip">{{ c.contact_role|replace('_', ' ')|title }}</span>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
             <td class="table-cell text-secondary">
-              {% if c.email %}<a href="mailto:{{ c.email }}" @click.stop class="hover:text-brand-600 hover:underline">{{ c.email }}</a>{% else %}—{% endif %}
+              {% if c.email %}<a href="mailto:{{ c.email }}" @click.stop @keyup.stop class="hover:text-brand-600 hover:underline">{{ c.email }}</a>{% else %}—{% endif %}
             </td>
             <td class="table-cell text-secondary">
-              {% if c.phone %}<a href="tel:{{ c.phone }}" @click.stop class="hover:text-brand-600 hover:underline whitespace-nowrap">{{ c.phone }}</a>{% else %}—{% endif %}
+              {% if c.phone %}<a href="tel:{{ c.phone }}" @click.stop @keyup.stop class="hover:text-brand-600 hover:underline whitespace-nowrap">{{ c.phone }}</a>{% else %}—{% endif %}
             </td>
             <td class="table-cell text-right text-[11px] tabular-nums {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
               {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
             </td>
             {# Edit — opens the shared contact edit modal with origin=contacts + the live
                filter values so the save re-renders this list with filters intact.
-               @click.stop keeps the row's navigate-to-account handler from firing. #}
+               @click.stop + @keyup.stop keep the row's navigate-to-account handler
+               (hx-trigger click / keyup[Enter]) from also firing. #}
             <td class="compact-cell text-right">
               {% if company %}
               <button type="button"
+                      @keyup.stop
                       @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ c.id }}/edit-form?origin=contacts&filter_search={{ search|urlencode }}&filter_company_id={{ company_id }}&filter_contact_role={{ contact_role|urlencode }}&filter_cadence_state={{ cadence_state|urlencode }}&filter_limit={{ limit }}&filter_offset={{ offset }}'})"
                       class="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-100"
                       aria-label="Edit {{ c.full_name or c.email or 'contact' }}"

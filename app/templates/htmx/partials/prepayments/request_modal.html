@@ -35,7 +35,7 @@
         x-data='{ po: {{ "%.2f"|format(amount) }}, amt: {{ "%.2f"|format(amount) }} }'
         :data-deviates='po > 0 && isFinite(amt) && Math.abs(amt - po) / po > 0.05 ? "1" : ""'
         hx-on::confirm='if (this.dataset.deviates) { event.preventDefault(); if (window.confirm("The amount differs from the PO line total by more than 5%. Submit anyway?")) event.detail.issueRequest(true); }'
-        hx-on::after-request='if(event.detail.successful) $dispatch("close-modal")'
+        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
         data-loading-disable
         class='space-y-3'>
     <input type='hidden' name='buy_plan_id' value='{{ plan.id }}'>

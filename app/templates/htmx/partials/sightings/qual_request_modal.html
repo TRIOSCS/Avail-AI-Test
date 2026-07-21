@@ -18,7 +18,7 @@
   <form x-data='offerQualification({{ (prefill or {})|tojson }})'
         hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ offer.id }}"
         hx-target="#sightings-offers-panel" hx-swap="innerHTML"
-        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
         data-loading-disable class="space-y-3">
     {% set mpn_default = requirement.primary_mpn %}
     {% include "htmx/partials/offers/_offer_form_fields.html" %}

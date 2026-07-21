@@ -31,7 +31,7 @@
     <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"
             hx-vals='{{ {"vendor_name": vendor_name}|tojson }}'
             hx-target="#sightings-detail" hx-swap="innerHTML"
-            hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+            hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
             data-loading-disable
             class="mt-1 text-emerald-700 hover:text-emerald-900 font-medium">
       It's back — mark available
@@ -41,7 +41,7 @@
 
   <form hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
         hx-target="#sightings-detail" hx-swap="innerHTML"
-        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
         data-loading-disable class="space-y-3"
         x-data='{{ {"specific": specific_reason_values, "reasonValue": (current.reason if current else "")}|tojson }}'>
 

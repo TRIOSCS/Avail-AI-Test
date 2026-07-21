@@ -30,8 +30,10 @@ from app.models.tags import EntityTag, Tag
 
 
 @pytest.fixture()
-def site_and_two_contacts(db_session: Session, test_company: Company):
+def site_and_two_contacts(db_session: Session, test_company: Company, test_user: User):
     """HQ site + two active contacts for testing reports_to and tags."""
+    # Owner set so the account-gated edit-form GET (can_manage_account) renders.
+    test_company.account_owner_id = test_user.id
     site = CustomerSite(
         company_id=test_company.id,
         site_name="HQ",
