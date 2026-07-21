@@ -108,13 +108,14 @@ def test_manage_connectors_always_true_for_admin(admin_user):
 
 
 def test_capability_keys_constant_matches_expected_set():
-    """CAPABILITY_ACCESS_KEYS is the five capability keys (registry shape guard)."""
+    """CAPABILITY_ACCESS_KEYS is the six capability keys (registry shape guard)."""
     assert set(CAPABILITY_ACCESS_KEYS) == {
         AccessKey.SEND_RFQ,
         AccessKey.APPROVE_OFFERS,
         AccessKey.EXPORT_DATA,
         AccessKey.MANAGE_CONNECTORS,
         AccessKey.OPS_VERIFICATION,
+        AccessKey.EXPORT_BULK_DATA,
     }
 
 
@@ -658,19 +659,30 @@ def _make_pending_offer(db, req):
 
 
 class TestCapabilityGating:
-    def test_export_companies_403_when_export_revoked(self, db_session, test_user):
-        test_user.access_overrides = {AccessKey.EXPORT_DATA.value: False}
-        db_session.commit()
+    def test_export_companies_403_for_default_buyer(self, db_session, test_user):
+        # ISS-022: bulk dataset exports (companies/contacts/vendors/requisitions/
+        # sightings) moved off EXPORT_DATA onto manager+admin-only EXPORT_BULK_DATA —
+        # see tests/test_export_bulk_data_gate.py for the full role matrix.
         c = _client_as(db_session, test_user)
         try:
             assert c.get("/v2/customers/export.csv").status_code == 403
         finally:
             _drop_overrides(c)
 
-    def test_export_companies_200_for_default_buyer(self, db_session, test_user):
-        c = _client_as(db_session, test_user)
+    def test_export_companies_200_for_manager_default(self, db_session, manager_user):
+        # Manager holds EXPORT_BULK_DATA by default (ISS-022).
+        c = _client_as(db_session, manager_user)
         try:
             assert c.get("/v2/customers/export.csv").status_code == 200
+        finally:
+            _drop_overrides(c)
+
+    def test_export_companies_403_when_export_bulk_data_revoked_for_manager(self, db_session, manager_user):
+        manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: False}
+        db_session.commit()
+        c = _client_as(db_session, manager_user)
+        try:
+            assert c.get("/v2/customers/export.csv").status_code == 403
         finally:
             _drop_overrides(c)
 

@@ -251,6 +251,128 @@ async def test_background_run_records_error_on_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_background_run_skips_existing_prospect_contact_by_email(db_session, vendor, monkeypatch):
+    """ISS-025: a suggestion whose email matches an existing ProspectContact
+    (case-insensitively) is dropped, not re-persisted."""
+    from app.routers.htmx.vendors import _run_vendor_find_contacts
+
+    vid = vendor.id
+    db_session.add(
+        ProspectContact(
+            vendor_card_id=vid,
+            full_name="Bob Jones",
+            email="Bob@DigiKey.com",
+            source="web_search",
+            confidence="low",
+            created_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(
+        "app.services.ai_service.enrich_contacts_websearch",
+        AsyncMock(
+            return_value=[
+                {"full_name": "Bob Jones", "email": "bob@digikey.com", "source": "web_search"},
+                {"full_name": "Alice Test", "email": "alice@digikey.com", "source": "web_search"},
+            ]
+        ),
+    )
+
+    vendor_contact_runs.begin(vid)
+    await _run_vendor_find_contacts(vid, None)
+
+    outcome = vendor_contact_runs.consume_outcome(vid)
+    assert outcome == VendorContactRunOutcome(new_count=1, error=None)  # only Alice is new
+    assert _prospect_count(db_session, vid) == 2  # 1 pre-existing + 1 new
+
+
+@pytest.mark.asyncio
+async def test_background_run_skips_existing_vendor_contact_by_email(db_session, vendor, monkeypatch):
+    """ISS-025: a suggestion matching a REAL VendorContact's email is also dropped."""
+    from app.models.vendors import VendorContact
+    from app.routers.htmx.vendors import _run_vendor_find_contacts
+
+    vid = vendor.id
+    db_session.add(
+        VendorContact(
+            vendor_card_id=vid,
+            full_name="Carol Real",
+            email="carol@digikey.com",
+            source="manual",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(
+        "app.services.ai_service.enrich_contacts_websearch",
+        AsyncMock(return_value=[{"full_name": "Carol Real", "email": "carol@digikey.com", "source": "web_search"}]),
+    )
+
+    vendor_contact_runs.begin(vid)
+    await _run_vendor_find_contacts(vid, None)
+
+    outcome = vendor_contact_runs.consume_outcome(vid)
+    assert outcome == VendorContactRunOutcome(new_count=0, error=None)
+    assert _prospect_count(db_session, vid) == 0
+
+
+@pytest.mark.asyncio
+async def test_background_run_skips_existing_contact_by_normalized_name_when_no_email(db_session, vendor, monkeypatch):
+    """ISS-025: a suggestion with NO email falls back to a normalized-name match
+    against an existing contact (lowercase, collapsed whitespace)."""
+    from app.routers.htmx.vendors import _run_vendor_find_contacts
+
+    vid = vendor.id
+    db_session.add(
+        ProspectContact(
+            vendor_card_id=vid,
+            full_name="  Dana   Wu ",
+            source="web_search",
+            confidence="low",
+            created_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(
+        "app.services.ai_service.enrich_contacts_websearch",
+        AsyncMock(return_value=[{"full_name": "dana wu", "source": "web_search"}]),  # no email
+    )
+
+    vendor_contact_runs.begin(vid)
+    await _run_vendor_find_contacts(vid, None)
+
+    outcome = vendor_contact_runs.consume_outcome(vid)
+    assert outcome == VendorContactRunOutcome(new_count=0, error=None)
+    assert _prospect_count(db_session, vid) == 1  # only the pre-existing row
+
+
+@pytest.mark.asyncio
+async def test_background_run_rerun_does_not_duplicate_prospect_contacts(db_session, vendor, monkeypatch):
+    """ISS-025: running Find Contacts twice with the same discovery result must not
+    create duplicate ProspectContact rows on the second run."""
+    from app.routers.htmx.vendors import _run_vendor_find_contacts
+
+    vid = vendor.id
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(
+        "app.services.ai_service.enrich_contacts_websearch",
+        AsyncMock(return_value=[{"full_name": "Erin New", "email": "erin@digikey.com", "source": "web_search"}]),
+    )
+
+    vendor_contact_runs.begin(vid)
+    await _run_vendor_find_contacts(vid, None)
+    assert vendor_contact_runs.consume_outcome(vid) == VendorContactRunOutcome(new_count=1, error=None)
+    assert _prospect_count(db_session, vid) == 1
+
+    vendor_contact_runs.begin(vid)
+    await _run_vendor_find_contacts(vid, None)
+    assert vendor_contact_runs.consume_outcome(vid) == VendorContactRunOutcome(new_count=0, error=None)
+    assert _prospect_count(db_session, vid) == 1  # no duplicate row
+
+
+@pytest.mark.asyncio
 async def test_background_run_passes_keywords_through(db_session, vendor, monkeypatch):
     """The title-keyword string reaches the search service (the filter is honoured)."""
     from app.routers.htmx.vendors import _run_vendor_find_contacts

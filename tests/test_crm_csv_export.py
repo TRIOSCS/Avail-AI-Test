@@ -3,7 +3,12 @@
 Verifies:
 - GET /v2/customers/export.csv → companies CSV (header + rows)
 - GET /v2/customers/contacts/export.csv → contacts CSV (header + rows)
-- Manager sees all companies; sales rep sees only owned companies
+- Manager sees all companies; a sales rep granted an EXPORT_BULK_DATA override sees
+  only owned companies (the underlying visibility scoping in _companies_rows /
+  _contacts_rows)
+- ISS-022: both routes are manager/admin only by default (AccessKey.EXPORT_BULK_DATA)
+  — a plain sales rep with no override is denied 403 (full role matrix in
+  tests/test_export_bulk_data_gate.py)
 - Content-Type is text/csv with attachment disposition
 - CSV has correct column headers
 
@@ -19,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.constants import AccessKey
 from app.models import Company, CustomerSite, SiteContact, User
 
 
@@ -165,10 +171,26 @@ class TestCompaniesCSVExport:
         assert "Owned Corp" in names
         assert "Other Corp" in names
 
-    def test_sales_rep_sees_only_owned_companies(
+    def test_sales_rep_denied_by_default(
         self, sales_client: TestClient, owned_company: Company, other_company: Company
     ):
+        """ISS-022: bulk export is manager/admin only — a plain sales rep is 403."""
+        assert sales_client.get("/v2/customers/export.csv").status_code == 403
+
+    def test_sales_rep_with_override_sees_only_owned_companies(
+        self,
+        sales_client: TestClient,
+        sales_user: User,
+        db_session: Session,
+        owned_company: Company,
+        other_company: Company,
+    ):
+        """An admin-granted EXPORT_BULK_DATA override still respects the underlying
+        visibility scoping (_companies_rows): a sales rep sees only owned companies."""
+        sales_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+        db_session.commit()
         resp = sales_client.get("/v2/customers/export.csv")
+        assert resp.status_code == 200
         rows = _parse_csv(resp.text)
         names = {r["name"] for r in rows}
         assert "Owned Corp" in names
@@ -221,13 +243,20 @@ class TestContactsCSVExport:
         names = {r["full_name"] for r in rows}
         assert "Jane Doe" in names
 
-    def test_sales_rep_sees_only_owned_contacts(
+    def test_sales_rep_denied_by_default(self, sales_client: TestClient, contact_for_owned: SiteContact):
+        """ISS-022: bulk export is manager/admin only — a plain sales rep is 403."""
+        assert sales_client.get("/v2/customers/contacts/export.csv").status_code == 403
+
+    def test_sales_rep_with_override_sees_only_owned_contacts(
         self,
         sales_client: TestClient,
+        sales_user: User,
         contact_for_owned: SiteContact,
         other_company: Company,
         db_session: Session,
     ):
+        """An admin-granted EXPORT_BULK_DATA override still respects the underlying
+        visibility scoping (_contacts_rows): a sales rep sees only owned contacts."""
         # Add a contact under other_company (not owned by sales_user)
         other_site = CustomerSite(
             company_id=other_company.id,
@@ -244,9 +273,11 @@ class TestContactsCSVExport:
             created_at=datetime.now(UTC),
         )
         db_session.add(other_contact)
+        sales_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
         db_session.commit()
 
         resp = sales_client.get("/v2/customers/contacts/export.csv")
+        assert resp.status_code == 200
         rows = _parse_csv(resp.text)
         names = {r["full_name"] for r in rows}
         assert "Jane Doe" in names

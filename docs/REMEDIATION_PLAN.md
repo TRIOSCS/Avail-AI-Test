@@ -7,6 +7,15 @@
 **Status:** COLLECTING — issues are being recorded from user notes. Phasing is
 drafted only after collection closes and each item is verified against current code.
 
+**Shipped in this PR (2026-07-21):** ISS-021 (fast-uri bump), ISS-022 (export
+lockdown via new `EXPORT_BULK_DATA` key — manager/admin only on the 5 dataset
+exports; quote docs untouched), ISS-024 ("+ add here" removed; `preselect_site_id`
+plumbing KEPT — still used by the Sites tab "+ Add first contact",
+`site_card.html:69`), ISS-025 (Find Contacts dedupe via
+`app/services/contact_dedup.py`, vendor worker + customer status-route filter),
+ISS-027 (all 5 sub-items; per-site contact count retained — load-bearing per
+existing tests).
+
 **Branch:** `claude/issues-remediation-plan-tdd147`
 **Started:** 2026-07-21
 

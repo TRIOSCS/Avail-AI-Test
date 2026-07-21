@@ -87,6 +87,7 @@ _ACCESS_KEY_LABELS: dict[AccessKey, str] = {
     AccessKey.EXPORT_DATA: "Export data",
     AccessKey.MANAGE_CONNECTORS: "Manage connectors",
     AccessKey.OPS_VERIFICATION: "Ops verification group",
+    AccessKey.EXPORT_BULK_DATA: "Export bulk data (manager)",
 }
 
 

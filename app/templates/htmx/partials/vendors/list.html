@@ -26,13 +26,18 @@
          this anchor out of the app's global nav-boost so it does a plain GET that streams
          the file as an attachment (never swapping into #main-content). The querystring is
          server-rendered from the SAME filter context the list used, so the CSV mirrors
-         exactly what's on screen (every filter change re-renders this whole partial). #}
+         exactly what's on screen (every filter change re-renders this whole partial).
+         Gated on can_export_bulk_data (ISS-022, manager/admin only) — the SAME predicate
+         require_access(AccessKey.EXPORT_BULK_DATA) enforces on the export route, so the
+         button never shows for a role whose click would 403. #}
+      {% if can_export_bulk_data(user) %}
       <a hx-boost="false"
          href="/v2/partials/vendors/export?q={{ q|urlencode }}&hide_blacklisted={{ hide_blacklisted|lower }}&include_archived={{ include_archived|lower }}&my_only={{ my_only|lower }}&sort={{ sort|urlencode }}&dir={{ dir|urlencode }}"
          class="btn btn-secondary btn-sm cursor-pointer"
          title="Download all matching vendors as a CSV file">
         Export CSV
       </a>
+      {% endif %}
       <button type="button" @click="importOpen = true" class="btn btn-secondary btn-sm">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
         Upload stock list

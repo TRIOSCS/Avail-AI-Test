@@ -2,11 +2,14 @@
 
 Verifies the export streams CSV with the attachment headers, one row per matching
 Sighting, and that it mirrors the board's filter parity (same predicates as
-GET /v2/partials/sightings) plus the same auth rejection.
+GET /v2/partials/sightings). Manager/admin only (ISS-022 — AccessKey.EXPORT_BULK_DATA);
+the plain buyer `client` fixture is denied 403 (full role matrix in
+tests/test_export_bulk_data_gate.py).
 
 Called by: pytest
-Depends on: conftest.py fixtures (db_session, test_user, client, unauthenticated_client),
-            app.models.sourcing (Requisition, Requirement, Sighting)
+Depends on: conftest.py fixtures (db_session, test_user, client, manager_client,
+            unauthenticated_client), app.models.sourcing (Requisition, Requirement,
+            Sighting)
 """
 
 import csv
@@ -67,13 +70,13 @@ def _parse_csv(text: str) -> list[list[str]]:
     return list(csv.reader(io.StringIO(text)))
 
 
-def test_export_returns_csv_attachment(client: TestClient, db_session: Session):
+def test_export_returns_csv_attachment(manager_client: TestClient, db_session: Session):
     """200 + text/csv + attachment Content-Disposition with the fixed filename."""
     r = _make_requirement(db_session, mpn="LM317T")
     _make_sighting(db_session, r, vendor="Digi-Key")
     db_session.commit()
 
-    resp = client.get(EXPORT_URL)
+    resp = manager_client.get(EXPORT_URL)
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
@@ -82,7 +85,7 @@ def test_export_returns_csv_attachment(client: TestClient, db_session: Session):
     assert 'filename="sightings_export.csv"' in disposition
 
 
-def test_export_header_and_one_row_per_sighting(client: TestClient, db_session: Session):
+def test_export_header_and_one_row_per_sighting(manager_client: TestClient, db_session: Session):
     """Header row + one data row per matching sighting, with the key fields present."""
     r = _make_requirement(db_session, mpn="LM317T", manufacturer="Texas Instruments")
     _make_sighting(
@@ -102,7 +105,7 @@ def test_export_header_and_one_row_per_sighting(client: TestClient, db_session: 
     _make_sighting(db_session, r, vendor="Mouser", mpn_matched="LM317T", qty_available=200)
     db_session.commit()
 
-    rows = _parse_csv(client.get(EXPORT_URL).text)
+    rows = _parse_csv(manager_client.get(EXPORT_URL).text)
 
     header = rows[0]
     assert header[0] == "Requirement ID"
@@ -120,7 +123,7 @@ def test_export_header_and_one_row_per_sighting(client: TestClient, db_session: 
     assert "T1" in body
 
 
-def test_export_respects_manufacturer_filter(client: TestClient, db_session: Session):
+def test_export_respects_manufacturer_filter(manager_client: TestClient, db_session: Session):
     """The manufacturer filter (a board filter on Requirement.manufacturer) is
     honored."""
     ti = _make_requirement(db_session, mpn="LM317T", manufacturer="Texas Instruments")
@@ -129,7 +132,7 @@ def test_export_respects_manufacturer_filter(client: TestClient, db_session: Ses
     _make_sighting(db_session, adi, vendor="Arrow", mpn_matched="AD8232")
     db_session.commit()
 
-    rows = _parse_csv(client.get(EXPORT_URL, params={"manufacturer": "Texas"}).text)
+    rows = _parse_csv(manager_client.get(EXPORT_URL, params={"manufacturer": "Texas"}).text)
 
     body = "\n".join(",".join(row) for row in rows[1:])
     assert "Digi-Key" in body  # TI sighting kept
@@ -137,7 +140,7 @@ def test_export_respects_manufacturer_filter(client: TestClient, db_session: Ses
     assert len(rows) == 2  # header + one matching sighting
 
 
-def test_export_respects_status_filter(client: TestClient, db_session: Session):
+def test_export_respects_status_filter(manager_client: TestClient, db_session: Session):
     """The status filter selects only sightings on requirements in that sourcing
     status."""
     open_req = _make_requirement(db_session, mpn="LM317T", sourcing_status="open")
@@ -146,7 +149,7 @@ def test_export_respects_status_filter(client: TestClient, db_session: Session):
     _make_sighting(db_session, sourcing_req, vendor="SourcingVendor")
     db_session.commit()
 
-    rows = _parse_csv(client.get(EXPORT_URL, params={"status": "sourcing"}).text)
+    rows = _parse_csv(manager_client.get(EXPORT_URL, params={"status": "sourcing"}).text)
 
     body = "\n".join(",".join(row) for row in rows[1:])
     assert "SourcingVendor" in body
@@ -160,15 +163,32 @@ def test_export_unauthenticated_rejected(unauthenticated_client: TestClient, db_
     assert resp.status_code in (401, 403)
 
 
-def test_export_button_rendered_in_board_toolbar(client: TestClient, db_session: Session):
-    """The board table partial renders the Export CSV anchor: a plain (non-htmx) download
-    that points at the export endpoint and opts out of nav-boost."""
+def test_export_button_rendered_in_board_toolbar(manager_client: TestClient, db_session: Session):
+    """The board table partial renders the Export CSV anchor for a manager: a plain
+    (non-htmx) download that points at the export endpoint and opts out of nav-boost."""
+    r = _make_requirement(db_session, mpn="LM317T")
+    _make_sighting(db_session, r, vendor="Digi-Key")
+    db_session.commit()
+
+    html = manager_client.get("/v2/partials/sightings").text
+
+    assert "Export CSV" in html
+    assert 'hx-boost="false"' in html
+    assert "/v2/sightings/export" in html
+
+
+def test_export_button_hidden_for_buyer(client: TestClient, db_session: Session):
+    """ISS-022: a plain buyer (no EXPORT_BULK_DATA) never sees the Export CSV button —
+    single source of truth with the 403 the route itself enforces."""
     r = _make_requirement(db_session, mpn="LM317T")
     _make_sighting(db_session, r, vendor="Digi-Key")
     db_session.commit()
 
     html = client.get("/v2/partials/sightings").text
 
-    assert "Export CSV" in html
-    assert 'hx-boost="false"' in html
-    assert "/v2/sightings/export" in html
+    assert "Export CSV" not in html
+
+
+def test_export_403_for_default_buyer(client: TestClient, db_session: Session):
+    """ISS-022: bulk sighting export is manager/admin only."""
+    assert client.get(EXPORT_URL).status_code == 403

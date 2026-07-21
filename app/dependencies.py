@@ -561,6 +561,24 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
     return ak in ROLE_ACCESS_DEFAULTS.get(user.role, frozenset())  # type: ignore[call-overload]  # user.role is a plain str at instance level; StrEnum-keyed lookup by str works
 
 
+def can_export_bulk_data(user: User | None) -> bool:
+    """True if *user* may export bulk CRM/vendor/requisition/sighting datasets.
+
+    Single source of truth for hiding "Export CSV" controls in list toolbars — the SAME
+    predicate ``require_access(AccessKey.EXPORT_BULK_DATA)`` enforces on the export
+    routes (ISS-022: companies/contacts/vendors/requisitions/sightings exports are
+    manager+admin only). Quote-builder single-deal Excel/PDF exports stay gated on
+    ``EXPORT_DATA`` and are unaffected by this predicate.
+
+    ``isinstance`` (not a bare None check) so this degrades to False — never raises —
+    for a Jinja ``Undefined`` sentinel or a test-harness stand-in object lacking
+    ``.role``/``.access_overrides`` (template-compilation smoke tests render every
+    partial with a minimal dummy context); a real request always injects a genuine
+    ``User`` row here.
+    """
+    return isinstance(user, User) and user_has_access(user, AccessKey.EXPORT_BULK_DATA)
+
+
 def require_access(key):
     """Dependency factory: 403 unless the current user has *key*.
 

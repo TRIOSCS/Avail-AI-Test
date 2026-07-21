@@ -281,6 +281,68 @@ def test_poller_deleted_company_stops_polling(client):
     assert resp.text.strip() == ""
 
 
+# ── ISS-025: poller drops suggestions already on file for this company ────────────────
+
+
+def _make_site_contact(db_session, company, *, full_name, email=None, site_name="HQ"):
+    from app.models import CustomerSite, SiteContact
+
+    site = CustomerSite(company_id=company.id, site_name=site_name, is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    contact = SiteContact(customer_site_id=site.id, full_name=full_name, email=email, is_active=True)
+    db_session.add(contact)
+    db_session.commit()
+    return contact
+
+
+def test_poller_drops_suggestion_matching_existing_contact_email(client, db_session, test_user):
+    """A suggestion whose email matches an existing SiteContact (case-insensitively) is
+    dropped from the rendered panel — it never even round-trips through the "Add"
+    button."""
+    company = _make_company(db_session, test_user, name="Dedup Co", domain="dedup.com")
+    _make_site_contact(db_session, company, full_name="Jane Buyer", email="Jane@Dedup.com")
+
+    dup = {"full_name": "Jane B.", "email": "jane@dedup.com", "source": "hunter"}
+    new = {"full_name": "New Person", "email": "new@dedup.com", "source": "hunter"}
+    contact_discovery_runs.finish(company.id, ContactDiscoveryOutcome(suggested=[dup, new], errored_providers=[]))
+
+    resp = client.get(f"/v2/partials/customers/{company.id}/suggested-contacts/status")
+    assert resp.status_code == 286
+    assert "Jane B." not in resp.text
+    assert "New Person" in resp.text
+
+
+def test_poller_drops_suggestion_matching_existing_contact_name_when_no_email(client, db_session, test_user):
+    """A suggestion with NO email falls back to a normalized full-name match against an
+    existing contact."""
+    company = _make_company(db_session, test_user, name="NameDedup Co", domain="namededup.com")
+    _make_site_contact(db_session, company, full_name="  Dana   Wu ")
+
+    dup = {"full_name": "dana wu", "source": "hunter"}  # no email
+    new = {"full_name": "Fresh Contact", "source": "hunter"}
+    contact_discovery_runs.finish(company.id, ContactDiscoveryOutcome(suggested=[dup, new], errored_providers=[]))
+
+    resp = client.get(f"/v2/partials/customers/{company.id}/suggested-contacts/status")
+    assert resp.status_code == 286
+    assert "dana wu" not in resp.text.lower()
+    assert "Fresh Contact" in resp.text
+
+
+def test_poller_all_suggestions_deduped_renders_none_found(client, db_session, test_user):
+    """Every suggestion matches an existing contact -> the panel renders the neutral
+    'No contacts found' state, not stale duplicates."""
+    company = _make_company(db_session, test_user, name="AllDup Co", domain="alldup.com")
+    _make_site_contact(db_session, company, full_name="Solo Contact", email="solo@alldup.com")
+
+    dup = {"full_name": "Solo Contact", "email": "solo@alldup.com", "source": "hunter"}
+    contact_discovery_runs.finish(company.id, ContactDiscoveryOutcome(suggested=[dup], errored_providers=[]))
+
+    resp = client.get(f"/v2/partials/customers/{company.id}/suggested-contacts/status")
+    assert resp.status_code == 286
+    assert "No contacts found" in resp.text
+
+
 # ── End-to-end: button GET runs the (mocked) waterfall in the bg task, status swaps ──
 
 

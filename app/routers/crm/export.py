@@ -150,7 +150,7 @@ async def export_companies_csv(
     has_open_reqs: bool = False,
     my_only: bool = False,
     sort: str = "name_asc",
-    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     db: Session = Depends(get_db),
 ):
     """Export the current filtered companies view as a CSV download."""
@@ -178,7 +178,7 @@ async def export_contacts_csv(
     company_id: int = Query(0, ge=0),
     contact_role: str = "",
     cadence_state: str = "",
-    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     db: Session = Depends(get_db),
 ):
     """Export the current filtered contacts view as a CSV download."""

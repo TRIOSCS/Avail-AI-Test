@@ -614,6 +614,42 @@ def client(db_session: Session, test_user: User) -> TestClient:
 
 
 @pytest.fixture()
+def manager_client(db_session: Session, manager_user: User) -> TestClient:
+    """FastAPI TestClient with auth overridden to return manager_user.
+
+    Manager holds every _INTERACTIVE_DEFAULTS capability PLUS AccessKey.EXPORT_BULK_DATA
+    (ISS-022) — used by bulk-dataset-export tests (companies/vendors/requisitions/
+    sightings) where the plain buyer `client` fixture now gets 403.
+    """
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return manager_user
+
+    async def _override_fresh_token():
+        return "mock-token"
+
+    overridden_deps = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[require_admin] = _override_user
+    app.dependency_overrides[require_buyer] = _override_user
+    app.dependency_overrides[require_fresh_token] = _override_fresh_token
+
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in overridden_deps:
+            app.dependency_overrides.pop(dep, None)
+
+
+@pytest.fixture()
 def unauthenticated_client(db_session: Session) -> TestClient:
     """TestClient with DB override but NO user auth — for testing 401 paths."""
     from app.database import get_db

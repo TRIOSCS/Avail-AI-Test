@@ -792,14 +792,15 @@ def _sighting_export_rows(db: Session, user: User, filters: SightingsListParams)
 @router.get("/v2/sightings/export")
 async def sightings_export(
     db: Session = Depends(get_db),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     filters: SightingsListParams = Depends(),
 ):
     """Stream every board-matching Sighting as a CSV download (attachment, no
     pagination).
 
-    Same auth (require_user) and same filters as the board list route — the export mirrors
-    the board's active view (status/urgent/stale/search/manufacturer/assignment/ownership).
+    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filters as the
+    board list route — the export mirrors the board's active view (status/urgent/
+    stale/search/manufacturer/assignment/ownership).
     """
     return stream_csv("sightings_export.csv", _EXPORT_COLUMNS, _sighting_export_rows(db, user, filters))
 
