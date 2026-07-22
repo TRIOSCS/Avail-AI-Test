@@ -678,3 +678,239 @@ def test_upload_confirm_oob_refreshes_lines_and_chips(client, db_session, trader
         assert refreshed.status == ExcessListStatus.COLLECTING  # the flip is now visible in the chips render
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# Finding #1 (P2) — a non-blank but unparseable/negative unit price REJECTS the row,
+# rather than silently ingesting it with unit_price=None.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_price", ["TBD", "1.2.5", "-4.00"])
+def test_preview_invalid_unit_price_rejected_never_nulled(db_session: Session, posted_list: ExcessList, bad_price):
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price=bad_price)]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, rows)
+    assert result["accepted_count"] == 0
+    assert result["rejected_count"] == 1
+    assert "unit price" in result["rejected"][0]["reason"].lower()
+
+
+@pytest.mark.parametrize("blank_price", [None, "", "   "])
+def test_preview_blank_unit_price_accepted_with_none(db_session: Session, posted_list: ExcessList, blank_price):
+    """Blank price stays optional and pins the existing behavior: the row is accepted
+    with unit_price=None."""
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price=blank_price)]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, rows)
+    assert result["accepted_count"] == 1
+    assert result["rejected_count"] == 0
+    assert result["accepted"][0]["unit_price"] is None
+
+
+def test_upload_bids_invalid_unit_price_rejected(db_session: Session, trader_user: User, posted_list: ExcessList):
+    """A row with an unparseable price is dropped from ingestion entirely (never
+    ingested with unit_price=None) — with only that one bad row, nothing is left to
+    upload."""
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price="call")]
+    with pytest.raises(HTTPException) as exc_info:
+        excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert exc_info.value.status_code == 400
+
+
+def test_upload_bids_invalid_unit_price_rejected_alongside_valid_row(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """A bad-price row is rejected while a sibling valid row from another bidder still
+    ingests normally — the rejection is per-row, never a whole-sheet abort."""
+    rows = [
+        _row(bidder="Broker A", part_number="LM358N", unit_price="call"),
+        _row(bidder="Broker B", part_number="NE555P", unit_price="0.9000"),
+    ]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert result["offers_created"] == 1
+    assert result["rejected"] == 1
+    assert result["lines_created"] == 1
+    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    assert offer.offerer_vendor_card.display_name == "Broker B"
+
+
+# ---------------------------------------------------------------------------
+# Finding #2 (P2) — re-uploading a corrected sheet SUPERSEDES (withdraw + replace) an
+# earlier uploaded offer from the same bidder, instead of duplicating it.
+# ---------------------------------------------------------------------------
+
+
+def test_upload_bids_reupload_supersedes_old_offer(db_session: Session, trader_user: User, posted_list: ExcessList):
+    from app.constants import ExcessOfferStatus
+
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.0000")]
+    first = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert first["offers_created"] == 1
+    assert first["superseded"] == 0
+
+    old_offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    old_offer_id = old_offer.id
+
+    rows2 = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.2000")]
+    second = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows2)
+    assert second["offers_created"] == 1
+    assert second["superseded"] == 1
+
+    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
+    assert len(offers) == 2  # the withdrawn original PLUS the replacement — never deleted
+    old = db_session.get(ExcessOffer, old_offer_id)
+    assert old.status == ExcessOfferStatus.WITHDRAWN
+
+    open_offers = [o for o in offers if o.status == ExcessOfferStatus.OPEN]
+    assert len(open_offers) == 1  # exactly one open offer per bidder after the re-upload
+    assert open_offers[0].id != old_offer_id
+
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id, part_number="LM358N").one()
+    assert line.offer_count == 1  # offer_count back to 1, not 2
+    assert line.best_offer_unit_price == Decimal("1.2000")
+
+
+def test_upload_bids_reupload_leaves_manual_offer_untouched(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """A MANUAL offer (different ``notes``) from the same VendorCard is never superseded
+    by an upload — only earlier UPLOADED offers are supersede-eligible."""
+    from app.constants import ExcessOfferStatus
+    from app.vendor_utils import normalize_vendor_name
+
+    card = VendorCard(
+        normalized_name=normalize_vendor_name("Broker A"),
+        display_name="Broker A",
+        emails=[],
+        phones=[],
+        source="manual",
+    )
+    db_session.add(card)
+    db_session.flush()
+    manual_offer = ExcessOffer(
+        excess_list_id=posted_list.id,
+        submitted_by=trader_user.id,
+        offerer_vendor_card_id=card.id,
+        scope=ExcessOfferScope.PER_LINE,
+        status=ExcessOfferStatus.OPEN,
+        notes="Submitted via broker portal",
+    )
+    db_session.add(manual_offer)
+    db_session.commit()
+    db_session.refresh(manual_offer)
+
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert result["superseded"] == 0
+
+    db_session.refresh(manual_offer)
+    assert manual_offer.status == ExcessOfferStatus.OPEN
+
+
+def test_upload_bids_reupload_never_withdraws_won_offer(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """A WON uploaded offer is a resolved sale, not "in play" — a re-upload for the same
+    bidder must never touch it."""
+    from app.constants import ExcessOfferStatus
+
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.0000")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    won_offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    won_offer.status = ExcessOfferStatus.WON
+    db_session.commit()
+
+    rows2 = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.5000")]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows2)
+    assert result["superseded"] == 0
+
+    db_session.refresh(won_offer)
+    assert won_offer.status == ExcessOfferStatus.WON
+    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
+    assert len(offers) == 2
+
+
+def test_preview_flags_bidder_with_existing_upload(db_session: Session, trader_user: User, posted_list: ExcessList):
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+
+    preview_rows = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.9000")]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, preview_rows)
+    assert result["supersedes_by_bidder"].get("Broker A") is True
+
+
+def test_preview_no_flag_for_bidder_without_existing_upload(db_session: Session, posted_list: ExcessList):
+    result = excess_service.preview_bid_upload(
+        db_session, posted_list.id, [_row(bidder="Broker A", part_number="LM358N")]
+    )
+    assert result["supersedes_by_bidder"].get("Broker A") is False
+
+
+def test_upload_confirm_toast_includes_superseded_count(client, db_session, trader_user, posted_list):
+    restore = _own(trader_user)
+    try:
+        client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": json.dumps([_row(bidder="Broker A", part_number="LM358N", unit_price="1.0000")])},
+        )
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": json.dumps([_row(bidder="Broker A", part_number="LM358N", unit_price="1.2000")])},
+        )
+        assert resp.status_code == 200
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        assert "replaced 1 earlier upload" in trigger["showToast"]["message"]
+    finally:
+        restore()
+
+
+def test_upload_confirm_no_superseded_note_when_zero(client, db_session, trader_user, posted_list):
+    restore = _own(trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": json.dumps([_row(bidder="Broker A", part_number="LM358N")])},
+        )
+        assert resp.status_code == 200
+        trigger = json.loads(resp.headers["HX-Trigger"])
+        assert "replaced" not in trigger["showToast"]["message"]
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# Finding #3 (P3) — blank separator rows shift preview row numbers away from the
+# spreadsheet's literal row numbers; the template promise is now honest about it.
+# ---------------------------------------------------------------------------
+
+
+def test_upload_preview_blank_separator_row_shifts_numbering(client, db_session, trader_user, posted_list):
+    """A blank line between two bidders' rows is dropped by the CSV parser before the
+    service ever sees it (file_utils._parse_csv's csv.DictReader skips blank lines), so
+    the preview's row numbers count NON-BLANK rows only — Broker B lands on row 3 (its
+    file row is actually 4).
+
+    Parsed via the real upload-preview route so the parser's blank-row skip is genuinely
+    exercised, not simulated.
+    """
+    restore = _own(trader_user)
+    try:
+        csv_bytes = (
+            b"Bidder,Part Number,Offer Qty,Unit Price\nBroker A,LM358N,150,1.2000\n\nBroker B,NE555P,50,0.8000\n"
+        )
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-preview",
+            files={"file": ("bids.csv", csv_bytes, "text/csv")},
+        )
+        assert resp.status_code == 200
+
+        from app.file_utils import parse_tabular_file
+
+        parsed_rows = parse_tabular_file(csv_bytes, "bids.csv")
+        assert len(parsed_rows) == 2  # the blank line is already gone before the service sees it
+
+        result = excess_service.preview_bid_upload(db_session, posted_list.id, parsed_rows)
+        rows_by_bidder = {a["bidder"]: a["row"] for a in result["accepted"]}
+        assert rows_by_bidder["Broker A"] == 2  # matches its real file row
+        assert rows_by_bidder["Broker B"] == 3  # its real file row is 4 — drift is pinned, not hidden
+    finally:
+        restore()

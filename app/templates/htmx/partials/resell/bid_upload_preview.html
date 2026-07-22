@@ -3,10 +3,13 @@
   sheet (swaps #bid-upload-area inside the Upload Bids modal). Groups ACCEPTED rows by
   bidder, shows a per-row match chip (Line ID match / Matched / Unmatched / Ambiguous),
   and lists REJECTED rows with reasons — rejected rows are NEVER silently coerced
-  (phase-6b lesson). Confirm posts the carried canonical rows to upload-confirm, which
-  re-classifies them server-side, swaps the Offers tab, and closes the modal on success.
+  (phase-6b lesson). A bidder group flagged in supersedes_by_bidder already has an
+  in-play uploaded offer on this list; confirming SUPERSEDES it (withdraw + replace)
+  rather than duplicating it. Confirm posts the carried canonical rows to upload-confirm,
+  which re-classifies them server-side, swaps the Offers tab, and closes the modal on
+  success.
   Receives: list_id, by_bidder, rejected, accepted_count, rejected_count, bidder_count,
-            carry_rows_json, filename.
+            carry_rows_json, filename, supersedes_by_bidder.
   Called by: resell.resell_bids_upload_preview.
 #}
 <div class="space-y-3">
@@ -26,7 +29,7 @@
       <li>Row {{ r.row }}{% if r.bidder %} ({{ r.bidder }}){% endif %}: {{ r.reason }}</li>
       {% endfor %}
     </ul>
-    <p class="mt-1 pl-4 text-xs text-rose-500">Row numbers match your file (the header row is row 1).</p>
+    <p class="mt-1 pl-4 text-xs text-rose-500">Row numbers count filled rows only (header = row 1) — blank rows in your file are skipped.</p>
   </div>
   {% endif %}
 
@@ -41,6 +44,9 @@
     <div class="rounded-lg border border-brand-200 overflow-hidden">
       <div class="px-3 py-2 bg-gray-50 border-b border-brand-100 text-sm font-semibold text-gray-900">
         {{ bidder }} <span class="text-secondary font-normal">({{ rows|length }} row{{ 's' if rows|length != 1 }})</span>
+        {% if supersedes_by_bidder and supersedes_by_bidder.get(bidder) %}
+        <span class="ml-1 text-xs font-normal text-amber-600">— replaces the earlier uploaded bid</span>
+        {% endif %}
       </div>
       <table class="compact-table min-w-full">
         <thead>

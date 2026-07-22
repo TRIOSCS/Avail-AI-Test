@@ -153,26 +153,32 @@ ExcessOutreachStatus.NO_RESPONSE ('the terminal GENUINE-buyer-silence state used
 
 ## C. New bid-upload feature residuals (fix in PR #785)
 
-### 23. [P2] Bulk bid ingest silently nulls invalid or negative unit_price instead of rejecting the row
+### 23. [P2] Bulk bid ingest silently nulls invalid or negative unit_price instead of rejecting the row — **FIXED in PR #785**
 **Where:** `app/services/excess_service.py:854` (dimension: gap:bid-csv-upload)
 
 _classify_bid_row builds accepted rows with "unit_price": _parse_price(row.get("unit_price")), and _parse_price (lines 156-165) returns None for any unparseable value (e.g. "1.2.5", "TBD", "call") AND for any negative price. Unlike a bad quantity — which rejects the row with a reason per the phase-6b 'never coerced' rule stated in the same docstring (line 798) — a bad price is silently dropped: the row stays ACCEPTED, the preview grid renders the price cell as '—' (bid_upload_preview.html:61) with no warning, and upload_bids persists an ExcessOfferLine with unit_price=None. recompute_line_rollup filters None prices (line 695 'priced = [r for r in rows if r.unit_price is not None]'), so that bid can never become best_offer_unit_price. This is the same defect class already found on the single-bid log path — the bulk path was not fixed.
 
 **Fix:** In _classify_bid_row, distinguish blank (None is fine — price optional) from present-but-unparseable/negative: if the raw cell is non-blank and _parse_price returns None, reject the row with reason 'invalid unit price' so it appears in the preview's rejected list, mirroring the quantity rule.
 
-### 24. [P2] Re-uploading a corrected bid sheet duplicates every previously ingested bid (no idempotency or duplicate warning)
+**Resolution:** `_classify_bid_row` now rejects a non-blank/unparseable-or-negative price with reason "invalid unit price" before quantity/blank checks build the returned fields; a blank cell is unchanged (accepted, `unit_price=None`). See `app/services/excess_service.py` (`_classify_bid_row`); tests in `tests/test_resell_bid_upload.py` (`test_preview_invalid_unit_price_rejected_never_nulled`, `test_preview_blank_unit_price_accepted_with_none`, `test_upload_bids_invalid_unit_price_rejected*`).
+
+### 24. [P2] Re-uploading a corrected bid sheet duplicates every previously ingested bid (no idempotency or duplicate warning) — **FIXED in PR #785**
 **Where:** `app/services/excess_service.py:1005` (dimension: gap:bid-csv-upload)
 
 upload_bids unconditionally creates a NEW ExcessOffer per bidder on every call (loop at 1005-1037) — nothing checks for an existing open offer from the same resolved VendorCard on the same list. The UI actively invites the trap: the preview shows 'N rejected' rows and offers an 'Upload another file' button (bid_upload_preview.html:90-94), so the natural flow after a partial reject is fix-the-file → re-upload the WHOLE corrected sheet → confirm. Every row that already ingested on the first confirm is ingested again: each bidder gets a second identical offer, item.offer_count doubles (recompute_line_rollup:693 counts distinct offer_ids), and the Offers tab shows two identical bids per bidder with no marker of which is stale. The owner can then award the duplicate. submit_offer has the same shape, but there the counterparty submits intentionally; here one owner action legitimately re-proces
 
 **Fix:** On confirm, detect an existing open/late uploaded offer for the same card on the same list and either supersede it (withdraw + replace, then recompute rollups) or surface a preview-stage warning ('Broker A already has an uploaded offer on this list — confirming will add a second').
 
-### 58. [P3] Rejected-row numbers drift on sheets with blank separator rows, while the preview promises they match the file
+**Resolution:** `upload_bids` now supersedes (withdraw + replace) the design chosen in the review: before creating a bidder's new offer it looks up an earlier offer on this list for the same resolved VendorCard with `submitted_by == the uploading owner`, `notes == "Uploaded bid sheet"`, and status still open/late — withdraws it, and rolls both the withdrawn and new offer's matched lines into the rollup recompute. Manually-submitted offers (different notes) and won/lost offers are never touched. The result now carries a `superseded` count, surfaced in the confirm route's toast ("... replaced K earlier upload(s)") only when K>0; `preview_bid_upload` adds a cheap `supersedes_by_bidder` flag rendered as an inline note in `bid_upload_preview.html`. See `app/services/excess_service.py` (`upload_bids`, `preview_bid_upload`, `_UPLOAD_OFFER_NOTES`), `app/routers/resell.py` (`resell_bids_upload_confirm`); tests in `tests/test_resell_bid_upload.py` (`test_upload_bids_reupload_supersedes_old_offer`, `test_upload_bids_reupload_leaves_manual_offer_untouched`, `test_upload_bids_reupload_never_withdraws_won_offer`, `test_preview_flags_bidder_with_existing_upload`, `test_upload_confirm_toast_includes_superseded_count`).
+
+### 58. [P3] Rejected-row numbers drift on sheets with blank separator rows, while the preview promises they match the file — **FIXED in PR #785**
 **Where:** `app/services/excess_service.py:882` (dimension: gap:bid-csv-upload)
 
 preview_bid_upload numbers rows with 'enumerate(rows, start=2)' assuming the parser output maps 1:1 to file rows after the header. But both parsers drop fully-blank rows before the service sees them: _parse_excel skips 'if not headers or not any(row): continue' (file_utils.py:124-125) and _parse_csv uses csv.DictReader (file_utils.py:134), which skips empty lines. The upload's own use case — 'several bidders' filled-in copies of the bid sheet, concatenated together' (upload_bids_modal.html:12-13) — makes blank separator rows between bidders likely. Every blank row shifts all subsequent rejection numbers, yet bid_upload_preview.html:29 asserts 'Row numbers match your file (the header row is row 1).' The owner opens Excel at 'Row 14', finds a valid row, and 'fixes' the wrong line. extract_mpns_with_rows documents this drift for the import path (file_utils.py:158-160); the bid path inherite
 
 **Fix:** Have parse_tabular_file preserve source row numbers (emit them alongside each dict, as extract_mpns_with_rows already needs), or soften the template promise to 'Row numbers count non-blank rows (header = row 1)'.
+
+**Resolution:** Scope decision taken (do not change `parse_tabular_file`'s shared contract in this PR): `bid_upload_preview.html`'s promise now reads "Row numbers count filled rows only (header = row 1) — blank rows in your file are skipped," and `preview_bid_upload`'s docstring no longer claims file-row parity. See `app/templates/htmx/partials/resell/bid_upload_preview.html`, `app/services/excess_service.py` (`preview_bid_upload` docstring); test in `tests/test_resell_bid_upload.py::test_upload_preview_blank_separator_row_shifts_numbering` (parses a real CSV with a blank separator line through `parse_tabular_file` to pin the drift).
 
 
 ## D. UX truthfulness & dead ends
@@ -499,4 +505,3 @@ Beyond the crash in finding #1 (which currently masks this), seed_excess_lists w
 
 - Gap round confirmed the four originally-uncovered areas and contributed 19 of the 63 findings.
 - Known-deferred items (market_price/demand_score orphan drop, excess_lists.version, total_line_items) were excluded by design.
-

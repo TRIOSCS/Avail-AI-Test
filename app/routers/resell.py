@@ -1615,6 +1615,9 @@ async def resell_bids_upload_confirm(
         f"{result['offers_created']} bid(s) uploaded ({result['lines_created']} lines, "
         f"{result['unmatched']} unmatched, {result['rejected']} rejected)"
     )
+    superseded = result.get("superseded", 0)
+    if superseded > 0:
+        message += f" — replaced {superseded} earlier upload(s)"
     return _toast(resp, message)
 
 

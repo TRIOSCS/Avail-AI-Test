@@ -2100,13 +2100,19 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     match [wins outright, even over a disagreeing Part Number] → mpn_match [via the
     |     SHARED _index_lines_by_norm_mpn/_classify_mpn_match helpers submit_offer uses:
     |     matched/unmatched/ambiguous] → rejected [missing bidder, missing/invalid/non-
-    |     positive quantity, a bidder name that normalizes to nothing on
+    |     positive quantity, a NON-BLANK unit price that is unparseable or negative
+    |     ["invalid unit price" — a blank price is fine and stays optional; never silently
+    |     nulled, PR #785 finding #1], a bidder name that normalizes to nothing on
     |     normalize_vendor_name (suffix-only "Inc."), a malformed non-dict row, or neither
     |     a valid Line ID nor a Part Number — the take-all shape is out of scope, never
-    |     coerced; rejected-row numbers are FILE rows, header = row 1, matching
-    |     file_utils.extract_mpns_with_rows]. Renders bid_upload_preview.html grouped by
-    |     bidder [on the normalize_vendor_name key, first-seen spelling displayed] with a
-    |     carry_rows_json hidden field for the confirm round-trip)
+    |     coerced; row numbers count NON-BLANK rows only, header = row 1 — the parser drops
+    |     fully-blank rows before the service sees them, so numbering does not necessarily
+    |     equal the literal spreadsheet row, PR #785 finding #3]. Renders
+    |     bid_upload_preview.html grouped by bidder [on the normalize_vendor_name key,
+    |     first-seen spelling displayed] with a carry_rows_json hidden field for the confirm
+    |     round-trip, plus supersedes_by_bidder [one cheap query flagging a bidder group
+    |     that already has an in-play uploaded offer on this list — inline "replaces the
+    |     earlier uploaded bid" note, PR #785 finding #2])
     +-- POST /api/resell/{id}/bids/upload-confirm        (owner-only; 400 unless rows_json is
     |     a list of dicts [mirrors resell_assemble_bid's element guard — tampered payloads
     |     never 500]; excess_service.upload_bids
@@ -2117,16 +2123,23 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     spacing variants = ONE bidder, first-seen spelling for display], resolves/creates
     |     ONE VendorCard per bidder via resell_outreach_service.resolve_bidder_card [reused
     |     on the same key, never duplicated; new cards tagged
-    |     source="resell_bid_upload"], creates one ExcessOffer[scope=PER_LINE,
-    |     notes="Uploaded bid sheet"] + one ExcessOfferLine per row per bidder
-    |     [unmatched/ambiguous rows KEPT, never dropped], recomputes the best-price rollup
-    |     for matched lines exactly like submit_offer, and flips open→collecting on a first
-    |     ingest [mirrors submit_offer]. 400 on empty/all-rejected rows.
+    |     source="resell_bid_upload"]. SUPERSEDE on re-upload [PR #785 finding #2]: before
+    |     creating a bidder's new offer, any EARLIER offer on this list for the SAME
+    |     resolved VendorCard where submitted_by==the uploading owner AND
+    |     notes=="Uploaded bid sheet" AND status is still open/late is withdrawn first —
+    |     never a manually-submitted offer [different notes] or a won/lost one — so a
+    |     fix-the-file-and-re-upload never doubles a bidder's bid. Creates one
+    |     ExcessOffer[scope=PER_LINE, notes="Uploaded bid sheet"] + one ExcessOfferLine per
+    |     row per bidder [unmatched/ambiguous rows KEPT, never dropped], recomputes the
+    |     best-price rollup for BOTH the superseded offer's matched lines and the
+    |     replacement's, and flips open→collecting on a first ingest [mirrors submit_offer].
+    |     400 on empty/all-rejected rows.
     |     RESPONSE is the same _award_response.html OOB compose as award [PRIMARY = Offers
     |     tab #tab-offers-<id>; OOB = #tab-lines-<id> rollup badges + #resell-chips-<id>
     |     offer count/status badge — the ingest mutates rollups + list status, so an
     |     Offers-only swap would leave those stale] + HX-Trigger showToast
-    |     "N bid(s) uploaded (M lines, K unmatched, J rejected)")
+    |     "N bid(s) uploaded (M lines, K unmatched, J rejected)" [+ " — replaced K earlier
+    |     upload(s)" when the supersede count is > 0])
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
