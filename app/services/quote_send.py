@@ -134,9 +134,16 @@ async def send_quote_email(
         if "error" in result:
             raise QuoteSendError(f"Failed to send quote email: {result.get('detail', '')}")
 
-        from ..email_service import _find_sent_message
+        from ..email_service import SentMessageLookupError, _find_sent_message
 
-        msg = await _find_sent_message(gc, subject, to_email)
+        try:
+            msg = await _find_sent_message(gc, subject, to_email)
+        except SentMessageLookupError:
+            # The quote email already went out (sendMail succeeded above) — a failed
+            # Sent-Items lookup must not fail the send. Graph ids stay NULL and reply
+            # matching degrades to the subject/email heuristics.
+            logger.warning("Quote sent-message lookup failed for <{}> — graph ids left NULL", to_email)
+            msg = None
         if msg:
             graph_message_id = msg["id"]
             graph_conversation_id = msg.get("conversationId")

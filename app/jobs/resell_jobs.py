@@ -4,7 +4,9 @@ Three nightly backstops for the Resell lifecycle:
   - M5 list-expiry: an ``open``/``collecting`` ExcessList whose ``close_at`` deadline has
     passed without being awarded or closed is flipped to ``expired`` and its Sighting
     live-mirror retired, so a lapsed posting stops advertising supply and drops out of the
-    offerable ("Open to Me") lens.
+    offerable ("Open to Me") lens. A partially-awarded list (any awarded line / won offer)
+    instead steps to the non-terminal ``bid_out`` — terminal ``expired`` would strand its
+    remaining live bids behind award's terminal-list guard (deep-review #2 finding #1).
   - Outreach send-durability sweep: an ExcessOutreach row stuck in ``sending`` past the
     staleness threshold (its background send job died mid-flight) is flipped to
     ``interrupted`` so it stops polling and becomes retryable — never resent here (the
@@ -50,10 +52,12 @@ def register_resell_jobs(scheduler, settings):
 
 @_traced_job
 async def _job_expire_resell_lists():
-    """Daily — flip unresolved excess lists past ``close_at`` to ``expired``.
+    """Daily — resolve unresolved excess lists past ``close_at``.
 
-    Delegates to ``excess_service.expire_overdue_lists`` (which also retires each expired
-    list's Sighting mirror). Idempotent — already-resolved lists are skipped.
+    Delegates to ``excess_service.expire_overdue_lists`` (which also retires each resolved
+    list's Sighting mirror): a list with no sale flips to terminal ``expired``; a
+    partially-awarded one steps to non-terminal ``bid_out`` so its remaining live bids
+    stay awardable. Idempotent — already-resolved lists are skipped.
     """
     from ..database import SessionLocal
     from ..services.excess_service import expire_overdue_lists
@@ -62,7 +66,7 @@ async def _job_expire_resell_lists():
     try:
         expired = expire_overdue_lists(db)
         if expired:
-            logger.info(f"Expired {expired} overdue excess list(s)")
+            logger.info(f"Resolved {expired} overdue excess list(s)")
     except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Resell list expiry DB error: {e}")
         db.rollback()

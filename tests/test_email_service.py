@@ -29,6 +29,7 @@ import pytest
 from app.email_service import (
     NOISE_DOMAINS,
     NOISE_PREFIXES,
+    SentMessageLookupError,
     _apply_parsed_result,
     _build_html_body,
     _classify_response,
@@ -420,12 +421,31 @@ class TestFindSentMessage:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_exception_returns_none(self):
+    async def test_api_error_raises_lookup_error(self):
+        """Deep-review #2, finding 2 — three-state contract: a lookup whose attempts hit
+        Graph API errors must RAISE (delivery state unknown), never return None.
+
+        None is reserved for the POSITIVE 'scanned the window cleanly, message is not
+        there' answer that authorizes a caller's resend.
+        """
         gc = AsyncMock()
         gc.get_json.side_effect = Exception("Network error")
         with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(SentMessageLookupError):
+                await _find_sent_message(gc, "Subject", "sales@vendora.com")
+
+    @pytest.mark.asyncio
+    async def test_transient_error_then_found_returns_match(self):
+        """A transient error on an early attempt followed by a successful match still
+        returns the message dict — found always wins over lookup-failed."""
+        gc = AsyncMock()
+        gc.get_json.side_effect = [
+            Exception("transient 429"),
+            {"value": [_sent_item("msg-1", "conv-1", "Subject")]},
+        ]
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await _find_sent_message(gc, "Subject", "sales@vendora.com")
-        assert result is None
+        assert result["id"] == "msg-1"
 
     @pytest.mark.asyncio
     async def test_subject_whitespace_matching(self):

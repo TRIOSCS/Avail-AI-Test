@@ -1750,20 +1750,42 @@ def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList
 _UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
+def _list_is_partially_awarded(excess_list: ExcessList) -> bool:
+    """True when *excess_list* already SOLD something — any ``awarded`` line or ``won``
+    offer.
+
+    A partial award deliberately keeps the list ``collecting`` (``_apply_award_list_status``
+    only flips to ``awarded`` when EVERY line is decided), so such a list lands in the
+    nightly sweep's open/collecting net. Both markers are checked belt-and-braces: award
+    flips them together, but either alone is proof a sale exists that a terminal flip
+    would strand (deep-review #2, finding #1).
+    """
+    return any(it.status == ExcessLineItemStatus.AWARDED for it in excess_list.line_items) or any(
+        o.status == ExcessOfferStatus.WON for o in excess_list.offers
+    )
+
+
 def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
-    """Flip every unresolved list past its ``close_at`` to ``expired`` — the nightly
-    backstop.
+    """Resolve every unresolved list past its ``close_at`` — the nightly backstop.
 
     An ``open``/``collecting`` list whose ``close_at`` deadline has passed without being
-    awarded or closed is stale: it auto-expires so it stops advertising supply and drops
-    out of the offerable ("Open to Me") lens. For each expired list the Sighting mirror is
-    retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list already
-    ``expired``/``awarded``/``bid_out`` is skipped.
+    awarded or closed is stale: it auto-resolves so it stops advertising supply and drops
+    out of the offerable ("Open to Me") lens. For each resolved list the Sighting mirror
+    is retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list
+    already ``expired``/``awarded``/``bid_out`` is skipped.
+
+    A list with NO sale flips to terminal ``expired``. A PARTIALLY-AWARDED list (any
+    ``awarded`` line / ``won`` offer — a partial award deliberately stays ``collecting``)
+    instead steps to the NON-terminal ``bid_out``: ``expired`` would 409 every later
+    ``award_offer`` (the terminal-list guard), permanently stranding the still-live bids
+    on its remaining lines and mislabeling a list that actually sold parts as "expired"
+    (deep-review #2, finding #1). ``bid_out`` retires the mirror identically (both are in
+    the mirror's posting-closed set) while keeping the remaining offers awardable.
 
     Each list's flip + mirror-sync + commit is ISOLATED in its own try/except: one list
     whose mirror-sync raises is rolled back and skipped, and the batch continues expiring
     the others (a single bad list must never silently strand the whole nightly sweep).
-    Returns the count SUCCESSFULLY expired.
+    Returns the count SUCCESSFULLY resolved (expired + stepped to ``bid_out``).
     """
     from . import excess_mirror
 
@@ -1780,7 +1802,9 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
     expired_count = 0
     for excess_list in overdue:
         try:
-            excess_list.status = ExcessListStatus.EXPIRED
+            excess_list.status = (
+                ExcessListStatus.BID_OUT if _list_is_partially_awarded(excess_list) else ExcessListStatus.EXPIRED
+            )
             db.flush()
             excess_mirror.sync_list_mirror(db, excess_list)
             _safe_commit(db, entity="excess list expiry")
@@ -1791,7 +1815,11 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
                 excess_list.id,
             )
             db.rollback()
-    logger.info("Expired {} of {} overdue excess list(s) past close_at", expired_count, len(overdue))
+    logger.info(
+        "Resolved {} of {} overdue excess list(s) past close_at (partially-awarded → bid_out, rest → expired)",
+        expired_count,
+        len(overdue),
+    )
     return expired_count
 
 
