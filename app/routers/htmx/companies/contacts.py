@@ -51,6 +51,7 @@ from ._registries import (
     _recompose_full_name,
     _validate_role,
     apply_contact_field,
+    resolve_contact_role,
 )
 from .saved_views import _saved_views_ctx
 
@@ -696,8 +697,8 @@ async def contacts_tab_create(
         db.add(site)
         db.flush()
 
-    # ── Validate role ───────────────────────────────────────────────────
-    role = _validate_role(form.get("contact_role") or "")
+    # ── Resolve role (canonical value, or the OTHER free-text write-in) ──
+    role = resolve_contact_role(form.get("contact_role") or "", form.get("contact_role_custom") or "")
     is_priority = bool((form.get("is_priority") or "").strip())
 
     # SiteContact.wechat_id is String(100); SQLite (tests) ignores VARCHAR lengths
@@ -1680,13 +1681,20 @@ async def edit_site_contact(
         contact.last_name = new_last
         _recompose_full_name(contact)
 
-    # Remaining registry fields (skip first_name/last_name — handled above)
+    # Remaining registry fields (skip first_name/last_name — handled above;
+    # contact_role — handled below with its contact_role_custom write-in companion)
     for f in EDITABLE_CONTACT_FIELDS:
-        if f in ("first_name", "last_name"):
+        if f in ("first_name", "last_name", "contact_role"):
             continue
         raw = form.get(f)
         if raw is not None:  # field was submitted
             apply_contact_field(contact, f, raw, site_id, db)
+
+    # contact_role — resolved together with its OTHER free-text write-in companion,
+    # so it can't go through the generic single-value apply_contact_field loop above.
+    role_raw = form.get("contact_role")
+    if role_raw is not None:  # field was submitted
+        contact.contact_role = resolve_contact_role(role_raw, form.get("contact_role_custom") or "")
 
     # Non-registry fields
     contact.notes = (form.get("notes", "") or "").strip() or None

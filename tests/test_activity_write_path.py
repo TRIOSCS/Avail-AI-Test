@@ -71,7 +71,7 @@ def test_log_email_activity_accepts_requisition_id(db_session, test_requisition,
     record = log_email_activity(
         user_id=test_user.id,
         direction="sent",
-        email_addr="vendor@example.com",
+        email_addr="vendor@realvendorparts.com",
         subject=f"RFQ [ref:{test_requisition.id}]",
         external_id="msg-req-001",
         contact_name="Vendor Rep",
@@ -114,7 +114,7 @@ def test_log_email_activity_accepts_none_user(db_session, test_requisition):
     record = log_email_activity(
         user_id=None,
         direction="received",
-        email_addr="vendor@example.com",
+        email_addr="vendor@realvendorparts.com",
         subject="RE: RFQ",
         external_id="msg-none-user-001",
         contact_name="Vendor Rep",
@@ -124,6 +124,68 @@ def test_log_email_activity_accepts_none_user(db_session, test_requisition):
     assert record is not None
     assert record.user_id is None
     assert record.requisition_id == test_requisition.id
+
+
+def test_log_email_activity_skips_unmatched_own_domain_sender(db_session, test_requisition):
+    """ISS-030 write-time filter: an own-domain counterparty that doesn't independently
+    resolve via match_email_to_entity is pure internal noise — log_email_activity must
+    skip writing the row (return None) instead of logging it."""
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="colleague@trioscs.com",
+        subject="RE: internal FYI",
+        external_id="msg-own-domain-001",
+        contact_name="Colleague",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is None
+    assert db_session.query(ActivityLog).filter_by(external_id="msg-own-domain-001").first() is None
+
+
+def test_log_email_activity_skips_unmatched_junk_prefix(db_session, test_requisition):
+    """A junk local-part (e.g. mailer-daemon@) with no entity match is skipped too."""
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="mailer-daemon@some-mail-relay.example",
+        subject="Undeliverable",
+        external_id="msg-junk-prefix-001",
+        contact_name=None,
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is None
+
+
+def test_log_email_activity_still_logs_own_domain_when_matched(db_session, test_requisition, test_company):
+    """An own-domain/junk address that DOES independently resolve (e.g. a customer
+    contact whose email happens to collide with a junk prefix or own domain in a test
+    fixture) is still logged — the match itself is authoritative, not the domain
+    heuristic."""
+    from app.models import SiteContact
+    from app.models.crm import CustomerSite
+
+    site = CustomerSite(company_id=test_company.id, site_name="HQ", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    contact = SiteContact(customer_site_id=site.id, email="postmaster@trioscs.com", full_name="Ops Contact")
+    db_session.add(contact)
+    db_session.commit()
+
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="postmaster@trioscs.com",
+        subject="RE: matched despite junk prefix",
+        external_id="msg-matched-junk-001",
+        contact_name="Ops Contact",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.company_id == test_company.id
 
 
 def test_get_requisition_activities_returns_scoped_rows(db_session, test_requisition, test_user):
@@ -284,6 +346,66 @@ async def test_poll_inbox_logs_email_received_activity(db_session, test_requisit
         .all()
     )
     assert len(rows) == 1
+
+
+async def test_poll_inbox_skips_logging_auto_reply(db_session, test_requisition, test_user):
+    """ISS-030: an inbound OOO/auto-reply is not genuine correspondence — poll_inbox must
+    not write an ActivityLog row for it (the VendorResponse row is still recorded for the
+    RFQ classifier)."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.email_service import poll_inbox
+    from app.models.offers import VendorResponse
+
+    msg = _make_inbox_message(test_requisition.id)
+    msg["id"] = "poll-inbox-ooo-001"
+    msg["bodyPreview"] = "I am currently out of the office and will return next week."
+    msg["body"] = {"content": "<p>I am currently out of the office and will return next week.</p>"}
+
+    mock_gc = AsyncMock()
+    mock_gc.get_json.return_value = {"value": [msg]}
+
+    with (
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.email_service.get_credential_cached", return_value=None),
+    ):
+        await poll_inbox(token="fake-token", db=db_session, requisition_id=test_requisition.id)
+
+    rows = db_session.query(ActivityLog).filter(ActivityLog.external_id == "poll-inbox-ooo-001").all()
+    assert rows == [], "Auto-reply must not be logged as ActivityLog"
+    # The raw VendorResponse row is still recorded for the classifier.
+    assert db_session.query(VendorResponse).filter_by(message_id="poll-inbox-ooo-001").first() is not None
+
+
+async def test_poll_inbox_skips_exchange_ndr_sender(db_session, test_requisition, test_user):
+    """A Microsoft Exchange NDR/bounce mailbox (variable hex suffix, own domain) is
+    treated as noise entirely — no VendorResponse and no ActivityLog row."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.email_service import poll_inbox
+    from app.models.offers import VendorResponse
+
+    msg = _make_inbox_message(test_requisition.id)
+    msg["id"] = "poll-inbox-ndr-001"
+    msg["from"] = {
+        "emailAddress": {
+            "address": "MicrosoftExchange329e71ec88ae4615bbc36ab6ce41109e@trioscs.com",
+            "name": "Microsoft Outlook",
+        }
+    }
+    msg["subject"] = "Undeliverable: RE: Quote request"
+
+    mock_gc = AsyncMock()
+    mock_gc.get_json.return_value = {"value": [msg]}
+
+    with (
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.email_service.get_credential_cached", return_value=None),
+    ):
+        await poll_inbox(token="fake-token", db=db_session, requisition_id=test_requisition.id)
+
+    assert db_session.query(ActivityLog).filter_by(external_id="poll-inbox-ndr-001").first() is None
+    assert db_session.query(VendorResponse).filter_by(message_id="poll-inbox-ndr-001").first() is None
 
 
 @pytest.mark.parametrize(

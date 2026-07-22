@@ -50,8 +50,10 @@ done
 
 if [ "$REMOTE" = 1 ]; then
   echo "== stale remote branches (merged or archived; never open PRs) =="
-  for r in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/ \
-              | sed 's#^origin/##' | grep -vxF 'HEAD' | grep -vxF 'main'); do
+  # Use %(refname), not %(refname:short): git shortens refs/remotes/origin/HEAD to
+  # bare "origin", which survives the HEAD filter and yields a phantom "origin/origin".
+  for r in $(git for-each-ref --format='%(refname)' refs/remotes/origin/ \
+              | sed 's#^refs/remotes/origin/##' | grep -vxF 'HEAD' | grep -vxF 'main'); do
     protected "$r" && { echo "skip (open PR): origin/$r"; continue; }
     merged=$(git merge-base --is-ancestor "origin/$r" origin/main 2>/dev/null && echo yes || echo no)
     archived=$(git rev-parse -q --verify "refs/tags/archive/$r" >/dev/null && echo yes || echo no)

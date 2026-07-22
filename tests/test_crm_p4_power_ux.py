@@ -30,6 +30,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.constants import AccessKey
 from app.models import Company, CustomerSite, SavedView, SiteContact, User
 
 # ---------------------------------------------------------------------------
@@ -39,11 +40,20 @@ from app.models import Company, CustomerSite, SavedView, SiteContact, User
 
 @pytest.fixture()
 def mgr_user(db_session: Session) -> User:
+    """A manager-role user.
+
+    ISS-028: EXPORT_BULK_DATA is admin-only by default (supersedes ISS-022's
+    manager+admin default), so TestFilteredCsvExport (which exercises the export
+    ROUTE's filter/header CONTENT, not the access gate itself) grants this user an
+    explicit per-user override — mirrors tests/test_crm_csv_export.py's manager_client
+    fixture.
+    """
     u = User(
         email="p4.mgr@trioscs.com",
         name="P4 Mgr",
         role="manager",
         azure_id="p4-mgr",
+        access_overrides={AccessKey.EXPORT_BULK_DATA.value: True},
         created_at=datetime.now(UTC),
     )
     db_session.add(u)

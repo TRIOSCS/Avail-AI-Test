@@ -1,9 +1,10 @@
 """test_crm_contact_card.py — CRM customer-tab contact-card rework (2026-06-26).
 
 Covers the four reworked asks on the active `contact_row` macro + its expand drawer:
-  1. Role dropdown — the canonical ContactRole vocabulary (buyer/manager/engineer/
-     planner/other) is accepted by the setter; legacy/unknown values 400; the editor
-     renders all five options; legacy DB values still render read-only.
+  1. Role dropdown — the canonical ContactRole vocabulary (13 members as of ISS-029:
+     the original buyer/manager/engineer/planner + the 8 promoted former-legacy roles
+     + other) is accepted by the setter; truly unknown values 400; the editor renders
+     every canonical option; a genuine custom write-in still renders read-only.
   2. Phone + email — click-to-contact (tel: / Outlook-compose) links in the row + drawer.
   3. Recent notes + notes modal — GET renders the feed + add form; POST logs an
      ActivityLog NOTE (can_manage_account gated; blank → inline error).
@@ -68,14 +69,40 @@ def _company_site_contact(
 
 class TestContactRoleSourceOfTruth:
     def test_enum_members_are_mikes_vocabulary(self):
+        # ISS-029 promoted the 8 former legacy-only DB values to first-class members
+        # (buyer_po/specifier/ap_payer/logistics/exec/technical/decision_maker/
+        # operations), inserted between the original 4 and the trailing OTHER
+        # write-in sentinel.
         assert tuple(ContactRole) == (
             ContactRole.BUYER,
             ContactRole.MANAGER,
             ContactRole.ENGINEER,
             ContactRole.PLANNER,
+            ContactRole.BUYER_PO,
+            ContactRole.SPECIFIER,
+            ContactRole.AP_PAYER,
+            ContactRole.LOGISTICS,
+            ContactRole.EXEC,
+            ContactRole.TECHNICAL,
+            ContactRole.DECISION_MAKER,
+            ContactRole.OPERATIONS,
             ContactRole.OTHER,
         )
-        assert [r.value for r in ContactRole] == ["buyer", "manager", "engineer", "planner", "other"]
+        assert [r.value for r in ContactRole] == [
+            "buyer",
+            "manager",
+            "engineer",
+            "planner",
+            "buyer_po",
+            "specifier",
+            "ap_payer",
+            "logistics",
+            "exec",
+            "technical",
+            "decision_maker",
+            "operations",
+            "other",
+        ]
 
     def test_canonical_roles_and_jinja_global_derive_from_enum(self):
         from app.routers.htmx.companies import _VALID_ROLES, CANONICAL_ROLES
@@ -120,14 +147,16 @@ class TestRoleDropdown:
         )
         assert resp.status_code == 400
 
-    def test_setter_rejects_legacy_value(self, client: TestClient, db_session: Session, test_user: User):
-        """Legacy DB roles (buyer_po) are no longer selectable — POST 400s."""
+    def test_setter_accepts_promoted_legacy_value(self, client: TestClient, db_session: Session, test_user: User):
+        """ISS-029: the former legacy-only DB role buyer_po is now selectable."""
         company, _site, contact = _company_site_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "buyer_po"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role == "buyer_po"
 
     def test_setter_blank_clears_role(self, client: TestClient, db_session: Session, test_user: User):
         company, _site, contact = _company_site_contact(db_session, owner_id=test_user.id, contact_role="buyer")
@@ -139,7 +168,7 @@ class TestRoleDropdown:
         db_session.refresh(contact)
         assert contact.contact_role is None
 
-    def test_editor_renders_all_five_options(self, client: TestClient, db_session: Session, test_user: User):
+    def test_editor_renders_all_canonical_options(self, client: TestClient, db_session: Session, test_user: User):
         company, _site, contact = _company_site_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
@@ -147,21 +176,44 @@ class TestRoleDropdown:
         )
         assert resp.status_code == 200
         html = resp.text
-        for role in ("buyer", "manager", "engineer", "planner", "other"):
+        for role in (
+            "buyer",
+            "manager",
+            "engineer",
+            "planner",
+            "buyer_po",
+            "specifier",
+            "ap_payer",
+            "logistics",
+            "exec",
+            "technical",
+            "decision_maker",
+            "operations",
+            "other",
+        ):
             assert f"value='{role}'" in html or f'value="{role}"' in html, f"missing option {role}"
         # The "— clear —" affordance is present.
         assert "clear" in html.lower()
 
-    def test_legacy_role_renders_read_only_label(self, client: TestClient, db_session: Session, test_user: User):
-        """A pre-existing legacy value still renders a clean chip (display-label
-        fallback)."""
+    def test_promoted_legacy_role_renders_labeled_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """A now-canonical, formerly-legacy value renders its display-label chip (DM for
+        decision_maker) — the single CONTACT_ROLE_LABELS source."""
         company, _site, _contact = _company_site_contact(
             db_session, owner_id=test_user.id, contact_role="decision_maker"
         )
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
-        # legacy label "DM" (decision_maker) renders without error
-        assert "DM" in resp.text or "decision_maker" in resp.text
+        assert "DM" in resp.text
+
+    def test_genuine_custom_role_renders_verbatim(self, client: TestClient, db_session: Session, test_user: User):
+        """A truly custom write-in value (not a canonical member) renders VERBATIM,
+        never title-cased or otherwise transformed (ISS-029 display rule)."""
+        company, _site, _contact = _company_site_contact(
+            db_session, owner_id=test_user.id, contact_role="Regional Field Rep"
+        )
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "Regional Field Rep" in resp.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -418,10 +418,14 @@ templates.env.globals["cadence_state"] = cadence_state
 # macro-include path.
 # Sourced from the ContactRole StrEnum (single source of truth in app/constants.py) —
 # the SAME tuple CANONICAL_ROLES in app/routers/htmx_views.py is built from.
-from .constants import ContactRole  # noqa: E402
+from .constants import CONTACT_ROLE_LABELS, ContactRole  # noqa: E402
 
 _CANONICAL_ROLES = tuple(ContactRole)
 templates.env.globals["roles"] = _CANONICAL_ROLES
+# Single label source for ContactRole values (ISS-029) — consolidates the three
+# previously-duplicated per-template role_labels dicts. `.get(value, value)` in
+# templates falls back to the raw stored string for non-canonical custom write-ins.
+templates.env.globals["contact_role_labels"] = CONTACT_ROLE_LABELS
 
 # Buy-plan approval right exposed as a Jinja2 global so templates hide the approve/reject
 # UI using the SAME predicate the require_buyplan_approver dependency enforces on the POST

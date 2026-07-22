@@ -72,19 +72,12 @@
       </div>
     </div>
 
-    <div class='grid grid-cols-2 gap-2'>
-      <div>
-        <label class='form-label'>Payment Terms</label>
-        <input type='text' name='payment_terms' value='{{ site.payment_terms or "" }}'
-               placeholder='e.g. Net30'
-               class='input'>
-      </div>
-      <div>
-        <label class='form-label'>Shipping Terms</label>
-        <input type='text' name='shipping_terms' value='{{ site.shipping_terms or "" }}'
-               placeholder='e.g. FCA'
-               class='input'>
-      </div>
+    {# Payment terms intentionally absent — managed in the ERP, not the CRM (ISS-031). #}
+    <div>
+      <label class='form-label'>Shipping Terms</label>
+      <input type='text' name='shipping_terms' value='{{ site.shipping_terms or "" }}'
+             placeholder='e.g. FCA'
+             class='input'>
     </div>
 
     <div>

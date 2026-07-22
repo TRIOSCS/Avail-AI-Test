@@ -198,22 +198,8 @@
           Clean &amp; reset
         </button>
 
-        {# Export CSV — a REAL browser download, not an htmx request: hx-boost="false" opts
-           this anchor out of the app's global nav-boost so it does a plain GET that streams
-           the file as an attachment (never swapping into #main-content). The querystring is
-           server-rendered from the SAME filter context the list used, so the CSV mirrors
-           exactly what's on screen (every filter change re-renders this whole partial).
-           Gated on can_export_bulk_data (ISS-022, manager/admin only) — the SAME predicate
-           require_access(AccessKey.EXPORT_BULK_DATA) enforces on the export route, so the
-           button never shows for a role whose click would 403. #}
-        {% if can_export_bulk_data(user) %}
-        <a hx-boost="false"
-           href="/v2/partials/requisitions/export?q={{ q|urlencode }}&status={{ status|urlencode }}&owner={{ owner }}&urgency={{ urgency|urlencode }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&sort={{ sort|urlencode }}&dir={{ dir|urlencode }}"
-           class="btn btn-sm btn-secondary self-center"
-           title="Download all matching requisitions as a CSV file">
-          Export CSV
-        </a>
-        {% endif %}
+        {# Bulk export moved to admin-only Settings ▸ Data export (ISS-028) — no export
+           UI outside Settings. #}
 
       </div>
     </form>

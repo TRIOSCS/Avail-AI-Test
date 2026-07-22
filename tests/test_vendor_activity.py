@@ -52,6 +52,26 @@ class TestVendorActivityTab:
         # Should show empty state text (no activities)
         assert "No activity" in body or "no activity" in body.lower()
 
+    def test_vendor_activity_tab_excludes_not_meaningful(self, client, db_session, test_vendor_card, test_user):
+        """ISS-030 parity: a row the AI quality pass classified is_meaningful=False must
+        not render on the vendor Activity tab either (same gate as the company tab)."""
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type=ActivityType.EMAIL_RECEIVED,
+            channel="email",
+            vendor_card_id=test_vendor_card.id,
+            summary="Bounce notification — mailbox unavailable",
+            is_meaningful=False,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(log)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Bounce notification" not in resp.text
+        assert "No activity" in resp.text or "no activity" in resp.text.lower()
+
     def test_vendor_activity_tab_404_for_unknown_vendor(self, client):
         """Unknown vendor id → 404."""
         resp = client.get("/v2/partials/vendors/99999/tab/activity")

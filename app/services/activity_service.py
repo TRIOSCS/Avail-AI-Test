@@ -474,6 +474,31 @@ def _match_entity_links(match: dict | None) -> dict:
     }
 
 
+def _is_internal_email(email: str) -> bool:
+    """True if ``email``'s domain is one of the org's own domains
+    (settings.own_domains).
+
+    Shared by log_email_activity and log_meeting_activity so "internal colleague" has
+    one definition across the write path.
+    """
+    domain = email.split("@")[-1] if "@" in email else ""
+    return domain in settings.own_domains
+
+
+def _is_junk_email(email: str) -> bool:
+    """True if ``email`` is a generic/junk mail domain or a junk local-part prefix.
+
+    Shared by log_email_activity and log_meeting_activity (see _is_internal_email).
+    """
+    from app.shared_constants import JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
+
+    domain = email.split("@")[-1] if "@" in email else ""
+    local = email.split("@")[0] if "@" in email else email
+    if domain in (_GENERIC_DOMAINS | JUNK_DOMAINS):
+        return True
+    return local in JUNK_EMAIL_PREFIXES
+
+
 def log_email_activity(
     user_id: int | None,
     direction: str,  # sent/received/inbound/outbound (normalized via _normalize_direction)
@@ -488,7 +513,11 @@ def log_email_activity(
 ) -> ActivityLog | None:
     """Log an email activity, matching the contact to a company or vendor.
 
-    Returns the ActivityLog record or None if dedup/no-match.
+    Returns the ActivityLog record, or None if dedup/no-match, or None if the
+    counterparty is an own-domain/junk address that doesn't independently resolve to a
+    company or vendor (ISS-030 write-time filter — mirrors log_meeting_activity's
+    _is_internal_email/_is_junk_email gate; a matched address is logged regardless,
+    since the match itself is authoritative).
 
     Pass occurred_at to stamp the exact send/receive time on the row.  When omitted the
     column default (server-side UTC now) is used.  Always pass occurred_at for send-time
@@ -513,6 +542,15 @@ def log_email_activity(
     is_outbound = normalized_direction == Direction.OUTBOUND
 
     match = match_email_to_entity(email_addr, db)
+
+    email_lower = (email_addr or "").strip().lower()
+    if not match and email_lower and (_is_internal_email(email_lower) or _is_junk_email(email_lower)):
+        logger.debug(
+            "log_email_activity: skipping own-domain/junk unmatched counterparty {!r} (external_id={})",
+            email_lower,
+            external_id,
+        )
+        return None
 
     activity_type = ActivityType.EMAIL_SENT if is_outbound else ActivityType.EMAIL_RECEIVED
 
@@ -571,9 +609,6 @@ def log_meeting_activity(
     Returns [] if only internal attendees or the event was already logged.
     Dedup key: ``external_id = "calendar-{graph_event_id}"``.
     """
-    from app.config import settings
-    from app.shared_constants import JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
-
     external_id = f"calendar-{graph_event_id}"
 
     # Idempotent re-scan: skip if ANY row with this external_id already exists.
@@ -581,24 +616,8 @@ def log_meeting_activity(
     if existing:
         return []
 
-    own_domains: frozenset[str] = settings.own_domains
-    _all_generic = _GENERIC_DOMAINS | JUNK_DOMAINS
-
-    def _is_internal(email: str) -> bool:
-        domain = email.split("@")[-1] if "@" in email else ""
-        return domain in own_domains
-
-    def _is_junk(email: str) -> bool:
-        domain = email.split("@")[-1] if "@" in email else ""
-        local = email.split("@")[0] if "@" in email else email
-        if domain in _all_generic:
-            return True
-        if local in JUNK_EMAIL_PREFIXES:
-            return True
-        return False
-
     organizer_lower = (organizer_email or "").strip().lower()
-    organizer_is_own = _is_internal(organizer_lower) if organizer_lower else True
+    organizer_is_own = _is_internal_email(organizer_lower) if organizer_lower else True
     direction = Direction.OUTBOUND if organizer_is_own else Direction.INBOUND
     duration_seconds = max(0, int((end_dt - start_dt).total_seconds()))
 
@@ -611,9 +630,9 @@ def log_meeting_activity(
         email_lower = raw_email.strip().lower()
         if not email_lower or "@" not in email_lower:
             continue
-        if _is_internal(email_lower):
+        if _is_internal_email(email_lower):
             continue
-        if _is_junk(email_lower):
+        if _is_junk_email(email_lower):
             continue
 
         match = match_email_to_entity(email_lower, db)
@@ -779,30 +798,50 @@ def _is_meaningful_or_unscored():
 
 
 def get_company_activities(
-    company_id: int, db: Session, limit: int = 50, meaningful_only: bool = False
+    company_id: int,
+    db: Session,
+    limit: int = 50,
+    meaningful_only: bool = False,
+    exclude_types: frozenset[str] | None = None,
 ) -> list[ActivityLog]:
     """Get recent activity for a company.
+
+    Scoped strictly to ``ActivityLog.company_id`` — this is the SINGLE arbitration point
+    for the company Activity tab; do not OR in requisition_id (see ISS-030: doing so
+    leaked internal colleagues' RFQ-thread replies and unrelated requisition events onto
+    the customer's page).
 
     meaningful_only (default False preserves existing caller behaviour). When True,
     filters out activities that the AI quality pass classified as not meaningful
     (is_meaningful=False); rows that are meaningful (True) or not yet scored (None) are
     kept, matching the requisition path semantics.
+
+    exclude_types (default None) removes rows whose activity_type is in the set BEFORE
+    the limit is applied, e.g. RFQ_SENT (RfqContact rows are the canonical RFQ source so
+    the rfq_sent ActivityLog echo must not double-show, and must not consume a limit slot).
     """
     q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
     if meaningful_only:
         q = q.filter(_is_meaningful_or_unscored())
+    if exclude_types:
+        q = q.filter(ActivityLog.activity_type.notin_(exclude_types))
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
-def get_vendor_activities(vendor_card_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
-    """Get recent activity for a vendor."""
-    return (
-        db.query(ActivityLog)
-        .filter(ActivityLog.vendor_card_id == vendor_card_id)
-        .order_by(ActivityLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_vendor_activities(
+    vendor_card_id: int, db: Session, limit: int = 50, meaningful_only: bool = False
+) -> list[ActivityLog]:
+    """Get recent activity for a vendor.
+
+    meaningful_only (default False preserves existing caller behaviour). When True,
+    hides activities the AI quality pass classified as not meaningful (is_meaningful=
+    False); rows that are meaningful (True) or not yet scored (None) are kept — same
+    semantics as get_company_activities/get_requisition_activities.
+    """
+    q = db.query(ActivityLog).filter(ActivityLog.vendor_card_id == vendor_card_id)
+    if meaningful_only:
+        q = q.filter(_is_meaningful_or_unscored())
+    return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
 def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:

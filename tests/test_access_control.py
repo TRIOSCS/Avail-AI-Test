@@ -660,18 +660,29 @@ def _make_pending_offer(db, req):
 
 class TestCapabilityGating:
     def test_export_companies_403_for_default_buyer(self, db_session, test_user):
-        # ISS-022: bulk dataset exports (companies/contacts/vendors/requisitions/
-        # sightings) moved off EXPORT_DATA onto manager+admin-only EXPORT_BULK_DATA —
-        # see tests/test_export_bulk_data_gate.py for the full role matrix.
+        # ISS-028: bulk dataset exports (companies/contacts/vendors/requisitions/
+        # sightings) are admin-only by default via EXPORT_BULK_DATA — see
+        # tests/test_export_bulk_data_gate.py for the full role matrix.
         c = _client_as(db_session, test_user)
         try:
             assert c.get("/v2/customers/export.csv").status_code == 403
         finally:
             _drop_overrides(c)
 
-    def test_export_companies_200_for_manager_default(self, db_session, manager_user):
-        # Manager holds EXPORT_BULK_DATA by default (ISS-022). Assert the actual CSV
-        # stream (headers + column row), not just the status code.
+    def test_export_companies_403_for_manager_default(self, db_session, manager_user):
+        # ISS-028 (supersedes ISS-022's manager+admin default): manager no longer
+        # holds EXPORT_BULK_DATA by default — admin-only unless explicitly granted.
+        c = _client_as(db_session, manager_user)
+        try:
+            assert c.get("/v2/customers/export.csv").status_code == 403
+        finally:
+            _drop_overrides(c)
+
+    def test_export_companies_200_when_export_bulk_data_granted_to_manager(self, db_session, manager_user):
+        # An admin-granted per-user override still lets a manager through. Assert the
+        # actual CSV stream (headers + column row), not just the status code.
+        manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+        db_session.commit()
         c = _client_as(db_session, manager_user)
         try:
             resp = c.get("/v2/customers/export.csv")

@@ -787,6 +787,7 @@ async def scan_sent_folder(user, db):
     from ..config import settings
     from ..models import SyncState
     from ..models.intelligence import ActivityLog
+    from ..services.activity_service import match_email_to_entity
     from ..utils.token_manager import get_valid_token
 
     token = await get_valid_token(user, db)
@@ -980,7 +981,12 @@ async def scan_sent_folder(user, db):
                     else:
                         # No send-time row: fall back to the legacy create path
                         # (handles sends that pre-date P1b, or edge cases where the
-                        # send-time row was already reconciled or deleted).
+                        # send-time row was already reconciled or deleted). Resolve the
+                        # recipient to a company/vendor here (ISS-030) — otherwise this
+                        # row lands with requisition_id set but company_id/vendor_card_id
+                        # both NULL, which the company Activity tab can no longer surface
+                        # now that it is scoped strictly to ActivityLog.company_id.
+                        entity_match = match_email_to_entity(first_recipient, db) if first_recipient else None
                         log_entry = ActivityLog(
                             user_id=user.id,
                             activity_type="email_sent",
@@ -991,6 +997,12 @@ async def scan_sent_folder(user, db):
                             contact_email=first_recipient or None,
                             external_id=msg_id,
                             requisition_id=requisition_id,
+                            company_id=entity_match["id"]
+                            if entity_match and entity_match["type"] == "company"
+                            else None,
+                            vendor_card_id=entity_match["id"]
+                            if entity_match and entity_match["type"] == "vendor"
+                            else None,
                             auto_logged=True,
                             occurred_at=occurred_at,
                         )

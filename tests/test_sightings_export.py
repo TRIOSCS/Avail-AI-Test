@@ -2,9 +2,12 @@
 
 Verifies the export streams CSV with the attachment headers, one row per matching
 Sighting, and that it mirrors the board's filter parity (same predicates as
-GET /v2/partials/sightings). Manager/admin only (ISS-022 — AccessKey.EXPORT_BULK_DATA);
-the plain buyer `client` fixture is denied 403 (full role matrix in
-tests/test_export_bulk_data_gate.py).
+GET /v2/partials/sightings). Admin only by default (ISS-028 —
+AccessKey.EXPORT_BULK_DATA); the plain buyer `client` fixture is denied 403 (full role
+matrix in tests/test_export_bulk_data_gate.py). The board toolbar never renders an
+export button anymore — bulk export lives ONLY on the admin-gated Settings "Data
+export" page (ISS-028); `manager_client` (an explicit per-user EXPORT_BULK_DATA
+override) exercises the export ROUTE content directly.
 
 Called by: pytest
 Depends on: conftest.py fixtures (db_session, test_user, client, manager_client,
@@ -163,23 +166,21 @@ def test_export_unauthenticated_rejected(unauthenticated_client: TestClient, db_
     assert resp.status_code in (401, 403)
 
 
-def test_export_button_rendered_in_board_toolbar(manager_client: TestClient, db_session: Session):
-    """The board table partial renders the Export CSV anchor for a manager: a plain
-    (non-htmx) download that points at the export endpoint and opts out of nav-boost."""
+def test_export_button_absent_from_board_toolbar(manager_client: TestClient, db_session: Session):
+    """ISS-028: the board toolbar never renders an Export CSV button for ANY role —
+    bulk export moved to the admin-only Settings "Data export" page."""
     r = _make_requirement(db_session, mpn="LM317T")
     _make_sighting(db_session, r, vendor="Digi-Key")
     db_session.commit()
 
     html = manager_client.get("/v2/partials/sightings").text
 
-    assert "Export CSV" in html
-    assert 'hx-boost="false"' in html
-    assert "/v2/sightings/export" in html
+    assert "Export CSV" not in html
 
 
 def test_export_button_hidden_for_buyer(client: TestClient, db_session: Session):
-    """ISS-022: a plain buyer (no EXPORT_BULK_DATA) never sees the Export CSV button —
-    single source of truth with the 403 the route itself enforces."""
+    """ISS-028: a plain buyer never sees the Export CSV button — single source of
+    truth with the 403 the route itself enforces."""
     r = _make_requirement(db_session, mpn="LM317T")
     _make_sighting(db_session, r, vendor="Digi-Key")
     db_session.commit()
@@ -190,5 +191,5 @@ def test_export_button_hidden_for_buyer(client: TestClient, db_session: Session)
 
 
 def test_export_403_for_default_buyer(client: TestClient, db_session: Session):
-    """ISS-022: bulk sighting export is manager/admin only."""
+    """ISS-028: bulk sighting export is admin only by default."""
     assert client.get(EXPORT_URL).status_code == 403

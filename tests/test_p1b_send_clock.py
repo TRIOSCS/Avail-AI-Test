@@ -335,6 +335,51 @@ class TestScanSentFolderReconcile:
         log = db_session.query(ActivityLog).filter(ActivityLog.external_id == graph_msg_id).first()
         assert log is not None, "Fallback path must create an ActivityLog with external_id set"
 
+    @pytest.mark.asyncio
+    async def test_scan_fallback_create_resolves_entity_attribution(self, db_session, test_user, test_requisition):
+        """ISS-030: the fallback CREATE path resolves the recipient to a Company via
+        match_email_to_entity and stamps company_id — a NULL company_id here is exactly
+        the leak-scenario gap the get_company_activities() scope fix depends on being
+        backfilled."""
+        from app.jobs.email_jobs import scan_sent_folder
+        from app.models import Company
+
+        company = Company(name="Acme Customer", domain="acme-customer.com", is_active=True)
+        db_session.add(company)
+        db_session.commit()
+
+        tagged_subject = f"RFQ [ref:{test_requisition.id}]"
+        vendor_email = "buyer@acme-customer.com"
+        graph_msg_id = "graph-attrib-001"
+
+        gc_mock = MagicMock()
+        now = datetime.now(UTC)
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": graph_msg_id,
+                        "subject": tagged_subject,
+                        "sentDateTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "toRecipients": [{"emailAddress": {"address": vendor_email}}],
+                        "hasAttachments": False,
+                    }
+                ],
+                "new-delta-token",
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            await scan_sent_folder(test_user, db_session)
+
+        log = db_session.query(ActivityLog).filter(ActivityLog.external_id == graph_msg_id).first()
+        assert log is not None
+        assert log.company_id == company.id, "Recipient domain match must attribute company_id on the sent row"
+        assert log.vendor_card_id is None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test 3: Reply-matching (Tier-1) still works after reconciliation
