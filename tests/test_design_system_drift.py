@@ -60,9 +60,9 @@ def test_shared_partials_no_gray_brand_focus_ring():
     """Shared form-control partials must use the accent focus ring / .input-focus mixin,
     not the retired gray-brand focus classes.
 
-    Enforced surface is app/templates/htmx/partials/shared/ (see
-    _ENFORCED_SHARED_ROOTS above) — widen that list to extend coverage to more
-    directories in a later PR without touching this test body.
+    Enforced surface is app/templates/htmx/partials/shared/ (see _ENFORCED_SHARED_ROOTS
+    above) — widen that list to extend coverage to more directories in a later PR
+    without touching this test body.
     """
     retired = ("focus:ring-brand-500", "focus:border-brand-500")
     offenders: list[str] = []
@@ -79,7 +79,8 @@ def test_shared_partials_no_gray_brand_focus_ring():
 
 def test_canonical_component_classes_defined_in_styles_css():
     """The canonical component layer must define these classes — macros and every page
-    sweep depend on them; a dropped definition silently breaks styling across the app."""
+    sweep depend on them; a dropped definition silently breaks styling across the
+    app."""
     css = Path("app/static/styles.css").read_text()
     required = [
         ".card",
