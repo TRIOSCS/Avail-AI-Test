@@ -201,6 +201,18 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Real-time:** SSE via `hx-ext="sse"` for notifications
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
 - **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
+- **Design system (single source of truth):** the canonical component layer lives in
+  `app/static/styles.css` (`@layer components`: `.card`/`.card-sm`/`.card-lg`, `.btn-*`,
+  `.badge*`, `.input`/`.input-focus`, `.h1`–`.h4`, `.table-wrapper`+`.data-table`,
+  `.font-data`) + the macro library `partials/shared/_macros.html`. `brand-*` is the neutral
+  gray text/surface/border ramp; the single interactive accent is `accent-*` azure
+  (`--accent #007DBD`) — focus rings, active nav, and primary buttons use accent, never
+  `brand-*`. Page/detail titles render through the `page_header(title, subtitle=None)` macro
+  (`.h1` + optional `.text-secondary` + right-aligned action slot via `{% call %}`). Status
+  pills route through the shared `badge()`/`status_badge()`/`req_status_badge()`/
+  `quote_status_badge()` macros (which preserve semantic status colors) rather than inline
+  color-map dicts. `tests/test_design_system_drift.py` guards these invariants (page_header
+  present, no gray focus rings in shared partials, canonical classes defined, no dark mode).
 - **Lazy-load wrapper:** `lazy_body` macro (`partials/shared/_macros.html`) is the mandated
   wrapper for any faceted/lazy-load sub-container (spinner/skeleton `caller()` block ->
   `hx-get` on `trigger` swapped into an explicit `hx-target`, defaulting to `this`) — used by

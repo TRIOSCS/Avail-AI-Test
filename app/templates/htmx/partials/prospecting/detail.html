@@ -7,6 +7,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
 {% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 
 <div class="page-readable">
 
@@ -25,15 +26,13 @@
           {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
         </div>
         <div class="mt-2 flex items-center gap-2">
-          {% set prospect_status_colors = {
+          {% set _prospect_status_map = {
             'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
             'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
             'converted': 'bg-violet-100 text-violet-700 border-violet-200',
             'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
           } %}
-          <span class="badge {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-700 border-gray-200') }}">
-            {{ prospect.status|capitalize }}
-          </span>
+          {{ status_badge(prospect.status, status_map=_prospect_status_map) }}
           {% if prospect.claimed_by_user %}
           <span class="text-sm text-gray-600">Claimed by {{ prospect.claimed_by_user.name }}</span>
           {% endif %}
@@ -188,12 +187,11 @@
     <h2 class="h2 mb-4 flex items-center gap-2">
       AI Screening
       {% set verdict = ai_screen.get('verdict', '') %}
-      <span class="badge
-        {% if verdict == 'pass' %}bg-emerald-100 text-emerald-700 border-emerald-200
-        {% elif verdict == 'screened_out' %}bg-amber-100 text-amber-700 border-amber-200
-        {% else %}bg-gray-100 text-gray-600 border-gray-200{% endif %}">
-        {{ verdict|replace('_', ' ')|capitalize }}
-      </span>
+      {% set _verdict_map = {
+        'pass': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+        'screened_out': 'bg-amber-100 text-amber-700 border-amber-200'
+      } %}
+      {{ status_badge(verdict, status_map=_verdict_map) }}
     </h2>
 
     {# Score trio #}
@@ -369,7 +367,7 @@
   {# Warm intro section #}
   {% if warm_intro and warm_intro.get('has_warm_intro') %}
   <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-5 mb-6">
-    <h2 class="text-lg font-semibold text-emerald-800 mb-3 flex items-center gap-2">
+    <h2 class="h2 text-emerald-800 mb-3 flex items-center gap-2">
       <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
       </svg>

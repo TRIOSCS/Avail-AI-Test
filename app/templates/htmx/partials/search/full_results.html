@@ -56,7 +56,7 @@
     message_class="mt-4 text-lg text-gray-600",
     description="Try a different search term, check spelling, or use fewer keywords.",
     description_class="text-sm text-gray-400 mt-2",
-    wrapper_class="bg-white border border-brand-200 rounded-xl shadow-card p-6 sm:p-8 text-center",
+    wrapper_class="card p-6 sm:p-8 text-center",
     icon_class="mx-auto w-16 h-16 text-gray-300",
     icon_path="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
   %}
@@ -165,7 +165,7 @@
     {% if items %}
     <div>
       <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">{{ group_label }}</h3>
-      <div class="bg-white border border-brand-200 rounded-xl shadow-card overflow-hidden">
+      <div class="card p-0 overflow-hidden">
         <table class="w-full text-sm">
           <tbody class="divide-y divide-gray-100">
             {% for item in items[:10] %}
@@ -293,7 +293,7 @@
   {% set items = results.groups.get(group_key, []) %}
   {% if items %}
   <div x-show="tab === '{{ group_key }}'" x-cloak>
-    <div class="bg-white border border-brand-200 rounded-xl shadow-card overflow-hidden">
+    <div class="card p-0 overflow-hidden">
       <table class="w-full text-sm">
         <thead class="bg-gray-50 border-b border-gray-200">
           <tr>

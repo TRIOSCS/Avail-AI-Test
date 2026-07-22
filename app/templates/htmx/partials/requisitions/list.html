@@ -2,7 +2,8 @@
    Shows filterable, sortable list. Clicking a row navigates to detail view.
    Receives: requisitions, q, match_counts, status, owner, urgency, date_from, date_to, sort, dir, total, limit, offset, users, user_role.
    Called by: requisitions_list_partial route.
-   Depends on: partials/requisitions/req_row.html, brand palette.
+   Depends on: partials/requisitions/req_row.html, canonical accent design system
+   (input-focus / .btn / .card — see styles.css).
 #}
 
 <div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}', collapsed: $persist({}).as('saleshub-group-collapse') }">
@@ -33,15 +34,15 @@
         New Requisition
       </button>
       <div>
-        <h1 class="h2">Requisitions list</h1>
-        <p class="text-sm text-gray-600">{{ total }} total</p>
+        <h1 class="h1">Requisitions list</h1>
+        <p class="text-secondary">{{ total }} total</p>
       </div>
     </div>
     {% with active='list' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
   </div>
 
   {# Filter bar #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
+  <div class="card p-4 mb-4">
     <form id="req-filters" class="space-y-3" onsubmit="return false"
           hx-indicator="#req-loading"
           hx-target-error="#req-error">
@@ -61,7 +62,7 @@
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  hx-trigger="input changed delay:300ms"
-                 class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
 
           {# Search scope indicators — show what matched when actively searching #}
           {% if match_counts %}
@@ -99,7 +100,7 @@
                   hx-push-url="true"
                   hx-include="#req-filters"
                   :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
-                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
             <option value="0">All owners</option>
             {% for u in users %}
             <option value="{{ u.id }}" {% if owner == u.id %}selected{% endif %}>{{ u.name }}</option>
@@ -117,7 +118,7 @@
                  hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
-                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
         </div>
         <div>
           <label class="form-label">To</label>
@@ -127,7 +128,7 @@
                  hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
-                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
         </div>
 
         {# Loading spinner #}
@@ -179,7 +180,7 @@
                 hx-push-url="true"
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
-                class="px-3 py-1 border border-gray-200 rounded-full text-xs font-medium focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                class="px-3 py-1 border border-gray-200 rounded-full text-xs font-medium input-focus">
           <option value="" {% if not group_by %}selected{% endif %}>Flat</option>
           <option value="customer" {% if group_by == 'customer' %}selected{% endif %}>By Customer</option>
         </select>
@@ -217,7 +218,7 @@
     {# Assign with owner dropdown #}
     <div x-data="{ showAssign: false }" class="relative inline-block">
       <button @click="showAssign = !showAssign" type="button"
-              class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1">
+              class="btn btn-sm btn-secondary">
         Assign
         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
@@ -248,7 +249,7 @@
                 htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#modal-content', swap:'innerHTML', indicator:'#modal-loading'}).then(() => $dispatch('open-modal', {wide:true}));
               }
             "
-            class="px-3 py-1 text-xs font-medium bg-emerald-600 text-white border border-emerald-700 rounded-lg hover:bg-emerald-700 inline-flex items-center gap-1">
+            class="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
       </svg>

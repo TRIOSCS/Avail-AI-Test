@@ -3,7 +3,8 @@
   pricing history, followup alert, and copy table functionality.
   Receives: quote (Quote ORM), lines (list of QuoteLine), offers (list of Offer).
   Called by: htmx_views.py quote_detail_partial endpoint.
-  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+  Depends on: HTMX, Alpine.js, canonical accent design system (.card/.btn/input-focus —
+  see styles.css and shared/_macros.html).
 #}
 {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color %}
 {% from "htmx/partials/shared/_macros.html" import lazy_body %}
@@ -12,7 +13,7 @@
 <div class="page-fluid" x-data="{ showMarkup: false, showHistory: false }">
 
   {# Header card #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="card p-4 mb-6">
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
         <div class="flex items-center gap-3">
@@ -251,11 +252,11 @@
   </div>
 
   {# Global markup input #}
-  <div x-show="showMarkup" x-collapse x-cloak class="mb-4 bg-white border border-brand-200 rounded-lg p-4">
+  <div x-show="showMarkup" x-collapse x-cloak class="card p-4 mb-4">
     <form hx-post="/v2/partials/quotes/{{ quote.id }}/apply-markup" hx-target="#main-content" class="flex flex-wrap items-center gap-3">
       <label class="text-sm font-medium text-gray-700">Markup %:</label>
       <input type="number" name="markup_pct" step="0.1" value="25"
-             class="w-24 px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+             class="w-24 px-3 py-1.5 border border-brand-200 rounded-lg text-sm input-focus">
       <button type="submit" data-loading-disable
               class="btn-primary btn-sm">
         {{ loading_spinner("h-3 w-3 mr-1 spinner inline") }}
@@ -317,27 +318,27 @@
         <div>
           <label class="block text-xs text-gray-600 mb-1">MPN</label>
           <input type="text" name="mpn" required placeholder="LM317T"
-                 class="w-32 px-2 py-1.5 text-sm border border-brand-200 rounded-lg font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-32 px-2 py-1.5 text-sm border border-brand-200 rounded-lg font-mono input-focus">
         </div>
         <div>
           <label class="block text-xs text-gray-600 mb-1">Manufacturer</label>
           <input type="text" name="manufacturer" placeholder="TI"
-                 class="w-28 px-2 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-28 px-2 py-1.5 text-sm border border-brand-200 rounded-lg input-focus">
         </div>
         <div>
           <label class="block text-xs text-gray-600 mb-1">Qty</label>
           <input type="number" name="qty" value="1" min="1"
-                 class="w-20 px-2 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-20 px-2 py-1.5 text-sm border border-brand-200 rounded-lg input-focus">
         </div>
         <div>
           <label class="block text-xs text-gray-600 mb-1">Cost</label>
           <input type="number" name="cost_price" step="0.0001" placeholder="0.5000"
-                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-lg input-focus">
         </div>
         <div>
           <label class="block text-xs text-gray-600 mb-1">Sell</label>
           <input type="number" name="sell_price" step="0.0001" placeholder="0.7500"
-                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-lg input-focus">
         </div>
         <button type="submit" data-loading-disable
                 class="btn-primary btn-sm">
@@ -384,7 +385,7 @@
 
   {# Offer gallery #}
   {% if offers %}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="card p-4 mb-6">
     <h2 class="h2 mb-4 flex items-center gap-2">
       <svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
@@ -399,7 +400,7 @@
     </div>
   </div>
   {% else %}
-  <div class="bg-white border border-brand-200 rounded-lg p-8 mb-6 text-center">
+  <div class="card p-8 mb-6 text-center">
     <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
     </svg>

@@ -11,7 +11,8 @@
 
 ## App Shell
 
-Defined in `app/templates/base.html`. Fixed structure — do not modify for individual partials.
+Defined in `app/templates/base.html`. Fixed structure — do not modify for individual
+partials.
 
 ```
 ┌──────────────────────────────────────┐
@@ -26,27 +27,26 @@ Defined in `app/templates/base.html`. Fixed structure — do not modify for indi
 └──────────────────────────────────────┘
 ```
 
-`#main-content` has `padding-bottom: 52px` to avoid mobile nav overlap. Every partial must account for this — do not add extra bottom padding beyond what content needs.
+`#main-content` has `padding-bottom: 52px` to avoid mobile nav overlap. Every partial
+must account for this — do not add extra bottom padding beyond what content needs.
 
 ---
 
 ## Page Structure
 
-Standard partial layout for list views:
+Standard partial layout for list views uses the `page_header` macro for the title/CTA
+row — do not hand-roll it.
 
 ```html
-<div class="p-4 sm:p-6 space-y-4">
-  {# Page header #}
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-lg font-semibold text-gray-900">Vendors</h1>
-      <p class="text-sm text-gray-500">{{ total }} suppliers</p>
-    </div>
-    <button class="btn-primary btn-sm">Add Vendor</button>
-  </div>
+{% from "htmx/partials/shared/_macros.html" import page_header %}
 
-  {# Filters #}
-  <div class="filter-bar flex items-center gap-3">
+<div class="p-4 sm:p-6 space-y-4">
+  {% call page_header("Vendors", subtitle=total ~ " suppliers") %}
+    <button class="btn-primary btn-sm">Add Vendor</button>
+  {% endcall %}
+
+  {# Filters — plain flex row of .input controls; there is no .filter-bar class #}
+  <div class="flex items-center gap-3">
     <!-- filter inputs -->
   </div>
 
@@ -57,19 +57,24 @@ Standard partial layout for list views:
 </div>
 ```
 
+`page_header(title, subtitle=None)` renders title + optional subtitle on the left and
+any `{% call %}` block content (action buttons) right-aligned — this right-aligned CTA
+placement is the canonical layout for every list/detail page header, not a per-page
+choice.
+
 Detail views use tab pattern:
 
 ```html
 <div class="p-4 sm:p-6">
-  {# Detail header — always a card-padded #}
-  <div class="card-padded mb-4">
+  {# Detail header — always a .card, not "card-padded" (that class doesn't exist) #}
+  <div class="card mb-4">
     <!-- entity name, key stats, action buttons -->
   </div>
 
-  {# Tab nav #}
+  {# Tab nav — active state uses the accent ring, not brand #}
   <div class="flex border-b border-gray-200 mb-4 gap-1">
     <button class="px-4 py-2 text-sm font-medium border-b-2
-                   border-brand-500 text-brand-600"
+                   border-accent-500 text-accent-600"
             hx-get="/v2/partials/vendors/{{ id }}/activity"
             hx-target="#tab-content">Activity</button>
     <!-- more tabs -->
@@ -100,13 +105,23 @@ Use `space-y-4` between stacked sections. Use `gap-4` for grid/flex layouts.
 </div>
 ```
 
-Padding scale: `p-4` (16px) for mobile, `sm:p-6` (24px) for desktop. Never use `p-8` or higher — it eats too much of the data-dense screen space.
+Padding scale: `p-4` (16px) for mobile, `sm:p-6` (24px) for desktop. Never use `p-8` or
+higher — it eats too much of the data-dense screen space.
+
+Page-width policy (`styles.css`) — apply on a page shell's outermost wrapper in place of
+ad-hoc `max-w-*xl mx-auto`:
+- `.page-fluid` — dense data pages (tables, lists, dashboards, hubs) fill the viewport
+- `.page-readable` — reading/form pages cap at `max-w-6xl`, centered, for line-length comfort
+
+Short forms, document previews, and split-panel panes keep their own deliberately-narrow
+caps and are not re-classed onto either of these.
 
 ---
 
 ## Responsive Patterns
 
-The topbar + bottom nav layout means full-width content on all breakpoints. There is no sidebar — navigation is bottom-tab-style. Mobile-first:
+The topbar + bottom nav layout means full-width content on all breakpoints. There is no
+sidebar — navigation is bottom-tab-style. Mobile-first:
 
 ```html
 <!-- Stack on mobile, side-by-side on sm+ -->
@@ -120,17 +135,19 @@ The topbar + bottom nav layout means full-width content on all breakpoints. Ther
 <td class="hidden sm:table-cell">{{ v.hq_country }}</td>
 ```
 
-`app/static/htmx_mobile.css` handles mobile-specific overrides. Check it before adding mobile-targeted styles inline.
+`app/static/htmx_mobile.css` handles mobile-specific overrides. Check it before adding
+mobile-targeted styles inline.
 
 ---
 
 ## List + Detail Split
 
-AvailAI doesn't use a split-pane layout. List and detail are full-page HTMX swaps into `#main-content` with `hx-push-url` to update the browser URL.
+AvailAI doesn't use a split-pane layout. List and detail are full-page HTMX swaps into
+`#main-content` with `hx-push-url` to update the browser URL.
 
 ```html
 <!-- In list partial: each row navigates to detail -->
-<tr class="cursor-pointer hover:bg-brand-50"
+<tr class="cursor-pointer hover:bg-gray-50"
     hx-get="/v2/partials/requisitions/{{ r.id }}"
     hx-target="#main-content"
     hx-push-url="/v2/requisitions/{{ r.id }}">
@@ -141,9 +158,10 @@ AvailAI doesn't use a split-pane layout. List and detail are full-page HTMX swap
 <button hx-get="/v2/partials/requisitions/list"
         hx-target="#main-content"
         hx-push-url="/v2/requisitions"
-        class="text-sm text-brand-500 hover:text-brand-700 flex items-center gap-1">
+        class="text-sm text-accent-600 hover:text-accent-700 flex items-center gap-1">
   ← Back to Requisitions
 </button>
 ```
 
-**Never** use `window.history.back()` — HTMX partial swaps don't create real history entries.
+**Never** use `window.history.back()` — HTMX partial swaps don't create real history
+entries.

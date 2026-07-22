@@ -1,4 +1,5 @@
 {% from "htmx/partials/sourcing/_panel_macros.html" import collapse_header -%}
+{% from "htmx/partials/shared/_macros.html" import status_badge -%}
 {# OOB: update lead row highlight in left panel #}
 {% if lead %}
 <div id="lead-row-{{ lead.id }}" hx-swap-oob="true"
@@ -53,29 +54,23 @@
           {{ '%.0f'|format(lead.confidence_score) }}%
         </span>
         {# Safety badge #}
-        {% set safety_badge = {
-          'low_risk': 'bg-emerald-50 text-emerald-700',
-          'medium_risk': 'bg-amber-50 text-amber-700',
-          'high_risk': 'bg-rose-50 text-rose-700',
-          'unknown': 'bg-gray-100 text-gray-600'
+        {% set _safety_map = {
+          'low_risk': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          'medium_risk': 'bg-amber-50 text-amber-700 border-amber-200',
+          'high_risk': 'bg-rose-50 text-rose-700 border-rose-200',
+          'unknown': 'bg-gray-100 text-gray-600 border-gray-200'
         } %}
-        <span class="px-2 py-0.5 text-[11px] font-medium rounded-full
-                     {{ safety_badge.get(lead.vendor_safety_band, 'bg-gray-100 text-gray-600') }}">
-          {{ lead.vendor_safety_band|replace('_', ' ')|title if lead.vendor_safety_band else 'Unknown' }}
-        </span>
+        {{ status_badge(lead.vendor_safety_band or 'unknown', status_map=_safety_map) }}
         {# Buyer status #}
-        {% set status_colors = {
-          'new': 'bg-brand-100 text-brand-600',
-          'contacted': 'bg-amber-50 text-amber-700',
-          'has_stock': 'bg-emerald-50 text-emerald-700',
-          'no_stock': 'bg-gray-100 text-gray-600',
-          'bad_lead': 'bg-rose-50 text-rose-700',
-          'do_not_contact': 'bg-rose-50 text-rose-700'
+        {% set _buyer_status_map = {
+          'new': 'bg-brand-100 text-brand-600 border-brand-200',
+          'contacted': 'bg-amber-50 text-amber-700 border-amber-200',
+          'has_stock': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          'no_stock': 'bg-gray-100 text-gray-600 border-gray-200',
+          'bad_lead': 'bg-rose-50 text-rose-700 border-rose-200',
+          'do_not_contact': 'bg-rose-50 text-rose-700 border-rose-200'
         } %}
-        <span class="px-2 py-0.5 text-[11px] font-medium rounded-full
-                     {{ status_colors.get(lead.buyer_status, 'bg-gray-100 text-gray-600') }}">
-          {{ lead.buyer_status|replace('_', ' ')|title }}
-        </span>
+        {{ status_badge(lead.buyer_status, status_map=_buyer_status_map) }}
       </div>
     </div>
 
@@ -155,10 +150,8 @@
       {% if best_sighting.evidence_tier %}
       <div>
         <span class="text-[10px] text-gray-400">Tier</span>
-        {% set tier_colors = {'T1': 'bg-emerald-50 text-emerald-700', 'T2': 'bg-sky-50 text-sky-700', 'T3': 'bg-violet-50 text-violet-700', 'T4': 'bg-amber-50 text-amber-700'} %}
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ tier_colors.get(best_sighting.evidence_tier, 'bg-gray-100 text-gray-600') }}">
-          {{ best_sighting.evidence_tier }}
-        </span>
+        {% set _tier_map_colors = {'T1': 'bg-emerald-50 text-emerald-700 border-emerald-200', 'T2': 'bg-sky-50 text-sky-700 border-sky-200', 'T3': 'bg-violet-50 text-violet-700 border-violet-200', 'T4': 'bg-amber-50 text-amber-700 border-amber-200'} %}
+        {{ status_badge(best_sighting.evidence_tier, status_map=_tier_map_colors) }}
       </div>
       {% endif %}
     </div>
@@ -259,10 +252,8 @@
             <p class="text-[11px] text-gray-600 mt-0.5 line-clamp-2">{{ ev.explanation }}</p>
             <div class="flex items-center gap-2 mt-0.5">
               <span class="text-[10px] text-gray-400">{% if ev.observed_at %}{{ ev.observed_at | timesince }}{% endif %}</span>
-              {% set verify_colors = {'raw': 'bg-gray-100 text-gray-600', 'inferred': 'bg-brand-100 text-brand-600', 'buyer_confirmed': 'bg-emerald-50 text-emerald-700', 'rejected': 'bg-rose-50 text-rose-700'} %}
-              <span class="px-1 py-0.5 text-[9px] font-medium rounded {{ verify_colors.get(ev.verification_state, 'bg-gray-100 text-gray-600') }}">
-                {{ ev.verification_state|replace('_', ' ')|title }}
-              </span>
+              {% set _verify_map = {'raw': 'bg-gray-100 text-gray-600 border-gray-200', 'inferred': 'bg-brand-100 text-brand-600 border-brand-200', 'buyer_confirmed': 'bg-emerald-50 text-emerald-700 border-emerald-200', 'rejected': 'bg-rose-50 text-rose-700 border-rose-200'} %}
+              {{ status_badge(ev.verification_state, status_map=_verify_map) }}
             </div>
           </div>
         </div>
