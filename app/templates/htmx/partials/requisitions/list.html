@@ -272,7 +272,7 @@
         <thead class="bg-white">
           <tr>
             <th class="px-3 py-3 w-10">
-              <input aria-label="Select all requisitions" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
+              <input aria-label="Select all requisitions" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
             {# Role-based column order: sales omits Owner, puts Status before Parts; non-sales includes Owner and puts Parts/Offers before Status #}

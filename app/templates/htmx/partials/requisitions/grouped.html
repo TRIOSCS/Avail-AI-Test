@@ -38,7 +38,7 @@
           <input type="checkbox" aria-label="Select requisition {{ rg.req.name }}" :value="{{ rg.req.id }}"
                  @change="$event.target.checked ? selectedIds.add({{ rg.req.id }}) : selectedIds.delete({{ rg.req.id }}); selectedIds = new Set(selectedIds)"
                  :checked="selectedIds.has({{ rg.req.id }})"
-                 class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+                 class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus">
           <button type="button" @click="collapsed[gkey] = !collapsed[gkey]"
                   :aria-expanded="(!collapsed[gkey]).toString()"
                   class="flex items-center gap-2 text-left flex-1 min-w-0">

@@ -95,7 +95,7 @@
               }).catch(function(){
                 var t = Alpine.store('toast'); t.message = 'Could not save notes'; t.type = 'error'; t.show = true;
               })"
-              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400">{{ ticket.admin_notes or '' }}</textarea>
+              class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm input-focus placeholder-gray-400">{{ ticket.admin_notes or '' }}</textarea>
 
     <div class="flex items-center gap-3 mt-3 mb-4">
       <button hx-post="/api/trouble-tickets/{{ ticket.id }}/generate-prompt"

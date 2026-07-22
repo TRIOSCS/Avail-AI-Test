@@ -41,7 +41,7 @@
               hx-target="{{ target }}" hx-push-url="{{ push_url }}"
               hx-include="#sourcing-filters"
               name="sort"
-              class="text-[11px] border border-gray-300 rounded px-1.5 py-0.5 focus:ring-brand-500 focus:border-brand-500">
+              class="text-[11px] border border-gray-300 rounded px-1.5 py-0.5 input-focus">
         {% for val, label in [('best', 'Best'), ('freshest', 'Freshest'), ('safest', 'Safest'), ('contact', 'Contact'), ('proven', 'Proven')] %}
         <option value="{{ val }}" {{ 'selected' if f_sort == val }}>{{ label }}</option>
         {% endfor %}
@@ -70,7 +70,7 @@
                  hx-get="{{ endpoint }}"
                  hx-target="{{ target }}" hx-push-url="{{ push_url }}"
                  hx-include="#sourcing-filters"
-                 class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 w-3 h-3">
+                 class="rounded border-gray-300 text-brand-500 input-focus w-3 h-3">
           {% with source_type=src %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}
         </label>
         {% endfor %}

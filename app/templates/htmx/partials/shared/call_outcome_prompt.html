@@ -22,7 +22,7 @@
     <div class="grid grid-cols-2 gap-2 mb-3">
       <template x-for="chip in $store.callOutcome.chips" :key="chip.value">
         <button type="button"
-                class="px-3 py-2 rounded-lg border text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-400 border-zinc-200 text-zinc-700 bg-white hover:bg-zinc-50"
+                class="px-3 py-2 rounded-lg border text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500 border-zinc-200 text-zinc-700 bg-white hover:bg-zinc-50"
                 :aria-label="chip.label"
                 @click="$store.callOutcome.submit(chip.value)">
           <span x-text="chip.label"></span>
@@ -34,11 +34,11 @@
              x-model="$store.callOutcome.note"
              maxlength="500"
              placeholder="Optional note…"
-             class="flex-1 text-xs border border-zinc-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-400"
+             class="flex-1 text-xs border border-zinc-200 rounded-lg px-2 py-1.5 input-focus"
              @keydown.enter.prevent
              aria-label="Optional call note">
       <button type="button"
-              class="text-xs text-zinc-400 hover:text-zinc-600 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded"
+              class="text-xs text-zinc-400 hover:text-zinc-600 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 rounded"
               @click="$store.callOutcome.dismiss()"
               aria-label="Skip">
         Skip

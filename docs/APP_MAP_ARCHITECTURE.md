@@ -211,8 +211,10 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
   (`.h1` + optional `.text-secondary` + right-aligned action slot via `{% call %}`). Status
   pills route through the shared `badge()`/`status_badge()`/`req_status_badge()`/
   `quote_status_badge()` macros (which preserve semantic status colors) rather than inline
-  color-map dicts. `tests/test_design_system_drift.py` guards these invariants (page_header
-  present, no gray focus rings in shared partials, canonical classes defined, no dark mode).
+  color-map dicts. Form-control focus rings are the `.input-focus` mixin (accent) app-wide —
+  the legacy gray `focus:ring-brand-*` rings are fully retired. `tests/test_design_system_drift.py`
+  guards these invariants (page_header present, no gray-brand focus rings anywhere in
+  `app/templates/`, canonical classes defined, no dark mode).
 - **Lazy-load wrapper:** `lazy_body` macro (`partials/shared/_macros.html`) is the mandated
   wrapper for any faceted/lazy-load sub-container (spinner/skeleton `caller()` block ->
   `hx-get` on `trigger` swapped into an explicit `hx-target`, defaulting to `this`) — used by

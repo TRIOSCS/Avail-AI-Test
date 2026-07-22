@@ -5,9 +5,10 @@ markup) can't silently return.
 What it guards:
   1. The shared `page_header` macro (the canonical page-title/subtitle block used across
      every partial) still exists in shared/_macros.html.
-  2. Shared partials (app/templates/htmx/partials/shared/) never reintroduce the retired
-     gray `focus:ring-brand-500` / `focus:border-brand-500` classes on form controls —
-     these were converted to the accent color / the `.input-focus` mixin.
+  2. No template anywhere reintroduces the retired gray `focus:ring-brand-*` /
+     `focus:border-brand-*` classes on form controls — the whole app was converted to the
+     accent focus color / the `.input-focus` mixin, so the interactive focus ring is a
+     single azure across every module.
   3. The canonical component classes (.card, .btn-primary, .badge, .table-wrapper,
      .data-table, .h1, .input, .font-data) stay defined in app/static/styles.css — the
      macros and every page sweep depend on these; dropping one silently breaks styling
@@ -28,12 +29,13 @@ import re
 from pathlib import Path
 
 # ─────────────────────────────────────────────────────────────────────────
-# Enforced surface — edit this list to widen coverage in later PRs. Each
-# entry is a directory (relative to repo root) that guard #2 (and any future
-# file-walking guard reusing this constant) scans recursively for *.html.
+# Enforced surface for the focus-ring guard. The gray-brand→accent focus
+# conversion is complete across the WHOLE template tree, so the guard enforces
+# the full app — narrow this list only if a future carve-out is ever needed
+# (document why here if so).
 # ─────────────────────────────────────────────────────────────────────────
-_ENFORCED_SHARED_ROOTS: list[str] = [
-    "app/templates/htmx/partials/shared",
+_FOCUS_RING_ENFORCED_ROOTS: list[str] = [
+    "app/templates",
 ]
 
 _ALL_TEMPLATES_ROOT = "app/templates"
@@ -56,24 +58,32 @@ def test_page_header_macro_exists():
     )
 
 
-def test_shared_partials_no_gray_brand_focus_ring():
-    """Shared form-control partials must use the accent focus ring / .input-focus mixin,
-    not the retired gray-brand focus classes.
+def test_no_gray_brand_focus_rings_app_wide():
+    """Every form control across the app must use the accent focus ring / .input-focus
+    mixin, not the retired gray-brand focus classes — the focus ring is one azure app-
+    wide.
 
-    Enforced surface is app/templates/htmx/partials/shared/ (see _ENFORCED_SHARED_ROOTS
-    above) — widen that list to extend coverage to more directories in a later PR
-    without touching this test body.
+    Enforced across the whole template tree (see _FOCUS_RING_ENFORCED_ROOTS above); the
+    gray `brand-500/400/300` focus rings were fully converted, so any reappearance is
+    drift.
     """
-    retired = ("focus:ring-brand-500", "focus:border-brand-500")
+    retired = (
+        "focus:ring-brand-500",
+        "focus:border-brand-500",
+        "focus:ring-brand-400",
+        "focus:border-brand-400",
+        "focus:ring-brand-300",
+        "focus:border-brand-300",
+    )
     offenders: list[str] = []
-    for path in _html_files(_ENFORCED_SHARED_ROOTS):
+    for path in _html_files(_FOCUS_RING_ENFORCED_ROOTS):
         text = path.read_text()
         for needle in retired:
             if needle in text:
                 offenders.append(f"{path}: contains retired class {needle!r}")
     assert not offenders, (
-        "retired gray-brand focus-ring classes reappeared in shared partials — use the "
-        "accent focus ring / .input-focus mixin instead:\n" + "\n".join(offenders)
+        "retired gray-brand focus-ring classes reappeared — use the accent focus ring / "
+        ".input-focus mixin instead:\n" + "\n".join(offenders)
     )
 
 
@@ -102,7 +112,7 @@ def test_no_dark_mode_variants_in_templates():
 
     Verified clean across the FULL app/templates/ tree today (zero hits), so the guard
     is scoped to the whole tree rather than narrowed to shared/ only — if a future sweep
-    ever needs to narrow this, document why here and switch to _ENFORCED_SHARED_ROOTS.
+    ever needs to narrow this, document why here and use a scoped roots list.
     """
     dark_variant = re.compile(r'class="[^"]*\bdark:')
     offenders: list[str] = []

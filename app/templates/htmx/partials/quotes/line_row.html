@@ -21,29 +21,29 @@
         <div>
           <label class="block text-secondary mb-0.5">MPN</label>
           <input type="text" name="mpn" value="{{ line.mpn }}"
-                 class="w-28 px-2 py-1 text-sm border border-brand-200 rounded font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-28 px-2 py-1 text-sm border border-brand-200 rounded font-mono input-focus">
         </div>
         <div>
           <label class="block text-secondary mb-0.5">Mfr</label>
           <input type="text" name="manufacturer" value="{{ line.manufacturer or '' }}"
-                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded input-focus">
         </div>
         <div>
           <label class="block text-secondary mb-0.5">Qty</label>
           <input type="number" name="qty" value="{{ line.qty or 0 }}"
-                 class="w-20 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-20 px-2 py-1 text-sm border border-brand-200 rounded input-focus">
         </div>
         <div>
           <label class="block text-secondary mb-0.5">Cost</label>
           <input type="number" name="cost_price" value="{{ '{:.4f}'.format(line.cost_price|float) if line.cost_price else '' }}"
                  step="0.0001"
-                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded input-focus">
         </div>
         <div>
           <label class="block text-secondary mb-0.5">Sell</label>
           <input type="number" name="sell_price" value="{{ '{:.4f}'.format(line.sell_price|float) if line.sell_price else '' }}"
                  step="0.0001"
-                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded input-focus">
         </div>
         <div class="flex gap-1">
           <button type="submit" class="btn btn-primary btn-sm">Save</button>

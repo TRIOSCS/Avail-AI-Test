@@ -11,7 +11,7 @@
     <label class="flex items-center gap-2 text-sm text-gray-700">
       <input type="checkbox" name="checked_items" value="{{ item.label }}"
              {% if item.prechecked %}checked{% endif %}
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+             class="rounded border-gray-300 text-brand-600 input-focus">
       <span>{{ item.label }}</span>
       {% if item.prechecked %}<span class="text-[11px] text-amber-600">missing</span>{% endif %}
     </label>
@@ -22,7 +22,7 @@
       <div class="flex items-center gap-2">
         <input type="text" name="custom_items" x-model="customItems[idx]"
                placeholder="Add your own request…"
-               class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+               class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded input-focus">
         <button type="button" x-show="customItems.length > 1" @click="customItems.splice(idx, 1)"
                 class="text-gray-400 hover:text-rose-600 text-sm" aria-label="Remove item">&times;</button>
       </div>

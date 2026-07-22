@@ -13,25 +13,25 @@
   <div>
     <label class="block text-xs text-gray-600 mb-1">Vendor Name *</label>
     <input type="text" name="vendor_name" required value="{{ p.get('vendor_name', '') }}"
-           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
            placeholder="e.g. Arrow Electronics">
   </div>
   <div>
     <label class="block text-xs text-gray-600 mb-1">MPN *</label>
     <input type="text" name="mpn" required value="{{ p.get('mpn') or mpn_default or '' }}"
-           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
            placeholder="e.g. LM317T">
   </div>
   <div>
     <label class="block text-xs text-gray-600 mb-1">Qty Available</label>
     <input type="number" name="qty_available" min="1" value="{{ p.get('qty_available', '') }}"
-           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
            placeholder="5000">
   </div>
   <div>
     <label class="block text-xs text-gray-600 mb-1">Unit Price (USD)</label>
     <input type="number" name="unit_price" step="0.0001" min="0" value="{{ p.get('unit_price', '') }}"
-           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+           class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
            placeholder="0.4500">
   </div>
 </div>
@@ -49,14 +49,14 @@
       <div>
         <label class="block text-xs text-gray-600 mb-1">Manufacturer</label>
         <input type="text" name="manufacturer" x-model="manufacturer" value="{{ p.get('manufacturer', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="e.g. Texas Instruments">
       </div>
       {{ text_field('Lead Time', 'lead_time', '2-3 weeks', p) }}
       <div>
         <label class="block text-xs text-gray-600 mb-1">Date Code</label>
         <input type="text" name="date_code" x-model="date_code" value="{{ p.get('date_code', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="2025+">
       </div>
     </div>
@@ -66,19 +66,19 @@
       <div>
         <label class="block text-xs text-gray-600 mb-1">MOQ</label>
         <input type="number" name="moq" min="1" value="{{ p.get('moq', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="1">
       </div>
       <div>
         <label class="block text-xs text-gray-600 mb-1">SPQ</label>
         <input type="number" name="spq" min="1" value="{{ p.get('spq', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="1">
       </div>
       <div>
         <label class="block text-xs text-gray-600 mb-1">Packaging</label>
         <input type="text" name="packaging" x-model="packaging" value="{{ p.get('packaging', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="e.g. Tape & Reel">
       </div>
       {{ text_field('Firmware', 'firmware', 'Rev / version', p) }}
@@ -92,7 +92,7 @@
       <div>
         <label class="block text-xs text-gray-600 mb-1">Valid Until</label>
         <input type="date" name="valid_until" value="{{ p.get('valid_until', '') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus">
       </div>
     </div>
 
