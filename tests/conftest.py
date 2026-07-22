@@ -647,13 +647,21 @@ def client(db_session: Session, test_user: User) -> TestClient:
 def manager_client(db_session: Session, manager_user: User) -> TestClient:
     """FastAPI TestClient with auth overridden to return manager_user.
 
-    Manager holds every _INTERACTIVE_DEFAULTS capability PLUS AccessKey.EXPORT_BULK_DATA
-    (ISS-022) — used by bulk-dataset-export tests (companies/vendors/requisitions/
-    sightings) where the plain buyer `client` fixture now gets 403.
+    Manager holds every _INTERACTIVE_DEFAULTS capability. AccessKey.EXPORT_BULK_DATA is
+    admin-only by default (ISS-028 — supersedes ISS-022's manager+admin default), so this
+    fixture grants manager_user an explicit per-user override for it — used by
+    bulk-dataset-export CONTENT tests (companies/vendors/requisitions/sightings row/
+    header/filter correctness) where the plain buyer `client` fixture now gets 403. The
+    manager-denied-by-default / override-grants-through gate behavior itself is covered
+    by tests/test_export_bulk_data_gate.py and tests/test_access_control.py.
     """
+    from app.constants import AccessKey
     from app.database import get_db
     from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
     from app.main import app
+
+    manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+    db_session.commit()
 
     def _override_db():
         yield db_session

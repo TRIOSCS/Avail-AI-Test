@@ -165,27 +165,35 @@
              class='input'>
     </div>
 
-    {# ── Role select — CANONICAL_ROLES is the single source ──────────────── #}
-    <div>
+    {# ── Role select — CANONICAL_ROLES (roles global) is the single source; labels
+       come from the contact_role_labels global (app/constants.py CONTACT_ROLE_LABELS,
+       consolidated single label source, ISS-029). Selecting "Other" reveals a
+       free-text write-in (contact_role_custom) — the write path
+       (app/routers/htmx/companies/contacts.py) stores the trimmed custom string
+       (capped to 50 chars) in place of the literal "other" when non-empty. An
+       already-custom stored value (not one of the canonical roles) is treated as
+       "Other" on open, with the custom text prefilled so it round-trips. #}
+    {% set _role_is_custom = contact and contact.contact_role and contact.contact_role not in roles %}
+    {% set _role_other_selected = contact and (contact.contact_role == 'other' or _role_is_custom) %}
+    <div x-data='{"roleOther": {{ _role_other_selected | tojson }} }'>
       <label class='form-label'>Role</label>
-      {% set role_labels = {
-        'specifier':  'Specifier',
-        'buyer_po':   'Buyer / PO',
-        'ap_payer':   'AP / Payer',
-        'logistics':  'Logistics',
-        'exec':       'Exec',
-        'other':      'Other',
-      } %}
       <select name='contact_role'
+              @change='roleOther = ($el.value === "other")'
               class='input'>
         <option value=''>— clear —</option>
         {% for r in roles %}
         <option value='{{ r }}'
-          {% if contact and contact.contact_role == r %}selected{% endif %}>
-          {{ role_labels.get(r, r | replace('_', ' ') | title) }}
+          {% if contact and (contact.contact_role == r or (r == 'other' and _role_is_custom)) %}selected{% endif %}>
+          {{ contact_role_labels.get(r, r) }}
         </option>
         {% endfor %}
       </select>
+      <div x-show='roleOther' x-cloak class='mt-1.5'>
+        <input type='text' name='contact_role_custom' maxlength='50'
+               placeholder='Describe the role…'
+               value='{{ ((contact.contact_role if _role_is_custom else "") if contact else "") | e }}'
+               class='input'>
+      </div>
     </div>
 
     {# ── Priority checkbox ───────────────────────────────────────────────── #}

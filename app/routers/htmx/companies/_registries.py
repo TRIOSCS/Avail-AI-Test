@@ -221,12 +221,44 @@ def apply_contact_field(
 def _validate_role(role_raw: str) -> str | None:
     """Validate a contact_role value: blank → None, unknown → raises HTTPException 400.
 
-    Used by set_contact_role chip endpoint AND edit_site_contact form endpoint so
-    both paths share one source of truth for canonical-role enforcement.
+    Used by set_contact_role chip endpoint AND the single-field inline contact_role
+    editor (contact_field_post) so both paths share one source of truth for
+    canonical-role enforcement. Neither of those two surfaces has a companion
+    free-text write-in control — resolve_contact_role (below) is for the surfaces
+    that do.
     """
     cleaned = (role_raw or "").strip()
     if not cleaned:
         return None
+    if cleaned not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{cleaned}'. Valid: {sorted(_VALID_ROLES)}")
+    return cleaned
+
+
+# Cap matches SiteContact.contact_role's String(50) column (app/models/crm.py).
+CONTACT_ROLE_CUSTOM_MAX_LEN = 50
+
+
+def resolve_contact_role(role_raw: str, custom_raw: str = "") -> str | None:
+    """Resolve a submitted contact_role + its OTHER write-in companion (ISS-029).
+
+    Used by the two full contact create/edit handlers (contacts_tab_create,
+    edit_site_contact) whose form carries BOTH `contact_role` (the <select>) and
+    `contact_role_custom` (the free-text write-in, shown only when "other" is
+    selected). Rules:
+      - blank role → None (cleared)
+      - role == "other" AND a non-empty trimmed custom string → that string,
+        capped to CONTACT_ROLE_CUSTOM_MAX_LEN (matches the String(50) column)
+      - role == "other" with an empty/whitespace-only custom string → plain "other"
+      - any other canonical ContactRole value → that value
+      - anything else → HTTPException(400) (mirrors _validate_role)
+    """
+    cleaned = (role_raw or "").strip()
+    if not cleaned:
+        return None
+    if cleaned == "other":
+        custom = (custom_raw or "").strip()
+        return custom[:CONTACT_ROLE_CUSTOM_MAX_LEN] if custom else "other"
     if cleaned not in _VALID_ROLES:
         raise HTTPException(400, f"Invalid contact_role '{cleaned}'. Valid: {sorted(_VALID_ROLES)}")
     return cleaned

@@ -432,6 +432,24 @@ async def settings_data_ops_tab(
     return _render_data_ops(request, user, db)
 
 
+@router.get("/v2/partials/settings/data-export", response_class=HTMLResponse)
+async def settings_data_export_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Data export tab — admin-only bulk dataset export links (ISS-028).
+
+    Links to the existing, unchanged EXPORT_BULK_DATA-gated download routes; this tab is
+    the ONLY place bulk export controls appear in the app.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    ctx = _base_ctx(request, user, "settings")
+    return template_response("htmx/partials/settings/data_export.html", ctx)
+
+
 @router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
 async def settings_api_keys_tab(
     request: Request,

@@ -1,9 +1,11 @@
-"""tests/test_export_bulk_data_gate.py — ISS-022 role-matrix guard for bulk dataset
+"""tests/test_export_bulk_data_gate.py — ISS-028 role-matrix guard for bulk dataset
 export routes.
 
-Bulk dataset exports (companies, contacts, vendors, requisitions, sightings) must be
-manager/admin only (AccessKey.EXPORT_BULK_DATA). Quote-builder single-deal Excel/PDF
-exports stay open to sales via the unaffected AccessKey.EXPORT_DATA gate.
+Bulk dataset exports (companies, contacts, vendors, requisitions, sightings) are
+admin-only by default (AccessKey.EXPORT_BULK_DATA) — ISS-028 supersedes ISS-022's
+manager+admin default; a manager may still be granted the capability via an explicit
+per-user access_overrides grant (mirrors manage_connectors). Quote-builder single-deal
+Excel/PDF exports stay open to sales via the unaffected AccessKey.EXPORT_DATA gate.
 
 Called by: pytest
 Depends on: app.constants (AccessKey), app.dependencies (require_access, require_user),
@@ -54,8 +56,8 @@ def _role_users(test_user, sales_user, trader_user, manager_user, admin_user):
     }
 
 
-_DENIED_ROLES = ("buyer", "sales", "trader")
-_ALLOWED_ROLES = ("manager", "admin")
+_DENIED_ROLES = ("buyer", "sales", "trader", "manager")
+_ALLOWED_ROLES = ("admin",)
 
 
 def _assert_csv_export(resp, filename: str, first_col: str):
@@ -156,10 +158,68 @@ class TestSightingsExportGate:
             _drop_overrides(c)
 
 
+class TestManagerOverrideGrantsExportAccess:
+    """ISS-028: a manager is 403 by default, but an admin-granted per-user
+    access_overrides={'export_bulk_data': True} still lets that manager through on
+    every one of the five bulk export routes — mirrors the manage_connectors
+    per-user-override pattern."""
+
+    def _grant(self, db_session, manager_user):
+        manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+        db_session.commit()
+
+    def test_companies_csv_200_with_override(self, db_session, manager_user):
+        self._grant(db_session, manager_user)
+        c = _client_as(db_session, manager_user)
+        try:
+            _assert_csv_export(c.get("/v2/customers/export.csv"), "customers.csv", "name")
+        finally:
+            _drop_overrides(c)
+
+    def test_contacts_csv_200_with_override(self, db_session, manager_user):
+        self._grant(db_session, manager_user)
+        c = _client_as(db_session, manager_user)
+        try:
+            _assert_csv_export(c.get("/v2/customers/contacts/export.csv"), "contacts.csv", "full_name")
+        finally:
+            _drop_overrides(c)
+
+    def test_vendors_export_200_with_override(self, db_session, manager_user):
+        self._grant(db_session, manager_user)
+        c = _client_as(db_session, manager_user)
+        try:
+            _assert_csv_export(c.get("/v2/partials/vendors/export"), "vendors_export.csv", "Vendor")
+        finally:
+            _drop_overrides(c)
+
+    def test_requisitions_export_200_with_override(self, db_session, manager_user):
+        self._grant(db_session, manager_user)
+        c = _client_as(db_session, manager_user)
+        try:
+            _assert_csv_export(c.get("/v2/partials/requisitions/export"), "requisitions_export.csv", "Name")
+        finally:
+            _drop_overrides(c)
+
+    def test_sightings_export_200_with_override(self, db_session, manager_user):
+        self._grant(db_session, manager_user)
+        c = _client_as(db_session, manager_user)
+        try:
+            _assert_csv_export(c.get("/v2/sightings/export"), "sightings_export.csv", "Requirement ID")
+        finally:
+            _drop_overrides(c)
+
+
 class TestManagerAccessDefault:
-    def test_manager_has_export_bulk_data_by_default(self, manager_user):
+    def test_manager_lacks_export_bulk_data_by_default(self, manager_user):
         from app.dependencies import user_has_access
 
+        assert user_has_access(manager_user, AccessKey.EXPORT_BULK_DATA) is False
+
+    def test_manager_override_grants_export_bulk_data(self, db_session, manager_user):
+        from app.dependencies import user_has_access
+
+        manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+        db_session.commit()
         assert user_has_access(manager_user, AccessKey.EXPORT_BULK_DATA) is True
 
     def test_buyer_sales_trader_lack_export_bulk_data_by_default(self, test_user, sales_user, trader_user):
@@ -168,17 +228,28 @@ class TestManagerAccessDefault:
         for user in (test_user, sales_user, trader_user):
             assert user_has_access(user, AccessKey.EXPORT_BULK_DATA) is False, user.role
 
+    def test_admin_has_export_bulk_data_by_default(self, admin_user):
+        from app.dependencies import user_has_access
+
+        assert user_has_access(admin_user, AccessKey.EXPORT_BULK_DATA) is True
+
 
 class TestCanExportBulkDataJinjaGlobal:
-    """can_export_bulk_data — the Jinja global the list toolbars call directly — must
-    mirror user_has_access for real users AND degrade to False (never raise) for a non-
-    User stand-in, so template-compilation smoke tests rendering with a bare/fake
-    context never blow up."""
+    """can_export_bulk_data — the Jinja global the admin-only Settings "Data export"
+    page calls (ISS-028; no list toolbar uses it anymore) — must mirror user_has_access
+    for real users AND degrade to False (never raise) for a non-User stand-in, so
+    template-compilation smoke tests rendering with a bare/fake context never blow
+    up."""
 
-    def test_true_for_manager(self, manager_user):
+    def test_true_for_admin(self, admin_user):
         from app.dependencies import can_export_bulk_data
 
-        assert can_export_bulk_data(manager_user) is True
+        assert can_export_bulk_data(admin_user) is True
+
+    def test_false_for_manager_by_default(self, manager_user):
+        from app.dependencies import can_export_bulk_data
+
+        assert can_export_bulk_data(manager_user) is False
 
     def test_false_for_buyer(self, test_user):
         from app.dependencies import can_export_bulk_data

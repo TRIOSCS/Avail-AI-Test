@@ -397,6 +397,79 @@ class TestCompanyActivityTab:
             "rfq_sent ActivityLog must not double-show alongside RfqContact"
         )
 
+    def test_orphaned_requisition_activity_not_leaked_into_company_tab(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """ISS-030 leak-scenario regression: an ActivityLog row with company_id=None but
+        requisition_id belonging to this company's requisition must NOT be attributed to
+        the company. The old handler OR'd company_id with requisition_id.in_(company's
+        reqs), which leaked internal colleagues' RFQ-thread replies and unrelated
+        requisition events onto the customer's Activity tab."""
+        from app.models import Company
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Leak Scenario Co", account_type="customer", account_owner_id=test_user.id)
+        db_session.add(company)
+        db_session.flush()
+
+        req = Requisition(
+            name="Leak Req",
+            status="open",
+            created_by=test_user.id,
+            company_id=company.id,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        # Orphaned row: requisition_id set, company_id NULL — e.g. an internal
+        # colleague's reply on the RFQ thread, not customer correspondence.
+        leaked = ActivityLog(
+            requisition_id=req.id,
+            activity_type="email_received",
+            channel="email",
+            summary="Internal colleague replied on the RFQ thread",
+            contact_email="colleague@trioscs.com",
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(leaked)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Internal colleague replied on the RFQ thread" not in resp.text, (
+            "Orphaned requisition-only ActivityLog row must not leak onto the company tab"
+        )
+        assert "No activity recorded" in resp.text
+
+    def test_ai_flagged_not_meaningful_excluded_from_company_tab(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """A row the AI quality pass classified is_meaningful=False (OOO/bounce/blank
+        noise) must not render on the company Activity tab."""
+        from app.models import Company
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Noise Co", account_type="customer", account_owner_id=test_user.id)
+        db_session.add(company)
+        db_session.flush()
+
+        noise = ActivityLog(
+            company_id=company.id,
+            activity_type="email_received",
+            channel="email",
+            summary="Out of office auto-reply",
+            is_meaningful=False,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(noise)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Out of office auto-reply" not in resp.text
+        assert "No activity recorded" in resp.text
+
 
 # ── Phase 6: AI Insights panels ─────────────────────────────────────
 

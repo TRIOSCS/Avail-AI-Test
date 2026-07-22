@@ -354,8 +354,17 @@ class AccessKey(StrEnum):
     MANAGE_CONNECTORS = "manage_connectors"
     OPS_VERIFICATION = "ops_verification"
     # Bulk dataset exports (companies, contacts, vendors, requisitions, sightings) —
-    # manager/admin only (ISS-022). Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA:
-    # single-deal quote-builder Excel/PDF exports stay open to sales via EXPORT_DATA.
+    # admin only by default (ISS-028; supersedes ISS-022's manager+admin default),
+    # surfaced solely via the admin-gated Settings "Data export" page — no export UI
+    # anywhere else. Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA: single-deal
+    # quote-builder Excel/PDF exports stay open to sales via EXPORT_DATA.
+    #
+    # export_bulk_data is INTENTIONALLY excluded from every non-admin role default,
+    # mirroring manage_connectors: bulk data extraction is a data-exfiltration control,
+    # so a blanket role default would let every manager pull full customer/vendor
+    # datasets. It is a deliberate, per-user grant: an admin always qualifies
+    # (user_has_access short-circuits on admin), and an admin may grant it to a
+    # specific trusted non-admin via an explicit access override.
     EXPORT_BULK_DATA = "export_bulk_data"
 
 
@@ -424,9 +433,7 @@ ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
     UserRole.BUYER: _INTERACTIVE_DEFAULTS,
     UserRole.SALES: _INTERACTIVE_DEFAULTS,
     UserRole.TRADER: _INTERACTIVE_DEFAULTS,
-    # Managers additionally get EXPORT_BULK_DATA (ISS-022) — bulk dataset exports
-    # (companies, contacts, vendors, requisitions, sightings) are manager+admin only.
-    UserRole.MANAGER: _INTERACTIVE_DEFAULTS | {AccessKey.EXPORT_BULK_DATA},
+    UserRole.MANAGER: _INTERACTIVE_DEFAULTS,
     UserRole.ADMIN: frozenset(AccessKey),  # admin has everything
     UserRole.AGENT: frozenset(),  # service account: no interactive access
 }
@@ -889,18 +896,58 @@ class ContactRole(StrEnum):
     """Canonical CRM site-contact buying-role taxonomy (Mike's vocabulary).
 
     Single source of truth for the role dropdown on the customer-tab contact card.
-    `tuple(ContactRole)` drives both CANONICAL_ROLES (app/routers/htmx_views.py) and
-    the `roles` Jinja2 global fallback (app/template_env.py). Stored in
-    site_contacts.contact_role (String(50)); legacy DB values (buyer_po/specifier/
-    ap_payer/logistics/exec/technical/decision_maker/operations) are NOT in this set —
-    they render via the legacy display-label maps but can only be cleared, not re-saved.
+    `tuple(ContactRole)` drives both CANONICAL_ROLES (app/routers/htmx/companies/
+    _registries.py) and the `roles` Jinja2 global fallback (app/template_env.py).
+    Stored in site_contacts.contact_role (String(50)).
+
+    ISS-029 promoted the former legacy-only DB values (buyer_po, specifier, ap_payer,
+    logistics, exec, technical, decision_maker, operations) to first-class members —
+    they are now selectable, not merely clearable. Display labels for every member
+    (including OTHER) live in CONTACT_ROLE_LABELS below — the single label source
+    consolidated from the three previously-duplicated per-template maps.
+
+    OTHER is a write-in: selecting it in the contact form reveals a free-text input
+    (contact_role_custom) whose trimmed value — capped to the column's 50 chars —
+    is stored verbatim in place of the literal string "other" when non-empty (the
+    write path in app/routers/htmx/companies/contacts.py). Role pills/labels render
+    any non-canonical stored string verbatim (CONTACT_ROLE_LABELS.get(value, value)).
     """
 
     BUYER = "buyer"
     MANAGER = "manager"
     ENGINEER = "engineer"
     PLANNER = "planner"
+    BUYER_PO = "buyer_po"
+    SPECIFIER = "specifier"
+    AP_PAYER = "ap_payer"
+    LOGISTICS = "logistics"
+    EXEC = "exec"
+    TECHNICAL = "technical"
+    DECISION_MAKER = "decision_maker"
+    OPERATIONS = "operations"
     OTHER = "other"
+
+
+# Single source of truth for ContactRole display labels — consolidates the three
+# previously-duplicated per-template dicts (app/templates/htmx/partials/customers/
+# _contact_macros.html role_labels, .../tabs/_contact_form.html role_labels). Every
+# StrEnum member has an entry; templates fall back to a title-cased raw value for any
+# NON-canonical custom write-in string stored via the OTHER write-in path.
+CONTACT_ROLE_LABELS: dict[str, str] = {
+    ContactRole.BUYER: "Buyer",
+    ContactRole.MANAGER: "Manager",
+    ContactRole.ENGINEER: "Engineer",
+    ContactRole.PLANNER: "Planner",
+    ContactRole.BUYER_PO: "Buyer/PO",
+    ContactRole.SPECIFIER: "Specifier",
+    ContactRole.AP_PAYER: "AP",
+    ContactRole.LOGISTICS: "Logistics",
+    ContactRole.EXEC: "Exec",
+    ContactRole.TECHNICAL: "Tech",
+    ContactRole.DECISION_MAKER: "DM",
+    ContactRole.OPERATIONS: "Ops",
+    ContactRole.OTHER: "Other",
+}
 
 
 # Canonical CRM company-industry pick-list (CRM P5 trust). Constrains the inline

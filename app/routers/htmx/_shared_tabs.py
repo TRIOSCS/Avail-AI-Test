@@ -178,7 +178,6 @@ async def company_tab(
 
     from ...dependencies import can_manage_account
     from ...models import Company, CustomerSite, Requisition
-    from ...models.intelligence import ActivityLog
     from ...models.offers import Contact as RfqContact
     from ...services.crm_field_history import ENTITY_COMPANY as _ENTITY_COMPANY
     from ...services.crm_field_history import field_history_for as _field_history_for
@@ -343,20 +342,19 @@ async def company_tab(
                 for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
                     req_map[r.id] = r
 
-        # Direct activity logs on this company + its requisitions (newest-first).
+        # Direct activity logs on this company (newest-first), quality-gated.
+        # Scoped strictly to ActivityLog.company_id via the shared service helper —
+        # NOT OR'd with requisition_id. That OR used to leak internal colleagues'
+        # RFQ-thread replies, vendor replies, and unrelated requisition events onto the
+        # customer's page (ISS-030); get_company_activities is the single arbitration
+        # point shared with the requisition/vendor tabs and the activity digest.
         # Exclude rfq_sent: RfqContact rows are the canonical source; showing both
         # would double-show the same RFQ.
+        from ...services.activity_service import get_company_activities
+
         _RFQ_SENT = ActivityType.RFQ_SENT
-        activity_filters = [ActivityLog.company_id == company.id]
-        if req_ids:
-            activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
-        activities = (
-            db.query(ActivityLog)
-            .filter(or_clause(*activity_filters))
-            .filter(ActivityLog.activity_type != _RFQ_SENT)
-            .order_by(ActivityLog.created_at.desc())
-            .limit(50)
-            .all()
+        activities = get_company_activities(
+            company.id, db, limit=50, meaningful_only=True, exclude_types=frozenset({_RFQ_SENT})
         )
 
         activities_truncated = len(activities) >= 50
@@ -435,7 +433,6 @@ async def vendor_tab(
     """
     import html as html_mod
 
-    from ...models.intelligence import ActivityLog as _ActivityLog
     from ...models.offers import Contact as RfqContact
     from ...models.offers import VendorResponse
     from ...services.task_service import get_open_tasks_for_vendor_card
@@ -598,13 +595,11 @@ async def vendor_tab(
         return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
 
     elif tab == "activity":
-        activities = (
-            db.query(_ActivityLog)
-            .filter(_ActivityLog.vendor_card_id == vendor_id)
-            .order_by(_ActivityLog.created_at.desc())
-            .limit(50)
-            .all()
-        )
+        from ...services.activity_service import get_vendor_activities
+
+        # meaningful_only=True hides AI-quality-scored noise (OOO/bounce/blank rows) —
+        # parity with the company Activity tab (ISS-030).
+        activities = get_vendor_activities(vendor_id, db, limit=50, meaningful_only=True)
         activities_truncated = len(activities) >= 50
 
         # Bucket activities into type-sections (the template renders by section), mirroring

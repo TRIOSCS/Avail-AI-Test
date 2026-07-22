@@ -2234,22 +2234,36 @@ class TestBuyingRoleSetter:
         )
         assert resp.status_code == 400
 
-    def test_set_role_legacy_value_rejected(self, client: TestClient, db_session: Session, test_user: User):
-        """A legacy DB value (buyer_po) is no longer selectable — POST 400s.
-
-        Legacy values still render read-only via the display-label maps, but the setter
-        only accepts the canonical ContactRole vocabulary.
-        """
+    def test_set_role_promoted_legacy_value_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """ISS-029: buyer_po (a former legacy-only value) is now a first-class
+        ContactRole member — the setter accepts it and persists it."""
         company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "buyer_po"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role == "buyer_po"
 
     def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
-        """All canonical buying-role values are accepted."""
-        for role_val in ("buyer", "manager", "engineer", "planner", "other"):
+        """All canonical buying-role values (5 original + 8 ISS-029-promoted) are
+        accepted."""
+        for role_val in (
+            "buyer",
+            "manager",
+            "engineer",
+            "planner",
+            "buyer_po",
+            "specifier",
+            "ap_payer",
+            "logistics",
+            "exec",
+            "technical",
+            "decision_maker",
+            "operations",
+            "other",
+        ):
             company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
             resp = client.post(
                 f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
@@ -2406,11 +2420,11 @@ class TestEditSite:
         resp = client.get(f"/v2/partials/customers/{company.id}/sites/99999/edit-form")
         assert resp.status_code == 404
 
-    def test_post_site_edit_persists_payment_terms_and_address(
+    def test_post_site_edit_persists_address_and_preserves_payment_terms(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit saves payment_terms + address fields; re-rendered sites tab shows
-        new values."""
+        """POST edit saves address fields; payment_terms is ERP-managed (ISS-031) — the
+        route must IGNORE a posted value and preserve what's stored."""
         from app.models.crm import CustomerSite
 
         company, site = self._make_company_with_site(db_session, owner=test_user)
@@ -2433,7 +2447,8 @@ class TestEditSite:
         db_session.expire_all()
         updated = db_session.query(CustomerSite).filter(CustomerSite.id == site.id).first()
         assert updated is not None
-        assert updated.payment_terms == "Net60"
+        assert updated.payment_terms == "Net30"  # unchanged despite posted Net60
+        assert updated.shipping_terms == "DAP"
         assert updated.address_line1 == "456 New Ave"
         assert updated.city == "Cambridge"
         assert updated.state == "MA"
@@ -2568,14 +2583,40 @@ class TestEditContact:
         assert updated is not None
         assert updated.contact_role == "buyer"
 
-    def test_post_contact_edit_legacy_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
-        """POST contact edit with legacy role 'decision_maker' returns 400."""
+    def test_post_contact_edit_promoted_legacy_role_accepted(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """ISS-029: 'decision_maker' (a former legacy-only value) is now a
+        first-class ContactRole member — POST edit accepts and persists it."""
+        from app.models.crm import SiteContact
+
         company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
                 "full_name": "Alice Smith",
-                "contact_role": "decision_maker",  # legacy — must reject
+                "contact_role": "decision_maker",
+                "title": "Buyer",
+                "email": "alice@editco.com",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
+        assert updated is not None
+        assert updated.contact_role == "decision_maker"
+
+    def test_post_contact_edit_truly_invalid_role_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST contact edit with a role outside the (now 12-member) canonical
+        vocabulary — and not 'other' — still 400s."""
+        company, site, contact = self._make_company_with_contact(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "contact_role": "wizard",
                 "title": "Buyer",
                 "email": "alice@editco.com",
             },
@@ -3357,8 +3398,11 @@ class TestContactsTabHome:
         updated = db_session.get(SiteContact, contact.id)
         assert updated.contact_role == "buyer"
 
-    def test_edit_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
-        """POST edit with legacy 'decision_maker' role returns 400."""
+    def test_edit_sets_contact_role_promoted_legacy(self, client: TestClient, db_session: Session, test_user: User):
+        """ISS-029: POST edit with the now-canonical 'decision_maker' role persists
+        it (a former legacy-only value, no longer rejected)."""
+        from app.models.crm import SiteContact
+
         company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
@@ -3366,6 +3410,24 @@ class TestContactsTabHome:
                 "full_name": "Alice Prime",
                 "email": "alice@tabco.com",
                 "contact_role": "decision_maker",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert db_session.query(SiteContact).filter(SiteContact.id == contact.id).first().contact_role == (
+            "decision_maker"
+        )
+
+    def test_edit_truly_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with a role outside the canonical vocabulary (and not 'other')
+        still 400s."""
+        company, site, contact = self._make_company_with_hq(db_session, owner=test_user)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "wizard",
             },
         )
         assert resp.status_code == 400

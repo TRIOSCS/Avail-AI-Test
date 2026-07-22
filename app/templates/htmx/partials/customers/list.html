@@ -151,17 +151,8 @@
     <div class="flex items-center gap-3 text-xs text-gray-600">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
-    {# Export honors the CURRENT filtered view: @click.prevent rebuilds the download URL
-       from the live #cdm-filters form; the bare href is the no-JS fallback (full export).
-       Gated on can_export_bulk_data (ISS-022, manager/admin only) — the SAME predicate
-       require_access(AccessKey.EXPORT_BULK_DATA) enforces on both export routes, so these
-       links never show for a role whose click would 403. #}
-    {% if can_export_bulk_data(user) %}
-    <a href="/v2/customers/export.csv"
-       @click.prevent="window.location = '/v2/customers/export.csv?' + new URLSearchParams(new FormData(document.getElementById('cdm-filters'))).toString()"
-       class="hover:text-accent-600 hover:underline cursor-pointer">Export CSV</a>
-    <a href="/v2/customers/contacts/export.csv" class="hover:text-accent-600 hover:underline">Export contacts</a>
-    {% endif %}
+    {# Bulk export moved to admin-only Settings ▸ Data export (ISS-028) — no export UI
+       outside Settings. #}
     <button type="button" @click="importOpen = true"
             class="hover:text-accent-600 hover:underline cursor-pointer">Import CSV</button>
     </div>

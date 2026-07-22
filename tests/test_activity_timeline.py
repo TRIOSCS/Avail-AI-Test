@@ -249,10 +249,12 @@ class TestGetLastOutboundActivity:
 
 class TestDirectionEventTypePopulation:
     def test_log_email_sets_direction_and_event_type(self, db_session, test_user):
+        # realvendorparts.com (not example.com, which is on JUNK_DOMAINS): ISS-030's
+        # write-time filter skips an unmatched own-domain/junk counterparty.
         record = log_email_activity(
             user_id=test_user.id,
             direction="sent",
-            email_addr="nobody@example.com",
+            email_addr="nobody@realvendorparts.com",
             subject="Test",
             external_id="test-ext-001",
             contact_name="Nobody",
@@ -277,10 +279,13 @@ class TestDirectionEventTypePopulation:
         assert record.event_type == "call"
 
     def test_summary_is_populated(self, db_session, test_user):
+        # bob@ (not test@, a JUNK_EMAIL_PREFIXES local-part) at realvendorparts.com (not
+        # example.com, a JUNK_DOMAINS domain): ISS-030's write-time filter skips an
+        # unmatched own-domain/junk counterparty.
         record = log_email_activity(
             user_id=test_user.id,
             direction="sent",
-            email_addr="test@example.com",
+            email_addr="bob@realvendorparts.com",
             subject="Hello",
             external_id="test-ext-002",
             contact_name="Bob",
