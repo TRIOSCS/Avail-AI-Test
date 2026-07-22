@@ -2100,21 +2100,33 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     match [wins outright, even over a disagreeing Part Number] → mpn_match [via the
     |     SHARED _index_lines_by_norm_mpn/_classify_mpn_match helpers submit_offer uses:
     |     matched/unmatched/ambiguous] → rejected [missing bidder, missing/invalid/non-
-    |     positive quantity, or neither a valid Line ID nor a Part Number — the take-all
-    |     shape is out of scope, never coerced]. Renders bid_upload_preview.html grouped by
-    |     bidder with a carry_rows_json hidden field for the confirm round-trip)
-    +-- POST /api/resell/{id}/bids/upload-confirm        (owner-only; excess_service.upload_bids
+    |     positive quantity, a bidder name that normalizes to nothing on
+    |     normalize_vendor_name (suffix-only "Inc."), a malformed non-dict row, or neither
+    |     a valid Line ID nor a Part Number — the take-all shape is out of scope, never
+    |     coerced; rejected-row numbers are FILE rows, header = row 1, matching
+    |     file_utils.extract_mpns_with_rows]. Renders bid_upload_preview.html grouped by
+    |     bidder [on the normalize_vendor_name key, first-seen spelling displayed] with a
+    |     carry_rows_json hidden field for the confirm round-trip)
+    +-- POST /api/resell/{id}/bids/upload-confirm        (owner-only; 400 unless rows_json is
+    |     a list of dicts [mirrors resell_assemble_bid's element guard — tampered payloads
+    |     never 500]; excess_service.upload_bids
     |     RE-CLASSIFIES every carried row fresh against the list's CURRENT lines [never
     |     trusts the preview's derived match_status — mirrors confirm_import's L3
-    |     discipline]; groups accepted rows by bidder name, resolves/creates ONE VendorCard
-    |     per bidder via resell_outreach_service.resolve_bidder_card [reused on the shared
-    |     normalize_vendor_name key, never duplicated; new cards tagged
+    |     discipline; text cells str()-coerced so numeric/null cells classify, never raise];
+    |     groups accepted rows by bidder on the shared normalize_vendor_name key [case/
+    |     spacing variants = ONE bidder, first-seen spelling for display], resolves/creates
+    |     ONE VendorCard per bidder via resell_outreach_service.resolve_bidder_card [reused
+    |     on the same key, never duplicated; new cards tagged
     |     source="resell_bid_upload"], creates one ExcessOffer[scope=PER_LINE,
     |     notes="Uploaded bid sheet"] + one ExcessOfferLine per row per bidder
     |     [unmatched/ambiguous rows KEPT, never dropped], recomputes the best-price rollup
-    |     for matched lines exactly like submit_offer. 400 on empty/all-rejected rows.
-    |     Re-renders the Offers tab [#tab-offers-<id>, same _offers_context resell_offers
-    |     uses] + HX-Trigger showToast "N bid(s) uploaded (M lines, K unmatched, J rejected)")
+    |     for matched lines exactly like submit_offer, and flips open→collecting on a first
+    |     ingest [mirrors submit_offer]. 400 on empty/all-rejected rows.
+    |     RESPONSE is the same _award_response.html OOB compose as award [PRIMARY = Offers
+    |     tab #tab-offers-<id>; OOB = #tab-lines-<id> rollup badges + #resell-chips-<id>
+    |     offer count/status badge — the ingest mutates rollups + list status, so an
+    |     Offers-only swap would leave those stale] + HX-Trigger showToast
+    |     "N bid(s) uploaded (M lines, K unmatched, J rejected)")
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
@@ -2157,6 +2169,10 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     built ONLY from bid_back_export_context [Part Number/Manufacturer/Condition/
     |     Quantity/Unit Price/Extended Price] + a trailing Total row — never the inbound
     |     offer/rollup/vendor fields, so no broker/trader/seller identity leaks in.
+    |     Money cells FORMATTED [unit 4dp, extended/Total 2dp, blank for None — the PDF's
+    |     rounding, never raw float reprs]; bid_back_export_context rounds each
+    |     extended_price to 2dp and sums the ROUNDED values into subtotal, so line
+    |     extendeds always add up to the printed Total in both PDF and CSV.
     |     Filename from the sanitized bid number, e.g. BID-42.csv)
     +-- POST /api/resell/{id}/bid/{bid_id}/send          (owner-only; bid_back_service.send_bid_back:
     |     resolve_seller_contact → email the clean PDF via send_batch_rfq [no requisition,

@@ -1053,12 +1053,18 @@ async def resell_bid_csv(
     Built ONLY from :func:`bid_back_service.bid_back_export_context` (the identity-clean
     whitelist) — never the inbound offer/rollup/vendor fields — so the download carries no
     broker / trader / seller identity, same guarantee as the PDF. A trailing "Total" row
-    carries the subtotal.
+    carries the subtotal. Money cells are FORMATTED (unit 4dp, extended/total 2dp —
+    matching the PDF's ``{:,.4f}``/``{:,.2f}``, sans thousands separators so spreadsheets
+    parse them as numbers) — never raw float reprs (a 0.07 × 3 line must read "0.21",
+    not "0.21000000000000002").
     """
     _excess_list, bid = bid_back_service.guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=user)
     summary = bid_back_service.bid_back_export_context(bid)
 
     header = ["Part Number", "Manufacturer", "Condition", "Quantity", "Unit Price", "Extended Price"]
+
+    def _money(value: float | None, places: int) -> str:
+        return f"{value:.{places}f}" if value is not None else ""
 
     def _rows():
         for li in summary["line_items"]:
@@ -1067,10 +1073,10 @@ async def resell_bid_csv(
                 li["manufacturer"],
                 li["condition"],
                 li["quantity"],
-                li["unit_price"],
-                li["extended_price"],
+                _money(li["unit_price"], 4),
+                _money(li["extended_price"], 2),
             ]
-        yield ["Total", "", "", "", "", summary["subtotal"]]
+        yield ["Total", "", "", "", "", _money(summary["subtotal"], 2)]
 
     safe_number = re.sub(r"[^A-Za-z0-9_-]", "_", summary["bid_number"])
     return stream_csv(f"{safe_number}.csv", header, _rows())
@@ -1579,9 +1585,11 @@ async def resell_bids_upload_confirm(
     Offers tab.
 
     The service RE-CLASSIFIES every row fresh (never trusts the client's carried
-    classification — mirrors ``confirm_import``'s L3 discipline). Returns the SAME
-    ``_offers_context`` ``resell_offers`` renders, with an HX-Trigger toast summarizing the
-    ingest counts.
+    classification — mirrors ``confirm_import``'s L3 discipline). Responds with the
+    ``_award_response.html`` OOB compose (primary body = Offers tab, the confirm form's
+    hx-target; out-of-band = Lines tab + header chips) — the ingest recomputes per-line
+    rollups and can flip ``open → collecting``, so an Offers-only swap would leave the
+    owner's chips and Lines-tab badges stale. An HX-Trigger toast summarizes the counts.
     """
     el, is_owner = _get_list_for_user(db, list_id, user)
     if not is_owner:
@@ -1592,11 +1600,18 @@ async def resell_bids_upload_confirm(
         raise HTTPException(400, "Invalid bid upload payload") from exc
     if not isinstance(rows, list):
         raise HTTPException(400, "Invalid bid upload payload")
+    # Guard EVERY element is a dict before the service normalizes rows (mirrors
+    # resell_assemble_bid) — a tampered payload like [1] or ["x"] otherwise raises
+    # AttributeError in _normalize_bid_row as an unhandled 500 instead of this 400.
+    if not all(isinstance(r, dict) for r in rows):
+        raise HTTPException(400, "Invalid bid upload payload")
 
     result = excess_service.upload_bids(db, list_id=list_id, user=user, rows=rows)
 
     el = excess_service.get_excess_list(db, list_id)
-    resp = template_response("htmx/partials/resell/_offers.html", _offers_context(request, db, el, user))
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
     message = (
         f"{result['offers_created']} bid(s) uploaded ({result['lines_created']} lines, "
         f"{result['unmatched']} unmatched, {result['rejected']} rejected)"

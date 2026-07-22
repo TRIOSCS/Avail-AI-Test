@@ -232,6 +232,64 @@ def test_preview_missing_bidder_rejected(db_session: Session, posted_list: Exces
     assert "bidder" in result["rejected"][0]["reason"].lower()
 
 
+@pytest.mark.parametrize("unusable", ["Inc.", "LLC", "---"])
+def test_preview_bidder_normalizing_to_empty_rejected(db_session: Session, posted_list: ExcessList, unusable):
+    """A NON-blank bidder whose name normalizes to nothing (suffix-only, punctuation-
+    only) is rejected per-row — it must never survive classification only to 422 the
+    whole ingest inside resolve_bidder_card."""
+    rows = [_row(bidder=unusable, part_number="LM358N")]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, rows)
+    assert result["accepted_count"] == 0
+    assert result["rejected_count"] == 1
+    assert "bidder" in result["rejected"][0]["reason"].lower()
+
+
+def test_preview_row_numbers_are_file_rows(db_session: Session, posted_list: ExcessList):
+    """Rejected-row pointers use FILE row numbers — the header occupies row 1, so the
+    first data row reports as row 2 (matches file_utils.extract_mpns_with_rows) and the
+    owner's Excel cursor lands on the right line."""
+    rows = [
+        _row(bidder="", part_number="LM358N"),  # file row 2 — rejected
+        _row(bidder="Broker A", part_number="NE555P"),  # file row 3 — accepted
+        _row(bidder="Broker A", part_number="", line_id=None),  # file row 4 — rejected
+    ]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, rows)
+    assert [r["row"] for r in result["rejected"]] == [2, 4]
+    assert result["accepted"][0]["row"] == 3
+
+
+def test_preview_non_string_cells_classify_without_raising(db_session: Session, posted_list: ExcessList):
+    """Numeric/None cells in text columns (a tampered payload, or a spreadsheet numeric
+    cell) are str()-coerced and classified like any other value — never an
+    AttributeError."""
+    rows = [
+        {
+            "bidder": 5,
+            "part_number": 123,
+            "quantity": 10,
+            "unit_price": None,
+            "lead_time_days": None,
+            "notes": 7,
+            "line_id": None,
+        }
+    ]
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, rows)
+    assert result["accepted_count"] == 1
+    accepted = result["accepted"][0]
+    assert accepted["bidder"] == "5"
+    assert accepted["mpn_raw"] == "123"
+    assert accepted["terms_text"] == "7"
+
+
+def test_preview_non_dict_rows_rejected_with_reason(db_session: Session, posted_list: ExcessList):
+    """Non-dict list elements classify as rejected rows (with a reason) — never
+    raise."""
+    result = excess_service.preview_bid_upload(db_session, posted_list.id, ["x", 1])  # type: ignore[list-item]
+    assert result["accepted_count"] == 0
+    assert result["rejected_count"] == 2
+    assert all("malformed" in r["reason"].lower() for r in result["rejected"])
+
+
 # ---------------------------------------------------------------------------
 # upload_bids — ingestion into ExcessOffer / ExcessOfferLine
 # ---------------------------------------------------------------------------
@@ -330,6 +388,68 @@ def test_upload_bids_recomputes_rollup(db_session: Session, trader_user: User, p
     db_session.refresh(line)
     assert line.offer_count == 2
     assert line.best_offer_unit_price == Decimal("2.5000")
+
+
+def test_upload_bids_open_list_flips_to_collecting(db_session: Session, trader_user: User, posted_list: ExcessList):
+    """The FIRST ingested offer on an OPEN list flips it to COLLECTING (mirrors
+    submit_offer)."""
+    posted_list.status = ExcessListStatus.OPEN
+    db_session.commit()
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    db_session.refresh(posted_list)
+    assert posted_list.status == ExcessListStatus.COLLECTING
+
+
+@pytest.mark.parametrize("status", [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED])
+def test_upload_bids_late_statuses_untouched(db_session: Session, trader_user: User, posted_list: ExcessList, status):
+    """A late upload on a bid_out/awarded list never rewrites the list status."""
+    posted_list.status = status
+    db_session.commit()
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    db_session.refresh(posted_list)
+    assert posted_list.status == status
+
+
+def test_upload_bids_case_variant_bidders_grouped_one_offer(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """'Broker A' and 'BROKER A' are ONE bidder: grouped on the normalize_vendor_name
+    key (the same key cards resolve on), so one bidder never yields two offers pointing
+    at one VendorCard."""
+    from app.vendor_utils import normalize_vendor_name
+
+    rows = [
+        _row(bidder="Broker A", part_number="LM358N"),
+        _row(bidder="BROKER A", part_number="NE555P"),
+    ]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert result["offers_created"] == 1
+    assert result["lines_created"] == 2
+
+    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    assert len(offer.lines) == 2
+    assert offer.offerer_vendor_card.display_name == "Broker A"  # first-seen spelling
+    cards = db_session.query(VendorCard).filter(VendorCard.normalized_name == normalize_vendor_name("Broker A")).all()
+    assert len(cards) == 1
+
+
+def test_upload_bids_unusable_bidder_rejected_per_row_never_aborts(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """A bidder name that normalizes to nothing ('Inc.') rejects THAT row only — the
+    other bidders' offers still ingest (no mid-loop 422 aborting the whole sheet)."""
+    rows = [
+        _row(bidder="Inc.", part_number="LM358N"),
+        _row(bidder="Broker A", part_number="NE555P"),
+    ]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert result["offers_created"] == 1
+    assert result["lines_created"] == 1
+    assert result["rejected"] == 1
+    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    assert offer.offerer_vendor_card.display_name == "Broker A"
 
 
 def test_upload_bids_non_owner_403(db_session: Session, test_user: User, posted_list: ExcessList):
@@ -455,3 +575,106 @@ def test_upload_confirm_non_owner_403(client, posted_list, test_user):
         data={"rows_json": json.dumps([{"bidder": "X", "part_number": "LM358N", "quantity": 1}])},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "bad_payload",
+    [
+        "not json",  # unparsable
+        "{}",  # parses, but not a list
+        '"a string"',  # parses, but not a list
+        "[1]",  # list, but element is not a dict
+        '["x"]',  # list, but element is not a dict
+        '[{"bidder": "A", "part_number": "LM358N", "quantity": 1}, 7]',  # one bad element poisons the payload
+    ],
+)
+def test_upload_confirm_malformed_rows_json_400_never_500(client, db_session, trader_user, posted_list, bad_payload):
+    """Every malformed rows_json shape degrades to the SAME clean 400 — never an
+    AttributeError 500 (the confirm path must never trust the client payload)."""
+    restore = _own(trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": bad_payload},
+        )
+        assert resp.status_code == 400
+        assert "invalid bid upload payload" in resp.json()["error"].lower()
+    finally:
+        restore()
+
+
+def test_upload_confirm_reclassifies_tampered_payload_server_side(
+    client, db_session, trader_user, posted_list, other_list
+):
+    """L3 tamper-resistance at the CONFIRM boundary: a carried payload smuggling a
+    foreign-list line_id plus fabricated match_status/excess_line_item_id fields is
+    re-classified fresh — the write path uses the server's own MPN fallback, never the
+    client's claimed match."""
+    foreign_line = db_session.query(ExcessLineItem).filter_by(excess_list_id=other_list.id).one()
+    own_line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id, part_number="NE555P").one()
+    tampered = [
+        {
+            # Foreign line_id + fabricated match fields → MPN fallback resolves NE555P
+            # on THIS list, never the foreign id the client claimed.
+            "bidder": "Tamper Broker",
+            "part_number": "NE555P",
+            "quantity": 5,
+            "unit_price": "1.0",
+            "lead_time_days": None,
+            "notes": None,
+            "line_id": foreign_line.id,
+            "match_status": "matched",
+            "excess_line_item_id": foreign_line.id,
+        },
+        {
+            # Nothing resolves on this list → unmatched, despite the claimed match.
+            "bidder": "Tamper Broker",
+            "part_number": "NOT-ON-THIS-LIST",
+            "quantity": 5,
+            "unit_price": None,
+            "lead_time_days": None,
+            "notes": None,
+            "line_id": foreign_line.id,
+            "match_status": "matched",
+            "excess_line_item_id": foreign_line.id,
+        },
+    ]
+    restore = _own(trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": json.dumps(tampered)},
+        )
+        assert resp.status_code == 200
+        offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+        lines = sorted(offer.lines, key=lambda x: x.id)
+        assert lines[0].excess_line_item_id == own_line.id  # server-side MPN fallback won
+        assert lines[0].match_status == OfferLineMatchStatus.MATCHED
+        assert lines[1].excess_line_item_id is None  # fabricated id ignored
+        assert lines[1].match_status == OfferLineMatchStatus.UNMATCHED
+    finally:
+        restore()
+
+
+def test_upload_confirm_oob_refreshes_lines_and_chips(client, db_session, trader_user, posted_list):
+    """The confirm response is the _award_response OOB compose: Offers tab body PLUS
+    out-of-band Lines tab and header chips — the ingest recomputes rollups and can flip
+    the list status, so an Offers-only swap would leave those stale."""
+    posted_list.status = ExcessListStatus.OPEN
+    db_session.commit()
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    restore = _own(trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/bids/upload-confirm",
+            data={"rows_json": json.dumps(rows)},
+        )
+        assert resp.status_code == 200
+        assert f'id="tab-lines-{posted_list.id}"' in resp.text
+        assert f'id="resell-chips-{posted_list.id}"' in resp.text
+        assert "hx-swap-oob" in resp.text
+        db_session.expire_all()
+        refreshed = db_session.get(ExcessList, posted_list.id)
+        assert refreshed.status == ExcessListStatus.COLLECTING  # the flip is now visible in the chips render
+    finally:
+        restore()

@@ -144,8 +144,11 @@ def resolve_bidder_card(db: Session, bidder_name: str) -> VendorCard:
     spreadsheet. An existing card on the SAME ``normalize_vendor_name`` key is REUSED,
     never duplicated; a new card is tagged ``source="resell_bid_upload"`` so its
     provenance is distinguishable from a card backfilled via the outreach/offer-
-    attribution paths. Raises HTTPException(422) if the name has no normalizable form
-    (should not happen — callers already reject a blank bidder before this is called).
+    attribution paths. Raises HTTPException(422) if the name has no normalizable form —
+    a true invariant only because ``excess_service._classify_bid_row`` rejects (per-row,
+    with a reason) not just blank bidders but any bidder whose name normalizes to
+    nothing (suffix-only like "Inc.", strip-to-nothing punctuation) before this is
+    called; without that guard this 422 would abort a whole multi-bidder ingest mid-loop.
     """
     norm = normalize_vendor_name(bidder_name) or ""
     if not norm:

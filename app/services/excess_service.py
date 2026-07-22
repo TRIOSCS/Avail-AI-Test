@@ -31,6 +31,7 @@ from ..constants import (
 from ..models import ActivityLog, Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..utils.normalization import normalize_mpn_key
+from ..vendor_utils import normalize_vendor_name
 from .buyer_affinity_service import recompute_buyer_score_on_win
 
 # ---------------------------------------------------------------------------
@@ -757,7 +758,11 @@ def _normalize_bid_row(raw_row: dict) -> dict:
     Idempotent: canonical keys (``bidder``, ``part_number``, ...) map to themselves, so a
     row already carrying canonical fields (the confirm round-trip payload) normalizes
     unchanged. Mirrors ``_normalize_row``'s tolerant-header pattern for the intake importer.
+    A non-dict input normalizes to ``{}`` (callers classify that as a rejected row) rather
+    than raising.
     """
+    if not isinstance(raw_row, dict):
+        return {}
     result: dict = {}
     for key, value in raw_row.items():
         canonical = _BID_HEADER_MAP.get(str(key).strip().lower())
@@ -802,18 +807,29 @@ def _classify_bid_row(
     ``_classify_mpn_match``). A row with neither a valid Line ID nor a Part Number has
     nothing to identify the part and is rejected (the "take-all" shape is out of scope for
     a per-line compiled sheet).
+
+    Cell values are ``str()``-coerced before stripping (same tolerance as
+    ``_parse_quantity``) so a JSON/spreadsheet number in a text cell classifies like any
+    other value instead of raising; a non-dict *raw_row* is rejected with a reason, never
+    an AttributeError. A bidder whose name has no normalizable form (suffix-only like
+    "Inc.", strip-to-nothing punctuation) is rejected here too — this is what makes
+    ``resolve_bidder_card``'s 422 a true never-happens invariant downstream.
     """
+    if not isinstance(raw_row, dict):
+        return None, "malformed row (not a spreadsheet row)"
     row = _normalize_bid_row(raw_row)
-    bidder = (row.get("bidder") or "").strip()
+    bidder = str(row.get("bidder") or "").strip()
     if not bidder:
         return None, "missing bidder"
+    if not normalize_vendor_name(bidder):
+        return None, "bidder name not usable"
 
     qty = _parse_quantity(row.get("quantity"))
     if qty is None:
         return None, "missing or invalid quantity"
 
     line_id = _parse_optional_int(row.get("line_id"))
-    part_number = (row.get("part_number") or "").strip()
+    part_number = str(row.get("part_number") or "").strip()
     target_item = posted_by_id.get(line_id) if line_id is not None else None
 
     if target_item is not None:
@@ -837,19 +853,24 @@ def _classify_bid_row(
         "quantity": qty,
         "unit_price": _parse_price(row.get("unit_price")),
         "lead_time_days": _parse_optional_int(row.get("lead_time_days")),
-        "terms_text": (row.get("notes") or "").strip() or None,
+        "terms_text": str(row.get("notes") or "").strip() or None,
     }, None
 
 
 def preview_bid_upload(db: Session, list_id: int, rows: list[dict]) -> dict:
     """Classify uploaded compiled-bid-sheet rows for the multi-bidder preview grid.
 
-    Read-only (no writes/commits). Groups ACCEPTED rows by bidder name for the grid;
-    REJECTED rows (missing bidder, missing/invalid/non-positive quantity, or no Line
-    ID/Part Number to identify the part) are listed with a reason — never silently
-    coerced. ``carry_rows`` is the JSON-safe canonical payload the confirm form round-trips
-    back to :func:`upload_bids`, which RE-CLASSIFIES it fresh (never trusts this preview's
-    derived ``match_status``/``excess_line_item_id`` — mirrors ``confirm_import``'s L3
+    Read-only (no writes/commits). Groups ACCEPTED rows by bidder for the grid — on the
+    shared ``normalize_vendor_name`` key (displayed under the first-seen spelling), so
+    case/spacing variants of one bidder preview as the ONE offer :func:`upload_bids` will
+    create. REJECTED rows (missing bidder, missing/invalid/non-positive quantity, or no
+    Line ID/Part Number to identify the part) are listed with a reason — never silently
+    coerced. Row numbers are FILE row numbers — the header occupies file row 1, so the
+    first data row is row 2 (matches ``file_utils.extract_mpns_with_rows``) and a
+    rejection points at the exact line the owner opens in Excel. ``carry_rows`` is the
+    JSON-safe canonical payload the confirm form round-trips back to :func:`upload_bids`,
+    which RE-CLASSIFIES it fresh (never trusts this preview's derived
+    ``match_status``/``excess_line_item_id`` — mirrors ``confirm_import``'s L3
     discipline).
     """
     posted = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
@@ -858,18 +879,20 @@ def preview_bid_upload(db: Session, list_id: int, rows: list[dict]) -> dict:
 
     accepted: list[dict] = []
     rejected: list[dict] = []
-    for i, raw in enumerate(rows, start=1):
+    for i, raw in enumerate(rows, start=2):  # the header occupies file row 1
         normalized = _normalize_bid_row(raw)
         fields, reason = _classify_bid_row(raw, posted_by_id=posted_by_id, by_norm=by_norm)
         if fields is None:
-            rejected.append({"row": i, "bidder": (normalized.get("bidder") or "").strip(), "reason": reason})
+            rejected.append({"row": i, "bidder": str(normalized.get("bidder") or "").strip(), "reason": reason})
             continue
         fields["row"] = i
         accepted.append(fields)
 
     by_bidder: dict[str, list[dict]] = {}
+    display_by_norm: dict[str, str] = {}
     for a in accepted:
-        by_bidder.setdefault(a["bidder"], []).append(a)
+        display = display_by_norm.setdefault(normalize_vendor_name(a["bidder"]), a["bidder"])
+        by_bidder.setdefault(display, []).append(a)
 
     carry_rows = [
         {
@@ -918,8 +941,11 @@ def upload_bids(
     *rows* are the canonical accepted rows carried forward from :func:`preview_bid_upload`
     (bidder/part_number/quantity/unit_price/lead_time_days/notes/line_id) — RE-CLASSIFIED
     here fresh against the list's CURRENT lines via :func:`_classify_bid_row` (never trusts
-    the client's pre-computed classification). Rows are grouped by bidder name; each
-    distinct bidder becomes ONE ``ExcessOffer(scope=PER_LINE)`` whose counterparty
+    the client's pre-computed classification). Rows are grouped by bidder on the shared
+    ``normalize_vendor_name`` key — "Broker A" and "BROKER A" are ONE bidder (display name
+    = first-seen spelling), matching the card-resolution key so one bidder never yields
+    two offers on one card; each distinct bidder becomes ONE
+    ``ExcessOffer(scope=PER_LINE)`` whose counterparty
     VendorCard is resolved/created via ``resell_outreach_service.resolve_bidder_card``
     (reused on the shared ``normalize_vendor_name`` key, never duplicated), with one
     ``ExcessOfferLine`` per accepted row — matched/unmatched/ambiguous rows are all KEPT
@@ -950,6 +976,7 @@ def upload_bids(
     by_norm = _index_lines_by_norm_mpn(posted)
 
     accepted_by_bidder: dict[str, list[dict]] = {}
+    bidder_display: dict[str, str] = {}
     rejected_count = 0
     for raw in rows:
         fields, reason = _classify_bid_row(raw, posted_by_id=posted_by_id, by_norm=by_norm)
@@ -957,7 +984,12 @@ def upload_bids(
             rejected_count += 1
             logger.warning("upload_bids rejected a row on ExcessList id={}: {}", list_id, reason)
             continue
-        accepted_by_bidder.setdefault(fields["bidder"], []).append(fields)
+        # Group case/spacing variants of one bidder onto ONE offer: the grouping key is
+        # the SAME normalize_vendor_name key resolve_bidder_card resolves cards on
+        # (non-empty — _classify_bid_row rejects a bidder that normalizes to nothing).
+        norm_key = normalize_vendor_name(fields["bidder"])
+        bidder_display.setdefault(norm_key, fields["bidder"])
+        accepted_by_bidder.setdefault(norm_key, []).append(fields)
 
     if not accepted_by_bidder:
         raise HTTPException(400, "No valid bid rows to upload")
@@ -970,8 +1002,8 @@ def upload_bids(
     unmatched_count = 0
     affected_line_item_ids: set[int] = set()
 
-    for bidder_name, bidder_rows in accepted_by_bidder.items():
-        card = resolve_bidder_card(db, bidder_name)
+    for norm_key, bidder_rows in accepted_by_bidder.items():
+        card = resolve_bidder_card(db, bidder_display[norm_key])
         offer = ExcessOffer(
             excess_list_id=list_id,
             submitted_by=user.id,

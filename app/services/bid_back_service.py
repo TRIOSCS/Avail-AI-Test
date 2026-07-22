@@ -442,6 +442,12 @@ def bid_back_export_context(bid: CustomerBid) -> dict:
     customer doc is identity-clean; spec §"Customer identity hiding"). This is the single
     source the PDF template renders from, so cleanliness is guaranteed at assembly, not
     by hoping the template omits a field.
+
+    Money rounding is canonical HERE (one place, shared by PDF and CSV): each
+    ``extended_price`` is rounded to 2dp and the ``subtotal`` sums those ROUNDED
+    extendeds — so the visible line extendeds always add up to the printed Total,
+    and no export can leak binary-float artifacts (0.07 × 3 is 0.21, never
+    0.21000000000000002).
     """
     line_items: list[dict] = []
     subtotal = 0.0
@@ -449,7 +455,7 @@ def bid_back_export_context(bid: CustomerBid) -> dict:
         item = ln.excess_line_item
         unit = float(ln.customer_unit_price) if ln.customer_unit_price is not None else None
         qty = ln.quantity or 0
-        extended = (unit * qty) if unit is not None else None
+        extended = round(unit * qty, 2) if unit is not None else None
         if extended is not None:
             subtotal += extended
         # WHITELIST — explicitly enumerate the clean fields. No part of the inbound

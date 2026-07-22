@@ -105,13 +105,48 @@ def test_bid_csv_owner_200_rows_match_lines_plus_total(client, db_session, trade
         assert rows[1][0] == "LM358N"
         assert rows[1][1] == "Texas Instruments"
         assert rows[1][3] == "200"
-        assert rows[1][4] == "1.5"
+        assert rows[1][4] == "1.5000"  # money cells are FORMATTED (unit 4dp), never raw float reprs
+        assert rows[1][5] == "300.00"  # extended 2dp — matches the PDF's {:,.2f}
         assert rows[2][0] == "NE555P"
 
         total_row = rows[-1]
         assert total_row[0] == "Total"
         expected_subtotal = float(Decimal("1.5000") * 200 + Decimal("2.0000") * 200)
         assert float(total_row[-1]) == pytest.approx(expected_subtotal)
+        assert total_row[-1] == "700.00"
+    finally:
+        restore()
+
+
+def test_bid_csv_money_cells_never_leak_float_artifacts(client, db_session, trader_user, posted_list):
+    """A $0.07 × 3 line reads "0.21", never "0.21000000000000002" — and the Total row
+    equals the sum of the printed line extendeds (canonical rounding lives in
+    bid_back_export_context, shared by PDF and CSV)."""
+    tiny = ExcessLineItem(
+        excess_list_id=posted_list.id,
+        part_number="TINY-QTY-3",
+        normalized_part_number=normalize_mpn_key("TINY-QTY-3"),
+        manufacturer="Acme",
+        quantity=3,
+        condition="New",
+    )
+    db_session.add(tiny)
+    db_session.commit()
+    bid = bid_back_service.build_bid_back(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader_user,
+        selections=[{"excess_line_item_id": tiny.id, "customer_unit_price": "0.07"}],
+    )
+    restore = _own(trader_user)
+    try:
+        resp = client.get(f"/api/resell/{posted_list.id}/bid/{bid.id}/csv")
+        assert resp.status_code == 200
+        rows = _parse_csv(resp.text)
+        line = rows[1]
+        assert line[4] == "0.0700"
+        assert line[5] == "0.21"
+        assert rows[-1] == ["Total", "", "", "", "", "0.21"]
     finally:
         restore()
 

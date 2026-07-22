@@ -22,9 +22,11 @@
   <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
     <ul class="list-disc pl-4 text-sm text-rose-700">
       {% for r in rejected %}
+      {# r.row is the FILE row number (header = row 1), so it matches the spreadsheet the owner opens to fix it #}
       <li>Row {{ r.row }}{% if r.bidder %} ({{ r.bidder }}){% endif %}: {{ r.reason }}</li>
       {% endfor %}
     </ul>
+    <p class="mt-1 pl-4 text-xs text-rose-500">Row numbers match your file (the header row is row 1).</p>
   </div>
   {% endif %}
 
