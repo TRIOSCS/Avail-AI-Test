@@ -15,6 +15,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.crm_service
     route table)
 """
 
+import html as html_mod
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
@@ -33,6 +34,7 @@ from ...models.vendors import VendorContact
 from ...services.crm_service import cadence_state as _cadence_state
 from ...services.crm_service import next_best_touch as _next_best_touch
 from ...services.crm_service import order_by_clock as _order_by_clock
+from ...services.vendor_duplicates import check_vendor_duplicate
 from ...template_env import template_response
 from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
@@ -157,7 +159,7 @@ async def vendors_list_partial(
     ctx.update(
         {
             "vendors": vendors,
-            "user": user,  # Export CSV toolbar button gates on can_export_bulk_data(user)
+            "user": user,  # kept in ctx; the toolbar Export CSV button it once gated is gone (ISS-028 — bulk export lives on the capability-gated Settings ▸ Data export tab)
             "q": q,
             "hide_blacklisted": hide_blacklisted,
             "include_archived": include_archived,
@@ -266,9 +268,10 @@ async def vendors_export(
 ):
     """Stream every list-matching vendor as a CSV download (attachment, no pagination).
 
-    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filter params as
-    the list route (GET /v2/partials/vendors) — the export mirrors the list's active
-    view (search/hide-blacklisted/show-archived/my-vendors).
+    Gated on EXPORT_BULK_DATA (ISS-028 bulk dataset export lockdown — admin-by-default,
+    per-user override possible). Same filter params as the list route
+    (GET /v2/partials/vendors) — the export mirrors the list's active view
+    (search/hide-blacklisted/show-archived/my-vendors).
     """
     return stream_csv(
         "vendors_export.csv",
@@ -359,6 +362,36 @@ async def vendor_create_form_early(
         "htmx/partials/vendors/create_form.html",
         {"request": request},
     )
+
+
+@router.get("/v2/partials/vendors/check-duplicate", response_class=HTMLResponse)
+async def vendor_check_duplicate_partial(
+    display_name: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Inline duplicate warning for the vendor create form (early route to precede
+    /{vendor_id}).
+
+    Mirrors the company create dup-check (GET /v2/partials/customers/check-duplicate):
+    the create form's name input hx-gets this route with its own field name
+    (``display_name``) and the returned warning HTML swaps into ``#dup-warning``.
+    Returns an empty 200 when the name is blank or has no match. Exact + fuzzy
+    semantics come from services.vendor_duplicates.check_vendor_duplicate (exact
+    normalized-name match short-circuits at score 100; fuzzy suggestions >= 80).
+    """
+    if not display_name.strip():
+        return HTMLResponse("")
+    matches = check_vendor_duplicate(display_name.strip(), db)
+    if not matches:
+        return HTMLResponse("")
+    top = matches[0]
+    name_esc = html_mod.escape(top["name"] or "")
+    if top["match"] == "exact":
+        msg = f'A vendor named "{name_esc}" already exists (ID {top["id"]}).'
+    else:
+        msg = f'Possible duplicate: "{name_esc}" ({top["score"]}% name match).'
+    return HTMLResponse(f'<p class="text-sm text-amber-600">{msg}</p>')
 
 
 @router.post("/v2/partials/vendors/create", response_class=HTMLResponse)

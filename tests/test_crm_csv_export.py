@@ -185,7 +185,8 @@ class TestCompaniesCSVExport:
     def test_sales_rep_denied_by_default(
         self, sales_client: TestClient, owned_company: Company, other_company: Company
     ):
-        """ISS-022: bulk export is manager/admin only — a plain sales rep is 403."""
+        """ISS-028: bulk export is admin-only by default (EXPORT_BULK_DATA) — a plain
+        sales rep is 403."""
         assert sales_client.get("/v2/customers/export.csv").status_code == 403
 
     def test_sales_rep_with_override_sees_only_owned_companies(
@@ -255,7 +256,8 @@ class TestContactsCSVExport:
         assert "Jane Doe" in names
 
     def test_sales_rep_denied_by_default(self, sales_client: TestClient, contact_for_owned: SiteContact):
-        """ISS-022: bulk export is manager/admin only — a plain sales rep is 403."""
+        """ISS-028: bulk export is admin-only by default (EXPORT_BULK_DATA) — a plain
+        sales rep is 403."""
         assert sales_client.get("/v2/customers/contacts/export.csv").status_code == 403
 
     def test_sales_rep_with_override_sees_only_owned_contacts(

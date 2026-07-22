@@ -1,6 +1,7 @@
 {#
   settings/index.html — Settings page with Alpine-driven tabbed navigation.
-  Receives: active_tab (str), is_admin (bool), can_manage_connectors (bool).
+  Receives: active_tab (str), is_admin (bool), can_manage_connectors (bool),
+  can_export_bulk (bool).
   Called by: htmx_views.py settings_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
@@ -35,11 +36,17 @@
             data-loading-disable') }}
 
     {{ tab_button('data_ops', '/v2/partials/settings/data-ops', 'Data Ops', ['M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z']) }}
+    {% endif %}
 
-    {# Data export — admin-only bulk dataset downloads (ISS-028); no export UI outside
-       Settings. #}
+    {# Data export — bulk dataset downloads (ISS-028); no export UI outside Settings.
+       Gated on EXPORT_BULK_DATA (admins by default, or an explicit per-user override,
+       e.g. a granted manager) — the SAME capability the tab endpoint and the five
+       export routes enforce, so the button is never a dead 403 (SET-06 pattern). #}
+    {% if can_export_bulk %}
     {{ tab_button('data_export', '/v2/partials/settings/data-export', 'Data export', ['M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-8-9v10m0 0l-4-4m4 4l4-4']) }}
+    {% endif %}
 
+    {% if is_admin %}
     {{ tab_button('ops_group', '/v2/partials/settings/ops-group', 'Ops Group', ['M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z']) }}
 
     {{ tab_button('users', '/v2/partials/settings/users', 'Users', ['M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z']) }}

@@ -5,9 +5,9 @@ Sighting, and that it mirrors the board's filter parity (same predicates as
 GET /v2/partials/sightings). Admin only by default (ISS-028 —
 AccessKey.EXPORT_BULK_DATA); the plain buyer `client` fixture is denied 403 (full role
 matrix in tests/test_export_bulk_data_gate.py). The board toolbar never renders an
-export button anymore — bulk export lives ONLY on the admin-gated Settings "Data
-export" page (ISS-028); `manager_client` (an explicit per-user EXPORT_BULK_DATA
-override) exercises the export ROUTE content directly.
+export button anymore — bulk export lives ONLY on the capability-gated Settings "Data
+export" page (EXPORT_BULK_DATA, ISS-028); `manager_client` (an explicit per-user
+EXPORT_BULK_DATA override) exercises the export ROUTE content directly.
 
 Called by: pytest
 Depends on: conftest.py fixtures (db_session, test_user, client, manager_client,
@@ -168,7 +168,8 @@ def test_export_unauthenticated_rejected(unauthenticated_client: TestClient, db_
 
 def test_export_button_absent_from_board_toolbar(manager_client: TestClient, db_session: Session):
     """ISS-028: the board toolbar never renders an Export CSV button for ANY role —
-    bulk export moved to the admin-only Settings "Data export" page."""
+    bulk export moved to the capability-gated (EXPORT_BULK_DATA, admin-by-default)
+    Settings "Data export" page."""
     r = _make_requirement(db_session, mpn="LM317T")
     _make_sighting(db_session, r, vendor="Digi-Key")
     db_session.commit()

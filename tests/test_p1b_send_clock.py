@@ -380,6 +380,56 @@ class TestScanSentFolderReconcile:
         assert log.company_id == company.id, "Recipient domain match must attribute company_id on the sent row"
         assert log.vendor_card_id is None
 
+    @pytest.mark.asyncio
+    async def test_scan_fallback_create_demotes_own_domain_recipient(self, db_session, test_user, test_requisition):
+        """ISS-030 hardening: the fallback CREATE path must apply the same own-domain
+        demotion as log_email_activity — an internal (own-domain) recipient row is kept
+        with its attribution but forced is_meaningful=False and stamped quality-assessed
+        (quality_assessed_at + quality_classification="internal") so
+        score_unscored_activities can never AI re-promote it."""
+        from app.jobs.email_jobs import scan_sent_folder
+        from app.models import Company
+
+        # The org's own company record — match_email_to_entity's domain step resolves
+        # the internal recipient to it (the exact re-creation scenario in prod).
+        own_co = Company(name="Trio Own Org", domain="trioscs.com", is_active=True)
+        db_session.add(own_co)
+        db_session.commit()
+
+        tagged_subject = f"Internal FYI [ref:{test_requisition.id}]"
+        internal_email = "colleague@trioscs.com"
+        graph_msg_id = "graph-internal-001"
+
+        gc_mock = MagicMock()
+        now = datetime.now(UTC)
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": graph_msg_id,
+                        "subject": tagged_subject,
+                        "sentDateTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "toRecipients": [{"emailAddress": {"address": internal_email}}],
+                        "hasAttachments": False,
+                    }
+                ],
+                "new-delta-token",
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            await scan_sent_folder(test_user, db_session)
+
+        log = db_session.query(ActivityLog).filter(ActivityLog.external_id == graph_msg_id).first()
+        assert log is not None, "row must be kept (audit trail + external_id dedup)"
+        assert log.company_id == own_co.id, "attribution must be kept"
+        assert log.is_meaningful is False, "own-domain recipient must never yield a promotable row"
+        assert log.quality_classification == "internal"
+        assert log.quality_assessed_at is not None, "must be stamped assessed so the AI pass never rescores it"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test 3: Reply-matching (Tier-1) still works after reconciliation

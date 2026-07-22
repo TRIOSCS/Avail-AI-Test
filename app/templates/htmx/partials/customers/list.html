@@ -151,8 +151,8 @@
     <div class="flex items-center gap-3 text-xs text-gray-600">
     <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
        class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
-    {# Bulk export moved to admin-only Settings ▸ Data export (ISS-028) — no export UI
-       outside Settings. #}
+    {# Bulk export moved to the capability-gated (EXPORT_BULK_DATA) Settings ▸ Data
+       export tab (ISS-028) — no export UI outside Settings. #}
     <button type="button" @click="importOpen = true"
             class="hover:text-accent-600 hover:underline cursor-pointer">Import CSV</button>
     </div>

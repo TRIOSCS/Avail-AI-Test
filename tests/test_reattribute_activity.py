@@ -80,7 +80,10 @@ def test_apply_resolves_company_attribution(db_session: Session):
 
 def test_apply_flags_own_domain_row_not_meaningful(db_session: Session):
     """A row whose counterparty is the org's own domain (and doesn't independently
-    resolve) is flagged is_meaningful=False, not attributed."""
+    resolve) is flagged is_meaningful=False, not attributed — and stamped quality-
+    assessed (quality_assessed_at + quality_classification="internal") like the write
+    path, so score_unscored_activities (quality_assessed_at IS NULL) can never AI re-
+    promote the demotion."""
     req = _requisition(db_session)
     row = _orphan_row(db_session, req, "colleague@trioscs.com")
     db_session.commit()
@@ -91,6 +94,24 @@ def test_apply_flags_own_domain_row_not_meaningful(db_session: Session):
     assert row.company_id is None
     assert row.vendor_card_id is None
     assert row.is_meaningful is False
+    assert row.quality_classification == "internal", "must carry the write path's demotion classification"
+    assert row.quality_assessed_at is not None, "must be stamped assessed so the AI pass never rescores it"
+    assert stats["flagged_noise"] == 1
+
+
+def test_apply_flags_junk_domain_row_with_same_stamps(db_session: Session):
+    """A junk-domain counterparty row gets the identical demotion stamps as the own-
+    domain case — one shared helper, one definition of a demoted row."""
+    req = _requisition(db_session)
+    row = _orphan_row(db_session, req, "noreply@gmail.com")
+    db_session.commit()
+
+    stats = run_backfill(db_session, apply=True)
+
+    db_session.refresh(row)
+    assert row.is_meaningful is False
+    assert row.quality_classification == "internal"
+    assert row.quality_assessed_at is not None
     assert stats["flagged_noise"] == 1
 
 
