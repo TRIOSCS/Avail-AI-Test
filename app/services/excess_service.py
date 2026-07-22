@@ -366,7 +366,8 @@ def preview_import(rows: list[dict]) -> dict:
 
 
 def confirm_import(db: Session, list_id: int, rows: list[dict]) -> dict:
-    """Import client-submitted rows into an excess list — RE-VALIDATED server-side (L3).
+    """Import client-submitted rows into an excess list — RE-VALIDATED server-side
+    (L3).
 
     The preview grid round-trips its rows back through a hidden form field, so *rows* is
     client-controlled and MUST NOT be trusted: a hand-crafted POST could otherwise inject
@@ -438,17 +439,35 @@ _CLOSED_LIST_STATUSES = (
     ExcessListStatus.EXPIRED,
 )
 
+# List statuses that ACCEPT a new inbound offer / owner-ingested bid sheet — a posting
+# window that is currently live or resolved-but-still-awardable (open/collecting/bid_out/
+# awarded). A draft has no finalized lines to bid on yet, and a terminal (closed/expired)
+# list is dead. Shared by :func:`submit_offer` (finding #47 — was enforced ONLY in the
+# router) and :func:`upload_bids`.
+_POSTED_LIST_STATUSES = (
+    ExcessListStatus.OPEN,
+    ExcessListStatus.COLLECTING,
+    ExcessListStatus.BID_OUT,
+    ExcessListStatus.AWARDED,
+)
 
-def offer_status_for_list(list_status: str) -> ExcessOfferStatus:
-    """The status a NEW inbound offer takes given the list's status at submit time.
 
-    ``late`` when the posting window has already closed (bid_out/awarded/closed/expired) —
-    the offer is still accepted and queued for review, never dropped — else ``open``.
-    Shared by :func:`submit_offer` and the inbound-email path
-    (``resell_outreach_service._link_inbound_offer``) so both entry points flag lateness
+def offer_status_for_list(excess_list: ExcessList) -> ExcessOfferStatus:
+    """The status a NEW inbound offer takes given the list's state at submit time.
+
+    ``late`` when EITHER the list's status already reads as closed (bid_out/awarded/
+    closed/expired) OR the posting window's own ``close_at`` deadline has genuinely
+    passed (:func:`_posting_window_closed`) even though the nightly sweep hasn't caught up
+    to flip the status yet (finding #10) — an offer landing in that gap would otherwise be
+    indistinguishable from an on-time bid for up to a day. The offer is still accepted and
+    queued for review, never dropped — else ``open``. Shared by :func:`submit_offer`,
+    :func:`upload_bids`, and the inbound-email/manual-log path
+    (``resell_outreach_service._link_inbound_offer``) so every entry point flags lateness
     identically.
     """
-    return ExcessOfferStatus.LATE if list_status in _CLOSED_LIST_STATUSES else ExcessOfferStatus.OPEN
+    if excess_list.status in _CLOSED_LIST_STATUSES or _posting_window_closed(excess_list):
+        return ExcessOfferStatus.LATE
+    return ExcessOfferStatus.OPEN
 
 
 def notify_owner_of_offer(
@@ -543,6 +562,40 @@ def _classify_mpn_match(by_norm: dict[str, list[ExcessLineItem]], mpn_raw: str) 
     return OfferLineMatchStatus.UNMATCHED, None
 
 
+def _lock_list_row(db: Session, excess_list_id: int) -> None:
+    """Take the M9 row lock on JUST the ExcessList row (``with_for_update`` +
+    ``populate_existing``).
+
+    The minimal list-only half of the M9 lock family — :func:`_lock_list_for_award`
+    extends this with the line-item lock + offer refresh for award/unaward/withdraw/
+    assign. :func:`submit_offer` / ``resell_outreach_service._link_inbound_offer`` take
+    THIS narrower lock before reading ``excess_list.status``: there is no ExcessOffer row
+    yet to refresh (the offer doesn't exist until after the guard below), so the full
+    ``_lock_list_for_award`` doesn't fit. ``populate_existing`` refreshes the caller's
+    already-identity-mapped ExcessList object in place, so the status read immediately
+    after this call reflects post-lock, freshly-committed state — closing the
+    read-check-flip race where a concurrent close/award/expiry commits between the
+    caller's initial (pre-lock) read and its status-derived write (findings #9/#47). A
+    no-op on SQLite (tests), enforced on PostgreSQL (prod) — mirrors
+    ``_lock_list_for_award``.
+    """
+    db.query(ExcessList).filter(ExcessList.id == excess_list_id).with_for_update().populate_existing().first()
+
+
+def _lock_list_and_lines(db: Session, excess_list_id: int) -> None:
+    """Take the M9 row lock on the ExcessList row + every one of its line items.
+
+    Shared by :func:`_lock_list_for_award` (award/unaward/withdraw/assign) and
+    :func:`_end_posting_window` (close/close-without-bid, finding #11) — every writer that
+    mutates list/line status serializes against every other one via this SAME lock,
+    never a second locking mechanism.
+    """
+    _lock_list_row(db, excess_list_id)
+    db.query(ExcessLineItem).filter(
+        ExcessLineItem.excess_list_id == excess_list_id
+    ).with_for_update().populate_existing().all()
+
+
 def submit_offer(
     db: Session,
     *,
@@ -572,8 +625,12 @@ def submit_offer(
     offer still wins, just unattributed).
 
     Guards (raise HTTPException, never silent): the list must exist (404); *user* must
-    have ``can_offer`` (403); and *user* must not own the list — self-offer blocked
-    (403). Returns the persisted ExcessOffer.
+    have ``can_offer`` (403); *user* must not own the list — self-offer blocked (403); and
+    (finding #47 — previously enforced ONLY in the router) the list must be posted, i.e. in
+    ``_POSTED_LIST_STATUSES`` — a direct service call on a draft/terminal list is rejected
+    (409). The posted-status re-check happens AFTER taking the M9 list-row lock (finding
+    #9): a list closed between the caller's stale read and this call can no longer be
+    resurrected by the open->collecting flip below. Returns the persisted ExcessOffer.
 
     Row dict keys: ``mpn_raw`` (required), ``quantity`` (required), ``unit_price``,
     ``lead_time_days``, ``terms_text`` (all optional).
@@ -584,6 +641,14 @@ def submit_offer(
         raise HTTPException(403, "You do not have permission to submit offers")
     if user.id == excess_list.owner_id:
         raise HTTPException(403, "You cannot offer on your own excess list")
+
+    # M9 (findings #9/#47): lock the list row, THEN re-validate it is still posted — a
+    # concurrent close_list_without_bid / award / nightly expiry may have committed while
+    # we blocked on the row lock, and the guard below must read that fresh state, never the
+    # stale pre-lock read.
+    _lock_list_row(db, list_id)
+    if excess_list.status not in {s.value for s in _POSTED_LIST_STATUSES}:
+        raise HTTPException(409, "This list is not accepting offers")
 
     scope_value = ExcessOfferScope(scope).value  # raises ValueError on a bad scope
 
@@ -602,7 +667,7 @@ def submit_offer(
         offerer_vendor_card_id=offerer_vendor_card_id,
         scope=scope_value,
         notes=notes,
-        status=offer_status_for_list(excess_list.status),
+        status=offer_status_for_list(excess_list),
         take_all_total_price=take_all_total_price if scope_value == ExcessOfferScope.TAKE_ALL else None,
     )
     db.add(offer)
@@ -948,16 +1013,6 @@ def preview_bid_upload(db: Session, list_id: int, rows: list[dict]) -> dict:
     }
 
 
-# List statuses whose posting window accepts an owner-ingested compiled bid sheet — the
-# SAME posted-status set the router enforces on ``submit_offer`` (draft lists have no
-# finalized lines to bid on yet).
-_UPLOAD_POSTED_STATUSES = (
-    ExcessListStatus.OPEN,
-    ExcessListStatus.COLLECTING,
-    ExcessListStatus.BID_OUT,
-    ExcessListStatus.AWARDED,
-)
-
 # The fixed ``notes`` value stamped on every offer :func:`upload_bids` creates — also the
 # marker used to identify a bidder's EARLIER uploaded offer as supersede-eligible (never a
 # manually-submitted offer, which carries different/no notes).
@@ -1007,7 +1062,7 @@ def upload_bids(
     excess_list = get_excess_list(db, list_id)
     if user.id != excess_list.owner_id:
         raise HTTPException(403, "Only the list owner can upload a compiled bid sheet")
-    if excess_list.status not in {s.value for s in _UPLOAD_POSTED_STATUSES}:
+    if excess_list.status not in {s.value for s in _POSTED_LIST_STATUSES}:
         # Only the verified owner can reach this branch (403 above fires first), so a
         # camouflage 404 would be lying to the one user who can see the draft. Tell them
         # what to do instead.
@@ -1040,7 +1095,7 @@ def upload_bids(
 
     from .resell_outreach_service import resolve_bidder_card
 
-    offer_status = offer_status_for_list(excess_list.status)
+    offer_status = offer_status_for_list(excess_list)
     offers_created = 0
     lines_created = 0
     unmatched_count = 0
@@ -1197,28 +1252,43 @@ def assign_offer_line(
     (and thus awardable). Sets ``excess_line_item_id`` + flips ``match_status`` → MATCHED,
     then recomputes the target line's best-price rollup (and, on a RE-assign, the line it
     moved off of, so the old line no longer counts the moved bid). Guards: the list exists
-    (404) + *owner* owns it (403); the list is not resolved/terminal — ``awarded``/
-    ``closed``/``expired`` reject 409 (finding #2 + the finding #4 "second vector": a
-    salvaged line on a dead list must not become awardable); the parent offer is still in
-    play (``open``/``late``) — a won/lost/withdrawn offer's line is 409 (re-pointing a won
-    offer's line would strand its award linkage); the offer line belongs to this list
-    (404); the target line is on this list (404, never another list's line). Commits.
+    (404) + *owner* owns it (403); the offer line belongs to this list (404); the list is
+    not resolved/terminal — ``awarded``/``closed``/``expired`` reject 409 (finding #2 + the
+    finding #4 "second vector": a salvaged line on a dead list must not become awardable);
+    the parent offer is still in play (``open``/``late``) — a won/lost/withdrawn offer's
+    line is 409 (re-pointing a won offer's line would strand its award linkage); the target
+    line is on this list (404, never another list's line) and is NOT already
+    ``awarded``/``withdrawn`` (409 — finding #12: assigning an unmatched bid onto an already
+    -decided line must never silently displace the winner from ``best_offer_id``). Takes
+    the M9 row lock (:func:`_lock_list_for_award`) BEFORE evaluating the status guards, so a
+    concurrent award/close/withdraw of this list serializes instead of racing this assign.
+    Commits.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can assign an offer line")
-    if excess_list.status in _ASSIGN_BLOCKED_LIST_STATUSES:
-        raise HTTPException(409, "This list is resolved — its offer lines can no longer be reassigned")
 
     offer_line = db.get(ExcessOfferLine, offer_line_id)
     if offer_line is None or offer_line.offer is None or offer_line.offer.excess_list_id != list_id:
         raise HTTPException(404, f"Offer line {offer_line_id} not found on list {list_id}")
+
+    # M9 (finding #12): lock the list + lines and refresh the offer BEFORE evaluating any
+    # status guard below — mirrors award/unaward/withdraw so a concurrent award/close is
+    # serialized instead of racing this assign.
+    _lock_list_for_award(db, offer_line.offer, list_id)
+
+    if excess_list.status in _ASSIGN_BLOCKED_LIST_STATUSES:
+        raise HTTPException(409, "This list is resolved — its offer lines can no longer be reassigned")
     if offer_line.offer.status not in {s.value for s in _ACTIONABLE_OFFER_STATUSES}:
         raise HTTPException(409, "Only an open or late offer's line can be assigned")
 
     target = db.get(ExcessLineItem, target_line_item_id)
     if target is None or target.excess_list_id != list_id:
         raise HTTPException(404, f"Line {target_line_item_id} not found on list {list_id}")
+    if target.status == ExcessLineItemStatus.AWARDED:
+        raise HTTPException(409, f"Line '{target.part_number}' is already awarded — unaward the winner first")
+    if target.status == ExcessLineItemStatus.WITHDRAWN:
+        raise HTTPException(409, f"Line '{target.part_number}' has been withdrawn and can't accept new offers")
 
     previous_line_item_id = offer_line.excess_line_item_id
     offer_line.excess_line_item_id = target.id
@@ -1314,6 +1384,32 @@ def _close_competing_offers(excess_list: ExcessList, winner: ExcessOffer) -> set
     return touched
 
 
+def _revived_offer_status(excess_list: ExcessList, offer: ExcessOffer) -> ExcessOfferStatus:
+    """The honest status to restore when reviving an offer an award had closed (findings
+    #37/#46).
+
+    ``unaward_offer``'s own reversal and :func:`_reopen_competing_offers` used to
+    hardcode the revived status to ``open``, silently flattening an offer that was
+    actually ``late`` (landed after the posting window closed) back to an
+    indistinguishable on-time bid — destroying the "landed after your window closed"
+    review signal on every award→unaward round-trip. Recomputes from the offer's own
+    history instead of a stored prior-status column (none exists, and none is added here
+    — deterministic recomputation, no migration): ``late`` when the list has a
+    ``close_at`` deadline AND this offer's ``created_at`` landed after it, else ``open``.
+    Tolerates naive datetimes (SQLite strips tzinfo), mirroring
+    :func:`_posting_window_closed`.
+    """
+    close_at = excess_list.close_at
+    created_at = offer.created_at
+    if close_at is None or created_at is None:
+        return ExcessOfferStatus.OPEN
+    if close_at.tzinfo is None:
+        close_at = close_at.replace(tzinfo=UTC)
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return ExcessOfferStatus.LATE if created_at > close_at else ExcessOfferStatus.OPEN
+
+
 def _reopen_competing_offers(excess_list: ExcessList, unawarded: ExcessOffer) -> set[int]:
     """Inverse of :func:`_close_competing_offers` — revive the ``lost`` closures an
     award made.
@@ -1322,8 +1418,10 @@ def _reopen_competing_offers(excess_list: ExcessList, unawarded: ExcessOffer) ->
     ``lost`` offer that once again has a line it could win: a ``per_line`` offer with any
     matched line no longer decided, or a ``take_all`` offer once NO line is awarded.
     ``lost`` is only ever set by :func:`_close_competing_offers`, so every ``lost`` offer
-    here was closed by an award and is safe to revive. Returns the touched line ids for
-    rollup recompute.
+    here was closed by an award and is safe to revive. The revived status is recomputed via
+    :func:`_revived_offer_status` (findings #37/#46) rather than hardcoded ``open`` — a
+    competitor that was ``late`` when the award closed it revives ``late``, not an
+    indistinguishable on-time bid. Returns the touched line ids for rollup recompute.
     """
     any_awarded = any(li.status == ExcessLineItemStatus.AWARDED for li in excess_list.line_items)
     touched: set[int] = set()
@@ -1336,7 +1434,7 @@ def _reopen_competing_offers(excess_list: ExcessList, unawarded: ExcessOffer) ->
             matched = [ln.excess_line_item for ln in other.lines if ln.excess_line_item is not None]
             reopen = any(li.status not in _DECIDED_LINE_STATUSES for li in matched)
         if reopen:
-            other.status = ExcessOfferStatus.OPEN
+            other.status = _revived_offer_status(excess_list, other)
             touched.update(ln.excess_line_item_id for ln in other.lines if ln.excess_line_item_id is not None)
     return touched
 
@@ -1348,17 +1446,18 @@ def _lock_list_for_award(db: Session, offer: ExcessOffer, excess_list_id: int) -
     two concurrent awards touching an overlapping line can both pass the guard before
     either commits and double-award it (double-firing the buyer-score / mirror hooks).
     Mirroring ``claim_prospect``'s ``with_for_update`` pattern, this locks the list row
-    and every one of its line items up front: a second concurrent award BLOCKS here until
-    the first commits, then sees the awarded line status and fails the already-awarded
-    guard (or the idempotency check) instead of racing it. ``populate_existing`` refreshes
-    any identity-mapped line so the guard reads freshly-committed state, and ``db.refresh``
-    does the same for the offer (so a concurrent flip of THIS offer is seen as idempotent).
-    ``with_for_update`` is a no-op on SQLite (tests) and enforced on PostgreSQL (prod).
+    and every one of its line items up front (via :func:`_lock_list_and_lines`): a second
+    concurrent award BLOCKS here until the first commits, then sees the awarded line
+    status and fails the already-awarded guard (or the idempotency check) instead of
+    racing it. ``populate_existing`` refreshes any identity-mapped ExcessList AND line so
+    the guard reads freshly-committed state (finding #8 — the ExcessList query used to be
+    missing ``populate_existing``, so a concurrent close/expiry committed while this call
+    blocked on the row lock was invisible to the terminal-status guard and
+    ``sync_list_mirror`` right after), and ``db.refresh`` does the same for the offer (so a
+    concurrent flip of THIS offer is seen as idempotent). ``with_for_update`` is a no-op on
+    SQLite (tests) and enforced on PostgreSQL (prod).
     """
-    db.query(ExcessList).filter(ExcessList.id == excess_list_id).with_for_update().first()
-    db.query(ExcessLineItem).filter(
-        ExcessLineItem.excess_list_id == excess_list_id
-    ).with_for_update().populate_existing().all()
+    _lock_list_and_lines(db, excess_list_id)
     db.refresh(offer)
 
 
@@ -1471,9 +1570,15 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     Owner-only (404 missing, 403 non-owner, same order as award). Raises 409 if the offer
     is not ``won`` (there is nothing to reverse — we never silently re-pick a different
-    winner). Flips the offer back to ``open`` and its awarded lines back to ``available``,
-    recomputes each line's rollup, recomputes the buyer's ``BuyerScore`` (a full-history
-    recompute self-heals the win count back down), re-mirrors the now-live lines
+    winner), and 409 if the list is TERMINAL (``closed``/``expired`` — finding #4): a
+    closed-without-bid (D5) or nightly-expired list is dead, and award_offer permanently
+    409s on it, so reversing a win there would erase a recorded sale with no way to
+    re-award it. ``bid_out`` is NOT terminal (it is the normal step-back target below) and
+    stays reversible. Flips the offer back to ``open``/``late`` (recomputed honestly via
+    :func:`_revived_offer_status` — findings #37/#46, never a blanket ``open`` that erases
+    a late-arrival provenance) and its awarded lines back to ``available``, recomputes each
+    line's rollup, recomputes the buyer's ``BuyerScore`` (a full-history recompute
+    self-heals the win count back down), re-mirrors the now-live lines
     (``sync_list_mirror``), and steps the list's own status back off ``awarded`` — to
     ``bid_out`` when the posting window has closed, else ``collecting``. One transaction.
     """
@@ -1490,8 +1595,14 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     if offer.status != ExcessOfferStatus.WON:
         raise HTTPException(409, "This offer is not awarded — nothing to reverse")
 
+    # D5 / finding #4: a terminal (closed-without-bid or nightly-expired) list is dead —
+    # award_offer permanently 409s on it, so reversing a win here would strand the offer
+    # with no way to ever re-award it. BID_OUT is not terminal and stays reversible.
+    if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}:
+        raise HTTPException(409, "This list is closed — the award can no longer be reversed")
+
     affected = [it for it in _award_scope_items(db, offer, excess_list) if it.status == ExcessLineItemStatus.AWARDED]
-    offer.status = ExcessOfferStatus.OPEN
+    offer.status = _revived_offer_status(excess_list, offer)
     for it in affected:
         it.status = ExcessLineItemStatus.AVAILABLE
     db.flush()
@@ -1693,13 +1804,20 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
     Shared engine for both posting-window exits: ``bid_out`` (bids went out) and ``closed``
     (closed without bidding — D5). Guards: the list must exist (404), *owner* must own it
     (403), and it must be actively posted (``open``/``collecting``) — a draft or an
-    already-resolved list is 409 (M5). RETIRES the Sighting mirror (``sync_list_mirror`` on
+    already-resolved list is 409 (M5). Takes the SAME M9 list+lines lock award/unaward/
+    withdraw/assign use (:func:`_lock_list_and_lines`) BEFORE evaluating the closeable
+    guard (finding #11): without it, a close racing a concurrent award can read the list as
+    still ``collecting``, block on the award's row lock, then unconditionally overwrite the
+    just-awarded status once it wakes. RETIRES the Sighting mirror (``sync_list_mirror`` on
     a now-closed posting drops every line's live-supply row — both ``bid_out`` and ``closed``
     are in the mirror's posting-closed set). Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can close it")
+
+    _lock_list_and_lines(db, list_id)
+
     if excess_list.status not in {s.value for s in _CLOSEABLE_LIST_STATUSES}:
         raise HTTPException(409, "Only an open or collecting list can be closed")
 
@@ -1732,8 +1850,8 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
 
 
 def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList:
-    """Close a posted list WITHOUT bidding → the terminal ``closed`` state (D5, finding
-    #14).
+    """Close a posted list WITHOUT bidding → the terminal ``closed`` state (D5,
+    finding #14).
 
     The deliberate "nothing came of this — end it" exit, distinct from the ``bid_out``
     (bids went out) path: an owner ends a posting that drew no usable bid instead of leaving
@@ -1751,8 +1869,8 @@ _UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
 def _list_is_partially_awarded(excess_list: ExcessList) -> bool:
-    """True when *excess_list* already SOLD something — any ``awarded`` line or ``won``
-    offer.
+    """True when *excess_list* already SOLD something — any ``awarded`` line or
+    ``won`` offer.
 
     A partial award deliberately keeps the list ``collecting`` (``_apply_award_list_status``
     only flips to ``awarded`` when EVERY line is decided), so such a list lands in the

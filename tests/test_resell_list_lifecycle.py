@@ -123,6 +123,35 @@ def test_close_list_allows_collecting(db_session, owner, company):
     assert closed.close_at is not None
 
 
+def test_end_posting_window_locks_list_before_guard(db_session, owner, company, monkeypatch):
+    """Finding #11: ``_end_posting_window`` (close / close-without-bid) takes the SAME
+    M9 list+lines lock award/unaward/withdraw/assign use, BEFORE evaluating the
+    closeable guard — so a close racing a concurrent award serializes instead of
+    clobbering the just-awarded status.
+
+    Spy the lock hook to prove it's wired (``with_for_update`` itself is a no-op on the
+    SQLite test engine, so the race is unobservable here — this guards the hook against
+    regression, same technique as ``test_withdraw_offer_locks_list_for_serialization``).
+    """
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    el.status = ExcessListStatus.COLLECTING
+    db_session.commit()
+
+    calls: list[int] = []
+    real_lock = excess_service._lock_list_and_lines
+
+    def _spy(db, excess_list_id):
+        calls.append(excess_list_id)
+        return real_lock(db, excess_list_id)
+
+    monkeypatch.setattr(excess_service, "_lock_list_and_lines", _spy)
+
+    excess_service.close_list(db_session, el.id, owner)
+
+    assert calls == [el.id]
+
+
 # ── close retires the Sighting mirror ────────────────────────────────
 
 

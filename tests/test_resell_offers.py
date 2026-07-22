@@ -15,6 +15,7 @@ Called by: pytest
 Depends on: app.services.excess_service, app.models.excess, tests.conftest
 """
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -67,11 +68,20 @@ def _make_user(db: Session, *, email: str, role: str = "trader") -> User:
 
 
 def _make_list_with_lines(db: Session, owner: User, company: Company, parts: list[str]) -> ExcessList:
-    """Create an ExcessList with one line per part (via import path so resolve
-    fires)."""
+    """Create a POSTED (open) ExcessList with one line per part (via import path so
+    resolve fires).
+
+    Posted, not draft: ``submit_offer`` rejects a non-posted list (finding #47), so every
+    caller that submits an offer against a list built by this helper needs it already
+    open. Callers that want a specific status (e.g. bid_out/awarded for late-offer tests)
+    still override ``el.status`` after this returns.
+    """
     el = create_excess_list(db, title="Excess", company_id=company.id, owner_id=owner.id)
     rows = [{"part_number": p, "quantity": "100"} for p in parts]
     import_line_items(db, el.id, rows)
+    el.status = ExcessListStatus.OPEN
+    db.commit()
+    db.refresh(el)
     return el
 
 
@@ -582,3 +592,141 @@ def test_tracker_context_no_n_plus_1_across_rows(db_session: Session):
     four = _count_queries(db_session, _build_and_walk)
 
     assert four == one, f"tracker N+1: 1 row={one} queries, 4 rows={four}"
+
+
+# ---------------------------------------------------------------------------
+# Finding #47 — submit_offer's own posted-status guard (service-level, not just router)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blocked_status", [ExcessListStatus.DRAFT, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+def test_submit_offer_rejects_non_posted_list_service_level(db_session: Session, blocked_status):
+    """A direct service call (bypassing the router's own 404-camouflage guard) must
+    itself reject a draft/terminal list — mirrors ``upload_bids``'s own guard."""
+    company = _make_company(db_session, name=f"NonPosted-{blocked_status}")
+    owner = _make_user(db_session, email=f"np-owner-{blocked_status}@test.com", role="sales")
+    offerer = _make_user(db_session, email=f"np-buyer-{blocked_status}@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = blocked_status
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+    assert exc.value.status_code == 409
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).count() == 0
+
+
+@pytest.mark.parametrize(
+    "posted_status",
+    [ExcessListStatus.OPEN, ExcessListStatus.COLLECTING, ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED],
+)
+def test_submit_offer_works_on_every_posted_status(db_session: Session, posted_status):
+    """Control: every posted status (live or resolved-but-awardable) still accepts an
+    offer through the service directly."""
+    company = _make_company(db_session, name=f"Posted-{posted_status}")
+    owner = _make_user(db_session, email=f"posted-owner-{posted_status}@test.com", role="sales")
+    offerer = _make_user(db_session, email=f"posted-buyer-{posted_status}@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.status = posted_status
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+    assert offer.id is not None
+
+
+# ---------------------------------------------------------------------------
+# Finding #9 — submit_offer takes the M9 lock + re-checks post-lock status
+# ---------------------------------------------------------------------------
+
+
+def test_submit_offer_locks_list_before_status_read(db_session: Session, monkeypatch):
+    """``submit_offer`` takes the M9 list-row lock (``_lock_list_row``) BEFORE re-
+    reading ``excess_list.status`` — spy the hook to prove it's wired
+    (``with_for_update`` is a no-op on the SQLite test engine, so the actual race is
+    unobservable here)."""
+    from app.services import excess_service
+
+    company = _make_company(db_session, name="Lock Seller")
+    owner = _make_user(db_session, email="lock-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="lock-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    db_session.commit()
+
+    calls: list[int] = []
+    real_lock = excess_service._lock_list_row
+
+    def _spy(db, excess_list_id):
+        calls.append(excess_list_id)
+        return real_lock(db, excess_list_id)
+
+    monkeypatch.setattr(excess_service, "_lock_list_row", _spy)
+
+    submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert calls == [el.id]
+
+
+def test_submit_offer_stale_read_cannot_resurrect_closed_list(db_session: Session):
+    """Finding #9: a list closed BETWEEN the caller's stale read and the lock must not
+    be resurrected by the open->collecting flip.
+
+    Simulates the race within one SQLite session: a raw core UPDATE (bypassing the ORM,
+    like a second transaction's committed close) flips the list CLOSED behind the
+    already-identity-mapped object's back, with no intervening commit (so
+    ``expire_on_commit`` never auto-refreshes it). Without the M9 lock's
+    ``populate_existing`` refresh, ``submit_offer`` would read the stale 'open' status and
+    proceed to create the offer / flip to collecting on a dead list.
+    """
+    from sqlalchemy import text as sa_text
+
+    company = _make_company(db_session, name="StaleRace Seller")
+    owner = _make_user(db_session, email="stale-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="stale-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    db_session.commit()
+    assert el.status == ExcessListStatus.OPEN
+
+    db_session.execute(sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=el.id))
+    assert el.status == ExcessListStatus.OPEN  # still stale, pre-call
+
+    with pytest.raises(HTTPException) as exc:
+        submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+    assert exc.value.status_code == 409
+    assert el.status == ExcessListStatus.CLOSED  # the lock refreshed it in place
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Finding #10 — an offer landing after close_at (but before the status is swept) is LATE
+# ---------------------------------------------------------------------------
+
+
+def test_submit_offer_past_close_at_is_late_even_though_status_still_open(db_session: Session):
+    """A D1 posting window that lapsed at ``close_at`` but hasn't been swept to
+    bid_out/expired yet (the nightly job hasn't run) still stamps a landing offer
+    ``late`` — not an indistinguishable on-time ``open``."""
+    company = _make_company(db_session, name="LapsedWindow Seller")
+    owner = _make_user(db_session, email="lapsed-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="lapsed-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.close_at = datetime.now(UTC) - timedelta(hours=2)
+    db_session.commit()
+    assert el.status == ExcessListStatus.OPEN  # the nightly sweep hasn't run
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert offer.status == ExcessOfferStatus.LATE
+
+
+def test_submit_offer_before_close_at_is_open(db_session: Session):
+    """Control: a future close_at (window still live) still stamps ``open``."""
+    company = _make_company(db_session, name="FutureWindow Seller")
+    owner = _make_user(db_session, email="future-owner@test.com", role="sales")
+    offerer = _make_user(db_session, email="future-buyer@test.com", role="buyer")
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    el.close_at = datetime.now(UTC) + timedelta(hours=2)
+    db_session.commit()
+
+    offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
+
+    assert offer.status == ExcessOfferStatus.OPEN

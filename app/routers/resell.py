@@ -1751,7 +1751,15 @@ async def resell_award_offer(
     derivation) and enforces owner-gating, 404 on a missing offer, and 409 when a line is
     already awarded to a different offer. The response is an OOB compose so awarding from a
     tab never resets the Alpine ``tab`` state; the toast fires via HX-Trigger.
+
+    Finding #32: {list_id} is otherwise unused — a caller could POST an offer id that
+    belongs to a DIFFERENT list under this URL's list_id (a stale tab, replayed request,
+    or a crafted URL). 404 up front when the offer's real list disagrees, mirroring
+    ``resell_withdraw_offer``'s existing guard — existence not revealed across lists.
     """
+    offer = db.get(ExcessOffer, offer_id)
+    if offer is None or offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer {offer_id} not found on list {list_id}")
     offer = excess_service.award_offer(db, offer_id, user)
     el = excess_service.get_excess_list(db, offer.excess_list_id)
     resp = template_response(
@@ -1774,7 +1782,13 @@ async def resell_unaward_offer(
     The explicit inverse of award — never a silent auto-swap to a different winner. The
     service enforces owner-gating, 404 on a missing offer, and 409 when the offer is not
     awarded (nothing to reverse).
+
+    Finding #32: 404 up front when the offer's real list disagrees with this URL's
+    list_id, mirroring ``resell_withdraw_offer`` / ``resell_award_offer``.
     """
+    offer = db.get(ExcessOffer, offer_id)
+    if offer is None or offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer {offer_id} not found on list {list_id}")
     offer = excess_service.unaward_offer(db, offer_id, user)
     el = excess_service.get_excess_list(db, offer.excess_list_id)
     resp = template_response(
