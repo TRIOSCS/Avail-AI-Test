@@ -1697,7 +1697,9 @@ else `CustomerSite.contact_email`), **hard-blocks DNC** (site-level or a matchin
 `_build_quote_email_html` (whose single home is now this module — re-exported from
 `crm/_helpers.py` for the preview route), POSTs `/me/sendMail`, then captures the sent
 message's Graph ids via `email_service._find_sent_message` into `quote.graph_message_id` /
-`graph_conversation_id` (NULL-safe). It then transitions the quote→SENT, advances the
+`graph_conversation_id` (NULL-safe; a raised `SentMessageLookupError` — the lookup's
+lookup-failed state — is swallowed here since the mail already went out: ids stay NULL,
+reply matching degrades). It then transitions the quote→SENT, advances the
 requisition→QUOTED (unless WON/LOST/ARCHIVED), writes an OUTBOUND email `ActivityLog` via
 `activity_service.log_email_activity`, and commits, returning a frozen `SendQuoteResult`.
 Under `TESTING=1` the Graph POST + Sent-Items lookup are skipped but the quote is still
@@ -2269,14 +2271,12 @@ when the LIST's status is posting-closed (`bid_out`/`awarded`/`closed`/`expired`
 collecting are unchanged (draft/open/collecting fall through to the per-line active check).
 The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
 `excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
-to `expired` and retires their mirror; the left-list stage filter now offers the `closed` /
-`expired` stages (the status badges already rendered them). **P1 finding #1 fix (2026-07-22
-deep review):** the sweep query itself excludes (NOT EXISTS) any list holding an `awarded`
-line or a `won` offer — a partial award deliberately leaves the list `collecting` (only a
-FULLY-decided list flips to `awarded`), and expiring it to the terminal `expired` would
-permanently 409 `award_offer` on its still-live remaining offers with no recovery path. Such
-lists are never loaded by the sweep at all (skip logged at INFO with the list id) and stay
-`collecting`, keeping their late offers reviewable/awardable.
+to `expired` and retires their mirror; a PARTIALLY-AWARDED list (any `awarded` line / `won`
+offer — a partial award deliberately stays `collecting`) instead steps to the non-terminal
+`bid_out`, because terminal `expired` would 409 every later `award_offer` and strand the
+still-live bids on its remaining lines (deep-review #2 finding #1; mirror retired identically —
+both are posting-closed). The left-list stage filter now offers the `closed` /
+`expired` stages (the status badges already rendered them).
 
 **Phase 5 (posting window + scoring + mirror identity).** Four related fixes:
 - *Posting-deadline entry point + chip fix (finding #8, D1).* `create_excess_list` /
@@ -2555,18 +2555,14 @@ only for `SENT` buyers (gated at the call site). Every send persists its exact s
 campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
 (`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
 retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
-already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES
-`email_service.DeliveryCheckUnavailable` is the UNKNOWN case → the row is left `interrupted`
-and nothing is resent (never assume not-sent); the resend refreshes `created_at` so the stale
-sweeper can't flip an in-flight retry. **P1 finding #2 fix (2026-07-22 deep review):**
-`_find_sent_message` previously could never raise — every attempt wrapped `except Exception`
-internally and the function returned a bare `None` for BOTH a transient Graph failure and a
-genuine no-match, so the retry's "unknown" branch was dead code and a Graph outage during the
-reconcile read as a false "confirmed not-sent" and resent. `_find_sent_message` now raises
-`DeliveryCheckUnavailable` when at least one attempt errored (still returns `None` only on an
-all-clean no-match); every caller (retry's guard, `_finalize_outreach_send`'s post-send id
-capture, `send_batch_rfq`'s batch lookup, `quote_send.send_quote_email`) handles the exception
-deliberately. An inbound reply carrying a bid flips an `OPEN` list to `COLLECTING`
+already-delivered row is reconciled to `SENT`, never double-sent. `_find_sent_message` has a
+THREE-STATE contract (deep-review #2 finding 2): found dict | positive not-found (`None` —
+every attempt scanned the Sent window cleanly) | lookup-failed (raises
+`email_service.SentMessageLookupError` on Graph API errors — 429/5xx/expired token). Retry maps
+lookup-failed to the UNKNOWN case → the row is left `interrupted` and nothing is resent (never
+assume not-sent); ONLY the positive not-found authorizes a resend; the
+resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
+reply carrying a bid flips an `OPEN` list to `COLLECTING`
 (mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
 one bad list can't abort the nightly sweep.
 
@@ -2665,20 +2661,50 @@ writing a row (returns `None`) when the counterparty is an own-domain (`settings
 or junk (`JUNK_DOMAINS`/`JUNK_EMAIL_PREFIXES` from `shared_constants.py`) address that doesn't
 independently resolve via `match_email_to_entity` — mirroring `log_meeting_activity`'s existing
 `_is_internal_email`/`_is_junk_email` gate (now shared module-level helpers instead of
-per-function nested closures). `email_service.poll_inbox()` skips logging (not just contact
+per-function nested closures). A MATCHED own-domain counterparty is demoted rather than
+skipped: `match_email_to_entity`'s domain step resolves internal addresses to the org's own
+company record, so the row is kept with its attribution (audit trail, `external_id` dedup) but
+forced `is_meaningful=False` and stamped `quality_assessed_at`/`quality_classification=
+"internal"` — the stamp keeps `score_unscored_activities` (which selects on
+`quality_assessed_at IS NULL`) from AI-rescoring it back to True. That demotion write is the
+shared `activity_service.demote_internal_activity()` helper — ONE definition reused by all
+four demoting writers (`log_email_activity`, `scan_sent_folder`'s fallback CREATE, and the
+`reattribute_activity`/`demote_own_domain_activity` backfills), so an unstamped demotion can
+never reappear. Matched external and
+junk-prefix addresses are logged un-demoted (`is_meaningful=None`, left for the AI pass). `email_service.poll_inbox()` skips logging (not just contact
 progression) when `_is_auto_reply()` matches an inbound message's subject/body (OOO/vacation/
 bounce), and `_is_noise_email()` gained a conservative `microsoftexchange`-local-part prefix
 check for Exchange NDR mailboxes (their hex suffix is tenant-random, so it can't be an exact
 `JUNK_EMAIL_PREFIXES` entry). `jobs/email_jobs.scan_sent_folder()`'s legacy CREATE fallback
 (when no send-time row exists to reconcile) now resolves the first recipient via
-`match_email_to_entity` and stamps `company_id`/`vendor_card_id` instead of leaving both NULL.
+`match_email_to_entity` and stamps `company_id`/`vendor_card_id` instead of leaving both NULL —
+and when that recipient is own-domain (`_is_internal_email`) the row is additionally demoted
+via `demote_internal_activity()` (internal Outlook sends must never re-create promotable rows).
 
 `app/management/reattribute_activity.py` (dry-run by default, `--apply` to write, `--limit` to
 cap the scan) backfills historical rows left over from before these write-time filters existed:
 `ActivityLog` rows with `requisition_id` set but `company_id`/`vendor_card_id` both NULL are
 re-resolved via `match_email_to_entity` on `contact_email`; rows whose counterparty is
-own-domain/junk are flagged `is_meaningful=False` instead of attributed. No deletions;
-idempotent (an already-attributed row falls out of the candidate query on the next pass).
+own-domain/junk are demoted via `demote_internal_activity()` (`is_meaningful=False` + the
+`quality_assessed_at`/`quality_classification="internal"` stamps) instead of attributed. No
+deletions; idempotent (an already-attributed row falls out of the candidate query on the next
+pass).
+
+`app/management/demote_own_domain_activity.py` (same CLI shape: dry-run by default with counts
++ sample rows, `--apply` to write, `--limit` to cap the scan) covers the rows
+`reattribute_activity` structurally cannot reach — its candidate query requires `company_id`
+IS NULL, but historical own-domain emails written before the ISS-030 write-time filter were
+*attributed* (`company_id` set) and still `is_meaningful` TRUE or NULL, so they surface on the
+company Activity tab. The command scans `company_id` NOT NULL / `contact_email` NOT NULL rows
+matching the tab's exact visibility predicate (`_is_meaningful_or_unscored` — TRUE OR NULL,
+reused from `activity_service`) and demotes those whose `contact_email` is own-domain per the
+write path's `_is_internal_email` helper (`settings.own_domains` — reused, never
+re-implemented), writing via the shared `demote_internal_activity()` (`is_meaningful=False` +
+the quality-assessed stamps, so the AI pass can't re-promote fresh demoted rows within its
+7-day window). Candidates stream in id-keyset batches of 500 (no full-table
+materialization; commit-safe, ORM-portable across SQLite/PG). External-domain rows are
+untouched; no deletions; idempotent (a demoted row falls out of the candidate query on the
+next pass — False fails both predicate arms).
 
 ---
 
@@ -2995,7 +3021,7 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
 | **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
 | **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); quote-builder Excel/PDF exports (`quote_builder.py`, `EXPORT_DATA` — open to sales, single-deal customer documents); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
-| **Bulk dataset export (ISS-028, supersedes ISS-022)** | `require_access(AccessKey.EXPORT_BULK_DATA)` — **admin-only by default** — on the five bulk CSV export routes: companies + contacts (`crm/export.py`), vendors (`htmx/vendors.py:vendors_export`), requisitions (`htmx/requisitions.py:requisitions_export`), sightings (`sightings.py:sightings_export`). No interactive role (`ROLE_ACCESS_DEFAULTS`) holds this key by default — `EXPORT_BULK_DATA` was removed from `MANAGER`'s defaults (ISS-022 had granted it there); only `ADMIN` holds it via `frozenset(AccessKey)`. A manager (or any non-admin) may still be granted it individually via `access_overrides` (admin users panel), mirroring the `manage_connectors` per-user-override pattern. None of the four list toolbars (vendors/requisitions/sightings/customers) render export controls anymore — the ONLY export UI in the app is the admin-gated Settings **"Data export"** tab (`GET /v2/partials/settings/data-export`, `app/routers/htmx/settings.py:settings_data_export_tab`, template `htmx/partials/settings/data_export.html`), which links the five routes as plain full-dataset (default-params) downloads. The tab itself is gated the same way as the sibling System/Users/Ops-Group/Data-Ops admin-only tabs (`if user.role != UserRole.ADMIN: raise HTTPException(403, ...)`) — independent of the `EXPORT_BULK_DATA` capability, so a manager granted the capability override still cannot open the tab, only hit the routes directly. The `can_export_bulk_data(user)` Jinja global (`app/dependencies.py`, mirrors `has_buyer_role`/`can_approve_buy_plans`) is the single source of truth the Data-export page uses — same predicate as the route gate. |
+| **Bulk dataset export (ISS-028, supersedes ISS-022)** | `require_access(AccessKey.EXPORT_BULK_DATA)` — **admin-only by default** — on the five bulk CSV export routes: companies + contacts (`crm/export.py`), vendors (`htmx/vendors.py:vendors_export`), requisitions (`htmx/requisitions.py:requisitions_export`), sightings (`sightings.py:sightings_export`). No interactive role (`ROLE_ACCESS_DEFAULTS`) holds this key by default — `EXPORT_BULK_DATA` was removed from `MANAGER`'s defaults (ISS-022 had granted it there); only `ADMIN` holds it via `frozenset(AccessKey)`. A manager (or any non-admin) may still be granted it individually via `access_overrides` (admin users panel), mirroring the `manage_connectors` per-user-override pattern. No list toolbar renders export controls anymore — vendors/requisitions/sightings/customers accounts AND the cross-company customer-contacts workspace (`customers/contacts_list.html`, an ISS-028 leftover removed later) — the ONLY export UI in the app is the capability-gated Settings **"Data export"** tab (`GET /v2/partials/settings/data-export`, `app/routers/htmx/settings.py:settings_data_export_tab`, template `htmx/partials/settings/data_export.html`), which links the five routes as plain full-dataset (default-params) downloads. The tab endpoint is gated on the SAME `require_access(AccessKey.EXPORT_BULK_DATA)` dependency as the five export routes (NOT a strict admin-role check), and the Settings nav renders the "Data export" tab button from the matching `can_export_bulk` context flag (`settings_partial` computes it via `can_export_bulk_data(user)`, outside the `is_admin` template block — SET-06 Connectors pattern) — so a manager granted the capability override gets a real UI path to the exports, never a dead 403. The `can_export_bulk_data(user)` predicate (`app/dependencies.py`, also a Jinja global; mirrors `has_buyer_role`/`can_approve_buy_plans`) is the single source of truth — same predicate as the route gate. |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
 and raises 403 unless `user_has_access` passes (admins always pass). The
@@ -3476,7 +3502,11 @@ UI for uploading a vendor's stock list. All three are thin routes in
   DERIVED dot (not a column) but its day-floor thresholds collapse to exact timestamp
   cutoffs, so `customer_contacts_list_ctx` filters it in SQL via
   `contact_cadence_predicate` (which mirrors `cadence_state_of` EXACTLY) and pages with
-  count()/offset()/limit() — no full-set load before paging (PERF-10). The company-filter
+  count()/offset()/limit() — no full-set load before paging (PERF-10). A filter change
+  always restarts at page 1: the `#contacts-filters` form intentionally carries NO offset
+  field (mirrors `_account_list.html`; pagination links pin offset via `hx-vals`), and
+  `customer_contacts_list_ctx` snaps a stale beyond-range offset (`offset >= total`) back
+  to 0 rather than render an empty page. The company-filter
   dropdown is built from the
   same visibility scope. `require_user`. Reached via the "All contacts" link in
   `customers/list.html`.
@@ -5610,6 +5640,32 @@ time_range)` and renders `crm/scorecard.html` (full tab) or `crm/_scorecard_tabl
 time_range`). The "Activity" tab button sits beside Customers/Vendors in `crm/shell.html`
 (loads its content into `#crm-tab-content` on click, like the other CRM tabs).
 
+### CRM -> Vendors surface: create dup-check + detail-pane swap targets
+
+- **Create-form inline duplicate check.** The vendor create form's name input
+  (`vendors/create_form.html`) hx-gets `GET /v2/partials/vendors/check-duplicate`
+  (`vendor_check_duplicate_partial`, `htmx/vendors.py` — registered BEFORE
+  `/v2/partials/vendors/{vendor_id}` so the static path never int-parses) with its own
+  `display_name` param and swaps the returned warning HTML into `#dup-warning`
+  (empty 200 when clean). It is a thin HTML wrapper over
+  `services.vendor_duplicates.check_vendor_duplicate` (exact normalized-name match →
+  "already exists"; fuzzy >= 80 → "% name match" suggestion), mirroring the company
+  create form's `GET /v2/partials/customers/check-duplicate`. The JSON
+  `GET /api/vendors/check-duplicate?name=…` remains the API twin — it must NOT be
+  wired into the form (its `name` param 422s on the form's `display_name`, and JSON
+  can't swap into `#dup-warning`).
+- **Vendor detail pane self-targets its own root id.** `vendors/detail.html` renders
+  into TWO containers — `#main-content` standalone (`/v2/vendors/{id}`) and
+  `#crm-tab-content` inside the CRM shell (vendor list rows carry
+  `hx_target=#crm-tab-content` there). The header action buttons
+  (blacklist / archive / edit / delete) therefore target the pane's own root
+  `#vendor-detail-{id}` with `hx-swap="outerHTML"` — never a hard-coded
+  `#main-content`, which embedded would replace the whole CRM shell.
+  `edit_vendor_form.html` outerHTML-replaces the pane, so its root RE-CARRIES
+  `#vendor-detail-{id}` and Save/Cancel target it (same re-carried-container-id
+  pattern as the CRM task edit form, PR #781). Delete returns the vendor LIST,
+  which swaps in where the pane was, preserving the surrounding container.
+
 ---
 
 ## Cache Interaction Pattern
@@ -6070,7 +6126,7 @@ registry.)
 | Auth | 7 | OAuth login/callback/logout, status |
 | Requisitions | 47 | CRUD, search, bulk archive/assign, claim. The canonical surface is `/v2/requisitions` (**Sales Hub** = the split-panel parts workspace, `partials/parts/workspace.html`); the legacy `/requisitions2` split-panel was retired in #622 — `app/routers/requisitions2.py` now 302-redirects every `/requisitions2/*` URL to `/v2/requisitions` (no templates, no offers/activity sub-routes). **View toggle (finding REQ-12)**: a segmented switch (`partials/requisitions/_view_toggle.html`, in the workspace eyebrow + the list header) flips between the Sales Hub workspace and the flat **"Requisitions list"** (`partials/requisitions/list.html`). Clean full-page push URLs: `/v2/requisitions` → workspace (default); `/v2/requisitions?view=list` → list (`v2_page` honours `?view=list`). Every link that loads the flat list partial (detail back-link, dashboard "Open Requisitions" card, proactive convert-success) pushes `?view=list` so a reload/bookmark reproduces the list. **Create/import flow (unified_modal)**: `POST /v2/partials/requisitions/import-save` parses the modal's `reqs[i].substitutes_json` (per-sub mpn+manufacturer) via `parse_substitute_mpns()` into the canonical `[{mpn, manufacturer}]` list (falls back to the legacy comma-joined `reqs[i].substitutes` MPN string) — never stores raw strings. On success it fires `HX-Trigger: reqListRefresh` (no longer hard-targets the workspace-only `#parts-list`); **both** launch surfaces listen for `reqListRefresh from:body` — the parts workspace `#parts-list` and a hidden hook in `requisitions/list.html` (reloads the list into `#main-content`) — so the create modal refreshes whichever surface opened it. The parts-tab edit row (`tabs/req_row.html`) coerces legacy string subs → `{mpn, manufacturer}` dicts before Alpine binds `sub.mpn`. **By-Customer grouping (Workspace grouping)**: `requisitions_list_partial` takes a `group_by` param; `group_by=customer` builds a server-side nested tree (Customer → Requisition → requirement lines) over the CURRENT PAGE's rows (page-scoped, mirrors sightings; ownership inherited from the already-filtered query) and renders `partials/requisitions/grouped.html`. Both levels collapse (keys `cust:<name>` / `req:<id>`) against a per-user `$persist({}).as('saleshub-group-collapse')` map on the list root x-data; groups start expanded. The `group_by` `<select>` lives inside `#req-filters` so grouping rides `hx-include` and stays sticky across filter/sort/page changes. A **Clean & reset** button does a full reset: GET `/v2/partials/requisitions` with no params (clears search + all filters + grouping) + expands all groups + clears the `selectedIds` bulk basket |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
-| Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
+| Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `GET /v2/partials/vendors/check-duplicate` (HTML `#dup-warning` fragment off the form's `display_name` input; see "CRM -> Vendors surface" section), `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit; the edit-form fragment AND both validation-error responses re-carry the swapped container id `#account-tasks-{cid}`/`#contact-tasks-{ctid}`/`#vendor-tasks-{vid}` at their root — the flow outerHTML-swaps that container, so an id-less fragment would destroy its own Save/Cancel hx-target); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 26 | CRUD, send, PDF, e-signature, pricing history; terms editor modal (`GET .../{id}/edit-form` + `POST .../{id}/edit`) + Preview (`POST .../{id}/preview`) — OQ-08; "Valid Until" date picker persists as `validity_days` (no `valid_until` column); bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
@@ -6420,9 +6476,11 @@ minimal and mirrors the accounts pattern; no rearrangement of existing controls.
   `cadence_state` facet is applied in SQL via `contact_cadence_predicate` (mirroring
   `customer_contacts_list_ctx`) so the whole set streams through `yield_per(200)` instead
   of being materialized (PERF-10). Headers unchanged.
-- Both export links are progressive-enhancement anchors: `@click.prevent` rebuilds the
-  download URL from the live filter form (`#cdm-filters` / `#contacts-filters`) via
-  `URLSearchParams(new FormData(...))`; the bare `href` is the no-JS fallback (full export).
+- Neither list toolbar renders an export link anymore (ISS-028 — the customer-contacts
+  workspace anchor was a leftover, removed later): the export UI is the capability-gated
+  (`EXPORT_BULK_DATA`, admin-by-default with per-user override) Settings "Data export"
+  tab, which links these routes as plain full-dataset downloads.
+  The filter query params above remain supported for direct/scripted calls.
 
 ### Contacts bulk actions (`POST /v2/partials/contacts/bulk/{action}`, `companies/contacts.py`)
 - Actions: `archive` (`SiteContact.is_archived=True`), `dnc` (`do_not_contact=True`) — both

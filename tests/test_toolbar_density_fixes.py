@@ -101,8 +101,9 @@ class TestAccountsUtilityRow:
         assert 'hx-target="#modal-content"' in html
 
     def test_no_utility_control_loss(self, manager_client, test_company):
-        # ISS-028: Export CSV / Export contacts moved to the admin-only Settings
-        # "Data export" page — no export UI on the list toolbar for ANY role,
+        # ISS-028: Export CSV / Export contacts moved to the capability-gated
+        # (EXPORT_BULK_DATA, admin-by-default) Settings "Data export" page —
+        # no export UI on the list toolbar for ANY role,
         # including manager. The remaining (non-export) utilities survive the fold.
         html = manager_client.get("/v2/partials/customers", headers=_HX).text
         # Saved views + new + non-export utilities all survive the fold.
@@ -120,8 +121,8 @@ class TestAccountsUtilityRow:
 
     def test_export_csv_hidden_for_all_roles(self, client, manager_client, test_company):
         """ISS-028: bulk export controls never appear on the list toolbar for ANY
-        role (buyer or manager) — the only export UI is the admin-only Settings
-        "Data export" page."""
+        role (buyer or manager) — the only export UI is the capability-gated
+        Settings "Data export" page."""
         for c in (client, manager_client):
             html = c.get("/v2/partials/customers", headers=_HX).text
             assert "Export CSV" not in html

@@ -1,18 +1,24 @@
 {# edit_vendor_form.html — Inline edit form for vendor header fields.
    Receives: vendor (VendorCard).
-   Called by: htmx_views.py vendor_edit_form route.
+   Called by: vendor_edit_form route (routers/htmx/vendors.py).
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
-<div class="bg-white rounded-lg shadow-card border border-gray-200 p-6 mb-6">
+{# Root div re-carries the id of the detail pane this fragment outerHTML-replaces
+   (#vendor-detail-{id}, see detail.html) so Save/Cancel can swap the pane back in
+   place — in #main-content standalone AND in #crm-tab-content inside the CRM shell
+   (PR #781 pattern). Never target #main-content: embedded, that wipes the shell. #}
+<div id="vendor-detail-{{ vendor.id }}" class="bg-white rounded-lg shadow-card border border-gray-200 p-6 mb-6">
   <div class="flex items-center justify-between mb-4">
     <h2 class="text-sm font-semibold text-gray-900">Edit Vendor</h2>
     <button hx-get="/v2/partials/vendors/{{ vendor.id }}"
-            hx-target="#main-content"
+            hx-target="#vendor-detail-{{ vendor.id }}"
+            hx-swap="outerHTML"
             class="text-xs text-gray-600 hover:text-gray-700">Cancel</button>
   </div>
 
   <form hx-post="/v2/partials/vendors/{{ vendor.id }}/edit"
-        hx-target="#main-content"
+        hx-target="#vendor-detail-{{ vendor.id }}"
+        hx-swap="outerHTML"
         data-loading-disable
         class="space-y-3">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

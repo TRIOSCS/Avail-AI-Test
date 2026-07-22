@@ -523,6 +523,11 @@ def customer_contacts_list_ctx(
         # Python. contact_cadence_predicate mirrors cadence_state_of EXACTLY. (PERF-10)
         base = base.filter(contact_cadence_predicate(cadence_state, now))
     total = base.count()
+    if offset and offset >= total:
+        # Stale offset beyond the (re)filtered result set — e.g. a bookmarked/hand-edited
+        # URL, or a client older than the no-offset-in-filter-form contract — would render
+        # an empty page. Never blindly trust a round-tripped offset: snap back to page 1.
+        offset = 0
     contacts = base.offset(offset).limit(limit).all()
     for c in contacts:
         c.cadence_state = cadence_state_of(c, now)

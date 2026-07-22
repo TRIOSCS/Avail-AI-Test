@@ -112,10 +112,13 @@ def test_create_form_route_renders(client: TestClient):
 
 
 def test_create_form_has_duplicate_check_wiring(client: TestClient):
-    """create_form.html wires the vendor name input to the duplicate-check endpoint."""
+    """create_form.html wires the vendor name input to the HTMX duplicate-check partial
+    (the JSON /api/vendors/check-duplicate expects ?name=… and returns JSON — wired
+    there, the check 422'd on every keystroke and never rendered)."""
     resp = client.get("/v2/partials/vendors/create-form")
     assert resp.status_code == 200
-    assert b"/api/vendors/check-duplicate" in resp.content
+    assert b"/v2/partials/vendors/check-duplicate" in resp.content
+    assert b"/api/vendors/check-duplicate" not in resp.content
 
 
 # ── vendors/list.html — Add Vendor button ────────────────────────────

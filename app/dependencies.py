@@ -564,11 +564,12 @@ def user_has_access(user: User, key, db: Session | None = None) -> bool:
 def can_export_bulk_data(user: User | None) -> bool:
     """True if *user* may export bulk CRM/vendor/requisition/sighting datasets.
 
-    Single source of truth for the admin-only Settings "Data export" page — the SAME
-    predicate ``require_access(AccessKey.EXPORT_BULK_DATA)`` enforces on the export
-    routes (ISS-028: companies/contacts/vendors/requisitions/sightings exports are
-    admin-only by default; supersedes ISS-022's manager+admin default — a manager may
-    still be granted the capability via an explicit per-user access_overrides grant).
+    Single source of truth for the Settings "Data export" page (tab button AND tab
+    route) — the SAME predicate ``require_access(AccessKey.EXPORT_BULK_DATA)`` enforces
+    on the export routes (ISS-028: companies/contacts/vendors/requisitions/sightings
+    exports are admin-only by default; supersedes ISS-022's manager+admin default — a
+    manager may still be granted the capability via an explicit per-user
+    access_overrides grant, which also surfaces the Settings tab).
     No list toolbar renders export controls anymore (ISS-028). Quote-builder
     single-deal Excel/PDF exports stay gated on ``EXPORT_DATA`` and are unaffected by
     this predicate.

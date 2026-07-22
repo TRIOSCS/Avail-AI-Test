@@ -134,20 +134,15 @@ async def send_quote_email(
         if "error" in result:
             raise QuoteSendError(f"Failed to send quote email: {result.get('detail', '')}")
 
-        from ..email_service import DeliveryCheckUnavailable, _find_sent_message
+        from ..email_service import SentMessageLookupError, _find_sent_message
 
         try:
             msg = await _find_sent_message(gc, subject, to_email)
-        except DeliveryCheckUnavailable:
-            # The Graph POST above already succeeded — the email is delivered. A failure
-            # to reconcile its Graph ids must not block marking the quote SENT (that
-            # would leave a delivered quote stuck as "draft" and risk a manual resend).
-            # Reply threading just degrades to the weaker subject/email heuristics.
-            logger.warning(
-                "Sent-message lookup unavailable for quote {} <{}> — graph ids left NULL, reply-matching degrades",
-                quote.quote_number,
-                to_email,
-            )
+        except SentMessageLookupError:
+            # The quote email already went out (sendMail succeeded above) — a failed
+            # Sent-Items lookup must not fail the send. Graph ids stay NULL and reply
+            # matching degrades to the subject/email heuristics.
+            logger.warning("Quote sent-message lookup failed for <{}> — graph ids left NULL", to_email)
             msg = None
         if msg:
             graph_message_id = msg["id"]

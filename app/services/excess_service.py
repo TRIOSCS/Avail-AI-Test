@@ -14,7 +14,6 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1751,57 +1750,61 @@ def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList
 _UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
+def _list_is_partially_awarded(excess_list: ExcessList) -> bool:
+    """True when *excess_list* already SOLD something — any ``awarded`` line or ``won``
+    offer.
+
+    A partial award deliberately keeps the list ``collecting`` (``_apply_award_list_status``
+    only flips to ``awarded`` when EVERY line is decided), so such a list lands in the
+    nightly sweep's open/collecting net. Both markers are checked belt-and-braces: award
+    flips them together, but either alone is proof a sale exists that a terminal flip
+    would strand (deep-review #2, finding #1).
+    """
+    return any(it.status == ExcessLineItemStatus.AWARDED for it in excess_list.line_items) or any(
+        o.status == ExcessOfferStatus.WON for o in excess_list.offers
+    )
+
+
 def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
-    """Flip every unresolved, never-awarded list past its ``close_at`` to ``expired`` —
-    the nightly backstop.
+    """Resolve every unresolved list past its ``close_at`` — the nightly backstop.
 
     An ``open``/``collecting`` list whose ``close_at`` deadline has passed without being
-    awarded or closed is stale: it auto-expires so it stops advertising supply and drops
-    out of the offerable ("Open to Me") lens. For each expired list the Sighting mirror is
-    retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list already
-    ``expired``/``awarded``/``bid_out`` is skipped.
+    awarded or closed is stale: it auto-resolves so it stops advertising supply and drops
+    out of the offerable ("Open to Me") lens. For each resolved list the Sighting mirror
+    is retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list
+    already ``expired``/``awarded``/``bid_out`` is skipped.
 
-    A list holding at least one ``awarded`` line OR one ``won`` offer is EXCLUDED from the
-    sweep query outright (a NOT EXISTS on both), never even loaded: ``_apply_award_list_status``
-    deliberately leaves a partially-awarded list in ``collecting`` (only flips to ``awarded``
-    once every line is decided), and flipping it to the terminal ``expired`` would permanently
-    409 ``award_offer`` on its still-live remaining offers with no recovery path (P1 finding
-    #1, 2026-07-22 deep review). Such a list is skipped and logged at INFO — it stays
-    ``collecting`` so its late offers remain reviewable/awardable by design; a fully-awarded
-    list is already ``awarded`` and outside this sweep's status filter regardless.
+    A list with NO sale flips to terminal ``expired``. A PARTIALLY-AWARDED list (any
+    ``awarded`` line / ``won`` offer — a partial award deliberately stays ``collecting``)
+    instead steps to the NON-terminal ``bid_out``: ``expired`` would 409 every later
+    ``award_offer`` (the terminal-list guard), permanently stranding the still-live bids
+    on its remaining lines and mislabeling a list that actually sold parts as "expired"
+    (deep-review #2, finding #1). ``bid_out`` retires the mirror identically (both are in
+    the mirror's posting-closed set) while keeping the remaining offers awardable.
 
     Each list's flip + mirror-sync + commit is ISOLATED in its own try/except: one list
     whose mirror-sync raises is rolled back and skipped, and the batch continues expiring
     the others (a single bad list must never silently strand the whole nightly sweep).
-    Returns the count SUCCESSFULLY expired.
+    Returns the count SUCCESSFULLY resolved (expired + stepped to ``bid_out``).
     """
     from . import excess_mirror
 
     now = now or datetime.now(UTC)
-    overdue_filter = (
-        ExcessList.status.in_([s.value for s in _UNRESOLVED_LIST_STATUSES]),
-        ExcessList.close_at.isnot(None),
-        ExcessList.close_at < now,
-    )
-    has_awarded_or_won = or_(
-        ExcessList.line_items.any(ExcessLineItem.status == ExcessLineItemStatus.AWARDED),
-        ExcessList.offers.any(ExcessOffer.status == ExcessOfferStatus.WON),
-    )
-
-    strand_candidate_ids = [lid for (lid,) in db.query(ExcessList.id).filter(*overdue_filter, has_awarded_or_won).all()]
-    if strand_candidate_ids:
-        logger.info(
-            "Auto-expiry sweep SKIPPED {} partially-awarded overdue list(s) (id(s) {}) — left in "
-            "collecting/open so their still-live remaining offers stay reviewable/awardable",
-            len(strand_candidate_ids),
-            strand_candidate_ids,
+    overdue = (
+        db.query(ExcessList)
+        .filter(
+            ExcessList.status.in_([s.value for s in _UNRESOLVED_LIST_STATUSES]),
+            ExcessList.close_at.isnot(None),
+            ExcessList.close_at < now,
         )
-
-    overdue = db.query(ExcessList).filter(*overdue_filter, ~has_awarded_or_won).all()
+        .all()
+    )
     expired_count = 0
     for excess_list in overdue:
         try:
-            excess_list.status = ExcessListStatus.EXPIRED
+            excess_list.status = (
+                ExcessListStatus.BID_OUT if _list_is_partially_awarded(excess_list) else ExcessListStatus.EXPIRED
+            )
             db.flush()
             excess_mirror.sync_list_mirror(db, excess_list)
             _safe_commit(db, entity="excess list expiry")
@@ -1812,7 +1815,11 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
                 excess_list.id,
             )
             db.rollback()
-    logger.info("Expired {} of {} overdue excess list(s) past close_at", expired_count, len(overdue))
+    logger.info(
+        "Resolved {} of {} overdue excess list(s) past close_at (partially-awarded → bid_out, rest → expired)",
+        expired_count,
+        len(overdue),
+    )
     return expired_count
 
 

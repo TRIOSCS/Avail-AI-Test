@@ -160,10 +160,10 @@ def test_log_email_activity_skips_unmatched_junk_prefix(db_session, test_requisi
 
 
 def test_log_email_activity_still_logs_own_domain_when_matched(db_session, test_requisition, test_company):
-    """An own-domain/junk address that DOES independently resolve (e.g. a customer
-    contact whose email happens to collide with a junk prefix or own domain in a test
-    fixture) is still logged — the match itself is authoritative, not the domain
-    heuristic."""
+    """An own-domain address that DOES independently resolve (e.g. an internal ops
+    mailbox saved as a customer site contact) still writes the row WITH its attribution
+    (audit trail, external_id dedup) — but demoted: an own-domain counterparty must
+    never yield is_meaningful=True, even when entity-matched (ISS-030 hardening H1)."""
     from app.models import SiteContact
     from app.models.crm import CustomerSite
 
@@ -186,6 +186,92 @@ def test_log_email_activity_still_logs_own_domain_when_matched(db_session, test_
     )
     assert record is not None
     assert record.company_id == test_company.id
+    assert record.is_meaningful is False, "own-domain counterparty must never be meaningful"
+
+
+def test_log_email_activity_own_company_domain_match_never_meaningful(db_session, test_requisition):
+    """H1 (ISS-030 hardening): match_email_to_entity's domain step resolves an internal
+    address to the org's OWN company record (prod: company id 2, domain trioscs.com).
+
+    The row must still be written with attribution intact (company_id set), but forced
+    is_meaningful=False AND stamped quality-assessed — score_unscored_activities selects
+    on quality_assessed_at IS NULL, so an unstamped row would be AI-rescored (possibly
+    back to True) within days, re-polluting the company Activity tab.
+    """
+    from app.models import Company
+
+    own_co = Company(name="Trio Supply Chain Solutions", domain="trioscs.com", is_active=True)
+    db_session.add(own_co)
+    db_session.commit()
+
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="colleague@trioscs.com",
+        subject="RE: internal thread",
+        external_id="msg-own-co-domain-001",
+        contact_name="Colleague",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.company_id == own_co.id, "attribution must be kept"
+    assert record.is_meaningful is False
+    assert record.quality_assessed_at is not None, "must be stamped assessed so the AI pass never rescores it"
+
+
+def test_log_email_activity_external_match_left_unscored(db_session, test_requisition):
+    """An external matched counterparty keeps the pre-H1 contract: is_meaningful is left
+    None for the AI quality pass (visible under the True-or-NULL tab predicate)."""
+    from app.models import Company
+
+    ext_co = Company(name="External Buyer Co", domain="extbuyer-co.com", is_active=True)
+    db_session.add(ext_co)
+    db_session.commit()
+
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="buyer@extbuyer-co.com",
+        subject="RE: quote",
+        external_id="msg-ext-match-001",
+        contact_name="Buyer",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.company_id == ext_co.id
+    assert record.is_meaningful is None, "external matched row is left for the AI quality pass"
+    assert record.quality_assessed_at is None
+
+
+def test_log_email_activity_matched_junk_prefix_external_not_demoted(db_session, test_requisition, test_company):
+    """A junk local-part at an EXTERNAL domain that exactly matches a site contact is
+    still logged un-demoted — H1's write-time demotion is scoped to own domains only
+    (for junk prefixes the exact-email match IS authoritative)."""
+    from app.models import SiteContact
+    from app.models.crm import CustomerSite
+
+    site = CustomerSite(company_id=test_company.id, site_name="HQ2", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    contact = SiteContact(customer_site_id=site.id, email="postmaster@acme-electronics.com", full_name="Ops")
+    db_session.add(contact)
+    db_session.commit()
+
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="postmaster@acme-electronics.com",
+        subject="RE: matched junk prefix, external domain",
+        external_id="msg-matched-junk-ext-001",
+        contact_name="Ops",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.company_id == test_company.id
+    assert record.is_meaningful is None
 
 
 def test_get_requisition_activities_returns_scoped_rows(db_session, test_requisition, test_user):
