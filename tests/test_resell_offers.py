@@ -617,12 +617,19 @@ def test_submit_offer_rejects_non_posted_list_service_level(db_session: Session,
 
 
 @pytest.mark.parametrize(
-    "posted_status",
-    [ExcessListStatus.OPEN, ExcessListStatus.COLLECTING, ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED],
+    ("posted_status", "expected_offer_status"),
+    [
+        (ExcessListStatus.OPEN, ExcessOfferStatus.OPEN),
+        (ExcessListStatus.COLLECTING, ExcessOfferStatus.OPEN),
+        # Resolved-but-awardable lists still ACCEPT the offer, but stamp it late
+        # (offer_status_for_list: the posting already reads as closed).
+        (ExcessListStatus.BID_OUT, ExcessOfferStatus.LATE),
+        (ExcessListStatus.AWARDED, ExcessOfferStatus.LATE),
+    ],
 )
-def test_submit_offer_works_on_every_posted_status(db_session: Session, posted_status):
+def test_submit_offer_works_on_every_posted_status(db_session: Session, posted_status, expected_offer_status):
     """Control: every posted status (live or resolved-but-awardable) still accepts an
-    offer through the service directly."""
+    offer through the service directly — persisted with the honest open/late stamp."""
     company = _make_company(db_session, name=f"Posted-{posted_status}")
     owner = _make_user(db_session, email=f"posted-owner-{posted_status}@test.com", role="sales")
     offerer = _make_user(db_session, email=f"posted-buyer-{posted_status}@test.com", role="buyer")
@@ -631,7 +638,12 @@ def test_submit_offer_works_on_every_posted_status(db_session: Session, posted_s
     db_session.commit()
 
     offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
-    assert offer.id is not None
+
+    persisted = db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).one()
+    assert persisted.id == offer.id
+    assert persisted.submitted_by == offerer.id
+    assert persisted.scope == ExcessOfferScope.TAKE_ALL
+    assert persisted.status == expected_offer_status
 
 
 # ---------------------------------------------------------------------------
