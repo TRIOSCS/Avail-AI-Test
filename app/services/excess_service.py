@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from loguru import logger
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1751,14 +1752,23 @@ _UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
 
 
 def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
-    """Flip every unresolved list past its ``close_at`` to ``expired`` — the nightly
-    backstop.
+    """Flip every unresolved, never-awarded list past its ``close_at`` to ``expired`` —
+    the nightly backstop.
 
     An ``open``/``collecting`` list whose ``close_at`` deadline has passed without being
     awarded or closed is stale: it auto-expires so it stops advertising supply and drops
     out of the offerable ("Open to Me") lens. For each expired list the Sighting mirror is
     retired (``sync_list_mirror`` on the now-closed posting). Idempotent — a list already
     ``expired``/``awarded``/``bid_out`` is skipped.
+
+    A list holding at least one ``awarded`` line OR one ``won`` offer is EXCLUDED from the
+    sweep query outright (a NOT EXISTS on both), never even loaded: ``_apply_award_list_status``
+    deliberately leaves a partially-awarded list in ``collecting`` (only flips to ``awarded``
+    once every line is decided), and flipping it to the terminal ``expired`` would permanently
+    409 ``award_offer`` on its still-live remaining offers with no recovery path (P1 finding
+    #1, 2026-07-22 deep review). Such a list is skipped and logged at INFO — it stays
+    ``collecting`` so its late offers remain reviewable/awardable by design; a fully-awarded
+    list is already ``awarded`` and outside this sweep's status filter regardless.
 
     Each list's flip + mirror-sync + commit is ISOLATED in its own try/except: one list
     whose mirror-sync raises is rolled back and skipped, and the batch continues expiring
@@ -1768,15 +1778,26 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
     from . import excess_mirror
 
     now = now or datetime.now(UTC)
-    overdue = (
-        db.query(ExcessList)
-        .filter(
-            ExcessList.status.in_([s.value for s in _UNRESOLVED_LIST_STATUSES]),
-            ExcessList.close_at.isnot(None),
-            ExcessList.close_at < now,
-        )
-        .all()
+    overdue_filter = (
+        ExcessList.status.in_([s.value for s in _UNRESOLVED_LIST_STATUSES]),
+        ExcessList.close_at.isnot(None),
+        ExcessList.close_at < now,
     )
+    has_awarded_or_won = or_(
+        ExcessList.line_items.any(ExcessLineItem.status == ExcessLineItemStatus.AWARDED),
+        ExcessList.offers.any(ExcessOffer.status == ExcessOfferStatus.WON),
+    )
+
+    strand_candidate_ids = [lid for (lid,) in db.query(ExcessList.id).filter(*overdue_filter, has_awarded_or_won).all()]
+    if strand_candidate_ids:
+        logger.info(
+            "Auto-expiry sweep SKIPPED {} partially-awarded overdue list(s) (id(s) {}) — left in "
+            "collecting/open so their still-live remaining offers stay reviewable/awardable",
+            len(strand_candidate_ids),
+            strand_candidate_ids,
+        )
+
+    overdue = db.query(ExcessList).filter(*overdue_filter, ~has_awarded_or_won).all()
     expired_count = 0
     for excess_list in overdue:
         try:

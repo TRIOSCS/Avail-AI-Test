@@ -398,9 +398,12 @@ async def send_batch_rfq(
                     contact.graph_message_id = sent_msg.get("id")
                     contact.graph_conversation_id = sent_msg.get("conversationId")
             else:
-                # The sent message could not be located (None after retries, or the
-                # lookup task raised and was captured by return_exceptions). These
-                # Contacts keep NULL graph ids, which silently downgrades all future
+                # The sent message could not be located: either a genuine no-match (None)
+                # or the lookup raised DeliveryCheckUnavailable/other and was captured by
+                # return_exceptions=True. Both are handled identically here on purpose —
+                # this is a POST-send, best-effort id capture (the send already happened),
+                # so either way these Contacts keep NULL graph ids, which silently downgrades
+                # all future
                 # reply matching for this vendor from Tier-1 conversationId (exact
                 # thread) to the weaker Tier-2/3/4 heuristics — make the dropped
                 # association OBSERVABLE rather than silent. Common on large batches:
@@ -447,6 +450,21 @@ async def send_batch_rfq(
     return results
 
 
+class DeliveryCheckUnavailable(Exception):
+    """Raised by :func:`_find_sent_message` when EVERY lookup attempt hit a Graph API
+    error (429/5xx/expired token/network) — so delivery could not be positively
+    confirmed OR ruled out.
+
+    This is DISTINCT from a clean run that completes all attempts without error and
+    simply finds no matching message (that case returns ``None``, which IS safe to treat
+    as "not delivered"). Callers that use a not-found result to justify a resend (the
+    double-send guard in ``resell_outreach_service.retry_outreach_send``) MUST catch this
+    exception and treat it as "delivery unknown" — never as proof the original send never
+    went out. Every caller of ``_find_sent_message`` must handle this deliberately (never
+    a bare swallow that could mask a resend decision).
+    """
+
+
 async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None:
     """Find the just-sent message in Sent Items to get its ID and conversationId.
 
@@ -459,6 +477,12 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
 
     Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation
     delays.
+
+    Three-state contract (P1 finding #2, 2026-07-22 deep review): returns the matched
+    message dict on a hit; returns ``None`` when every attempt completed WITHOUT error
+    and simply found no match (a genuine, confirmed no-match); raises
+    :class:`DeliveryCheckUnavailable` when at least one attempt errored and no match was
+    found — delivery is INDETERMINATE, not confirmed absent.
     """
     wanted = (vendor_email or "").strip().lower()
     delays = [1, 2, 4]
@@ -490,21 +514,25 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
             logger.warning(f"Sent message lookup attempt failed: {e}")
     # Distinguish a transient API failure from a genuine no-match: the latter means the
     # recipient never appeared in the $top window (likely pushed below it by a large
-    # batch fan-out), and the caller leaves the Contact's graph ids NULL.
+    # batch fan-out) and is safe to treat as "not delivered"; the former means delivery
+    # is UNKNOWN and must never be treated as a confirmed no-match (raise instead).
     if api_error:
         logger.warning(
-            "Sent-message lookup gave up for <{}> (subject '{}') after API errors on all retries",
+            "Sent-message lookup gave up for <{}> (subject '{}') after API errors on all retries "
+            "— delivery status is INDETERMINATE",
             wanted,
             subject,
         )
-    else:
-        logger.warning(
-            "Sent-message lookup found no match for <{}> (subject '{}') within the top {} Sent items "
-            "— recipient may have been pushed below the window by a large batch",
-            wanted,
-            subject,
-            scanned,
+        raise DeliveryCheckUnavailable(
+            f"Sent-message lookup for <{wanted}> (subject '{subject}') failed on every retry attempt"
         )
+    logger.warning(
+        "Sent-message lookup found no match for <{}> (subject '{}') within the top {} Sent items "
+        "— recipient may have been pushed below the window by a large batch",
+        wanted,
+        subject,
+        scanned,
+    )
     return None
 
 

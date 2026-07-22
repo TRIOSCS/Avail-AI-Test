@@ -29,6 +29,7 @@ import pytest
 from app.email_service import (
     NOISE_DOMAINS,
     NOISE_PREFIXES,
+    DeliveryCheckUnavailable,
     _apply_parsed_result,
     _build_html_body,
     _classify_response,
@@ -420,12 +421,41 @@ class TestFindSentMessage:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_exception_returns_none(self):
+    async def test_exception_on_every_attempt_raises_delivery_check_unavailable(self):
+        """P1 finding #2 (2026-07-22 deep review): when EVERY retry attempt hits a Graph
+        error, delivery is INDETERMINATE — the function must raise
+        DeliveryCheckUnavailable, never return a bare None (which would be
+        indistinguishable from a confirmed no-match and would let a caller wrongly
+        justify a resend)."""
         gc = AsyncMock()
         gc.get_json.side_effect = Exception("Network error")
+        with patch("asyncio.sleep", new_callable=AsyncMock), pytest.raises(DeliveryCheckUnavailable):
+            await _find_sent_message(gc, "Subject", "sales@vendora.com")
+
+    @pytest.mark.asyncio
+    async def test_clean_no_match_still_returns_none_not_raise(self):
+        """The raise-vs-None contract (d): a clean run — every attempt succeeds, none
+        errors — that simply finds no matching message returns ``None`` (safe to treat
+        as "not delivered"), distinct from the error case above which raises."""
+        gc = AsyncMock()
+        gc.get_json.return_value = {"value": [_sent_item("msg-1", "conv-1", "Something else")]}
         with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await _find_sent_message(gc, "Subject", "sales@vendora.com")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_partial_error_then_clean_miss_still_raises(self):
+        """One failed attempt followed by clean (no-error) misses on the rest STILL
+        raises — ``api_error`` is sticky across the whole retry loop, per the documented
+        "at least one lookup attempt failed" contract."""
+        gc = AsyncMock()
+        gc.get_json.side_effect = [
+            Exception("transient 503"),
+            {"value": []},
+            {"value": []},
+        ]
+        with patch("asyncio.sleep", new_callable=AsyncMock), pytest.raises(DeliveryCheckUnavailable):
+            await _find_sent_message(gc, "Subject", "sales@vendora.com")
 
     @pytest.mark.asyncio
     async def test_subject_whitespace_matching(self):

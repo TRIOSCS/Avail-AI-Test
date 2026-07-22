@@ -29,6 +29,7 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from app import email_service
 from app.constants import ActivityType, ExcessListStatus, ExcessOutreachStatus
 from app.models import ActivityLog, Company, ExcessList, ExcessOutreach, User, VendorCard
 from app.models.excess import ExcessLineItem
@@ -1161,18 +1162,19 @@ class TestRetryOutreachSend:
         trader: User,
         buyer_card: VendorCard,
     ):
-        """Finding #1: a transient Sent-folder lookup FAILURE is the UNKNOWN case (the
-        original may have delivered) — the retry must NEVER assume not-sent and resend.
+        """Finding #2 (2026-07-22 deep review): a Sent-folder lookup that raises
+        ``DeliveryCheckUnavailable`` (every attempt hit a Graph error — 429/5xx/expired
+        token) is the UNKNOWN case (the original may have delivered) — the retry must
+        NEVER assume not-sent and resend.
 
-        The
-        row is left ``interrupted`` (retryable, no false delivery claim) with a reason, and
-        nothing is sent.
+        The row is left ``interrupted`` (retryable, no
+        false delivery claim) with a reason, and nothing is sent.
         """
         row_id = _fail_row(db_session, posted_list, trader, buyer_card)
         send_mock = AsyncMock()
 
         async def _boom(_gc, _subject, _email):
-            raise RuntimeError("graph 429 timeout")
+            raise email_service.DeliveryCheckUnavailable("graph 429 timeout on every retry attempt")
 
         with (
             patch("app.email_service.send_batch_rfq", send_mock),
@@ -1189,6 +1191,46 @@ class TestRetryOutreachSend:
             )
 
         send_mock.assert_not_called()  # a lookup error must never trigger a (possible double-) send
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.INTERRUPTED
+        assert row.sent_at is None
+        assert row.send_error and "double-send" in row.send_error
+
+    @pytest.mark.asyncio
+    async def test_retry_graph_outage_on_every_attempt_never_resends_end_to_end(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Finding #2 (a), end-to-end: the REAL (unmocked) ``email_service._find_sent_
+        message`` raises ``DeliveryCheckUnavailable`` when EVERY Graph lookup attempt
+        errors (429/5xx/expired token) — the retry must not resend, the row stays
+        ``interrupted``, and the persisted message says delivery could not be
+        verified."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        send_mock = AsyncMock()
+
+        failing_gc = AsyncMock()
+        failing_gc.get_json.side_effect = RuntimeError("Graph 429 Too Many Requests")
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.utils.graph_client.GraphClient", return_value=failing_gc),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # the real lookup's raise must never trigger a resend
         db_session.expire_all()
         row = db_session.get(ExcessOutreach, row_id)
         assert row.status == ExcessOutreachStatus.INTERRUPTED

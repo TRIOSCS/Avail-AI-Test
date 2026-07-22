@@ -2270,7 +2270,13 @@ collecting are unchanged (draft/open/collecting fall through to the per-line act
 The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
 `excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
 to `expired` and retires their mirror; the left-list stage filter now offers the `closed` /
-`expired` stages (the status badges already rendered them).
+`expired` stages (the status badges already rendered them). **P1 finding #1 fix (2026-07-22
+deep review):** the sweep query itself excludes (NOT EXISTS) any list holding an `awarded`
+line or a `won` offer — a partial award deliberately leaves the list `collecting` (only a
+FULLY-decided list flips to `awarded`), and expiring it to the terminal `expired` would
+permanently 409 `award_offer` on its still-live remaining offers with no recovery path. Such
+lists are never loaded by the sweep at all (skip logged at INFO with the list id) and stay
+`collecting`, keeping their late offers reviewable/awardable.
 
 **Phase 5 (posting window + scoring + mirror identity).** Four related fixes:
 - *Posting-deadline entry point + chip fix (finding #8, D1).* `create_excess_list` /
@@ -2549,10 +2555,18 @@ only for `SENT` buyers (gated at the call site). Every send persists its exact s
 campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
 (`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
 retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
-already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES is the
-UNKNOWN case → the row is left `interrupted` and nothing is resent (never assume not-sent); the
-resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
-reply carrying a bid flips an `OPEN` list to `COLLECTING`
+already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES
+`email_service.DeliveryCheckUnavailable` is the UNKNOWN case → the row is left `interrupted`
+and nothing is resent (never assume not-sent); the resend refreshes `created_at` so the stale
+sweeper can't flip an in-flight retry. **P1 finding #2 fix (2026-07-22 deep review):**
+`_find_sent_message` previously could never raise — every attempt wrapped `except Exception`
+internally and the function returned a bare `None` for BOTH a transient Graph failure and a
+genuine no-match, so the retry's "unknown" branch was dead code and a Graph outage during the
+reconcile read as a false "confirmed not-sent" and resent. `_find_sent_message` now raises
+`DeliveryCheckUnavailable` when at least one attempt errored (still returns `None` only on an
+all-clean no-match); every caller (retry's guard, `_finalize_outreach_send`'s post-send id
+capture, `send_batch_rfq`'s batch lookup, `quote_send.send_quote_email`) handles the exception
+deliberately. An inbound reply carrying a bid flips an `OPEN` list to `COLLECTING`
 (mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
 one bad list can't abort the nightly sweep.
 
