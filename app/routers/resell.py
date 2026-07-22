@@ -1269,7 +1269,6 @@ async def resell_add_line(
     # clear 400 instead.
     if quantity <= 0:
         raise HTTPException(400, "Quantity must be a positive whole number")
-    from ..utils.normalization import normalize_mpn_key
 
     item = ExcessLineItem(
         excess_list_id=list_id,
