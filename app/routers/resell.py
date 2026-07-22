@@ -23,6 +23,7 @@ Depends on: services.excess_service, services.excess_mirror, file_utils,
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -797,6 +798,70 @@ async def resell_offers_export(
     return stream_csv(f"resell_offers_list_{el.id}.csv", header, _rows())
 
 
+@router.get("/v2/partials/resell/{list_id}/bid-sheet")
+async def resell_bid_sheet_export(
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Stream a BLANK bid sheet CSV (owner-only) to compile multi-bidder responses.
+
+    Same owner-only gate as ``resell_offers_export``. One row per ACTIVE line item
+    (available/bidding — a withdrawn/awarded line has nothing left to bid on), plus blank
+    bidder-fill columns (Bidder / Offer Qty / Unit Price / Lead Time (Days) / Notes) so
+    several bidders' filled-in copies of this sheet can be concatenated into one compiled
+    sheet and re-uploaded via ``/bids/upload-preview``. Line ID lets the upload path
+    exact-match a row back to its posted line even if a bidder edited the part-number text.
+    """
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "The bid sheet is only available to the list owner")
+
+    items = (
+        db.query(ExcessLineItem)
+        .filter(
+            ExcessLineItem.excess_list_id == el.id,
+            ExcessLineItem.status.in_([ExcessLineItemStatus.AVAILABLE, ExcessLineItemStatus.BIDDING]),
+        )
+        .order_by(ExcessLineItem.id)
+        .all()
+    )
+
+    header = [
+        "Line ID",
+        "Part Number",
+        "Manufacturer",
+        "Description",
+        "Qty Available",
+        "Condition",
+        "Date Code",
+        "Bidder",
+        "Offer Qty",
+        "Unit Price",
+        "Lead Time (Days)",
+        "Notes",
+    ]
+
+    def _rows():
+        for item in items:
+            yield [
+                item.id,
+                item.part_number,
+                item.manufacturer,
+                item.description,
+                item.quantity,
+                item.condition,
+                item.date_code,
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+
+    return stream_csv(f"resell_bid_sheet_list_{el.id}.csv", header, _rows())
+
+
 @router.get("/v2/partials/resell/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
 async def resell_line_offer_compare(
     request: Request,
@@ -975,6 +1040,48 @@ async def resell_bid_pdf(
     )
 
 
+@router.get("/api/resell/{list_id}/bid/{bid_id}/csv")
+async def resell_bid_csv(
+    list_id: int,
+    bid_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Download the clean bid-back as CSV (owner-only) — the spreadsheet twin of the
+    PDF.
+
+    Built ONLY from :func:`bid_back_service.bid_back_export_context` (the identity-clean
+    whitelist) — never the inbound offer/rollup/vendor fields — so the download carries no
+    broker / trader / seller identity, same guarantee as the PDF. A trailing "Total" row
+    carries the subtotal. Money cells are FORMATTED (unit 4dp, extended/total 2dp —
+    matching the PDF's ``{:,.4f}``/``{:,.2f}``, sans thousands separators so spreadsheets
+    parse them as numbers) — never raw float reprs (a 0.07 × 3 line must read "0.21",
+    not "0.21000000000000002").
+    """
+    _excess_list, bid = bid_back_service.guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=user)
+    summary = bid_back_service.bid_back_export_context(bid)
+
+    header = ["Part Number", "Manufacturer", "Condition", "Quantity", "Unit Price", "Extended Price"]
+
+    def _money(value: float | None, places: int) -> str:
+        return f"{value:.{places}f}" if value is not None else ""
+
+    def _rows():
+        for li in summary["line_items"]:
+            yield [
+                li["part_number"],
+                li["manufacturer"],
+                li["condition"],
+                li["quantity"],
+                _money(li["unit_price"], 4),
+                _money(li["extended_price"], 2),
+            ]
+        yield ["Total", "", "", "", "", _money(summary["subtotal"], 2)]
+
+    safe_number = re.sub(r"[^A-Za-z0-9_-]", "_", summary["bid_number"])
+    return stream_csv(f"{safe_number}.csv", header, _rows())
+
+
 @router.post("/api/resell/{list_id}/bid/{bid_id}/send", response_class=HTMLResponse)
 async def resell_send_bid(
     request: Request,
@@ -1053,6 +1160,24 @@ async def resell_add_line_form(
     return template_response(
         "htmx/partials/resell/add_line_modal.html",
         {"request": request, "list_id": list_id},
+    )
+
+
+@router.get("/v2/partials/resell/{list_id}/bids/upload-form", response_class=HTMLResponse)
+async def resell_bids_upload_form(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Render the Upload Bids modal (owner-only) — a compiled multi-bidder sheet
+    upload."""
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "Only the list owner can upload a compiled bid sheet")
+    return template_response(
+        "htmx/partials/resell/upload_bids_modal.html",
+        {"request": request, "list_id": el.id},
     )
 
 
@@ -1144,7 +1269,6 @@ async def resell_add_line(
     # clear 400 instead.
     if quantity <= 0:
         raise HTTPException(400, "Quantity must be a positive whole number")
-    from ..utils.normalization import normalize_mpn_key
 
     item = ExcessLineItem(
         excess_list_id=list_id,
@@ -1399,6 +1523,102 @@ async def resell_import_confirm(
         message = f"{skipped} row(s) skipped (invalid quantity or blank part number)"
         resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "warning"}})
     return resp
+
+
+@router.post("/api/resell/{list_id}/bids/upload-preview", response_class=HTMLResponse)
+async def resell_bids_upload_preview(
+    request: Request,
+    list_id: int,
+    file: UploadFile,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Parse an uploaded compiled bid sheet and render the multi-bidder preview grid.
+
+    Owner-only, posted-lists-only (mirrors ``submit_offer``'s list-status gate — a draft
+    has no finalized lines to bid on). Same extension/size/ParseError guards as
+    ``resell_import_preview``.
+    """
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "Only the list owner can upload a compiled bid sheet")
+    if el.status not in {s.value for s in _POSTED_STATUSES}:
+        # Owner-only from here (403 above) — a camouflage 404 would mislead the one user
+        # who can see the draft; say what unblocks the upload instead.
+        raise HTTPException(400, "Post the list before uploading bids — offers are only collected on a posted list")
+    filename = file.filename or ""
+    if _file_extension(filename) not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{_file_extension(filename)}'")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large")
+    try:
+        rows = parse_tabular_file(content, filename)
+    except ParseError as exc:
+        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
+    if not rows:
+        raise HTTPException(400, "No data rows found")
+
+    result = excess_service.preview_bid_upload(db, list_id, rows)
+    return template_response(
+        "htmx/partials/resell/bid_upload_preview.html",
+        {
+            "request": request,
+            "list_id": list_id,
+            "filename": filename,
+            **result,
+            "carry_rows_json": json.dumps(result["carry_rows"]),
+        },
+    )
+
+
+@router.post("/api/resell/{list_id}/bids/upload-confirm", response_class=HTMLResponse)
+async def resell_bids_upload_confirm(
+    request: Request,
+    list_id: int,
+    rows_json: str = Form(...),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Confirm a previewed compiled bid-sheet upload: ingest into offers, re-render the
+    Offers tab.
+
+    The service RE-CLASSIFIES every row fresh (never trusts the client's carried
+    classification — mirrors ``confirm_import``'s L3 discipline). Responds with the
+    ``_award_response.html`` OOB compose (primary body = Offers tab, the confirm form's
+    hx-target; out-of-band = Lines tab + header chips) — the ingest recomputes per-line
+    rollups and can flip ``open → collecting``, so an Offers-only swap would leave the
+    owner's chips and Lines-tab badges stale. An HX-Trigger toast summarizes the counts.
+    """
+    el, is_owner = _get_list_for_user(db, list_id, user)
+    if not is_owner:
+        raise HTTPException(403, "Only the list owner can upload a compiled bid sheet")
+    try:
+        rows = json.loads(rows_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(400, "Invalid bid upload payload") from exc
+    if not isinstance(rows, list):
+        raise HTTPException(400, "Invalid bid upload payload")
+    # Guard EVERY element is a dict before the service normalizes rows (mirrors
+    # resell_assemble_bid) — a tampered payload like [1] or ["x"] otherwise raises
+    # AttributeError in _normalize_bid_row as an unhandled 500 instead of this 400.
+    if not all(isinstance(r, dict) for r in rows):
+        raise HTTPException(400, "Invalid bid upload payload")
+
+    result = excess_service.upload_bids(db, list_id=list_id, user=user, rows=rows)
+
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    message = (
+        f"{result['offers_created']} bid(s) uploaded ({result['lines_created']} lines, "
+        f"{result['unmatched']} unmatched, {result['rejected']} rejected)"
+    )
+    superseded = result.get("superseded", 0)
+    if superseded > 0:
+        message += f" — replaced {superseded} earlier upload(s)"
+    return _toast(resp, message)
 
 
 @router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)

@@ -135,6 +135,42 @@ def counterparty_card(
     return card
 
 
+def resolve_bidder_card(db: Session, bidder_name: str) -> VendorCard:
+    """Canonicalize a FREE-TEXT bidder name (from an uploaded compiled bid sheet) to its
+    VendorCard.
+
+    Mirrors :func:`counterparty_card`'s normalize-then-reuse-or-create pattern, but for a
+    bidder who has no Company/VendorCard row to start from — just a name typed onto a
+    spreadsheet. An existing card on the SAME ``normalize_vendor_name`` key is REUSED,
+    never duplicated; a new card is tagged ``source="resell_bid_upload"`` so its
+    provenance is distinguishable from a card backfilled via the outreach/offer-
+    attribution paths. Raises HTTPException(422) if the name has no normalizable form —
+    a true invariant only because ``excess_service._classify_bid_row`` rejects (per-row,
+    with a reason) not just blank bidders but any bidder whose name normalizes to
+    nothing (suffix-only like "Inc.", strip-to-nothing punctuation) before this is
+    called; without that guard this 422 would abort a whole multi-bidder ingest mid-loop.
+    """
+    norm = normalize_vendor_name(bidder_name) or ""
+    if not norm:
+        raise HTTPException(422, f"Bidder name {bidder_name!r} has no normalizable name to canonicalize")
+
+    existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+    if existing:
+        return existing
+
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=bidder_name.strip(),
+        emails=[],
+        phones=[],
+        source="resell_bid_upload",
+    )
+    db.add(card)
+    db.flush()  # assign id for the offer FK
+    logger.info("Created VendorCard id={} for uploaded bidder {!r}", card.id, bidder_name)
+    return card
+
+
 def _resolve_buyer_card(db: Session, buyer: dict) -> VendorCard:
     """Resolve one buyer dict ({vendor_card_id} | {company_id}) to its canonical
     card."""

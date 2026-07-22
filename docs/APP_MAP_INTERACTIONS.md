@@ -2087,6 +2087,59 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     close_at, clears only a stale one [Phase 5])
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    +-- GET  /v2/partials/resell/{id}/bid-sheet          (owner-only; blank bid-sheet CSV —
+    |     one row per ACTIVE [available/bidding] line + empty Bidder/Offer Qty/Unit Price/
+    |     Lead Time/Notes columns so several bidders' filled-in copies concatenate into one
+    |     compiled sheet for /bids/upload-preview. Same owner gate as offers/export)
+    +-- GET  /v2/partials/resell/{id}/bids/upload-form   (owner-only; renders the Upload Bids
+    |     modal — file input auto-submits to upload-preview)
+    +-- POST /api/resell/{id}/bids/upload-preview        (owner-only; posted-lists-only [400
+    |     with a "post the list first" fix-it message — only the owner can reach it, so no
+    |     draft-camouflage 404]; same extension/size/ParseError guards as
+    |     import-preview; excess_service.preview_bid_upload classifies each row — Line ID
+    |     match [wins outright, even over a disagreeing Part Number] → mpn_match [via the
+    |     SHARED _index_lines_by_norm_mpn/_classify_mpn_match helpers submit_offer uses:
+    |     matched/unmatched/ambiguous] → rejected [missing bidder, missing/invalid/non-
+    |     positive quantity, a NON-BLANK unit price that is unparseable or negative
+    |     ["invalid unit price" — a blank price is fine and stays optional; never silently
+    |     nulled, PR #785 finding #1], a bidder name that normalizes to nothing on
+    |     normalize_vendor_name (suffix-only "Inc."), a malformed non-dict row, or neither
+    |     a valid Line ID nor a Part Number — the take-all shape is out of scope, never
+    |     coerced; row numbers count NON-BLANK rows only, header = row 1 — the parser drops
+    |     fully-blank rows before the service sees them, so numbering does not necessarily
+    |     equal the literal spreadsheet row, PR #785 finding #3]. Renders
+    |     bid_upload_preview.html grouped by bidder [on the normalize_vendor_name key,
+    |     first-seen spelling displayed] with a carry_rows_json hidden field for the confirm
+    |     round-trip, plus supersedes_by_bidder [one cheap query flagging a bidder group
+    |     that already has an in-play uploaded offer on this list — inline "replaces the
+    |     earlier uploaded bid" note, PR #785 finding #2])
+    +-- POST /api/resell/{id}/bids/upload-confirm        (owner-only; 400 unless rows_json is
+    |     a list of dicts [mirrors resell_assemble_bid's element guard — tampered payloads
+    |     never 500]; excess_service.upload_bids
+    |     RE-CLASSIFIES every carried row fresh against the list's CURRENT lines [never
+    |     trusts the preview's derived match_status — mirrors confirm_import's L3
+    |     discipline; text cells str()-coerced so numeric/null cells classify, never raise];
+    |     groups accepted rows by bidder on the shared normalize_vendor_name key [case/
+    |     spacing variants = ONE bidder, first-seen spelling for display], resolves/creates
+    |     ONE VendorCard per bidder via resell_outreach_service.resolve_bidder_card [reused
+    |     on the same key, never duplicated; new cards tagged
+    |     source="resell_bid_upload"]. SUPERSEDE on re-upload [PR #785 finding #2]: before
+    |     creating a bidder's new offer, any EARLIER offer on this list for the SAME
+    |     resolved VendorCard where submitted_by==the uploading owner AND
+    |     notes=="Uploaded bid sheet" AND status is still open/late is withdrawn first —
+    |     never a manually-submitted offer [different notes] or a won/lost one — so a
+    |     fix-the-file-and-re-upload never doubles a bidder's bid. Creates one
+    |     ExcessOffer[scope=PER_LINE, notes="Uploaded bid sheet"] + one ExcessOfferLine per
+    |     row per bidder [unmatched/ambiguous rows KEPT, never dropped], recomputes the
+    |     best-price rollup for BOTH the superseded offer's matched lines and the
+    |     replacement's, and flips open→collecting on a first ingest [mirrors submit_offer].
+    |     400 on empty/all-rejected rows.
+    |     RESPONSE is the same _award_response.html OOB compose as award [PRIMARY = Offers
+    |     tab #tab-offers-<id>; OOB = #tab-lines-<id> rollup badges + #resell-chips-<id>
+    |     offer count/status badge — the ingest mutates rollups + list status, so an
+    |     Offers-only swap would leave those stale] + HX-Trigger showToast
+    |     "N bid(s) uploaded (M lines, K unmatched, J rejected)" [+ " — replaced K earlier
+    |     upload(s)" when the supersede count is > 0])
     +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
@@ -2124,6 +2177,16 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     NEW customer_bids row [revision+1, draft] and leaves the answered row untouched — D3;
     |     re-renders the tab — M4)
     +-- GET  /api/resell/{id}/bid/{bid_id}/pdf           (owner-only clean bid PDF, whitelist only)
+    +-- GET  /api/resell/{id}/bid/{bid_id}/csv           (owner-only clean bid CSV — the
+    |     spreadsheet twin of the PDF; guarded via bid_back_service.guard_bid_for_owner;
+    |     built ONLY from bid_back_export_context [Part Number/Manufacturer/Condition/
+    |     Quantity/Unit Price/Extended Price] + a trailing Total row — never the inbound
+    |     offer/rollup/vendor fields, so no broker/trader/seller identity leaks in.
+    |     Money cells FORMATTED [unit 4dp, extended/Total 2dp, blank for None — the PDF's
+    |     rounding, never raw float reprs]; bid_back_export_context rounds each
+    |     extended_price to 2dp and sums the ROUNDED values into subtotal, so line
+    |     extendeds always add up to the printed Total in both PDF and CSV.
+    |     Filename from the sanitized bid number, e.g. BID-42.csv)
     +-- POST /api/resell/{id}/bid/{bid_id}/send          (owner-only; bid_back_service.send_bid_back:
     |     resolve_seller_contact → email the clean PDF via send_batch_rfq [no requisition,
     |     PDF as the sole attachment] → draft→sent + stamp sent_at ONLY on a confirmed send;
@@ -5923,7 +5986,7 @@ shared helper:
 | Materials | `GET /v2/partials/materials/export` | `routers/htmx/materials.py` |
 | Requisitions | `GET /v2/partials/requisitions/export` | `routers/htmx/requisitions.py` |
 | Vendors | `GET /v2/partials/vendors/export` | `routers/htmx/vendors.py` |
-| Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` | `routers/resell.py` |
+| Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` + `.../bid-sheet` (blank bid sheet) + `GET /api/resell/{list_id}/bid/{bid_id}/csv` (clean bid-back CSV) | `routers/resell.py` |
 | Approvals | `GET /v2/partials/approvals/{tab}/export` | `routers/htmx/approvals_hub.py` |
 
 The **Sightings board** export (`GET /v2/sightings/export`, `routers/sightings.py`)

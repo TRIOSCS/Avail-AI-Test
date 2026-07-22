@@ -1,0 +1,104 @@
+{#
+  resell/bid_upload_preview.html — Multi-bidder preview grid for an uploaded compiled bid
+  sheet (swaps #bid-upload-area inside the Upload Bids modal). Groups ACCEPTED rows by
+  bidder, shows a per-row match chip (Line ID match / Matched / Unmatched / Ambiguous),
+  and lists REJECTED rows with reasons — rejected rows are NEVER silently coerced
+  (phase-6b lesson). A bidder group flagged in supersedes_by_bidder already has an
+  in-play uploaded offer on this list; confirming SUPERSEDES it (withdraw + replace)
+  rather than duplicating it. Confirm posts the carried canonical rows to upload-confirm,
+  which re-classifies them server-side, swaps the Offers tab, and closes the modal on
+  success.
+  Receives: list_id, by_bidder, rejected, accepted_count, rejected_count, bidder_count,
+            carry_rows_json, filename, supersedes_by_bidder.
+  Called by: resell.resell_bids_upload_preview.
+#}
+<div class="space-y-3">
+  <div class="flex items-center gap-3 text-sm">
+    <span class="font-medium text-emerald-600">
+      {{ accepted_count }} row{{ 's' if accepted_count != 1 }} across {{ bidder_count }} bidder{{ 's' if bidder_count != 1 }}
+    </span>
+    {% if rejected_count %}<span class="font-medium text-rose-500">{{ rejected_count }} rejected</span>{% endif %}
+    <span class="text-gray-500">from {{ filename }}</span>
+  </div>
+
+  {% if rejected %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
+    <ul class="list-disc pl-4 text-sm text-rose-700">
+      {% for r in rejected %}
+      {# r.row is the FILE row number (header = row 1), so it matches the spreadsheet the owner opens to fix it #}
+      <li>Row {{ r.row }}{% if r.bidder %} ({{ r.bidder }}){% endif %}: {{ r.reason }}</li>
+      {% endfor %}
+    </ul>
+    <p class="mt-1 pl-4 text-xs text-rose-500">Row numbers count filled rows only (header = row 1) — blank rows in your file are skipped.</p>
+  </div>
+  {% endif %}
+
+  {% set status_chip = {
+    'matched': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'unmatched': 'bg-amber-50 text-amber-700 border-amber-200',
+    'ambiguous': 'bg-rose-50 text-rose-700 border-rose-200'
+  } %}
+  {% if by_bidder %}
+  <div class="space-y-3 max-h-96 overflow-y-auto">
+    {% for bidder, rows in by_bidder.items() %}
+    <div class="rounded-lg border border-brand-200 overflow-hidden">
+      <div class="px-3 py-2 bg-gray-50 border-b border-brand-100 text-sm font-semibold text-gray-900">
+        {{ bidder }} <span class="text-secondary font-normal">({{ rows|length }} row{{ 's' if rows|length != 1 }})</span>
+        {% if supersedes_by_bidder and supersedes_by_bidder.get(bidder) %}
+        <span class="ml-1 text-xs font-normal text-amber-600">— replaces the earlier uploaded bid</span>
+        {% endif %}
+      </div>
+      <table class="compact-table min-w-full">
+        <thead>
+          <tr>
+            <th class="text-left">Part</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Unit $</th>
+            <th class="text-center">Lead</th>
+            <th class="text-center">Match</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="font-mono">{{ row.mpn_raw }}</td>
+            <td class="text-right tabular-nums">{{ "{:,}".format(row.quantity) }}</td>
+            <td class="text-right tabular-nums">
+              {% if row.unit_price is not none %}${{ "{:,.4f}".format(row.unit_price|float) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-center">{{ (row.lead_time_days|string ~ 'd') if row.lead_time_days is not none else '—' }}</td>
+            <td class="text-center">
+              <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full border {{ status_chip.get(row.match_status, 'bg-gray-50 text-gray-500 border-gray-200') }}">
+                {{ 'Line ID match' if row.classification == 'line_id_match' else row.match_status|capitalize }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="flex gap-2 pt-2">
+    {% if accepted_count %}
+    <form hx-post="/api/resell/{{ list_id }}/bids/upload-confirm"
+          hx-target="#tab-offers-{{ list_id }}"
+          hx-swap="innerHTML"
+          data-loading-disable
+          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); }">
+      <input type="hidden" name="rows_json" value="{{ carry_rows_json }}">
+      <button type="submit" class="btn btn-primary btn-sm">Confirm upload ({{ accepted_count }})</button>
+    </form>
+    {% endif %}
+    <button type="button"
+            hx-get="/v2/partials/resell/{{ list_id }}/bids/upload-form"
+            hx-target="#modal-content"
+            hx-swap="innerHTML"
+            class="btn btn-secondary btn-sm">
+      {{ 'Upload another file' if accepted_count else 'Try another file' }}
+    </button>
+    <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary btn-sm">Cancel</button>
+  </div>
+</div>

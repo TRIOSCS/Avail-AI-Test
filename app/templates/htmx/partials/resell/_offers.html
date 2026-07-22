@@ -134,11 +134,17 @@
 {% else %}
 <div class="space-y-5">
 
-  {# ── Export CSV — owner-only competing-broker bids as a real download ─── #}
-  {# hx-boost="false" opts this anchor out of nav-boost so it streams the file instead of
-     swapping into #main-content. Owner-only (this whole branch is is_owner), matching the
-     export endpoint's owner gate. #}
-  <div class="flex items-center justify-end">
+  {# ── Export CSV / Bid Sheet / Upload Bids — owner-only real downloads + upload ─── #}
+  {# hx-boost="false" opts these anchors out of nav-boost so they stream the file instead
+     of swapping into #main-content. Owner-only (this whole branch is is_owner), matching
+     each endpoint's owner gate. #}
+  <div class="flex items-center justify-end gap-2">
+    <button @click="$dispatch('open-modal')"
+            hx-get="/v2/partials/resell/{{ el.id }}/bids/upload-form"
+            hx-target="#modal-content"
+            class="btn-secondary btn-sm" title="Upload a compiled sheet of several bidders' filled-in bid sheets">Upload Bids</button>
+    <a hx-boost="false" href="/v2/partials/resell/{{ el.id }}/bid-sheet"
+       class="btn-secondary btn-sm" title="Download the blank bid sheet to send to bidders">Download Bid Sheet</a>
     <a hx-boost="false" href="/v2/partials/resell/{{ el.id }}/offers/export"
        class="btn-secondary btn-sm" title="Download all offers on this list as a CSV file">Export CSV</a>
   </div>
