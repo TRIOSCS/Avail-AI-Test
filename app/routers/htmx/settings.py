@@ -29,6 +29,7 @@ from ...constants import (
 )
 from ...database import get_db
 from ...dependencies import (
+    can_export_bulk_data,
     require_access,
     require_admin,
     require_user,
@@ -116,6 +117,10 @@ async def settings_partial(
     ctx["active_tab"] = tab
     ctx["is_admin"] = is_admin
     ctx["can_manage_connectors"] = can_manage_connectors
+    # Data-export tab visibility: the SAME EXPORT_BULK_DATA predicate the tab route and
+    # the five export routes enforce (admins by default, or an explicit per-user
+    # override), so the button is never a dead 403 — mirrors can_manage_connectors.
+    ctx["can_export_bulk"] = can_export_bulk_data(user)
     return template_response("htmx/partials/settings/index.html", ctx)
 
 
@@ -435,17 +440,18 @@ async def settings_data_ops_tab(
 @router.get("/v2/partials/settings/data-export", response_class=HTMLResponse)
 async def settings_data_export_tab(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.EXPORT_BULK_DATA)),
     db: Session = Depends(get_db),
 ):
-    """Data export tab — admin-only bulk dataset export links (ISS-028).
+    """Data export tab — bulk dataset export links (ISS-028).
 
     Links to the existing, unchanged EXPORT_BULK_DATA-gated download routes; this tab is
-    the ONLY place bulk export controls appear in the app.
+    the ONLY place bulk export controls appear in the app. Gated on the SAME
+    require_access(AccessKey.EXPORT_BULK_DATA) the five export routes enforce (admins by
+    default, or a non-admin granted an explicit per-user access_overrides escape hatch)
+    — a role-only admin gate would let an overridden manager pass the export routes yet
+    reach no UI that links them (mirrors the SET-06 Connectors pattern).
     """
-    if user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
-
     ctx = _base_ctx(request, user, "settings")
     return template_response("htmx/partials/settings/data_export.html", ctx)
 

@@ -373,9 +373,12 @@ existing tests).
     remains possible via the admin users panel, mirroring `manage_connectors`).
   - Delete the export buttons from the vendors/requisitions/sightings/customers
     list toolbars (added in ISS-022) — no export UI outside Settings.
-  - New Settings "Data export" page (admin-gated, existing settings patterns)
-    linking the five dataset exports; exports from there are full-dataset
-    (default params), no longer tied to on-screen filters.
+  - New Settings "Data export" page (existing settings patterns) linking the five
+    dataset exports; exports from there are full-dataset (default params), no
+    longer tied to on-screen filters. (Gated on the admin role at ship time; the
+    tab + route later moved to the same `require_access(EXPORT_BULK_DATA)`
+    capability gate as the five export routes, so a per-user override unlocks
+    the tab UI too — admin-by-default is unchanged.)
   - Routes keep their URLs and `require_access(EXPORT_BULK_DATA)` gates.
   - Update role-matrix/toolbar tests; add settings-page tests.
 

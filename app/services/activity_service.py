@@ -485,6 +485,22 @@ def _is_internal_email(email: str) -> bool:
     return domain in settings.own_domains
 
 
+def demote_internal_activity(record: ActivityLog) -> None:
+    """Demote an internal-noise (own-domain/junk counterparty) ActivityLog row in place.
+
+    Sets is_meaningful=False and stamps quality_assessed_at + quality_classification=
+    "internal". The stamp is load-bearing: score_unscored_activities selects on
+    quality_assessed_at IS NULL, so an unstamped demotion would be AI re-scored
+    (possibly back to True) within days, silently undoing the demotion. ONE definition
+    shared by log_email_activity (write path), scan_sent_folder's fallback CREATE
+    (app/jobs/email_jobs.py), and the demote_own_domain_activity / reattribute_activity
+    backfills — the four demoting writers can never disagree.
+    """
+    record.is_meaningful = False
+    record.quality_classification = "internal"
+    record.quality_assessed_at = datetime.now(UTC)
+
+
 def _is_junk_email(email: str) -> bool:
     """True if ``email`` is a generic/junk mail domain or a junk local-part prefix.
 
@@ -516,8 +532,14 @@ def log_email_activity(
     Returns the ActivityLog record, or None if dedup/no-match, or None if the
     counterparty is an own-domain/junk address that doesn't independently resolve to a
     company or vendor (ISS-030 write-time filter — mirrors log_meeting_activity's
-    _is_internal_email/_is_junk_email gate; a matched address is logged regardless,
-    since the match itself is authoritative).
+    _is_internal_email/_is_junk_email gate). A matched external or junk-prefix address
+    is logged as before (the exact-email match is authoritative there), but a matched
+    OWN-DOMAIN counterparty is demoted at write time: the row is kept with its
+    attribution (audit trail, external_id dedup) yet forced is_meaningful=False and
+    stamped quality-assessed — match_email_to_entity's domain step resolves internal
+    addresses to the org's own company record, so "the match is authoritative" never
+    holds for own domains and every internal email would otherwise keep re-creating
+    meaningful-or-unscored rows on that company's Activity tab.
 
     Pass occurred_at to stamp the exact send/receive time on the row.  When omitted the
     column default (server-side UTC now) is used.  Always pass occurred_at for send-time
@@ -552,6 +574,12 @@ def log_email_activity(
         )
         return None
 
+    # ISS-030 hardening (H1): even a MATCHED own-domain counterparty must never yield
+    # is_meaningful=True — force False and stamp the row quality-assessed, because
+    # score_unscored_activities selects on quality_assessed_at IS NULL and would
+    # otherwise AI-rescore the row (possibly back to True) within days.
+    is_own_domain = bool(email_lower) and _is_internal_email(email_lower)
+
     activity_type = ActivityType.EMAIL_SENT if is_outbound else ActivityType.EMAIL_RECEIVED
 
     record = ActivityLog(
@@ -569,7 +597,11 @@ def log_email_activity(
         requisition_id=requisition_id,
         requirement_id=requirement_id,
         occurred_at=occurred_at,
+        # Non-own-domain email rows stay is_meaningful=None for the AI quality pass.
+        is_meaningful=None,
     )
+    if is_own_domain:
+        demote_internal_activity(record)
     db.add(record)
     db.flush()
 

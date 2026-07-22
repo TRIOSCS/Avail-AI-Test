@@ -439,9 +439,11 @@ from .dependencies import (  # noqa: E402
 )
 
 templates.env.globals["can_approve_buy_plans"] = can_approve_buy_plans
-# Bulk dataset export gate (ISS-022): list toolbars hide "Export CSV" using the SAME
-# predicate require_access(AccessKey.EXPORT_BULK_DATA) enforces on the export routes
-# (companies/contacts/vendors/requisitions/sightings — manager+admin only).
+# Bulk dataset export gate (ISS-028, supersedes ISS-022): the Settings nav shows the
+# capability-gated "Data export" tab using the SAME predicate
+# require_access(AccessKey.EXPORT_BULK_DATA) enforces on the export routes
+# (companies/contacts/vendors/requisitions/sightings — admin-by-default, per-user
+# override possible). List toolbars render no export controls at all anymore.
 templates.env.globals["can_export_bulk_data"] = can_export_bulk_data
 # Purchase-order approval right exposed the same way: templates hide the verify-PO UI using
 # the SAME predicate require_buyplan_po_approver enforces on the POST (Phase D —

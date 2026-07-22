@@ -1,4 +1,5 @@
-{# data_export.html — Admin-only bulk dataset export links (ISS-028).
+{# data_export.html — Bulk dataset export links (ISS-028), capability-gated on
+   EXPORT_BULK_DATA (admin-by-default, per-user override possible).
    Receives: no template-specific context (user comes from base ctx).
    Called by: app/routers/htmx/settings.py settings_data_export_tab.
    Depends on: HTMX, Tailwind CSS with brand palette. Links target the existing,
@@ -10,8 +11,9 @@
     <div class="px-4 py-3 bg-gray-50 border-b">
       <h2 class="text-lg font-semibold text-gray-900">Data export</h2>
       <p class="text-sm text-gray-600 mt-0.5">
-        Full-dataset CSV downloads. Admin-only — moved out of the list toolbars so bulk
-        extraction always goes through this one audited surface.
+        Full-dataset CSV downloads. Requires the bulk-export permission (admin-only by
+        default) — moved out of the list toolbars so bulk extraction always goes through
+        this one audited surface.
       </p>
     </div>
     <ul class="divide-y divide-line-base">

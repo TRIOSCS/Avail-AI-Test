@@ -7,7 +7,9 @@
    Called by: customer_contacts_partial + contacts_bulk_action routes (companies.py).
    Depends on: brand palette, timeago filter, .table-cell / .compact-cell utilities,
                _saved_views.html.
-   Power-UX (P4): bulk select + actions (archive/DNC), Saved Views, filtered CSV export.
+   Power-UX (P4): bulk select + actions (archive/DNC), Saved Views. Bulk CSV export
+   lives ONLY in the capability-gated Settings "Data export" page (ISS-028) — this toolbar
+   renders no export control, matching the vendors/requisitions/sightings/accounts lists.
    Per-row Edit: pencil button opens the shared _contact_form.html edit modal with
    origin=contacts + the current filter_* values, so the save re-renders THIS list
    (filters intact) instead of the company Contacts tab.
@@ -19,13 +21,7 @@
       <h2 class="h2">Customer Contacts</h2>
       <p class="text-sm text-gray-600 mt-1">{{ total }} contact{{ "s" if total != 1 }} across your accounts</p>
     </div>
-    {# x-data="{}" makes the export anchor part of an Alpine scope so @click.prevent runs. #}
-    <div class="flex items-center gap-2" x-data="{}">
-      {# Export honors the CURRENT filtered view: @click.prevent rebuilds the download URL
-         from the live #contacts-filters form; the bare href is the no-JS fallback. #}
-      <a href="/v2/customers/contacts/export.csv"
-         @click.prevent="window.location = '/v2/customers/contacts/export.csv?' + new URLSearchParams(new FormData(document.getElementById('contacts-filters'))).toString()"
-         class="btn btn-secondary btn-sm">Export CSV</a>
+    <div class="flex items-center gap-2">
       <a href="/v2/customers"
          hx-get="/v2/partials/customers"
          hx-target="#main-content"
@@ -67,7 +63,9 @@
         <option value="on_target" {{ "selected" if cadence_state == "on_target" }}>On target</option>
         <option value="new" {{ "selected" if cadence_state == "new" }}>Never contacted</option>
       </select>
-      <input type="hidden" name="offset" value="{{ offset }}">
+      {# The filter form intentionally carries NO offset field (mirrors _account_list.html):
+         a filter change must restart at page 1, so the change-triggered GET sends no offset
+         and the server defaults to 0. Pagination links pin offset via hx-vals below. #}
       <input type="hidden" name="limit" value="{{ limit }}">
       <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
     </form>
