@@ -200,6 +200,74 @@ def _find_company_dedup_candidates_rapidfuzz(db, threshold: int, limit: int) -> 
     return candidates
 
 
+def _dup_match_pg_query(db, company_id: int, norm: str, threshold: int):
+    """Build the anchored pg_trgm query (kept separate so tests can compile it with the
+    postgresql dialect — SQLite masks PG-invalid SQL).
+
+    `%` pre-filters via the GIN(normalized_name gin_trgm_ops) index (migration 120); the
+    explicit similarity() >= threshold/100 predicate enforces the caller's cutoff (same
+    pattern as services.vendor_duplicates._fuzzy_match_pg_trgm).
+    """
+    from sqlalchemy import func
+
+    from .models import Company
+
+    sim = func.similarity(Company.normalized_name, norm)
+    return (
+        db.query(Company.id, Company.name, sim.label("sim"))
+        .filter(
+            Company.is_active.is_(True),
+            Company.id != company_id,
+            Company.normalized_name.isnot(None),
+            Company.normalized_name != "",
+            Company.normalized_name.op("%")(norm),
+            sim >= (threshold / 100.0),
+        )
+        .order_by(sim.desc(), Company.id.asc())
+    )
+
+
+def find_company_dup_match(db, company_id: int, normalized_name: str | None, threshold: int = 85) -> dict | None:
+    """Top near-duplicate partner for ONE company — anchored, never the global pair
+    scan.
+
+    Returns {"id", "name", "score"} for the best-scoring active partner at or above
+    `threshold`, or None. Unlike find_company_dedup_candidates (global all-pairs, used by
+    data-ops and the auto-dedup job), this is a single-anchor lookup: one GIN index probe
+    on PostgreSQL, one O(n) fuzzy_dedup_scan anchor pass on SQLite/fallback — and it can
+    never lose a real match to the global scan's top-`limit` truncation.
+
+    Called by: routers.htmx.companies.core.company_dup_suggestion (per-render banner).
+    """
+    if not normalized_name:
+        return None
+
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        row = _dup_match_pg_query(db, company_id, normalized_name, threshold).first()
+        if row is None:
+            return None
+        return {"id": row.id, "name": row.name, "score": round(row.sim * 100)}
+
+    from .models import Company
+    from .vendor_utils import fuzzy_dedup_scan
+
+    rows = (
+        db.query(Company.id, Company.name, Company.normalized_name)
+        .filter(
+            Company.is_active.is_(True),
+            Company.id != company_id,
+            Company.normalized_name.isnot(None),
+            Company.normalized_name != "",
+        )
+        .all()
+    )
+    scanned = fuzzy_dedup_scan(rows, lambda r: r.normalized_name, threshold=threshold, anchor_key=normalized_name)
+    if not scanned:
+        return None
+    best_row, _, best_score = max(scanned, key=lambda t: (t[2], -t[0].id))  # tie -> lowest id
+    return {"id": best_row.id, "name": best_row.name, "score": round(best_score)}
+
+
 def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
     """Find potential duplicate companies using fuzzy name matching.
 

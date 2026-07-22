@@ -224,6 +224,23 @@ class TestDupSuggestionRoute:
         resp = unauthenticated_client.get(f"/v2/partials/customers/{solo.id}/dup-suggestion")
         assert resp.status_code == 401
 
+    def test_banner_survives_many_earlier_dup_pairs(self, client: TestClient, db_session: Session, test_user: User):
+        """The banner must be ANCHORED on this company, not filtered out of the global
+        pair scan's top-50: with 51 decoy near-dup pairs at lower ids, the old org-wide
+        scan hit its 50-pair cap before ever comparing the target pair and silently
+        rendered no banner despite a real near-duplicate."""
+        for i in range(51):
+            _make_company(db_session, f"Decoy {i} Inc")
+            _make_company(db_session, f"Decoy {i} Incorporated")
+        keep = _make_company(db_session, "Acme Corp", sites=1)
+        _make_company(db_session, "Acme Corporation")
+        keep.account_owner_id = test_user.id  # owner passes can_manage_account gate
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{keep.id}/dup-suggestion", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Acme Corporation" in resp.text
+
 
 # ── name-suggestion chip (suggest-only) ────────────────────────────────────
 
