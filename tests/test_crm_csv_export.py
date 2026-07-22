@@ -3,11 +3,11 @@
 Verifies:
 - GET /v2/customers/export.csv → companies CSV (header + rows)
 - GET /v2/customers/contacts/export.csv → contacts CSV (header + rows)
-- Manager sees all companies; a sales rep granted an EXPORT_BULK_DATA override sees
-  only owned companies (the underlying visibility scoping in _companies_rows /
-  _contacts_rows)
-- ISS-022: both routes are manager/admin only by default (AccessKey.EXPORT_BULK_DATA)
-  — a plain sales rep with no override is denied 403 (full role matrix in
+- Manager (granted an EXPORT_BULK_DATA override) sees all companies; a sales rep
+  granted the same override sees only owned companies (the underlying visibility
+  scoping in _companies_rows / _contacts_rows)
+- ISS-028: both routes are admin only by default (AccessKey.EXPORT_BULK_DATA) — a
+  plain sales rep or manager with no override is denied 403 (full role matrix in
   tests/test_export_bulk_data_gate.py)
 - Content-Type is text/csv with attachment disposition
 - CSV has correct column headers
@@ -30,9 +30,20 @@ from app.models import Company, CustomerSite, SiteContact, User
 
 @pytest.fixture()
 def manager_client(db_session: Session, manager_user: User) -> TestClient:
+    """Manager client used to exercise the export ROWS/visibility scoping
+    (is_manager_or_admin sees-all behavior), not the access gate itself — the gate's
+    manager-denied-by-default / override behavior is covered by
+    tests/test_export_bulk_data_gate.py and tests/test_access_control.py (ISS-028:
+
+    EXPORT_BULK_DATA is admin-only by default), so this fixture grants the override
+    explicitly.
+    """
     from app.database import get_db
     from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
     from app.main import app
+
+    manager_user.access_overrides = {AccessKey.EXPORT_BULK_DATA.value: True}
+    db_session.commit()
 
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[require_user] = lambda: manager_user

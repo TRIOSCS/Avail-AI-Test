@@ -193,26 +193,12 @@
   {% set out_days = ((now_utc - out_ts).days) if (out_ts and now_utc) else none %}
   {% set _cname = contact.full_name or '—' %}
 
-  {# Role display map (compact). Canonical = Mike's ContactRole vocabulary
-     (buyer/manager/engineer/planner/other); the remaining keys are LEGACY DB
-     values kept ONLY so pre-existing rows render a clean read-only chip — they
-     are not selectable in the editor (CANONICAL_ROLES drives the <option> list).
+  {# Role display labels — the `contact_role_labels` Jinja2 global (single source,
+     app/constants.py CONTACT_ROLE_LABELS) covers every canonical ContactRole member.
+     A stored value NOT in that map is a custom OTHER write-in (ISS-029) and renders
+     VERBATIM via the `.get(value, value)` fallback below — never title-cased, so a
+     buyer's exact free-text role survives round-trip.
      Every color below uses a shade in the Tailwind safelist (tailwind.config.js). #}
-  {% set role_labels = {
-    'buyer':          'Buyer',
-    'manager':        'Manager',
-    'engineer':       'Engineer',
-    'planner':        'Planner',
-    'other':          'Other',
-    'specifier':      'Specifier',
-    'buyer_po':       'Buyer/PO',
-    'ap_payer':       'AP',
-    'logistics':      'Logistics',
-    'exec':           'Exec',
-    'technical':      'Tech',
-    'decision_maker': 'DM',
-    'operations':     'Ops'
-  } %}
   {% set role_colors = {
     'buyer':          'bg-blue-50 text-blue-700',
     'manager':        'bg-violet-50 text-violet-700',
@@ -240,7 +226,7 @@
         {% if contact.contact_role %}
         <span class='chip flex-shrink-0 {{ role_colors.get(contact.contact_role, "bg-gray-100 text-gray-600") }}'
               title='{{ contact.contact_role }}'>
-          {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }}
+          {{ contact_role_labels.get(contact.contact_role, contact.contact_role) }}
         </span>
         {% endif %}
         {% if contact.do_not_contact %}
@@ -577,7 +563,7 @@
           <button type='button' x-show='!editing' x-cloak @click.stop='editing=true'
                   class='text-brand-600 hover:underline text-xs'>
             {% if contact.contact_role %}
-              {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }} ✎
+              {{ contact_role_labels.get(contact.contact_role, contact.contact_role) }} ✎
             {% else %}
               + Set role
             {% endif %}
@@ -594,7 +580,7 @@
                     x-init='$nextTick(() => { if (editing) $el.focus() })'
                     class='text-xs border border-brand-300 rounded px-1 py-0.5 input-focus'>
               <option value=''>— clear —</option>
-              {% for r in roles %}<option value='{{ r }}' {% if contact.contact_role == r %}selected{% endif %}>{{ role_labels.get(r, r|replace('_', ' ')|title) }}</option>{% endfor %}
+              {% for r in roles %}<option value='{{ r }}' {% if contact.contact_role == r %}selected{% endif %}>{{ contact_role_labels.get(r, r) }}</option>{% endfor %}
             </select>
           </form>
         </div>

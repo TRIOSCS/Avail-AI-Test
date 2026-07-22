@@ -1,0 +1,60 @@
+{# data_export.html — Admin-only bulk dataset export links (ISS-028).
+   Receives: no template-specific context (user comes from base ctx).
+   Called by: app/routers/htmx/settings.py settings_data_export_tab.
+   Depends on: HTMX, Tailwind CSS with brand palette. Links target the existing,
+   unchanged EXPORT_BULK_DATA-gated download routes — full-dataset (default params),
+   not tied to any on-screen filter state.
+#}
+<div class="space-y-6">
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Data export</h2>
+      <p class="text-sm text-gray-600 mt-0.5">
+        Full-dataset CSV downloads. Admin-only — moved out of the list toolbars so bulk
+        extraction always goes through this one audited surface.
+      </p>
+    </div>
+    <ul class="divide-y divide-line-base">
+      <li class="px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Accounts</p>
+          <p class="text-xs text-gray-600">Every CRM company/account record.</p>
+        </div>
+        <a hx-boost="false" href="/v2/customers/export.csv"
+           class="btn btn-secondary btn-sm cursor-pointer whitespace-nowrap">Export CSV</a>
+      </li>
+      <li class="px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Contacts</p>
+          <p class="text-xs text-gray-600">Every CRM site-contact record.</p>
+        </div>
+        <a hx-boost="false" href="/v2/customers/contacts/export.csv"
+           class="btn btn-secondary btn-sm cursor-pointer whitespace-nowrap">Export CSV</a>
+      </li>
+      <li class="px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Vendors</p>
+          <p class="text-xs text-gray-600">Every vendor card in the system.</p>
+        </div>
+        <a hx-boost="false" href="/v2/partials/vendors/export"
+           class="btn btn-secondary btn-sm cursor-pointer whitespace-nowrap">Export CSV</a>
+      </li>
+      <li class="px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Requisitions</p>
+          <p class="text-xs text-gray-600">Every requisition, all statuses.</p>
+        </div>
+        <a hx-boost="false" href="/v2/partials/requisitions/export"
+           class="btn btn-secondary btn-sm cursor-pointer whitespace-nowrap">Export CSV</a>
+      </li>
+      <li class="px-4 py-3 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Sightings</p>
+          <p class="text-xs text-gray-600">Every sourced sighting record.</p>
+        </div>
+        <a hx-boost="false" href="/v2/sightings/export"
+           class="btn btn-secondary btn-sm cursor-pointer whitespace-nowrap">Export CSV</a>
+      </li>
+    </ul>
+  </div>
+</div>

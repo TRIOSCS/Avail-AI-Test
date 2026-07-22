@@ -2918,7 +2918,7 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
 | **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
 | **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); quote-builder Excel/PDF exports (`quote_builder.py`, `EXPORT_DATA` — open to sales, single-deal customer documents); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
-| **Bulk dataset export (ISS-022)** | `require_access(AccessKey.EXPORT_BULK_DATA)` — manager/admin only — on the five bulk CSV export routes: companies + contacts (`crm/export.py`), vendors (`htmx/vendors.py:vendors_export`), requisitions (`htmx/requisitions.py:requisitions_export`), sightings (`sightings.py:sightings_export`). `ROLE_ACCESS_DEFAULTS[MANAGER]` is the only interactive role holding this key by default (`_INTERACTIVE_DEFAULTS | {EXPORT_BULK_DATA}`); buyer/sales/trader do not, even though they hold `EXPORT_DATA`. The four list toolbars (vendors/requisitions/sightings/customers) hide their "Export CSV" controls via the `can_export_bulk_data(user)` Jinja global (`template_env.py`, mirrors `has_buyer_role`/`can_approve_buy_plans`) — single source of truth with the route gate. |
+| **Bulk dataset export (ISS-028, supersedes ISS-022)** | `require_access(AccessKey.EXPORT_BULK_DATA)` — **admin-only by default** — on the five bulk CSV export routes: companies + contacts (`crm/export.py`), vendors (`htmx/vendors.py:vendors_export`), requisitions (`htmx/requisitions.py:requisitions_export`), sightings (`sightings.py:sightings_export`). No interactive role (`ROLE_ACCESS_DEFAULTS`) holds this key by default — `EXPORT_BULK_DATA` was removed from `MANAGER`'s defaults (ISS-022 had granted it there); only `ADMIN` holds it via `frozenset(AccessKey)`. A manager (or any non-admin) may still be granted it individually via `access_overrides` (admin users panel), mirroring the `manage_connectors` per-user-override pattern. None of the four list toolbars (vendors/requisitions/sightings/customers) render export controls anymore — the ONLY export UI in the app is the admin-gated Settings **"Data export"** tab (`GET /v2/partials/settings/data-export`, `app/routers/htmx/settings.py:settings_data_export_tab`, template `htmx/partials/settings/data_export.html`), which links the five routes as plain full-dataset (default-params) downloads. The tab itself is gated the same way as the sibling System/Users/Ops-Group/Data-Ops admin-only tabs (`if user.role != UserRole.ADMIN: raise HTTPException(403, ...)`) — independent of the `EXPORT_BULK_DATA` capability, so a manager granted the capability override still cannot open the tab, only hit the routes directly. The `can_export_bulk_data(user)` Jinja global (`app/dependencies.py`, mirrors `has_buyer_role`/`can_approve_buy_plans`) is the single source of truth the Data-export page uses — same predicate as the route gate. |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
 and raises 403 unless `user_has_access` passes (admins always pass). The
@@ -3224,17 +3224,31 @@ CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SA
   padding uses the locked `.compact-table`/`.td-label` utilities (no inline `px-`/`py-`
   on `<td>`). The old per-card `contact_card` macro was **removed as dead code** — the
   `contact_row` macro is the only contact surface.
-- **Buying-role vocabulary — single source `ContactRole` (`app/constants.py`).** The
-  `StrEnum` `buyer/manager/engineer/planner/other` drives BOTH `CANONICAL_ROLES`
-  (`htmx_views.py`, `tuple(ContactRole)`) and the `roles` Jinja2 global fallback
-  (`template_env.py`); `_VALID_ROLES = frozenset(CANONICAL_ROLES)` gates the setter.
-  The role editor (`POST .../contacts/{id}/role` → `set_contact_role`, validated by
-  `_validate_role`: blank → NULL, non-canonical → 400) renders the five options + a
-  "— clear —". Legacy DB values (`buyer_po/specifier/ap_payer/logistics/exec/technical/
-  decision_maker/operations`) remain in the display-label + color maps so existing rows
-  render a clean read-only chip, but they are NOT selectable and 400 if re-submitted.
-  Chip colors are safelisted shades (buyer=blue, manager=violet, engineer=sky,
-  planner=amber, other=gray).
+- **Buying-role vocabulary — single source `ContactRole` (`app/constants.py`), 13
+  members (ISS-029).** The `StrEnum` — `buyer/manager/engineer/planner` + the 8
+  former legacy-only DB values promoted to first-class members
+  (`buyer_po/specifier/ap_payer/logistics/exec/technical/decision_maker/operations`)
+  + trailing `other` — drives BOTH `CANONICAL_ROLES`
+  (`app/routers/htmx/companies/_registries.py`, `tuple(ContactRole)`) and the `roles`
+  Jinja2 global fallback (`template_env.py`); `_VALID_ROLES = frozenset(CANONICAL_ROLES)`
+  gates the quick chip-editor setter (`POST .../contacts/{id}/role` → `set_contact_role`,
+  validated by `_validate_role`: blank → NULL, non-canonical → 400) and the generic
+  single-field inline editor (`contact_field_post`) — both render all 13 canonical
+  options + "— clear —" but have no write-in companion field.
+  `CONTACT_ROLE_LABELS` (`app/constants.py`) is the single label source consolidating
+  the three previously-duplicated per-template `role_labels` dicts, exposed as the
+  `contact_role_labels` Jinja2 global; every member has an entry, safelisted chip
+  colors stay in `_contact_macros.html`.
+  The two FULL contact create/edit handlers (`contacts_tab_create`, `edit_site_contact`
+  in `app/routers/htmx/companies/contacts.py`) additionally accept an `other` +
+  free-text write-in: selecting "Other" in `_contact_form.html` reveals
+  `contact_role_custom` (Alpine `x-show='roleOther'`); `resolve_contact_role()`
+  (`_registries.py`) stores the trimmed custom string (capped to the column's
+  String(50) via `CONTACT_ROLE_CUSTOM_MAX_LEN`) in place of the literal `"other"` when
+  non-empty, else falls back to plain `"other"`. Role pills/labels render any
+  non-canonical stored string VERBATIM (`contact_role_labels.get(value, value)` —
+  never title-cased). No migration needed — `site_contacts.contact_role` has no DB
+  CHECK constraint.
 - **Contact-notes modal (reuses the activity-log notes infra).** `recent_note` (latest
   `ActivityLog` NOTE per contact) is batched in `crm_service.company_contact_rows`
   (`_latest_contact_notes`, one grouped query — no N+1) and threaded through to

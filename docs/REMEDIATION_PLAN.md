@@ -360,7 +360,7 @@ existing tests).
 - **Fix shape:** frontend-only template work (`frontend-design` + `htmx` skills);
   no route or data changes; before/after review per screen with the user.
 
-### ISS-028: Relocate bulk data export to an admin-only Settings section
+### ISS-028: Relocate bulk data export to an admin-only Settings section — SHIPPED (wave 2)
 - **Reported:** 2026-07-21 (user note — revises shipped ISS-022 after review)
 - **Area:** CRM / backend + frontend (authz, settings)
 - **Severity:** P1 (tightens the data-exfiltration control)
@@ -379,7 +379,11 @@ existing tests).
   - Routes keep their URLs and `require_access(EXPORT_BULK_DATA)` gates.
   - Update role-matrix/toolbar tests; add settings-page tests.
 
-### ISS-029: Contact role field — more options + write-in
+### ISS-029: Contact role field — more options + write-in — SHIPPED (wave 2)
+- **Implementation notes:** ContactRole grew 5→13 members; `CONTACT_ROLE_LABELS`
+  is the single label source (replaced 3 duplicated per-template dicts); write-in
+  via `contact_role_custom` on the full contact form (the inline role-chip quick
+  editor accepts all 13 canonical values but deliberately has no free-text box).
 - **Reported:** 2026-07-21 (user note — CRM walkthrough)
 - **Area:** CRM / frontend + backend
 - **Severity:** P2

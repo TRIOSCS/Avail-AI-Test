@@ -391,8 +391,8 @@ def test_capability_access_keys():
     assert isinstance(CAPABILITY_ACCESS_KEYS, tuple)
     assert AccessKey.SEND_RFQ in CAPABILITY_ACCESS_KEYS
     assert AccessKey.OPS_VERIFICATION in CAPABILITY_ACCESS_KEYS
-    # ISS-022: EXPORT_BULK_DATA (manager+admin-only bulk dataset exports) added to the
-    # six capability keys.
+    # EXPORT_BULK_DATA (admin-only-by-default bulk dataset exports, ISS-028) is one
+    # of the six capability keys.
     assert AccessKey.EXPORT_BULK_DATA in CAPABILITY_ACCESS_KEYS
     assert len(CAPABILITY_ACCESS_KEYS) == 6
 
@@ -411,10 +411,11 @@ def test_role_access_defaults():
     # Buyer gets interactive defaults (not ops_verification)
     assert AccessKey.OPS_VERIFICATION not in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
     assert AccessKey.SEND_RFQ in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
-    # ISS-022: manager alone among interactive roles additionally holds
-    # EXPORT_BULK_DATA (bulk dataset exports); buyer does not.
-    assert AccessKey.EXPORT_BULK_DATA in ROLE_ACCESS_DEFAULTS[UserRole.MANAGER]
+    # ISS-028 (supersedes ISS-022): EXPORT_BULK_DATA is admin-only by default — no
+    # interactive role (including manager) holds it via ROLE_ACCESS_DEFAULTS.
+    assert AccessKey.EXPORT_BULK_DATA not in ROLE_ACCESS_DEFAULTS[UserRole.MANAGER]
     assert AccessKey.EXPORT_BULK_DATA not in ROLE_ACCESS_DEFAULTS[UserRole.BUYER]
+    assert AccessKey.EXPORT_BULK_DATA in ROLE_ACCESS_DEFAULTS[UserRole.ADMIN]
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +834,45 @@ def test_contact_role():
     assert ContactRole.ENGINEER == "engineer"
     assert ContactRole.PLANNER == "planner"
     assert ContactRole.OTHER == "other"
+
+
+def test_contact_role_iss029_promoted_legacy_members():
+    """ISS-029: the eight former legacy-only DB values are now first-class
+    ContactRole members (selectable, not merely clearable)."""
+    from app.constants import ContactRole
+
+    assert ContactRole.BUYER_PO == "buyer_po"
+    assert ContactRole.SPECIFIER == "specifier"
+    assert ContactRole.AP_PAYER == "ap_payer"
+    assert ContactRole.LOGISTICS == "logistics"
+    assert ContactRole.EXEC == "exec"
+    assert ContactRole.TECHNICAL == "technical"
+    assert ContactRole.DECISION_MAKER == "decision_maker"
+    assert ContactRole.OPERATIONS == "operations"
+    assert len(tuple(ContactRole)) == 13
+
+
+def test_contact_role_string_round_trip():
+    """Every ContactRole member round-trips through its plain string value (StrEnum
+    equality + construction from the raw string)."""
+    from app.constants import ContactRole
+
+    for member in ContactRole:
+        assert ContactRole(member.value) is member
+        assert str(member) == member.value
+
+
+def test_contact_role_labels_single_source_covers_every_member():
+    """CONTACT_ROLE_LABELS (the consolidated single label source, ISS-029) has an entry
+    for every ContactRole member — no member silently falls back to its raw value in the
+    UI."""
+    from app.constants import CONTACT_ROLE_LABELS, ContactRole
+
+    for member in ContactRole:
+        assert member in CONTACT_ROLE_LABELS
+        assert CONTACT_ROLE_LABELS[member]  # non-empty display label
+    assert CONTACT_ROLE_LABELS[ContactRole.BUYER_PO] == "Buyer/PO"
+    assert CONTACT_ROLE_LABELS[ContactRole.OTHER] == "Other"
 
 
 # ---------------------------------------------------------------------------
