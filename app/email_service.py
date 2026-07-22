@@ -447,6 +447,17 @@ async def send_batch_rfq(
     return results
 
 
+class SentMessageLookupError(RuntimeError):
+    """Sent-Items lookup FAILED (Graph API errors) — delivery state is UNKNOWN.
+
+    Raised by :func:`_find_sent_message` when the Sent-folder query itself errored (429 /
+    5xx / expired token) on an attempt and no match was found, so "the message is not
+    there" was never positively established. Callers implementing a double-send guard
+    MUST treat this as indeterminate and never resend on it; ``None`` remains the
+    positive "scanned the window cleanly, no match" answer that authorizes a resend.
+    """
+
+
 async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None:
     """Find the just-sent message in Sent Items to get its ID and conversationId.
 
@@ -459,6 +470,15 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
 
     Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation
     delays.
+
+    Three-state contract (deep-review #2, finding 2):
+      - **found** → the message dict (``id`` + ``conversationId``);
+      - **positively not found** → ``None`` — every attempt scanned the Sent window
+        cleanly and the recipient's message is not there (a resend-safe answer);
+      - **lookup failed** → raises :class:`SentMessageLookupError` — at least one attempt
+        hit a Graph API error and no match was found, so delivery state is UNKNOWN.
+        Double-send guards (e.g. ``retry_outreach_send``) must map this to their
+        no-resend branch, never to "not delivered".
     """
     wanted = (vendor_email or "").strip().lower()
     delays = [1, 2, 4]
@@ -488,23 +508,28 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
         except Exception as e:
             api_error = True
             logger.warning(f"Sent message lookup attempt failed: {e}")
-    # Distinguish a transient API failure from a genuine no-match: the latter means the
-    # recipient never appeared in the $top window (likely pushed below it by a large
-    # batch fan-out), and the caller leaves the Contact's graph ids NULL.
+    # Distinguish a transient API failure from a genuine no-match: an API error means the
+    # lookup FAILED and delivery state is unknown → raise (three-state contract), so a
+    # double-send guard never mistakes an outage for "positively not delivered". A clean
+    # no-match means the recipient never appeared in the $top window (likely pushed below
+    # it by a large batch fan-out) → return None; the caller leaves graph ids NULL.
     if api_error:
         logger.warning(
-            "Sent-message lookup gave up for <{}> (subject '{}') after API errors on all retries",
+            "Sent-message lookup FAILED for <{}> (subject '{}') — Graph API errors during retries; "
+            "delivery state unknown (raising, not a positive no-match)",
             wanted,
             subject,
         )
-    else:
-        logger.warning(
-            "Sent-message lookup found no match for <{}> (subject '{}') within the top {} Sent items "
-            "— recipient may have been pushed below the window by a large batch",
-            wanted,
-            subject,
-            scanned,
+        raise SentMessageLookupError(
+            f"Sent-Items lookup for <{wanted}> (subject '{subject}') hit Graph API errors — delivery state unknown"
         )
+    logger.warning(
+        "Sent-message lookup found no match for <{}> (subject '{}') within the top {} Sent items "
+        "— recipient may have been pushed below the window by a large batch",
+        wanted,
+        subject,
+        scanned,
+    )
     return None
 
 

@@ -260,6 +260,33 @@ async def test_service_graph_ids_none_safe_when_no_message(db_session, test_requ
     assert quote.graph_conversation_id is None
 
 
+async def test_service_lookup_error_degrades_to_null_ids(db_session, test_requisition, test_customer_site, test_user):
+    """Deep-review #2, finding 2: _find_sent_message now RAISES SentMessageLookupError
+    on Graph API errors (three-state contract).
+
+    The quote email already went out by then, so the send must still complete — graph
+    ids stay NULL (reply matching degrades), quote still transitions to sent.
+    """
+    from app.email_service import SentMessageLookupError
+    from app.services.quote_send import send_quote_email
+
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-GLKF")
+
+    with (
+        patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock) as mock_post,
+        patch("app.email_service._find_sent_message", new_callable=AsyncMock) as mock_find,
+    ):
+        mock_post.return_value = {}
+        mock_find.side_effect = SentMessageLookupError("graph 503 during lookup")
+        result = await send_quote_email(db_session, quote, test_user, token="t", testing=False)
+
+    assert result.graph_message_id is None
+    db_session.refresh(quote)
+    assert quote.status == "sent"
+    assert quote.graph_message_id is None
+    assert quote.graph_conversation_id is None
+
+
 async def test_service_raises_on_graph_error(db_session, test_requisition, test_customer_site, test_user):
     """A Graph error response raises QuoteSendError and does NOT mark sent."""
     from app.services.quote_send import QuoteSendError, send_quote_email

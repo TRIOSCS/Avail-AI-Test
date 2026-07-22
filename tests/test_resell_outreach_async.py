@@ -1243,6 +1243,144 @@ class TestRetryOutreachSend:
         assert row.status == ExcessOutreachStatus.FAILED
         assert row.send_error == "no buyer email on file to retry"
 
+    # ── Deep-review #2, finding 2: the REAL _find_sent_message three-state contract ──
+    # The tests above mock _find_sent_message itself, so they cannot catch a contract
+    # regression in the real function (it used to swallow every Graph error and return
+    # None — indistinguishable from "positively not delivered" — making the UNKNOWN
+    # branch dead code and double-sending on a Graph outage). These three drive the REAL
+    # lookup through a mocked GraphClient.
+
+    @pytest.mark.asyncio
+    async def test_retry_real_lookup_api_error_leaves_interrupted_and_never_resends(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """REGRESSION (deep-review #2, finding 2): a Graph 429/5xx/expired-token during
+        the reconcile lookup must surface as lookup-FAILED (raise), not as None — the
+        row stays ``interrupted`` and nothing is resent.
+
+        Before the fix the real _find_sent_message swallowed the errors and returned
+        None, so the retry resent a possibly-delivered offer to a real buyer.
+        """
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        send_mock = AsyncMock(return_value=[{"vendor_email": "sales@asyncbuyer.com", "status": "sent"}])
+        gc = AsyncMock()
+        gc.get_json.side_effect = Exception("graph 503 — service unavailable")
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.utils.graph_client.GraphClient", return_value=gc),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # delivery unknown → NEVER resend
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.INTERRUPTED
+        assert row.sent_at is None
+        assert row.send_error and "double-send" in row.send_error
+
+    @pytest.mark.asyncio
+    async def test_retry_real_lookup_positive_not_found_resends(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """A POSITIVE not-found (every reconcile attempt scanned the Sent window
+        cleanly, no match) is the only answer that authorizes a resend — the real lookup
+        returns None and the retry resends exactly once."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        send_mock = AsyncMock(return_value=[{"vendor_email": "sales@asyncbuyer.com", "status": "sent"}])
+        resent = {
+            "id": "resent-real-1",
+            "conversationId": "conv-resent-real-1",
+            "subject": "Excess available",
+            "toRecipients": [{"emailAddress": {"address": "sales@asyncbuyer.com"}}],
+        }
+        gc = AsyncMock()
+        # Guard lookup: 3 clean empty scans → positive not-found; post-send stamp
+        # lookup inside _finalize_outreach_send then finds the resent message.
+        gc.get_json.side_effect = [{"value": []}, {"value": []}, {"value": []}, {"value": [resent]}]
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.utils.graph_client.GraphClient", return_value=gc),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        assert send_mock.await_count == 1  # resent exactly once
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.graph_message_id == "resent-real-1"
+        assert row.send_error is None
+
+    @pytest.mark.asyncio
+    async def test_retry_real_lookup_found_reconciles_to_sent_without_resend(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        line_item: ExcessLineItem,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """The real lookup finding the delivered message (exact subject + recipient)
+        reconciles the row to SENT + stamps the found ids and never resends."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        send_mock = AsyncMock()
+        delivered = {
+            "id": "already-real-1",
+            "conversationId": "conv-already-real-1",
+            "subject": "Excess available",
+            "toRecipients": [{"emailAddress": {"address": "sales@asyncbuyer.com"}}],
+        }
+        gc = AsyncMock()
+        gc.get_json.return_value = {"value": [delivered]}
+
+        with (
+            patch("app.email_service.send_batch_rfq", send_mock),
+            patch("app.utils.graph_client.GraphClient", return_value=gc),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        send_mock.assert_not_called()  # already delivered → no double-send
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.graph_message_id == "already-real-1"
+        assert row.graph_conversation_id == "conv-already-real-1"
+        assert row.send_error is None
+
 
 # ── Router: the submit returns immediately with ``sending`` rows ─────
 

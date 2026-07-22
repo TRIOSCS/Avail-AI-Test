@@ -1697,7 +1697,9 @@ else `CustomerSite.contact_email`), **hard-blocks DNC** (site-level or a matchin
 `_build_quote_email_html` (whose single home is now this module — re-exported from
 `crm/_helpers.py` for the preview route), POSTs `/me/sendMail`, then captures the sent
 message's Graph ids via `email_service._find_sent_message` into `quote.graph_message_id` /
-`graph_conversation_id` (NULL-safe). It then transitions the quote→SENT, advances the
+`graph_conversation_id` (NULL-safe; a raised `SentMessageLookupError` — the lookup's
+lookup-failed state — is swallowed here since the mail already went out: ids stay NULL,
+reply matching degrades). It then transitions the quote→SENT, advances the
 requisition→QUOTED (unless WON/LOST/ARCHIVED), writes an OUTBOUND email `ActivityLog` via
 `activity_service.log_email_activity`, and commits, returning a frozen `SendQuoteResult`.
 Under `TESTING=1` the Graph POST + Sent-Items lookup are skipped but the quote is still
@@ -2269,7 +2271,11 @@ when the LIST's status is posting-closed (`bid_out`/`awarded`/`closed`/`expired`
 collecting are unchanged (draft/open/collecting fall through to the per-line active check).
 The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
 `excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
-to `expired` and retires their mirror; the left-list stage filter now offers the `closed` /
+to `expired` and retires their mirror; a PARTIALLY-AWARDED list (any `awarded` line / `won`
+offer — a partial award deliberately stays `collecting`) instead steps to the non-terminal
+`bid_out`, because terminal `expired` would 409 every later `award_offer` and strand the
+still-live bids on its remaining lines (deep-review #2 finding #1; mirror retired identically —
+both are posting-closed). The left-list stage filter now offers the `closed` /
 `expired` stages (the status badges already rendered them).
 
 **Phase 5 (posting window + scoring + mirror identity).** Four related fixes:
@@ -2549,8 +2555,12 @@ only for `SENT` buyers (gated at the call site). Every send persists its exact s
 campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
 (`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
 retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
-already-delivered row is reconciled to `SENT`, never double-sent; a lookup that RAISES is the
-UNKNOWN case → the row is left `interrupted` and nothing is resent (never assume not-sent); the
+already-delivered row is reconciled to `SENT`, never double-sent. `_find_sent_message` has a
+THREE-STATE contract (deep-review #2 finding 2): found dict | positive not-found (`None` —
+every attempt scanned the Sent window cleanly) | lookup-failed (raises
+`email_service.SentMessageLookupError` on Graph API errors — 429/5xx/expired token). Retry maps
+lookup-failed to the UNKNOWN case → the row is left `interrupted` and nothing is resent (never
+assume not-sent); ONLY the positive not-found authorizes a resend; the
 resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
 reply carrying a bid flips an `OPEN` list to `COLLECTING`
 (mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
