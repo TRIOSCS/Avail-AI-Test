@@ -93,7 +93,9 @@ def buyer_company(db_session: Session) -> Company:
 
 @pytest.fixture()
 def excess_list(db_session: Session, seller_company: Company, trader: User) -> ExcessList:
-    el = ExcessList(company_id=seller_company.id, owner_id=trader.id, title="Q1 Excess")
+    """A POSTED (open) list — ``_guard_owner`` rejects a DRAFT list (finding #47), and
+    outreach is only ever offered out on a posted posting."""
+    el = ExcessList(company_id=seller_company.id, owner_id=trader.id, title="Q1 Excess", status=ExcessListStatus.OPEN)
     db_session.add(el)
     db_session.commit()
     db_session.refresh(el)
@@ -176,6 +178,26 @@ class TestSubmitOutreachGuards:
                 send_email=False,
             )
         assert exc.value.status_code == 403
+
+    def test_draft_list_blocked(
+        self, db_session: Session, excess_list: ExcessList, trader: User, buyer_card: VendorCard
+    ):
+        """Finding #47: ``_guard_owner`` rejects a DRAFT list at the SERVICE layer too —
+        the router already 409s a draft outreach submit, but a direct service call must
+        not be able to attach outreach to a private, never-posted list."""
+        excess_list.status = ExcessListStatus.DRAFT
+        db_session.commit()
+        with pytest.raises(HTTPException) as exc:
+            svc.submit_outreach(
+                db_session,
+                list_id=excess_list.id,
+                owner=trader,
+                buyers=[{"vendor_card_id": buyer_card.id}],
+                scope="whole_list",
+                channel="phone",
+                send_email=False,
+            )
+        assert exc.value.status_code == 409
 
 
 # ── submit_outreach: manual-log path ─────────────────────────────────
@@ -506,6 +528,70 @@ class TestRecordResponse:
 
         db_session.refresh(excess_list)
         assert excess_list.status == ExcessListStatus.COLLECTING
+
+    def test_reply_with_offer_past_close_at_stamps_late(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """Finding #10: a reply landing after ``close_at`` lapsed — but before the
+        nightly sweep flips the status — is linked as a ``late`` offer, not an
+        indistinguishable on-time ``open``, mirroring ``submit_offer``."""
+        from datetime import UTC, datetime, timedelta
+
+        excess_list.close_at = datetime.now(UTC) - timedelta(hours=2)
+        db_session.commit()
+        assert excess_list.status == ExcessListStatus.OPEN  # the nightly sweep hasn't run
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+
+        svc.record_response(
+            db_session,
+            conversation_id="conv-1",
+            has_offer=True,
+            offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+        )
+
+        offers = db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).all()
+        assert len(offers) == 1
+        assert offers[0].status == "late"
+
+    def test_reply_with_offer_locks_list_before_status_read(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+        monkeypatch,
+    ):
+        """Finding #9: ``_link_inbound_offer`` takes the M9 list-row lock before reading
+        ``excess_list.status`` — spy the hook to prove it's wired."""
+        from app.services import excess_service
+
+        excess_list.status = ExcessListStatus.OPEN
+        db_session.commit()
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+
+        calls: list[int] = []
+        real_lock = excess_service._lock_list_row
+
+        def _spy(db, excess_list_id):
+            calls.append(excess_list_id)
+            return real_lock(db, excess_list_id)
+
+        monkeypatch.setattr(excess_service, "_lock_list_row", _spy)
+
+        svc.record_response(
+            db_session,
+            conversation_id="conv-1",
+            has_offer=True,
+            offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+        )
+
+        assert calls == [excess_list.id]
 
     @pytest.mark.parametrize("bad_qty", [0, -5])
     def test_reply_with_non_positive_quantity_rejected(

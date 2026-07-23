@@ -54,13 +54,18 @@ def _make_user(db: Session, *, email: str, role: str) -> User:
 
 @pytest.fixture()
 def rollup_fixture(db_session: Session) -> tuple[ExcessList, ExcessLineItem, User, User]:
-    """A posted list with one line + an owner and two distinct buyer-offerers."""
+    """A posted (open) list with one line + an owner and two distinct buyer-offerers.
+
+    Posted, not draft: ``submit_offer`` rejects a non-posted list (finding #47).
+    """
     company = _make_company(db_session)
     owner = _make_user(db_session, email="owner@roll.com", role="sales")
     buyer_a = _make_user(db_session, email="a@roll.com", role="buyer")
     buyer_b = _make_user(db_session, email="b@roll.com", role="buyer")
     el = create_excess_list(db_session, title="Roll", company_id=company.id, owner_id=owner.id)
     import_line_items(db_session, el.id, [{"part_number": "LM358N", "quantity": "100"}])
+    el.status = ExcessListStatus.OPEN
+    db_session.commit()
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
     return el, line, buyer_a, buyer_b
 

@@ -2088,7 +2088,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     GUARDED to draft [409 otherwise — no re-open of a resolved posting]; PRESERVES a future
     |     close_at, clears only a stale one [Phase 5])
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
-    |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    |     per_line|take_all; service enforces can_offer + the self-offer guard + [deep-review #2
+    |     finding #47] its OWN posted-status guard [409 draft/terminal — previously router-only]
+    |     re-checked AFTER taking the M9 list-row lock [finding #9], so a list closed between the
+    |     caller's stale read and the lock can never be resurrected by the open→collecting flip;
+    |     the new-offer status is offer_status_for_list(excess_list) — late when the list's status
+    |     already reads closed OR its close_at deadline has genuinely passed even though the
+    |     nightly sweep hasn't run yet [finding #10])
     +-- GET  /v2/partials/resell/{id}/bid-sheet          (owner-only; blank bid-sheet CSV —
     |     one row per ACTIVE [available/bidding] line + empty Bidder/Offer Qty/Unit Price/
     |     Lead Time/Notes columns so several bidders' filled-in copies concatenate into one
@@ -2142,21 +2148,32 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     Offers-only swap would leave those stale] + HX-Trigger showToast
     |     "N bid(s) uploaded (M lines, K unmatched, J rejected)" [+ " — replaced K earlier
     |     upload(s)" when the supersede count is > 0])
-    +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; excess_service.award_offer:
+    +-- POST /api/resell/{id}/offers/{offer_id}/award   (owner-only; 404 when the offer's real
+    |     excess_list_id != {id} [deep-review #2 finding #32 — existence never revealed/mutated
+    |     across lists]; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
     |     [closed/expired — awarding would reopen the dead list, finding #4]; 409 unless the offer
     |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
     |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
     |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
-    |     list→awarded status once every line is decided. RESPONSE is an OOB compose
+    |     list→awarded status once every line is decided. Takes the M9 list+lines row lock
+    |     (_lock_list_for_award, populate_existing on BOTH the list and its lines — deep-review
+    |     #2 finding #8) BEFORE the terminal-list guard/mirror-sync so a concurrent close/expiry
+    |     is never read stale. RESPONSE is an OOB compose
     |     (_award_response.html): PRIMARY = Offers tab (hx-target #tab-offers-<id>), OOB =
     |     #tab-lines-<id> (Awarded/Withdrawn pills) + #resell-chips-<id> (N/M-awarded chip +
     |     status badge), so awarding never resets the Alpine tab state; HX-Trigger showToast)
-    +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; excess_service.unaward_offer:
+    +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; 404 on a cross-list offer id
+    |     [same finding #32 guard as award]; excess_service.unaward_offer:
     |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
-    |     is not won; reverts offer→open + lines→available, recomputes rollups + buyer score
-    |     (full-history recompute self-heals wins), steps the list back off awarded → bid_out
+    |     is not won; 409 on a TERMINAL list [closed/expired — mirrors award's guard, deep-review
+    |     #2 finding #4; bid_out stays reversible]; reverts offer→_revived_offer_status(list, offer)
+    |     [late when the offer's created_at landed after close_at, else open — deep-review #2
+    |     finding #37, never a blanket "open" that erases late-arrival provenance] + lines→
+    |     available, recomputes rollups + buyer score (full-history recompute self-heals wins) +
+    |     revives the offers _close_competing_offers had closed via the SAME _revived_offer_status
+    |     recomputation [finding #46], steps the list back off awarded → bid_out
     |     (posting window CLOSED — close_at in the PAST, via _posting_window_closed; NOT bare
     |     close_at truthiness, since Phase 5 preserves a FUTURE deadline through publish) else
     |     collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed posting stays retired,
@@ -2165,9 +2182,12 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
     |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
-    |     salvaged bid is awardable. GUARDED: 409 on a resolved/terminal list [awarded/closed/
+    |     salvaged bid is awardable. Takes the M9 lock BEFORE any status guard (deep-review #2
+    |     finding #11/#12). GUARDED: 409 on a resolved/terminal list [awarded/closed/
     |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
-    |     "second vector"]. Same _award_response OOB compose as award)
+    |     "second vector"]; 409 when the TARGET line is already awarded/withdrawn [deep-review #2
+    |     finding #12 — an unmatched bid can no longer displace a decided line's winner]. Same
+    |     _award_response OOB compose as award)
     +-- GET  /v2/partials/resell/{id}/build-bid          (owner-only Build-Bid tab: each line's
     |     best-offer planning price + editable "our offer"; once assembled, the clean
     |     bid_back_export_context summary + Download-PDF + the lifecycle action bar. Context
@@ -2196,12 +2216,14 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/bid/{bid_id}/accept|reject (owner-only; bid_back_service.record_bid_response:
     |     the trader logs the seller's answer sent→accepted/rejected + responded_at/by; 409 unless sent — M4)
     +-- POST /api/resell/{id}/close                      (owner-only; excess_service.close_list:
-    |     GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the Sighting
-    |     mirror [sync_list_mirror on a now-closed posting] — M5)
+    |     takes the M9 list+lines lock BEFORE the closeable guard [deep-review #2 finding #11 —
+    |     a close racing a concurrent award now serializes instead of clobbering the just-awarded
+    |     status]; GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the
+    |     Sighting mirror [sync_list_mirror on a now-closed posting] — M5)
     +-- POST /api/resell/{id}/close-without-bid          (owner-only; D5; excess_service.
     |     close_list_without_bid → the TERMINAL closed state [distinct from bid_out]: same
-    |     open/collecting guard + close_at + mirror retire, but CLOSED is never swept by the
-    |     nightly expiry [only open/collecting are] and never reopens. close_list and
+    |     M9 lock + open/collecting guard + close_at + mirror retire, but CLOSED is never swept by
+    |     the nightly expiry [only open/collecting are] and never reopens. close_list and
     |     close_list_without_bid share _end_posting_window(target_status))
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
     |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
@@ -2277,6 +2299,50 @@ offer — a partial award deliberately stays `collecting`) instead steps to the 
 still-live bids on its remaining lines (deep-review #2 finding #1; mirror retired identically —
 both are posting-closed). The left-list stage filter now offers the `closed` /
 `expired` stages (the status badges already rendered them).
+
+**Deep-review #2 Theme A (lifecycle & concurrency correctness, findings #4/#8/#9/#10/#11/
+#12/#32/#37/#46/#47).** Extends the existing M9 award/unaward row-lock family to every
+list-status writer, and closes the gap where lateness/late-revival was keyed only on the
+list's STATUS column rather than the actual `close_at` deadline or offer-arrival time:
+
+- *Lock family (finding #8/#9/#11/#12).* `excess_service._lock_list_row` (list row only,
+  `with_for_update().populate_existing()`) and `_lock_list_and_lines` (list + every line
+  item) are the shared M9 primitives; `_lock_list_for_award` (award/unaward/withdraw/
+  assign) now composes them + `db.refresh(offer)`. The ExcessList lock query previously
+  lacked `populate_existing()` (finding #8) — a concurrent close/expiry committed while
+  `award_offer`/`unaward_offer` blocked on the row lock was invisible to the terminal-list
+  guard and `sync_list_mirror` right after; both now read post-lock, freshly-committed
+  state. `submit_offer` and `resell_outreach_service._link_inbound_offer` take
+  `_lock_list_row` before reading `excess_list.status` (finding #9) so a list closed
+  between the caller's stale pre-lock read and the open→collecting flip can never be
+  resurrected. `_end_posting_window` (close / close-without-bid) and `assign_offer_line`
+  now take the full list+lines lock BEFORE evaluating their status guards (finding #11),
+  serializing a close/assign against a concurrent award instead of racing it.
+- *Late-stamping is close_at-aware, not status-aware (finding #10).* `offer_status_for_list`
+  now takes the `ExcessList` object (not a bare status string) and returns `late` when
+  EITHER the list's status already reads closed OR `_posting_window_closed(excess_list)`
+  is true (the deadline has passed even though the nightly sweep hasn't caught up) —
+  shared by `submit_offer`, `upload_bids`, and `_link_inbound_offer` so every offer-
+  creation path stamps the same honest lateness.
+- *Terminal-list guard parity + cross-list guard (finding #4/#32).* `unaward_offer` now
+  409s on a TERMINAL list (`closed`/`expired` — `bid_out` stays reversible) exactly like
+  `award_offer`'s existing guard. The award/unaward ROUTES 404 up front when the URL's
+  `{list_id}` disagrees with the offer's real `excess_list_id` (mirrors the withdraw
+  route's existing guard) — existence is never revealed/mutated across lists.
+- *Target-line guard on assign (finding #12).* `assign_offer_line` 409s when the target
+  line is already `awarded` or `withdrawn` — an unmatched bid can no longer be salvaged
+  onto an already-decided line and silently displace the winner from `best_offer_id`.
+- *Honest LATE revival (finding #37/#46).* `_revived_offer_status(excess_list, offer)`
+  recomputes `late` vs `open` from `offer.created_at` vs `excess_list.close_at`
+  (deterministic, no stored prior-status column, no migration) instead of hardcoding
+  `open` — used by `unaward_offer`'s own reversal AND `_reopen_competing_offers`, so a
+  bid that was late when an award closed it out revives late, not an indistinguishable
+  on-time bid.
+- *Service-level posted-status guard (finding #47).* `submit_offer` now 409s a non-posted
+  (draft/terminal) list itself — previously enforced only by the router's camouflage
+  404 — and `resell_outreach_service._guard_owner` 409s a DRAFT list, mirroring the
+  router's own "List is not posted" guard, so a direct service caller can no longer
+  attach an offer/outreach campaign to a private draft.
 
 **Phase 5 (posting window + scoring + mirror identity).** Four related fixes:
 - *Posting-deadline entry point + chip fix (finding #8, D1).* `create_excess_list` /

@@ -19,7 +19,7 @@ Depends on: app.services.excess_service, app.routers.resell, tests.conftest
 from __future__ import annotations
 
 import threading
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -525,6 +525,44 @@ class TestAwardOfferService:
 
         assert _customer_excess_sightings(db_session, excess_list.company_id) == []
 
+    def test_award_lock_refreshes_stale_excess_list_status(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Finding #8: the M9 lock's ExcessList query must ``populate_existing`` so the
+        terminal-list guard reads POST-lock committed state, never a stale identity-
+        mapped object.
+
+        Simulates the race within one SQLite session: a raw core UPDATE (bypassing the
+        ORM entirely — exactly like a second transaction's committed write the row lock
+        just blocked on) flips the list to CLOSED behind the already-identity-mapped
+        ``excess_list`` object's back, with NO intervening commit (so ``expire_on_commit``
+        never auto-refreshes it — it stays genuinely stale until something explicitly
+        re-populates it). Without ``populate_existing`` on the ExcessList lock query,
+        ``award_offer`` would read the STALE in-memory 'collecting' status and award a
+        dead list; with the fix the terminal-list guard sees 'closed' and 409s.
+        """
+        excess_list.status = ExcessListStatus.COLLECTING
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        # Bypass the ORM: a raw UPDATE the identity-mapped ``excess_list`` object never
+        # sees on its own (no commit → no expire-on-commit refresh).
+        db_session.execute(
+            sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=excess_list.id)
+        )
+        assert excess_list.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.award_offer(db_session, offer.id, owner)
+        assert exc.value.status_code == 409
+        assert excess_list.status == ExcessListStatus.CLOSED  # the lock refreshed it in place
+        db_session.refresh(offer)
+        db_session.refresh(cap_line)
+        assert offer.status == ExcessOfferStatus.OPEN  # never awarded
+        assert cap_line.status == ExcessLineItemStatus.AVAILABLE
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  unaward_offer (service) — the explicit inverse
@@ -669,6 +707,69 @@ class TestUnawardOfferService:
         with pytest.raises(HTTPException) as exc:
             excess_service.unaward_offer(db_session, 999_999, owner)
         assert exc.value.status_code == 404
+
+    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+    def test_unaward_on_terminal_list_409_no_reopen(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        terminal_status,
+    ):
+        """Finding #4: unaward mirrors award's terminal-list guard — a CLOSED (D5) or
+        EXPIRED list is dead, so reversing a win there must 409, never unwind the sale.
+
+        Without the guard, the winner flips back to open, its awarded line back to
+        available, and any lost competitor revives — all on a list where award_offer
+        permanently 409s, leaving the reversed offer stuck open forever.
+        """
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)
+        excess_list.status = terminal_status
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.unaward_offer(db_session, offer.id, owner)
+        assert exc.value.status_code == 409
+        db_session.refresh(offer)
+        db_session.refresh(cap_line)
+        db_session.refresh(excess_list)
+        assert offer.status == ExcessOfferStatus.WON  # unchanged — the sale stands
+        assert cap_line.status == ExcessLineItemStatus.AWARDED
+        assert excess_list.status == terminal_status  # stayed terminal — no reopen
+
+    def test_unaward_on_bid_out_list_still_works(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """BID_OUT is NOT terminal (finding #4 distinguishes it from CLOSED/EXPIRED) —
+        unaward must still succeed on a BID_OUT list.
+
+        A PARTIAL award (one of two lines) leaves the list at BID_OUT (not flipped to
+        AWARDED, since ``_apply_award_list_status`` only fires when every line is
+        decided) — the realistic way a WON offer coexists with a non-AWARDED, non-
+        terminal list status.
+        """
+        a = _line(db_session, excess_list, "PARTIAL-BIDOUT-A")
+        _line(db_session, excess_list, "PARTIAL-BIDOUT-B")
+        excess_list.status = ExcessListStatus.BID_OUT
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=a, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.BID_OUT  # precondition — partial award
+
+        result = excess_service.unaward_offer(db_session, offer.id, owner)
+
+        assert result.status in {ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE}
+        db_session.refresh(a)
+        assert a.status == ExcessLineItemStatus.AVAILABLE
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -817,6 +918,73 @@ class TestAwardRoute:
         assert resp.status_code == 403
         db_session.refresh(offer)
         assert offer.status == ExcessOfferStatus.WON
+
+    def test_award_route_wrong_list_id_404_nothing_mutated(
+        self,
+        client,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        seller_company: Company,
+    ):
+        """Finding #32: awarding via a URL whose {list_id} does NOT match the offer's
+        real list must 404 (existence not revealed across lists) — never mutate the
+        offer under the wrong list's URL."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        other_list = ExcessList(company_id=seller_company.id, owner_id=owner.id, title="Other List (award)")
+        db_session.add(other_list)
+        db_session.flush()
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{other_list.id}/offers/{offer.id}/award")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 404
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.OPEN  # never awarded
+
+    def test_unaward_route_wrong_list_id_404_nothing_mutated(
+        self,
+        client,
+        db_session: Session,
+        excess_list: ExcessList,
+        cap_line: ExcessLineItem,
+        owner: User,
+        broker: User,
+        seller_company: Company,
+    ):
+        """Finding #32: the same URL-vs-real-list guard on unaward."""
+        from app.dependencies import require_user
+        from app.main import app
+
+        other_list = ExcessList(company_id=seller_company.id, owner_id=owner.id, title="Other List (unaward)")
+        db_session.add(other_list)
+        db_session.flush()
+        offer = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, offer.id, owner)
+
+        app.dependency_overrides[require_user] = lambda: owner
+        try:
+            resp = client.post(f"/api/resell/{other_list.id}/offers/{offer.id}/unaward")
+        finally:
+            app.dependency_overrides.pop(require_user, None)
+
+        assert resp.status_code == 404
+        db_session.refresh(offer)
+        assert offer.status == ExcessOfferStatus.WON  # unchanged, still awarded
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -977,6 +1145,67 @@ class TestAwardClosesCompetingOffers:
         db_session.refresh(cap_line)
         assert loser.status == ExcessOfferStatus.OPEN
         assert cap_line.best_offer_id == loser.id  # revived higher bid owns the rollup again
+
+    def test_unaward_revives_late_born_winner_as_late_not_open(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Finding #37: a WON offer that landed LATE (after the posting window's
+        close_at) must revive ``late`` on unaward — never a blanket ``open`` that erases
+        the late-arrival provenance."""
+        excess_list.close_at = datetime.now(UTC) - timedelta(hours=1)
+        db_session.commit()
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        winner.created_at = datetime.now(UTC)  # landed AFTER close_at → was late
+        db_session.commit()
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        result = excess_service.unaward_offer(db_session, winner.id, owner)
+
+        assert result.status == ExcessOfferStatus.LATE
+
+    def test_unaward_revives_on_time_winner_as_open(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Control: a winner that landed BEFORE close_at still revives ``open`` (no
+        close_at at all is also covered by ``test_unaward_reopens_lost_competitor``)."""
+        excess_list.close_at = datetime.now(UTC) + timedelta(hours=1)
+        db_session.commit()
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, winner.id, owner)
+
+        result = excess_service.unaward_offer(db_session, winner.id, owner)
+
+        assert result.status == ExcessOfferStatus.OPEN
+
+    def test_unaward_reopens_late_born_competitor_as_late_not_open(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Finding #46: a competing offer that was LATE when the award closed it (M1)
+        must revive ``late`` on unaward, not the flattened ``open`` — the "landed after
+        your window closed" signal must survive the award→unaward round-trip."""
+        excess_list.close_at = datetime.now(UTC) - timedelta(hours=1)
+        db_session.commit()
+        winner = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        late_competitor = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("1.50")
+        )
+        late_competitor.created_at = datetime.now(UTC)  # landed AFTER close_at → was late
+        db_session.commit()
+        excess_service.award_offer(db_session, winner.id, owner)
+        db_session.refresh(late_competitor)
+        assert late_competitor.status == ExcessOfferStatus.LOST  # precondition
+
+        excess_service.unaward_offer(db_session, winner.id, owner)
+
+        db_session.refresh(late_competitor)
+        assert late_competitor.status == ExcessOfferStatus.LATE
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1439,6 +1668,91 @@ class TestAssignOfferLineService:
         assert exc.value.status_code == 409
         db_session.refresh(offer_line)
         assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
+
+    def test_assign_onto_awarded_target_line_409_winner_intact(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """Finding #12: assigning an unmatched bid onto an already-AWARDED line must 409
+        from the TARGET-LINE guard — never silently displace the winner from
+        ``best_offer_id``.
+
+        A second, still-undecided line keeps the award partial, so the list stays BID_OUT
+        (not blocked by ``_ASSIGN_BLOCKED_LIST_STATUSES``, which only blocks
+        awarded/closed/expired at the LIST level) and the assign gets past the list-level
+        guard to the new ``target.status == AWARDED`` check — the exact non-concurrent
+        scenario the finding describes.
+        """
+        winner_line = _line(db_session, excess_list, "AWARDED-TARGET")
+        _line(db_session, excess_list, "STILL-OPEN")  # keeps the award partial
+        excess_list.status = ExcessListStatus.BID_OUT
+        winner_offer = _open_offer(
+            db_session,
+            excess_list=excess_list,
+            submitter=broker,
+            line=winner_line,
+            buyer=None,
+            unit_price=Decimal("1.00"),
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, winner_offer.id, owner)
+        db_session.refresh(winner_line)
+        db_session.refresh(excess_list)
+        assert winner_line.status == ExcessLineItemStatus.AWARDED  # precondition
+        assert winner_line.best_offer_id == winner_offer.id
+        # Partial award: list must NOT be AWARDED, or the 409 below would come from the
+        # pre-existing list-level guard instead of the target-line guard under test.
+        assert excess_list.status == ExcessListStatus.BID_OUT
+
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-HIGHER", unit_price=Decimal("5.00")
+        )
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, winner_line.id, owner)
+        assert exc.value.status_code == 409
+        assert "already awarded" in exc.value.detail  # the target-line guard, not the list-level one
+        db_session.refresh(offer_line)
+        db_session.refresh(winner_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
+        assert winner_line.best_offer_id == winner_offer.id  # winner marker intact
+        assert winner_line.best_offer_unit_price == Decimal("1.00")  # not displaced by 5.00
+
+    def test_assign_onto_withdrawn_target_line_409(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """Finding #12, WITHDRAWN branch: a withdrawn line can't accept new offers."""
+        withdrawn_line = _line(db_session, excess_list, "PULLED")
+        withdrawn_line.status = ExcessLineItemStatus.WITHDRAWN
+        excess_list.status = ExcessListStatus.BID_OUT
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, withdrawn_line.id, owner)
+        assert exc.value.status_code == 409
+        assert "has been withdrawn" in exc.value.detail
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
+
+    def test_assign_onto_available_line_on_bid_out_list_still_works(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """Control: an available (undecided) target line on a BID_OUT list still accepts
+        an assign — the new AWARDED/WITHDRAWN target guard must not over-block."""
+        excess_list.status = ExcessListStatus.BID_OUT
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        result = excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, cap_line.id, owner)
+
+        assert result.match_status == OfferLineMatchStatus.MATCHED
+        db_session.refresh(cap_line)
+        assert cap_line.best_offer_id == offer_line.offer_id
 
 
 class TestAssignOfferLineRoute:

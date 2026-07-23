@@ -35,12 +35,16 @@ award_offer 409s on a terminal list (line 955), but unaward_offer has no such gu
 
 **Fix:** Mirror award_offer's guard in unaward_offer: if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}: raise HTTPException(409, ...) immediately after the WON check.
 
+**Resolution: FIXED.** `unaward_offer` now 409s ("This list is closed — the award can no longer be reversed") when `excess_list.status in _TERMINAL_LIST_STATUSES`, checked immediately after the not-WON guard and before any mutation; `bid_out` is not in that set and stays reversible. See `app/services/excess_service.py` (`unaward_offer`); tests in `tests/test_resell_award.py` (`test_unaward_on_terminal_list_409_no_reopen`, `test_unaward_on_bid_out_list_still_works`).
+
 ### 8. [P2] M9 award lock never refreshes the ExcessList row, so award's terminal-list guard and mirror sync read pre-lock stale status
 **Where:** `app/services/excess_service.py:916` (dimension: lifecycle-concurrency)
 
 _lock_list_for_award applies .populate_existing() to the line-item lock query and db.refresh(offer) to the offer, but the ExcessList lock query at line 916 has neither. award_offer loads the list (line 942) BEFORE taking the lock (line 946); if a concurrent close_list_without_bid / expiry commits while award blocks on the row lock, the FOR UPDATE select fetches the fresh 'closed'/'expired' row but SQLAlchemy returns the stale identity-mapped object without refreshing attributes. The terminal-list guard at line 955 then passes on the stale 'collecting' status, the award proceeds on a dead list (offer→WON, lines→AWARDED), and sync_list_mirror at line 994 — also reading the stale status — sees posting_closed=False and RE-MIRRORS the list's remaining lines as live Sightings that the close had just retired. The docstring explicitly claims the blocked-then-recheck behavior ('populate_existing
 
 **Fix:** Add .populate_existing() to the ExcessList lock query in _lock_list_for_award (or db.refresh(excess_list) after the lock) so the terminal-status / window guards and sync_list_mirror read post-lock committed state.
+
+**Resolution: FIXED.** `_lock_list_for_award` now composes the new shared `_lock_list_row` (`with_for_update().populate_existing()` on the ExcessList row) + `_lock_list_and_lines` (adds the line-item lock), so the ExcessList query itself refreshes the caller's identity-mapped object in place — the terminal-status guard and `sync_list_mirror` right after both read post-lock committed state. See `app/services/excess_service.py` (`_lock_list_row`, `_lock_list_and_lines`, `_lock_list_for_award`); test in `tests/test_resell_award.py::test_award_lock_refreshes_stale_excess_list_status` (a raw core UPDATE bypasses the ORM to simulate the race within one SQLite session).
 
 ### 9. [P2] submit_offer / _link_inbound_offer flip list status via unlocked last-write-wins, resurrecting a concurrently closed/expired list
 **Where:** `app/services/excess_service.py:618` (dimension: lifecycle-concurrency)
@@ -49,12 +53,16 @@ submit_offer takes no _lock_list_for_award and never re-reads the list: it loads
 
 **Fix:** Take _lock_list_for_award (with the list-row refresh from finding 1) in submit_offer and _link_inbound_offer before reading excess_list.status, or make the flip a guarded UPDATE (`WHERE status='open'`) and re-derive the late stamp from the locked read.
 
+**Resolution: FIXED.** Both `submit_offer` and `resell_outreach_service._link_inbound_offer` now take the new list-only `_lock_list_row` (populate_existing) BEFORE re-reading `excess_list.status` / re-validating the posted-status guard / stamping `offer_status_for_list` — a list closed between the caller's stale read and the lock can no longer be resurrected by the open→collecting flip. See `app/services/excess_service.py` (`submit_offer`), `app/services/resell_outreach_service.py` (`_link_inbound_offer`); tests in `tests/test_resell_offers.py` (`test_submit_offer_locks_list_before_status_read`, `test_submit_offer_stale_read_cannot_resurrect_closed_list`) and `tests/test_resell_outreach_service.py::test_reply_with_offer_locks_list_before_status_read`.
+
 ### 10. [P2] Offers landing after close_at but before the nightly sweep are stamped on-time 'open' — the late flag keys only on list status
 **Where:** `app/services/excess_service.py:449` (dimension: lifecycle-concurrency)
 
 offer_status_for_list decides LATE solely from list status membership in _CLOSED_LIST_STATUSES. A D1 posting window that lapses at e.g. 15:00 leaves the list in OPEN/COLLECTING until the 02:15 expire_overdue_lists cron (resell_jobs.py:33), so for up to ~11-24 hours every inbound offer (UI submit, emailed reply, manual log-bid) on the lapsed window is stamped 'open' — indistinguishable from an on-time bid — and the list keeps advertising in the 'Open to Me' lens and the Sighting mirror. The time-aware helper already exists (_posting_window_closed, line 1005, built in Phase 5 for unaward) but is not consulted at submit time, so the 'late = landed after the window closed' contract in the enum docstring is only enforced against the status column, not the actual deadline.
 
 **Fix:** Have submit_offer / _link_inbound_offer pass the list to a window-aware check (`_posting_window_closed(excess_list) or status in _CLOSED_LIST_STATUSES`) so lateness reflects the real deadline, not the nightly sweep's lag.
+
+**Resolution: FIXED.** `offer_status_for_list` now takes the `ExcessList` object (not a bare status string) and returns `late` when EITHER the status already reads closed OR `_posting_window_closed(excess_list)` is true — shared by `submit_offer`, `upload_bids`, and `_link_inbound_offer` so every offer-creation path stamps the same honest lateness even during the gap before the nightly sweep runs. See `app/services/excess_service.py` (`offer_status_for_list`); tests in `tests/test_resell_offers.py` (`test_submit_offer_past_close_at_is_late_even_though_status_still_open`, `test_submit_offer_before_close_at_is_open`), `tests/test_resell_bid_upload.py::test_upload_bids_past_close_at_stamps_late_even_though_status_still_collecting`, `tests/test_resell_outreach_service.py::test_reply_with_offer_past_close_at_stamps_late`.
 
 ### 11. [P2] _end_posting_window (close / close-without-bid) is an unlocked M9 sibling — a close racing an award clobbers the AWARDED status
 **Where:** `app/services/excess_service.py:1261` (dimension: lifecycle-concurrency)
@@ -63,12 +71,16 @@ close_list / close_list_without_bid check `status in (open, collecting)` on an u
 
 **Fix:** Take the same list+lines lock (with list refresh) at the top of _end_posting_window before evaluating the closeable guard, mirroring award/withdraw.
 
+**Resolution: FIXED.** `_end_posting_window` now calls the shared `_lock_list_and_lines` BEFORE evaluating the closeable guard — the same M9 primitive `_lock_list_for_award` composes — so a close racing a concurrent award serializes instead of clobbering the just-awarded status. See `app/services/excess_service.py` (`_end_posting_window`, `_lock_list_and_lines`); test in `tests/test_resell_list_lifecycle.py::test_end_posting_window_locks_list_before_guard`.
+
 ### 12. [P2] assign_offer_line allows assigning an unmatched bid onto an already-AWARDED line, displacing the winner from best_offer_id
 **Where:** `app/services/excess_service.py:777` (dimension: lifecycle-concurrency)
 
 The target-line guard checks only existence and list membership — not the target's status. Concrete non-concurrent scenario: list is BID_OUT (allowed by _ASSIGN_BLOCKED_LIST_STATUSES, which blocks only closed/expired/awarded); line 1 is already AWARDED to winner W (partial award), line 2 undecided. The unmatched queue holds an open offer line from O with a higher unit_price. Owner assigns it to line 1: the guard passes, match_status flips MATCHED, and recompute_line_rollup(target.id) at line 790 — whose rollup set includes OPEN/LATE (line 426) — makes O the SOLD line's best_offer_id/best_offer_unit_price, displacing winner W from the 'Best' marker and inflating offer_count on a decided line. The salvaged bid is also a dead end: award_offer 409s ('already awarded — unaward the winner first'), and _close_competing_offers only runs on a future award, so O lingers open in the triage counts f
 
 **Fix:** Reject a target line whose status is AWARDED/WITHDRAWN with a 409 ('unaward the winner first'), and take the M9 lock at the top of assign_offer_line.
+
+**Resolution: FIXED.** `assign_offer_line` now takes `_lock_list_for_award` right after resolving the offer line (before any status guard), and 409s when the target line is `awarded` ("unaward the winner first") or `withdrawn` — the winner's `best_offer_id`/`best_offer_unit_price` are never displaced. See `app/services/excess_service.py` (`assign_offer_line`); tests in `tests/test_resell_award.py` (`test_assign_onto_awarded_target_line_409_winner_intact`, `test_assign_onto_available_line_on_bid_out_list_still_works`).
 
 ### 32. [P3] Award/unaward routes ignore the {list_id} path param — no offer.excess_list_id == list_id check (withdraw has one)
 **Where:** `app/routers/resell.py:1535` (dimension: router-correctness)
@@ -77,12 +89,16 @@ resell_award_offer (line 1535) and resell_unaward_offer (line 1558) never verify
 
 **Fix:** In both routes load the offer first and 404 when `offer.excess_list_id != list_id`, exactly as resell_withdraw_offer does.
 
+**Resolution: FIXED.** `resell_award_offer` and `resell_unaward_offer` both load the offer first and 404 ("Offer {id} not found on list {list_id}") when `offer.excess_list_id != list_id`, exactly mirroring `resell_withdraw_offer`. See `app/routers/resell.py`; tests in `tests/test_resell_award.py` (`test_award_route_wrong_list_id_404_nothing_mutated`, `test_unaward_route_wrong_list_id_404_nothing_mutated`).
+
 ### 37. [P3] LATE offer status silently flattened to OPEN on unaward / competitor revival
 **Where:** `app/services/excess_service.py:1052` (dimension: services-core)
 
 A LATE offer (landed after the window closed — a state the module explicitly preserves per constants.ExcessOfferStatus.LATE and offer_status_for_list) is awardable (line 696 _ACTIONABLE_OFFER_STATUSES includes LATE). unaward_offer unconditionally sets the reversed winner to OPEN (line 1052), and _reopen_competing_offers revives every LOST offer to OPEN (line 897) even if it was LATE before being closed by the award. Scenario: list is bid_out; late offer L arrives (status=late, amber 'late' pill in _offers.html line 73); owner awards W (take_all) → L marked LOST; owner unawards W → L becomes OPEN. The late flag — a user-visible review signal ('landed after your window closed') that also drives offer_status semantics — is silently destroyed on a round-trip that is supposed to be a pure reversal.
 
 **Fix:** Recompute the revived status from the list's window instead of hardcoding OPEN: other.status = offer_status_for_list(excess_list.status) (and same for the unawarded winner), so an offer on a closed-window list reverts to LATE, not OPEN.
+
+**Resolution: FIXED (same defect as #46 — one fix).** New `_revived_offer_status(excess_list, offer)` recomputes `late` vs `open` from `offer.created_at` vs `excess_list.close_at` (deterministic, no stored prior-status column, no migration); `unaward_offer` uses it for the reversed winner. See `app/services/excess_service.py` (`_revived_offer_status`, `unaward_offer`); tests in `tests/test_resell_award.py` (`test_unaward_revives_late_born_winner_as_late_not_open`, `test_unaward_revives_on_time_winner_as_open`).
 
 ### 46. [P3] Award→unaward round-trip erases LATE provenance: _reopen_competing_offers revives late offers as OPEN
 **Where:** `app/services/excess_service.py:897` (dimension: lifecycle-concurrency)
@@ -91,12 +107,16 @@ _close_competing_offers correctly closes both OPEN and LATE competitors to LOST 
 
 **Fix:** On revive, restore LATE when the offer originally was late — either persist the prior status before closing, or re-derive it (`offer_status_for_list`/_posting_window_closed) at reopen time.
 
+**Resolution: FIXED (same defect as #37 — one fix).** `_reopen_competing_offers` uses the same `_revived_offer_status(excess_list, other)` recomputation instead of hardcoding `open`. See `app/services/excess_service.py` (`_revived_offer_status`, `_reopen_competing_offers`); test in `tests/test_resell_award.py::test_unaward_reopens_late_born_competitor_as_late_not_open`.
+
 ### 47. [P3] Posted-status guards live only in the router: service-level submit_offer accepts offers on drafts and outreach's _guard_owner skips the draft check
 **Where:** `app/services/excess_service.py:545` (dimension: lifecycle-concurrency)
 
 The Phase-1 architecture states 'Guards live in the SERVICE layer (routers stay thin)', and submit_offer's docstring enumerates its guards (404/403/self-offer) as if complete — but the posted-status requirement is enforced only in the router (resell.py:1473-1474 404s non-posted lists). A direct service call submits an offer on a DRAFT list: offer_status_for_list treats draft as on-time OPEN (line 449), the draft flips... nothing, but the offer persists. Same asymmetry on outreach: resell_outreach_service._guard_owner (lines 153-165) checks owner+can_post but not status, while the router 409s drafts at resell.py:1970-1971 — so a service-level outreach on a draft, followed by a reply, reaches _link_inbound_offer and attaches an offer to a private draft. That breaks a documented invariant: _get_list_for_user's expired-access relaxation (resell.py:313-316) reasons 'Drafts never carry offers,
 
 **Fix:** Add a 404/409 non-posted guard inside submit_offer and _guard_owner (mirroring the close/award service-level guards) so direct service callers cannot attach offers/outreach to drafts.
+
+**Resolution: FIXED.** `submit_offer` now 409s ("This list is not accepting offers") when `excess_list.status` is not in `_POSTED_LIST_STATUSES` (checked post-lock, see finding #9); `resell_outreach_service._guard_owner` 409s ("List is not posted") on a DRAFT list, mirroring the router's own guard message. See `app/services/excess_service.py` (`submit_offer`, `_POSTED_LIST_STATUSES`), `app/services/resell_outreach_service.py` (`_guard_owner`); tests in `tests/test_resell_offers.py` (`test_submit_offer_rejects_non_posted_list_service_level`, `test_submit_offer_works_on_every_posted_status`) and `tests/test_resell_outreach_service.py::TestSubmitOutreachGuards::test_draft_list_blocked`.
 
 
 ## B. Outreach & email truthfulness

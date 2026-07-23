@@ -187,17 +187,24 @@ def _resolve_buyer_card(db: Session, buyer: dict) -> VendorCard:
 
 
 def _guard_owner(db: Session, list_id: int, owner: User) -> ExcessList:
-    """Resolve the list and enforce the offering-out guards (owner + can_post).
+    """Resolve the list and enforce the offering-out guards (owner + can_post + posted-
+    status).
 
     Offering excess OUT is the list owner's action: *owner* must both hold the
     sell-side ``can_post`` capability AND own the list. Mirrors ``submit_offer``'s
-    guard discipline (raise HTTPException, never silent).
+    guard discipline (raise HTTPException, never silent). Also rejects a DRAFT list
+    (409 — finding #47): the router already 409s a draft outreach submit
+    (``resell.py``'s "List is not posted" guard), but that guard alone left a direct
+    service caller free to attach outreach/offers to a private, never-posted list — this
+    closes that gap at the service layer, same message as the router.
     """
     excess_list = get_excess_list(db, list_id)
     if not can_post(owner):
         raise HTTPException(403, "You do not have permission to offer out excess")
     if owner.id != excess_list.owner_id:
         raise HTTPException(403, "Only the list owner can offer it out")
+    if excess_list.status == ExcessListStatus.DRAFT:
+        raise HTTPException(409, "List is not posted")
     return excess_list
 
 
@@ -1250,11 +1257,22 @@ def _link_inbound_offer(
         if not isinstance(qty, int) or isinstance(qty, bool) or not 0 < qty <= PG_INT4_MAX:
             raise ValueError(f"Inbound offer line quantity must be a positive INT4 integer, got {qty!r}")
 
-    # An inbound reply landing after the posting window closed is flagged ``late`` (never
-    # dropped) — same rule as the User-driven submit_offer path.
+    # M9 (finding #9): lock the list row BEFORE reading its status — a reply landing
+    # concurrently with a close/award/expiry must see POST-lock state, else the
+    # open->collecting flip below could resurrect a list a concurrent close just
+    # committed terminal. A no-op when the outreach's list was deleted from under it
+    # (excess_list is None — nothing to lock or resurrect).
+    if excess_list is not None:
+        from .excess_service import _lock_list_row
+
+        _lock_list_row(db, excess_list.id)
+
+    # An inbound reply landing after the posting window closed — OR whose close_at
+    # deadline has genuinely passed even though the status hasn't been swept yet
+    # (finding #10) — is flagged ``late`` (never dropped), same rule as submit_offer.
     from .excess_service import offer_status_for_list
 
-    status = offer_status_for_list(excess_list.status) if excess_list is not None else ExcessOfferStatus.OPEN
+    status = offer_status_for_list(excess_list) if excess_list is not None else ExcessOfferStatus.OPEN
     offer = ExcessOffer(
         excess_list_id=outreach.excess_list_id,
         submitted_by=outreach.submitted_by,

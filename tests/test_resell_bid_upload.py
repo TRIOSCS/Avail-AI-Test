@@ -412,6 +412,25 @@ def test_upload_bids_late_statuses_untouched(db_session: Session, trader_user: U
     assert posted_list.status == status
 
 
+def test_upload_bids_past_close_at_stamps_late_even_though_status_still_collecting(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """Finding #10: a compiled bid sheet uploaded after ``close_at`` lapsed — but before
+    the nightly sweep flips the status — is stamped ``late``, not an indistinguishable
+    on-time ``open``."""
+    from datetime import timedelta
+
+    posted_list.close_at = datetime.now(UTC) - timedelta(hours=3)
+    db_session.commit()
+    assert posted_list.status == ExcessListStatus.COLLECTING  # the nightly sweep hasn't run
+
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+
+    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    assert offer.status == "late"
+
+
 def test_upload_bids_case_variant_bidders_grouped_one_offer(
     db_session: Session, trader_user: User, posted_list: ExcessList
 ):
