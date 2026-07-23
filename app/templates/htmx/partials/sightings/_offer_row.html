@@ -4,6 +4,7 @@
    approved offers show Reconfirm/Mark Sold; all show Delete. The mutating actions
    (review/reconfirm/mark-sold/delete) re-render #sightings-offers-panel. #}
 {% from "htmx/partials/offers/_field_macros.html" import qual_badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 {% set sc = {
   'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'pending_review': 'bg-amber-50 text-amber-700 border-amber-200',
@@ -12,6 +13,7 @@
   'sold': 'bg-gray-100 text-gray-600 border-gray-200',
   'won': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'expired': 'bg-gray-100 text-gray-500 border-gray-200',
+  'unknown': 'bg-gray-100 text-gray-600 border-gray-200',
 } %}
 <div id="offer-row-{{ o.id }}" class="group px-2 py-1.5 hover:bg-gray-50/50" x-data="{ open: false, expand: false }">
   <div class="flex items-center gap-2">
@@ -19,9 +21,7 @@
       <div class="flex items-center gap-2">
         <button @click.stop="expand = !expand"
                 class="font-medium text-gray-900 text-sm truncate hover:text-accent-600 text-left">{{ o.vendor_name or '—' }}</button>
-        <span class="chip {{ sc.get(o.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-          {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
-        </span>
+        {{ status_badge(o.status or 'unknown', status_map=sc) }}
         {{ qual_badge(o) }}
       </div>
       <div class="text-[11px] text-gray-400 mt-0.5 font-mono">

@@ -1,8 +1,9 @@
 {# quotes.html — Cross-requisition quote history for the selected part (Reqs workspace Quotes tab).
    Receives: requirement (Requirement), quote_lines (list[QuoteLine] with .quote and .quote.requisition eager-loaded).
    Called by: part_tab_quotes route (/v2/partials/parts/{requirement_id}/tab/quotes).
-   Depends on: HTMX (row deep-link), brand palette.
+   Depends on: HTMX (row deep-link), brand palette, shared/_macros.html (status_badge, badge).
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
 <div>
   {% if quote_lines %}
   <p class="text-sm text-gray-600 mb-4">
@@ -43,11 +44,11 @@
           <td class="table-cell text-sm text-right">
             {% if line.margin_pct is not none %}
               {% if line.margin_pct >= 30 %}
-                <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">{{ "%.1f%%"|format(line.margin_pct) }}</span>
+                {{ badge("%.1f%%"|format(line.margin_pct), tone='success') }}
               {% elif line.margin_pct >= 15 %}
-                <span class="badge bg-amber-50 text-amber-700 border-amber-200">{{ "%.1f%%"|format(line.margin_pct) }}</span>
+                {{ badge("%.1f%%"|format(line.margin_pct), tone='warning') }}
               {% else %}
-                <span class="badge bg-rose-50 text-rose-700 border-rose-200">{{ "%.1f%%"|format(line.margin_pct) }}</span>
+                {{ badge("%.1f%%"|format(line.margin_pct), tone='danger') }}
               {% endif %}
             {% else %}
               <span class="text-gray-600">—</span>
@@ -61,7 +62,7 @@
               "lost": "bg-rose-50 text-rose-700 border-rose-200",
               "revised": "bg-gray-100 text-gray-600 border-gray-200"
             } %}
-            <span class="badge {{ quote_colors.get(q.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">{{ q.status|capitalize }}</span>
+            {{ status_badge(q.status, status_map=quote_colors) }}
           </td>
           <td class="table-cell text-sm text-gray-600">{{ q.created_at|localdate('%b %d, %Y') if q.created_at else "—" }}</td>
         </tr>

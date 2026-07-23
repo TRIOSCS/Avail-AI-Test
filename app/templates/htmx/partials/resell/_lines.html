@@ -12,6 +12,7 @@
             user.
   Called by: resell.resell_lines + detail.html (default tab) + add-line/import re-render.
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 {% set el = list %}
 {% set is_owner = can_see_customer %}
 {% set is_draft = el.status == 'draft' %}
@@ -35,12 +36,15 @@
 
 {# Awarded / Withdrawn state pill — surfaces a line's terminal status next to its offer
    badge so the sold/pulled lines read at a glance (RS-3). Shown to everyone: "this line
-   is sold" is a fact, not the owner's private planning data. #}
+   is sold" is a fact, not the owner's private planning data. Delegates to the shared
+   status_badge() so the pill shape unifies onto .badge; colors are the exact bg/text
+   pair this replaced (a matching border shade is added since .badge always renders one). #}
 {% macro _status_pill(item) %}
-  {%- if item.status == 'awarded' -%}
-  <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">Awarded</span>
-  {%- elif item.status == 'withdrawn' -%}
-  <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500 whitespace-nowrap">Withdrawn</span>
+  {%- if item.status in ('awarded', 'withdrawn') -%}
+  <span class="whitespace-nowrap">{{ status_badge(item.status, status_map={
+    'awarded': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'withdrawn': 'bg-gray-100 text-gray-500 border-gray-200'
+  }) }}</span>
   {%- endif -%}
 {% endmacro %}
 

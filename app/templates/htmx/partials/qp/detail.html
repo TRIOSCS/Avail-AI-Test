@@ -21,13 +21,15 @@
 
 {# ── Section review-status chip ────────────────────────────────────────────────
    Renders whether a QP section (Sales / Purchasing) has been marked reviewed.
-   reviewed_at is the section's reviewed-at timestamp (or None / falsy). #}
+   reviewed_at is the section's reviewed-at timestamp (or None / falsy). Delegates
+   to the shared status_badge() — 'reviewed'/'not_reviewed' pass through its default
+   replace('_',' ')|capitalize label logic to produce the exact original "Reviewed" /
+   "Not reviewed" text, with the exact original colors preserved in status_map. #}
 {% macro review_chip(reviewed_at) %}
-  {% if reviewed_at %}
-  <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200">Reviewed</span>
-  {% else %}
-  <span class="badge bg-slate-50 text-slate-500 border-slate-200">Not reviewed</span>
-  {% endif %}
+  {{ status_badge('reviewed' if reviewed_at else 'not_reviewed', status_map={
+    'reviewed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'not_reviewed': 'bg-slate-50 text-slate-500 border-slate-200'
+  }) }}
 {% endmacro %}
 
 {# ── Derive header fields from the buy plan (bp may be None on orphaned data) ── #}

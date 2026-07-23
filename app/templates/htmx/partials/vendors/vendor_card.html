@@ -5,6 +5,7 @@
    Depends on: brand palette, Alpine.js
    Context vars: v (VendorCard), claim_map (dict of vendor_card_id -> {user_name, days_left})
 #}
+{% from "htmx/partials/shared/_macros.html" import badge %}
 <div class="bg-white rounded-lg border border-brand-200 hover:border-brand-400
             hover:shadow-md transition-all cursor-pointer p-4 space-y-3"
      hx-get="/v2/partials/vendors/{{ v.id }}"
@@ -20,19 +21,18 @@
       {% endif %}
     </div>
     {% set claim = claim_map.get(v.id) if claim_map else None %}
+    {# All three tones are byte-identical to SEMANTIC's violet/danger/muted — routed
+       through the shared badge() primitive with zero recolor. badge() has no title
+       param, so the claim tooltip is kept via a thin wrapping span (flex-shrink-0
+       preserved the same way for all three, since badge() doesn't take extra classes). #}
     {% if claim %}
-      <span class="badge bg-violet-50 text-violet-700 border-violet-200 flex-shrink-0"
-            title="Claimed by {{ claim.user_name }} — {{ claim.days_left }} days left">
-        Strategic ({{ claim.user_name }})
+      <span class="flex-shrink-0" title="Claimed by {{ claim.user_name }} — {{ claim.days_left }} days left">
+        {{ badge("Strategic (" ~ claim.user_name ~ ")", tone="violet") }}
       </span>
     {% elif v.is_blacklisted %}
-      <span class="badge bg-rose-50 text-rose-700 border-rose-200 flex-shrink-0">
-        Blacklisted
-      </span>
+      <span class="flex-shrink-0">{{ badge("Blacklisted", tone="danger") }}</span>
     {% elif not v.is_active %}
-      <span class="badge bg-gray-100 text-gray-600 border-gray-200 flex-shrink-0">
-        Archived
-      </span>
+      <span class="flex-shrink-0">{{ badge("Archived", tone="muted") }}</span>
     {% endif %}
   </div>
 

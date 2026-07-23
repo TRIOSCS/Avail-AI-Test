@@ -2,6 +2,7 @@
    Called by: offers/_offer_form_fields.html, offers/_qualification_fields.html.
    The macros emit the exact same markup the grid used to repeat inline; keep the
    input name= attributes stable — both offer POST handlers read inputs by name. #}
+{% from "htmx/partials/shared/_macros.html" import badge %}
 
 {# Radio chip selector — drives both a hidden radio input and an Alpine x-model. #}
 {%- macro chip_select(label, name, options, model) -%}
@@ -29,12 +30,16 @@
   </div>
 {%- endmacro -%}
 
-{# Qualification status badge — colored pill with filled/total count or "Unqualified". #}
+{# Qualification status badge — colored pill with filled/total count or "Unqualified".
+   Delegates to the shared badge() primitive: cmap's 4 colors are byte-identical to
+   SEMANTIC's success/warning/danger/neutral tones, so tone= reuses them with zero
+   recolor. The label (a dynamic "filled/total" count, not a fixed per-value string)
+   can't route through status_badge's value->label transform, so it's computed here
+   and passed to badge()'s explicit label param instead. badge() has no title param,
+   so the tooltip is kept via a thin wrapping span (same hover behavior as before). #}
 {%- macro qual_badge(offer) -%}
 {% set s = offer.qualification_summary %}
-{% set cmap = {'complete':'bg-emerald-50 text-emerald-700 border-emerald-200','essentials':'bg-amber-50 text-amber-700 border-amber-200','incomplete':'bg-rose-50 text-rose-700 border-rose-200','unset':'bg-gray-50 text-gray-600 border-gray-200'} %}
-<span class="badge {{ cmap.get(s.status, 'bg-gray-50 text-gray-600 border-gray-200') }}"
-      title="{{ s.note or 'Not qualified' }}">
-  {% if s.status == 'unset' %}Unqualified{% elif s.total %}{{ s.filled }}/{{ s.total }}{% else %}{{ s.status|capitalize }}{% endif %}
-</span>
+{% set tmap = {'complete': 'success', 'essentials': 'warning', 'incomplete': 'danger', 'unset': 'neutral'} %}
+{% set _label = 'Unqualified' if s.status == 'unset' else (s.filled ~ '/' ~ s.total if s.total else s.status|capitalize) %}
+<span title="{{ s.note or 'Not qualified' }}">{{ badge(_label, tone=tmap.get(s.status, 'neutral')) }}</span>
 {%- endmacro -%}
