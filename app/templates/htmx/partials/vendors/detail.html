@@ -13,7 +13,15 @@
 
 {# Full panel width — no max-w cap; meta is compressed into a slim stat strip
    so the tabbed main content uses the full width. #}
-<div class="space-y-4 page-fluid">
+{# Root id is the swap anchor for the header action buttons (blacklist / archive /
+   edit / delete): they target #vendor-detail-{id} with hx-swap="outerHTML" so the
+   re-rendered pane replaces itself IN WHATEVER CONTAINER it was loaded into —
+   #main-content standalone or #crm-tab-content inside the CRM shell. Never target
+   #main-content here: embedded, that wipes the whole CRM shell. Same re-carried
+   container-id pattern as customers/_task_edit_form.html (PR #781) and
+   #company-detail-{id}; edit_vendor_form.html re-carries this id when it replaces
+   the pane. #}
+<div id="vendor-detail-{{ vendor.id }}" class="space-y-4 page-fluid">
 
   {# ── Header Card ─────────────────────────────────────────── #}
   <div class="card">
@@ -62,7 +70,8 @@
         {% endif %}
         {# Toggle blacklist #}
         <button hx-post="/v2/partials/vendors/{{ vendor.id }}/toggle-blacklist"
-                hx-target="#main-content"
+                hx-target="#vendor-detail-{{ vendor.id }}"
+                hx-swap="outerHTML"
                 hx-confirm="{{ 'Remove from blacklist?' if vendor.is_blacklisted else 'Add to blacklist? This marks the vendor as untrusted.' }}"
                 data-loading-disable
                 class="px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100' if vendor.is_blacklisted else 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' }} transition-colors">
@@ -70,7 +79,8 @@
         </button>
         {# Archive / Unarchive (soft-archive — hides from default list, never deletes) #}
         <button hx-post="/v2/partials/vendors/{{ vendor.id }}/{{ 'unarchive' if not vendor.is_active else 'archive' }}"
-                hx-target="#main-content"
+                hx-target="#vendor-detail-{{ vendor.id }}"
+                hx-swap="outerHTML"
                 hx-confirm="{{ 'Restore this vendor to the active list?' if not vendor.is_active else 'Archive this vendor? It will be hidden from the default vendor list (not deleted).' }}"
                 data-loading-disable
                 class="px-3 py-1.5 text-xs font-medium rounded-lg {{ 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' if not vendor.is_active else 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' }} transition-colors">
@@ -78,13 +88,17 @@
         </button>
         {# Edit #}
         <button hx-get="/v2/partials/vendors/{{ vendor.id }}/edit-form"
-                hx-target="#main-content"
+                hx-target="#vendor-detail-{{ vendor.id }}"
+                hx-swap="outerHTML"
                 class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
           Edit
         </button>
         {# Delete (admin-only destructive action) #}
+        {# Delete returns the vendor LIST — outerHTML on the pane root swaps the list
+           in where the detail was, preserving the surrounding shell/container. #}
         <button hx-delete="/v2/partials/vendors/{{ vendor.id }}"
-                hx-target="#main-content"
+                hx-target="#vendor-detail-{{ vendor.id }}"
+                hx-swap="outerHTML"
                 hx-confirm="Permanently delete {{ vendor.display_name }}? All contacts and reviews will also be removed. This cannot be undone."
                 data-loading-disable
                 class="btn btn-danger btn-sm">

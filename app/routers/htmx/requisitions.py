@@ -472,10 +472,11 @@ async def requisitions_export(
     """Stream every list-matching requisition as a CSV download (attachment, no
     pagination).
 
-    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filter params as
-    the list route (GET /v2/partials/requisitions) — the export mirrors the list's
-    active view (search/status/owner/urgency/date-range) including the restricted-role
-    ownership boundary.
+    Gated on EXPORT_BULK_DATA (ISS-028 bulk dataset export lockdown — admin-by-default,
+    per-user override possible). Same filter params as the list route (GET
+    /v2/partials/requisitions) — the export mirrors the list's active view
+    (search/status/owner/urgency/date-range) including the restricted-role ownership
+    boundary.
     """
     return stream_csv(
         "requisitions_export.csv",

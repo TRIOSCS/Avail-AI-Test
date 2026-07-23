@@ -12,8 +12,11 @@ instead of just stopping the leak.
 This command re-runs match_email_to_entity() on each candidate row's stored
 contact_email and, when it resolves, fills in company_id or vendor_card_id. Rows whose
 counterparty is an own-domain or junk address (settings.own_domains / JUNK_DOMAINS /
-JUNK_EMAIL_PREFIXES) are flagged is_meaningful=False instead — this keeps them excluded
-from both the company and vendor Activity tabs without deleting any data.
+JUNK_EMAIL_PREFIXES) are demoted instead via the write path's demote_internal_activity
+(is_meaningful=False + quality_assessed_at/quality_classification="internal" stamps —
+score_unscored_activities selects on quality_assessed_at IS NULL, so an unstamped
+demotion would be AI re-promoted within days). This keeps them excluded from both the
+company and vendor Activity tabs without deleting any data.
 
 Usage: python -m app.management.reattribute_activity [--apply] [--limit N]
 
@@ -26,7 +29,7 @@ False is re-flagged to the same value. No deletions.
 Called by: an operator (manually, post-deploy of the ISS-030 activity-tab fix).
 Depends on: app.database.SessionLocal, app.models.ActivityLog,
     app.services.activity_service.match_email_to_entity / _is_internal_email /
-    _is_junk_email.
+    _is_junk_email / demote_internal_activity.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from ..models import ActivityLog
 from ..services.activity_service import (
     _is_internal_email,
     _is_junk_email,
+    demote_internal_activity,
     match_email_to_entity,
 )
 
@@ -108,7 +112,7 @@ def run_backfill(db: Session, *, apply: bool, limit: int | None = None) -> dict:
             if vendor_card_id is not None:
                 row.vendor_card_id = vendor_card_id
             if is_noise:
-                row.is_meaningful = False  # type: ignore[assignment]  # legacy Column-model ORM noise
+                demote_internal_activity(row)
             if tally["scanned"] % _COMMIT_CHUNK == 0:
                 db.commit()
 

@@ -135,6 +135,42 @@ def counterparty_card(
     return card
 
 
+def resolve_bidder_card(db: Session, bidder_name: str) -> VendorCard:
+    """Canonicalize a FREE-TEXT bidder name (from an uploaded compiled bid sheet) to its
+    VendorCard.
+
+    Mirrors :func:`counterparty_card`'s normalize-then-reuse-or-create pattern, but for a
+    bidder who has no Company/VendorCard row to start from — just a name typed onto a
+    spreadsheet. An existing card on the SAME ``normalize_vendor_name`` key is REUSED,
+    never duplicated; a new card is tagged ``source="resell_bid_upload"`` so its
+    provenance is distinguishable from a card backfilled via the outreach/offer-
+    attribution paths. Raises HTTPException(422) if the name has no normalizable form —
+    a true invariant only because ``excess_service._classify_bid_row`` rejects (per-row,
+    with a reason) not just blank bidders but any bidder whose name normalizes to
+    nothing (suffix-only like "Inc.", strip-to-nothing punctuation) before this is
+    called; without that guard this 422 would abort a whole multi-bidder ingest mid-loop.
+    """
+    norm = normalize_vendor_name(bidder_name) or ""
+    if not norm:
+        raise HTTPException(422, f"Bidder name {bidder_name!r} has no normalizable name to canonicalize")
+
+    existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+    if existing:
+        return existing
+
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=bidder_name.strip(),
+        emails=[],
+        phones=[],
+        source="resell_bid_upload",
+    )
+    db.add(card)
+    db.flush()  # assign id for the offer FK
+    logger.info("Created VendorCard id={} for uploaded bidder {!r}", card.id, bidder_name)
+    return card
+
+
 def _resolve_buyer_card(db: Session, buyer: dict) -> VendorCard:
     """Resolve one buyer dict ({vendor_card_id} | {company_id}) to its canonical
     card."""
@@ -616,7 +652,12 @@ async def _finalize_outreach_send(
         if sent_ok and email:
             try:
                 sent_msg = await email_service._find_sent_message(gc, subject, email)
-            except Exception:  # lookup is best-effort — a failure must not lose the row
+            except Exception:
+                # Incl. SentMessageLookupError (the lookup's three-state "lookup failed").
+                # HERE the lookup is best-effort: the send itself already succeeded, so a
+                # failed id lookup must degrade (NULL ids + the note below), never lose
+                # the SENT row. Contrast retry_outreach_send, where the same raise is the
+                # UNKNOWN case that blocks a resend.
                 logger.warning("Outreach sent-message lookup failed for <{}>", email, exc_info=True)
                 sent_msg = None
             if isinstance(sent_msg, dict) and sent_msg:
@@ -849,9 +890,11 @@ async def retry_outreach_send(
     (``row.send_subject``, so a customized subject still matches its delivered message):
     a ``failed`` row may have actually DELIVERED (the failure was downstream of the send),
     so if the message is already there the row is reconciled to ``sent`` + its graph ids
-    stamped and NOTHING is resent. A lookup that RAISES is the UNKNOWN case (delivery
-    indeterminate) — the row is left ``interrupted`` and NOTHING is resent (never assume
-    not-sent). Only when the reconcile positively finds nothing is the row reset to
+    stamped and NOTHING is resent. A lookup that RAISES (``SentMessageLookupError`` —
+    the Sent-folder query itself hit Graph API errors, per the lookup's three-state
+    contract) is the UNKNOWN case (delivery indeterminate) — the row is left
+    ``interrupted`` and NOTHING is resent (never assume not-sent). Only when the
+    reconcile POSITIVELY finds nothing (a clean ``None``) is the row reset to
     ``sending`` (with a refreshed ``created_at`` so the stale sweeper cannot flip the
     in-flight retry) and re-sent via :func:`_finalize_outreach_send` (a one-buyer plan
     built from the row's ``parts_included`` snapshot, reusing the persisted subject/body).
@@ -899,8 +942,12 @@ async def retry_outreach_send(
             sent_msg = await email_service._find_sent_message(gc, guard_subject, email)
         except Exception:
             # A lookup FAILURE is the UNKNOWN case, never proof of not-sent — the original
-            # may have delivered while the Sent-folder query is transiently failing. Never
-            # assume not-sent: leave the row in the ambiguous ``interrupted`` state
+            # may have delivered while the Sent-folder query is transiently failing.
+            # _find_sent_message's three-state contract raises SentMessageLookupError on
+            # Graph API errors (429/5xx/expired token) precisely so this branch can tell
+            # an outage apart from its positive-None "scanned cleanly, not there"; the
+            # broad `except` also keeps any unexpected error on the safe no-resend side.
+            # Never assume not-sent: leave the row in the ambiguous ``interrupted`` state
             # (retryable, no false delivery claim) and do NOT resend, so a delivered offer
             # is never double-sent. The trader (or a later retry) can re-run once Graph recovers.
             logger.warning(

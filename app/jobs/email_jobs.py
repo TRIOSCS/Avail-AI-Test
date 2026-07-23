@@ -787,7 +787,11 @@ async def scan_sent_folder(user, db):
     from ..config import settings
     from ..models import SyncState
     from ..models.intelligence import ActivityLog
-    from ..services.activity_service import match_email_to_entity
+    from ..services.activity_service import (
+        _is_internal_email,
+        demote_internal_activity,
+        match_email_to_entity,
+    )
     from ..utils.token_manager import get_valid_token
 
     token = await get_valid_token(user, db)
@@ -1006,6 +1010,13 @@ async def scan_sent_folder(user, db):
                             auto_logged=True,
                             occurred_at=occurred_at,
                         )
+                        # ISS-030 hardening: an own-domain recipient (internal send)
+                        # must NEVER yield a promotable row — keep the row + its
+                        # attribution (audit trail, external_id dedup) but demote and
+                        # stamp it exactly like the log_email_activity write path, so
+                        # score_unscored_activities can never AI re-promote it.
+                        if first_recipient and _is_internal_email(first_recipient.strip().lower()):
+                            demote_internal_activity(log_entry)
                         db.add(log_entry)
                         msg_logs.append(log_entry)
         except Exception:

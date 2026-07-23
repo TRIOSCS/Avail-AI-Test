@@ -5,9 +5,10 @@ each streams a CSV attachment, writes a header row + one row per matching record
 mirrors its list route's filter parity (only matching records export). Admin only by
 default (ISS-028 — AccessKey.EXPORT_BULK_DATA); the plain buyer `client` fixture is
 denied 403 (full role matrix in tests/test_export_bulk_data_gate.py). Neither list
-toolbar renders an export button anymore — bulk export lives ONLY on the admin-gated
-Settings "Data export" page (ISS-028); `manager_client` (an explicit per-user
-EXPORT_BULK_DATA override) exercises the export ROUTE content directly.
+toolbar renders an export button anymore — bulk export lives ONLY on the
+capability-gated Settings "Data export" page (EXPORT_BULK_DATA, ISS-028);
+`manager_client` (an explicit per-user EXPORT_BULK_DATA override) exercises the
+export ROUTE content directly.
 
 Called by: pytest
 Depends on: conftest.py fixtures (db_session, test_user, client, manager_client,
@@ -166,7 +167,8 @@ def test_requisitions_export_unauthenticated_rejected(unauthenticated_client: Te
 
 def test_requisitions_export_button_absent_from_list_toolbar(manager_client: TestClient, db_session: Session):
     """ISS-028: the requisitions list toolbar never renders an Export CSV button for
-    ANY role — bulk export moved to the admin-only Settings "Data export" page."""
+    ANY role — bulk export moved to the capability-gated (EXPORT_BULK_DATA,
+    admin-by-default) Settings "Data export" page."""
     _make_requisition(db_session, name="RFQ-One")
     db_session.commit()
 
@@ -333,7 +335,8 @@ def test_vendors_export_unauthenticated_rejected(unauthenticated_client: TestCli
 
 def test_vendors_export_button_absent_from_list_header(manager_client: TestClient, db_session: Session):
     """ISS-028: the vendor list header never renders an Export CSV button for ANY
-    role — bulk export moved to the admin-only Settings "Data export" page."""
+    role — bulk export moved to the capability-gated (EXPORT_BULK_DATA,
+    admin-by-default) Settings "Data export" page."""
     _make_vendor(db_session, name="Arrow Electronics")
     db_session.commit()
 

@@ -6,7 +6,10 @@
   pills) and the header chips (the N/M-awarded chip + the list-status badge that flips
   to `awarded` when the last line is decided).
   Receives: the merged _detail_context + _offers_context (see resell._award_response_context).
-  Called by: resell.resell_award_offer, resell.resell_unaward_offer.
+  Called by: resell.resell_award_offer, resell.resell_unaward_offer,
+  resell.resell_withdraw_offer, resell.resell_assign_offer_line, and
+  resell.resell_bids_upload_confirm (the bid-sheet ingest also mutates rollups/status,
+  so it needs the same OOB chips+lines refresh).
 #}
 {% set el = list %}
 {% include "htmx/partials/resell/_offers.html" %}

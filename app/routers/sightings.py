@@ -798,9 +798,10 @@ async def sightings_export(
     """Stream every board-matching Sighting as a CSV download (attachment, no
     pagination).
 
-    Manager/admin only (ISS-022 — bulk dataset export lockdown). Same filters as the
-    board list route — the export mirrors the board's active view (status/urgent/
-    stale/search/manufacturer/assignment/ownership).
+    Gated on EXPORT_BULK_DATA (ISS-028 bulk dataset export lockdown — admin-by-default,
+    per-user override possible). Same filters as the board list route — the export
+    mirrors the board's active view (status/urgent/stale/search/manufacturer/
+    assignment/ownership).
     """
     return stream_csv("sightings_export.csv", _EXPORT_COLUMNS, _sighting_export_rows(db, user, filters))
 

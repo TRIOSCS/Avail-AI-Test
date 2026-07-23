@@ -355,7 +355,8 @@ class AccessKey(StrEnum):
     OPS_VERIFICATION = "ops_verification"
     # Bulk dataset exports (companies, contacts, vendors, requisitions, sightings) —
     # admin only by default (ISS-028; supersedes ISS-022's manager+admin default),
-    # surfaced solely via the admin-gated Settings "Data export" page — no export UI
+    # surfaced solely via the Settings "Data export" page (gated on this same
+    # capability, NOT a strict admin-role check) — no export UI
     # anywhere else. Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA: single-deal
     # quote-builder Excel/PDF exports stay open to sales via EXPORT_DATA.
     #
