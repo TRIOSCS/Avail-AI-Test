@@ -6,7 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import tab_button %}
-{% from "htmx/partials/shared/_macros.html" import lazy_body %}
+{% from "htmx/partials/shared/_macros.html" import lazy_body, page_header %}
 {# Initial lazy-load URL per tab. Most tabs live at /v2/partials/settings/<slug>,
    but the slug differs from the Alpine tab id for some (data_ops→data-ops,
    ops_group→ops-group) and the Tickets tab's content is the trouble-tickets
@@ -20,6 +20,7 @@
 } %}
 {% set content_url = _tab_content_urls.get(active_tab, '/v2/partials/settings/' ~ active_tab) %}
 <div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
+  {{ page_header("Settings") }}
   {# Tab buttons — scroll horizontally on narrow screens instead of overflowing the page #}
   <div class="flex gap-1 mb-6 border-b border-line-base overflow-x-auto">
     {# Connectors tab is gated on MANAGE_CONNECTORS (admins always qualify). Rendered in

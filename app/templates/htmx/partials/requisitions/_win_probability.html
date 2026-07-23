@@ -26,7 +26,7 @@
            max="100"
            value="{{ req.win_probability if req.win_probability is not none else '' }}"
            placeholder="0–100"
-           class="w-16 text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
+           class="w-16 text-xs border border-gray-300 rounded px-1 py-0.5 input-focus"
            @keydown.escape="editing = false">
     <button type="submit" class="text-xs text-brand-600 hover:text-brand-800 font-medium">Save</button>
     <button type="button" @click="editing = false" class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>

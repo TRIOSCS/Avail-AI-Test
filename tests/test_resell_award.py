@@ -1673,14 +1673,17 @@ class TestAssignOfferLineService:
         self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
     ):
         """Finding #12: assigning an unmatched bid onto an already-AWARDED line must 409
-        — never silently displace the winner from ``best_offer_id``.
+        from the TARGET-LINE guard — never silently displace the winner from
+        ``best_offer_id``.
 
-        The list is BID_OUT (not blocked by ``_ASSIGN_BLOCKED_LIST_STATUSES``, which only
-        blocks awarded/closed/expired at the LIST level) with line 1 already awarded to a
-        winner (a partial award) and an unmatched, higher-priced offer line in the queue —
-        the exact non-concurrent scenario the finding describes.
+        A second, still-undecided line keeps the award partial, so the list stays BID_OUT
+        (not blocked by ``_ASSIGN_BLOCKED_LIST_STATUSES``, which only blocks
+        awarded/closed/expired at the LIST level) and the assign gets past the list-level
+        guard to the new ``target.status == AWARDED`` check — the exact non-concurrent
+        scenario the finding describes.
         """
         winner_line = _line(db_session, excess_list, "AWARDED-TARGET")
+        _line(db_session, excess_list, "STILL-OPEN")  # keeps the award partial
         excess_list.status = ExcessListStatus.BID_OUT
         winner_offer = _open_offer(
             db_session,
@@ -1693,8 +1696,12 @@ class TestAssignOfferLineService:
         db_session.commit()
         excess_service.award_offer(db_session, winner_offer.id, owner)
         db_session.refresh(winner_line)
+        db_session.refresh(excess_list)
         assert winner_line.status == ExcessLineItemStatus.AWARDED  # precondition
         assert winner_line.best_offer_id == winner_offer.id
+        # Partial award: list must NOT be AWARDED, or the 409 below would come from the
+        # pre-existing list-level guard instead of the target-line guard under test.
+        assert excess_list.status == ExcessListStatus.BID_OUT
 
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-HIGHER", unit_price=Decimal("5.00")
@@ -1704,11 +1711,31 @@ class TestAssignOfferLineService:
         with pytest.raises(HTTPException) as exc:
             excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, winner_line.id, owner)
         assert exc.value.status_code == 409
+        assert "already awarded" in exc.value.detail  # the target-line guard, not the list-level one
         db_session.refresh(offer_line)
         db_session.refresh(winner_line)
         assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
         assert winner_line.best_offer_id == winner_offer.id  # winner marker intact
         assert winner_line.best_offer_unit_price == Decimal("1.00")  # not displaced by 5.00
+
+    def test_assign_onto_withdrawn_target_line_409(
+        self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
+    ):
+        """Finding #12, WITHDRAWN branch: a withdrawn line can't accept new offers."""
+        withdrawn_line = _line(db_session, excess_list, "PULLED")
+        withdrawn_line.status = ExcessLineItemStatus.WITHDRAWN
+        excess_list.status = ExcessListStatus.BID_OUT
+        offer_line = _unmatched_offer_line(
+            db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
+        )
+        db_session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            excess_service.assign_offer_line(db_session, excess_list.id, offer_line.id, withdrawn_line.id, owner)
+        assert exc.value.status_code == 409
+        assert "has been withdrawn" in exc.value.detail
+        db_session.refresh(offer_line)
+        assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
 
     def test_assign_onto_available_line_on_bid_out_list_still_works(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User

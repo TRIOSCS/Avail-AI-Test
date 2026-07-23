@@ -10,7 +10,7 @@
             hx-target="#{{ cell_id }}" hx-swap="outerHTML"
             hx-vals='{"field": "{{ field }}"}'
             @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
-            class="text-[11px] px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500"
+            class="text-[11px] px-1 py-0.5 rounded border border-brand-300 input-focus"
             x-init="$el.focus()" autofocus>
       {% for s in ['open', 'sourcing', 'offered', 'quoted', 'won', 'lost', 'archived'] %}
         <option value="{{ s }}" {{ 'selected' if s == requirement.sourcing_status }}>{{ s|capitalize }}</option>
@@ -24,7 +24,7 @@
            hx-vals='{"field": "{{ field }}"}'
            hx-trigger="keyup[key=='Enter']"
            @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
-           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-16"
+           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 input-focus w-16"
            x-init="$el.focus(); $el.select()" autofocus />
   {% elif field == 'target_price' %}
     <input aria-label="Target price" type="number" name="value" step="0.0001"
@@ -35,7 +35,7 @@
            hx-vals='{"field": "{{ field }}"}'
            hx-trigger="keyup[key=='Enter']"
            @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
-           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-20"
+           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 input-focus w-20"
            x-init="$el.focus(); $el.select()" autofocus />
   {% endif %}
 </td>

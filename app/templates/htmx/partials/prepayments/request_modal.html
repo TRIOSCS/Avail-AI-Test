@@ -58,12 +58,12 @@
         <input type='number' name='total_incl_fees' required min='0' step='0.01'
                value='{{ "%.2f"|format(amount) }}'
                @input='amt = parseFloat($event.target.value)'
-               class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
+               class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'>
       </div>
       <div class='w-28'>
         <label class='form-label'>Currency</label>
         <select name='currency'
-                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
+                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'>
           {% for code in ["USD", "EUR", "GBP", "AED"] %}
           <option value='{{ code }}'>{{ code }}</option>
           {% endfor %}
@@ -75,7 +75,7 @@
     <div>
       <label class='form-label'>Payment method</label>
       <select name='payment_method'
-              class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'>
+              class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'>
         {% for value, label in payment_methods %}
         <option value='{{ value }}'>{{ label }}</option>
         {% endfor %}
@@ -84,14 +84,14 @@
 
     <label class='flex items-center gap-2 text-sm text-gray-700'>
       <input type='checkbox' name='test_report_sent' value='true'
-             class='rounded border-gray-300 text-brand-500 focus:ring-brand-500'>
+             class='rounded border-gray-300 text-brand-500 input-focus'>
       Test report already received from the vendor
     </label>
 
     <div>
       <label class='form-label'>Notes for the approver</label>
       <textarea name='buyer_remarks' rows='3' placeholder='Optional context…'
-                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500'></textarea>
+                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'></textarea>
     </div>
 
     <div class='flex justify-end gap-2 pt-1'>

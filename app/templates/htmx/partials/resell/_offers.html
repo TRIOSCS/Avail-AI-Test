@@ -9,6 +9,7 @@
             take_all_offers, is_owner, can_see_customer, shape.
   Called by: resell.resell_offers (lazy + offer-submit re-render).
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 {% set el = list %}
 
 {% macro _broker_label(offer, is_owner) %}
@@ -68,15 +69,15 @@
     <div class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-brand-100">
       <span class="inline-flex items-center gap-2">
         <span class="text-sm font-semibold text-gray-900">{{ 'Take-all offer' if is_take_all else 'Your offer' }}</span>
-        {% set badge = {
+        {# 'lost' renders as the value 'not_selected' so status_badge's default label
+           (replace '_' -> ' ' + capitalize) produces the exact original "Not selected"
+           text — same colors, same words, shape now unified onto .badge. #}
+        {{ status_badge('not_selected' if offer.status == 'lost' else offer.status, status_map={
           'open': 'bg-sky-50 text-sky-600 border-sky-200',
           'late': 'bg-amber-50 text-amber-600 border-amber-200',
           'won': 'bg-emerald-50 text-emerald-700 border-emerald-300',
-          'lost': 'bg-gray-50 text-gray-400 border-gray-200'
-        } %}
-        <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full border capitalize {{ badge.get(offer.status, 'bg-gray-50 text-gray-500 border-gray-200') }}">
-          {{ 'Not selected' if offer.status == 'lost' else offer.status }}
-        </span>
+          'not_selected': 'bg-gray-50 text-gray-400 border-gray-200'
+        }) }}
       </span>
       {% if can_withdraw %}
       <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"

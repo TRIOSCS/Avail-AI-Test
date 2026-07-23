@@ -1,8 +1,12 @@
 {# buy_plans_tab.html — Buy Plans tab for the CRM account (company) detail.
    Receives: company (Company), buy_plans (list[BuyPlan] with lines loaded).
    Called by: company_tab route (tab == "buy_plans").
-   Depends on: HTMX, brand palette.
+   Depends on: HTMX, brand palette, shared status_badge macro (badge dedup pass —
+   was a hand-rolled rounded-full span with its own bp_colors map; now wired
+   through status_badge with the SAME dict so the pill shape is unified with
+   the rest of the app while every color stays byte-identical).
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 <div>
   {% if buy_plans %}
   <div class="flex items-center justify-between mb-4">
@@ -41,11 +45,10 @@
               "active": "bg-emerald-50 text-emerald-700",
               "halted": "bg-rose-50 text-rose-700",
               "completed": "bg-emerald-50 text-emerald-700",
-              "cancelled": "bg-gray-100 text-gray-600"
+              "cancelled": "bg-gray-100 text-gray-600",
+              "unknown": "bg-gray-100 text-gray-600"
             } %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ bp_colors.get(bp.status, 'bg-gray-100 text-gray-600') }}">
-              {{ (bp.status or 'unknown')|replace('_', ' ')|capitalize }}
-            </span>
+            {{ status_badge(bp.status or 'unknown', status_map=bp_colors) }}
           </td>
           <td class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "—" }}</td>

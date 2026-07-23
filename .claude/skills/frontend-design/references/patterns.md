@@ -147,7 +147,7 @@ Never render an empty container. Every list/table needs an empty state.
     <!-- table content -->
   </div>
 {% else %}
-  <div class="card-padded text-center py-12">
+  <div class="card text-center py-12">
     <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
     </svg>
@@ -165,7 +165,7 @@ For HTMX error responses, return an HTML fragment with the error — never a JSO
 
 ```html
 {# error_partial.html — rendered by FastAPI on 4xx/5xx for HTMX requests #}
-<div class="card-padded border-rose-200">
+<div class="card border-rose-200">
   <div class="flex items-center gap-3 text-rose-700">
     <svg class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

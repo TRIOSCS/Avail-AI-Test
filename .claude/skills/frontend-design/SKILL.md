@@ -10,7 +10,8 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash, mcp__playwright__browser_clo
 # Frontend-Design Skill
 
 AvailAI uses HTMX-driven navigation (no SPA), Alpine.js for component state, Jinja2 for
-server-side rendering, and Tailwind CSS with a custom steel-blue brand palette. All UI lives in
+server-side rendering, and Tailwind CSS with a neutral-gray `brand-*` ramp plus a single
+azure `accent-*` palette (Trio azure `#007DBD`) for all interactive chrome. All UI lives in
 `app/templates/htmx/partials/`. Server returns HTML fragments; HTMX swaps into `#main-content`.
 Never build client-side routing or fetch JSON in templates.
 
@@ -36,7 +37,7 @@ Never build client-side routing or fetch JSON in templates.
 ### Alpine.js expandable panel
 
 ```html
-<div x-data="{ open: false }" class="card-padded">
+<div x-data="{ open: false }" class="card">
   <button @click="open = !open" class="flex items-center justify-between w-full">
     <span class="font-medium text-gray-900">Details</span>
     <svg class="h-5 w-5 text-gray-400 transition-transform" :class="{ 'rotate-180': open }"
@@ -76,18 +77,21 @@ Never build client-side routing or fetch JSON in templates.
 
 | Concept | Class / Pattern | Notes |
 |---------|----------------|-------|
-| Primary button | `btn-primary` | brand-500 bg, focus ring |
-| Card container | `card` / `card-padded` | 2px border, rounded-xl |
-| Data table wrapper | `table-wrapper` | brand scrollbar, overflow-x |
+| Primary button | `btn-primary` | accent (azure) bg via `--accent`, focus ring |
+| Card container | `card` / `card-sm` / `card-lg` | 1px `border-brand-200`, rounded-xl, `shadow-card` |
+| Page header | `page_header(title, subtitle)` macro | `.h1` title + right-aligned action slot |
+| Data table wrapper | `table-wrapper` + `data-table` | overflow-x, brand-gray hairline |
 | Monospace data | `font-data` | JetBrains Mono 12px |
-| Brand blue mid | `brand-500` = `#5B8FB8` | scrollbars, borders, links |
+| Interactive accent | `accent-500` = `#007DBD` | links, primary buttons, focus rings, active nav |
+| Brand gray mid | `brand-500` = `#5F6878` | secondary text, neutral borders (NOT interactive) |
 | Topbar height | `h-12` sticky | 52px bottom padding on main |
-| Content swap target | `#main-content` | defined in `base.html` |
+| Content swap target | `#main-content` | defined in `htmx/base.html` |
 
 ## New Partial Checklist
 
 Copy and track progress:
 - [ ] Add header comment: what it does, called by, depends on, context vars
+- [ ] Page/detail title rendered via the `page_header()` macro (`.h1` + right-aligned actions)
 - [ ] Use `card` or `table-wrapper` as outermost container
 - [ ] Status values rendered via badge classes, not raw inline colors
 - [ ] Data cells use `font-data` for MPN/price/qty columns

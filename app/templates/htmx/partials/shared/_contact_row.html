@@ -59,7 +59,7 @@
       {# Site select — defaults to HQ site #}
       {% if active_sites %}
       <select name='site_id'
-              class='text-xs border border-gray-300 rounded px-1.5 py-1 focus:ring-brand-500 focus:border-brand-500 max-w-[120px]'>
+              class='text-xs border border-gray-300 rounded px-1.5 py-1 input-focus max-w-[120px]'>
         {% for s in active_sites %}
         <option value='{{ s.id }}'
           {% if s.site_type == 'hq' or loop.first %}selected{% endif %}>

@@ -21,7 +21,7 @@
       <input aria-label="Filter by lifecycle {{ label }}" type="checkbox" value="{{ value }}"
              :checked="lifecycle.includes('{{ value }}')"
              @change="toggleGlobalFacet('lifecycle', '{{ value }}')"
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+             class="rounded border-gray-300 text-brand-600 input-focus h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
       <span class="text-[11px] text-gray-400 tabular-nums">{{ lc_counts[value] }}</span>
     </label>
@@ -43,7 +43,7 @@
       <input aria-label="Filter by RoHS {{ label }}" type="checkbox" value="{{ value }}"
              :checked="rohs.includes('{{ value }}')"
              @change="toggleGlobalFacet('rohs', '{{ value }}')"
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+             class="rounded border-gray-300 text-brand-600 input-focus h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
       <span class="text-[11px] text-gray-400 tabular-nums">{{ rohs_counts[value] }}</span>
     </label>
@@ -68,7 +68,7 @@
       <input aria-label="Filter by condition {{ label }}" type="checkbox" value="{{ value }}"
              :checked="condition.includes('{{ value }}')"
              @change="toggleGlobalFacet('condition', '{{ value }}')"
-             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+             class="rounded border-gray-300 text-brand-600 input-focus h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
       <span class="text-[11px] text-gray-400 tabular-nums">{{ condition_counts[value] }}</span>
     </label>
@@ -86,7 +86,7 @@
     <input aria-label="Only parts with a datasheet" type="checkbox"
            :checked="hasDatasheet"
            @change="toggleDatasheet()"
-           class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+           class="rounded border-gray-300 text-brand-600 input-focus h-3.5 w-3.5">
     <span class="text-gray-700 truncate flex-1 text-[13px]">Has datasheet</span>
     <span class="text-[11px] text-gray-400 tabular-nums">{{ ds_count }}</span>
   </label>

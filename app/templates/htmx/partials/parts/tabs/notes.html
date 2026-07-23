@@ -18,7 +18,7 @@
           @htmx:after-request="saving = false">
       <textarea name="sale_notes" rows="6"
                 placeholder="Add sales notes, customer context, pricing strategy..."
-                class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y">{{ requirement.sale_notes or '' }}</textarea>
+                class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg input-focus resize-y">{{ requirement.sale_notes or '' }}</textarea>
       <div class="flex items-center gap-2 mt-2">
         <button type="submit" :disabled="saving"
                 class="btn-primary btn-sm">
