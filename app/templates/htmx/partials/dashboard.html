@@ -2,10 +2,14 @@
   dashboard.html — Main dashboard partial with logo, welcome, stat cards, quick actions, and lazy pipeline insights.
   Receives: user_name (str), open_reqs_count (int), active_vendors_count (int), companies_count (int).
   Called by: htmx_views.py dashboard_partial endpoint.
-  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+  Depends on: HTMX, Alpine.js, canonical accent design system (.card/.btn — see
+  styles.css).
 #}{% from "htmx/partials/_dashboard_cards.html" import stat_card %}
 
 <div class="page-fluid py-8 px-4 space-y-8">
+
+  {# Page title — canonical .h1, matching the header pattern used by other partials. #}
+  <h1 class="h1 text-center">Dashboard</h1>
 
   {# Brand logo — centered hero moment #}
   <div class="flex justify-center">
@@ -30,7 +34,7 @@
   </div>
 
   {# Quick actions card #}
-  <div class="bg-white border border-brand-200 rounded-xl p-6">
+  <div class="card p-6">
     <h3 class="text-base font-semibold text-gray-900 mb-4">Quick Actions</h3>
     <div class="flex flex-wrap gap-3"
          x-data="{ showReqModal: false }">
@@ -41,8 +45,7 @@
         </svg>
         Create Requisition
       </button>
-      <button class="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg
-                     hover:bg-brand-50 transition-colors"
+      <button class="btn btn-lg btn-secondary gap-2"
               hx-get="/v2/partials/search"
               hx-target="#main-content"
               hx-push-url="/v2/search">

@@ -4,6 +4,7 @@
    Called by: htmx_views.py vendor_tab endpoint (tab=="emails").
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import quote_status_badge, status_badge %}
 <div class="space-y-4">
 
   {# Summary stats #}
@@ -41,18 +42,7 @@
             </svg>
             <span class="text-sm font-medium text-gray-900">{{ c.subject or "RFQ" }}</span>
           </div>
-          {% set st_colors = {
-            'sent': 'bg-brand-50 text-brand-700 border-brand-200',
-            'opened': 'bg-amber-50 text-amber-700 border-amber-200',
-            'responded': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-            'quoted': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-            'declined': 'bg-rose-50 text-rose-700 border-rose-200',
-            'bounced': 'bg-rose-50 text-rose-600 border-rose-200',
-            'failed': 'bg-rose-50 text-rose-700 border-rose-200',
-          } %}
-          <span class="badge {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-            {{ (c.status or 'sent')|capitalize }}
-          </span>
+          {{ quote_status_badge(c.status or 'sent') }}
         </div>
         <div class="flex items-center gap-3 text-xs text-gray-600">
           <span>To: {{ c.vendor_contact or "" }}</span>
@@ -90,16 +80,14 @@
             <span class="text-sm font-medium text-gray-900">{{ r.subject or "Reply" }}</span>
           </div>
           <div class="flex items-center gap-2">
-            {% set class_colors = {
+            {% set _class_map = {
               "quote": "bg-emerald-50 text-emerald-700 border-emerald-200",
               "decline": "bg-rose-50 text-rose-700 border-rose-200",
               "ooo": "bg-amber-50 text-amber-700 border-amber-200",
               "bounce": "bg-gray-100 text-gray-600 border-gray-200",
             } %}
             {% if r.classification %}
-            <span class="badge {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-              {{ r.classification|capitalize }}
-            </span>
+            {{ status_badge(r.classification, status_map=_class_map) }}
             {% endif %}
             {% if r.confidence is not none %}
             <span class="text-xs font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">

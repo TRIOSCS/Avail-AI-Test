@@ -2,8 +2,9 @@
    Receives: req (Requisition), quotes (list of dicts), overall_confidence (float),
              email_type (str), vendor_name (str).
    Called by: POST /v2/partials/requisitions/{id}/parse-email.
-   Depends on: HTMX, Alpine.js.
+   Depends on: HTMX, Alpine.js, shared/_macros.html (badge).
 #}
+{% from "htmx/partials/shared/_macros.html" import badge %}
 <div class="space-y-4">
 
   {# Summary banner #}
@@ -14,11 +15,11 @@
       </span>
       {% set conf_pct = (overall_confidence * 100)|round|int %}
       {% if conf_pct >= 80 %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">{{ conf_pct }}% confidence</span>
+      {{ badge(conf_pct ~ '% confidence', tone='success') }}
       {% elif conf_pct >= 50 %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">{{ conf_pct }}% confidence</span>
+      {{ badge(conf_pct ~ '% confidence', tone='warning') }}
       {% else %}
-      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">{{ conf_pct }}% confidence</span>
+      {{ badge(conf_pct ~ '% confidence', tone='danger') }}
       {% endif %}
     </div>
     <button @click="$el.closest('#parse-area').innerHTML = ''"
@@ -42,11 +43,11 @@
         {% set q_conf = ((q.confidence or 0.5) * 100)|round|int %}
         <div class="absolute top-3 right-3">
           {% if q_conf >= 80 %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">{{ q_conf }}%</span>
+          {{ badge(q_conf ~ '%', tone='success') }}
           {% elif q_conf >= 50 %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">{{ q_conf }}%</span>
+          {{ badge(q_conf ~ '%', tone='warning') }}
           {% else %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">{{ q_conf }}%</span>
+          {{ badge(q_conf ~ '%', tone='danger') }}
           {% endif %}
           <button type="button"
                   @click="$el.closest('[id^=parsed-card]').remove(); cards--"

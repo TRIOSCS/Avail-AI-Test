@@ -19,6 +19,7 @@
 #}
 
 {% from "htmx/partials/shared/_score_hover.html" import score_breakdown %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 {% set intel = vendor_intel.get(s.vendor_name, {}) %}
 {% set vendor_phone = vendor_phones.get(s.vendor_name) %}
 {% set ooo = ooo_map.get(s.vendor_name|lower|trim) if ooo_map is defined else none %}
@@ -38,13 +39,18 @@
 {% set matched = vendor_matched_mpns.get(s.vendor_name, []) if vendor_matched_mpns is defined else [] %}
 {% set sub_matches = matched|reject("equalto", requirement.primary_mpn)|list %}
 
+{# status_badge's default label formatting only replaces underscores (not hyphens), so
+   vs_styles is keyed with underscores and vs_key (below) normalizes 'offer-in' ->
+   'offer_in' before the lookup — this keeps the rendered label byte-identical to the
+   old vs|replace('-', ' ')|capitalize ("Offer in") while still using the shared macro. #}
 {% set vs_styles = {
   'sighting': 'bg-gray-100 text-gray-600 border-gray-200',
   'contacted': 'bg-blue-50 text-blue-700 border-blue-200',
-  'offer-in': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'offer_in': 'bg-emerald-100 text-emerald-700 border-emerald-200',
   'unavailable': 'bg-rose-100 text-rose-700 border-rose-200',
   'blacklisted': 'bg-red-50 text-red-700 border-red-200',
 } %}
+{% set vs_key = vs|replace('-', '_') %}
 {# Status-aware row treatment: unavailable = red tint + dimmed, offer-in = green tint.
    The compact-table hover rule paints over the tr tint on hover (transient) — the at-a-
    glance non-hover state carries the signal, matching the existing red/green treatment. #}
@@ -74,9 +80,7 @@
         <div class="min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="font-medium text-sm {{ name_color }}">{{ s.vendor_name }}</span>
-            <span class="chip {{ vs_styles.get(vs, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-              {{ vs|replace('-', ' ')|capitalize }}
-            </span>
+            {{ status_badge(vs_key, status_map=vs_styles) }}
             {% if unav_restock %}
             {# Bordered emerald-50 chip — deliberately distinct from the solid
                bg-emerald-100 offer-in pill (color-collision rule). #}

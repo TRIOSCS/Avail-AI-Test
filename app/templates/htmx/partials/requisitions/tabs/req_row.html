@@ -15,7 +15,7 @@
 
   {# ── Display mode ────────────────────────────────────────── #}
   <td class="px-2 py-2.5" x-show="!editing" x-cloak @dblclick.stop>
-    <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+    <input type="checkbox" class="rounded border-gray-300 text-brand-500 input-focus"
            :value="{{ r.id }}"
            @change="$el.checked ? selectedReqIds.push({{ r.id }}) : selectedReqIds = selectedReqIds.filter(id => id !== {{ r.id }})">
   </td>
@@ -101,7 +101,7 @@
       {# Row 1: MPN, Manufacturer typeahead, Qty, Target Price #}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         <input aria-label="Primary Mpn" type="text" name="primary_mpn" value="{{ r.primary_mpn or '' }}" required
-               class="px-2 py-1.5 text-sm font-mono border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm font-mono border border-brand-200 rounded input-focus"
                placeholder="MPN">
         <div class="relative" x-data="{ mfrOpen: false }">
           <input aria-label="Manufacturer" type="text" name="manufacturer" value="{{ r.manufacturer or '' }}" required
@@ -113,47 +113,47 @@
                  hx-target="next .mfr-dropdown"
                  hx-vals="js:{q: event.target.value}"
                  hx-swap="innerHTML"
-                 class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 placeholder:text-gray-400">
+                 class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded input-focus placeholder:text-gray-400">
           <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-line-base rounded shadow-float max-h-40 overflow-y-auto"
                x-show="mfrOpen" x-cloak></div>
         </div>
         <input aria-label="Target Qty" type="number" name="target_qty" value="{{ r.target_qty or 1 }}" min="1"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Qty">
         <input aria-label="Target Price" type="number" name="target_price" value="{{ '{:.4f}'.format(r.target_price|float) if r.target_price else '' }}" step="0.0001" min="0"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Target $">
       </div>
       {# Row 2: Brand, Customer PN, Need-by, Condition, Packaging #}
       <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
         <input aria-label="Brand" type="text" name="brand" value="{{ r.brand or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Brand">
         <input aria-label="Customer Pn" type="text" name="customer_pn" value="{{ r.customer_pn or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Customer PN">
         <input aria-label="Need By Date" type="date" name="need_by_date" value="{{ r.need_by_date.isoformat() if r.need_by_date else '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500">
-        <select name="condition" class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500">
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus">
+        <select name="condition" class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus">
           <option value="">Condition</option>
           <option value="new" {{ 'selected' if r.condition == 'new' }}>New</option>
           <option value="refurb" {{ 'selected' if r.condition == 'refurb' }}>Refurbished</option>
           <option value="used" {{ 'selected' if r.condition == 'used' }}>Used</option>
         </select>
         <input aria-label="Packaging" type="text" name="packaging" value="{{ r.packaging or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Packaging">
       </div>
       {# Row 3: Date Codes, Firmware, HW Codes #}
       <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
         <input aria-label="Date Codes" type="text" name="date_codes" value="{{ r.date_codes or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Date Codes">
         <input aria-label="Firmware" type="text" name="firmware" value="{{ r.firmware or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="Firmware">
         <input aria-label="Hardware Codes" type="text" name="hardware_codes" value="{{ r.hardware_codes or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded input-focus"
                placeholder="HW Codes">
       </div>
       {# Structured substitute rows — initialised from data-subs JSON attribute.
@@ -165,7 +165,7 @@
         <template x-for="(sub, idx) in subs" :key="idx">
           <div class="flex gap-1.5 items-center mb-1">
             <input aria-label="Sub MPN" :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
-                   class="flex-1 px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+                   class="flex-1 px-2 py-1 text-xs font-mono border border-gray-300 rounded input-focus">
             <div class="relative flex-1" x-data="{ subMfrOpen: false }">
               <input aria-label="Manufacturer" :name="'sub_manufacturer'" x-model="sub.manufacturer" placeholder="Manufacturer"
                      @input.debounce.300ms="subMfrOpen = $el.value.length > 0"
@@ -175,7 +175,7 @@
                      hx-target="next .sub-mfr-dropdown"
                      hx-vals="js:{q: event.target.value}"
                      hx-swap="innerHTML"
-                     class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 placeholder:text-gray-400">
+                     class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus placeholder:text-gray-400">
               <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-line-base rounded shadow-float max-h-32 overflow-y-auto"
                    x-show="subMfrOpen" x-cloak></div>
             </div>
@@ -187,7 +187,7 @@
                 class="text-[11px] text-brand-500 hover:text-brand-600 font-medium">+ Add substitute</button>
       </div>
       <textarea name="notes" rows="1" placeholder="Notes"
-                class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500">{{ r.notes or '' }}</textarea>
+                class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded input-focus">{{ r.notes or '' }}</textarea>
       <div class="flex items-center gap-2">
         <button type="submit" class="btn-primary btn-sm">Save</button>
         <button type="button" @click="editing = false" class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-100">Cancel</button>

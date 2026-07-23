@@ -25,12 +25,12 @@
       <div>
         <label class="block text-xs text-gray-600 mb-1">Display Name *</label>
         <input type="text" name="display_name" required value="{{ vendor.display_name or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus">
       </div>
       <div>
         <label class="block text-xs text-gray-600 mb-1">Website</label>
         <input type="url" name="website" value="{{ vendor.website or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="https://example.com">
       </div>
     </div>
@@ -38,13 +38,13 @@
       <div>
         <label class="block text-xs text-gray-600 mb-1">Emails (comma-separated)</label>
         <input type="text" name="emails" value="{{ (vendor.emails or [])|join(', ') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="sales@vendor.com, info@vendor.com">
       </div>
       <div>
         <label class="block text-xs text-gray-600 mb-1">Phones (comma-separated)</label>
         <input type="text" name="phones" value="{{ (vendor.phones or [])|join(', ') }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="+1-555-0100, +1-555-0200">
       </div>
     </div>

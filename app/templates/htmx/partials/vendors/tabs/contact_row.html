@@ -69,16 +69,16 @@
           data-loading-disable
           class="flex items-center gap-2 py-1">
       <input aria-label="Full Name" type="text" name="full_name" value="{{ c.full_name or '' }}"
-             class="w-36 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             class="w-36 px-2 py-1 text-sm border border-brand-200 rounded input-focus"
              placeholder="Full Name">
       <input aria-label="Title" type="text" name="title" value="{{ c.title or '' }}"
-             class="w-28 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             class="w-28 px-2 py-1 text-sm border border-brand-200 rounded input-focus"
              placeholder="Title">
       <input aria-label="Email" type="email" name="email" value="{{ c.email or '' }}" required
-             class="w-44 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             class="w-44 px-2 py-1 text-sm border border-brand-200 rounded input-focus"
              placeholder="email@vendor.com">
       <input aria-label="Phone" type="text" name="phone" value="{{ c.phone or '' }}"
-             class="w-32 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             class="w-32 px-2 py-1 text-sm border border-brand-200 rounded input-focus"
              placeholder="Phone">
       <button type="submit" class="btn btn-primary btn-sm">Save</button>
       <button type="button" @click="editing = false" class="btn btn-secondary btn-sm">Cancel</button>

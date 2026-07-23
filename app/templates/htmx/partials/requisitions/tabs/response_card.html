@@ -3,6 +3,7 @@
    Called by: htmx_views.py review_response_htmx endpoint, and responses.html loop.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 <div id="response-{{ r.id }}" class="bg-white rounded-lg border border-gray-200 p-4 hover:border-brand-300 transition-colors">
   <div class="flex items-start justify-between mb-2">
     <div>
@@ -10,31 +11,27 @@
       <p class="text-xs text-gray-600">{{ r.vendor_email or "" }} &middot; {{ r.received_at|localtime('%b %d, %Y %H:%M') if r.received_at else "&mdash;" }}</p>
     </div>
     <div class="flex items-center gap-2">
-      {% set class_colors = {
+      {% set _class_map = {
         "quote": "bg-emerald-50 text-emerald-700 border-emerald-200",
         "decline": "bg-rose-50 text-rose-700 border-rose-200",
         "ooo": "bg-amber-50 text-amber-700 border-amber-200",
         "bounce": "bg-gray-50 text-gray-500 border-gray-200",
       } %}
       {% if r.classification %}
-      <span class="badge {{ class_colors.get(r.classification, 'bg-gray-50 text-gray-600 border-gray-200') }}">
-        {{ r.classification|capitalize }}
-      </span>
+      {{ status_badge(r.classification, status_map=_class_map) }}
       {% endif %}
       {% if r.confidence is not none %}
       <span class="text-xs font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">
         {{ "%.0f"|format(r.confidence * 100) }}% conf
       </span>
       {% endif %}
-      {% set status_colors = {
+      {% set _status_map = {
         "new": "bg-brand-50 text-brand-700 border-brand-200",
         "reviewed": "bg-emerald-50 text-emerald-700 border-emerald-200",
         "rejected": "bg-rose-50 text-rose-700 border-rose-200",
         "matched": "bg-emerald-50 text-emerald-700 border-emerald-200",
       } %}
-      <span class="badge {{ status_colors.get(r.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">
-        {{ (r.status or "new")|capitalize }}
-      </span>
+      {{ status_badge(r.status or "new", status_map=_status_map) }}
     </div>
   </div>
   {% if r.subject %}

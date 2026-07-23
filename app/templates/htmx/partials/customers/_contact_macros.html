@@ -16,7 +16,7 @@
    Clock honesty rule: NULL last_outbound_at means "not yet logged". Render "—"
    — NEVER "never replied".
 #}
-{% from "htmx/partials/shared/_macros.html" import cadence_dot %}
+{% from "htmx/partials/shared/_macros.html" import cadence_dot, badge %}
 
 {% macro outreach_btn(label, href, channel, value, company_id, site_id, contact_id, contact_name, icon_path, new_tab=False, copy=False) %}
 {% if copy %}
@@ -230,10 +230,12 @@
         </span>
         {% endif %}
         {% if contact.do_not_contact %}
-        <span class='badge-danger flex-shrink-0'>DNC</span>
+        {# badge-danger == SEMANTIC['danger'] (bg-rose-50 text-rose-700 border-rose-200) — byte-identical color via the shared badge() primitive; flex-shrink-0 kept on a thin wrapper since badge() doesn't take extra classes. #}
+        <span class='flex-shrink-0'>{{ badge('DNC', tone='danger') }}</span>
         {% endif %}
         {% if contact.is_archived %}
-        <span class='badge bg-gray-100 text-gray-600 border-gray-200 flex-shrink-0'>Archived</span>
+        {# bg-gray-100 text-gray-600 border-gray-200 == SEMANTIC['muted'] — same color via badge(). #}
+        <span class='flex-shrink-0'>{{ badge('Archived', tone='muted') }}</span>
         {% endif %}
         {# CRM P5 trust — completeness is scored here but rendered as a segmented
            hashmark bar at the far right of the row (see the w-20 action cell

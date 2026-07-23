@@ -21,7 +21,7 @@
   <input type="hidden" name="field" value="{{ field }}">
   {% if field == 'condition' %}
   <select name="value"
-          class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+          class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm input-focus"
           autofocus
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
@@ -34,7 +34,7 @@
   </select>
   {% else %}
   <input aria-label="{{ field_label }}" type="text" name="value" value="{{ field_value or '' }}"
-         class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+         class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm input-focus"
          placeholder="{{ field_label }}"
          autofocus
          x-init="$el.focus(); $el.select()"

@@ -11,24 +11,44 @@
   Every hx-* control sets an explicit hx-target. Credential saves send a nested JSON body
   ({credentials:{ENV:val}}) via hx-ext="json-enc".
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 
 {# ── Status pill ─────────────────────────────────────────────────────── #}
+{# Delegates its label+color rendering to the shared status_badge() primitive
+   (htmx/partials/shared/_macros.html) via a custom status_map — same bg/text
+   colors as before (plus a matching border-*-200, added so the pill shape
+   unifies onto the shared .badge shape; the fill/text hex values are
+   byte-identical, nothing recolored). status_badge's default label transform
+   (value|replace('_',' ')|capitalize) already produces the exact same label
+   text for every one of these 9 states ("worker_active" -> "Worker active",
+   etc.), so no label override was needed. The leading status dot is a
+   distinct visual affordance (not part of the shared badge shape) and is
+   kept as-is via a small local dot-color map. Signature/name unchanged —
+   imported by connectors.html, _connector_card_partial.html, and the
+   Test-all OOB bundle. #}
 {% macro state_badge(s) %}
-{%- set _states = {
-  'live':           ('bg-green-100 text-green-800', 'bg-green-500',   'Live'),
-  'worker_active':  ('bg-green-100 text-green-800', 'bg-green-500',   'Worker active'),
-  'error':          ('bg-red-100 text-red-800',     'bg-red-500',     'Error'),
-  'worker_down':    ('bg-red-100 text-red-800',     'bg-red-500',     'Worker down'),
-  'off':            ('bg-gray-100 text-gray-600',   'bg-gray-400',    'Off'),
-  'needs_setup':    ('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs setup'),
-  'needs_reconnect':('bg-amber-100 text-amber-800', 'bg-amber-500',   'Needs reconnect'),
-  'untested':       ('bg-blue-100 text-blue-800',   'bg-blue-500',    'Untested'),
-  'planned':        ('bg-slate-100 text-slate-600', 'bg-slate-400',   'Planned'),
+{%- set _pill_map = {
+  'live':            'bg-green-100 text-green-800 border-green-200',
+  'worker_active':   'bg-green-100 text-green-800 border-green-200',
+  'error':           'bg-red-100 text-red-800 border-red-200',
+  'worker_down':     'bg-red-100 text-red-800 border-red-200',
+  'off':             'bg-gray-100 text-gray-600 border-gray-200',
+  'needs_setup':     'bg-amber-100 text-amber-800 border-amber-200',
+  'needs_reconnect': 'bg-amber-100 text-amber-800 border-amber-200',
+  'untested':        'bg-blue-100 text-blue-800 border-blue-200',
+  'planned':         'bg-slate-100 text-slate-600 border-slate-200',
 } -%}
-{%- set _pill = _states.get(s.state, ('bg-gray-100 text-gray-600', 'bg-gray-400', s.state)) -%}
-  <span class="inline-flex items-center gap-1.5 w-28 justify-center px-2 py-0.5 rounded-full text-xs font-medium {{ _pill[0] }}"
-        title="{{ _state_help(s.state) }}">
-    <span class="w-1.5 h-1.5 rounded-full {{ _pill[1] }}"></span> {{ _pill[2] }}
+{%- set _dots = {
+  'live': 'bg-green-500', 'worker_active': 'bg-green-500',
+  'error': 'bg-red-500', 'worker_down': 'bg-red-500',
+  'off': 'bg-gray-400',
+  'needs_setup': 'bg-amber-500', 'needs_reconnect': 'bg-amber-500',
+  'untested': 'bg-blue-500',
+  'planned': 'bg-slate-400',
+} -%}
+  <span class="inline-flex items-center gap-1.5 w-28 justify-center" title="{{ _state_help(s.state) }}">
+    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ _dots.get(s.state, 'bg-gray-400') }}"></span>
+    {{ status_badge(s.state, status_map=_pill_map) }}
   </span>
 {% endmacro %}
 

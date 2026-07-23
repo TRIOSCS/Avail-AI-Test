@@ -31,7 +31,7 @@ Usage:
 <div x-data="{ asap: {{ 'true' if urgency_value == 'critical' else 'false' }} }" class="flex items-center gap-2">
   <input aria-label="Deadline" type="date" name="deadline" :disabled="asap"
          value="{{ deadline_value }}"
-         class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus">
   <input type="hidden" name="urgency" :value="asap ? 'critical' : 'normal'">
   <button type="button" @click="asap = !asap"
           :class="asap ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600'"
@@ -64,6 +64,46 @@ Usage:
    pill defined in styles.css. #}
 {% macro badge(label, tone='neutral', icon=None) -%}
 <span class="badge {{ SEMANTIC.get(tone, SEMANTIC['neutral']) }}">{% if icon %}{{ icon }}{% endif %}{{ label }}</span>
+{%- endmacro %}
+
+
+{# ── Page Header ──────────────────────────────────────────────────── #}
+{#
+  Purpose:     The one page-header every list/detail partial reaches for, so
+               titles, subtitles, and primary-action placement stay identical
+               across modules. Retires the ad-hoc headers that rendered list
+               titles at .h2 in some modules and .h1 in others, or omitted a
+               title entirely (materials, settings, customers detail).
+  Layout:      A single `flex items-center justify-between` row — title block on
+               the LEFT (.h1 + optional .text-secondary subtitle), action
+               buttons on the RIGHT via the {% call %} block. This fixes the
+               inconsistent "New X" CTA that sat left in requisitions but right
+               everywhere else: canonical placement is right.
+  Args:
+    title:    Page title string (rendered .h1). Required.
+    subtitle: Optional secondary line (rendered .text-secondary).
+    actions:  Pass action markup as the {% call %} body (caller()). Omit the
+              call form entirely when the page has no header actions.
+  Usage (no actions):
+    {% from "htmx/partials/shared/_macros.html" import page_header %}
+    {{ page_header("Requisitions", subtitle="Open sales opportunities") }}
+  Usage (with actions):
+    {% call page_header("Vendors", subtitle="Supplier intelligence") %}
+      <button class="btn btn-primary btn-sm" hx-get="/v2/partials/vendors/new">New Vendor</button>
+    {% endcall %}
+#}
+{% macro page_header(title, subtitle=None) -%}
+<div class="flex items-center justify-between gap-3 flex-wrap mb-4">
+  <div class="min-w-0">
+    <h1 class="h1">{{ title }}</h1>
+    {%- if subtitle %}
+    <p class="text-secondary mt-0.5">{{ subtitle }}</p>
+    {%- endif %}
+  </div>
+  {%- if caller %}
+  <div class="flex items-center gap-2 flex-shrink-0">{{ caller() }}</div>
+  {%- endif %}
+</div>
 {%- endmacro %}
 
 
