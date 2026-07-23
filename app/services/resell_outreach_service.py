@@ -19,8 +19,11 @@ Three entry points:
     state and returns at once, so the modal never blocks on a multi-buyer send) +
     ``run_outreach_email_send`` (the BACKGROUND job the router enqueues — it performs
     the sends + per-buyer sent-message lookups off the request path and advances each
-    row to ``sent`` / ``no_response``). ``submit_outreach_email`` itself is the inline
-    convenience that runs both phases on one session (direct callers / tests).
+    row to ``sent`` / ``failed``). ``submit_outreach_email`` itself is the inline
+    convenience that runs both phases on one session (direct callers / tests). (Finding
+    B45: ``no_response`` is a RESERVED terminal state for the don't-forget nudge — no
+    production path advances a row to it; a genuine buyer silence is simply a row that
+    stays ``sent``.)
   - ``record_response``        — reply adapter consumed by the inbox poll (or
     Chunk D): match a reply (conversation/message id) → the ExcessOutreach rows,
     advance ``status`` (responded → bid / declined), and link/create the inbound
@@ -296,6 +299,7 @@ def _make_outreach_rows(
     sent_at: datetime | None = None,
     send_subject: str | None = None,
     send_body: str | None = None,
+    recipient_email: str | None = None,
 ) -> list[ExcessOutreach]:
     """Create one ExcessOutreach row per line id for a single buyer (does NOT flush).
 
@@ -307,6 +311,11 @@ def _make_outreach_rows(
     ``send_subject`` / ``send_body`` persist the EXACT text an email campaign was sent
     with (email path only) so the retry double-send guard can match the delivered message
     and a legitimate resend reuses the original wording; NULL on the manual-log path.
+
+    ``recipient_email`` (finding B5) persists the address ACTUALLY resolved at
+    send/enqueue time (email path only) — retry/reconcile use this over the card's
+    CURRENT email so a card-email change between send and retry never queries the wrong
+    mailbox; NULL on the manual-log path and legacy rows (pre-migration).
     """
     rows: list[ExcessOutreach] = []
     for line_id in line_ids:
@@ -321,6 +330,7 @@ def _make_outreach_rows(
             sent_at=sent_at,
             send_subject=send_subject,
             send_body=send_body,
+            recipient_email=recipient_email,
         )
         db.add(row)
         rows.append(row)
@@ -522,6 +532,7 @@ def enqueue_outreach_email(
             status=ExcessOutreachStatus.SENDING,
             send_subject=subject,
             send_body=body,
+            recipient_email=email,
             whole_list_snapshot=whole_list_snapshot,
             by_line=by_line,
         )
@@ -556,7 +567,8 @@ async def _finalize_outreach_send(
 ) -> list[ExcessOutreach]:
     """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
     status. Shared by :func:`submit_outreach_email` (inline) and
-    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup live.
+    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup
+    logic lives.
 
     Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
     the live RFQ tracking path is untouched). Graph ids do NOT come back in
@@ -817,8 +829,10 @@ async def submit_outreach_email(
 
     Inline convenience that runs both phases on ONE session:
     :func:`enqueue_outreach_email` (write the ``sending`` rows + build the plan) then
-    :func:`_finalize_outreach_send` (send + stamp + advance to ``sent`` / ``no_response``).
-    Direct callers / tests that want the fully-finalized rows in one call use this; the
+    :func:`_finalize_outreach_send` (send + stamp + advance to ``sent`` / ``failed`` —
+    ``no_response`` is a reserved don't-forget-nudge state no production path writes;
+    finding B45). Direct callers / tests that want the fully-finalized rows in one call
+    use this; the
     ROUTER instead enqueues the finalize as a background job (via
     :func:`run_outreach_email_send`) so the modal returns immediately. Commits. Returns
     the rows.
@@ -878,6 +892,28 @@ _RETRYABLE_STATUSES = {
 _STALE_SENDING_MINUTES = 30
 
 
+def mark_outreach_retrying(db: Session, outreach: ExcessOutreach) -> ExcessOutreach:
+    """Optimistically flip an outreach row to ``sending`` for a Retry click (finding
+    B36).
+
+    Moved out of ``routers/resell.py`` (thin-router discipline — routers stay HTTP-only,
+    business logic lives here): the router's own ``resell_retry_outreach`` used to mutate
+    the row directly (flip status, clear ``send_error``/``sent_at``, forge
+    ``created_at``) and commit. Behavior is preserved EXACTLY: ``created_at`` is refreshed
+    to now so the stale-sending threshold (:func:`reclassify_stale_sending`) does not treat
+    this in-flight retry as "born stale" the instant it is written. The caller (the router)
+    owns the 404/409 guards and is responsible for passing an already-validated,
+    already-owned row. Commits + refreshes; returns the row.
+    """
+    outreach.status = ExcessOutreachStatus.SENDING
+    outreach.send_error = None
+    outreach.sent_at = None
+    outreach.created_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(outreach)
+    return outreach
+
+
 async def retry_outreach_send(
     *,
     outreach_id: int,
@@ -887,8 +923,8 @@ async def retry_outreach_send(
     token: str,
     session_factory=None,
 ) -> None:
-    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, resend only
-    if the original never actually went out (the double-send guard).
+    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, only
+    resend if the original never actually went out (the double-send guard).
 
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
@@ -926,7 +962,13 @@ async def retry_outreach_send(
             logger.error("Outreach retry: owner={} or list={} missing — aborting", owner_id, row.excess_list_id)
             return
         card = db.get(VendorCard, row.target_vendor_card_id) if row.target_vendor_card_id else None
-        email = _primary_email(card) if card else None
+        # B5: reconcile/resend against the address ACTUALLY used at send time (persisted
+        # on the row) — the card's CURRENT email is only a fallback for a legacy row
+        # (pre-migration, recipient_email NULL). Without this, a card-email change
+        # between send and retry would query the WRONG mailbox and defeat the
+        # double-send guard (an actually-delivered message on the ORIGINAL address is
+        # never found, so the row resends to the buyer a second time).
+        email = row.recipient_email or (_primary_email(card) if card else None)
         if not email:
             row.status = ExcessOutreachStatus.FAILED
             row.send_error = "no buyer email on file to retry"
@@ -977,6 +1019,7 @@ async def retry_outreach_send(
             row.send_error = None
             row.graph_message_id = sent_msg.get("id")
             row.graph_conversation_id = sent_msg.get("conversationId")
+            row.recipient_email = row.recipient_email or email  # backfill a legacy NULL row
             db.commit()
             logger.info("Outreach retry: row={} already delivered — reconciled to sent, not resent", outreach_id)
             return
@@ -991,6 +1034,7 @@ async def retry_outreach_send(
         row.sent_at = None
         row.send_error = None
         row.created_at = datetime.now(UTC)
+        row.recipient_email = row.recipient_email or email  # backfill a legacy NULL row
         db.commit()
         parts = [p.get("part_number") for p in (row.parts_included or []) if p.get("part_number")]
         plan = [{"card_id": card.id, "email": email, "row_ids": [row.id], "parts": parts}]
@@ -1005,26 +1049,44 @@ async def retry_outreach_send(
         db.close()
 
 
-def sweep_stale_sending_outreach(db: Session, *, now: datetime | None = None) -> int:
-    """Flip every outreach row stuck in ``sending`` past the staleness threshold to
-    ``interrupted`` — the durability backstop for a background send job that died.
+def reclassify_stale_sending(
+    db: Session,
+    *,
+    excess_list_id: int | None = None,
+    outreach_id: int | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Flip outreach row(s) stuck in ``sending`` past the staleness threshold to
+    ``interrupted`` — the shared durability backstop for a dead background send job
+    (finding B7).
 
     A row optimistically written ``sending`` whose finalize job crashed (or the process
-    was killed) mid-flight would otherwise poll forever. This nightly sweep flips such aged
-    rows to ``interrupted`` — the ambiguous "we don't know if it sent" state, NEVER
+    was killed) mid-flight would otherwise poll forever. This flips such aged rows to
+    ``interrupted`` — the ambiguous "we don't know if it sent" state, NEVER
     ``no_response`` (that would libel the buyer as contacted-and-silent) and NEVER a resend
     (whether the send actually landed is unknown here; the manual retry path does the
-    Sent-folder lookup before any resend). Idempotent, commits once, returns the count
-    flipped.
+    Sent-folder lookup before any resend). Idempotent, commits once (only when something
+    was flipped), returns the count flipped.
+
+    Previously this reclassification only ran once nightly (:func:`sweep_stale_sending_outreach`),
+    so an orphaned row was unactionable — stuck showing ``sending`` and hard-409ing Retry —
+    for up to ~24h even though the code's own threshold already knew it was orphaned.
+    ``excess_list_id`` / ``outreach_id`` optionally SCOPE the reclassification to just the
+    rows a caller is about to read (the outreach tab context builder, or the retry guard for
+    one specific row) so it becomes actionable the instant that surface is loaded, without
+    waiting for the nightly cron. Omitting both scopes the whole table (the nightly sweep).
     """
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(minutes=_STALE_SENDING_MINUTES)
-    stale = db.scalars(
-        select(ExcessOutreach).where(
-            ExcessOutreach.status == ExcessOutreachStatus.SENDING,
-            ExcessOutreach.created_at < cutoff,
-        )
-    ).all()
+    conditions = [
+        ExcessOutreach.status == ExcessOutreachStatus.SENDING,
+        ExcessOutreach.created_at < cutoff,
+    ]
+    if excess_list_id is not None:
+        conditions.append(ExcessOutreach.excess_list_id == excess_list_id)
+    if outreach_id is not None:
+        conditions.append(ExcessOutreach.id == outreach_id)
+    stale = db.scalars(select(ExcessOutreach).where(*conditions)).all()
     for row in stale:
         row.status = ExcessOutreachStatus.INTERRUPTED
         row.send_error = (
@@ -1032,8 +1094,18 @@ def sweep_stale_sending_outreach(db: Session, *, now: datetime | None = None) ->
         )
     if stale:
         db.commit()
-    logger.info("Swept {} stale 'sending' outreach row(s) to 'interrupted'", len(stale))
     return len(stale)
+
+
+def sweep_stale_sending_outreach(db: Session, *, now: datetime | None = None) -> int:
+    """Nightly backstop — reclassify EVERY stale ``sending`` row table-wide.
+
+    Thin wrapper over :func:`reclassify_stale_sending` (no scope) kept as the cron entry
+    point / stable public name; see that function for the full contract.
+    """
+    swept = reclassify_stale_sending(db, now=now)
+    logger.info("Swept {} stale 'sending' outreach row(s) to 'interrupted'", swept)
+    return swept
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1211,7 +1283,8 @@ def _match_outreach(
     conversation_id: str | None,
     message_id: str | None,
 ) -> list[ExcessOutreach]:
-    """Match a reply to outreach rows — conversation id (whole thread) then message id.
+    """Match a reply to outreach rows — conversation id (whole thread), then message
+    id.
 
     Conversation id is the preferred key (matches all rows on the thread, like RFQ
     Tier-1 fan-out); message id is the exact-touch fallback. Vendor-scoped by

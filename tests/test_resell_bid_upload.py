@@ -505,6 +505,99 @@ def test_upload_bids_draft_list_owner_gets_fix_it_400(db_session: Session, trade
 
 
 # ---------------------------------------------------------------------------
+# M9 lock — deep-review #2 residual R1: upload_bids takes no list-row lock
+# ---------------------------------------------------------------------------
+
+
+def test_upload_bids_locks_list_before_status_read(
+    db_session: Session, trader_user: User, posted_list: ExcessList, monkeypatch
+):
+    """``upload_bids`` takes the M9 list-row lock (``_lock_list_row``) BEFORE re-reading
+    ``excess_list.status`` — spy the hook to prove it's wired (``with_for_update`` is a
+    no-op on the SQLite test engine, so the actual race is unobservable here)."""
+    calls: list[int] = []
+    real_lock = excess_service._lock_list_row
+
+    def _spy(db, excess_list_id):
+        calls.append(excess_list_id)
+        return real_lock(db, excess_list_id)
+
+    monkeypatch.setattr(excess_service, "_lock_list_row", _spy)
+
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+
+    assert calls == [posted_list.id]
+
+
+def test_upload_bids_stale_read_cannot_resurrect_closed_list(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """Finding R1: a list closed BETWEEN the caller's stale read and the lock must not be
+    resurrected, and the upload must not proceed on a dead list.
+
+    Simulates the race within one SQLite session: a raw core UPDATE (bypassing the ORM,
+    like a second transaction's committed close) flips the list CLOSED behind the
+    already-identity-mapped object's back, with no intervening commit (so
+    ``expire_on_commit`` never auto-refreshes it). Without the M9 lock's
+    ``populate_existing`` refresh, ``upload_bids`` would read the stale 'collecting'
+    status and ingest bids on a dead list.
+    """
+    from sqlalchemy import text as sa_text
+
+    assert posted_list.status == ExcessListStatus.COLLECTING
+
+    db_session.execute(
+        sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=posted_list.id)
+    )
+    assert posted_list.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+
+    rows = [_row(bidder="Broker A", part_number="LM358N")]
+    with pytest.raises(HTTPException) as exc:
+        excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert exc.value.status_code == 400
+    assert posted_list.status == ExcessListStatus.CLOSED  # the lock refreshed it in place
+    assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+
+
+def test_upload_bids_reupload_race_prior_won_not_clobbered(
+    db_session: Session, trader_user: User, posted_list: ExcessList
+):
+    """Finding R1: a re-upload must never withdraw an earlier offer that became WON.
+
+    HONESTY NOTE (pre-merge verification of PR #792): what this test actually pins is the
+    supersede query's ``_ACTIONABLE_OFFER_STATUSES`` WHERE filter — the raw core UPDATE
+    flips the offer to ``won`` BEFORE ``upload_bids`` runs, so the filter simply never
+    selects it. The additional under-lock status re-check inside the supersede step is
+    belt-and-braces for a WON flip landing between SELECT and lock, and is NOT exercisable
+    in this single-connection harness (the same raw-UPDATE trick that powers the other
+    stale-read tests makes the row invisible to the query here rather than
+    concurrently-won). The user-facing invariant — a WON offer is never clobbered to
+    withdrawn, no awarded line ever points at a withdrawn offer — is what this asserts.
+    """
+    from sqlalchemy import text as sa_text
+
+    rows = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.0000")]
+    first = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
+    assert first["offers_created"] == 1
+    won_offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
+    won_offer_id = won_offer.id
+    assert won_offer.status == "open"
+
+    db_session.execute(sa_text("UPDATE excess_offers SET status = 'won' WHERE id = :id").bindparams(id=won_offer_id))
+    assert won_offer.status == "open"  # still stale, pre-call
+
+    rows2 = [_row(bidder="Broker A", part_number="LM358N", unit_price="1.5000")]
+    result = excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows2)
+
+    assert result["superseded"] == 0  # the WON offer was never treated as supersede-eligible
+    db_session.refresh(won_offer)
+    assert won_offer.status == "won"  # never clobbered to withdrawn
+    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
+    assert len(offers) == 2  # the WON original PLUS the new re-upload — never merged/deleted
+
+
+# ---------------------------------------------------------------------------
 # Router: upload-preview / upload-confirm
 # ---------------------------------------------------------------------------
 
