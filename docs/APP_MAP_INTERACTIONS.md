@@ -2183,7 +2183,7 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
     |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
     |     salvaged bid is awardable. Takes the M9 lock BEFORE any status guard (deep-review #2
-    |     finding #11/#12). GUARDED: 409 on a resolved/terminal list [awarded/closed/
+    |     finding #12). GUARDED: 409 on a resolved/terminal list [awarded/closed/
     |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
     |     "second vector"]; 409 when the TARGET line is already awarded/withdrawn [deep-review #2
     |     finding #12 — an unmatched bid can no longer displace a decided line's winner]. Same

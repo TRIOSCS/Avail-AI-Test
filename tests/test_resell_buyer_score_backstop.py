@@ -123,6 +123,36 @@ def test_backstop_returns_zero_with_no_buyers(db_session: Session):
     assert svc.recompute_all_buyer_scores(db_session) == 0
 
 
+def test_backstop_one_poisoned_buyer_does_not_strand_the_others(db_session: Session):
+    """Finding B44: recompute_buyer_score has no per-buyer error isolation — one buyer
+    raising must roll back ONLY that buyer and let the batch continue reconciling the
+    rest, mirroring excess_service.expire_overdue_lists's per-list isolation."""
+    el, line, owner = _list_with_cap_line(db_session)
+    good_buyer_a = _buyer(db_session, "GoodBuyerA")
+    poisoned_buyer = _buyer(db_session, "PoisonedBuyer")
+    good_buyer_b = _buyer(db_session, "GoodBuyerB")
+    _won_offer(db_session, el, line, good_buyer_a, owner, "0.80")
+    _won_offer(db_session, el, line, poisoned_buyer, owner, "0.85")
+    _won_offer(db_session, el, line, good_buyer_b, owner, "0.90")
+    db_session.commit()
+
+    real_recompute = svc.recompute_buyer_score
+
+    def _boom_on_poisoned(db, vendor_card_id):
+        if vendor_card_id == poisoned_buyer.id:
+            raise RuntimeError("simulated per-buyer failure")
+        return real_recompute(db, vendor_card_id)
+
+    with patch("app.services.buyer_affinity_service.recompute_buyer_score", side_effect=_boom_on_poisoned):
+        walked = svc.recompute_all_buyer_scores(db_session)
+
+    assert walked == 2  # the two good buyers, NOT the poisoned one
+    db_session.expire_all()
+    assert db_session.query(BuyerScore).filter_by(vendor_card_id=good_buyer_a.id).one().wins == 1
+    assert db_session.query(BuyerScore).filter_by(vendor_card_id=good_buyer_b.id).one().wins == 1
+    assert db_session.query(BuyerScore).filter_by(vendor_card_id=poisoned_buyer.id).first() is None
+
+
 # ── (b) nightly job wrapper — success + both rollback branches ───────
 
 

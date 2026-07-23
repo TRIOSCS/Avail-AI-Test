@@ -1153,6 +1153,114 @@ class TestRetryOutreachSend:
         assert row.status == ExcessOutreachStatus.SENT
         assert row.graph_message_id == "already-1"
 
+    # ── Deep-review #2, finding B5: recipient_email persisted at send/enqueue time ──
+
+    def test_enqueue_stamps_recipient_email(
+        self, db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+    ):
+        """``enqueue_outreach_email`` persists the address ACTUALLY resolved for the
+        send on the row, not just used transiently."""
+        rows, _plan = svc.enqueue_outreach_email(
+            db_session,
+            list_id=posted_list.id,
+            owner=trader,
+            buyers=[{"vendor_card_id": buyer_card.id}],
+            scope="whole_list",
+            subject="Excess available",
+            body="surplus",
+        )
+        assert rows[0].recipient_email == "sales@asyncbuyer.com"
+
+    @pytest.mark.asyncio
+    async def test_retry_reconciles_against_persisted_recipient_email_after_card_email_changes(
+        self,
+        db_session: Session,
+        posted_list: ExcessList,
+        trader: User,
+        buyer_card: VendorCard,
+    ):
+        """Finding B5: the card's email changed BETWEEN send and retry (an enrichment/
+        merge routinely prepends a new address) — retry must reconcile/resend against the
+        PERSISTED send-time address, never the card's now-current one, or the Sent-folder
+        guard queries the wrong mailbox."""
+        row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.recipient_email == "sales@asyncbuyer.com"  # stamped at send time
+
+        # The card's email changes after the send — a routine enrichment/merge.
+        buyer_card.emails = ["new-address@asyncbuyer.com"]
+        db_session.commit()
+
+        seen_emails: list[str] = []
+
+        async def _found(_gc, _subject, email):
+            seen_emails.append(email)
+            return {"id": "already-2", "conversationId": "conv-already-2"}
+
+        with (
+            patch("app.email_service.send_batch_rfq", AsyncMock()),
+            patch("app.email_service._find_sent_message", side_effect=_found),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        assert seen_emails == ["sales@asyncbuyer.com"]  # the PERSISTED address, not the new one
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+
+    @pytest.mark.asyncio
+    async def test_retry_legacy_row_falls_back_to_card_email(
+        self, db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+    ):
+        """A pre-migration row with no persisted ``recipient_email`` (NULL) falls back
+        to the card's current email — the legacy path is never left un-retryable."""
+        row = ExcessOutreach(
+            excess_list_id=posted_list.id,
+            submitted_by=trader.id,
+            target_vendor_card_id=buyer_card.id,
+            channel="email",
+            status=ExcessOutreachStatus.FAILED,
+            send_error="graph send outage",
+            recipient_email=None,
+        )
+        db_session.add(row)
+        db_session.commit()
+        row_id = row.id
+
+        seen_emails: list[str] = []
+
+        async def _found(_gc, _subject, email):
+            seen_emails.append(email)
+            return {"id": "legacy-1", "conversationId": "conv-legacy-1"}
+
+        with (
+            patch("app.email_service.send_batch_rfq", AsyncMock()),
+            patch("app.email_service._find_sent_message", side_effect=_found),
+            patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()),
+        ):
+            await svc.retry_outreach_send(
+                outreach_id=row_id,
+                owner_id=trader.id,
+                subject="Excess available",
+                body="surplus",
+                token="fake-token",
+                session_factory=lambda: db_session,
+            )
+
+        assert seen_emails == ["sales@asyncbuyer.com"]  # fell back to the card's CURRENT email
+        db_session.expire_all()
+        row = db_session.get(ExcessOutreach, row_id)
+        assert row.status == ExcessOutreachStatus.SENT
+        assert row.recipient_email == "sales@asyncbuyer.com"  # backfilled for next time
+
     @pytest.mark.asyncio
     async def test_retry_lookup_error_leaves_interrupted_and_never_resends(
         self,
@@ -1559,6 +1667,123 @@ def test_retry_route_rejects_non_retryable_row(
         assert resp.status_code == 409
     finally:
         restore()
+
+
+def test_mark_outreach_retrying_flips_row_and_refreshes_created_at(
+    db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+):
+    """Finding B36: the optimistic sending-flip is a service function, not router-inlined
+    logic — pins its exact contract: status→sending, send_error/sent_at cleared,
+    created_at refreshed (so the stale-sending sweeper doesn't immediately re-flag it)."""
+    from datetime import UTC, datetime, timedelta
+
+    row_id = _fail_row(db_session, posted_list, trader, buyer_card)
+    row = db_session.get(ExcessOutreach, row_id)
+    row.created_at = datetime.now(UTC) - timedelta(hours=5)
+    db_session.commit()
+
+    result = svc.mark_outreach_retrying(db_session, row)
+
+    assert result.status == ExcessOutreachStatus.SENDING
+    assert result.send_error is None
+    assert result.sent_at is None
+    assert result.created_at > datetime.now(UTC) - timedelta(minutes=1)
+
+
+def test_retry_route_fresh_sending_row_stays_409(
+    client, db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+):
+    """Finding B7 control: a row that is genuinely 'sending' (well within the staleness
+    threshold — its background job may still be in flight) is untouched by the lazy
+    reclassification and still 409s — only a row PAST the threshold becomes actionable."""
+    rows, _plan = svc.enqueue_outreach_email(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader,
+        buyers=[{"vendor_card_id": buyer_card.id}],
+        scope="whole_list",
+        subject="Excess available",
+        body="surplus",
+    )
+    row_id = rows[0].id
+    restore = _own(trader)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
+        assert resp.status_code == 409
+    finally:
+        restore()
+    db_session.expire_all()
+    assert db_session.get(ExcessOutreach, row_id).status == ExcessOutreachStatus.SENDING
+
+
+def test_retry_route_stale_sending_row_becomes_retryable_immediately(
+    client, db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+):
+    """Finding B7: a 'sending' row past the 30-min staleness threshold (its background
+    send job died mid-flight) is reclassified to 'interrupted' — and thus retryable — the
+    INSTANT the retry route is hit, instead of hard-409ing for up to ~24h until the
+    once-nightly sweep catches up."""
+    from datetime import UTC, datetime, timedelta
+
+    rows, _plan = svc.enqueue_outreach_email(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader,
+        buyers=[{"vendor_card_id": buyer_card.id}],
+        scope="whole_list",
+        subject="Excess available",
+        body="surplus",
+    )
+    row_id = rows[0].id
+    stale_row = db_session.get(ExcessOutreach, row_id)
+    stale_row.created_at = datetime.now(UTC) - timedelta(minutes=45)  # past the 30-min threshold
+    db_session.commit()
+
+    retry_stub = MagicMock()
+    restore = _own(trader)
+    try:
+        with patch("app.services.resell_outreach_service.retry_outreach_send", retry_stub):
+            resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row_id}/retry")
+        assert resp.status_code == 200
+        retry_stub.assert_called_once()
+    finally:
+        restore()
+    db_session.expire_all()
+    row = db_session.get(ExcessOutreach, row_id)
+    assert row.status == ExcessOutreachStatus.SENDING  # reclassified to interrupted, then retried to sending
+
+
+def test_outreach_tab_load_reclassifies_stale_sending_row(
+    client, db_session: Session, posted_list: ExcessList, trader: User, buyer_card: VendorCard
+):
+    """Finding B7: opening the Outreach tab reclassifies a stale 'sending' row THIS
+    list's rows immediately, without waiting for the nightly sweep."""
+    from datetime import UTC, datetime, timedelta
+
+    rows, _plan = svc.enqueue_outreach_email(
+        db_session,
+        list_id=posted_list.id,
+        owner=trader,
+        buyers=[{"vendor_card_id": buyer_card.id}],
+        scope="whole_list",
+        subject="Excess available",
+        body="surplus",
+    )
+    row_id = rows[0].id
+    stale_row = db_session.get(ExcessOutreach, row_id)
+    stale_row.created_at = datetime.now(UTC) - timedelta(minutes=45)
+    db_session.commit()
+
+    restore = _own(trader)
+    try:
+        resp = client.get(f"/v2/partials/resell/{posted_list.id}/outreach")
+        assert resp.status_code == 200
+    finally:
+        restore()
+    db_session.expire_all()
+    row = db_session.get(ExcessOutreach, row_id)
+    assert row.status == ExcessOutreachStatus.INTERRUPTED
+    assert row.send_error and "staleness threshold" in row.send_error
 
 
 # ── Task 5: rendered tracker HTML + CSV export truthfulness ──────────

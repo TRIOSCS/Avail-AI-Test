@@ -515,6 +515,56 @@ class TestStaleSendingSweeper:
         assert db_session.get(ExcessOutreach, settled.id).status == ExcessOutreachStatus.SENT
 
 
+class TestReclassifyStaleSendingScoping:
+    def test_scoped_to_one_list_leaves_other_lists_stale_rows_untouched(
+        self, db_session: Session, test_company: Company
+    ):
+        """Finding B7: ``reclassify_stale_sending(excess_list_id=...)`` only reclassifies
+        rows on THAT list — a stale row on a different list is left for its own tab load
+        (or the nightly sweep) to catch."""
+        trader = _make_trader(db_session)
+        list_a = _make_list(db_session, trader, test_company)
+        list_b = _make_list(db_session, trader, test_company)
+        now = datetime.now(UTC)
+
+        stale_a = _make_outreach(
+            db_session, list_a, trader, status=ExcessOutreachStatus.SENDING, created_at=now - timedelta(hours=2)
+        )
+        stale_b = _make_outreach(
+            db_session, list_b, trader, status=ExcessOutreachStatus.SENDING, created_at=now - timedelta(hours=2)
+        )
+        db_session.commit()
+
+        flipped = outreach_svc.reclassify_stale_sending(db_session, excess_list_id=list_a.id, now=now)
+
+        assert flipped == 1
+        db_session.expire_all()
+        assert db_session.get(ExcessOutreach, stale_a.id).status == ExcessOutreachStatus.INTERRUPTED
+        assert db_session.get(ExcessOutreach, stale_b.id).status == ExcessOutreachStatus.SENDING
+
+    def test_scoped_to_one_outreach_id_leaves_sibling_rows_untouched(self, db_session: Session, test_company: Company):
+        """Scoping by ``outreach_id`` (the retry guard's use) reclassifies ONLY that
+        row, even when a sibling row on the same list is equally stale."""
+        trader = _make_trader(db_session)
+        el = _make_list(db_session, trader, test_company)
+        now = datetime.now(UTC)
+
+        target = _make_outreach(
+            db_session, el, trader, status=ExcessOutreachStatus.SENDING, created_at=now - timedelta(hours=2)
+        )
+        sibling = _make_outreach(
+            db_session, el, trader, status=ExcessOutreachStatus.SENDING, created_at=now - timedelta(hours=2)
+        )
+        db_session.commit()
+
+        flipped = outreach_svc.reclassify_stale_sending(db_session, outreach_id=target.id, now=now)
+
+        assert flipped == 1
+        db_session.expire_all()
+        assert db_session.get(ExcessOutreach, target.id).status == ExcessOutreachStatus.INTERRUPTED
+        assert db_session.get(ExcessOutreach, sibling.id).status == ExcessOutreachStatus.SENDING
+
+
 class TestOfferedSummaryExcludesNonSent:
     def test_offered_count_ignores_failed_buyer(self, db_session: Session, test_company: Company):
         """The tracker glance 'offered N' counts only buyers genuinely offered — a buyer
