@@ -82,7 +82,7 @@ The target-line guard checks only existence and list membership — not the targ
 
 **Fix:** Reject a target line whose status is AWARDED/WITHDRAWN with a 409 ('unaward the winner first'), and take the M9 lock at the top of assign_offer_line.
 
-**Resolution: FIXED.** `assign_offer_line` now takes `_lock_list_for_award` right after resolving the offer line (before any status guard), and 409s when the target line is `awarded` ("unaward the winner first") or `withdrawn` — the winner's `best_offer_id`/`best_offer_unit_price` are never displaced. See `app/services/excess_service.py` (`assign_offer_line`); tests in `tests/test_resell_award.py` (`test_assign_onto_awarded_target_line_409_winner_intact`, `test_assign_onto_available_line_on_bid_out_list_still_works`).
+**Resolution: FIXED.** `assign_offer_line` now takes `_lock_list_for_award` right after resolving the offer line (before any status guard), and 409s when the target line is `awarded` ("unaward the winner first") or `withdrawn` — the winner's `best_offer_id`/`best_offer_unit_price` are never displaced. See `app/services/excess_service.py` (`assign_offer_line`); tests in `tests/test_resell_award.py` (`test_assign_onto_awarded_target_line_409_winner_intact`, `test_assign_onto_available_line_on_bid_out_list_still_works`). **Residual R5 (post-#791 doc nit): FIXED** — the APP_MAP assign-route bullet cited "finding #11/#12"; assign is #12 only, corrected in `docs/APP_MAP_INTERACTIONS.md`.
 
 ### 32. [P3] Award/unaward routes ignore the {list_id} path param — no offer.excess_list_id == list_id check (withdraw has one)
 **Where:** `app/routers/resell.py:1535` (dimension: router-correctness)

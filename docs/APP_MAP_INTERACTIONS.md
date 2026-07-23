@@ -2239,7 +2239,9 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- MANUAL-CHANNEL log (finding #12, owner-only; a phone/teams/marketplace row is 'sent'
           with NO email thread, so the conversation-keyed reply matcher can't advance it):
           +-- POST .../{oid}/log-response  (resell_outreach_service.record_manual_response →
-          |     responded; never regresses a terminal bid/declined; 409 for an email row)
+          |     responded; never regresses a terminal bid/declined; 409 only for an email row
+          |     WITH graph ids — a degraded email row [SENT, no graph_conversation_id] has no
+          |     thread for the reply matcher, so it IS manually loggable [deep-review #2 B3])
           +-- GET  .../{oid}/log-bid-form  (reuses _reply_viewer.html — manual flag + convert_url
           |     — as the Log-bid modal; honest 'Bid logged' toast, not 'Offer created from reply')
           +-- POST .../{oid}/log-bid       (record_manual_response(has_offer=True) → bid + an
@@ -2604,7 +2606,8 @@ rose "do-not-contact" partial *before* the TESTING gate / token fetch; the servi
 `email_service.send_batch_rfq` skips the recipient (`status="skipped"`, `error="do-not-contact"`)
 and continues. The resell `submit_outreach_email` path delegates to `send_batch_rfq`, so a
 DNC buyer is recorded `ExcessOutreachStatus.FAILED` with `send_error="do-not-contact"` (Phase 2
-send-truthfulness — NOT `NO_RESPONSE`, which is genuine buyer silence only) and never emailed.
+send-truthfulness — NOT `NO_RESPONSE`, which no production path writes at all; it and `OPENED`
+are reserved enum members only [deep-review #2 B45]) and never emailed.
 
 **Resell outreach send truthfulness (Phase 2).** `_finalize_outreach_send` (the shared
 send+stamp step behind the background `run_outreach_email_send` and the inline
@@ -2618,8 +2621,11 @@ if that outcome commit itself fails it is snapshotted + re-applied in a fresh tr
 delivered send is never reverted to `sending`). The "Emailed" ActivityLog + cadence bump run
 only for `SENT` buyers (gated at the call site). Every send persists its exact subject/body
 (`send_subject`/`send_body`, migration 195) so the Retry guard can match a customized-subject
-campaign. A Retry action (`retry_outreach_send`, background) and a nightly stale-`sending` sweeper
-(`sweep_stale_sending_outreach`, flips aged `sending`→`interrupted`) close the durability gaps —
+campaign. A Retry action (`retry_outreach_send`, background) and the stale-`sending`
+reclassifier (`reclassify_stale_sending`, flips aged `sending`→`interrupted`; invoked lazily on
+tracker load and on retry, plus the nightly `sweep_stale_sending_outreach` wrapper — deep-review
+#2 B7, so an orphaned mid-send row is actionable immediately, not after up to a day) close the
+durability gaps —
 retry re-runs `_find_sent_message` (matched on the PERSISTED subject) BEFORE resending so an
 already-delivered row is reconciled to `SENT`, never double-sent. `_find_sent_message` has a
 THREE-STATE contract (deep-review #2 finding 2): found dict | positive not-found (`None` —

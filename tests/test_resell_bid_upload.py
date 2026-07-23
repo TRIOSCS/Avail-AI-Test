@@ -563,14 +563,17 @@ def test_upload_bids_stale_read_cannot_resurrect_closed_list(
 def test_upload_bids_reupload_race_prior_won_not_clobbered(
     db_session: Session, trader_user: User, posted_list: ExcessList
 ):
-    """Finding R1: the supersede path must re-check the earlier offer's status UNDER the
-    lock — it must never withdraw an offer that concurrently became WON.
+    """Finding R1: a re-upload must never withdraw an earlier offer that became WON.
 
-    A raw core UPDATE flips the FIRST upload's offer to ``won`` (simulating a concurrent
-    award that landed between the two uploads) behind the already-identity-mapped
-    object's back. The re-upload must leave the WON offer alone (never withdraw it,
-    leaving an awarded line pointing at a withdrawn offer) and must not report it as
-    superseded.
+    HONESTY NOTE (pre-merge verification of PR #792): what this test actually pins is the
+    supersede query's ``_ACTIONABLE_OFFER_STATUSES`` WHERE filter — the raw core UPDATE
+    flips the offer to ``won`` BEFORE ``upload_bids`` runs, so the filter simply never
+    selects it. The additional under-lock status re-check inside the supersede step is
+    belt-and-braces for a WON flip landing between SELECT and lock, and is NOT exercisable
+    in this single-connection harness (the same raw-UPDATE trick that powers the other
+    stale-read tests makes the row invisible to the query here rather than
+    concurrently-won). The user-facing invariant — a WON offer is never clobbered to
+    withdrawn, no awarded line ever points at a withdrawn offer — is what this asserts.
     """
     from sqlalchemy import text as sa_text
 
