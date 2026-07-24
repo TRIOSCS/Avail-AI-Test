@@ -293,7 +293,9 @@ search_service.py (orchestrator)
           guardrail-tested decision, not an oversight.
     |
     +---> scoring.py (score_sighting_v2 — 5-factor weighted: trust 0.30, price 0.25,
-    |       qty 0.20, freshness 0.15, completeness 0.10; SIGHTING_V2_WEIGHTS)
+    |       qty 0.20, freshness 0.15, completeness 0.10 defaults; SIGHTING_V2_WEIGHTS,
+    |       built at import from the SIGHTING_WEIGHT_* settings — must sum to 1.0,
+    |       validated fail-fast by Settings.validate_sighting_weights)
     |       +---> evidence_tiers.py (assign T1-T7, via app/source_trust.py)
     |
     +---> DB: UPSERT sightings (dedup by requirement + vendor + mpn)
@@ -1296,7 +1298,11 @@ the `rfqVendorModal` section below) is fed from four sources:
    (the send path resolves the address only from `VendorContact` rows), so the "no contact
    on file" badge never lies.
    Order: `covered_count` desc, then `has_contact` desc (contactable above
-   equal-coverage non-contactable), then engagement desc nullslast, then a stable,
+   equal-coverage non-contactable), then **responsiveness** desc nullslast — the key
+   prefers `email_health_score` ("will this vendor answer an RFQ", the
+   response_analytics composite refreshed by `batch_update_email_health`) and falls
+   back to `engagement_score` when health is NULL (vendors never emailed; cardless
+   rows have neither) — then a stable,
    deterministic tiebreak — `(0, card.id)` for carded (numeric id order, matching main;
    NOT lexicographic `str(key)`, which put "10" before "2"), `(1, group_key_str)` for
    cardless (carded ties first, cardless after); cap 20. Each row shows an `N/M parts` chip with the covered
@@ -2570,9 +2576,12 @@ it's approved after the watermark has advanced past its `created_at`, it stays
 invisible to every future batch scan too. The hook runs a targeted single-offer
 `find_matches_for_offer(offer.id, db)` in its own commit/rollback (a re-match failure
 never blocks the caller's approval transaction) and is a no-op for offers without a
-`material_card_id`. Wired into all three offer-approval paths: the htmx offers CRUD
-`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and
-`approve_offer` (`app/routers/crm/offers.py`).
+`material_card_id`. Wired into all four offer-approval paths: the htmx offers CRUD
+`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and both
+`approve_offer` and the T4→T5 review-queue `promote_offer`
+(`app/routers/crm/offers.py`) — see the invariant comment on `OFFER_TRANSITIONS`
+(`app/services/status_machine.py`): every router moving an offer into a live
+status from a non-live one must call the hook after its commit.
 
 **Hotlist → Proactive (monitor without purchase history).** The CPH path returns
 no matches when a customer has never bought the part (`_find_matches` needs CPH
@@ -5663,7 +5672,11 @@ unified_score_service.py (top-level, monthly)
             +---> vendor_metrics_snapshot (DB)
 
 SIGHTING SCORING (per search result, score_sighting_v2, app/scoring.py):
-    scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS):
+    scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS — built once at import from
+    the SIGHTING_WEIGHT_TRUST/PRICE/QUANTITY/FRESHNESS/COMPLETENESS settings;
+    defaults below preserve the historical hardcoded split, and Settings fail-fasts
+    a set that doesn't sum to 1.0; both the score and its breakdown hover read this
+    one map so they can never drift):
         +---> trust        0.30  (authorized=95, else vendor_score, else 35 new-vendor baseline)
         +---> price         0.25  (median/unit ratio, capped 0-100)
         +---> qty           0.20  (coverage of target_qty, or flat 60 if qty known but no target)
@@ -6890,7 +6903,9 @@ can never land `APPROVED` while its plan stays `PENDING` (RISK 1). `_run_approve
 dispatch and the legacy `approve_buy_plan`, so the two paths can never drift.
 
 `jobs.approval_outbox.dispatch_pending` drains the outbox (60s job):
-- `in_app` → `notifications.write_in_app`; the `Notification.body` now carries the decision
+- `in_app` → `notifications.write_in_app` (a re-export of the shared
+  `services/in_app_notifications.write_in_app` seam, which the nightly-status
+  alerting command also uses); the `Notification.body` now carries the decision
   `comment` (`payload.get("comment")`; `None` when no comment was given).
 - `email` → `notifications.send_email` via Graph (`_build_email_html`) — **now a live path**
   (previously dead: `decide()` only ever enqueued `in_app`). Send failure increments

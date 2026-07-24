@@ -14,10 +14,12 @@ returning a normalised confidence percentage, color, and source badge.
 
 Called by: search_service._save_sightings(), sighting_to_dict(),
            search_service.search_requirement()
-Depends on: nothing (pure logic)
+Depends on: app.config (SIGHTING_WEIGHT_* settings); otherwise pure logic
 """
 
 from loguru import logger
+
+from .config import settings
 
 NEW_VENDOR_BASELINE = 35.0
 
@@ -25,16 +27,30 @@ MISSING_DATA_SCORE = 25.0
 
 WEAK_LEAD_THRESHOLD = 30.0
 
+
+def _build_sighting_weights(cfg) -> dict[str, float]:
+    """Map the five typed SIGHTING_WEIGHT_* Settings fields onto the canonical factor
+    keys.
+
+    Settings validates the sum (must be 1.0, fail-fast at startup), so this is a pure
+    projection.
+    """
+    return {
+        "trust": cfg.sighting_weight_trust,
+        "price": cfg.sighting_weight_price,
+        "qty": cfg.sighting_weight_quantity,
+        "freshness": cfg.sighting_weight_freshness,
+        "completeness": cfg.sighting_weight_completeness,
+    }
+
+
 # Single source of truth for the score_sighting_v2 factor weights. Both the score
 # (score_sighting_v2) AND its deterministic breakdown (score_sighting_v2_breakdown)
 # read this map, so the weighted drivers a hover shows can never drift from the number.
-SIGHTING_V2_WEIGHTS: dict[str, float] = {
-    "trust": 0.30,
-    "price": 0.25,
-    "qty": 0.20,
-    "freshness": 0.15,
-    "completeness": 0.10,
-}
+# Built ONCE at import from settings (env knobs SIGHTING_WEIGHT_TRUST/PRICE/QUANTITY/
+# FRESHNESS/COMPLETENESS; defaults preserve the historical hardcoded split, and
+# Settings.validate_sighting_weights fail-fasts a set that doesn't sum to 1.0).
+SIGHTING_V2_WEIGHTS: dict[str, float] = _build_sighting_weights(settings)
 # Human-readable labels for the same five factors (used by the breakdown hover).
 SIGHTING_V2_LABELS: dict[str, str] = {
     "trust": "Vendor trust",

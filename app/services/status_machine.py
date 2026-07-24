@@ -21,6 +21,15 @@ from ..constants import (
 
 # ── Offer Status Transitions ────────────────────────────────────────────
 # Valid transitions: from_status → {allowed to_statuses}
+#
+# INVARIANT: every router that transitions an offer INTO a live status
+# (ACTIVE/APPROVED) from a non-live one (PENDING_REVIEW, EXPIRED) MUST call
+# proactive_matching.trigger_rematch_on_offer_approval(db, offer) AFTER its
+# commit. The batch scan only ever sees an offer once, at Offer.created_at, and
+# excludes non-live statuses — so once the scan watermark passes a pending offer,
+# only the targeted re-match can ever surface it to proactive matching. Current
+# call sites: crm/offers.py approve_offer + promote_offer, htmx/offers/crud.py
+# approve action + promote route.
 OFFER_TRANSITIONS: dict[str, set[str]] = {
     OfferStatus.PENDING_REVIEW: {OfferStatus.ACTIVE, OfferStatus.APPROVED, OfferStatus.REJECTED, OfferStatus.SOLD},
     OfferStatus.ACTIVE: {OfferStatus.SOLD, OfferStatus.REJECTED, OfferStatus.WON, OfferStatus.EXPIRED},
