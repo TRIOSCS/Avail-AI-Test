@@ -438,7 +438,9 @@ async def part_tab_sourcing(
     summaries = (
         db.query(VendorSightingSummary)
         .filter(VendorSightingSummary.requirement_id == requirement_id)
-        .order_by(VendorSightingSummary.score.desc(), VendorSightingSummary.id.desc())
+        # nullslast(): a NULL score must never outrank a real scored vendor — Postgres'
+        # DESC default sorts NULLs FIRST (finding #26, THEME F).
+        .order_by(VendorSightingSummary.score.desc().nullslast(), VendorSightingSummary.id.desc())
         .all()
     )
     vendor_tier_map = get_vendor_tier_map(db, requirement_id)

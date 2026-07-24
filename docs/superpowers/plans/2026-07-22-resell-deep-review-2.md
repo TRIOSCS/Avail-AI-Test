@@ -323,35 +323,43 @@ CLAUDE.md mandates StrEnum constants from app/constants.py for all status values
 
 ## F. Mirror & sightings integration
 
-### 25. [P2] Buyer sightings board shows phantom 'Customer Excess (list N)' scratch requirements
+### 25. [P2] Buyer sightings board shows phantom 'Customer Excess (list N)' scratch requirements — **FIXED**
 **Where:** `app/routers/sightings.py:391` (dimension: gap:mirror-consumers)
 
 build_board_requirement_query (shared by the sightings board list, its stat counters, and the CSV export) filters only requisition status and sourcing status — it never excludes is_scratch requisitions. The mirror's virtual requisition is created with status=RequisitionStatus.OPEN, is_scratch=True (app/services/excess_mirror.py:102-108) and its virtual Requirement with sourcing_status=SourcingStatus.OPEN and primary_mpn=None (excess_mirror.py:117-122), so both board predicates pass. Concrete failure: publish excess list 42 → any buyer/admin opens the Sightings board → a permanent row with a blank MPN under requisition 'Customer Excess (list 42)' appears among active sourcing work (and in the CSV export and status stat-counters), one per published list. The excess_mirror.py header (lines 11-14) claims scratch reqs 'never pollute' sales views because htmx_views filters is_scratch — the sig
 
 **Fix:** Add `.filter(Requisition.is_scratch.is_(False))` to build_board_requirement_query (and to the cached stat-count query at routers/sightings.py:487-492), matching the requisitions-list convention.
 
-### 26. [P2] Mirror sightings are never scored/tiered — 'Customer Excess' ranks as tier 'Poor' yet sorts to the top on Postgres
+**Resolution:** `build_board_requirement_query` now filters `Requisition.is_scratch.is_(False)` — the single source of truth for the board list, its CSV export, and (as a plain query filter) the CSV rows all drop the mirror's virtual requirement. The cached `sightings_stat_counts` query and the dashboard-strip `active_req_select` (urgent/stale/pending/unassigned counters, which independently re-derive the same base predicate) both got the identical filter so the badges above the now-filtered list can't disagree with it. See `app/routers/sightings.py`; tests in `tests/test_sightings_mirror_exclusion.py`.
+
+### 26. [P2] Mirror sightings are never scored/tiered — 'Customer Excess' ranks as tier 'Poor' yet sorts to the top on Postgres — **FIXED**
 **Where:** `app/services/sighting_ingest.py:34` (dimension: gap:mirror-consumers)
 
 mirror_line builds its row via sighting_from_row, which defaults `score=item.get("score", 0)` and `evidence_tier=item.get("evidence_tier")` (None); the mirror's row dict (excess_mirror.py:186-195) supplies neither, and the mirror path bypasses _save_sightings' score_sighting_v2/tier_for_sighting entirely. tier_for_sighting also has no 'customer_excess' mapping (evidence_tiers.py:51 knows only 'excess_list' → T7; 'customer_excess' would fall through to T3), so no writer could tier it correctly anyway. Downstream, rebuild_vendor_summaries pulls mirror rows via material_card_id (sighting_aggregation.py:93-126) and produces a 'customer excess' summary with score=None (`round(max_score,1) if max_score else None`, 0 is falsy) and tier 'Poor' (_score_to_tier(0)). Consumers then order by `VendorSightingSummary.score.desc()` with no nullslast (routers/sightings.py:515 top-vendor chip, routers/sig
 
 **Fix:** In mirror_line, set a real score (e.g. via score_sighting_v2 completeness inputs) and evidence_tier — add 'customer_excess' to tier_for_sighting (a live in-hand posting is arguably T6-level trust, not the T3 fallback); add .nullslast() to the three score.desc() order_bys.
 
-### 27. [P2] Retiring the mirror never invalidates VendorSightingSummary — requirement vendor boards advertise closed excess supply forever
+**Resolution:** Implemented exactly as prescribed (score honestly, not exclude — a live in-hand posting is genuine, useful supply on a REAL requirement's vendor board, so hiding it would be a regression, not a fix). `mirror_line` now calls `scoring.score_sighting_v2` (real qty/price/completeness inputs; no median-price context available, so price/trust fall to their honest "missing data" baselines) and sets `score`/`score_components`/`evidence_tier` on every mirrored Sighting. `evidence_tiers.tier_for_sighting` gained a `"customer_excess"` → T6 mapping. `.nullslast()` was added to all three `score.desc()` order-bys as defense-in-depth. See `app/services/excess_mirror.py` (`mirror_line`), `app/evidence_tiers.py`, `app/routers/sightings.py`, `app/routers/htmx/parts.py`; tests in `tests/test_resell_mirror.py::test_mirror_line_scores_and_tiers_honestly`.
+
+### 27. [P2] Retiring the mirror never invalidates VendorSightingSummary — requirement vendor boards advertise closed excess supply forever — **FIXED**
 **Where:** `app/services/excess_mirror.py:228` (dimension: gap:mirror-consumers)
 
 retire_line / sync_list_mirror / teardown_list_mirror delete the mirrored Sighting rows but never touch VendorSightingSummary, and summaries are upsert-only — rebuild_vendor_summaries (sighting_aggregation.py:197-206) updates/creates rows for vendors present in the current sighting set and there is no delete of VendorSightingSummary anywhere in app/ (grep confirms). Once a search on a requirement sharing the excess MPN materializes a 'customer excess' summary (with the posting's qty and asking price), awarding/closing/expiring the list retires the Sighting behind the summary's back and even a fresh re-search leaves the stale summary row in place ('customer excess' is simply absent from the new groups). Concrete failure: buyer searches requirement R for MPN X while list 42 is open → summary row 'customer excess, qty 500, $1.20' on R's vendor board; list 42 is awarded (mirror retired) → we
 
 **Fix:** When retiring a mirror row, delete matching VendorSightingSummary rows (vendor_name='customer excess') for the affected requirement(s) — or make rebuild_vendor_summaries delete summary rows for vendors no longer present in the sighting set.
 
-### 28. [P2] Global search surfaces mirror sightings and links users to the hidden scratch requisition
+**Resolution:** Both halves implemented. `sighting_aggregation.rebuild_vendor_summaries` now deletes any summary row for a vendor absent from the current sighting group on an unscoped (`vendor_names=None`) rebuild. `excess_mirror.retire_line` / `teardown_list_mirror` call a new `_invalidate_vendor_summaries_for_cards` helper — reverse-looks-up real `Requirement`s sharing the retired line's `MaterialCard.normalized_mpn` (indexed `Requirement.normalized_mpn`, no full-table scan) and reruns `rebuild_vendor_summaries` for each, dropping the stale 'customer excess' row immediately rather than waiting for an unrelated re-search. See `app/services/excess_mirror.py`, `app/services/sighting_aggregation.py`; tests in `tests/test_resell_mirror.py::test_retire_line_invalidates_real_requirement_vendor_summary`, `test_teardown_invalidates_real_requirement_vendor_summary`.
+
+### 28. [P2] Global search surfaces mirror sightings and links users to the hidden scratch requisition — **FIXED**
 **Where:** `app/services/global_search_service.py:374` (dimension: gap:mirror-consumers)
 
 fast_search's sightings group joins Sighting → Requirement and carries requisition_id 'for nav + read-gating', but unlike the requisition group (which filters `Requisition.is_scratch.is_(False)` at lines 227 and 575) it never excludes sightings hanging on scratch requisitions. Mirror rows match by normalized_mpn/mpn_matched, so a global search for a posted MPN returns a 'Customer Excess' sighting whose carried requisition_id is the hidden virtual requisition; the shared search-results template links every sighting hit to `/v2/requisitions/{{ requisition_id }}` (templates/htmx/partials/shared/search_results.html:39,49). Concrete failure: user global-searches 'LM317' while an excess posting of LM317 is live → result 'LM317 / Customer Excess' → click navigates to the requisition page for 'Customer Excess (list N)' — a system-owned scratch requisition that every other surface deliberately hi
 
 **Fix:** Join Requisition in the sightings group (fast_search and the intent-query sighting branch at line 623) and add `Requisition.is_scratch.is_(False)` — or exclude `Sighting.source_type == 'customer_excess'` from global search results.
 
-### 38. [P3] excess_mirror docs still describe the retired (source_company_id, material_card_id) upsert key
+**Resolution:** Took the simpler alternative (no extra join): both `fast_search`'s sightings group and `_run_intent_query`'s "sighting" branch add the new canonical `excess_mirror.mirror_sighting_filter()` predicate (`Sighting.source_type.is_distinct_from("customer_excess")`, NULL-safe). See `app/services/global_search_service.py`; tests in `tests/test_global_search_service.py::test_part_number_excludes_resell_mirror_sighting`, `test_intent_query_excludes_resell_mirror_sighting`.
+
+### 38. [P3] excess_mirror docs still describe the retired (source_company_id, material_card_id) upsert key — **FIXED**
 **Where:** `app/services/excess_mirror.py:21` (dimension: services-core)
 
 Phase 5 (#18, migration 199) moved the mirror upsert to line-identity (Sighting.excess_line_item_id — implemented in _find_mirror at lines 128-145). But the module docstring's 'Dedup trap' paragraph still states 'The mirror upserts by (source_company_id, material_card_id)', and the update-path comment in mirror_line repeats it. A maintainer following the module header (the CLAUDE.md-mandated authoritative file docs) would reason about duplicate-part collapse and sibling-list wipes from the pre-199 model — the precise behavior finding #18 fixed.
@@ -360,12 +368,14 @@ Phase 5 (#18, migration 199) moved the mirror upsert to line-identity (Sighting.
 
 **FIXED 2026-07-24 (P3 batch PR).** Rewrote the module docstring's "Dedup trap" paragraph and the mirror_line update-path comment to describe the `Sighting.excess_line_item_id` line-identity upsert key (#18, migration 199), replacing the retired `(source_company_id, material_card_id)` description.
 
-### 59. [P3] L3 vendor-affinity aggregation counts mirror rows — suggests synthetic 'Customer Excess' as a supplier
+### 59. [P3] L3 vendor-affinity aggregation counts mirror rows — suggests synthetic 'Customer Excess' as a supplier — **FIXED**
 **Where:** `app/services/vendor_affinity_service.py:187` (dimension: gap:mirror-consumers)
 
 find_affinity_vendors_l3 aggregates ALL sightings joined to MaterialCard by category, grouped by (vendor_name_normalized, vendor_name), with no source_type exclusion. Mirror rows always have material_card_id set (it is the mirror's linkage key) and vendor_name='Customer Excess', so once excess postings exist in a category, the synthetic internal label enters the affinity vendor rows; _vendor_results_from_rows (lines 32-44) does not require a VendorCard (`vendor_id: vc.id if vc else None`) so it is emitted as a suggested vendor for the search fan-out. This is precisely the 'pollute vendor analytics' hazard the mirror's own comment (excess_mirror.py:51-54) says the design must avoid — it avoided VendorCard creation but not vendor-name-level aggregation. Concrete failure: several capacitor excess lines posted → L3 affinity for a capacitor MPN ranks 'Customer Excess' (mpn_count inflated by m
 
 **Fix:** Add `Sighting.source_type != 'customer_excess'` (or an allowlist of connector source types) to the L3 aggregation.
+
+**Resolution:** `find_affinity_vendors_l3`'s query adds the canonical `excess_mirror.mirror_sighting_filter()` predicate. See `app/services/vendor_affinity_service.py`; test in `tests/test_vendor_affinity_coverage.py::TestFindAffinityVendorsL3::test_excludes_resell_mirror_sighting`.
 
 
 ## G. Buyer affinity & nudges

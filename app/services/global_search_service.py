@@ -4,8 +4,15 @@ Provides two search tiers:
   - fast_search(): pg_trgm fuzzy matching across 9 entity types (<100ms)
   - ai_search(): Claude Haiku intent parsing + targeted queries (<2s)
 
+The sightings group excludes the resell mirror's synthetic "Customer Excess" rows
+(``excess_mirror.mirror_sighting_filter()``) — those hang off a hidden scratch
+requisition every other surface deliberately hides, and the shared results template
+links every sighting hit straight to ``/v2/requisitions/{requisition_id}`` (finding #28,
+THEME F).
+
 Called by: app/routers/htmx_views.py (global search endpoints)
-Depends on: SQLAlchemy models, app/utils/sql_helpers.py, app/utils/claude_client.py
+Depends on: SQLAlchemy models, app/utils/sql_helpers.py, app/utils/claude_client.py,
+            app/services/excess_mirror.py (mirror_sighting_filter)
 """
 
 import hashlib
@@ -22,6 +29,7 @@ from app.models.intelligence import MaterialCard
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendors import VendorCard, VendorContact
+from app.services.excess_mirror import mirror_sighting_filter
 from app.utils.claude_client import claude_structured
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.normalization import normalize_mpn_key
@@ -383,6 +391,9 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
                 normalized_col=Sighting.normalized_mpn,
             )
         )
+        # Exclude the resell mirror's synthetic rows — supply advertising on a hidden
+        # scratch requisition, not real vendor intelligence (finding #28, THEME F).
+        .filter(mirror_sighting_filter())
     )
     if _is_restricted(user):
         q = q.filter(Requirement.requisition_id.in_(db.query(Requisition.id).filter(Requisition.created_by == user.id)))
@@ -577,6 +588,10 @@ def _run_intent_query(search_op: dict, db: Session, user: User | None = None) ->
     # Hide soft-deleted material cards.
     if entity_type == "material_card":
         q = q.filter(MaterialCard.deleted_at.is_(None))
+
+    # Exclude the resell mirror's synthetic sightings (finding #28, THEME F).
+    if entity_type == "sighting":
+        q = q.filter(mirror_sighting_filter())
 
     # Read-gating: restrict requisition-scoped entities to the user's own requisitions.
     if (req_id_col := _REQ_SCOPED_INTENT.get(entity_type)) is not None:

@@ -23,9 +23,18 @@ Dedup trap: ``search_service._save_sightings`` deletes sightings by
       distinct Sightings, and never wipes a SIBLING list's ``customer_excess`` rows.
       (Each list also gets its own virtual requirement, a second layer of safety.)
 
+Mirror-consumer exclusion: every surface that shows REAL vendor intelligence (buyer
+      sightings board, global search, vendor-affinity supplier suggestions) must exclude
+      these synthetic advertising rows — use ``mirror_sighting_filter()`` below, the ONE
+      canonical predicate, rather than re-inlining the ``source_type`` literal. See
+      docs/APP_MAP_INTERACTIONS.md "Mirror-consumer exclusions".
+
 Calls: models (ExcessList, ExcessLineItem, Requisition, Requirement, Sighting),
        sighting_ingest.sighting_from_row (the dict→ORM single source of truth),
-       search_service.resolve_material_card (lazy card link), normalize_mpn_key.
+       search_service.resolve_material_card (lazy card link), normalize_mpn_key,
+       scoring.score_sighting_v2 + evidence_tiers.tier_for_sighting (honest score/tier
+       for mirrored rows), sighting_aggregation.rebuild_vendor_summaries (retire-time
+       VendorSightingSummary invalidation).
 Depends on: a request-scoped Session. Flushes so ids are set; the CALLER commits
        (publish_list commits itself, matching excess_service's _safe_commit style).
 """
@@ -36,7 +45,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy import delete, select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.orm import Session
 
 from ..constants import (
@@ -45,8 +54,10 @@ from ..constants import (
     RequisitionStatus,
     SourcingStatus,
 )
+from ..evidence_tiers import tier_for_sighting
 from ..models.excess import ExcessLineItem, ExcessList
 from ..models.sourcing import Requirement, Requisition, Sighting
+from ..scoring import score_sighting_v2
 from ..utils.normalization import normalize_mpn_key
 from .sighting_ingest import sighting_from_row
 
@@ -55,6 +66,28 @@ from .sighting_ingest import sighting_from_row
 # would leak the customer and pollute vendor analytics (spec §"Sighting live-mirror"
 # vendor_name trap). The mirror never touches VendorCard for this source.
 EXCESS_VENDOR_LABEL = "Customer Excess"
+
+# The mirror's own explicit source_type marker (set by mirror_line on every row it
+# writes). The single robust, no-join-required signal that a Sighting is a synthetic
+# excess-mirror advertising row rather than real third-party vendor intelligence.
+MIRROR_SOURCE_TYPE = "customer_excess"
+
+
+def mirror_sighting_filter() -> ColumnElement[bool]:
+    """The ONE canonical SQLAlchemy predicate for excluding synthetic mirror Sightings.
+
+    Use this at every consumer that must surface only REAL vendor intelligence — global
+    search, vendor-affinity aggregation, etc. — instead of re-inlining the
+    ``source_type == "customer_excess"`` literal (finding #25/#28/#59, THEME F). Reads
+    ``Sighting.source_type`` directly (always set by ``mirror_line``, no join needed),
+    unlike ``excess_line_item_id`` which can be NULL until a lazy card-heal backfills it.
+    Uses ``is_distinct_from`` (NULL-safe) rather than plain ``!=`` — SQL's three-valued
+    logic means ``source_type != 'customer_excess'`` is NULL (excluded!) for the many
+    real sightings whose ``source_type`` is NULL, which would have silently dropped them
+    from every consumer of this filter.
+    """
+    return Sighting.source_type.is_distinct_from(MIRROR_SOURCE_TYPE)
+
 
 # Deterministic name marker for the per-list virtual requisition. Keyed on the list id
 # so the get-or-create lookup is exact and collision-free without a new FK column.
@@ -139,7 +172,7 @@ def _find_mirror(db: Session, excess_line_item_id: int) -> Sighting | None:
     return (
         db.query(Sighting)
         .filter(
-            Sighting.source_type == "customer_excess",
+            Sighting.source_type == MIRROR_SOURCE_TYPE,
             Sighting.excess_line_item_id == excess_line_item_id,
         )
         .order_by(Sighting.id.asc())
@@ -191,7 +224,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         "manufacturer": line.manufacturer,
         "qty_available": line.quantity,
         "unit_price": line.asking_price,
-        "source_type": "customer_excess",
+        "source_type": MIRROR_SOURCE_TYPE,
         "condition": line.condition,
         "date_code": line.date_code,
     }
@@ -201,7 +234,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         sighting = sighting_from_row(requirement.id, row)
     else:
         # Re-bind the existing row to the freshly built values (in-place update keeps the
-        # same Sighting id — proves the excess_line_item_id line-identity upsert).
+        # same Sighting id — proves the excess_line_item_id line-identity upsert, #38).
         sighting = sighting_from_row(requirement.id, row)
         existing.requirement_id = requirement.id
         existing.vendor_name = sighting.vendor_name
@@ -221,10 +254,75 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
     sighting.material_card_id = line.material_card_id
     sighting.normalized_mpn = norm_key or None
 
+    # Score + tier the mirror honestly (finding #26) — sighting_from_row's dict path
+    # defaults score=0/evidence_tier=None for any row that skips _save_sightings, which
+    # left "Customer Excess" summaries permanently tier "Poor" and (on Postgres, where
+    # NULLS FIRST is the DESC default) sorting ABOVE every real vendor. A real in-hand
+    # posting deserves the SAME multi-factor score real sightings get, not a fabricated
+    # number: vendor_score is None (an internal posting, not a scored vendor) and
+    # median_price is unavailable here (no requirement-level price context to compare
+    # against), so trust/price fall to their honest "missing data" baselines while
+    # qty/freshness reflect the line's real, current values.
+    score, components = score_sighting_v2(
+        vendor_score=None,
+        is_authorized=False,
+        unit_price=float(line.asking_price) if line.asking_price is not None else None,
+        qty_available=line.quantity,
+        age_hours=0.0,
+        has_price=line.asking_price is not None,
+        has_qty=bool(line.quantity),
+        has_lead_time=False,
+        has_condition=bool(line.condition),
+    )
+    sighting.score = score
+    sighting.score_components = components
+    sighting.evidence_tier = tier_for_sighting(MIRROR_SOURCE_TYPE, is_authorized=False)
+
     if existing is None:
         db.add(sighting)
     db.flush()
     return sighting
+
+
+def _invalidate_vendor_summaries_for_cards(db: Session, material_card_ids: set[int | None]) -> int:
+    """Recompute (dropping if now absent) the 'customer excess' VendorSightingSummary
+    row on every REAL requirement whose vendor board could have aggregated a mirrored
+    Sighting for one of *material_card_ids*.
+
+    ``rebuild_vendor_summaries`` pulls sightings by MaterialCard linkage keyed on the
+    requirement's own ``normalized_mpn`` — so a requirement sharing a retired line's
+    normalized MPN is a candidate. Scoping via the indexed ``Requirement.normalized_mpn``
+    column (populated at requirement-creation) avoids a full-table scan, and rebuilding
+    drops the stale 'customer excess' row when it's no longer backed by a live sighting
+    (sighting_aggregation.rebuild_vendor_summaries). Without this, retiring a mirror
+    leaves the requirement's vendor board advertising the now-closed supply forever
+    (finding #27, THEME F). Returns the number of requirements refreshed.
+    """
+    from ..models.intelligence import MaterialCard
+    from .sighting_aggregation import rebuild_vendor_summaries
+
+    card_ids = {c for c in material_card_ids if c is not None}
+    if not card_ids:
+        return 0
+
+    norm_keys = {
+        k
+        for (k,) in db.query(MaterialCard.normalized_mpn)
+        .filter(MaterialCard.id.in_(card_ids), MaterialCard.normalized_mpn.isnot(None))
+        .all()
+    }
+    if not norm_keys:
+        return 0
+
+    requirement_ids = [
+        rid for (rid,) in db.query(Requirement.id).filter(Requirement.normalized_mpn.in_(norm_keys)).all()
+    ]
+    for rid in requirement_ids:
+        # skip_ai_estimates: this runs inside user-facing award/close/withdraw
+        # transactions (often holding the M9 award lock) — a synchronous Claude call
+        # here would stall the request; the next routine search rebuild re-estimates.
+        rebuild_vendor_summaries(db, rid, skip_ai_estimates=True)
+    return len(requirement_ids)
 
 
 def retire_line(db: Session, line: ExcessLineItem) -> None:
@@ -233,14 +331,17 @@ def retire_line(db: Session, line: ExcessLineItem) -> None:
     Deletes the row outright (consistent with how ``_save_sightings`` removes stale
     sightings — the matcher reads live rows, never a soft-deleted excess shadow). Looked up
     by the line's own id, so retiring ONE duplicate-part line deletes only ITS Sighting and
-    leaves the twin line's row live (#18, migration 199). A no-op when the line has no
-    mirror. Flushes; does NOT commit.
+    leaves the twin line's row live (#18, migration 199). Then invalidates any REAL
+    requirement's 'customer excess' VendorSightingSummary that aggregated this line's
+    supply (#27) — a no-op if none exists. A no-op when the line has no mirror. Flushes;
+    does NOT commit.
     """
     existing = _find_mirror(db, line.id)
     if existing is not None:
         db.delete(existing)
         db.flush()
         logger.info("excess-mirror: retired sighting {} for line {}", existing.id, line.id)
+        _invalidate_vendor_summaries_for_cards(db, {line.material_card_id})
 
 
 def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
@@ -279,12 +380,26 @@ def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
         db.execute(select(Requirement.id).where(Requirement.requisition_id == req.id)).scalars().all()
     )
     sightings_deleted = 0
+    affected_card_ids: set[int | None] = set()
     if requirement_ids:
+        # Capture the material cards BEFORE the bulk delete so the post-teardown
+        # VendorSightingSummary invalidation (#27) knows which real requirements' vendor
+        # boards may have aggregated this supply.
+        affected_card_ids = set(
+            db.execute(
+                select(Sighting.material_card_id).where(
+                    Sighting.source_type == MIRROR_SOURCE_TYPE,
+                    Sighting.requirement_id.in_(requirement_ids),
+                )
+            )
+            .scalars()
+            .all()
+        )
         sightings_deleted = (
             db.execute(
                 delete(Sighting)
                 .where(
-                    Sighting.source_type == "customer_excess",
+                    Sighting.source_type == MIRROR_SOURCE_TYPE,
                     Sighting.requirement_id.in_(requirement_ids),
                 )
                 .execution_options(synchronize_session=False)
@@ -299,6 +414,7 @@ def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     )
     db.execute(delete(Requisition).where(Requisition.id == req.id).execution_options(synchronize_session=False))
     db.flush()
+    _invalidate_vendor_summaries_for_cards(db, affected_card_ids)
     logger.info(
         "excess-mirror: tore down list {} mirror ({} sightings, {} requirements, 1 requisition)",
         excess_list.id,

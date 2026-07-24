@@ -2375,6 +2375,47 @@ list's STATUS column rather than the actual `close_at` deadline or offer-arrival
   so the award win-hook (`recompute_buyer_score_on_win`) now fires for UI-submitted manual offers;
   unattributed offers stay None and still award (no regression).
 
+**Phase 6 (mirror-consumer exclusions, deep-review-2 THEME F).** The mirror's synthetic
+"Customer Excess" rows leaked into surfaces meant for REAL vendor intelligence. ONE
+canonical predicate now marks a mirror row — `excess_mirror.mirror_sighting_filter()`
+(`Sighting.source_type.is_distinct_from("customer_excess")`, NULL-safe) — reused at every
+Sighting-level exclusion site instead of re-inlining the literal; the mirror's virtual
+requisition exclusion reuses the pre-existing `Requisition.is_scratch.is_(False)`
+convention.
+- *Buyer sightings board (finding #25).* `routers.sightings.build_board_requirement_query`
+  (shared by the board list, its dashboard-strip counters, and the CSV export) and the
+  cached stat-count / `active_req_select` queries all add `Requisition.is_scratch.is_(False)`
+  — the mirror's virtual "Customer Excess (list N)" scratch requirement (blank MPN, no
+  buyer, no activity) no longer appears as phantom buyer demand or inflates the
+  Unassigned/Stale badges.
+- *Honest mirror score/tier (finding #26).* `excess_mirror.mirror_line` now scores every
+  mirrored Sighting via `scoring.score_sighting_v2` (real qty/price/completeness factors,
+  no fabricated number) and tiers it via `evidence_tiers.tier_for_sighting` (new
+  `"customer_excess"` → T6 mapping, matching a manual entry's trust level) instead of the
+  `score=0`/`evidence_tier=None` defaults that rendered tier "Poor" yet — on Postgres,
+  where `NULLS FIRST` is the `DESC` default — sorted ABOVE every honestly-scored vendor.
+  `.nullslast()` was also added to the three `VendorSightingSummary.score.desc()` /
+  `Sighting.score.desc()` order-bys (`routers/sightings.py` x2, `routers/htmx/parts.py`)
+  as defense-in-depth against any other NULL-score row.
+- *Retire-time VendorSightingSummary invalidation (finding #27).* `sighting_aggregation.
+  rebuild_vendor_summaries` now deletes any existing summary row for a vendor absent from
+  the current sighting group (an unscoped, `vendor_names=None` rebuild is authoritative for
+  the whole requirement). `excess_mirror.retire_line` / `teardown_list_mirror` call the new
+  `_invalidate_vendor_summaries_for_cards` helper (reverse-lookup via the retired line's
+  `MaterialCard.normalized_mpn` → `Requirement.normalized_mpn`, avoiding a full-table scan)
+  so a real requirement's vendor board stops advertising closed excess supply the moment
+  the mirror retires, not on the next unrelated re-search.
+- *Global search exclusion (finding #28).* `global_search_service.fast_search`'s sightings
+  group and the `_run_intent_query` "sighting" branch both add `mirror_sighting_filter()` —
+  a search hit no longer links a buyer to the hidden scratch requisition.
+- *Vendor-affinity L3 exclusion (finding #59).* `vendor_affinity_service.
+  find_affinity_vendors_l3`'s raw vendor-name aggregation adds `mirror_sighting_filter()` so
+  the synthetic "Customer Excess" label is never suggested as a contactable supplier.
+- *Docstring correction (finding #38).* `excess_mirror`'s module header and `mirror_line`'s
+  in-place-update comment now describe the CURRENT `excess_line_item_id` line-identity
+  upsert key (finding #18, migration 199) — not the retired `(source_company_id,
+  material_card_id)` key the "Dedup trap" paragraph used to claim.
+
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
 any take-all offer pins as a violet banner above the lines. Status pills reuse existing

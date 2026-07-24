@@ -645,6 +645,170 @@ def test_publish_nulls_stale_close_at(db_session: Session):
     assert el.open_at is not None
 
 
+def test_mirror_line_scores_and_tiers_honestly(db_session: Session):
+    """A mirrored line gets a real multi-factor score + T6 evidence tier (finding #26)
+    instead of the fabricated score=0/tier=None default that ranked it tier 'Poor' yet
+    (on Postgres) sorted it ABOVE every real, honestly-scored vendor."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+    line.asking_price = 0.42
+    db_session.commit()
+
+    sighting = mirror_line(db_session, line)
+    db_session.commit()
+
+    assert sighting.evidence_tier == "T6"
+    assert sighting.score is not None and sighting.score > 0
+    assert sighting.score_components is not None
+    assert set(sighting.score_components) == {"trust", "price", "qty", "freshness", "completeness"}
+
+
+def test_retire_line_invalidates_real_requirement_vendor_summary(db_session: Session):
+    """Retiring a mirrored line drops the stale 'customer excess' VendorSightingSummary
+    it left on a REAL buyer requirement sharing its MPN (finding #27) — otherwise the
+    requirement's vendor board keeps advertising the now-closed supply forever."""
+    from app.models.vendor_sighting_summary import VendorSightingSummary
+    from app.services.sighting_aggregation import rebuild_vendor_summaries
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    real_req = Requisition(name="Buyer Req", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.commit()
+
+    rebuild_vendor_summaries(db_session, real_requirement.id)
+    db_session.commit()
+
+    summary = (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+    )
+    assert summary is not None, "expected the mirror's supply to surface on the real requirement's vendor board"
+    assert summary.tier != "Poor"  # honest score/tier (#26), not the fabricated default
+
+    retire_line(db_session, line)
+    db_session.commit()
+
+    surviving = (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+    )
+    assert surviving is None, "stale 'customer excess' summary survived the mirror retire"
+
+
+def test_retire_invalidation_skips_ai_qty_estimates(db_session: Session, monkeypatch):
+    """The retire-path summary invalidation must NEVER make a synchronous Claude call —
+    it runs inside user-facing award/close/withdraw transactions (often holding the M9
+    award lock).
+
+    Deterministic no-AI estimation there; the next routine search rebuild refreshes with
+    the full estimator.
+    """
+    from unittest.mock import MagicMock
+
+    from app.services import sighting_aggregation
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    real_req = Requisition(name="Buyer Req AI", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.flush()
+    # Three non-null quantities from one real vendor: the exact shape that sends the
+    # full estimator to Claude, so this test fails if the retire path reaches it.
+    for qty in (10, 20, 30):
+        db_session.add(
+            Sighting(
+                requirement_id=real_requirement.id,
+                vendor_name="Real Vendor",
+                qty_available=qty,
+                source_type="api",
+            )
+        )
+    db_session.commit()
+
+    ai_spy = MagicMock(return_value={"qty": 999, "approximate": True})
+    monkeypatch.setattr(sighting_aggregation, "_estimate_qty_with_ai", ai_spy)
+
+    retire_line(db_session, line)
+    db_session.commit()
+
+    assert ai_spy.call_count == 0, "retire-path invalidation reached the AI qty estimator"
+
+
+def test_teardown_invalidates_real_requirement_vendor_summary(db_session: Session):
+    """teardown_list_mirror (list/company deletion) also drops the stale 'customer
+    excess' VendorSightingSummary on any real requirement it was advertised on."""
+    from app.models.vendor_sighting_summary import VendorSightingSummary
+    from app.services.sighting_aggregation import rebuild_vendor_summaries
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    publish_list(db_session, el.id, owner)
+
+    real_req = Requisition(name="Buyer Req 2", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.commit()
+
+    rebuild_vendor_summaries(db_session, real_requirement.id)
+    db_session.commit()
+    assert (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+        is not None
+    )
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+        is None
+    )
+
+
 def test_unresolvable_part_skips_mirror(db_session: Session):
     """A line whose MPN won't resolve to a MaterialCard cannot be upserted by card key
     and is skipped (never raises)."""
