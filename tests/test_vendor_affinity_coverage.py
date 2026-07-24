@@ -298,6 +298,46 @@ class TestFindAffinityVendorsL3:
 
         assert isinstance(result, list)
 
+    def test_excludes_resell_mirror_sighting(
+        self, db_session: Session, material_card: MaterialCard, req_with_item: tuple
+    ):
+        """A resell-mirror 'Customer Excess' sighting on the same category never enters
+        the L3 aggregation — it isn't a contactable supplier (finding #59, THEME F).
+
+        The real Arrow Electronics sighting still ranks.
+        """
+        from app.services.vendor_affinity_service import find_affinity_vendors_l3
+
+        _, item = req_with_item
+        real = Sighting(
+            requirement_id=item.id,
+            normalized_mpn="lm317t",
+            vendor_name="Arrow Electronics",
+            vendor_name_normalized="arrow electronics",
+            source_type="api",
+            material_card_id=material_card.id,
+            created_at=datetime.now(UTC),
+        )
+        mirror = Sighting(
+            requirement_id=item.id,
+            normalized_mpn="lm317t",
+            vendor_name="Customer Excess",
+            vendor_name_normalized="customer excess",
+            source_type="customer_excess",
+            material_card_id=material_card.id,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add_all([real, mirror])
+        db_session.commit()
+
+        with patch("app.services.credential_service.get_credential_cached", return_value="sk-fake"):
+            with patch("app.services.vendor_affinity_service._classify_mpn", return_value="voltage_regulators"):
+                result = find_affinity_vendors_l3("LM317T", "TI", db_session)
+
+        names = {r["vendor_name"] for r in result}
+        assert "Arrow Electronics" in names, "real vendor missing from L3 results"
+        assert "Customer Excess" not in names, "mirror sighting suggested as a supplier"
+
 
 class TestClassifyMpn:
     @pytest.mark.parametrize(

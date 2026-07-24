@@ -45,7 +45,10 @@ def tier_for_sighting(source_type: str | None, is_authorized: bool) -> str:
     if src in ("email_parse", "email_auto_import", "email"):
         return "T5"  # Default to high-confidence; caller can override to T4
 
-    if src in ("manual", ""):
+    # A resell excess-mirror posting ("customer_excess") is a live, in-hand internal
+    # listing entered by a trader — the same trust level as a manual entry, not the T3
+    # unknown-source fallback (finding #26, THEME F).
+    if src in ("manual", "customer_excess", ""):
         return "T6"
 
     if src in ("material_history", "stock_list", "excess_list"):

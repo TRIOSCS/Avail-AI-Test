@@ -393,6 +393,10 @@ def build_board_requirement_query(db: Session, user: User, filters: SightingsLis
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
         .filter(_active_sourcing_status_clause())
+        # Exclude the resell mirror's system-owned "Customer Excess (list N)" scratch
+        # requisition — supply advertising, not buyer demand a human should source
+        # (finding #25, THEME F).
+        .filter(Requisition.is_scratch.is_(False))
     )
 
     # Ownership boundary: restricted roles (SALES/TRADER) see only their own requisitions'
@@ -492,6 +496,7 @@ async def _render_sightings_table(
             .join(Requisition, Requirement.requisition_id == Requisition.id)
             .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
             .filter(_active_sourcing_status_clause())
+            .filter(Requisition.is_scratch.is_(False))
             .group_by(Requirement.sourcing_status)
             .all()
         ),
@@ -512,7 +517,10 @@ async def _render_sightings_table(
                 VendorSightingSummary.score,
             )
             .filter(VendorSightingSummary.requirement_id.in_(req_ids))
-            .order_by(VendorSightingSummary.requirement_id, VendorSightingSummary.score.desc())
+            # nullslast(): a NULL score (e.g. a summary row never scored) must never
+            # outrank a real scored vendor — Postgres' DESC default sorts NULLs FIRST
+            # (finding #26, THEME F).
+            .order_by(VendorSightingSummary.requirement_id, VendorSightingSummary.score.desc().nullslast())
             .all()
         )
         for s in summaries:
@@ -553,6 +561,10 @@ async def _render_sightings_table(
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
         .filter(_active_sourcing_status_clause())
+        # Mirror's virtual "Customer Excess" requirement never has an assigned buyer or
+        # ActivityLog, which would otherwise inflate the Unassigned/Stale badges the board
+        # shows directly above the now-filtered list (finding #25, THEME F).
+        .filter(Requisition.is_scratch.is_(False))
     )
 
     # Urgent: priority >= 70 OR need_by_date within 48h
@@ -827,7 +839,9 @@ async def sightings_detail(
     summaries = (
         db.query(VendorSightingSummary)
         .filter(VendorSightingSummary.requirement_id == requirement_id)
-        .order_by(VendorSightingSummary.score.desc())
+        # nullslast(): a NULL score must never outrank a real scored vendor — Postgres'
+        # DESC default sorts NULLs FIRST (finding #26, THEME F).
+        .order_by(VendorSightingSummary.score.desc().nullslast())
         .all()
     )
 

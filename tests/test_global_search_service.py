@@ -196,6 +196,51 @@ def test_part_number_returns_its_sightings(search_db):
     assert any(s["mpn_matched"] == "LM358N" for s in result["groups"]["sightings"]), "sighting missing"
 
 
+def test_part_number_excludes_resell_mirror_sighting(search_db):
+    """A resell-mirror sighting for the SAME MPN never surfaces in global search — it
+    hangs off a hidden scratch requisition that every other surface deliberately hides
+    (finding #28, THEME F).
+
+    The real Arrow sighting still appears.
+    """
+    mirror = Sighting(
+        requirement_id=search_db.query(Requirement).filter_by(primary_mpn="LM358N").one().id,
+        vendor_name="Customer Excess",
+        mpn_matched="LM358N",
+        normalized_mpn="lm358n",
+        source_type="customer_excess",
+    )
+    search_db.add(mirror)
+    search_db.commit()
+
+    result = fast_search("LM358N", search_db)
+    sightings = result["groups"]["sightings"]
+    assert any(s["mpn_matched"] == "LM358N" for s in sightings), "real sighting missing"
+    assert not any(s["vendor_name"] == "Customer Excess" for s in sightings), "mirror sighting leaked"
+
+
+def test_intent_query_excludes_resell_mirror_sighting(search_db):
+    """The AI-search intent-query 'sighting' branch also excludes resell-mirror rows
+    (finding #28, THEME F) — not just fast_search's SQL-fuzzy path."""
+    from app.services.global_search_service import _run_intent_query
+
+    mirror = Sighting(
+        requirement_id=search_db.query(Requirement).filter_by(primary_mpn="LM358N").one().id,
+        vendor_name="Customer Excess",
+        mpn_matched="LM358N",
+        normalized_mpn="lm358n",
+        source_type="customer_excess",
+    )
+    search_db.add(mirror)
+    search_db.commit()
+
+    group_key, results = _run_intent_query({"entity_type": "sighting", "text_query": "LM358N"}, search_db)
+
+    assert group_key == "sightings"
+    assert any(r["mpn_matched"] == "LM358N" for r in results), "real sighting missing"
+    assert not any(r["vendor_name"] == "Customer Excess" for r in results), "mirror sighting leaked"
+
+
 def test_material_card_matched_by_manufacturer(search_db):
     """Material cards are searchable by manufacturer, not just MPN."""
     result = fast_search("Texas Instruments", search_db)

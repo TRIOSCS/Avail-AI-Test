@@ -205,6 +205,19 @@ def rebuild_vendor_summaries(
             db.add(summary)
             results.append(summary)
 
+    # Drop stale summary rows for vendors no longer backed by ANY live sighting on this
+    # requirement — an unscoped (vendor_names=None) rebuild is authoritative for the whole
+    # requirement, so a row absent from `groups` means that vendor's last sighting was
+    # deleted/retired (e.g. an excess-mirror retire, finding #27) and the row is now a
+    # stale advertisement. A vendor_names-scoped rebuild only ever intends to refresh that
+    # subset, so it must not delete rows for vendors it didn't touch.
+    if vendor_names is None:
+        stale_query = db.query(VendorSightingSummary).filter(VendorSightingSummary.requirement_id == requirement_id)
+        if groups:
+            stale_query = stale_query.filter(~VendorSightingSummary.vendor_name.in_(list(groups.keys())))
+        for row in stale_query.all():
+            db.delete(row)
+
     db.flush()
     logger.info(
         "Rebuilt {} vendor summaries for requirement {}",

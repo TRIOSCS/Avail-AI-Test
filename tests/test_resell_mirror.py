@@ -645,6 +645,118 @@ def test_publish_nulls_stale_close_at(db_session: Session):
     assert el.open_at is not None
 
 
+def test_mirror_line_scores_and_tiers_honestly(db_session: Session):
+    """A mirrored line gets a real multi-factor score + T6 evidence tier (finding #26)
+    instead of the fabricated score=0/tier=None default that ranked it tier 'Poor' yet
+    (on Postgres) sorted it ABOVE every real, honestly-scored vendor."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+    line.asking_price = 0.42
+    db_session.commit()
+
+    sighting = mirror_line(db_session, line)
+    db_session.commit()
+
+    assert sighting.evidence_tier == "T6"
+    assert sighting.score is not None and sighting.score > 0
+    assert sighting.score_components is not None
+    assert set(sighting.score_components) == {"trust", "price", "qty", "freshness", "completeness"}
+
+
+def test_retire_line_invalidates_real_requirement_vendor_summary(db_session: Session):
+    """Retiring a mirrored line drops the stale 'customer excess' VendorSightingSummary
+    it left on a REAL buyer requirement sharing its MPN (finding #27) — otherwise the
+    requirement's vendor board keeps advertising the now-closed supply forever."""
+    from app.models.vendor_sighting_summary import VendorSightingSummary
+    from app.services.sighting_aggregation import rebuild_vendor_summaries
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    real_req = Requisition(name="Buyer Req", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.commit()
+
+    rebuild_vendor_summaries(db_session, real_requirement.id)
+    db_session.commit()
+
+    summary = (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+    )
+    assert summary is not None, "expected the mirror's supply to surface on the real requirement's vendor board"
+    assert summary.tier != "Poor"  # honest score/tier (#26), not the fabricated default
+
+    retire_line(db_session, line)
+    db_session.commit()
+
+    surviving = (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+    )
+    assert surviving is None, "stale 'customer excess' summary survived the mirror retire"
+
+
+def test_teardown_invalidates_real_requirement_vendor_summary(db_session: Session):
+    """teardown_list_mirror (list/company deletion) also drops the stale 'customer
+    excess' VendorSightingSummary on any real requirement it was advertised on."""
+    from app.models.vendor_sighting_summary import VendorSightingSummary
+    from app.services.sighting_aggregation import rebuild_vendor_summaries
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    publish_list(db_session, el.id, owner)
+
+    real_req = Requisition(name="Buyer Req 2", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.commit()
+
+    rebuild_vendor_summaries(db_session, real_requirement.id)
+    db_session.commit()
+    assert (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+        is not None
+    )
+
+    teardown_list_mirror(db_session, el)
+    db_session.commit()
+
+    assert (
+        db_session.query(VendorSightingSummary)
+        .filter_by(requirement_id=real_requirement.id, vendor_name="customer excess")
+        .one_or_none()
+        is None
+    )
+
+
 def test_unresolvable_part_skips_mirror(db_session: Session):
     """A line whose MPN won't resolve to a MaterialCard cannot be upserted by card key
     and is skipped (never raises)."""

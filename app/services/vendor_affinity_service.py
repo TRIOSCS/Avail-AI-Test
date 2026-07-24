@@ -1,8 +1,12 @@
 """Vendor Affinity Service — finds vendors likely to supply a given MPN.
 
 What: Three-level affinity matching (L1: same manufacturer, L2: same commodity, L3: AI classification)
+L3 excludes the resell mirror's synthetic "Customer Excess" sightings
+(``excess_mirror.mirror_sighting_filter()``) — a raw vendor-name aggregation that would
+otherwise suggest the synthetic label as a contactable supplier (finding #59, THEME F).
 Called by: app/search_service.py during search fan-out
-Depends on: app.models (MaterialCard, Sighting, MaterialVendorHistory, EntityTag, Tag, VendorCard), Claude API for L3
+Depends on: app.models (MaterialCard, Sighting, MaterialVendorHistory, EntityTag, Tag, VendorCard),
+            app.services.excess_mirror (mirror_sighting_filter), Claude API for L3
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from app.models import (
     Tag,
     VendorCard,
 )
+from app.services.excess_mirror import mirror_sighting_filter
 from app.utils.sql_helpers import escape_like
 
 
@@ -190,6 +195,7 @@ def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) ->
         )
         .join(MaterialCard, Sighting.material_card_id == MaterialCard.id)
         .filter(MaterialCard.category.ilike(f"%{escape_like(category)}%", escape="\\"))
+        .filter(mirror_sighting_filter())
         .group_by(Sighting.vendor_name_normalized, Sighting.vendor_name)
         .order_by(func.count(func.distinct(Sighting.normalized_mpn)).desc())
         .limit(20)
