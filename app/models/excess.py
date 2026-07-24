@@ -40,6 +40,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..constants import (
+    CustomerBidStatus,
+    ExcessLineItemStatus,
+    ExcessListStatus,
+    ExcessOfferScope,
+    ExcessOfferStatus,
+    ExcessOutreachChannel,
+    ExcessOutreachStatus,
+    OfferLineMatchStatus,
+)
 from ..database import UTCDateTime
 from .base import Base
 
@@ -53,14 +63,18 @@ class ExcessList(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"), nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     title = Column(String(255), nullable=False)
-    status = Column(String(20), default="draft")  # draft, open, collecting, bid_out, awarded, closed, expired
+    status = Column(String(20), default=ExcessListStatus.DRAFT)  # see constants.ExcessListStatus
     # Lock-on-post: revising a posted list bumps version (spec §Resolved-for-v1 #2).
     version = Column(Integer, nullable=False, default=1, server_default="1")
     source_filename = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     total_line_items = Column(Integer, default=0)
-    # Posting window: open_at stamped on publish, close_at on close_list. Both nullable —
-    # a draft has neither; close_at drives the "closes in Xd" urgency chip (spec §Data-model).
+    # Posting window (phase-5 D1): open_at is stamped on publish. close_at is the OPTIONAL
+    # owner-set "Offers close by" deadline — settable at create/update while the list is a
+    # draft (so a draft MAY carry close_at). Publish preserves a still-FUTURE close_at and
+    # clears a stale/past one (excess_mirror.publish_list); close_list stamps it at
+    # resolution; expiry never writes it — it only fires once a set close_at has passed.
+    # Both nullable; close_at drives the "closes in Xd" urgency chip (spec §Data-model).
     open_at = Column(UTCDateTime, nullable=True)
     close_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
@@ -76,8 +90,6 @@ class ExcessList(Base):
     # --- Validators ---
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import ExcessListStatus
-
         valid = {e.value for e in ExcessListStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessList status: {value!r}")
@@ -113,7 +125,7 @@ class ExcessLineItem(Base):
     best_offer_id = Column(Integer, nullable=True)
     offer_count = Column(Integer, nullable=False, default=0, server_default="0")
     demand_match_count = Column(Integer, default=0)
-    status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
+    status = Column(String(20), default=ExcessLineItemStatus.AVAILABLE)  # see constants.ExcessLineItemStatus
     notes = Column(Text, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
@@ -125,6 +137,13 @@ class ExcessLineItem(Base):
     def _validate_quantity(self, _key, value):
         if value is not None and value <= 0:
             raise ValueError("Quantity must be positive")
+        return value
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        valid = {e.value for e in ExcessLineItemStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ExcessLineItem status: {value!r}")
         return value
 
     __table_args__ = (
@@ -151,9 +170,9 @@ class ExcessOffer(Base):
     submitted_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     offerer_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
     offerer_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
-    scope = Column(String(20), default="per_line")  # per_line, take_all
+    scope = Column(String(20), default=ExcessOfferScope.PER_LINE)  # see constants.ExcessOfferScope
     take_all_total_price = Column(Numeric(12, 4), nullable=True)  # lump sum, take_all only
-    status = Column(String(20), default="open")  # open, won, lost, withdrawn, late
+    status = Column(String(20), default=ExcessOfferStatus.OPEN)  # see constants.ExcessOfferStatus
     notes = Column(Text, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
@@ -167,8 +186,6 @@ class ExcessOffer(Base):
     # --- Validators ---
     @validates("scope")
     def _validate_scope(self, _key, value):
-        from ..constants import ExcessOfferScope
-
         valid = {e.value for e in ExcessOfferScope}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessOffer scope: {value!r}")
@@ -176,8 +193,6 @@ class ExcessOffer(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import ExcessOfferStatus
-
         valid = {e.value for e in ExcessOfferStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessOffer status: {value!r}")
@@ -210,7 +225,7 @@ class ExcessOfferLine(Base):
     unit_price = Column(Numeric(12, 4), nullable=True)
     lead_time_days = Column(Integer, nullable=True)
     terms_text = Column(Text, nullable=True)
-    match_status = Column(String(20), default="unmatched")  # matched, unmatched, ambiguous
+    match_status = Column(String(20), default=OfferLineMatchStatus.UNMATCHED)  # see constants.OfferLineMatchStatus
 
     offer = relationship("ExcessOffer", back_populates="lines")
     excess_line_item = relationship("ExcessLineItem", foreign_keys=[excess_line_item_id])
@@ -224,8 +239,6 @@ class ExcessOfferLine(Base):
 
     @validates("match_status")
     def _validate_match_status(self, _key, value):
-        from ..constants import OfferLineMatchStatus
-
         valid = {e.value for e in OfferLineMatchStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid OfferLine match_status: {value!r}")
@@ -252,7 +265,7 @@ class CustomerBid(Base):
     id = Column(Integer, primary_key=True)
     excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="CASCADE"), nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    status = Column(String(20), default="draft")  # draft, sent, accepted, rejected
+    status = Column(String(20), default=CustomerBidStatus.DRAFT)  # see constants.CustomerBidStatus
     revision = Column(Integer, nullable=False, default=1, server_default="1")
     # Lifecycle stamps (M4): sent_at when the clean PDF is emailed to the seller;
     # responded_at / responded_by_id record WHO (the trader) logged the seller's
@@ -275,8 +288,6 @@ class CustomerBid(Base):
     # --- Validators ---
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import CustomerBidStatus
-
         valid = {e.value for e in CustomerBidStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid CustomerBid status: {value!r}")
@@ -345,9 +356,8 @@ class ExcessOutreach(Base):
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"), nullable=True)
     target_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
     submitted_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    channel = Column(String(20), default="email")  # email, phone, teams, marketplace, other
-    # sending, sent, opened, responded, bid, declined, no_response, failed, interrupted
-    status = Column(String(20), default="sent")
+    channel = Column(String(20), default=ExcessOutreachChannel.EMAIL)  # see constants.ExcessOutreachChannel
+    status = Column(String(20), default=ExcessOutreachStatus.SENT)  # see constants.ExcessOutreachStatus
     graph_message_id = Column(String(255), nullable=True)
     graph_conversation_id = Column(String(255), nullable=True)
     parts_included = Column(JSON, nullable=True)
@@ -373,8 +383,6 @@ class ExcessOutreach(Base):
     # --- Validators ---
     @validates("channel")
     def _validate_channel(self, _key, value):
-        from ..constants import ExcessOutreachChannel
-
         valid = {e.value for e in ExcessOutreachChannel}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessOutreach channel: {value!r}")
@@ -382,8 +390,6 @@ class ExcessOutreach(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import ExcessOutreachStatus
-
         valid = {e.value for e in ExcessOutreachStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessOutreach status: {value!r}")

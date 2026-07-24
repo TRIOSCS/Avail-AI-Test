@@ -1,28 +1,22 @@
-"""Tests for Excess Inventory (Resell) models and schemas.
+"""Tests for Excess Inventory (Resell) models.
 
-Verifies ExcessList / ExcessLineItem model creation, defaults, cascade deletes,
-and Pydantic validation.
+Verifies ExcessList / ExcessLineItem model creation, defaults, status
+validation, and cascade deletes. (The dead app/schemas/excess.py Pydantic
+module was deleted — routers use Form fields and services take kwargs — so
+the schema tests that exercised it are gone with it.)
 
 Called by: pytest
-Depends on: app.models.excess, app.schemas.excess, tests.conftest
+Depends on: app.constants, app.models.excess, tests.conftest
 """
 
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.constants import ExcessLineItemStatus
 from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer
-from app.schemas.excess import (
-    ExcessLineItemCreate,
-    ExcessListCreate,
-    ExcessListResponse,
-    ExcessListUpdate,
-    ExcessOfferCreate,
-    ExcessOfferResponse,
-)
 from tests.conftest import engine
 
 # Re-create tables for this test module (conftest handles it globally,
@@ -101,17 +95,11 @@ class TestExcessListModel:
 
 class TestExcessOfferValidUntilDropped:
     """D6: the dead ``excess_offers.valid_until`` column is dropped (migration 201) — the
-    model column and both unused schema fields go with it, or the fresh-DB drift gate
-    would emit a remove_column diff and fail."""
+    model column goes with it, or the fresh-DB drift gate would emit a remove_column
+    diff and fail."""
 
     def test_model_has_no_valid_until_column(self):
         assert "valid_until" not in ExcessOffer.__table__.columns
-
-    def test_create_schema_has_no_valid_until(self):
-        assert "valid_until" not in ExcessOfferCreate.model_fields
-
-    def test_response_schema_has_no_valid_until(self):
-        assert "valid_until" not in ExcessOfferResponse.model_fields
 
 
 class TestExcessLineItemModel:
@@ -125,6 +113,16 @@ class TestExcessLineItemModel:
     def test_default_condition_is_new(self, line_item: ExcessLineItem):
         assert line_item.condition == "New"
 
+    @pytest.mark.parametrize("bad_status", ["availble", "active", "bogus_status"])
+    def test_invalid_status_rejected(self, bad_status: str):
+        with pytest.raises(ValueError):
+            ExcessLineItem(excess_list_id=1, part_number="LM358N", quantity=1, status=bad_status)
+
+    def test_valid_enum_statuses_accepted(self):
+        for member in ExcessLineItemStatus:
+            li = ExcessLineItem(excess_list_id=1, part_number="LM358N", quantity=1, status=member)
+            assert li.status == member.value
+
 
 class TestCascadeDelete:
     def test_deleting_list_removes_line_items(
@@ -135,51 +133,3 @@ class TestCascadeDelete:
         db_session.commit()
         remaining = db_session.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
         assert remaining == []
-
-
-# ── Schema Tests ─────────────────────────────────────────────────────
-
-
-class TestExcessListSchemas:
-    def test_create_valid(self):
-        schema = ExcessListCreate(title="Test List", company_id=1)
-        assert schema.title == "Test List"
-
-    def test_create_blank_title_rejected(self):
-        with pytest.raises(ValidationError):
-            ExcessListCreate(title="   ", company_id=1)
-
-    def test_update_with_valid_status(self):
-        schema = ExcessListUpdate(status="active")
-        assert schema.status == "active"
-
-    def test_update_with_invalid_status_rejected(self):
-        with pytest.raises(ValidationError):
-            ExcessListUpdate(status="invalid_status")
-
-    def test_response_schema(self):
-        resp = ExcessListResponse(id=1, company_id=1, owner_id=1, title="Test", status="draft")
-        assert resp.total_line_items == 0
-
-
-class TestExcessLineItemSchemas:
-    def test_create_valid(self):
-        schema = ExcessLineItemCreate(part_number="LM358N", quantity=100)
-        assert schema.part_number == "LM358N"
-
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            pytest.param({"part_number": "  ", "quantity": 100}, id="blank_part_number"),
-            pytest.param({"part_number": "LM358N", "quantity": 0}, id="zero_quantity"),
-            pytest.param({"part_number": "LM358N", "quantity": 1, "asking_price": -1.0}, id="negative_price"),
-        ],
-    )
-    def test_create_invalid_rejected(self, kwargs):
-        with pytest.raises(ValidationError):
-            ExcessLineItemCreate(**kwargs)
-
-    def test_create_defaults(self):
-        schema = ExcessLineItemCreate(part_number="SN74HC595N", quantity=1)
-        assert schema.condition == "New"
-        assert schema.asking_price is None

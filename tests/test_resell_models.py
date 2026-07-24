@@ -1,29 +1,25 @@
-"""Tests for the additive Resell (resell-brokerage) schema foundation.
+"""Tests for the additive Resell (resell-brokerage) model foundation.
 
 Covers the inbound-offer models (ExcessOffer / ExcessOfferLine), the
 additive columns on the kept models (ExcessLineItem rollup + material_card_id,
-ExcessList.version), the StrEnum constants, and the Pydantic schemas. The kept
-ExcessList / ExcessLineItem models stay covered by tests/test_models_excess.py.
+ExcessList.version), and the StrEnum constants. The kept ExcessList /
+ExcessLineItem models stay covered by tests/test_models_excess.py. (The dead
+app/schemas/excess.py Pydantic module was deleted — routers use Form fields
+and services take kwargs — so the schema tests that exercised it are gone
+with it.)
 
 Called by: pytest
-Depends on: app.constants, app.models.excess, app.schemas.excess, tests.conftest
+Depends on: app.constants, app.models.excess, tests.conftest
 """
 
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.constants import ExcessListStatus, ExcessOfferScope, ExcessOfferStatus, OfferLineMatchStatus
 from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
-from app.schemas.excess import (
-    ExcessOfferCreate,
-    ExcessOfferLineCreate,
-    ExcessOfferLineResponse,
-    ExcessOfferResponse,
-)
 from tests.conftest import engine
 
 # Re-create tables for this test module (conftest handles it globally,
@@ -240,54 +236,3 @@ class TestAdditiveColumns:
 
     def test_excess_list_version_defaults_to_one(self, excess_list: ExcessList):
         assert excess_list.version == 1
-
-
-# ── Schemas ──────────────────────────────────────────────────────────
-
-
-class TestTradingSchemas:
-    def test_offer_line_create_valid(self):
-        schema = ExcessOfferLineCreate(mpn_raw="LM358N", quantity=100)
-        assert schema.mpn_raw == "LM358N"
-        assert schema.unit_price is None  # optional
-
-    def test_offer_line_create_quantity_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            ExcessOfferLineCreate(mpn_raw="LM358N", quantity=0)
-
-    def test_offer_create_per_line_carries_lines(self):
-        schema = ExcessOfferCreate(
-            scope="per_line",
-            lines=[ExcessOfferLineCreate(mpn_raw="LM358N", quantity=10, unit_price=0.35)],
-        )
-        assert schema.scope == "per_line"
-        assert len(schema.lines) == 1
-
-    def test_offer_create_take_all_carries_total(self):
-        schema = ExcessOfferCreate(scope="take_all", take_all_total_price=12500.0)
-        assert schema.scope == "take_all"
-        assert schema.take_all_total_price == 12500.0
-
-    def test_offer_create_invalid_scope_rejected(self):
-        with pytest.raises(ValidationError):
-            ExcessOfferCreate(scope="bogus")
-
-    def test_offer_response_from_attributes(self):
-        resp = ExcessOfferResponse(
-            id=1,
-            excess_list_id=1,
-            submitted_by=1,
-            scope="per_line",
-            status="open",
-        )
-        assert resp.id == 1
-
-    def test_offer_line_response_from_attributes(self):
-        resp = ExcessOfferLineResponse(
-            id=1,
-            offer_id=1,
-            mpn_raw="LM358N",
-            quantity=10,
-            match_status="matched",
-        )
-        assert resp.match_status == "matched"
