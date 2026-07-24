@@ -1207,6 +1207,71 @@ class TestAwardClosesCompetingOffers:
         db_session.refresh(late_competitor)
         assert late_competitor.status == ExcessOfferStatus.LATE
 
+    def test_revived_offer_status_awarded_close_at_none_is_late(
+        self, excess_list: ExcessList, cap_line: ExcessLineItem, broker: User
+    ):
+        """Deep-review #2 residual R3: ``_revived_offer_status`` only modeled close_at
+        lateness — a list closed by STATUS (e.g. ``awarded``, with another line STILL
+        awarded — i.e. genuinely resolved beyond just this reversal) with no
+        ``close_at`` ever recorded must still revive ``late``, not a blanket ``open``
+        that hides a resolved posting."""
+        cap_line.status = ExcessLineItemStatus.AWARDED  # some OTHER sale still stands
+        excess_list.status = ExcessListStatus.AWARDED
+        excess_list.close_at = None
+        offer = ExcessOffer(excess_list_id=excess_list.id, submitted_by=broker.id, scope="per_line", status="lost")
+
+        assert excess_service._revived_offer_status(excess_list, offer, competitor=True) == ExcessOfferStatus.LATE
+
+    def test_revived_offer_status_collecting_close_at_none_is_open(
+        self, excess_list: ExcessList, cap_line: ExcessLineItem, broker: User
+    ):
+        """Control: a list that is NOT closed by status (still ``collecting``) with no
+        ``close_at`` still revives ``open`` — the R3 fallback only fires when the list
+        currently reads resolved."""
+        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.close_at = None
+        offer = ExcessOffer(excess_list_id=excess_list.id, submitted_by=broker.id, scope="per_line", status="lost")
+
+        assert excess_service._revived_offer_status(excess_list, offer, competitor=True) == ExcessOfferStatus.OPEN
+
+    def test_unaward_on_close_at_null_awarded_list_revives_competitor_as_late(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
+    ):
+        """R3 end-to-end: a list that reaches ``awarded`` with no ``close_at`` ever set
+        (no D1 deadline configured) still revives a reopened competitor as ``late``, not
+        an indistinguishable ``open``, using the list's CURRENT resolved status as the
+        only remaining lateness signal."""
+        second_line = _line(db_session, excess_list, "R3-SECOND-LINE")
+        winner1 = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.90")
+        )
+        competitor = _open_offer(
+            db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, winner1.id, owner)
+        db_session.refresh(competitor)
+        assert competitor.status == ExcessOfferStatus.LOST  # precondition
+
+        winner2 = _open_offer(
+            db_session,
+            excess_list=excess_list,
+            submitter=broker,
+            line=second_line,
+            buyer=None,
+            unit_price=Decimal("0.70"),
+        )
+        db_session.commit()
+        excess_service.award_offer(db_session, winner2.id, owner)
+        db_session.refresh(excess_list)
+        assert excess_list.status == ExcessListStatus.AWARDED  # all lines now decided
+        assert excess_list.close_at is None  # no D1 deadline was ever configured
+
+        excess_service.unaward_offer(db_session, winner1.id, owner)
+
+        db_session.refresh(competitor)
+        assert competitor.status == ExcessOfferStatus.LATE
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  POST withdraw endpoint (M2)
