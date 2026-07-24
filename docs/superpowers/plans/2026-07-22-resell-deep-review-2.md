@@ -318,6 +318,8 @@ CLAUDE.md mandates StrEnum constants from app/constants.py for all status values
 
 **Fix:** Use `default=CustomerBidStatus.DRAFT` (StrEnum value) for the column default, matching the constants convention used by the service.
 
+**FIXED 2026-07-24 (P3 batch PR).** CustomerBid.status column default now uses `CustomerBidStatus.DRAFT` (imported from app.constants at module top) instead of the raw string; client-side default only, no migration. Review follow-up: the seven sibling raw-string Column defaults in the same file (ExcessList.status, ExcessLineItem.status, ExcessOffer.scope/status, ExcessOfferLine.match_status, ExcessOutreach.channel/status) were converted to their StrEnum members in the same pass, and the validators now use the module-top enum imports instead of shadowing local imports — value-identical, no migration.
+
 
 ## F. Mirror & sightings integration
 
@@ -355,6 +357,8 @@ fast_search's sightings group joins Sighting → Requirement and carries requisi
 Phase 5 (#18, migration 199) moved the mirror upsert to line-identity (Sighting.excess_line_item_id — implemented in _find_mirror at lines 128-145). But the module docstring's 'Dedup trap' paragraph still states 'The mirror upserts by (source_company_id, material_card_id)', and the update-path comment in mirror_line repeats it. A maintainer following the module header (the CLAUDE.md-mandated authoritative file docs) would reason about duplicate-part collapse and sibling-list wipes from the pre-199 model — the precise behavior finding #18 fixed.
 
 **Fix:** Rewrite both comments to name the excess_line_item_id line-identity key (mirroring the accurate docstrings already on _find_mirror/mirror_line/retire_line).
+
+**FIXED 2026-07-24 (P3 batch PR).** Rewrote the module docstring's "Dedup trap" paragraph and the mirror_line update-path comment to describe the `Sighting.excess_line_item_id` line-identity upsert key (#18, migration 199), replacing the retired `(source_company_id, material_card_id)` description.
 
 ### 59. [P3] L3 vendor-affinity aggregation counts mirror rows — suggests synthetic 'Customer Excess' as a supplier
 **Where:** `app/services/vendor_affinity_service.py:187` (dimension: gap:mirror-consumers)
@@ -404,12 +408,16 @@ Every other status-bearing resell model validates against its StrEnum via @valid
 
 **Fix:** Add the same @validates("status") pattern validating against ExcessLineItemStatus, plus a model test mirroring tests/test_resell_models.py's invalid-status cases.
 
+**FIXED 2026-07-24 (P3 batch PR).** Added `@validates("status")` on ExcessLineItem validating against ExcessLineItemStatus (same pattern as the sibling models), with TDD-first tests in tests/test_models_excess.py covering invalid raw strings rejected and every enum member accepted.
+
 ### 53. [P3] app/schemas/excess.py is dead to app code and drifted — ExcessListUpdate still whitelists remapped legacy statuses, and tests lock the drift in
 **Where:** `app/schemas/excess.py:44` (dimension: data-tests)
 
 No router or service imports anything from app/schemas/excess.py — routers use Form fields and services take kwargs (grep: the only consumers are tests/test_models_excess.py and tests/test_resell_models.py), yet the header claims "Called by: routers/resell.py". The module has drifted from the reworked model: ExcessListUpdate.status is a raw-string Literal (violating the StrEnum convention) that still permits "active" and "bidding" — the exact legacy statuses migration 193 remapped away and the publish guard rejects — and ExcessListResponse omits open_at/close_at although the D1 posting window is now a real model feature. tests/test_models_excess.py:152-154 (test_update_with_valid_status) asserts ExcessListUpdate(status="active") is VALID, i.e. assertion theater that actively guards a contradiction of the phase-1 lifecycle cutover.
 
 **Fix:** Either wire the schemas into the routes or delete the unused ones; at minimum drop "active"/"bidding" from the Literal (use ExcessListStatus values), fix the header comment, and retarget the tests so they stop enshrining legacy statuses.
+
+**FIXED 2026-07-24 (P3 batch PR).** Repo-wide grep re-confirmed the only importers were tests/test_models_excess.py and tests/test_resell_models.py, so the dead app/schemas/excess.py module was DELETED and the schema-only test classes (incl. the legacy-status assertion theater) removed from both files, keeping all genuine ORM-model tests.
 
 ### 54. [P3] Stale posting-window comment on the ExcessList model contradicts the phase-5 D1 behavior it sits next to
 **Where:** `app/models/excess.py:62` (dimension: data-tests)
@@ -418,12 +426,16 @@ The model comment still describes the pre-phase-5 semantics: "open_at stamped on
 
 **Fix:** Rewrite the comment: close_at is the optional owner-set deadline (create/update, draft scope), preserved on publish, and stamped at resolution by close/expire.
 
+**FIXED 2026-07-24 (P3 batch PR).** Rewrote the ExcessList posting-window comment (and the matching APP_MAP_DATABASE.md bullet) to the phase-5 D1 semantics: close_at is the optional owner-set draft deadline; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it (it only fires once a set close_at has passed). Note: this Fix line's own "preserved on publish ... stamped by close/expire" wording was imprecise — the code (excess_mirror.publish_list, excess_service.close_list/expire_overdue_lists) is the authority the comment now matches.
+
 ### 39. [P3] recompute_line_rollup docstring omits LATE from the counted statuses
 **Where:** `app/services/excess_service.py:651` (dimension: services-core)
 
 _ROLLUP_OFFER_STATUSES (line 426) is (OPEN, WON, LATE), with a lengthy comment explaining why LATE must be included, but recompute_line_rollup's docstring still says the rollup counts lines 'whose parent offer is in an active state (open/won)'. A reader trusting the function's own contract would conclude late bids are excluded from best_offer_unit_price/offer_count — the opposite of the implemented (and deliberate) behavior.
 
 **Fix:** Change the docstring to '(open/won/late)' to match _ROLLUP_OFFER_STATUSES.
+
+**FIXED 2026-07-24 (P3 batch PR).** recompute_line_rollup's docstring now says "(open/won/late — `_ROLLUP_OFFER_STATUSES`)" and notes why LATE counts, matching the implemented constant.
 
 
 ## I. Router/service discipline & guards
@@ -476,6 +488,8 @@ resell_add_line constructs the ExcessLineItem ORM row, normalizes the MPN, calls
 The file ends (lines 1356-1363) with two full section-header banners — '# Phase 4: Stats' and '# Phase 4: Normalization backfill' — followed by nothing. The functions they once introduced no longer exist in the file (the router computes its own stat strip in _stat_strip, resell.py:261). The empty banners mislead a reader into hunting for stats/backfill logic here and violate the codebase's own file-header hygiene.
 
 **Fix:** Delete the two empty section banners.
+
+**FIXED 2026-07-24 (P3 batch PR).** Deleted the two dead "Phase 4: Stats" / "Phase 4: Normalization backfill" banners at the end of excess_service.py; the file now ends at the last real function.
 
 ### 48. [P3] Draft-list existence oracle: owner-only endpoints return 403 (not 404) for another user's private draft
 **Where:** `app/routers/resell.py:896` (dimension: security-access)

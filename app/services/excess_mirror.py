@@ -17,9 +17,11 @@ Why a virtual requirement: ``Sighting.requirement_id`` is NOT NULL but an excess
 
 Dedup trap: ``search_service._save_sightings`` deletes sightings by
       ``(requirement_id, source_type)``. We deliberately do NOT route through that path.
-      The mirror upserts by ``(source_company_id, material_card_id)`` so a re-publish
-      updates the line's own row and never wipes a SIBLING list's ``customer_excess``
-      rows. (Each list also gets its own virtual requirement, a second layer of safety.)
+      The mirror upserts by line identity — ``Sighting.excess_line_item_id`` (the line's
+      own id) scoped to ``source_type='customer_excess'`` (#18, migration 199) — so a
+      re-sync updates each line's OWN row, keeps duplicate-part lines on one list as
+      distinct Sightings, and never wipes a SIBLING list's ``customer_excess`` rows.
+      (Each list also gets its own virtual requirement, a second layer of safety.)
 
 Calls: models (ExcessList, ExcessLineItem, Requisition, Requirement, Sighting),
        sighting_ingest.sighting_from_row (the dict→ORM single source of truth),
@@ -199,7 +201,7 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         sighting = sighting_from_row(requirement.id, row)
     else:
         # Re-bind the existing row to the freshly built values (in-place update keeps the
-        # same Sighting id — proves the (source_company_id, material_card_id) upsert).
+        # same Sighting id — proves the excess_line_item_id line-identity upsert).
         sighting = sighting_from_row(requirement.id, row)
         existing.requirement_id = requirement.id
         existing.vendor_name = sighting.vendor_name

@@ -934,7 +934,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - company_id -> companies, owner_id -> users
 - Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy active/bidding enum members remain defined but migration 193 remapped all legacy rows -> open/collecting; closed kept distinct from bid_out)
 - version (int, default 1) — lock-on-post; a revision bumps version
-- open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
+- open_at (stamped on publish), close_at (phase-5 D1: the optional owner-set "Offers close by" deadline — settable at create/update on a draft; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it, it only fires once a set close_at has passed) — posting window (Chunk E)
 
 **`excess_line_items`** — Individual parts in an excess list
 - part_number, description, manufacturer, quantity, asking_price, demand_match_count
