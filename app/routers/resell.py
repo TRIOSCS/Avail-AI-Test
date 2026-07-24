@@ -999,6 +999,12 @@ async def resell_assemble_bid(
         }
         for s in raw
     ]
+    # A missing/garbage/out-of-range excess_line_item_id coerces to None (_to_int) — 400
+    # here, consistent with the adjacent payload-shape guards above, rather than letting
+    # it reach build_bid_back's foreign-line guard as a confusing 404 "Line item None is
+    # not part of list N" (finding #56, THEME E).
+    if any(sel["excess_line_item_id"] is None for sel in selections):
+        raise HTTPException(400, "Invalid bid payload")
     bid_back_service.build_bid_back(db, list_id=list_id, owner=user, selections=selections)
     el = excess_service.get_excess_list(db, list_id)
     return template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))

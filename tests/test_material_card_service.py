@@ -190,6 +190,19 @@ class TestSerializeMaterialCard:
         assert len(result["sightings"]) == 1
         assert result["sightings"][0]["vendor_name"] == "Good Vendor"
 
+    def test_excludes_resell_mirror_sighting(self, db_session: Session, test_material_card, test_requisition):
+        """The material-card API's sightings list excludes the resell mirror's synthetic
+        'customer_excess' rows — this card-scoped surface shows REAL vendor intelligence
+        only (finding #F3, THEME F deep-review #2)."""
+        req_item = test_requisition.requirements[0]
+        _make_sighting(db_session, req_item.id, test_material_card.id, "Good Vendor", source_type="brokerbin")
+        _make_sighting(db_session, req_item.id, test_material_card.id, "Customer Excess", source_type="customer_excess")
+        db_session.commit()
+
+        result = serialize_material_card(test_material_card, db_session)
+        assert len(result["sightings"]) == 1
+        assert result["sightings"][0]["vendor_name"] == "Good Vendor"
+
     def test_filters_low_confidence_tags(self, db_session: Session, test_material_card):
         tag_high = _make_tag(db_session, "Semiconductors", "commodity")
         tag_low = _make_tag(db_session, "Passive", "commodity")

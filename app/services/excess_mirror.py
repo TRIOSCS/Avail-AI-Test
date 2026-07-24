@@ -445,7 +445,16 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     inactive (awarded / withdrawn / qty→0) OR when the LIST's posting window has closed
     (bid_out / awarded / closed / expired) — a closed posting stops advertising ALL its
     supply as live, no matter the per-line status (M5). Flushes; does NOT commit (the
-    caller / publish_list commits). Returns ``{"mirrored": int, "retired": int}``.
+    caller / publish_list commits).
+
+    Eagerly rebuilds (finding #F4, THEME F deep-review #2) any REAL requirement's
+    ``VendorSightingSummary`` that could aggregate a newly-(re)mirrored line's supply —
+    retire already does this per-line (finding #27); a revive (list re-published, a late
+    offer un-awarded, etc.) must get the same treatment or a real requirement's vendor
+    board stays stale (missing the "customer excess" row) until an unrelated search
+    happens to touch the same MPN. Uses ``skip_ai_estimates=True`` so this never issues a
+    synchronous Claude call inside a caller's locked transaction (award/unaward/publish
+    all hold the M9 row lock here). Returns ``{"mirrored": int, "retired": int}``.
     """
     ensure_virtual_requirement(db, excess_list)
     lines = db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id).all()
@@ -453,13 +462,18 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     posting_closed = _posting_is_closed(excess_list)
     mirrored = 0
     retired = 0
+    revived_card_ids: set[int | None] = set()
     for line in lines:
         if not posting_closed and _line_is_active(line):
             if mirror_line(db, line) is not None:
                 mirrored += 1
+                revived_card_ids.add(line.material_card_id)
         else:
             retire_line(db, line)
             retired += 1
+
+    if revived_card_ids:
+        _invalidate_vendor_summaries_for_cards(db, revived_card_ids)
 
     db.flush()
     logger.info(
