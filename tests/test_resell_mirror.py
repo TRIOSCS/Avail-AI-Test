@@ -714,6 +714,58 @@ def test_retire_line_invalidates_real_requirement_vendor_summary(db_session: Ses
     assert surviving is None, "stale 'customer excess' summary survived the mirror retire"
 
 
+def test_retire_invalidation_skips_ai_qty_estimates(db_session: Session, monkeypatch):
+    """The retire-path summary invalidation must NEVER make a synchronous Claude call —
+    it runs inside user-facing award/close/withdraw transactions (often holding the M9
+    award lock).
+
+    Deterministic no-AI estimation there; the next routine search rebuild refreshes with
+    the full estimator.
+    """
+    from unittest.mock import MagicMock
+
+    from app.services import sighting_aggregation
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
+    line = _lines(db_session, el)[0]
+    sync_list_mirror(db_session, el)
+    db_session.commit()
+
+    real_req = Requisition(name="Buyer Req AI", status="open", created_by=owner.id)
+    db_session.add(real_req)
+    db_session.flush()
+    real_requirement = Requirement(
+        requisition_id=real_req.id,
+        primary_mpn="LM358N",
+        normalized_mpn=normalize_mpn_key("LM358N"),
+        sourcing_status="open",
+    )
+    db_session.add(real_requirement)
+    db_session.flush()
+    # Three non-null quantities from one real vendor: the exact shape that sends the
+    # full estimator to Claude, so this test fails if the retire path reaches it.
+    for qty in (10, 20, 30):
+        db_session.add(
+            Sighting(
+                requirement_id=real_requirement.id,
+                vendor_name="Real Vendor",
+                qty_available=qty,
+                source_type="api",
+            )
+        )
+    db_session.commit()
+
+    ai_spy = MagicMock(return_value={"qty": 999, "approximate": True})
+    monkeypatch.setattr(sighting_aggregation, "_estimate_qty_with_ai", ai_spy)
+
+    retire_line(db_session, line)
+    db_session.commit()
+
+    assert ai_spy.call_count == 0, "retire-path invalidation reached the AI qty estimator"
+
+
 def test_teardown_invalidates_real_requirement_vendor_summary(db_session: Session):
     """teardown_list_mirror (list/company deletion) also drops the stale 'customer
     excess' VendorSightingSummary on any real requirement it was advertised on."""

@@ -318,7 +318,10 @@ def _invalidate_vendor_summaries_for_cards(db: Session, material_card_ids: set[i
         rid for (rid,) in db.query(Requirement.id).filter(Requirement.normalized_mpn.in_(norm_keys)).all()
     ]
     for rid in requirement_ids:
-        rebuild_vendor_summaries(db, rid)
+        # skip_ai_estimates: this runs inside user-facing award/close/withdraw
+        # transactions (often holding the M9 award lock) — a synchronous Claude call
+        # here would stall the request; the next routine search rebuild re-estimates.
+        rebuild_vendor_summaries(db, rid, skip_ai_estimates=True)
     return len(requirement_ids)
 
 

@@ -736,3 +736,69 @@ class TestRebuildFromSightings:
         summaries = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).all()
         # All three vendors get summary rows, not just the one in the arg.
         assert len(summaries) == 3
+
+
+# ── Stale-summary sweep (finding #27) safety properties ──────────────
+
+
+class TestStaleSummarySweep:
+    def test_unscoped_rebuild_preserves_fully_unavailable_vendors_summary(self, db_session: Session, test_user):
+        """A vendor whose sightings are ALL marked unavailable keeps its summary row.
+
+        The sweep's staleness test must be availability-AGNOSTIC: the unavailability UI
+        (three-state vendor board) renders FROM these rows, so deleting them on the next
+        unscoped rebuild would erase the vendor from the board entirely. Stale means "no
+        sightings at all", never "no available sightings".
+        """
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", qty_available=100)
+        _make_sighting(db_session, item.id, vendor_name="Ghost Vendor", qty_available=50)
+        db_session.commit()
+
+        rebuild_vendor_summaries(db_session, item.id)
+        db_session.commit()
+        assert (
+            db_session.query(VendorSightingSummary)
+            .filter_by(requirement_id=item.id, vendor_name="ghost vendor")
+            .one_or_none()
+            is not None
+        )
+
+        for s in db_session.query(Sighting).filter(Sighting.vendor_name == "Ghost Vendor"):
+            s.is_unavailable = True
+        db_session.commit()
+
+        rebuild_vendor_summaries(db_session, item.id)
+        db_session.commit()
+
+        preserved = (
+            db_session.query(VendorSightingSummary)
+            .filter_by(requirement_id=item.id, vendor_name="ghost vendor")
+            .one_or_none()
+        )
+        assert preserved is not None, "fully-unavailable vendor must keep its summary row"
+
+    def test_unscoped_rebuild_drops_summary_when_vendor_has_no_sightings_at_all(self, db_session: Session, test_user):
+        """The #27 behavior stays: a vendor with ZERO remaining sightings (deleted, e.g.
+        a mirror retire) has its stale summary row swept on the next unscoped
+        rebuild."""
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", qty_available=100)
+        gone = _make_sighting(db_session, item.id, vendor_name="Ghost Vendor", qty_available=50)
+        db_session.commit()
+
+        rebuild_vendor_summaries(db_session, item.id)
+        db_session.commit()
+
+        db_session.delete(gone)
+        db_session.commit()
+
+        rebuild_vendor_summaries(db_session, item.id)
+        db_session.commit()
+
+        assert (
+            db_session.query(VendorSightingSummary)
+            .filter_by(requirement_id=item.id, vendor_name="ghost vendor")
+            .one_or_none()
+            is None
+        ), "vendor with no sightings at all must be swept"

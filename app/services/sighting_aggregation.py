@@ -33,6 +33,19 @@ def _score_to_tier(score: float | None) -> str:
     return "Poor"
 
 
+def _estimate_qty_no_ai(qty_values: list[int | None]) -> dict:
+    """Deterministic qty estimate — identical to the estimator's non-AI paths.
+
+    Returns {"qty": int | None, "approximate": bool}.
+    """
+    non_null = [q for q in qty_values if q is not None]
+    if not non_null:
+        return {"qty": None, "approximate": False}
+    if len(non_null) <= 2:
+        return {"qty": sum(non_null), "approximate": False}
+    return {"qty": max(non_null), "approximate": True}
+
+
 def _estimate_qty_with_ai(qty_values: list[int | None]) -> dict:
     """Use Claude Haiku to estimate total available qty from varied listings.
 
@@ -87,6 +100,7 @@ def rebuild_vendor_summaries(
     db: Session,
     requirement_id: int,
     vendor_names: list[str] | None = None,
+    skip_ai_estimates: bool = False,
 ) -> list[VendorSightingSummary]:
     """Rebuild VendorSightingSummary rows for the requirement.
 
@@ -118,14 +132,15 @@ def rebuild_vendor_summaries(
         rows = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(norm_keys)).all()
         card_ids = {r[0] for r in rows}
 
-    base_filter = [Sighting.is_unavailable.isnot(True)]
+    # Scope (which sightings belong to this requirement) is kept separate from the
+    # availability filter: the stale-row sweep below must see unavailable rows too.
     if card_ids:
-        base_filter.append(
-            (Sighting.material_card_id.in_(card_ids))
-            | ((Sighting.material_card_id.is_(None)) & (Sighting.requirement_id == requirement_id))
+        scope_filter = (Sighting.material_card_id.in_(card_ids)) | (
+            (Sighting.material_card_id.is_(None)) & (Sighting.requirement_id == requirement_id)
         )
     else:
-        base_filter.append(Sighting.requirement_id == requirement_id)
+        scope_filter = Sighting.requirement_id == requirement_id
+    base_filter = [Sighting.is_unavailable.isnot(True), scope_filter]
 
     query = db.query(Sighting).filter(*base_filter)
     if vendor_names:
@@ -163,7 +178,7 @@ def rebuild_vendor_summaries(
         max_score = max(scores) if scores else None
         avg_price = sum(prices) / len(prices) if prices else None
         best_price = min(prices) if prices else None
-        qty_result = _estimate_qty_with_ai(qtys)
+        qty_result = _estimate_qty_no_ai(qtys) if skip_ai_estimates else _estimate_qty_with_ai(qtys)
         estimated_qty = qty_result["qty"]
         if qty_result["approximate"]:
             logger.info("Approximate qty {} for vendor {} (AI fallback)", estimated_qty, vn)
@@ -205,16 +220,23 @@ def rebuild_vendor_summaries(
             db.add(summary)
             results.append(summary)
 
-    # Drop stale summary rows for vendors no longer backed by ANY live sighting on this
+    # Drop stale summary rows for vendors no longer backed by ANY sighting on this
     # requirement — an unscoped (vendor_names=None) rebuild is authoritative for the whole
-    # requirement, so a row absent from `groups` means that vendor's last sighting was
-    # deleted/retired (e.g. an excess-mirror retire, finding #27) and the row is now a
-    # stale advertisement. A vendor_names-scoped rebuild only ever intends to refresh that
-    # subset, so it must not delete rows for vendors it didn't touch.
+    # requirement, so staleness means the vendor's last sighting row was deleted/retired
+    # (e.g. an excess-mirror retire, finding #27). The existence check is availability-
+    # AGNOSTIC (it must NOT reuse `groups`, which excludes is_unavailable rows): the
+    # unavailability three-state vendor board renders FROM these summary rows, so a vendor
+    # merely marked unavailable keeps its row. A vendor_names-scoped rebuild only ever
+    # intends to refresh that subset, so it must not delete rows for vendors it didn't
+    # touch.
     if vendor_names is None:
+        live_names = {
+            (vn or "unknown").lower().strip()
+            for (vn,) in db.query(Sighting.vendor_name).filter(scope_filter).distinct().all()
+        }
         stale_query = db.query(VendorSightingSummary).filter(VendorSightingSummary.requirement_id == requirement_id)
-        if groups:
-            stale_query = stale_query.filter(~VendorSightingSummary.vendor_name.in_(list(groups.keys())))
+        if live_names:
+            stale_query = stale_query.filter(~VendorSightingSummary.vendor_name.in_(list(live_names)))
         for row in stale_query.all():
             db.delete(row)
 
