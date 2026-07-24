@@ -1969,6 +1969,11 @@ def _buyer_panel_context(
 def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
     """Context for the unified Outreach tracker: rows (newest first) + the glance
     summary."""
+    # B7: reclassify any of THIS list's rows stuck in ``sending`` past the staleness
+    # threshold before rendering, so a row orphaned by a dead background send job becomes
+    # actionable (Retry-able) the instant the tab is opened, instead of waiting on the
+    # once-nightly sweep.
+    resell_outreach_service.reclassify_stale_sending(db, excess_list_id=el.id)
     rows = (
         db.query(ExcessOutreach)
         .filter(ExcessOutreach.excess_list_id == el.id)
@@ -2307,22 +2312,20 @@ async def resell_retry_outreach(
         raise HTTPException(404, "Outreach not found")
     if row.channel != ExcessOutreachChannel.EMAIL:
         raise HTTPException(409, "Only an email outreach can be retried")
+    # B7: a row stuck in ``sending`` past the staleness threshold (its background send job
+    # died) becomes actionable HERE instead of waiting for the once-nightly sweep — without
+    # this a genuinely-orphaned row hard-409s below for up to ~24h even though the code's
+    # own threshold already knows it is orphaned.
+    resell_outreach_service.reclassify_stale_sending(db, outreach_id=row.id)
     if row.status not in _RETRYABLE_OUTREACH:
         raise HTTPException(409, "Only a failed or interrupted outreach can be retried")
 
     line_count = db.scalar(select(func.count(ExcessLineItem.id)).where(ExcessLineItem.excess_list_id == el.id)) or 0
     subject = _neutral_outreach_subject(line_count)
     body = _RETRY_BODY
-    # Optimistic flip so the tracker shows ``sending`` + self-polls to the final state.
-    # Refresh ``created_at`` to now so the row is not "born stale": the nightly stale-sending
-    # sweeper selects on ``created_at < now - 30min`` (the sending-started proxy), and the
-    # row's created_at still holds the original, possibly hours-old enqueue time — without
-    # this the sweeper could flip the in-flight retry to ``interrupted`` mid-resend.
-    row.status = ExcessOutreachStatus.SENDING
-    row.send_error = None
-    row.sent_at = None
-    row.created_at = datetime.now(UTC)
-    db.commit()
+    # B36: the optimistic sending-flip is now a service function (thin-router discipline —
+    # business logic lives in resell_outreach_service, not the router).
+    resell_outreach_service.mark_outreach_retrying(db, row)
 
     background_tasks.add_task(
         resell_outreach_service.retry_outreach_send,
@@ -2359,19 +2362,24 @@ def _load_outreach_for_owner(
 def _load_manual_outreach_for_owner(
     db: Session, list_id: int, outreach_id: int, user: User
 ) -> tuple[ExcessList, ExcessOutreach]:
-    """Owner-gated load of one MANUAL-channel outreach row (finding #12).
+    """Owner-gated load of a MANUAL (or degraded-email) outreach row (finding #12; B3).
 
     404 (not 403) when the row is missing or belongs to another list — existence is not
-    revealed. 409 for an ``email`` row: an emailed touch has a thread, so its outcome is
-    logged via the reply viewer / inbox matcher, not the manual-log path. Shared by the
-    manual log-response / log-bid routes.
+    revealed. 409 for an email row that HAS a thread (``graph_conversation_id`` set): an
+    emailed touch with a thread has its outcome logged via the reply viewer / inbox
+    matcher, not the manual-log path. A DEGRADED email row — status SENT/FAILED but no
+    ``graph_conversation_id`` ever captured (the Graph-id lookup came back empty at send
+    time) — has no thread to view and is otherwise a hard dead end (the reply viewer 404s
+    it too, per ``_load_outreach_for_owner``): it is explicitly allowed through here so the
+    manual log-response/log-bid path is its one remaining outcome-logging route. Shared by
+    the manual log-response / log-bid routes.
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
     outreach = db.get(ExcessOutreach, outreach_id)
     if outreach is None or outreach.excess_list_id != el.id:
         raise HTTPException(404, "Outreach not found")
-    if outreach.channel == ExcessOutreachChannel.EMAIL:
+    if outreach.channel == ExcessOutreachChannel.EMAIL and outreach.graph_conversation_id:
         raise HTTPException(409, "Use the reply viewer to log an email outreach's outcome")
     return el, outreach
 

@@ -870,17 +870,37 @@ def test_manual_log_bid_form_uses_honest_toast_copy(client, db_session, trader_u
     assert "Offer created from reply" not in resp.text
 
 
-def test_manual_log_rejects_email_channel_row(client, db_session, trader_user, posted_list):
-    """An EMAIL-channel row must use the reply viewer, not the manual-log route →
-    409."""
+def test_manual_log_rejects_email_channel_row_with_thread(client, db_session, trader_user, posted_list):
+    """An EMAIL-channel row that HAS a thread (graph_conversation_id set) must use the
+    reply viewer, not the manual-log route → 409."""
     buyer = _reachable_buyer(db_session, "Email Buyer", engagement=10.0, commodity=_CAP)
     row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="email")
+    row.graph_conversation_id = "conv-thread-1"
+    db_session.commit()
     restore = _own(db_session, None, trader_user)
     try:
         resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
     finally:
         restore()
     assert resp.status_code == 409
+
+
+def test_manual_log_allows_degraded_email_row_without_thread(client, db_session, trader_user, posted_list):
+    """Finding B3: a DEGRADED email row (status sent, no graph_conversation_id ever
+    captured) has no thread to view — the reply viewer 404s it too — so the manual
+    log-response/log-bid path is its one remaining outcome-logging route and must be
+    ALLOWED, not 409."""
+    buyer = _reachable_buyer(db_session, "Degraded Email Buyer", engagement=10.0, commodity=_CAP)
+    row = _manual_outreach(db_session, posted_list, trader_user, buyer, channel="email")
+    assert row.graph_conversation_id is None  # the degraded shape
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(f"/api/resell/{posted_list.id}/outreach/{row.id}/log-response")
+    finally:
+        restore()
+    assert resp.status_code == 200
+    db_session.refresh(row)
+    assert row.status == ExcessOutreachStatus.RESPONDED
 
 
 def test_log_response_owner_gated(client, db_session, trader_user, posted_list):

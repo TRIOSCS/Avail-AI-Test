@@ -361,6 +361,12 @@ class ExcessOutreach(Base):
     # the default text for those).
     send_subject = Column(Text, nullable=True)
     send_body = Column(Text, nullable=True)
+    # The recipient address ACTUALLY used at send/enqueue time (deep-review #2 B5): the
+    # row previously never persisted who it went to, so retry/reconcile re-resolved the
+    # card's CURRENT primary email — a card-email change between send and retry queries
+    # the WRONG mailbox. NULL on legacy rows and manual-log rows (no email sent); those
+    # fall back to the card's current email. Never overwritten after the send/enqueue.
+    recipient_email = Column(Text, nullable=True)
     sent_at = Column(UTCDateTime, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
