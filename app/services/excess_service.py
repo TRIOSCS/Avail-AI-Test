@@ -735,7 +735,8 @@ def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
     HIGHEST ``unit_price`` — the most money for the parts and the correct award target
     (this is the inverse of the sourcing side, where best = cheapest supply). Sets
     ``best_offer_unit_price`` to the max ``unit_price`` across the line's ExcessOfferLines
-    whose parent offer is in an active state (open/won) and whose ``unit_price`` is not
+    whose parent offer is in a counted state (open/won/late — ``_ROLLUP_OFFER_STATUSES``;
+    a late bid stays a live, awardable competitor) and whose ``unit_price`` is not
     null (None when no priced active offers); ``best_offer_id`` to the ExcessOffer
     providing that max; ``offer_count`` to the number of DISTINCT offers touching the line
     (priced or not). Idempotent — safe to call after a land or a withdraw.
@@ -2008,13 +2009,3 @@ def expire_overdue_lists(db: Session, *, now: datetime | None = None) -> int:
         len(overdue),
     )
     return expired_count
-
-
-# ---------------------------------------------------------------------------
-# Phase 4: Stats
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Phase 4: Normalization backfill
-# ---------------------------------------------------------------------------

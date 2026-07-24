@@ -318,6 +318,8 @@ CLAUDE.md mandates StrEnum constants from app/constants.py for all status values
 
 **Fix:** Use `default=CustomerBidStatus.DRAFT` (StrEnum value) for the column default, matching the constants convention used by the service.
 
+**FIXED 2026-07-24 (P3 batch PR).** CustomerBid.status column default now uses `CustomerBidStatus.DRAFT` (imported from app.constants at module top) instead of the raw string; client-side default only, no migration. Review follow-up: the seven sibling raw-string Column defaults in the same file (ExcessList.status, ExcessLineItem.status, ExcessOffer.scope/status, ExcessOfferLine.match_status, ExcessOutreach.channel/status) were converted to their StrEnum members in the same pass, and the validators now use the module-top enum imports instead of shadowing local imports — value-identical, no migration.
+
 
 ## F. Mirror & sightings integration
 
@@ -364,7 +366,7 @@ Phase 5 (#18, migration 199) moved the mirror upsert to line-identity (Sighting.
 
 **Fix:** Rewrite both comments to name the excess_line_item_id line-identity key (mirroring the accurate docstrings already on _find_mirror/mirror_line/retire_line).
 
-**Resolution:** The module docstring's "Dedup trap" paragraph and `mirror_line`'s in-place-update comment now both name the `excess_line_item_id` line-identity key (finding #18, migration 199) instead of the retired `(source_company_id, material_card_id)` key. See `app/services/excess_mirror.py`.
+**FIXED 2026-07-24 (P3 batch PR).** Rewrote the module docstring's "Dedup trap" paragraph and the mirror_line update-path comment to describe the `Sighting.excess_line_item_id` line-identity upsert key (#18, migration 199), replacing the retired `(source_company_id, material_card_id)` description.
 
 ### 59. [P3] L3 vendor-affinity aggregation counts mirror rows — suggests synthetic 'Customer Excess' as a supplier — **FIXED**
 **Where:** `app/services/vendor_affinity_service.py:187` (dimension: gap:mirror-consumers)
@@ -416,12 +418,16 @@ Every other status-bearing resell model validates against its StrEnum via @valid
 
 **Fix:** Add the same @validates("status") pattern validating against ExcessLineItemStatus, plus a model test mirroring tests/test_resell_models.py's invalid-status cases.
 
+**FIXED 2026-07-24 (P3 batch PR).** Added `@validates("status")` on ExcessLineItem validating against ExcessLineItemStatus (same pattern as the sibling models), with TDD-first tests in tests/test_models_excess.py covering invalid raw strings rejected and every enum member accepted.
+
 ### 53. [P3] app/schemas/excess.py is dead to app code and drifted — ExcessListUpdate still whitelists remapped legacy statuses, and tests lock the drift in
 **Where:** `app/schemas/excess.py:44` (dimension: data-tests)
 
 No router or service imports anything from app/schemas/excess.py — routers use Form fields and services take kwargs (grep: the only consumers are tests/test_models_excess.py and tests/test_resell_models.py), yet the header claims "Called by: routers/resell.py". The module has drifted from the reworked model: ExcessListUpdate.status is a raw-string Literal (violating the StrEnum convention) that still permits "active" and "bidding" — the exact legacy statuses migration 193 remapped away and the publish guard rejects — and ExcessListResponse omits open_at/close_at although the D1 posting window is now a real model feature. tests/test_models_excess.py:152-154 (test_update_with_valid_status) asserts ExcessListUpdate(status="active") is VALID, i.e. assertion theater that actively guards a contradiction of the phase-1 lifecycle cutover.
 
 **Fix:** Either wire the schemas into the routes or delete the unused ones; at minimum drop "active"/"bidding" from the Literal (use ExcessListStatus values), fix the header comment, and retarget the tests so they stop enshrining legacy statuses.
+
+**FIXED 2026-07-24 (P3 batch PR).** Repo-wide grep re-confirmed the only importers were tests/test_models_excess.py and tests/test_resell_models.py, so the dead app/schemas/excess.py module was DELETED and the schema-only test classes (incl. the legacy-status assertion theater) removed from both files, keeping all genuine ORM-model tests.
 
 ### 54. [P3] Stale posting-window comment on the ExcessList model contradicts the phase-5 D1 behavior it sits next to
 **Where:** `app/models/excess.py:62` (dimension: data-tests)
@@ -430,12 +436,16 @@ The model comment still describes the pre-phase-5 semantics: "open_at stamped on
 
 **Fix:** Rewrite the comment: close_at is the optional owner-set deadline (create/update, draft scope), preserved on publish, and stamped at resolution by close/expire.
 
+**FIXED 2026-07-24 (P3 batch PR).** Rewrote the ExcessList posting-window comment (and the matching APP_MAP_DATABASE.md bullet) to the phase-5 D1 semantics: close_at is the optional owner-set draft deadline; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it (it only fires once a set close_at has passed). Note: this Fix line's own "preserved on publish ... stamped by close/expire" wording was imprecise — the code (excess_mirror.publish_list, excess_service.close_list/expire_overdue_lists) is the authority the comment now matches.
+
 ### 39. [P3] recompute_line_rollup docstring omits LATE from the counted statuses
 **Where:** `app/services/excess_service.py:651` (dimension: services-core)
 
 _ROLLUP_OFFER_STATUSES (line 426) is (OPEN, WON, LATE), with a lengthy comment explaining why LATE must be included, but recompute_line_rollup's docstring still says the rollup counts lines 'whose parent offer is in an active state (open/won)'. A reader trusting the function's own contract would conclude late bids are excluded from best_offer_unit_price/offer_count — the opposite of the implemented (and deliberate) behavior.
 
 **Fix:** Change the docstring to '(open/won/late)' to match _ROLLUP_OFFER_STATUSES.
+
+**FIXED 2026-07-24 (P3 batch PR).** recompute_line_rollup's docstring now says "(open/won/late — `_ROLLUP_OFFER_STATUSES`)" and notes why LATE counts, matching the implemented constant.
 
 
 ## I. Router/service discipline & guards
@@ -489,6 +499,8 @@ The file ends (lines 1356-1363) with two full section-header banners — '# Phas
 
 **Fix:** Delete the two empty section banners.
 
+**FIXED 2026-07-24 (P3 batch PR).** Deleted the two dead "Phase 4: Stats" / "Phase 4: Normalization backfill" banners at the end of excess_service.py; the file now ends at the last real function.
+
 ### 48. [P3] Draft-list existence oracle: owner-only endpoints return 403 (not 404) for another user's private draft
 **Where:** `app/routers/resell.py:896` (dimension: security-access)
 
@@ -506,12 +518,16 @@ seed_excess_lists constructs ExcessLineItem with market_price= and demand_score=
 
 **Fix:** Delete the market_price/demand_score kwargs (and modernize the section to post-rework statuses while touching it).
 
+**FIXED 2026-07-24 (P3 batch PR).** Dropped the removed market_price/demand_score kwargs and rewrote seed_excess_lists together with #63 (post-rework lifecycle via the real service chokepoints); also remapped REQ_CONFIGS/quote_configs off removed RequisitionStatus members (ACTIVE/SOURCING/QUOTING/REOPENED/ARCHIVED — the module didn't even import) and fixed the summary SQL still selecting from the dropped `bids` table.
+
 ### 30. [P2] scripts/seed_test_data.py has no production guard, unlike the resell demo seeder
 **Where:** `scripts/seed_test_data.py:657` (dimension: gap:demo-seeder)
 
 seed_resell_demo.main() refuses to run without ALLOW_SAMPLE_DATA_SEED (seed_resell_demo.py:372-378, covered by tests/test_seed_resell_demo_guard.py), and the header says it 'mirrors the AVSAMPLE seed guard'. But scripts/seed_test_data.py — which seeds excess lists, offers, quotes, buy plans and companies — opens app.database.SessionLocal directly with no opt-in check at all, and its own header (line 15) instructs running it inside the production app container: 'docker compose exec app python scripts/seed_test_data.py'. Whatever DATABASE_URL the container has (i.e. prod) gets synthetic data injected ungated. Today the TypeError in finding #1 accidentally aborts it, but once that is fixed a mistaken run seeds prod with pre-rework demo shapes.
 
 **Fix:** Add the same ALLOW_SAMPLE_DATA_SEED refusal (checked before SessionLocal) to seed_test_data.main(), plus a guard test mirroring test_seed_resell_demo_guard.py.
+
+**FIXED 2026-07-24 (P3 batch PR).** seed_test_data.main() now refuses with SystemExit(2) before opening SessionLocal unless ALLOW_SAMPLE_DATA_SEED is truthy (same flag/semantics as the other seeders), covered by tests/test_seed_test_data_guard.py mirroring the resell-demo guard tests.
 
 ### 60. [P3] Demo 'awarded' list is stamped awarded directly — zero offers, no WON offer, violating the M9 award invariant
 **Where:** `app/management/seed_resell_demo.py:312` (dimension: gap:demo-seeder)
@@ -520,12 +536,18 @@ _build_awarded creates the 'Demo · Awarded FPGA lot' list with status=ExcessLis
 
 **Fix:** Seed the awarded list like the others (status OPEN + lines), submit a per-line offer from the demo broker, then call excess_service.award_offer(db, offer.id, trader) so the WON offer, rollups, list status, and mirror all derive through the real chokepoint.
 
+**FIXED 2026-07-24 (P3 batch PR).** _build_awarded now seeds OPEN + available lines + mirror, submits a genuine full-coverage per-line offer from the demo broker (buyer-attributed via buyer_company_id → counterparty_card, producing a real BuyerScore on award), and derives `awarded` through excess_service.award_offer; _reset also cleans the buyer VendorCard/company the attribution creates.
+
+**FIXED 2026-07-24 (P3 batch PR).** Review follow-up: on environments where the OLD seeder already hand-stamped this demo (list/lines AWARDED, zero offers), _build_awarded now detects the legacy decay and heals it — reset to OPEN/AVAILABLE, mirror re-synced, then the real submit_offer/award_offer chain — instead of committing a dangling late offer and crashing 409 in award_offer (covered by test_heals_legacy_hand_stamped_awarded_demo).
+
 ### 61. [P3] Sample-data 'customer_excess' Sightings lack excess_line_item_id — invisible to the Phase-5 mirror lifecycle
 **Where:** `app/management/seed_sample_data.py:1349` (dimension: gap:demo-seeder)
 
 _seed_wf_e hand-rolls excess→demand Sightings with source_type='customer_excess' on its own AVSAMPLE scratch requisition via _mk_sighting, which never sets excess_line_item_id (see its defaults/key at seed_sample_data.py:1466-1484 — no excess_line_item_id) and never uses the list's 'Customer Excess (list N)' virtual requisition. The post-rework mirror machinery keys everything on excess_line_item_id (_find_mirror, app/services/excess_mirror.py:137-145) and retires/tears down by the list's virtual requirement. So these seeded sightings are unmanaged: if a user awards, closes, or expires ex1 in the app (or deletes it — delete_excess_list/teardown_list_mirror only delete customer_excess sightings hanging on the list's virtual req, excess_mirror.py:250,285), the AVSAMPLE customer_excess sightings stay live, advertising supply for a resolved list to search/matchers. Conversely, publishing ex1
 
 **Fix:** Replace the hand-made sightings with a call to excess_mirror.sync_list_mirror(db, ex1) (as seed_resell_demo does), so the sightings carry excess_line_item_id and live on the managed virtual requisition.
+
+**FIXED 2026-07-24 (P3 batch PR).** _seed_wf_e now mirrors ex1 via excess_mirror.sync_list_mirror (every customer_excess Sighting carries excess_line_item_id on the managed "Customer Excess (list N)" virtual req; the card-less line is lazily healed), and wipe() tears down each sample list's mirror via teardown_list_mirror so the virtual scratch req never orphans.
 
 ### 62. [P3] Collecting demo list auto-expires after 3 nights and the 'idempotent' re-seed cannot restore it
 **Where:** `app/management/seed_resell_demo.py:188` (dimension: gap:demo-seeder)
@@ -534,6 +556,8 @@ _build_collecting seeds the flagship 40-line list with close_at = now + 3 days (
 
 **Fix:** On find (created=False), refresh the demo window when the list has decayed: if status is expired/close_at past, reset status to COLLECTING, push close_at forward, and re-sync the mirror — or seed a longer window and document the decay.
 
+**FIXED 2026-07-24 (P3 batch PR).** _build_collecting now calls _refresh_demo_window on find: a decayed demo (status expired, or open/collecting with a lapsed close_at) is reset to COLLECTING with close_at pushed +3d, updated_at stamped, and the mirror re-synced — while awarded/bid_out/closed states a user drove are deliberately never trampled (covered by four new TestCollectingRefresh tests).
+
 ### 63. [P3] seed_excess_lists seeds pre-rework legacy statuses, owner self-offers, and offers with zero rollups
 **Where:** `scripts/seed_test_data.py:630` (dimension: gap:demo-seeder)
 
@@ -541,6 +565,15 @@ Beyond the crash in finding #1 (which currently masks this), seed_excess_lists w
 
 **Fix:** Rewrite the section on top of the fix for finding #1: use post-rework statuses, submit offers via excess_service.submit_offer under a distinct non-owner user, and derive WON via award_offer.
 
+**FIXED 2026-07-24 (P3 batch PR).** seed_excess_lists now builds every list as a DRAFT and derives its shape through the real chokepoints — publish_list (open + mirror), submit_offer from a dedicated non-owner broker user with buyer attribution (open→collecting + real rollups), award_offer (won offer / awarded lines / lost competitors / awarded list), close_list_without_bid (closed) — so no legacy ACTIVE/BIDDING statuses, no self-offers, and no hand-cycled statuses remain (covered by tests/test_seed_test_data_excess.py).
+
+
+### 64. [P3] OPEN (leftover, logged 2026-07-24 during the theme-J review): WF-E still hand-crafts an owner self-offer and hand-stamped offer shapes
+**Where:** `app/management/seed_sample_data.py` `_seed_wf_e` (dimension: gap:demo-seeder)
+
+While fixing #61 (sightings half of `_seed_wf_e`), review noted the adjacent offer half is still hand-crafted: `eo3 = _offer(u["u_trader"], vc["vc_apex"], ...)` writes an ExcessOffer with `submitted_by=u_trader` on list `ex1` whose `owner_id` is also `u_trader` — a self-offer the Phase-1 guard forbids in `submit_offer` ("You cannot offer on your own excess list"), i.e. a shape unreachable through the app (the invariant class theme J eliminates, cf. #63b). All WF-E offers/rollups are built via `get_or_create` rather than the chokepoints, with `eli1/eli2.best_offer_id` stamped by hand. Pre-existing; outside #61's literal scope (sightings only), so left untouched by the theme-J batch.
+
+**Fix (proposed):** Rework the WF-E offer section like #63's remedy — submit each offer via `excess_service.submit_offer` from a non-owner user (retire the u_trader self-offer or attribute it to a distinct broker) and let `recompute_line_rollup` derive `best_offer_id`/`offer_count` instead of hand-stamping them.
 
 ## Refuted by the skeptic panel (for the record)
 

@@ -17,11 +17,11 @@ Why a virtual requirement: ``Sighting.requirement_id`` is NOT NULL but an excess
 
 Dedup trap: ``search_service._save_sightings`` deletes sightings by
       ``(requirement_id, source_type)``. We deliberately do NOT route through that path.
-      The mirror upserts by the line's own id (``Sighting.excess_line_item_id``, migration
-      199/finding #18) so a re-sync updates that ONE line's row, never wipes a SIBLING
-      list's ``customer_excess`` rows, and keeps two duplicate-part lines on the same list
-      as distinct Sightings instead of collapsing them. (Each list also gets its own
-      virtual requirement, a second layer of safety.)
+      The mirror upserts by line identity — ``Sighting.excess_line_item_id`` (the line's
+      own id) scoped to ``source_type='customer_excess'`` (#18, migration 199) — so a
+      re-sync updates each line's OWN row, keeps duplicate-part lines on one list as
+      distinct Sightings, and never wipes a SIBLING list's ``customer_excess`` rows.
+      (Each list also gets its own virtual requirement, a second layer of safety.)
 
 Mirror-consumer exclusion: every surface that shows REAL vendor intelligence (buyer
       sightings board, global search, vendor-affinity supplier suggestions) must exclude
