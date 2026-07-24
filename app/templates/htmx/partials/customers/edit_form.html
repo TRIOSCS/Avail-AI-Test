@@ -7,8 +7,9 @@
      "Edit account" item in the company-detail kebab menu (detail.html).
    Success: the refreshed detail replaces #company-detail-{id} (outerHTML — works in the
      workspace right panel AND a deep-linked full page), the modal closes, and the handler's
-     HX-Trigger=cdmListRefresh refreshes the left account list. Errors surface via the
-     global htmx:responseError toast (htmx_app.js) with the modal kept open.
+     HX-Trigger=cdmListRefresh refreshes the left account list. 4xx errors surface via
+     the global htmx:responseError toast (htmx_app.js); 409s (duplicate rename) via the
+     server-owned HX-Trigger showToast (http_exception_handler). Modal stays open.
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette, _form_fields.html macros.
 #}
 {% from "htmx/partials/customers/_form_fields.html" import owner_select -%}
@@ -24,26 +25,26 @@
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
-        <input type="text" name="name" value="{{ company.name or '' }}" required
+        <input type="text" name="name" maxlength="{{ column_maxlength('company', 'name') }}" value="{{ company.name or '' }}" required
                class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
-        <input type="url" name="website" value="{{ company.website or '' }}"
+        <input type="url" name="website" maxlength="{{ column_maxlength('company', 'website') }}" value="{{ company.website or '' }}"
                class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
-        <input type="text" name="domain" value="{{ company.domain or '' }}"
+        <input type="text" name="domain" maxlength="{{ column_maxlength('company', 'domain') }}" value="{{ company.domain or '' }}"
                placeholder="e.g. acme.com"
                class="input">
       </div>
 
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
-        <input type="url" name="linkedin_url" value="{{ company.linkedin_url or '' }}"
+        <input type="url" name="linkedin_url" maxlength="{{ column_maxlength('company', 'linkedin_url') }}" value="{{ company.linkedin_url or '' }}"
                placeholder="https://linkedin.com/company/acme"
                class="input">
       </div>
@@ -79,7 +80,7 @@
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Company Details</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Legal / Registered Name</label>
-          <input type="text" name="legal_name" value="{{ company.legal_name or '' }}"
+          <input type="text" name="legal_name" maxlength="{{ column_maxlength('company', 'legal_name') }}" value="{{ company.legal_name or '' }}"
                  placeholder="Full legal entity name"
                  class="input">
         </div>
@@ -112,7 +113,7 @@
         <legend class="text-xs font-semibold text-gray-600 uppercase tracking-wide px-1">Contact Info</legend>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Main Phone</label>
-          <input type="tel" name="phone" value="{{ company.phone or '' }}"
+          <input type="tel" name="phone" maxlength="{{ column_maxlength('company', 'phone') }}" value="{{ company.phone or '' }}"
                  placeholder="+1 555 000 0000"
                  class="input">
         </div>
@@ -124,20 +125,20 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
-            <input type="text" name="hq_city" value="{{ company.hq_city or '' }}"
+            <input type="text" name="hq_city" maxlength="{{ column_maxlength('company', 'hq_city') }}" value="{{ company.hq_city or '' }}"
                    placeholder="e.g. Austin"
                    class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
-            <input type="text" name="hq_state" value="{{ company.hq_state or '' }}"
+            <input type="text" name="hq_state" maxlength="{{ column_maxlength('company', 'hq_state') }}" value="{{ company.hq_state or '' }}"
                    placeholder="e.g. TX"
                    class="input">
           </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
-          <input type="text" name="hq_country" value="{{ company.hq_country or '' }}"
+          <input type="text" name="hq_country" maxlength="{{ column_maxlength('company', 'hq_country') }}" value="{{ company.hq_country or '' }}"
                  placeholder="e.g. United States"
                  class="input">
         </div>
@@ -149,13 +150,13 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
-            <input type="text" name="credit_terms" value="{{ company.credit_terms or '' }}"
+            <input type="text" name="credit_terms" maxlength="{{ column_maxlength('company', 'credit_terms') }}" value="{{ company.credit_terms or '' }}"
                    placeholder="e.g. Net 30"
                    class="input">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
-            <input type="text" name="tax_id" value="{{ company.tax_id or '' }}"
+            <input type="text" name="tax_id" maxlength="{{ column_maxlength('company', 'tax_id') }}" value="{{ company.tax_id or '' }}"
                    placeholder="e.g. 12-3456789"
                    class="input">
           </div>

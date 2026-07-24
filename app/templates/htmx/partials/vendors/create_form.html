@@ -1,5 +1,7 @@
 {# create_form.html — Create new vendor form.
-   Receives: (no template vars required).
+   Receives: hx_target, push_url_base (sanitized embed-context params — the form and
+     both Cancels target the embed container inside the CRM shell, #main-content
+     standalone; Wave 3 item 8a).
    Called by: vendor_create_form_early route (routers/htmx/vendors.py).
    Depends on: HTMX, Tailwind CSS with brand palette,
                GET /v2/partials/vendors/check-duplicate (inline dup warning).
@@ -8,15 +10,21 @@
   <div class="bg-white rounded-lg shadow-card border border-gray-200 p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="h2">Add Vendor</h2>
-      <button hx-get="/v2/partials/vendors"
-              hx-target="#main-content"
+      <button hx-get="/v2/partials/vendors?hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
+              hx-target="{{ hx_target|default('#main-content') }}"
               class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
     </div>
 
     <form hx-post="/v2/partials/vendors/create"
-          hx-target="#main-content"
+          hx-target="{{ hx_target|default('#main-content') }}"
           data-loading-disable
           class="space-y-4">
+
+      {# Embed context rides the POST so the created vendor's detail (Delete button →
+         list re-render) keeps targeting the embed container (Wave 3 item 8a). The
+         server re-sanitizes against the same allowlist as the GET params. #}
+      <input type="hidden" name="hx_target" value="{{ hx_target|default('#main-content') }}">
+      <input type="hidden" name="push_url_base" value="{{ push_url_base|default('/v2/vendors') }}">
 
       {# Vendor name with inline duplicate check — the HTMX partial route (NOT the
          JSON /api/vendors/check-duplicate, which expects ?name=… and returns JSON)
@@ -24,7 +32,7 @@
          #dup-warning. Mirrors the company create form's check-duplicate wiring. #}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Vendor Name *</label>
-        <input type="text" name="display_name" required
+        <input type="text" name="display_name" maxlength="{{ column_maxlength('vendor', 'display_name') }}" required
                hx-get="/v2/partials/vendors/check-duplicate"
                hx-trigger="keyup changed delay:500ms"
                hx-target="#dup-warning"
@@ -36,13 +44,13 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
-          <input type="url" name="website"
+          <input type="url" name="website" maxlength="{{ column_maxlength('vendor', 'website') }}"
                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus"
                  placeholder="https://example.com">
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
-          <input type="text" name="industry"
+          <input type="text" name="industry" maxlength="{{ column_maxlength('vendor', 'industry') }}"
                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus"
                  placeholder="e.g. Electronic Components">
         </div>
@@ -68,13 +76,13 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
-            <input type="text" name="hq_city"
+            <input type="text" name="hq_city" maxlength="{{ column_maxlength('vendor', 'hq_city') }}"
                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus"
                    placeholder="e.g. Chicago">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Country</label>
-            <input type="text" name="hq_country"
+            <input type="text" name="hq_country" maxlength="{{ column_maxlength('vendor', 'hq_country') }}"
                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus"
                    placeholder="e.g. US">
           </div>
@@ -101,8 +109,8 @@
           Add Vendor
         </button>
         <button type="button"
-                hx-get="/v2/partials/vendors"
-                hx-target="#main-content"
+                hx-get="/v2/partials/vendors?hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
+                hx-target="{{ hx_target|default('#main-content') }}"
                 class="btn-secondary btn-md">
           Cancel
         </button>

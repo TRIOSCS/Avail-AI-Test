@@ -45,6 +45,7 @@ from ....services.crm_field_history import ENTITY_COMPANY, record_field_change
 from ....services.crm_service import cadence_state, cdm_list_ctx, next_best_touch
 from ....services.prospect_reclamation import park_company_in_prospecting
 from ....template_env import template_response
+from ....utils.column_limits import ensure_fits_column
 from ....utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 from ....utils.search_builder import SearchBuilder
 from .._shared import _base_ctx
@@ -469,6 +470,24 @@ async def create_company(
         tax_id=form.get("tax_id", "").strip() or None,
         source=form.get("source", "").strip() or "manual",
     )
+    # Model-derived length guards (Wave 3 item 6) — reject over-length values with a clean
+    # 400 instead of a Postgres StringDataRightTruncation 500 (SQLite tests mask it).
+    for _field, _label in (
+        ("name", "Company name"),
+        ("website", "Website"),
+        ("industry", "Industry"),
+        ("legal_name", "Legal name"),
+        ("employee_size", "Employee size"),
+        ("revenue_range", "Revenue range"),
+        ("hq_city", "HQ city"),
+        ("hq_state", "HQ state"),
+        ("hq_country", "HQ country"),
+        ("phone", "Phone"),
+        ("credit_terms", "Credit terms"),
+        ("tax_id", "Tax ID"),
+        ("source", "Source"),
+    ):
+        ensure_fits_column(Company, _field, getattr(company, _field), _label)
     # Assigning a NEW account to someone other than yourself is a manager action, and the
     # target must be a real active user (mirrors the bulk assign-owner path). A plain rep
     # assigning to self / leaving it blank keeps the current behaviour.
@@ -1196,6 +1215,7 @@ async def edit_company(
     form = await request.form()
     name = form.get("name", "").strip()
     if name:
+        ensure_fits_column(Company, "name", name, "Company name")
         # Duplicate-name guard — mirror create_company. Company.name is nullable=False
         # and NOT unique, so nothing else stops a rename colliding with another account.
         # Exclude self (Company.id != company_id) so a no-op or case-only save on the
@@ -1206,16 +1226,16 @@ async def edit_company(
         if existing:
             raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
         company.name = name
-    notes = form.get("notes", "").strip()
-    company.notes = notes or company.notes
     source = form.get("source", "").strip()
+    # source is blank-sentinel (see registry-loop comment below) but still a bounded
+    # String(50) — guard the submitted value; the preserved current value already fits.
+    ensure_fits_column(Company, "source", source, "Source")
     company.source = source or company.source
-    tax_id = form.get("tax_id", "").strip()
-    company.tax_id = tax_id or None
     # Owner reassignment is a TEAM action — only the primary owner / a manager may seize
     # primary ownership (can_manage_account admits collaborators + site-owners, who must
     # NOT be able to lock out the real owner). Gate only when the value actually changes.
-    owner_id = form.get("owner_id", "")
+    owner_id_raw = form.get("owner_id")
+    owner_id = (owner_id_raw or "").strip()
     if owner_id and owner_id.isdigit():
         new_owner_id = int(owner_id)
         if new_owner_id != company.account_owner_id:
@@ -1228,6 +1248,12 @@ async def edit_company(
             if not target or not target.is_active:
                 raise HTTPException(400, "Owner must be an active user")
             company.account_owner_id = new_owner_id
+    elif owner_id_raw is not None and not owner_id and company.account_owner_id is not None:
+        # Submitted-EMPTY owner ("— None —" selected) with an owner set = explicit
+        # unassign. Same team gate as reassignment; an ABSENT field stays a no-op.
+        if not can_manage_account_team(user, company):
+            raise HTTPException(403, "Only the account owner or a manager can change the primary owner")
+        company.account_owner_id = None
 
     parent_company_id_raw = form.get("parent_company_id", "").strip()
     # Parent-company (hierarchy) edits are also a team action — match set_parent_company,
@@ -1237,12 +1263,13 @@ async def edit_company(
             raise HTTPException(403, "Only the account owner or a manager can change company hierarchy")
     _set_parent_company(db, company, parent_company_id_raw)
 
-    # Registry fields — DRY via apply_company_field.
-    # notes/source use blank-sentinel "preserve current value" semantics above; tax_id is
-    # explicitly clear-on-blank (a submitted blank sets it to NULL). All three are handled
-    # above, so skip them here to keep that behaviour — the registry loop must not re-touch
-    # notes/source (its clear-on-blank would wipe a value the user left untouched).
-    _form_handled = {"notes", "source", "tax_id"}
+    # Registry fields — DRY via apply_company_field: a field ABSENT from the form is a
+    # partial edit (preserved); a SUBMITTED blank is an explicit clear (→ NULL). notes and
+    # tax_id follow that rule (the edit form prefills both, so blank means "user cleared
+    # it" — CRM Wave 3 item 3). ONLY source keeps blank-sentinel "preserve current value"
+    # semantics above, because its select has a real "— Keep current —" option whose
+    # submitted value is legitimately blank.
+    _form_handled = {"source"}
     for f in EDITABLE_ACCOUNT_FIELDS:
         if f in _form_handled:
             continue

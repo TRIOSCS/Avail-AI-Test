@@ -24,12 +24,12 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div>
         <label class="block text-xs text-gray-600 mb-1">Display Name *</label>
-        <input type="text" name="display_name" required value="{{ vendor.display_name or '' }}"
+        <input type="text" name="display_name" maxlength="{{ column_maxlength('vendor', 'display_name') }}" required value="{{ vendor.display_name or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus">
       </div>
       <div>
         <label class="block text-xs text-gray-600 mb-1">Website</label>
-        <input type="url" name="website" value="{{ vendor.website or '' }}"
+        <input type="url" name="website" maxlength="{{ column_maxlength('vendor', 'website') }}" value="{{ vendor.website or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded input-focus"
                placeholder="https://example.com">
       </div>
