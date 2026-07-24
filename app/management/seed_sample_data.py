@@ -95,6 +95,7 @@ from app.models.task import RequisitionTask
 from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendors import VendorCard, VendorContact
 from app.scoring import score_sighting_v2
+from app.services import excess_mirror
 from app.services.commodity_registry import seed_commodity_schemas
 from app.services.offer_qualification import apply_qualification
 from app.services.spec_tiers import set_brand, set_category, set_manufacturer
@@ -1282,7 +1283,7 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
 
     eli1 = _line("AVSAMPLE-STM32F103RB", 500, Decimal(30), "New", mc["mc_mcu"].id)
     eli2 = _line("AVSAMPLE-MAX3232", 200, Decimal(12), "New", mc["mc_conn"].id)
-    eli3 = _line("AVSAMPLE-NOMATCH-1", 50, Decimal(5), "New", None)
+    _line("AVSAMPLE-NOMATCH-1", 50, Decimal(5), "New", None)  # card-less; mirror heals it
 
     def _offer(submitted_by: User, vcard: VendorCard, scope: ExcessOfferScope, take_all: Decimal | None) -> ExcessOffer:
         defaults = {
@@ -1341,24 +1342,12 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
         eli2.offer_count = 2
     _ = eol1a  # Pinnacle's matched line retained for the spread/comparison view.
 
-    # Mirrored excess→demand sightings on a scratch virtual req (customer_excess).
-    ex_req = _mk_requisition(db, counts, "AVSAMPLE · EXCESS DEMAND", co["co_cust3"], None, "normal", 0, u["u_trader"])
-    ex_req.is_scratch = True
-    for eli in (eli1, eli2, eli3):
-        ex_rq = _mk_requirement(db, counts, ex_req, eli.part_number, SourcingStatus.OPEN, card_id=eli.material_card_id)
-        _mk_sighting(
-            db,
-            counts,
-            ex_rq,
-            "AVSAMPLE Customer Excess",
-            "customer_excess",
-            mpn=eli.part_number,
-            qty=eli.quantity,
-            price=float(eli.asking_price),
-            is_authorized=False,
-            vendor_score=None,
-            source_company_id=co["co_cust3"].id,
-        )
+    # Mirror the list through the managed Phase-5 lifecycle (finding #61): each
+    # customer_excess Sighting carries excess_line_item_id and hangs on the list's own
+    # "Customer Excess (list N)" virtual requisition, so awarding/closing/expiring/
+    # deleting ex1 in the app retires them — never unmanaged ghost supply. (The
+    # no-material-card line is lazily healed by mirror_line via resolve_material_card.)
+    excess_mirror.sync_list_mirror(db, ex1)
 
     # Clean customer bid-back (internal provenance — never exported).
     cb1, _ = get_or_create(
@@ -1679,6 +1668,20 @@ def wipe(db: Session) -> dict[str, int]:
         n = db.query(model).filter(where).delete(synchronize_session=False)
         if n:
             deleted[model.__name__] = deleted.get(model.__name__, 0) + n
+
+    # Tear down each sample list's managed Sighting mirror FIRST (while the list rows
+    # still exist — teardown needs excess_list.id): the virtual scratch req is named
+    # "Customer Excess (list N)", so the AVSAMPLE name filter below would orphan it.
+    if list_ids:
+        for el in db.query(ExcessList).filter(ExcessList.id.in_(list_ids)).all():
+            torn = excess_mirror.teardown_list_mirror(db, el)
+            for label, model_name in (
+                ("sightings", "Sighting"),
+                ("requirements", "Requirement"),
+                ("requisitions", "Requisition"),
+            ):
+                if torn.get(label):
+                    deleted[model_name] = deleted.get(model_name, 0) + torn[label]
 
     _del(ActivityLog, ActivityLog.external_id.like(f"{SAMPLE_TAG}:%"))
     _del(RequisitionTask, RequisitionTask.source_ref.like(f"{SAMPLE_TAG}:%"))

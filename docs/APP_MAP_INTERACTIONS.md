@@ -2381,9 +2381,15 @@ any take-all offer pins as a violet banner above the lines. Status pills reuse e
 `status_badge` keys — no new colors (open→sky, collecting→sourcing/amber, bid_out→quoted/violet,
 awarded→won/emerald, draft→muted). Customer hiding is view discipline (single-tenant): the
 offerer-facing list + non-owner detail project ONLY MPN/qty/condition, never the seller company.
-Demo seed: `python -m app.management.seed_resell_demo` (idempotent; `--reset` to clear) creates
-three deal shapes (40-line collecting w/ per-line + unmatched + take-all offers, a single-line
-one-off w/ 2 offers, an awarded list).
+Demo seed: `ALLOW_SAMPLE_DATA_SEED=true python -m app.management.seed_resell_demo` (idempotent;
+`--reset` to clear) creates three deal shapes (40-line collecting w/ per-line + unmatched +
+take-all offers, a single-line one-off w/ 2 offers, and an awarded list DERIVED through the real
+`award_offer` chokepoint — a genuine buyer-attributed WON offer with real rollups/line statuses).
+A re-run also re-arms the collecting demo if the nightly expiry has decayed it (status back to
+collecting, close_at pushed forward, mirror re-synced); awarded/bid_out/closed states a user
+drove are never trampled. A re-run also heals the legacy hand-stamped awarded demo (list/lines
+stamped AWARDED with zero offers by the pre-rework seeder): it resets to open/available,
+re-syncs the mirror, then re-derives the award through the real chain.
 
 **Anonymization policy (Phase 3, decision D2 — one predicate everywhere).** Customer-identity
 hiding is enforced through the SINGLE ownership predicate `can_see_customer` (== `is_owner` ==
