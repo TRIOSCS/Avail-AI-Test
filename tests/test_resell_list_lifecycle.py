@@ -152,6 +152,33 @@ def test_end_posting_window_locks_list_before_guard(db_session, owner, company, 
     assert calls == [el.id]
 
 
+def test_end_posting_window_stale_read_cannot_clobber_concurrent_award(db_session, owner, company):
+    """Finding R4: the spy-only test above only pins WIRING — it would pass even if the
+    closeable guard read PRE-lock state. This repros the actual race: a raw core UPDATE
+    (bypassing the ORM, like a second transaction's committed award) flips the list to
+    ``awarded`` behind the already-identity-mapped object's back, with no intervening
+    commit (so ``expire_on_commit`` never auto-refreshes it). Without the lock's
+    ``populate_existing`` refresh, ``close_list`` would read the STALE 'collecting' status
+    and clobber the just-awarded list to ``bid_out``; with the fix the closeable guard
+    sees 'awarded' post-lock and 409s instead.
+    """
+    from sqlalchemy import text as sa_text
+
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    el.status = ExcessListStatus.COLLECTING
+    db_session.commit()
+    assert el.status == ExcessListStatus.COLLECTING
+
+    db_session.execute(sa_text("UPDATE excess_lists SET status = 'awarded' WHERE id = :id").bindparams(id=el.id))
+    assert el.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+
+    with pytest.raises(HTTPException) as exc:
+        excess_service.close_list(db_session, el.id, owner)
+    assert exc.value.status_code == 409
+    assert el.status == ExcessListStatus.AWARDED  # the lock refreshed it in place — never clobbered
+
+
 # ── close retires the Sighting mirror ────────────────────────────────
 
 
@@ -360,6 +387,39 @@ def test_expire_is_idempotent(db_session, owner, company):
     later = close + timedelta(hours=2)
     assert excess_service.expire_overdue_lists(db_session, now=later) == 1
     assert excess_service.expire_overdue_lists(db_session, now=later) == 0
+
+
+def test_expire_stale_read_cannot_clobber_concurrent_award(db_session, owner, company, monkeypatch):
+    """Finding R2: ``expire_overdue_lists`` had no per-list row lock — a concurrent award
+    landing between the batch SELECT and this list's per-list write must not be clobbered
+    to a terminal ``expired`` (or a stale ``bid_out``).
+
+    The batch SELECT is a real query (it always reflects fresh committed data), so a race
+    can only land BETWEEN that fetch and the per-list processing turn — simulated here by
+    making the lock hook itself perform a raw core UPDATE (bypassing the ORM, exactly like
+    a second transaction's committed award) the instant this list's turn arrives, then
+    calling through to the real lock. Without the per-list re-guard, the sweep would
+    blindly overwrite the just-awarded status.
+    """
+    from sqlalchemy import text as sa_text
+
+    el, close = _published_list_with_deadline(db_session, owner, company)
+    el.status = ExcessListStatus.COLLECTING
+    db_session.commit()
+
+    real_lock = excess_service._lock_list_row
+
+    def _award_lands_mid_sweep(db, excess_list_id):
+        db.execute(sa_text("UPDATE excess_lists SET status = 'awarded' WHERE id = :id").bindparams(id=excess_list_id))
+        return real_lock(db, excess_list_id)
+
+    monkeypatch.setattr(excess_service, "_lock_list_row", _award_lands_mid_sweep)
+
+    n = excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2))
+
+    assert n == 0  # skipped — no longer unresolved post-lock
+    db_session.refresh(el)
+    assert el.status == ExcessListStatus.AWARDED  # never clobbered to bid_out/expired
 
 
 def _matched_open_offer(

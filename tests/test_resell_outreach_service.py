@@ -593,6 +593,46 @@ class TestRecordResponse:
 
         assert calls == [excess_list.id]
 
+    def test_reply_with_offer_stale_read_cannot_resurrect_closed_list(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """Finding R4: the spy test above only pins WIRING — it would pass even if the
+        guard read PRE-lock state. This repros the actual race: a raw core UPDATE
+        (bypassing the ORM, like a second transaction's committed close) flips the list
+        to ``closed`` behind the already-identity-mapped object's back, with no
+        intervening commit (so ``expire_on_commit`` never auto-refreshes it). Without the
+        lock's ``populate_existing`` refresh, ``_link_inbound_offer`` would read the STALE
+        'open' status, resurrect it to 'collecting', and stamp the reply's offer 'open'
+        instead of 'late'.
+        """
+        from sqlalchemy import text as sa_text
+
+        excess_list.status = ExcessListStatus.OPEN
+        db_session.commit()
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+
+        db_session.execute(
+            sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=excess_list.id)
+        )
+        assert excess_list.status == ExcessListStatus.OPEN  # still stale, pre-call
+
+        updated = svc.record_response(
+            db_session,
+            conversation_id="conv-1",
+            has_offer=True,
+            offer_lines=[{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}],
+        )
+
+        assert excess_list.status == ExcessListStatus.CLOSED  # never resurrected to collecting
+        assert updated[0].status == "bid"
+        offer = db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).one()
+        assert offer.status == "late"  # closed-by-status at the lock, not an on-time 'open'
+
     @pytest.mark.parametrize("bad_qty", [0, -5])
     def test_reply_with_non_positive_quantity_rejected(
         self,

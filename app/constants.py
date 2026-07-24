@@ -264,10 +264,13 @@ class ExcessOutreachStatus(StrEnum):
         mid-flight) that the stale-sending sweeper flipped so it stops polling; also
         retryable.
 
-    ``no_response`` is the terminal GENUINE-buyer-silence state used by the don't-forget
-    nudge — reached ONLY after a real ``sent`` that the buyer never answered, never as a
-    catch-all for a send that failed. Advanced past ``sent`` by the reply adapter (see
-    resell_outreach_service in Chunk B).
+    ``no_response`` is RESERVED for the terminal GENUINE-buyer-silence state the
+    don't-forget nudge is designed around — it would be reached ONLY after a real
+    ``sent`` that the buyer never answered, never as a catch-all for a send that failed.
+    Deep-review #2 finding B45: as of this writing NO production path advances a row to
+    ``no_response`` (nor to ``opened``) — a genuinely-silent buyer's row simply stays
+    ``sent`` forever. The member stays in the enum (a future aging job is the natural
+    writer) rather than being removed.
     """
 
     SENDING = "sending"

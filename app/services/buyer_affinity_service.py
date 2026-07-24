@@ -600,7 +600,15 @@ def recompute_all_buyer_scores(db: Session) -> int:
     """Nightly-batch backstop — recompute every buyer's scorecard.
 
     Walks every VendorCard that has either an ExcessOffer or an ExcessOutreach against
-    it and recomputes its BuyerScore. Commits once. Returns the count recomputed.
+    it and recomputes its BuyerScore. Returns the count SUCCESSFULLY recomputed.
+
+    Deep-review #2 finding B44: each buyer is wrapped in its own try/except + commit,
+    mirroring ``excess_service.expire_overdue_lists``'s per-list isolation — a single bad
+    buyer (an IntegrityError racing a concurrent ``recompute_buyer_score_on_win``, or any
+    other transient DB error) is rolled back and skipped, logged, and the batch continues
+    reconciling the rest. Previously one exception mid-batch propagated to the job wrapper
+    and rolled back EVERYTHING, so a single poisoned buyer silently stranded the whole
+    nightly reconcile.
     """
     offer_cards = (
         db.query(ExcessOffer.offerer_vendor_card_id).filter(ExcessOffer.offerer_vendor_card_id.isnot(None)).distinct()
@@ -611,11 +619,20 @@ def recompute_all_buyer_scores(db: Session) -> int:
         .distinct()
     )
     card_ids = {cid for (cid,) in offer_cards.all()} | {cid for (cid,) in outreach_cards.all()}
+    recomputed = 0
     for cid in card_ids:
-        recompute_buyer_score(db, cid)
-    db.commit()
-    logger.info("Nightly buyer-score backstop recomputed {} buyer(s)", len(card_ids))
-    return len(card_ids)
+        try:
+            recompute_buyer_score(db, cid)
+            db.commit()
+            recomputed += 1
+        except Exception:  # noqa: BLE001 — deliberate per-buyer isolation: ANY failure on one buyer must be logged and skipped so the batch keeps reconciling the rest
+            logger.exception(
+                "Nightly buyer-score backstop failed for vendor_card={} — rolling back this buyer, continuing the batch",
+                cid,
+            )
+            db.rollback()
+    logger.info("Nightly buyer-score backstop recomputed {} of {} buyer(s)", recomputed, len(card_ids))
+    return recomputed
 
 
 # ═══════════════════════════════════════════════════════════════════════
