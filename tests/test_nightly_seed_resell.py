@@ -9,13 +9,14 @@ Called by: pytest (nightly coverage run) Depends on: conftest (db_session)
 """
 
 import os
+from datetime import UTC, timedelta
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session
 
 os.environ.setdefault("TESTING", "1")
 
-from app.constants import ExcessListStatus, UserRole
+from app.constants import ExcessLineItemStatus, ExcessListStatus, ExcessOfferStatus, UserRole
 from app.management.seed_resell_demo import (
     _BROKER_EMAIL,
     _CUSTOMER_NAME,
@@ -35,7 +36,7 @@ from app.management.seed_resell_demo import (
     seed,
 )
 from app.models import Company, User
-from app.models.excess import ExcessList
+from app.models.excess import BuyerScore, ExcessLineItem, ExcessList, ExcessOffer
 
 # ── Pure helper tests ─────────────────────────────────────────────────────────
 
@@ -198,21 +199,88 @@ def _make_seed_users(db: Session):
 
 
 class TestBuildAwarded:
-    def test_creates_awarded_list(self, db_session: Session):
-        trader, _broker, company = _make_seed_users(db_session)
-        _build_awarded(db_session, company, trader)
-        db_session.flush()
+    """The awarded demo derives through the REAL submit_offer + award_offer chain (deep-
+    review-2 finding #60) — no mocks, so the WON offer / rollups / line statuses are
+    asserted as the genuine service output."""
+
+    def test_creates_awarded_list_through_award_offer(self, db_session: Session):
+        trader, broker, company = _make_seed_users(db_session)
+        _build_awarded(db_session, company, trader, broker)
         el = db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).one()
         assert el.status == ExcessListStatus.AWARDED
 
+        offers = db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).all()
+        won = [o for o in offers if o.status == ExcessOfferStatus.WON]
+        assert len(won) == 1, "the awarded demo must carry exactly one WON offer"
+        assert won[0].submitted_by == broker.id
+        assert won[0].submitted_by != el.owner_id
+        assert won[0].offerer_vendor_card_id is not None, "the demo award carries buyer attribution"
+
+        lines = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).all()
+        assert lines
+        assert all(ln.status == ExcessLineItemStatus.AWARDED for ln in lines)
+        # Rollups derive from the real chokepoint, never hand-stamped.
+        assert all(ln.best_offer_id == won[0].id for ln in lines)
+        assert all(ln.offer_count == 1 for ln in lines)
+
+        # The win-hook produced a genuine BuyerScore for the attributed buyer.
+        score = db_session.query(BuyerScore).filter_by(vendor_card_id=won[0].offerer_vendor_card_id).one()
+        assert score.wins >= 1
+
     def test_idempotent(self, db_session: Session):
-        trader, _broker, company = _make_seed_users(db_session)
-        _build_awarded(db_session, company, trader)
+        trader, broker, company = _make_seed_users(db_session)
+        _build_awarded(db_session, company, trader, broker)
+        _build_awarded(db_session, company, trader, broker)
+        assert db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).count() == 1
+        el = db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).one()
+        assert db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).count() == 1
+
+    def test_heals_legacy_hand_stamped_awarded_demo(self, db_session: Session):
+        """The OLD seeder hand-stamped the awarded demo (list AWARDED, lines AWARDED,
+        ZERO offers) — the exact deployed state that motivated finding #60.
+
+        A re-seed must heal it through the real chain, not crash in award_offer with a
+        409 on the already-awarded lines (after having committed a dangling late offer).
+        """
+        trader, broker, company = _make_seed_users(db_session)
+        el = ExcessList(
+            title=_LIST_AWARDED,
+            company_id=company.id,
+            owner_id=trader.id,
+            status=ExcessListStatus.AWARDED,
+            created_at=_now(),
+        )
+        db_session.add(el)
         db_session.flush()
-        _build_awarded(db_session, company, trader)
-        db_session.flush()
-        count = db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).count()
-        assert count == 1
+        for mpn in ("XC7A100T-2FGG484I", "XC7K325T-2FFG900C"):
+            db_session.add(
+                ExcessLineItem(
+                    excess_list_id=el.id,
+                    part_number=mpn,
+                    quantity=100,
+                    condition="New",
+                    status=ExcessLineItemStatus.AWARDED,  # hand-stamped, no offer behind it
+                    created_at=_now(),
+                )
+            )
+        el.total_line_items = 2
+        db_session.commit()
+
+        _build_awarded(db_session, company, trader, broker)
+
+        el = db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).one()
+        assert el.status == ExcessListStatus.AWARDED
+        offers = db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).all()
+        won = [o for o in offers if o.status == ExcessOfferStatus.WON]
+        assert len(won) == 1, "healing must leave exactly one genuine WON offer"
+        assert all(o.status == ExcessOfferStatus.WON for o in offers), "no dangling never-won offers"
+        lines = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).all()
+        assert all(ln.status == ExcessLineItemStatus.AWARDED for ln in lines)
+        assert all(ln.best_offer_id == won[0].id for ln in lines), "rollups derive from the WON offer"
+
+        # And the healed state is stable: a further re-seed is a no-op.
+        _build_awarded(db_session, company, trader, broker)
+        assert db_session.query(ExcessOffer).filter_by(excess_list_id=el.id).count() == 1
 
 
 class TestBuildCollecting:
@@ -221,6 +289,7 @@ class TestBuildCollecting:
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             _build_collecting(db_session, company, trader, broker)
@@ -234,6 +303,7 @@ class TestBuildCollecting:
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             _build_collecting(db_session, company, trader, broker)
@@ -245,12 +315,118 @@ class TestBuildCollecting:
         assert count == 1
 
 
+class TestCollectingRefresh:
+    """Finding #62: a re-seed must re-arm the collecting demo after the nightly expiry
+    has decayed it (expired status / lapsed close_at) — find-by-title used to return
+    early and leave the flagship demo permanently expired."""
+
+    def _seed_collecting(self, db_session: Session):
+        trader, broker, company = _make_seed_users(db_session)
+        with (
+            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
+            patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
+            patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
+        ):
+            _build_collecting(db_session, company, trader, broker)
+            db_session.commit()
+        return trader, broker, company
+
+    def test_reseed_restores_expired_demo(self, db_session: Session):
+        trader, broker, company = self._seed_collecting(db_session)
+        el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
+        # Decay exactly as the nightly expiry job would: terminal expired + retired mirror.
+        el.status = ExcessListStatus.EXPIRED
+        el.close_at = _now() - timedelta(days=1)
+        db_session.commit()
+
+        with (
+            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
+            patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
+            patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
+        ):
+            _build_collecting(db_session, company, trader, broker)
+            db_session.commit()
+
+        db_session.refresh(el)
+        assert el.status == ExcessListStatus.COLLECTING
+        close_at = el.close_at
+        if close_at.tzinfo is None:
+            close_at = close_at.replace(tzinfo=UTC)
+        assert close_at > _now(), "refresh must push the posting window forward"
+        assert sync_mock.called, "refresh must re-mirror the restored demo lines"
+
+    def test_reseed_rearms_lapsed_window_before_nightly_flip(self, db_session: Session):
+        trader, broker, company = self._seed_collecting(db_session)
+        el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
+        # close_at lapsed but the nightly sweep has not flipped the status yet.
+        el.close_at = _now() - timedelta(hours=2)
+        db_session.commit()
+
+        with (
+            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
+            patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
+            patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
+        ):
+            _build_collecting(db_session, company, trader, broker)
+            db_session.commit()
+
+        db_session.refresh(el)
+        assert el.status == ExcessListStatus.COLLECTING
+        close_at = el.close_at
+        if close_at.tzinfo is None:
+            close_at = close_at.replace(tzinfo=UTC)
+        assert close_at > _now()
+        assert sync_mock.called
+
+    def test_reseed_leaves_live_demo_untouched(self, db_session: Session):
+        trader, broker, company = self._seed_collecting(db_session)
+        el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
+        assert el.status == ExcessListStatus.COLLECTING
+
+        with (
+            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
+            patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
+            patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
+        ):
+            _build_collecting(db_session, company, trader, broker)
+            db_session.commit()
+
+        db_session.refresh(el)
+        assert el.status == ExcessListStatus.COLLECTING
+        assert not sync_mock.called, "a live window needs no refresh/re-mirror"
+
+    def test_reseed_never_tramples_an_awarded_demo(self, db_session: Session):
+        trader, broker, company = self._seed_collecting(db_session)
+        el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
+        # A user awarded the demo list in the UI; its window may read as closed.
+        el.status = ExcessListStatus.AWARDED
+        el.close_at = _now() - timedelta(days=1)
+        db_session.commit()
+
+        with (
+            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
+            patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
+            patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
+        ):
+            _build_collecting(db_session, company, trader, broker)
+            db_session.commit()
+
+        db_session.refresh(el)
+        assert el.status == ExcessListStatus.AWARDED, "refresh must not undo a user's award"
+
+
 class TestBuildOneoff:
     def test_creates_oneoff_list(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             _build_oneoff(db_session, company, trader, broker)
@@ -265,6 +441,7 @@ class TestSeed:
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             seed(db_session)
@@ -279,6 +456,7 @@ class TestSeed:
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             seed(db_session)
@@ -299,6 +477,7 @@ class TestReset:
         with (
             patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
+            patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
         ):
             seed(db_session)
@@ -315,3 +494,23 @@ class TestReset:
     def test_reset_noop_when_no_data(self, db_session: Session):
         # Should not raise even when there's nothing to delete
         _reset(db_session)
+
+    def test_reset_cleans_awarded_artifacts(self, db_session: Session):
+        """A real awarded build leaves a buyer VendorCard + BuyerScore (the win-hook);
+        reset must remove them along with the lists (finding #60)."""
+        from app.management.seed_resell_demo import _BROKER_COMPANY_NAME
+        from app.models.vendors import VendorCard
+        from app.vendor_utils import normalize_vendor_name
+
+        trader, broker, company = _make_seed_users(db_session)
+        _build_awarded(db_session, company, trader, broker)
+        norm = normalize_vendor_name(_BROKER_COMPANY_NAME)
+        card = db_session.query(VendorCard).filter_by(normalized_name=norm).one()
+        assert db_session.query(BuyerScore).filter_by(vendor_card_id=card.id).count() == 1
+
+        _reset(db_session)
+
+        assert db_session.query(ExcessList).filter_by(title=_LIST_AWARDED).count() == 0
+        assert db_session.query(VendorCard).filter_by(normalized_name=norm).count() == 0
+        assert db_session.query(BuyerScore).filter_by(vendor_card_id=card.id).count() == 0
+        assert db_session.query(Company).filter_by(name=_BROKER_COMPANY_NAME).count() == 0

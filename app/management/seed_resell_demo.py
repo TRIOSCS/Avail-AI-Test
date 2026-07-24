@@ -14,7 +14,9 @@ Creates (all find-or-create by a stable key — safe to re-run; never duplicates
       (a) "Demo · Q1 surplus (collecting)"  — ~40 lines, status ``collecting``, with
           several per-line offers, one UNMATCHED queue row, and one TAKE-ALL offer,
       (b) "Demo · One-off RU heatsink"       — single line, status ``open``, 2 offers,
-      (c) "Demo · Awarded FPGA lot"          — status ``awarded``.
+      (c) "Demo · Awarded FPGA lot"          — ``awarded`` DERIVED through the real
+          ``excess_service.award_offer`` chokepoint (a genuine WON offer from the demo
+          broker, buyer-attributed, with real rollups/line statuses).
 
 Offers land via the real ``excess_service.submit_offer`` (so rollups + the unmatched
 queue behave exactly as in production); per-line lists are mirrored via
@@ -22,7 +24,9 @@ queue behave exactly as in production); per-line lists are mirrored via
 
 Idempotency model: a fixed title per list + a fixed offerer/owner email. A re-run
 finds the existing rows and (for offers) skips creation when the list already has
-offers — so re-seeding does not stack duplicate offers.
+offers — so re-seeding does not stack duplicate offers. A re-run also re-arms the
+collecting demo when the nightly expiry has decayed it (expired / lapsed close_at):
+status back to ``collecting``, ``close_at`` pushed forward, mirror re-synced.
 
 Called by: an operator (manually, post-deploy). NOT cron — it's a demo fixture.
 Depends on: app.database.SessionLocal, models, excess_service, excess_mirror.
@@ -42,13 +46,19 @@ from sqlalchemy.orm import Session
 from ..constants import ExcessLineItemStatus, ExcessListStatus, ExcessOfferScope, UserRole
 from ..models import Company, User
 from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer
+from ..models.vendors import VendorCard
 from ..services import excess_mirror, excess_service
 from ..utils.normalization import normalize_mpn_key
+from ..vendor_utils import normalize_vendor_name
 
 # Stable identity keys — the whole seed keys off these so it is re-run safe.
 _TRADER_EMAIL = "demo.trader@trioscs.com"
 _BROKER_EMAIL = "demo.broker@trioscs.com"
 _CUSTOMER_NAME = "Demo Excess Customer Inc."
+# The broker's own company — the BUYER counterparty the awarded offer is attributed to
+# (canonicalized to a VendorCard via submit_offer's buyer_company_id, exactly like the
+# module's manual-log / outreach flows).
+_BROKER_COMPANY_NAME = "Demo Broker Trading Co."
 
 _LIST_COLLECTING = "Demo · Q1 surplus (collecting)"
 _LIST_ONEOFF = "Demo · One-off RU heatsink"
@@ -118,10 +128,10 @@ def _get_or_create_user(db: Session, email: str, name: str, role: str) -> User:
     return user
 
 
-def _get_or_create_company(db: Session, name: str) -> Company:
+def _get_or_create_company(db: Session, name: str, account_type: str = "Customer") -> Company:
     co = db.query(Company).filter(Company.name == name).one_or_none()
     if co is None:
-        co = Company(name=name, account_type="Customer", is_active=True, created_at=_now())
+        co = Company(name=name, account_type=account_type, is_active=True, created_at=_now())
         db.add(co)
         db.flush()
         logger.info("seed-resell: created company {}", name)
@@ -175,6 +185,39 @@ def _list_has_offers(db: Session, el: ExcessList) -> bool:
     return db.query(ExcessOffer.id).filter(ExcessOffer.excess_list_id == el.id).first() is not None
 
 
+def _refresh_demo_window(db: Session, el: ExcessList, *, close_in_days: int) -> None:
+    """Re-arm a decayed demo posting window on an idempotent re-seed (finding #62).
+
+    The nightly expiry job (``expire_overdue_lists``) flips any open/collecting list past
+    ``close_at`` to terminal ``expired`` and retires its Sighting mirror — so the flagship
+    collecting demo silently dies a few nights after seeding, and find-by-title used to
+    return early without restoring it. On a found (not created) list, when the demo has
+    decayed — status ``expired``, or a still-unresolved (open/collecting) window whose
+    ``close_at`` has lapsed — re-stamp what a fresh seed would set: status back to
+    ``COLLECTING``, ``close_at`` pushed ``close_in_days`` forward, ``updated_at`` now, and
+    the mirror re-synced so the lines advertise as live supply again. Deliberately does
+    NOT touch awarded/bid_out/closed lists: those record a user's own actions on the demo
+    (an award, a sent bid) and a re-seed must never undo them. Commits.
+    """
+    now = _now()
+    close_at = el.close_at
+    if close_at is not None and close_at.tzinfo is None:  # SQLite strips tzinfo
+        close_at = close_at.replace(tzinfo=UTC)
+    expired = el.status == ExcessListStatus.EXPIRED
+    lapsed = (
+        el.status in (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING) and close_at is not None and close_at <= now
+    )
+    if not (expired or lapsed):
+        return
+    el.status = ExcessListStatus.COLLECTING  # type: ignore[assignment]  # legacy Column-model ORM noise
+    el.close_at = now + timedelta(days=close_in_days)  # type: ignore[assignment]  # legacy Column-model ORM noise
+    el.updated_at = now  # type: ignore[assignment]  # legacy Column-model ORM noise
+    db.flush()
+    excess_mirror.sync_list_mirror(db, el)
+    db.commit()
+    logger.info("seed-resell: refreshed decayed demo window on {!r} (collecting, +{}d)", el.title, close_in_days)
+
+
 # ── per-list builders ────────────────────────────────────────────────
 
 
@@ -195,6 +238,10 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
         # Mirror so the Sighting live-mirror is exercised (and matchers see supply).
         excess_mirror.sync_list_mirror(db, el)
         db.commit()
+    else:
+        # The nightly expiry decays this demo after close_in_days nights; a re-seed
+        # must re-arm the window instead of returning early (finding #62).
+        _refresh_demo_window(db, el, close_in_days=3)
 
     if _list_has_offers(db, el):
         return  # already seeded offers — don't stack duplicates
@@ -303,29 +350,93 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
     logger.info("seed-resell: seeded 2 offers on the one-off {!r}", el.title)
 
 
-def _build_awarded(db: Session, company: Company, owner: User) -> None:
+def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> None:
+    """Seed the awarded shape through the REAL award chain (finding #60).
+
+    The list is seeded like the others (``open`` + available lines + mirror), the demo
+    broker submits a genuine full-coverage per-line offer via
+    ``excess_service.submit_offer`` — attributed to the broker's company via
+    ``buyer_company_id``, as the module's manual-log flow does — and the award is driven
+    through ``excess_service.award_offer`` (the single chokepoint where an ExcessOffer
+    becomes ``won``). So the WON offer, per-line rollups, awarded line statuses, the
+    list's derived ``awarded`` status, the retired mirror, and the buyer's BuyerScore are
+    all the service's own output — the Offers tab renders the emerald won card and
+    Unaward is demonstrable, instead of the old hand-stamped zero-offer state.
+    """
     el, created = _get_or_create_list(
         db,
         title=_LIST_AWARDED,
         company=company,
         owner=owner,
-        status=ExcessListStatus.AWARDED,
+        status=ExcessListStatus.OPEN,
         close_in_days=None,
     )
     if created:
         for mpn, mfr in _BULK_MPNS[:6]:
-            item = _add_line(db, el, mpn=mpn, mfr=mfr, qty=200)
-            item.status = ExcessLineItemStatus.AWARDED  # type: ignore[assignment]  # legacy Column-model ORM noise
+            _add_line(db, el, mpn=mpn, mfr=mfr, qty=200)
         el.total_line_items = 6  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
-    logger.info("seed-resell: ensured awarded list {!r}", el.title)
+        excess_mirror.sync_list_mirror(db, el)
+        db.commit()
+
+    if _list_has_offers(db, el):
+        logger.info("seed-resell: ensured awarded list {!r}", el.title)
+        return
+
+    lines = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    if not lines:
+        return
+
+    # Legacy decay (finding #60 follow-up): the OLD seeder hand-stamped this demo
+    # awarded with ZERO offers — a shape unreachable through the app. Left as-is,
+    # submit_offer would commit a dangling late offer and award_offer would then 409
+    # on the already-awarded lines, aborting the seed mid-run (and the NEXT run's
+    # offers-exist short-circuit would falsely report success). Mirroring the #62
+    # refresh philosophy: reset to what a fresh seed writes (open list, available
+    # lines, live mirror) and re-derive the award through the real chain below.
+    if not created and (
+        el.status == ExcessListStatus.AWARDED or any(ln.status == ExcessLineItemStatus.AWARDED for ln in lines)
+    ):
+        el.status = ExcessListStatus.OPEN  # type: ignore[assignment]  # legacy Column-model ORM noise
+        el.updated_at = _now()  # type: ignore[assignment]  # legacy Column-model ORM noise
+        for ln in lines:
+            ln.status = ExcessLineItemStatus.AVAILABLE  # type: ignore[assignment]  # legacy Column-model ORM noise
+            ln.best_offer_id = None  # hand-stamped legacy rollup, no offer behind it
+        db.flush()
+        excess_mirror.sync_list_mirror(db, el)
+        db.commit()
+        logger.info("seed-resell: healed legacy hand-stamped awarded demo {!r} (reset to open, re-deriving)", el.title)
+
+    buyer_co = _get_or_create_company(db, _BROKER_COMPANY_NAME, account_type="Partner")
+    offer = excess_service.submit_offer(
+        db,
+        list_id=el.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+        user=broker,
+        scope=ExcessOfferScope.PER_LINE,
+        notes="Full-lot FPGA buyer — takes every line.",
+        buyer_company_id=buyer_co.id,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+        lines=[
+            {
+                "mpn_raw": line.part_number,
+                "quantity": line.quantity,
+                "unit_price": Decimal("18.0000") + Decimal(idx) * Decimal("3.2500"),
+                "lead_time_days": 7 + idx,
+            }
+            for idx, line in enumerate(lines)
+        ],
+    )
+    excess_service.award_offer(db, offer.id, owner)  # type: ignore[arg-type]  # legacy Column-model ORM noise
+    db.commit()
+    logger.info("seed-resell: awarded {!r} through award_offer (won offer + rollups derived)", el.title)
 
 
 # ── reset ────────────────────────────────────────────────────────────
 
 
 def _reset(db: Session) -> None:
-    """Delete the demo lists (cascades to lines + offers) and the demo users/company."""
+    """Delete the demo lists (cascades to lines + offers), the demo users/companies, and
+    the awarded demo's buyer VendorCard (its BuyerScore rows cascade at the DB
+    level)."""
     lists = db.query(ExcessList).filter(ExcessList.title.in_(_DEMO_TITLES)).all()
     for el in lists:
         # Delete the Sighting mirror + virtual scratch req before the list, else its
@@ -337,9 +448,20 @@ def _reset(db: Session) -> None:
         u = db.query(User).filter(User.email == email).one_or_none()
         if u:
             db.delete(u)
-    co = db.query(Company).filter(Company.name == _CUSTOMER_NAME).one_or_none()
-    if co:
-        db.delete(co)
+    for name in (_CUSTOMER_NAME, _BROKER_COMPANY_NAME):
+        co = db.query(Company).filter(Company.name == name).one_or_none()
+        if co:
+            db.delete(co)
+    # The awarded build attributes its offer to the broker company, which counterparty_card
+    # canonicalized to a VendorCard (+ BuyerScore via the win-hook) — remove it too, or a
+    # reset would strand a demo buyer card advertising wins.
+    card = (
+        db.query(VendorCard)
+        .filter(VendorCard.normalized_name == normalize_vendor_name(_BROKER_COMPANY_NAME))
+        .one_or_none()
+    )
+    if card:
+        db.delete(card)  # buyer_scores.vendor_card_id is ondelete=CASCADE
     db.commit()
     logger.info("seed-resell: reset complete ({} demo lists removed)", len(lists))
 
@@ -356,7 +478,7 @@ def seed(db: Session) -> None:
 
     _build_collecting(db, company, trader, broker)
     _build_oneoff(db, company, trader, broker)
-    _build_awarded(db, company, trader)
+    _build_awarded(db, company, trader, broker)
     logger.info("seed-resell: done — open /v2/resell as the Demo Trader to view all three shapes.")
 
 

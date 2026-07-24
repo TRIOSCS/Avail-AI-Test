@@ -10,12 +10,25 @@ Creates realistic test data across the full transaction lifecycle:
   - Offers in every status
   - Quotes in every status (with quote lines)
   - Buy plans in every status (with buy plan lines)
-  - Excess lists in every status (with line items and bids)
+  - Excess lists across the post-rework lifecycle (draft/open/collecting/awarded/
+    closed), with inbound broker offers submitted through excess_service and the
+    awarded shape derived through award_offer (the single award chokepoint)
 
-Called by: manual execution via `docker compose exec app python scripts/seed_test_data.py`
-Depends on: app.models, app.constants, app.database
+Production guard: REFUSES to run unless ALLOW_SAMPLE_DATA_SEED=true is set (same
+opt-in flag as app/management/seed_sample_data.py and seed_resell_demo.py), checked
+before any DB session is opened.
+
+NOT single-transaction: the excess section's service chokepoints (submit_offer /
+award_offer / close_list_without_bid, plus the mirror) commit incrementally, so a
+mid-seed failure leaves the work committed up to that point. Every section is
+find-or-create idempotent — re-run to complete a partial seed.
+
+Called by: manual execution via
+  `docker compose exec -e ALLOW_SAMPLE_DATA_SEED=true app python scripts/seed_test_data.py`
+Depends on: app.models, app.constants, app.database, app.services.excess_service
 """
 
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -33,8 +46,6 @@ from app.constants import (
     ExcessLineItemStatus,
     ExcessListStatus,
     ExcessOfferScope,
-    ExcessOfferStatus,
-    OfferLineMatchStatus,
     OfferStatus,
     QuoteStatus,
     RequisitionStatus,
@@ -46,12 +57,14 @@ from app.database import SessionLocal
 from app.models.auth import User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.crm import Company, CustomerSite
-from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
+from app.models.excess import ExcessLineItem, ExcessList
 from app.models.intelligence import MaterialCard
 from app.models.offers import Offer
 from app.models.quotes import Quote, QuoteLine
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard
+from app.services import excess_mirror, excess_service
+from app.utils.normalization import normalize_mpn_key
 
 
 def get_or_create_user(db):
@@ -211,12 +224,10 @@ MATERIAL_CARDS_DATA = [
 
 REQ_CONFIGS = [
     {"name": "Acme - MCU Order Q3", "status": RequisitionStatus.DRAFT, "urgency": "normal"},
-    {"name": "GlobalChip - Regulator Restock", "status": RequisitionStatus.ACTIVE, "urgency": "normal"},
-    {"name": "Pinnacle - ADC Sourcing", "status": RequisitionStatus.SOURCING, "urgency": "hot"},
-    {"name": "Acme - MOSFET Eval Kit", "status": RequisitionStatus.OFFERS, "urgency": "normal"},
-    {"name": "GlobalChip - WiFi Module RFQ", "status": RequisitionStatus.QUOTING, "urgency": "critical"},
+    {"name": "GlobalChip - Regulator Restock", "status": RequisitionStatus.OPEN, "urgency": "normal"},
+    {"name": "Pinnacle - ADC Sourcing", "status": RequisitionStatus.RFQS_SENT, "urgency": "hot"},
+    {"name": "Acme - MOSFET Eval Kit", "status": RequisitionStatus.OFFERS, "urgency": "critical"},
     {"name": "Pinnacle - Shift Register Build", "status": RequisitionStatus.QUOTED, "urgency": "normal"},
-    {"name": "Acme - Timer IC Rush", "status": RequisitionStatus.REOPENED, "urgency": "hot"},
     {
         "name": "GlobalChip - AVR Board Win",
         "status": RequisitionStatus.WON,
@@ -224,7 +235,7 @@ REQ_CONFIGS = [
         "opp_value": Decimal("25400.00"),
     },
     {"name": "Pinnacle - Diode Array (lost)", "status": RequisitionStatus.LOST, "urgency": "normal"},
-    {"name": "Acme - Legacy RS-232 Parts", "status": RequisitionStatus.ARCHIVED, "urgency": "normal"},
+    {"name": "Acme - Timer IC Watch", "status": RequisitionStatus.HOTLIST, "urgency": "hot"},
     {"name": "GlobalChip - Cancelled Prototype", "status": RequisitionStatus.CANCELLED, "urgency": "normal"},
 ]
 
@@ -378,11 +389,9 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
             # Create offers for reqs that are past sourcing stage
             if cfg["status"] in (
                 RequisitionStatus.OFFERS,
-                RequisitionStatus.QUOTING,
                 RequisitionStatus.QUOTED,
                 RequisitionStatus.WON,
                 RequisitionStatus.LOST,
-                RequisitionStatus.REOPENED,
             ):
                 offer_statuses = list(OfferStatus)
                 for k in range(2):
@@ -420,11 +429,11 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
 def seed_quotes(db, user, requisitions, offers, sites, *, now):
     """Create quotes in every status."""
     quote_configs = [
-        {"status": QuoteStatus.DRAFT, "req_idx": 5},
+        {"status": QuoteStatus.DRAFT, "req_idx": 3},
         {"status": QuoteStatus.SENT, "req_idx": 4},
-        {"status": QuoteStatus.WON, "req_idx": 7, "won_revenue": Decimal("25400.00")},
-        {"status": QuoteStatus.LOST, "req_idx": 8, "result_reason": "Price too high"},
-        {"status": QuoteStatus.REVISED, "req_idx": 6, "revision": 2},
+        {"status": QuoteStatus.WON, "req_idx": 5, "won_revenue": Decimal("25400.00")},
+        {"status": QuoteStatus.LOST, "req_idx": 6, "result_reason": "Price too high"},
+        {"status": QuoteStatus.REVISED, "req_idx": 4, "revision": 2},
     ]
 
     quotes = []
@@ -557,14 +566,42 @@ def seed_buy_plans(db, user, quotes, offers, *, now):
     return buy_plans
 
 
-def seed_excess_lists(db, user, companies, sites, vendor_cards):
-    """Create excess lists in every status with line items and bids."""
+# Non-owner broker who submits the seeded inbound offers — the Phase-1 self-offer
+# guard (excess_service.submit_offer) forbids the list owner offering on their own list.
+SEED_BROKER_EMAIL = "seed.broker@availai.test"
+
+
+def get_or_create_offer_broker(db):
+    """Find-or-create the non-owner broker user who submits seeded inbound offers."""
+    broker = db.query(User).filter(User.email == SEED_BROKER_EMAIL).first()
+    if broker is None:
+        broker = User(email=SEED_BROKER_EMAIL, name="Seed Test Broker", role=UserRole.BUYER.value, is_active=True)
+        db.add(broker)
+        db.flush()
+    return broker
+
+
+def seed_excess_lists(db, user, companies, sites):
+    """Create excess lists across the post-rework lifecycle with genuine offers.
+
+    Every list starts as a DRAFT and derives its final shape through the real service
+    chokepoints, so statuses, rollups, and mirrors are exactly what the app produces:
+      - draft       — constructed only,
+      - open        — excess_mirror.publish_list (mirrors the lines),
+      - collecting  — publish + inbound offers via excess_service.submit_offer
+                      (the first offer flips open → collecting),
+      - awarded     — publish + a full-coverage offer + excess_service.award_offer
+                      (the single chokepoint: WON offer, awarded lines, rollups),
+      - closed      — publish + excess_service.close_list_without_bid.
+    Offers come from a dedicated non-owner broker user with buyer attribution
+    (buyer_company_id → counterparty VendorCard), mirroring the module's own flow.
+    """
     excess_configs = [
-        {"title": "Acme Q3 Surplus - Passives", "status": ExcessListStatus.DRAFT, "co_idx": 0},
-        {"title": "GlobalChip EOL Parts", "status": ExcessListStatus.ACTIVE, "co_idx": 1},
-        {"title": "Pinnacle Defense Excess", "status": ExcessListStatus.BIDDING, "co_idx": 3},
-        {"title": "Acme Reel Closeout", "status": ExcessListStatus.CLOSED, "co_idx": 0},
-        {"title": "Pacific Components Clearance", "status": ExcessListStatus.EXPIRED, "co_idx": 2},
+        {"title": "Acme Q3 Surplus - Passives", "shape": "draft", "co_idx": 0},
+        {"title": "GlobalChip EOL Parts", "shape": "open", "co_idx": 1},
+        {"title": "Pinnacle Defense Excess", "shape": "collecting", "co_idx": 3},
+        {"title": "Acme Reel Closeout", "shape": "awarded", "co_idx": 0},
+        {"title": "Pacific Components Clearance", "shape": "closed", "co_idx": 2},
     ]
 
     excess_parts = [
@@ -575,8 +612,8 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
         ("USB-C-16P", "Molex", 5000, Decimal("0.45")),
     ]
 
-    line_statuses = list(ExcessLineItemStatus)
-    offer_statuses = list(ExcessOfferStatus)
+    broker = get_or_create_offer_broker(db)
+    buyer_co = companies[4]  # Vertex Supply Co (Partner) — the buying counterparty
 
     for i, ecfg in enumerate(excess_configs):
         co = companies[ecfg["co_idx"]]
@@ -592,66 +629,96 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
             customer_site_id=site.id,
             owner_id=user.id,
             title=ecfg["title"],
-            status=ecfg["status"].value,
+            status=ExcessListStatus.DRAFT.value,
             total_line_items=3,
         )
         db.add(el)
         db.flush()
 
-        # 3 line items per list
+        # 3 line items per list — all start AVAILABLE; award_offer flips the sold ones.
         for j in range(3):
             pn, mfg, qty, price = excess_parts[(i + j) % len(excess_parts)]
-            ls = line_statuses[(i + j) % len(line_statuses)]
-
             eli = ExcessLineItem(
                 excess_list_id=el.id,
                 part_number=pn,
-                normalized_part_number=pn.replace(" ", "").upper(),
+                normalized_part_number=normalize_mpn_key(pn) or None,
                 manufacturer=mfg,
                 quantity=qty,
                 condition="New",
                 asking_price=price,
-                market_price=price * Decimal("1.15"),
-                demand_score=30 + (i + j) * 10,
-                status=ls.value,
+                status=ExcessLineItemStatus.AVAILABLE.value,
             )
             db.add(eli)
-            db.flush()
+        db.flush()
 
-            # Add inbound broker offers for bidding/closed lists (Trading module:
-            # ExcessOffer + per-line ExcessOfferLine — the replacement for the old Bid).
-            if ecfg["status"] in (ExcessListStatus.BIDDING, ExcessListStatus.CLOSED):
-                for k in range(2):
-                    vc = vendor_cards[(i + j + k) % len(vendor_cards)]
-                    os_ = offer_statuses[(i + j + k) % len(offer_statuses)]
+        shape = ecfg["shape"]
+        if shape == "draft":
+            continue
 
-                    offer = ExcessOffer(
-                        excess_list_id=el.id,
-                        submitted_by=user.id,
-                        offerer_vendor_card_id=vc.id,
-                        scope=ExcessOfferScope.PER_LINE.value,
-                        status=os_.value,
-                        notes="Seeded demo offer",
-                    )
-                    db.add(offer)
-                    db.flush()
-                    db.add(
-                        ExcessOfferLine(
-                            offer_id=offer.id,
-                            excess_line_item_id=eli.id,
-                            mpn_raw=pn,
-                            quantity=qty // (2 + k),
-                            unit_price=price * Decimal(str(0.85 + k * 0.1)),
-                            lead_time_days=5 + k * 3,
-                            match_status=OfferLineMatchStatus.MATCHED.value,
-                        )
-                    )
+        # draft → open through the real publish path (stamps open_at, mirrors lines).
+        excess_mirror.publish_list(db, el.id, user)
+
+        if shape in ("collecting", "awarded"):
+            lines = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+            offer = excess_service.submit_offer(
+                db,
+                list_id=el.id,
+                user=broker,
+                scope=ExcessOfferScope.PER_LINE,
+                notes="Seeded inbound broker offer (full coverage)",
+                buyer_company_id=buyer_co.id,
+                lines=[
+                    {
+                        "mpn_raw": ln.part_number,
+                        "quantity": max(1, (ln.quantity or 1) // 2),
+                        "unit_price": (ln.asking_price or Decimal("1")) * Decimal("0.90"),
+                        "lead_time_days": 5,
+                    }
+                    for ln in lines
+                ],
+            )
+            # A competing offer on the lead line so rollups have a spread to pick from.
+            excess_service.submit_offer(
+                db,
+                list_id=el.id,
+                user=broker,
+                scope=ExcessOfferScope.PER_LINE,
+                notes="Seeded competing broker offer",
+                buyer_company_id=buyer_co.id,
+                lines=[
+                    {
+                        "mpn_raw": lines[0].part_number,
+                        "quantity": lines[0].quantity,
+                        "unit_price": (lines[0].asking_price or Decimal("1")) * Decimal("0.95"),
+                        "lead_time_days": 12,
+                    }
+                ],
+            )
+            if shape == "awarded":
+                # The single award chokepoint: flips the offer WON, lines AWARDED,
+                # closes competitors LOST, recomputes rollups, retires the mirror,
+                # and derives the list's own awarded status.
+                excess_service.award_offer(db, offer.id, user)
+        elif shape == "closed":
+            excess_service.close_list_without_bid(db, el.id, user)
 
     db.flush()
-    logger.info("Excess lists with line items and inbound offers seeded")
+    logger.info("Excess lists seeded across the post-rework lifecycle (real offers/awards)")
 
 
 def main():
+    # Hard production guard: refuse to seed synthetic test data unless the operator has
+    # explicitly opted in (same ALLOW_SAMPLE_DATA_SEED flag as seed_sample_data /
+    # seed_resell_demo). Checked BEFORE opening a DB session so a refused run never
+    # touches whatever database SessionLocal resolves to.
+    if os.getenv("ALLOW_SAMPLE_DATA_SEED", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        print(
+            "REFUSED: test-data seeding is disabled unless ALLOW_SAMPLE_DATA_SEED=true is set "
+            "(guards against injecting synthetic data into production). Set it explicitly to seed.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     logger.info("=== Seeding test data ===")
     now = datetime.now(UTC)
     db = SessionLocal()
@@ -665,7 +732,7 @@ def main():
         requisitions, requirements, offers = seed_requisitions(db, user, companies, sites, material_cards, vendor_cards)
         quotes = seed_quotes(db, user, requisitions, offers, sites, now=now)
         seed_buy_plans(db, user, quotes, offers, now=now)
-        seed_excess_lists(db, user, companies, sites, vendor_cards)
+        seed_excess_lists(db, user, companies, sites)
 
         db.commit()
         logger.info("=== All test data committed ===")
@@ -682,7 +749,8 @@ def main():
             UNION ALL SELECT 'buy_plan_lines', count(*) FROM buy_plan_lines
             UNION ALL SELECT 'excess_lists', count(*) FROM excess_lists
             UNION ALL SELECT 'excess_line_items', count(*) FROM excess_line_items
-            UNION ALL SELECT 'bids', count(*) FROM bids
+            UNION ALL SELECT 'excess_offers', count(*) FROM excess_offers
+            UNION ALL SELECT 'excess_offer_lines', count(*) FROM excess_offer_lines
             UNION ALL SELECT 'companies', count(*) FROM companies
             UNION ALL SELECT 'vendor_cards', count(*) FROM vendor_cards
             UNION ALL SELECT 'material_cards', count(*) FROM material_cards
@@ -694,8 +762,15 @@ def main():
             logger.info(f"  {tbl}: {cnt}")
 
     except Exception:
+        # NOT all-or-nothing: seed_excess_lists routes through the real service
+        # chokepoints (submit_offer/award_offer/close_list_without_bid), which commit
+        # the shared session incrementally — so a failure here rolls back only work
+        # since the last service commit. Every section is find-or-create idempotent:
+        # re-run to complete a partial seed.
         db.rollback()
-        logger.exception("Seed failed — rolled back")
+        logger.exception(
+            "Seed failed — uncommitted work rolled back (service chokepoints commit incrementally; re-run to complete a partial seed)"
+        )
         raise
     finally:
         db.close()

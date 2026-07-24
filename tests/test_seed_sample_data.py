@@ -92,10 +92,12 @@ def test_fresh_seed_creates_expected_entities(db_session: Session) -> None:
     assert _count(db_session, SiteContact) == 5
     assert _count(db_session, VendorCard) == 6
     assert _count(db_session, VendorContact) == 6
-    assert _count(db_session, MaterialCard) == 3
+    # 3 hand-seeded cards + the card the excess mirror lazily heals for the
+    # no-material-card line (sync_list_mirror → resolve_material_card, finding #61).
+    assert _count(db_session, MaterialCard) == 4
     assert _count(db_session, VerificationGroupMember) == 1
 
-    # Requisitions: req1/req2/req3 + the excess-demand scratch req.
+    # Requisitions: req1/req2/req3 + the mirror's "Customer Excess (list N)" virtual req.
     assert _count(db_session, Requisition) == 4
 
     # Excess / resell (WF-E).
@@ -196,6 +198,29 @@ def test_seeded_best_offer_ids_resolve_to_real_offers(db_session: Session) -> No
         assert db_session.get(ExcessOffer, item.best_offer_id) is not None
 
 
+def test_customer_excess_sightings_are_mirror_managed(db_session: Session) -> None:
+    """WF-E's excess supply is mirrored through excess_mirror.sync_list_mirror (finding
+    #61): every customer_excess Sighting carries excess_line_item_id and lives on the
+    list's managed 'Customer Excess (list N)' virtual requisition — so awarding/
+    closing/deleting the list in the app retires them (no unmanaged ghost supply)."""
+    sds.seed(db_session)
+
+    ex1 = db_session.query(ExcessList).filter_by(source_filename=sds.SAMPLE_TAG).one()
+    line_ids = {r[0] for r in db_session.query(ExcessLineItem.id).filter_by(excess_list_id=ex1.id)}
+    sightings = db_session.query(Sighting).filter_by(source_type="customer_excess").all()
+    assert sightings, "the seeded excess list must be mirrored"
+    for s in sightings:
+        assert s.excess_line_item_id in line_ids, "mirror rows must key on the line's own id"
+
+    virtual_req = (
+        db_session.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name == f"Customer Excess (list {ex1.id})")
+        .one()
+    )
+    req_ids = {r[0] for r in db_session.query(Requirement.id).filter_by(requisition_id=virtual_req.id)}
+    assert all(s.requirement_id in req_ids for s in sightings), "mirror rows hang on the virtual requisition"
+
+
 def test_second_seed_is_idempotent(db_session: Session) -> None:
     """Re-running the seeder creates nothing new — counts are stable."""
     sds.seed(db_session)
@@ -230,6 +255,9 @@ def test_wipe_removes_sample_rows_only(db_session: Session) -> None:
     assert db_session.query(VendorCard).filter(VendorCard.source == sds.SAMPLE_TAG).count() == 0
     assert db_session.query(MaterialCard).filter(MaterialCard.normalized_mpn.like("avsample%")).count() == 0
     assert db_session.query(Requisition).filter(Requisition.name.like("AVSAMPLE ·%")).count() == 0
+    # The mirror's virtual scratch req is torn down too (teardown_list_mirror) — it is
+    # named "Customer Excess (list N)", so the AVSAMPLE name filter alone would miss it.
+    assert db_session.query(Requisition).filter(Requisition.name.like("Customer Excess (list %")).count() == 0
     assert db_session.query(ExcessList).filter(ExcessList.source_filename == sds.SAMPLE_TAG).count() == 0
     assert _count(db_session, Quote) == 0
     assert _count(db_session, Offer) == 0
