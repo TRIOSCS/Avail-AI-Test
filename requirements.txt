@@ -4,7 +4,7 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.117.0
+anthropic==0.120.0
     # via -r requirements.in
 anyio==4.13.0
     # via
@@ -59,7 +59,7 @@ docstring-parser==0.18.0
     # via anthropic
 et-xmlfile==2.0.0
     # via openpyxl
-fastapi==0.139.2
+fastapi==0.140.1
     # via
     #   -r requirements.in
     #   sentry-sdk
@@ -124,11 +124,11 @@ packaging==26.2
     # via limits
 patchright==1.61.2
     # via -r requirements.in
-phonenumbers==9.0.34
+phonenumbers==9.0.35
     # via -r requirements.in
 pillow==12.3.0
     # via weasyprint
-prometheus-client==0.25.0
+prometheus-client==0.26.0
     # via -r requirements.in
 psycopg2-binary==2.9.12
     # via -r requirements.in
@@ -170,7 +170,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.66.0
+sentry-sdk[fastapi]==2.66.1
     # via -r requirements.in
 slowapi==0.1.10
     # via -r requirements.in
@@ -182,7 +182,7 @@ sqlalchemy==2.0.51
     # via
     #   -r requirements.in
     #   alembic
-sse-starlette==3.4.5
+sse-starlette==3.4.6
     # via -r requirements.in
 starlette==1.3.1
     # via
