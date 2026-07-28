@@ -112,6 +112,7 @@ def run_startup_migrations() -> None:
     | _backfill_ticket_defaults                        | SLOW → deferred | unbatched per-row ORM update over trouble_tickets       |
     | _backfill_material_cards                         | SLOW → deferred | per-row resolve_material_card() call over unlinked requirements |
     | _backfill_sweep_cooldown                         | SLOW → deferred | unbounded ORM query over prospect_accounts              |
+    | _backfill_resell_mirrors                         | SLOW → deferred | per-list mirror rebuild over open/collecting excess lists |
     | _complete_reverted_active_plans                  | SLOW → deferred | per-candidate check_completion() business logic         |
     | _warn_non_canonical_categories                    | SLOW → deferred | full-table GROUP BY scan; pure observability            |
 
@@ -247,6 +248,7 @@ def run_deferred_startup_backfills() -> None:
         _backfill_ticket_defaults()
         _backfill_material_cards()
         _backfill_sweep_cooldown()
+        _backfill_resell_mirrors()
         _complete_reverted_active_plans()
         _warn_non_canonical_categories()
     except Exception:
@@ -1493,6 +1495,60 @@ def _backfill_sweep_cooldown() -> None:
         )
     except Exception:
         logger.exception("Failed backfilling sweep cooldown on ProspectAccounts")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _backfill_resell_mirrors() -> None:
+    """Rebuild the customer_excess Sighting mirror for live excess lists that lost it.
+
+    Migration 199 swept EVERY customer_excess Sighting (rebuilding line-keyed rows only
+    for lists touched afterwards), so a list that was already open/collecting at deploy
+    time advertises no supply to the matcher and has no in-app rebuild path (deep-review-2
+    finding #19). Idempotent detector: an open/collecting list with ZERO mirror sightings
+    keyed to its line items gets ``excess_mirror.sync_list_mirror`` (itself idempotent —
+    it re-mirrors active lines and retires inactive ones); healthy lists are skipped
+    without writing. Runtime backfill only — no DDL.
+
+    Called by: run_deferred_startup_backfills
+    Depends on: excess models, sourcing.Sighting, services.excess_mirror, SessionLocal
+    """
+    from .constants import ExcessListStatus
+    from .models.excess import ExcessLineItem, ExcessList
+    from .models.sourcing import Sighting
+    from .services import excess_mirror
+
+    db = SessionLocal()
+    try:
+        live = (ExcessListStatus.OPEN.value, ExcessListStatus.COLLECTING.value)
+        lists = db.query(ExcessList).filter(ExcessList.status.in_(live)).all()
+        restored = 0
+        for el in lists:
+            has_mirror = (
+                db.query(Sighting.id)
+                .join(ExcessLineItem, Sighting.excess_line_item_id == ExcessLineItem.id)
+                .filter(
+                    ExcessLineItem.excess_list_id == el.id,
+                    Sighting.source_type == excess_mirror.MIRROR_SOURCE_TYPE,
+                )
+                .first()
+            )
+            if has_mirror is not None:
+                continue
+            result = excess_mirror.sync_list_mirror(db, el)
+            db.commit()
+            if result["mirrored"]:
+                restored += 1
+                logger.info(
+                    "Restored the customer_excess mirror for live ExcessList id={} ({} lines mirrored)",
+                    el.id,
+                    result["mirrored"],
+                )
+        if restored:
+            logger.info("Resell mirror backfill restored {} stranded live list(s)", restored)
+    except Exception:
+        logger.exception("Failed backfilling resell list mirrors")
         db.rollback()
     finally:
         db.close()

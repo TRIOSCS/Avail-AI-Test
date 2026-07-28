@@ -780,8 +780,12 @@ def not_yet_offered_strip(
     don't-forget nudge surfaces exactly the historical commodity buyers you have not
     yet offered THIS round. Reachable / non-DNC only (reuses the same gate). Returns
     [] when every historical buyer has already been offered.
+
+    The subtraction happens BEFORE the cap (finding #6): the ranking runs with headroom
+    for every already-offered buyer, so a big campaign that touched the top-``limit``
+    ranked buyers no longer starves the strip — the next-ranked untouched buyers surface
+    instead of an empty nudge.
     """
-    ranked = rank_buyers_for(db, excess_list_id=excess_list_id, limit=limit)
     # "Already offered" excludes non-sent rows: a buyer whose only touch on this list is a
     # ``sending`` / ``failed`` / ``interrupted`` row was not really offered, so they stay
     # re-nudgeable (a failed send should surface again, not silently strand the buyer).
@@ -796,9 +800,12 @@ def not_yet_offered_strip(
         .distinct()
         .all()
     }
+    # Rank with headroom (limit + the touched set), subtract, THEN cap — the old
+    # rank-then-slice order let the already-offered buyers consume the whole slice.
+    ranked = rank_buyers_for(db, excess_list_id=excess_list_id, limit=limit + len(already))
     # The nudge is about buyers with a real history (part/commodity), not the cold
     # engagement tier — those are covered by the live suggestion panel, not "usually".
-    return [r for r in ranked if r.vendor_card_id not in already and r.rank_reason != "engagement"]
+    return [r for r in ranked if r.vendor_card_id not in already and r.rank_reason != "engagement"][:limit]
 
 
 # ═══════════════════════════════════════════════════════════════════════

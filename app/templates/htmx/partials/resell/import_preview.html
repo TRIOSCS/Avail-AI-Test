@@ -59,12 +59,15 @@
      never dead-ends inside #import-area (RS-6). Confirm re-renders the whole detail so
      the header Post button appears (RS-5). #}
   <div class="flex gap-2">
+    {# The confirmation toast is SERVER-emitted (finding #16): the route sends ONE
+       HX-Trigger message combining the imported count and any skipped-row warning, so
+       there is no client-side handler to fire a false green toast on a 4xx or clobber
+       the warning. #}
     {% if valid_count %}
     <form hx-post="/api/resell/{{ list_id }}/import-confirm"
           hx-target="closest [data-resell-detail-root]"
           hx-swap="outerHTML"
-          data-loading-disable
-          @htmx:after-request.camel="$store.toast.message='Imported {{ valid_count }} lines'; $store.toast.type='success'; $store.toast.show=true;">
+          data-loading-disable>
       <input type="hidden" name="rows_json" value="{{ all_valid_rows_json }}">
       <button type="submit" class="btn btn-primary btn-sm">Confirm import ({{ valid_count }})</button>
     </form>

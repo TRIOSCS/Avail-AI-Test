@@ -446,7 +446,9 @@ class TestResellPublishErrors:
         el = _make_draft_list(db_session, trader, test_company)
         db_session.commit()
         r = client.post(f"/api/resell/{el.id}/publish")
-        assert r.status_code == 403
+        # 404, not 403: a foreign private DRAFT's existence is masked (finding #48) —
+        # publish joins the owner-only sweep, so probing sequential ids reveals nothing.
+        assert r.status_code == 404
 
 
 # ── Task 4: stale-``sending`` sweeper ─────────────────────────────────────────

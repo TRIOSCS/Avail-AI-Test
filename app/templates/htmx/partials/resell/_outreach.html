@@ -124,11 +124,14 @@
                 Retry
               </button>
               {% endif %}
-              {# Manual-channel log actions (finding #12): a phone/teams/marketplace touch has
-                 no email thread, so the owner records the outcome directly on the row —
-                 Log response (→ responded) or Log their bid (→ bid + an ExcessOffer). Hidden
-                 once the row is terminal (bid/declined). #}
-              {% if row.channel != 'email' and row.status not in ('bid', 'declined') %}
+              {# Manual + degraded-email log actions (finding #12; B3): a phone/teams/
+                 marketplace touch has no email thread, and a DEGRADED email row (sent but
+                 no graph_conversation_id captured) has none either — for both, the owner
+                 records the outcome directly on the row — Log response (→ responded) or
+                 Log their bid (→ bid + an ExcessOffer). Mirrors the route contract
+                 (_load_manual_outreach_for_owner: 409 only for email WITH a thread).
+                 Hidden once the row is terminal (bid/declined). #}
+              {% if (row.channel != 'email' or not row.graph_conversation_id) and row.status not in ('bid', 'declined') %}
               {% if row.status == 'sent' %}
               <button hx-post="/api/resell/{{ el.id }}/outreach/{{ row.id }}/log-response"
                       hx-target="#tab-outreach-{{ el.id }}" hx-swap="innerHTML"

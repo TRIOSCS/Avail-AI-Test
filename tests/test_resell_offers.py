@@ -108,7 +108,7 @@ def test_confirm_import_resolves_material_card_id(db_session: Session):
     owner = _make_user(db_session, email="owner2@test.com", role="sales")
     el = create_excess_list(db_session, title="L", company_id=company.id, owner_id=owner.id)
 
-    confirm_import(db_session, el.id, [{"part_number": "MAX232", "quantity": 50}])
+    confirm_import(db_session, el.id, owner, [{"part_number": "MAX232", "quantity": 50}])
 
     item = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
     assert item.material_card_id is not None

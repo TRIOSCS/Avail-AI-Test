@@ -365,7 +365,7 @@ def preview_import(rows: list[dict]) -> dict:
     }
 
 
-def confirm_import(db: Session, list_id: int, rows: list[dict]) -> dict:
+def confirm_import(db: Session, list_id: int, user: User, rows: list[dict]) -> dict:
     """Import client-submitted rows into an excess list — RE-VALIDATED server-side (L3).
 
     The preview grid round-trips its rows back through a hidden form field, so *rows* is
@@ -376,9 +376,13 @@ def confirm_import(db: Session, list_id: int, rows: list[dict]) -> dict:
     quantity) is rejected and skipped, never inserted — and only the parser's canonical,
     normalized fields are persisted (the round-tripped values are re-derived, not trusted).
 
+    *user* is the acting user: the import is guarded by :func:`_require_owned_draft`
+    (404 → 403 → 409) like every other line mutator (finding #41), so a direct service
+    call cannot write another owner's list or a posted one.
+
     Returns {imported, skipped}.
     """
-    excess_list = get_excess_list(db, list_id)
+    excess_list = _require_owned_draft(db, list_id, user)
     imported = 0
     skipped = 0
     for raw in rows:
@@ -1718,6 +1722,56 @@ def _require_owned_draft(db: Session, list_id: int, owner: User) -> ExcessList:
     return el
 
 
+def add_line(
+    db: Session,
+    list_id: int,
+    owner: User,
+    *,
+    part_number: str,
+    quantity: int,
+    manufacturer: str | None = None,
+    condition: str | None = None,
+    date_code: str | None = None,
+    asking_price: Decimal | None = None,
+) -> ExcessList:
+    """Add one line to a draft list (owner-only, draft-only); returns the refreshed
+    list.
+
+    The service twin of the import-row path (findings #33/#42 — the router used to build
+    the ExcessLineItem inline with a bare ``db.commit()`` and a private-helper call):
+    guarded by :func:`_require_owned_draft` (404 → 403 → 409), validates ``quantity > 0``
+    (400 — otherwise the ``@validates('quantity')`` ValueError surfaces as a 500) and a
+    non-blank part number AFTER stripping (400 — whitespace-only was stored verbatim,
+    with no normalized key, mirroring ``_parse_import_row``'s blank-part rejection).
+    Resolves the MaterialCard link, bumps ``total_line_items``, commits via
+    :func:`_safe_commit` (IntegrityError → 409).
+    """
+    el = _require_owned_draft(db, list_id, owner)
+    pn = (part_number or "").strip()
+    if not pn:
+        raise HTTPException(400, "Part number is required")
+    if quantity is None or quantity <= 0:
+        raise HTTPException(400, "Quantity must be a positive whole number")
+
+    item = ExcessLineItem(
+        excess_list_id=el.id,
+        part_number=pn,
+        normalized_part_number=normalize_mpn_key(pn) or None,
+        manufacturer=manufacturer or None,
+        quantity=quantity,
+        condition=condition or "New",
+        date_code=date_code or None,
+        asking_price=asking_price,
+    )
+    db.add(item)
+    _resolve_line_material_card(db, item)
+    el.total_line_items = (el.total_line_items or 0) + 1
+    _safe_commit(db, entity="excess line item")
+    db.refresh(el)
+    logger.info("Added ExcessLineItem to draft list={} by owner={} (part={})", list_id, owner.id, pn)
+    return el
+
+
 def delete_line(db: Session, list_id: int, line_id: int, owner: User) -> ExcessList:
     """Delete one line from a draft list (owner-only, draft-only); returns the list.
 
@@ -1793,16 +1847,18 @@ def update_excess_list(
     title: str,
     notes: str | None = None,
     company_id: int | None = None,
-    customer_site_id: int | None = None,
     close_at: datetime | None = _UNSET_CLOSE_AT,
 ) -> ExcessList:
     """Edit a draft list's header (owner-only, draft-only); returns the refreshed list.
 
-    Updates ``title`` / ``notes`` / ``customer_site_id`` and, when ``company_id`` is given
-    and differs, re-points the seller company (404 if it does not exist). ``close_at`` is
-    draft-scope with the same future+tz-aware 400 validation as create; passing ``None``
-    CLEARS the deadline. It defaults to a sentinel so a header edit that carries no deadline
-    input (the current draft-edit form) leaves any stored deadline untouched. Commits.
+    Updates ``title`` / ``notes`` and, when ``company_id`` is given and differs, re-points
+    the seller company (404 if it does not exist). ``close_at`` is draft-scope with the
+    same future+tz-aware 400 validation as create; passing ``None`` CLEARS the deadline.
+    It defaults to a sentinel so a header edit that carries no deadline input (the current
+    draft-edit form) leaves any stored deadline untouched. ``customer_site_id`` is NOT a
+    parameter (finding #40): no form carries it, and the old unconditional assignment
+    silently wiped a stored site id on every header edit — reintroduce it only with an
+    _UNSET-style sentinel when a form actually posts it. Commits.
     """
     el = _require_owned_draft(db, list_id, owner)
     if company_id is not None and company_id != el.company_id:
@@ -1812,7 +1868,6 @@ def update_excess_list(
         el.company_id = company_id
     el.title = title
     el.notes = notes
-    el.customer_site_id = customer_site_id
     if close_at is not _UNSET_CLOSE_AT:
         el.close_at = _validate_draft_close_at(close_at)
     _safe_commit(db, entity="excess list update")
