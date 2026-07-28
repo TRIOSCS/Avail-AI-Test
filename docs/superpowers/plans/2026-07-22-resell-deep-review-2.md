@@ -130,6 +130,9 @@ retry_outreach_send treats an exception from email_service._find_sent_message as
 
 **Fix:** Give _find_sent_message a three-state contract (found dict | not-found | lookup-failed, e.g. raise on api_error or return a sentinel); in retry_outreach_send map lookup-failed to the existing INTERRUPTED no-resend branch and only resend on a positive not-found.
 
+
+**FIXED in PR #792 (annotation added 2026-07-28).** `_find_sent_message` now has the three-state contract (found dict / None / raises `SentMessageLookupError` when every attempt errored — `app/email_service.py`), and `retry_outreach_send` maps a raised lookup to the existing INTERRUPTED no-resend branch, so a Graph outage during the reconcile can never trigger a double-send.
+
 ### 3. [P2] Degraded email outreach row (SENT, no graph ids) is a hard dead end — the 409 points at a route that 404s
 **Where:** `app/routers/resell.py:2140` (dimension: router-correctness)
 
@@ -138,6 +141,9 @@ Phase 2 deliberately created a 'delivered, reply-matching degraded' state: a SEN
 **Fix:** Allow the manual log-response/log-bid path for an email row that has no graph_conversation_id (the degraded case): change _load_manual_outreach_for_owner's 409 condition to `outreach.channel == EMAIL and outreach.graph_conversation_id`, and render the Log actions in _outreach.html for email rows without a conversation id.
 
 **Resolution: FIXED (logic side).** `_load_manual_outreach_for_owner`'s 409 condition is now exactly `outreach.channel == EMAIL and outreach.graph_conversation_id` — a degraded email row (SENT/FAILED, no thread ever captured) is allowed through the manual log-response/log-bid path; an email row that DOES have a thread still 409s. **Template note for the UI team:** `_outreach.html`'s "Log response"/"Log bid" affordances currently gate on `channel != 'email'`, so this degraded row still renders NO action button in the template even though the route now accepts it — the UI team should also render those actions for an email row with `graph_conversation_id` falsy (mirroring the router's new condition). Not changed here per the hard constraint against editing `app/templates/`. See `app/routers/resell.py` (`_load_manual_outreach_for_owner`); tests in `tests/test_resell_outreach_routes.py` (`test_manual_log_rejects_email_channel_row_with_thread`, `test_manual_log_allows_degraded_email_row_without_thread`).
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The declared B3 template follow-up shipped: `_outreach.html` renders Log response / Log bid when `(channel != 'email' or not graph_conversation_id)` and the status is not terminal — mirroring the `_load_manual_outreach_for_owner` route contract — so a degraded email row is no longer an action-less dead end (View reply / Retry gates unchanged; render tests for degraded vs threaded rows in tests/test_resell_themes_dghi.py).
 
 ### 5. [P2] Recipient address is not persisted on ExcessOutreach — retry reconciles against the card's CURRENT primary email, defeating the guard
 **Where:** `app/services/resell_outreach_service.py:879` (dimension: outreach-affinity)
@@ -224,12 +230,18 @@ D2 hides every offer-existence signal from non-owners: _list_cards nulls coverag
 
 **Fix:** In the open lens, collapse the badge to a neutral 'open' for both open and collecting (template gate on can_see_customer, same predicate as D2), and restrict the open-lens stage filter to a whitelist that merges open+collecting (e.g. map stage in {open, collecting, live} -> _LIVE_STATUSES when not can_see_customer). Failure scenario: broker B loads GET /v2/partials/resell/lists?lens=open&stage=collecting and gets exactly the anonymized postings that have drawn a competing bid — the same signal t
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** In the open lens the stage tokens open/collecting/live all merge onto `_LIVE_STATUSES` (`_list_rows_context`), and both `_list_rows.html` and `_header_chips.html` collapse a collecting badge to a neutral 'open' on the same `can_see_customer` predicate — stage-diffing and the badge both stop leaking offer existence.
+
 ### 14. [P2] Every resell 409 guard failure is completely silent in the UI
 **Where:** `app/routers/resell.py:1139` (dimension: frontend-templates)
 
 The global htmx error handler (app/static/htmx_app.js:586-593) deliberately suppresses the generic error toast for ALL 409 responses, on the assumption that 409s come from services/stale_guard.py which sends its own HX-Trigger showToast + HX-Reswap:none. The resell module never uses stale_guard: it raises dozens of bare HTTPException(409, ...) (resell.py:1052, 1139, 1186, 1207, 1382, 1971, 2075-2077, 2141; excess_service.py:731, 956-971, 1049, 1262) that return plain JSON via main.py:269's handler with no HX-Trigger. htmx does not swap 4xx responses by default, so every resell 409 produces zero feedback: no swap, no toast, modal stays open.
 
 **Fix:** Attach the showToast HX-Trigger (the _toast helper pattern at resell.py:1510) to resell 409 responses — e.g. a router-level exception handler or reuse stale_guard's stale_conflict_response shape — so the suppressed-toast contract ("server owns 409 messaging") is actually honored.
+
+
+**FIXED 2026-07-28 via the app-wide 409 HX-Trigger seam (CRM Wave 3 PR).** Closed centrally — the shared 409 handler owns htmx 409 messaging for every module, so no per-route resell change is needed.
 
 ### 15. [P2] Draft Delete button is dead on a deep-linked /v2/resell/{id} page
 **Where:** `app/templates/htmx/partials/resell/detail.html:53` (dimension: frontend-templates)
@@ -238,12 +250,18 @@ The header Delete button targets #resell-list-body, which only exists inside the
 
 **Fix:** Give the delete response a target that exists in both render contexts — e.g. target `closest [data-resell-detail-root]` and have the route answer with an HX-Redirect/HX-Location to /v2/resell (it already sets HX-Push-Url), or fall back to hx-target="body"-safe handling when #resell-list-body is absent.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The Delete button targets `closest [data-resell-detail-root]` (exists in both render contexts) and `resell_delete_list` answers with `HX-Redirect: /v2/resell` + toast (the companies-delete pattern; `_list_after_delete.html` retired), so a deep-linked delete actually sends and lands on the workspace with a correct address bar.
+
 ### 16. [P2] Import-confirm toast fires 'Imported N lines' unconditionally, masking failures and clobbering the skipped-rows warning
 **Where:** `app/templates/htmx/partials/resell/import_preview.html:67` (dimension: frontend-templates)
 
 The confirm-import form's @htmx:after-request handler sets the success toast without the `if(event.detail.successful)` guard that every sibling resell form uses (offer_form.html:20, create_modal.html:14, add_line_modal.html:16, edit_line_modal.html:16, edit_list_modal.html:16). Two concrete failures: (a) on a 409 (list posted in another tab -> resell.py:1382) or any 4xx/5xx, the user sees a green 'Imported 47 lines' toast while nothing was imported and the stale preview stays on screen; (b) on success with server-side skips, Phase 6b Task 2's HX-Trigger warning toast ('N row(s) skipped (invalid quantity or blank part number)', resell.py:1397-1400) is dispatched first, then this handler overwrites the single global $store.toast with the success message — the just-shipped warning is never seen.
 
 **Fix:** Wrap the handler in `if(event.detail.successful){...}` like its siblings, and skip the client-side toast entirely when the response carries the skipped-rows HX-Trigger (or move the success toast server-side into the same HX-Trigger channel so only one message is emitted).
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** One server-side emitter: `resell_import_confirm` sends a single HX-Trigger toast combining the imported count and any skipped-row warning (type warning when rows were skipped), and the unconditional client-side success handler was deleted from `import_preview.html`.
 
 ### 17. [P2] List search input swaps itself away on every debounced keystroke — typing focus is lost
 **Where:** `app/templates/htmx/partials/resell/_lists.html:34` (dimension: frontend-templates)
@@ -252,12 +270,18 @@ The search input targets #resell-list-body with innerHTML, but the input itself 
 
 **Fix:** Move the filter/search bar out of the swapped region (swap only the rows container, matching the sightings/knowledge/parts pattern), or give the input a stable id so htmx's focus restoration applies, or use hx-swap="morph:innerHTML" like parts/list.html.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The left list swaps only the `#resell-list-rows` container: the search input targets the new rows-only `GET /v2/partials/resell/list-rows` endpoint (`_list_rows.html`), keeping the filter bar — and the input being typed in — outside the swapped region (the sightings/knowledge/parts pattern, not the id band-aid).
+
 ### 18. [P2] Header 'N offers' chip and Offers-tab badge count withdrawn/expired offers the tab never shows
 **Where:** `app/routers/resell.py:352` (dimension: frontend-templates)
 
 _detail_context computes offer_count with no status filter, but the Offers tab renders only _VISIBLE_OFFER_STATUSES (open/late/won/lost — resell.py:81-86); withdrawn and expired offers 'drop out of the tab entirely' per the module's own comment (resell.py:79-80). The count feeds both the header chip (_header_chips.html:34 '{{ offer_count }} offer{{ s }}') and the amber Offers-tab badge (detail.html:130), so after a withdrawal the owner sees a count that includes offers the tab cannot show.
 
 **Fix:** Filter the offer_count query (and the take_all_count already does this via _UNACTIONED_OFFER_STATUSES) on _VISIBLE_OFFER_STATUSES so the chip/badge match what the tab renders.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `_detail_context` filters `offer_count` on `_VISIBLE_OFFER_STATUSES` (mirroring `take_all_count`), so the header chip and Offers-tab badge count exactly what the tab renders.
 
 ### 20. [P2] _parse_close_at stamps UTC onto the naive datetime-local wall-clock — deadline saved shifted by the user's UTC offset, spurious 400 on near-term deadlines
 **Where:** `app/routers/resell.py:167` (dimension: data-tests)
@@ -266,6 +290,9 @@ The D1 "Offers close by" input is an HTML datetime-local field, which submits th
 
 **Fix:** Convert the naive wall-clock using the user/deployment timezone (e.g. a tz offset posted alongside the field via a hidden input populated from Date.getTimezoneOffset()), or at minimum document+test the intended semantics; add a test for the spurious-400 case.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The create modal posts a hidden `tz_offset_min` (from `Date.getTimezoneOffset()`) and `_parse_close_at(raw, tz_offset_min)` converts the local wall-clock to the real UTC instant (UTC fallback when the offset is absent/invalid) — killing both the shifted deadline and the spurious 400. The two sibling `replace(tzinfo=UTC)` display sites (`_hours_until` / `_close_at_display`) were verified correct: they stamp UTC onto naive DB reads, and the column stores UTC.
+
 ### 50. [P3] 'Submit offer' button renders on closed/expired lists and dead-ends in a 'List not found' error
 **Where:** `app/templates/htmx/partials/resell/detail.html:101` (dimension: frontend-templates)
 
@@ -273,12 +300,18 @@ _detail_context sets can_offer without any list-status check (resell.py:375 `exc
 
 **Fix:** Gate the context flag on posted status: `"can_offer": excess_service.can_offer(user) and el.owner_id != user.id and el.status in {s.value for s in _POSTED_STATUSES}` (is_posted is already computed in the same dict).
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `can_offer` in `_detail_context` now carries the posted-status term, so a broker on a closed/expired list no longer sees a Submit-offer button that dead-ends in a 404.
+
 ### 51. [P3] Open-lens empty state claims 'No postings are open to you' even when a search/filter is what emptied the list
 **Where:** `app/templates/htmx/partials/resell/_lists.html:107` (dimension: frontend-templates)
 
 The empty-state branch order tests `lens == 'open'` before `stage or needs or q`, so in the offerer lens an active search or stage filter that merely has no matches renders 'No postings are open to you right now.' instead of 'No lists match this filter.' — telling a broker the marketplace is empty when it is not.
 
 **Fix:** Test the filter condition first: `{% if stage or needs or q %}No lists match this filter.{% elif lens == 'open' %}No postings are open to you right now.{% else %}...` so filtered-empty and genuinely-empty read differently in both lenses.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** Branch order flipped (now in `_list_rows.html`): the filter condition tests first, so a filtered-empty list reads 'No lists match this filter.' in both lenses.
 
 ### 56. [P3] Invalid line id in assemble payload surfaces as 404 'Line item None is not part of list N' instead of 400
 **Where:** `app/routers/resell.py:995` (dimension: gap:bid-back-export)
@@ -402,12 +435,18 @@ The don't-forget nudge calls rank_buyers_for(db, excess_list_id=..., limit=limit
 
 **Fix:** Compute the `already` set first and pass it into rank_buyers_for as an exclusion (or rank with a larger headroom, e.g. limit + len(already), then slice after subtraction) so the strip fills from not-yet-offered history buyers.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `not_yet_offered_strip` computes the `already` set first, ranks with `limit + len(already)` headroom, subtracts, THEN caps — a campaign that touched the top-ranked buyers no longer starves the nudge.
+
 ### 35. [P3] Offer-to-buyers panel accepts line_ids from ANY list — scope_lines query and rank_buyers_for are never scoped to the URL's list
 **Where:** `app/routers/resell.py:1713` (dimension: router-correctness)
 
 resell_offer_buyers_form parses line_ids from the query string (resell.py:1825) and _buyer_panel_context loads them with `db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all()` (1713) with no `excess_list_id == el.id` filter; _suggestion_rows likewise passes the raw ids to buyer_affinity_service.rank_buyers_for (1650-1654), which ranks buyers off those lines' material cards with no list check. The SEND path validates (`_target_line_ids` 422s on ids 'not on list', resell_outreach_service.py:186-188), so the panel and its submit disagree. Failure scenario: GET /v2/partials/resell/{A}/offer-buyers-form?line_ids={ids-от-list-B} (stale nudge-chip URL after lines were deleted/moved, or a crafted URL) renders a panel captioned 'N selected lines' whose ranked buyers are computed from lines that are not on list A — including lines of ANOTHER owner's private DRAFT (tier-1 'bought
 
 **Fix:** In _buyer_panel_context filter the line query with `ExcessLineItem.excess_list_id == el.id` and 404/422 (or silently drop) ids not on the list before passing them to rank_buyers_for and the template.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** (Same fix closes #49.) `_buyer_panel_context` scopes the line query with `ExcessLineItem.excess_list_id == el.id` and 422s any id not on the list (mirroring the POST twin's `_target_line_ids`), so foreign line ids never reach the scope strip or `rank_buyers_for`.
 
 ### 49. [P3] resell_offer_buyers_form accepts line_ids from other lists (no ownership/scope validation)
 **Where:** `app/routers/resell.py:1825` (dimension: security-access)
@@ -417,6 +456,9 @@ The offer-to-buyers panel parses ?line_ids= into ints and passes them straight i
 **Fix:** In resell_offer_buyers_form, filter the parsed ids to lines on the authorized list (e.g. reuse resell_outreach_service._target_line_ids, or add `.filter(ExcessLineItem.excess_list_id == el.id)` and drop/422 mismatches) before building the panel context. Failure scenario: trader B (owner of list 50) requests GET /v2/partials/resell/50/offer-buyers-form?line_ids=777 where 777 is a line on trader A's private draft — the request succeeds and the panel/ranking is computed against A's draft line inste
 
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** Same defect as #35, one fix — see #35's resolution (`_buyer_panel_context` list-scoping + 422).
+
 ## H. Data layer, migration & schema drift
 
 ### 19. [P2] Migration 199's clean-sweep DELETE strands already-open lists with no mirror and no rebuild path
@@ -425,6 +467,9 @@ The offer-to-buyers panel parses ?line_ids= into ints and passes them straight i
 Migration 199 deletes ALL customer_excess Sightings, claiming they are "rebuilt line-keyed on the next publish/sync". But sync_list_mirror only fires on publish (draft->open, excess_mirror.py:388), award/unaward (excess_service.py:994, 1081), close (1272), expire (1343), and the demo seed. A list that is already open/collecting at deploy time hits NONE of these while it is live — an idle open posting's live-supply rows vanish at upgrade and never come back for the remainder of its window (the events that would resync it are exactly the ones that end/retire it). The matcher and "Open to Me"/live-supply surfaces silently omit that supply. No startup.py idempotent backfill or nightly job resyncs open lists (app/jobs/resell_jobs.py registers only expiry, stale-send sweep, and buyer-score jobs), and no test covers the post-sweep resume behavior for an open list.
 
 **Fix:** Add an idempotent backfill (startup.py backfills are explicitly permitted) or extend the nightly expiry job: for each open/collecting ExcessList with zero customer_excess Sightings, run sync_list_mirror. Add a test seeding an open mirrored list, deleting its sightings (simulating the 199 sweep), and asserting the backfill restores line-keyed rows.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** Idempotent deferred startup backfill `startup._backfill_resell_mirrors`: any open/collecting list with ZERO line-keyed customer_excess sightings is re-synced via `excess_mirror.sync_list_mirror`; healthy and resolved lists are untouched (tests/test_startup_resell_mirror_backfill.py simulates the 199 sweep).
 
 ### 52. [P3] ExcessLineItem.status has no @validates guard — the only resell status column that accepts arbitrary raw strings
 **Where:** `app/models/excess.py:116` (dimension: data-tests)
@@ -472,12 +517,18 @@ resell_import_confirm only guards json.loads (lines 1385-1388) and then passes t
 
 **Fix:** After json.loads add: `if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows): raise HTTPException(400, "Invalid import payload")` (mirroring resell_assemble_bid).
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `resell_import_confirm` shape-guards the round-tripped payload (must be a list of dicts, else 400) exactly like `resell_assemble_bid`; the three malformed payloads are pinned by tests.
+
 ### 33. [P3] resell_add_line inlines line-creation business logic in the router (private service helper, counter bump, commit) and accepts whitespace-only part numbers
 **Where:** `app/routers/resell.py:1149` (dimension: router-correctness)
 
 resell_add_line constructs the ExcessLineItem ORM row, calls the private excess_service._resolve_line_material_card, increments el.total_line_items and commits — all in the router (resell.py:1147-1162), violating the routers-thin/CLAUDE.md rule, while its siblings resell_update_line/resell_delete_line delegate to excess_service.update_line/delete_line where the guards live. Because it bypasses the service, it also misses the blank-part-number rejection every other write path has: the import parser skips 'blank part_number' rows (excess_service.py:174-176) and confirm_import re-validates, but the quick-add stores part_number verbatim. Failure scenario: POST /api/resell/{id}/lines with part_number=' ' (a single space passes both the HTML required attribute and FastAPI's empty-string-as-missing check) and quantity=5 -> a line is created with a whitespace part_number and normalized_part_numb
 
 **Fix:** Move the creation into an excess_service.add_line(...) service function that strips and rejects blank part numbers (400), mirroring update_line; router keeps only the auth/draft/qty guards.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** (Same fix closes #42.) Line creation moved into `excess_service.add_line` — `_require_owned_draft`, blank-part-number 400 (stripped), quantity 400, MaterialCard resolve, counter bump, `_safe_commit` — and the router keeps only the HTTP-boundary guards and delegates.
 
 ### 34. [P3] resell_import_preview lacks the draft-only 409 guard its confirm counterpart enforces — late failure after upload+review
 **Where:** `app/routers/resell.py:1338` (dimension: router-correctness)
@@ -486,12 +537,18 @@ resell_import_confirm 409s on a non-draft list (resell.py:1381-1382: 'Posted lis
 
 **Fix:** Add the identical `if el.status != ExcessListStatus.DRAFT: raise HTTPException(409, ...)` guard to resell_import_preview.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `resell_import_preview` now carries the identical draft-only 409 guard as confirm, so a posted list fails at upload time instead of after the user reviews the whole preview.
+
 ### 40. [P3] update_excess_list unconditionally clears customer_site_id on every header edit
 **Where:** `app/services/excess_service.py:1214` (dimension: services-core)
 
 update_excess_list gives close_at a dedicated _UNSET_CLOSE_AT identity sentinel (lines 198-202) precisely because 'the draft-edit form carries no deadline input' and a plain None default 'cannot express both'. customer_site_id has the identical hazard but no sentinel: it defaults to None and is assigned unconditionally at line 1214, so any caller editing just title/notes silently NULLs a stored customer_site_id. Today the HTMX router never sets the field (resell_update_list passes title/notes/company_id only), so the wipe is latent — but the service's documented contract ('Updates title / notes / customer_site_id') is a data-loss trap for the first caller that creates a list with a site (create_excess_list accepts it; ExcessListCreate schema exposes it at app/schemas/excess.py:32).
 
 **Fix:** Give customer_site_id the same unset-sentinel treatment as close_at (or drop the parameter until a form actually carries it).
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The dead `customer_site_id` parameter was DROPPED from `update_excess_list` (no form carries it — the doc's sanctioned alternative), so a header edit can no longer wipe a stored site id; reintroduce it only with an `_UNSET`-style sentinel when a form actually posts it.
 
 ### 41. [P3] confirm_import bypasses the service-level owned-draft guard the other line mutators enforce
 **Where:** `app/services/excess_service.py:379` (dimension: services-core)
@@ -500,12 +557,18 @@ Phase 4 established _require_owned_draft (lines 1105-1117) 'so a direct service 
 
 **Fix:** Thread the acting user into confirm_import/import_line_items and route the load through _require_owned_draft (keeping the router guard as the outer layer), matching the Phase-4 pattern.
 
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** `confirm_import(db, list_id, user, rows)` now takes the acting user and routes through `_require_owned_draft` (404 → 403 → 409), so a direct service call is owner+draft guarded like every other line mutator; the router keeps its outer guards.
+
 ### 42. [P3] resell_add_line builds the line item in the router with a bare db.commit() and a private service helper
 **Where:** `app/routers/resell.py:1160` (dimension: services-core)
 
 resell_add_line constructs the ExcessLineItem ORM row, normalizes the MPN, calls the private excess_service._resolve_line_material_card, maintains the total_line_items counter, and commits — all in the router (lines 1147-1162), violating the 'routers thin, business logic in services' rule its sibling endpoints follow (update/delete/import all delegate to service functions). It also commits with a bare db.commit() instead of the service's _safe_commit, so an IntegrityError surfaces as an unhandled 500 rather than the mapped 409 every other resell write path returns. The service already owns this exact logic (import_line_items/update_line build identical rows), so the duplication is also a drift risk — e.g. condition/date_code default handling now lives in two places.
 
 **Fix:** Add an excess_service.add_line(db, list_id, owner, *, part_number, quantity, ...) that reuses _require_owned_draft + _safe_commit, and have the router delegate to it.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** Same defect as #33, one fix — see #33's resolution (`excess_service.add_line`).
 
 ### 43. [P3] Dead 'Phase 4: Stats' / 'Phase 4: Normalization backfill' section headers with no code
 **Where:** `app/services/excess_service.py:1358` (dimension: services-core)
@@ -523,6 +586,9 @@ The documented draft-privacy policy is 404-masking: _get_list_for_user (resell.p
 
 **Fix:** Route these endpoints through _get_list_for_user (which 404-masks non-owner drafts) before the owner check, or make _require_owner raise 404 when the list is still a draft. Failure scenario: trader B sweeps GET /v2/partials/resell/{id}/build-bid over ids — 403 vs 404 tells B exactly which ids exist as trader A's private drafts, defeating the 404 mask the detail/edit routes enforce for the same lists.
 
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The whole owner-only sweep (build-bid, assemble, bid PDF, add-line, import preview/confirm, publish, and the outreach cluster incl. `_load_outreach_for_owner` / `_load_manual_outreach_for_owner`) resolves via `_get_list_for_user` FIRST, so a foreign private draft 404-masks before any 403 — pinned by a 15-endpoint probe sweep test.
 
 ## J. Seeders & demo data
 
@@ -583,12 +649,15 @@ Beyond the crash in finding #1 (which currently masks this), seed_excess_lists w
 **FIXED 2026-07-24 (P3 batch PR).** seed_excess_lists now builds every list as a DRAFT and derives its shape through the real chokepoints — publish_list (open + mirror), submit_offer from a dedicated non-owner broker user with buyer attribution (open→collecting + real rollups), award_offer (won offer / awarded lines / lost competitors / awarded list), close_list_without_bid (closed) — so no legacy ACTIVE/BIDDING statuses, no self-offers, and no hand-cycled statuses remain (covered by tests/test_seed_test_data_excess.py).
 
 
-### 64. [P3] OPEN (leftover, logged 2026-07-24 during the theme-J review): WF-E still hand-crafts an owner self-offer and hand-stamped offer shapes
+### 64. [P3] (leftover, logged 2026-07-24 during the theme-J review): WF-E still hand-crafts an owner self-offer and hand-stamped offer shapes — **FIXED**
 **Where:** `app/management/seed_sample_data.py` `_seed_wf_e` (dimension: gap:demo-seeder)
 
 While fixing #61 (sightings half of `_seed_wf_e`), review noted the adjacent offer half is still hand-crafted: `eo3 = _offer(u["u_trader"], vc["vc_apex"], ...)` writes an ExcessOffer with `submitted_by=u_trader` on list `ex1` whose `owner_id` is also `u_trader` — a self-offer the Phase-1 guard forbids in `submit_offer` ("You cannot offer on your own excess list"), i.e. a shape unreachable through the app (the invariant class theme J eliminates, cf. #63b). All WF-E offers/rollups are built via `get_or_create` rather than the chokepoints, with `eli1/eli2.best_offer_id` stamped by hand. Pre-existing; outside #61's literal scope (sightings only), so left untouched by the theme-J batch.
 
 **Fix (proposed):** Rework the WF-E offer section like #63's remedy — submit each offer via `excess_service.submit_offer` from a non-owner user (retire the u_trader self-offer or attribute it to a distinct broker) and let `recompute_line_rollup` derive `best_offer_id`/`offer_count` instead of hand-stamping them.
+
+
+**FIXED 2026-07-28 (themes D/G/H/I batch PR).** The WF-E offer half now submits every offer via `excess_service.submit_offer` from a dedicated, never-owner-redirected broker user (per-broker VendorCard attribution stamped after the chokepoint's guards), letting `recompute_line_rollup` derive `best_offer_id`/`offer_count`; the unreachable self-offer and hand-stamped AMBIGUOUS shapes are gone, and the unmatched-queue showcase survives as a genuinely-unmatched MPN (guard tests mirror tests/test_seed_test_data_excess.py).
 
 ## Refuted by the skeptic panel (for the record)
 

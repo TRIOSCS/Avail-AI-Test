@@ -95,8 +95,11 @@
         </button>
         {# Delete (admin-only destructive action) #}
         {# Delete returns the vendor LIST — outerHTML on the pane root swaps the list
-           in where the detail was, preserving the surrounding shell/container. #}
-        <button hx-delete="/v2/partials/vendors/{{ vendor.id }}"
+           in where the detail was, preserving the surrounding shell/container. The
+           embed params keep the refreshed list's controls targeting the right
+           container; vendor_detail_partial threads them (sanitized) from the detail
+           GET's query params and from the create POST's hidden inputs. #}
+        <button hx-delete="/v2/partials/vendors/{{ vendor.id }}?hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
                 hx-target="#vendor-detail-{{ vendor.id }}"
                 hx-swap="outerHTML"
                 hx-confirm="Permanently delete {{ vendor.display_name }}? All contacts and reviews will also be removed. This cannot be undone."

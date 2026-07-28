@@ -56,13 +56,11 @@ from app.constants import (
     ExcessLineItemStatus,
     ExcessListStatus,
     ExcessOfferScope,
-    ExcessOfferStatus,
     ExcessOutreachChannel,
     ExcessOutreachStatus,
     LineIssueType,
     MaterialEnrichmentStatus,
     OfferCondition,
-    OfferLineMatchStatus,
     OfferStatus,
     QuoteStatus,
     ReleaseTrigger,
@@ -95,7 +93,7 @@ from app.models.task import RequisitionTask
 from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendors import VendorCard, VendorContact
 from app.scoring import score_sighting_v2
-from app.services import excess_mirror
+from app.services import excess_mirror, excess_service
 from app.services.commodity_registry import seed_commodity_schemas
 from app.services.offer_qualification import apply_qualification
 from app.services.spec_tiers import set_brand, set_category, set_manufacturer
@@ -160,6 +158,11 @@ def _seed_users(db: Session, counts: _Counts) -> dict[str, User]:
         ("u_buyer2", "buyer2", "AVSAMPLE · Bob Buyer", UserRole.BUYER),
         ("u_trader", "trader", "AVSAMPLE · Tina Trader", UserRole.TRADER),
         ("u_manager", "manager", "AVSAMPLE · Morgan Manager", UserRole.MANAGER),
+        # The WF-E offer submitter (finding #64): offers ride excess_service.submit_offer,
+        # whose self-offer guard forbids the list owner bidding on their own list — so the
+        # submitter must be a user who is NEVER owner-redirected (mirrors seed_test_data's
+        # dedicated SEED_BROKER user).
+        ("u_broker", "broker", "AVSAMPLE · Brooke Broker", UserRole.BUYER),
     ]
     out: dict[str, User] = {}
     for var, local, name, role in spec:
@@ -967,8 +970,9 @@ def _mk_buy_plan(
     u: dict,
     *,
     extra: dict,
-) -> BuyPlan | None:
-    """One non-cancelled plan per quote: skip if one already exists."""
+) -> BuyPlan:
+    """One non-cancelled plan per quote: return the existing one if present
+    (idempotent re-runs) instead of creating a duplicate."""
     existing = (
         db.query(BuyPlan)
         .filter(BuyPlan.quote_id == quote.id, BuyPlan.status != BuyPlanStatus.CANCELLED.value)
@@ -1285,62 +1289,88 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
     eli2 = _line("AVSAMPLE-MAX3232", 200, Decimal(12), "New", mc["mc_conn"].id)
     _line("AVSAMPLE-NOMATCH-1", 50, Decimal(5), "New", None)  # card-less; mirror heals it
 
-    def _offer(submitted_by: User, vcard: VendorCard, scope: ExcessOfferScope, take_all: Decimal | None) -> ExcessOffer:
-        defaults = {
-            "offerer_vendor_card_id": vcard.id,
-            "status": ExcessOfferStatus.OPEN.value,
-            "take_all_total_price": take_all,
-            "notes": f"{SAMPLE_TAG} broker offer",
-        }
-        row, _ = get_or_create(
-            db, counts, ExcessOffer, defaults, excess_list_id=ex1.id, submitted_by=submitted_by.id, scope=scope.value
+    # Offers arrive through the REAL chokepoint (finding #64 — the theme-J invariant):
+    # excess_service.submit_offer enforces the self-offer guard, classifies each row's
+    # MPN match, and derives best_offer_id/offer_count via recompute_line_rollup — so
+    # the demo only ever holds shapes reachable through the app. The old hand-crafted
+    # version wrote an owner self-offer (u_trader bidding on their own ex1) and
+    # hand-stamped the rollups. The hand-stamped AMBIGUOUS row is gone too (no two demo
+    # lines share a normalized MPN, so that shape is unreachable); the unmatched-queue
+    # showcase survives via a genuinely-unknown MPN. submit_offer commits per offer —
+    # acceptable here for the same reason as scripts/seed_test_data.py (chokepoints own
+    # their transaction), and each offer is find-or-reuse keyed by its broker card.
+
+    def _submit_offer(
+        submitted_by: User,
+        vcard: VendorCard,
+        scope: ExcessOfferScope,
+        lines: list[dict] | None,
+        take_all: Decimal | None,
+    ) -> ExcessOffer:
+        existing = (
+            db.query(ExcessOffer)
+            .filter_by(excess_list_id=ex1.id, offerer_vendor_card_id=vcard.id, scope=scope.value)
+            .first()
         )
-        return row
+        if existing is not None:
+            _tally(counts, "ExcessOffer", created=False)
+            return existing
+        offer = excess_service.submit_offer(
+            db,
+            list_id=ex1.id,
+            user=submitted_by,
+            scope=scope.value,
+            notes=f"{SAMPLE_TAG} broker offer",
+            lines=lines,
+            take_all_total_price=take_all,
+        )
+        # Buyer attribution: the demo names a specific broker VendorCard; submit_offer
+        # only accepts a company id, so stamp the card AFTER the chokepoint ran its
+        # guards/classification/rollups (attribution never affects either).
+        offer.offerer_vendor_card_id = vcard.id
+        db.commit()
+        _tally(counts, "ExcessOffer", created=True)
+        return offer
 
-    def _offer_line(
-        off: ExcessOffer,
-        mpn: str,
-        qty: int,
-        price: Decimal | None,
-        match: OfferLineMatchStatus,
-        eli: ExcessLineItem | None,
-    ) -> ExcessOfferLine:
-        defaults = {
-            "quantity": qty,
-            "unit_price": price,
-            "match_status": match.value,
-            "excess_line_item_id": eli.id if eli else None,
-        }
-        row, _ = get_or_create(db, counts, ExcessOfferLine, defaults, offer_id=off.id, mpn_raw=mpn)
-        return row
+    eo1 = _submit_offer(
+        u["u_broker"],
+        vc["vc_pinnacle"],
+        ExcessOfferScope.PER_LINE,
+        [
+            {"mpn_raw": "AVSAMPLE-STM32F103RB", "quantity": 500, "unit_price": Decimal(28)},
+            {"mpn_raw": "AVSAMPLE-MAX3232", "quantity": 200, "unit_price": Decimal(11)},
+        ],
+        None,
+    )
+    eo2 = _submit_offer(
+        u["u_broker"],
+        vc["vc_meridian"],
+        ExcessOfferScope.PER_LINE,
+        [
+            {"mpn_raw": "AVSAMPLE-STM32F103RB", "quantity": 500, "unit_price": Decimal(26)},
+            # Genuinely-unknown MPN → a real UNMATCHED queue row (reachable shape).
+            {"mpn_raw": "AVSAMPLE-UNKNOWN-99", "quantity": 50, "unit_price": Decimal(4)},
+        ],
+        None,
+    )
+    # The old u_trader self-offer is unreachable (submit_offer forbids bidding on your
+    # own list) — the Apex-attributed bid is submitted by a distinct non-owner buyer.
+    eo3 = _submit_offer(
+        u["u_broker"],
+        vc["vc_apex"],
+        ExcessOfferScope.PER_LINE,
+        [{"mpn_raw": "AVSAMPLE-MAX3232", "quantity": 200, "unit_price": Decimal(10)}],
+        None,
+    )
+    _submit_offer(u["u_broker"], vc["vc_highrel"], ExcessOfferScope.TAKE_ALL, None, Decimal(18000))
 
-    eo1 = _offer(u["u_buyer1"], vc["vc_pinnacle"], ExcessOfferScope.PER_LINE, None)
-    eol1a = _offer_line(eo1, "AVSAMPLE-STM32F103RB", 500, Decimal(28), OfferLineMatchStatus.MATCHED, eli1)
-    _offer_line(eo1, "AVSAMPLE-MAX3232", 200, Decimal(11), OfferLineMatchStatus.MATCHED, eli2)
+    def _offer_line_for(off: ExcessOffer, mpn: str) -> ExcessOfferLine:
+        """The submitted offer's line for *mpn* (the bid-back provenance reference)."""
+        return db.query(ExcessOfferLine).filter_by(offer_id=off.id, mpn_raw=mpn).one()
 
-    eo2 = _offer(u["u_buyer2"], vc["vc_meridian"], ExcessOfferScope.PER_LINE, None)
-    eol2a = _offer_line(eo2, "AVSAMPLE-STM32F103RB", 500, Decimal(26), OfferLineMatchStatus.MATCHED, eli1)
-    _offer_line(eo2, "AVSAMPLE-NOMATCH-1", 50, Decimal(4), OfferLineMatchStatus.UNMATCHED, None)
-
-    eo3 = _offer(u["u_trader"], vc["vc_apex"], ExcessOfferScope.PER_LINE, None)
-    eol3a = _offer_line(eo3, "AVSAMPLE-MAX3232", 200, Decimal(10), OfferLineMatchStatus.MATCHED, eli2)
-    _offer_line(eo3, "avsample-stm32f-103rb", 500, Decimal(27), OfferLineMatchStatus.AMBIGUOUS, None)
-
-    _offer(u["u_buyer1"], vc["vc_highrel"], ExcessOfferScope.TAKE_ALL, Decimal(18000))
-
-    # Best-price rollup (seeder writes it so the column renders without a service call).
-    # best_offer_id holds the parent ExcessOffer id (recompute_line_rollup writes
-    # ExcessOfferLine.offer_id, NOT the offer-LINE id) — the bid-back seeds provenance from
-    # it, so an offer-line id here would dangle and 500 the assembly.
-    if eli1.best_offer_id is None:
-        eli1.best_offer_unit_price = Decimal(26)
-        eli1.best_offer_id = eol2a.offer_id
-        eli1.offer_count = 2
-    if eli2.best_offer_id is None:
-        eli2.best_offer_unit_price = Decimal(10)
-        eli2.best_offer_id = eol3a.offer_id
-        eli2.offer_count = 2
-    _ = eol1a  # Pinnacle's matched line retained for the spread/comparison view.
+    eol2a = _offer_line_for(eo2, "AVSAMPLE-STM32F103RB")
+    eol3a = _offer_line_for(eo3, "AVSAMPLE-MAX3232")
+    _ = eo1  # Pinnacle's matched lines retained for the spread/comparison view.
 
     # Mirror the list through the managed Phase-5 lifecycle (finding #61): each
     # customer_excess Sighting carries excess_line_item_id and hangs on the list's own
@@ -1684,6 +1714,10 @@ def wipe(db: Session) -> dict[str, int]:
                     deleted[model_name] = deleted.get(model_name, 0) + torn[label]
 
     _del(ActivityLog, ActivityLog.external_id.like(f"{SAMPLE_TAG}:%"))
+    if list_ids:
+        # submit_offer's owner notification (notify_owner_of_offer) carries no SAMPLE_TAG
+        # external_id — clean it by its sample-list linkage so wipe leaves no orphans.
+        _del(ActivityLog, ActivityLog.excess_list_id.in_(list_ids))
     _del(RequisitionTask, RequisitionTask.source_ref.like(f"{SAMPLE_TAG}:%"))
     _del(VendorPartUnavailability, VendorPartUnavailability.vendor_name_normalized.like("avsample%"))
     if vc_ids:

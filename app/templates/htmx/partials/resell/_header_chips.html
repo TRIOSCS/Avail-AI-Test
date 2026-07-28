@@ -18,7 +18,11 @@
   {{ el.company.name }}
 </span>
 {% endif %}
-{{ status_badge(el.status, status_map={
+{# Finding #13: the open↔collecting split is an offer-existence signal (first inbound bid
+   flips the list to collecting), so a non-owner sees a neutral 'open' badge — same D2
+   predicate as the offer-count/awarded gates below. #}
+{% set badge_status = 'open' if (not can_see_customer and el.status == 'collecting') else el.status %}
+{{ status_badge(badge_status, status_map={
   'draft': 'bg-slate-50 text-slate-500 border-slate-200',
   'open': 'bg-sky-50 text-sky-600 border-sky-200',
   'collecting': 'bg-amber-50 text-amber-600 border-amber-200',

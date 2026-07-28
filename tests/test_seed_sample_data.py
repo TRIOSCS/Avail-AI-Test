@@ -85,8 +85,9 @@ def test_fresh_seed_creates_expected_entities(db_session: Session) -> None:
     """A fresh seed builds the full cast and the documented per-workflow records."""
     sds.seed(db_session)
 
-    # Named cast (§2).
-    assert _count(db_session, User) == 6
+    # Named cast (§2) — incl. the dedicated WF-E offer broker (finding #64: offers ride
+    # submit_offer, whose self-offer guard needs a never-owner-redirected submitter).
+    assert _count(db_session, User) == 7
     assert _count(db_session, Company) == 6
     assert _count(db_session, CustomerSite) == 4
     assert _count(db_session, SiteContact) == 5
@@ -104,14 +105,17 @@ def test_fresh_seed_creates_expected_entities(db_session: Session) -> None:
     assert _count(db_session, ExcessList) == 1
     assert _count(db_session, ExcessLineItem) == 3
     assert _count(db_session, ExcessOffer) == 4  # 3 per-line + 1 take-all
-    assert _count(db_session, ExcessOfferLine) == 6
+    # eo1: 2 matched · eo2: 1 matched + 1 genuinely-unmatched · eo3: 1 matched (the old
+    # hand-stamped AMBIGUOUS row was an unreachable shape and is gone — finding #64).
+    assert _count(db_session, ExcessOfferLine) == 5
     assert _count(db_session, CustomerBid) == 1
     assert _count(db_session, CustomerBidLine) == 2
     assert _count(db_session, ExcessOutreach) == 3
     assert _count(db_session, BuyerScore) == 3
 
-    # My Day timeline.
-    assert _count(db_session, ActivityLog) == 8
+    # My Day timeline (8 hand-seeded + 1 deduped owner notification submit_offer emits
+    # for the offer-submitting broker — finding #64: offers ride the real chokepoint).
+    assert _count(db_session, ActivityLog) == 9
     assert _count(db_session, RequisitionTask) == 4
 
     # Vendor intelligence.
@@ -245,7 +249,7 @@ def test_wipe_removes_sample_rows_only(db_session: Session) -> None:
     db_session.commit()
 
     sds.seed(db_session)
-    assert _count(db_session, User) == 7  # 6 sample + 1 real
+    assert _count(db_session, User) == 8  # 7 sample + 1 real
 
     sds.wipe(db_session)
 
@@ -319,8 +323,8 @@ def test_owner_assigns_deals_to_existing_user(db_session: Session) -> None:
 
     sds.seed(db_session, owner_email="boss@trioscs.com")
 
-    # The existing user was reused, not duplicated: 6 sample users + the owner.
-    assert _count(db_session, User) == 7
+    # The existing user was reused, not duplicated: 7 sample users + the owner.
+    assert _count(db_session, User) == 8
     assert db_session.query(User).filter(User.email == "boss@trioscs.com").count() == 1
 
     # Every sample requisition is owned by the owner ('mine' requisitions lens).
@@ -396,7 +400,7 @@ def test_seed_entrypoint_runs_with_optin_flag(db_session: Session, monkeypatch) 
 
     assert rc == 0
     # Full sample cast landed — same result as a direct seed() call.
-    assert db_session.query(User).count() == 6
+    assert db_session.query(User).count() == 7
     assert db_session.query(Company).count() == 6
 
 
@@ -435,3 +439,63 @@ def test_wipe_with_owner_succeeds_under_fk_enforcement(db_session: Session) -> N
     assert _count(db_session, ExcessOutreach) == 0
     # The real owner survives the wipe.
     assert db_session.get(User, owner.id) is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  WF-E offers ride the real chokepoint (finding #64)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_wf_e_offers_come_from_a_non_owner_via_submit_offer(db_session: Session) -> None:
+    """No seeded offer is an owner self-offer (the Phase-1 guard forbids that shape),
+    and every offer carries buyer attribution — mirrors test_seed_test_data_excess."""
+    sds.seed(db_session)
+
+    offers = db_session.query(ExcessOffer).all()
+    assert offers, "WF-E must submit inbound offers"
+    for offer in offers:
+        el = db_session.get(ExcessList, offer.excess_list_id)
+        assert offer.submitted_by != el.owner_id, "self-offer forbidden (Phase-1 guard)"
+        assert offer.offerer_vendor_card_id is not None, "offers carry buyer attribution"
+
+
+def test_wf_e_rollups_are_derived_not_hand_stamped(db_session: Session) -> None:
+    """best_offer_id / best_offer_unit_price / offer_count come from
+    recompute_line_rollup inside submit_offer — re-running the recompute changes nothing
+    (a hand-stamped value would disagree with the derived one)."""
+    from app.services import excess_service
+
+    sds.seed(db_session)
+
+    ex1 = db_session.query(ExcessList).filter_by(source_filename=sds.SAMPLE_TAG).one()
+    lines = db_session.query(ExcessLineItem).filter_by(excess_list_id=ex1.id).all()
+    before = {ln.id: (ln.best_offer_id, ln.best_offer_unit_price, ln.offer_count) for ln in lines}
+    assert any(b[0] is not None for b in before.values()), "at least one line must roll up a best offer"
+    for ln in lines:
+        excess_service.recompute_line_rollup(db_session, ln.id)
+    db_session.flush()
+    after = {ln.id: (ln.best_offer_id, ln.best_offer_unit_price, ln.offer_count) for ln in lines}
+    assert after == before, "seeded rollups must already equal the service-derived values"
+
+
+def test_wf_e_unmatched_queue_row_is_genuine(db_session: Session) -> None:
+    """The unmatched-queue showcase survives as a REACHABLE shape: an offer row whose
+    MPN matches no posted line, classified unmatched by submit_offer itself."""
+    from app.models.excess import ExcessOfferLine
+
+    sds.seed(db_session)
+
+    unmatched = db_session.query(ExcessOfferLine).filter_by(mpn_raw="AVSAMPLE-UNKNOWN-99").one()
+    assert unmatched.excess_line_item_id is None
+    assert unmatched.match_status == "unmatched"
+
+
+def test_wf_e_seed_with_owner_still_submits_offers(db_session: Session) -> None:
+    """--owner redirects every deal role onto ONE user; the dedicated broker user keeps
+    the offer submitter distinct so submit_offer's self-offer guard never trips."""
+    sds.seed(db_session, owner_email="wfeowner@trioscs.com")
+
+    owner = db_session.query(User).filter(User.email == "wfeowner@trioscs.com").one()
+    offers = db_session.query(ExcessOffer).all()
+    assert offers
+    assert all(o.submitted_by != owner.id for o in offers)

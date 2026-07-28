@@ -1772,8 +1772,10 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
     belt-and-braces re-check kept for legacy suffixed cards). has_contact mirrors the
     send-skip logic (see _cards_with_resolvable_email).
 
-    Rank: covered_count desc, has_contact desc, engagement_score desc nullslast, then a
-    stable group-key tiebreak. Capped at 20.
+    Rank: covered_count desc, has_contact desc, responsiveness desc nullslast
+    (email_health_score when present — "will this vendor answer an RFQ", exactly what
+    the composer is choosing for — else engagement_score for vendors never emailed),
+    then a stable group-key tiebreak. Capped at 20.
     """
     raw_rows = (
         db.query(VendorSightingSummary, VendorCard)
@@ -1861,18 +1863,24 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
             lead_time_days=lead_time_days,
             vendor_score=(card.vendor_score if card is not None else None),
         )
-        engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
+        # Responsiveness key: prefer email_health_score (composite "will this vendor
+        # answer an RFQ" from response_analytics, refreshed by batch_update_email_health)
+        # and fall back to engagement_score for vendors never emailed (health NULL).
+        # Cardless groups have neither → None (sorts last within their bucket).
+        responsiveness: float | None = None
+        if card is not None:
+            responsiveness = card.email_health_score if card.email_health_score is not None else card.engagement_score
         # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
         # (bucket 0), cardless after (bucket 1, keyed by group-key string). str(key) alone
         # was lexicographic ("10" < "2"), drifting which equally-ranked vendor fell off the
         # cap-20 vs main's numeric id order.
         tiebreak: tuple[int, object] = (0, card.id) if card is not None else (1, str(key))
-        # Sort tuple: covered desc, has_contact desc, engagement desc nullslast, then tiebreak.
+        # Sort tuple: covered desc, has_contact desc, responsiveness desc nullslast, then tiebreak.
         ranked.append(
             (
                 -covered,
                 not has_contact,  # False(0) sorts before True(1) → contactable first
-                -(engagement if engagement is not None else float("-inf")),
+                -(responsiveness if responsiveness is not None else float("-inf")),
                 tiebreak,
                 rv,
             )

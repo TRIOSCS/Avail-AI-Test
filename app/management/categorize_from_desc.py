@@ -168,7 +168,7 @@ def run(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
                 categorized, written = (commodity is not None), 0
                 if categorized:
                     # transient only — db.rollback() in main()
-                    card.category = commodity  # type: ignore[assignment]  # legacy Column-model ORM noise
+                    card.category = commodity
 
             if categorized:
                 by_category[card.category] += 1

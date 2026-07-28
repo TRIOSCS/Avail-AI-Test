@@ -27,7 +27,9 @@ def normalize_phone_e164(raw: str | None) -> str | None:
     # this copy silently allowed. Behaviour is identical on every real phone shape.
     from app.utils.phone_utils import format_phone_e164
 
-    return format_phone_e164(str(raw) if raw is not None else None)
+    if raw is None:
+        return None
+    return format_phone_e164(str(raw))
 
 
 # ── Country normalization ────────────────────────────────────────────

@@ -585,9 +585,11 @@ document.body.addEventListener('click', (evt) => {
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
     const status = evt.detail.xhr && evt.detail.xhr.status;
-    // 409 = stale-edit guard conflict (services/stale_guard.py): the server owns the
-    // message via its HX-Trigger showToast (bridged below) and sends HX-Reswap: none,
-    // so the generic error toast here would double-toast. Skip it.
+    // 409 = conflict: the SERVER owns 409 messaging app-wide. Stale-edit guard 409s
+    // (services/stale_guard.py) attach their own HX-Trigger showToast, and every other
+    // HTTPException(409) gets one centrally in app/main.py's http_exception_handler
+    // (plus HX-Reswap: none). The trigger is bridged below, so the generic error toast
+    // here would double-toast. Skip it.
     if (status === 409) {
         return;
     }

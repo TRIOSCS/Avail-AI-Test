@@ -1036,6 +1036,10 @@ async def promote_offer(
     _log_offer_status_change(db, offer, old_status, user)
     db.commit()
 
+    from ...services.proactive_matching import trigger_rematch_on_offer_approval
+
+    trigger_rematch_on_offer_approval(db, offer)
+
     logger.info(f"Offer {offer_id} promoted T4→T5 by user {user.id}")
     return {"status": "promoted", "offer_id": offer_id}
 

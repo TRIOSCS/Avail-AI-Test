@@ -1497,3 +1497,111 @@ class TestComposeTimeVendorIntel:
         carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
         assert carded is not None
         assert carded.lead_time_days is None  # must be None, not 0
+
+
+class TestComposerResponsivenessRank:
+    """_coverage_ranked_vendor_rows folds email_health_score into the rank.
+
+    After has_contact, vendors sort by a responsiveness key that PREFERS
+    email_health_score ("will this vendor answer an RFQ") and falls back to
+    engagement_score when health is NULL (vendors never emailed). The stable numeric-
+    card-id tiebreak is unchanged.
+    """
+
+    def _seed_pair(self, db_session, *, a_scores, b_scores):
+        """One requirement + two carded, contactable vendors with equal coverage.
+
+        ``a_scores``/``b_scores``: {"engagement": float|None, "health": float|None}.
+        Returns (requirement, [card_a, card_b]) — card_a has the lower id.
+        """
+        req = Requisition(name="Rank RFQ", status="open", customer_name="Rank Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="RANK-001",
+            target_qty=10,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        cards = []
+        for name, scores in (("alpharank", a_scores), ("betarank", b_scores)):
+            card = VendorCard(
+                normalized_name=name,
+                display_name=name.title(),
+                engagement_score=scores.get("engagement"),
+                email_health_score=scores.get("health"),
+            )
+            db_session.add(card)
+            db_session.flush()
+            db_session.add(
+                VendorContact(
+                    vendor_card_id=card.id,
+                    contact_type="sales",
+                    email=f"info@{name}.com",
+                    source="manual",
+                )
+            )
+            db_session.add(
+                VendorSightingSummary(
+                    requirement_id=r.id,
+                    vendor_name=card.display_name,
+                    estimated_qty=10,
+                    listing_count=1,
+                    score=50.0,
+                    vendor_card_id=card.id,
+                )
+            )
+            cards.append(card)
+        db_session.commit()
+        return r, cards
+
+    def _ranked_card_ids(self, db_session, requirement):
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        rows = _coverage_ranked_vendor_rows(db_session, [requirement.id], excluded=set())
+        return [rv.card.id for rv in rows if rv.card is not None]
+
+    def test_health_outranks_engagement(self, db_session):
+        """Equal coverage+contact: the lower-engagement vendor with the higher
+        email_health_score ranks first."""
+        r, (a, b) = self._seed_pair(
+            db_session,
+            a_scores={"engagement": 10.0, "health": 90.0},
+            b_scores={"engagement": 80.0, "health": 20.0},
+        )
+        ids = self._ranked_card_ids(db_session, r)
+        assert ids.index(a.id) < ids.index(b.id)
+
+    def test_null_health_falls_back_to_engagement(self, db_session):
+        """Both vendors health-NULL: engagement_score still decides the order."""
+        r, (a, b) = self._seed_pair(
+            db_session,
+            a_scores={"engagement": 30.0, "health": None},
+            b_scores={"engagement": 70.0, "health": None},
+        )
+        ids = self._ranked_card_ids(db_session, r)
+        assert ids.index(b.id) < ids.index(a.id)
+
+    def test_mixed_null_health_coalesces_against_engagement(self, db_session):
+        """A NULL-health vendor competes with its engagement value against another
+        vendor's health value (single coalesced responsiveness key)."""
+        r, (a, b) = self._seed_pair(
+            db_session,
+            a_scores={"engagement": None, "health": 60.0},
+            b_scores={"engagement": 90.0, "health": None},
+        )
+        ids = self._ranked_card_ids(db_session, r)
+        assert ids.index(b.id) < ids.index(a.id)
+
+    def test_tiebreak_numeric_card_id_unchanged(self, db_session):
+        """No responsiveness signal on either vendor → the stable numeric card.id
+        tiebreak still decides (lower id first)."""
+        r, (a, b) = self._seed_pair(
+            db_session,
+            a_scores={"engagement": None, "health": None},
+            b_scores={"engagement": None, "health": None},
+        )
+        ids = self._ranked_card_ids(db_session, r)
+        assert ids.index(a.id) < ids.index(b.id)

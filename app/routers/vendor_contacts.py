@@ -26,6 +26,7 @@ from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorCo
 from ..services.credential_service import get_credential_cached
 from ..template_env import template_response
 from ..utils.async_helpers import safe_background_task
+from ..utils.column_limits import ensure_fits_column
 from ..utils.phone_utils import format_phone_e164
 from ..utils.vendor_helpers import (
     _background_enrich_vendor,
@@ -35,6 +36,7 @@ from ..utils.vendor_helpers import (
     get_or_create_card,
     merge_contact_into_card,
     scrape_website_contacts,
+    sync_card_emails_on_contact_change,
 )
 from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
 from ..vendor_utils import normalize_vendor_name
@@ -365,6 +367,17 @@ async def add_vendor_contact(
     """Manually add a structured contact to a vendor card."""
     email = payload.email
 
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    # phone is guarded raw: E.164 formatting only ever shortens/normalizes.
+    for _field, _value, _label in (
+        ("email", email, "Email"),
+        ("full_name", payload.full_name, "Name"),
+        ("title", payload.title, "Title"),
+        ("label", payload.label, "Label"),
+        ("phone", payload.phone, "Phone"),
+    ):
+        ensure_fits_column(VendorContact, _field, _value, _label)
+
     card = db.query(VendorCard).filter_by(id=card_id).first()
     if not card:
         raise HTTPException(404, "Vendor card not found")
@@ -393,9 +406,9 @@ async def add_vendor_contact(
     )
     db.add(vc)
 
-    # Also add to legacy emails[] for backward compat
-    if email not in (card.emails or []):
-        card.emails = (card.emails or []) + [email]
+    # Also add to legacy emails[] for backward compat — shared helper with the HTMX
+    # endpoints (app/routers/htmx/vendors.py), Wave 3 item 5.
+    sync_card_emails_on_contact_change(card, None, email)
 
     db.commit()
     return {"id": vc.id, "message": "Contact added", "duplicate": False}
@@ -413,6 +426,16 @@ async def update_vendor_contact(
     vc = db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
     if not vc:
         raise HTTPException(404, "Contact not found")
+
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    for _field, _value, _label in (
+        ("email", payload.email, "Email"),
+        ("full_name", payload.full_name, "Name"),
+        ("title", payload.title, "Title"),
+        ("label", payload.label, "Label"),
+        ("phone", payload.phone, "Phone"),
+    ):
+        ensure_fits_column(VendorContact, _field, _value, _label)
 
     old_email = vc.email
 
@@ -433,13 +456,10 @@ async def update_vendor_contact(
 
     vc.last_seen_at = datetime.now(UTC)
 
-    # Sync legacy emails[] array
+    # Sync legacy emails[] array — shared helper, Wave 3 item 5.
     card = db.query(VendorCard).filter_by(id=card_id).first()
-    if card and old_email != vc.email:
-        if old_email and card.emails and old_email in card.emails:
-            card.emails = [e for e in card.emails if e != old_email]
-        if vc.email and vc.email not in (card.emails or []):
-            card.emails = (card.emails or []) + [vc.email]
+    if card:
+        sync_card_emails_on_contact_change(card, old_email, vc.email)
 
     db.commit()
     return {"ok": True, "id": vc.id}
@@ -456,10 +476,10 @@ async def delete_vendor_contact(
     vc = db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
     if not vc:
         raise HTTPException(404, "Contact not found")
-    # Remove from legacy emails[] too
+    # Remove from legacy emails[] too — shared helper, Wave 3 item 5.
     card = db.query(VendorCard).filter_by(id=card_id).first()
-    if card and vc.email and card.emails and vc.email in card.emails:
-        card.emails = [e for e in card.emails if e != vc.email]
+    if card:
+        sync_card_emails_on_contact_change(card, vc.email, None)
     db.delete(vc)
     db.commit()
     return {"ok": True}

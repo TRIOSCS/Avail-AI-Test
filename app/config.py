@@ -259,6 +259,21 @@ class Settings(BaseSettings):
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
 
+    # --- Sighting scoring (score_sighting_v2 factor weights) ---
+    # The five factor weights behind every sighting's buyer-usefulness score.
+    # app/scoring.py builds SIGHTING_V2_WEIGHTS from these once at import, so the
+    # score AND its breakdown hover always share one map. Defaults preserve the
+    # historical hardcoded split; the set MUST sum to 1.0 (validated below — boot
+    # fails fast instead of silently rescaling every score). These REPLACE the six
+    # dead WEIGHT_* knobs older .envs carried (WEIGHT_RECENCY, WEIGHT_QUANTITY,
+    # WEIGHT_VENDOR_RELIABILITY, WEIGHT_DATA_COMPLETENESS, WEIGHT_SOURCE_CREDIBILITY,
+    # WEIGHT_PRICE) — those named a scorer generation that no longer exists.
+    sighting_weight_trust: float = 0.30
+    sighting_weight_price: float = 0.25
+    sighting_weight_quantity: float = 0.20
+    sighting_weight_freshness: float = 0.15
+    sighting_weight_completeness: float = 0.10
+
     # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---
     stock_sale_vendor_names: str | list[str] = "trio,trio supply chain,stock,internal"
     stock_sale_notify_emails: str | list[str] = "logistics@trioscs.com,accounting@trioscs.com"
@@ -429,6 +444,30 @@ class Settings(BaseSettings):
         if not 0.0 <= v <= 1.0:
             raise ValueError("Sample rate must be between 0.0 and 1.0")
         return v
+
+    @model_validator(mode="after")
+    def validate_sighting_weights(self) -> "Settings":
+        """Fail fast when the five score_sighting_v2 factor weights don't sum to 1.0.
+
+        A wrong total would silently rescale every sighting score, so boot refuses it
+        instead. The small tolerance absorbs float representation error (the defaults
+        sum to 1.0000000000000002).
+        """
+        total = (
+            self.sighting_weight_trust
+            + self.sighting_weight_price
+            + self.sighting_weight_quantity
+            + self.sighting_weight_freshness
+            + self.sighting_weight_completeness
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"SIGHTING_WEIGHT_* values must sum to 1.0 (got {total:.4f}: "
+                f"trust={self.sighting_weight_trust}, price={self.sighting_weight_price}, "
+                f"quantity={self.sighting_weight_quantity}, freshness={self.sighting_weight_freshness}, "
+                f"completeness={self.sighting_weight_completeness})"
+            )
+        return self
 
     @model_validator(mode="after")
     def parse_csv_fields(self) -> "Settings":

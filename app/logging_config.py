@@ -18,6 +18,7 @@ Depends on: app/config.py (for log_level, app_url)
 import logging
 import os
 import sys
+from types import FrameType
 
 from loguru import logger
 
@@ -102,7 +103,8 @@ class _InterceptHandler(logging.Handler):
             level = str(record.levelno)
 
         # Find the caller (skip frames from stdlib logging internals)
-        frame, depth = logging.currentframe(), 0
+        frame: FrameType | None = logging.currentframe()
+        depth = 0
         while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
             frame = frame.f_back
             depth += 1

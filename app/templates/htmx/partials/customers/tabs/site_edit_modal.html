@@ -16,7 +16,7 @@
 
     <div>
       <label class='form-label'>Site Name <span class="text-rose-500">*</span></label>
-      <input type='text' name='site_name' required value='{{ site.site_name or "" }}'
+      <input type='text' name='site_name' maxlength='{{ column_maxlength('site', 'site_name') }}' required value='{{ site.site_name or "" }}'
              class='input'>
     </div>
 
@@ -36,12 +36,12 @@
     <div class='grid grid-cols-2 gap-2'>
       <div>
         <label class='form-label'>Address Line 1</label>
-        <input type='text' name='address_line1' value='{{ site.address_line1 or "" }}'
+        <input type='text' name='address_line1' maxlength='{{ column_maxlength('site', 'address_line1') }}' value='{{ site.address_line1 or "" }}'
                class='input'>
       </div>
       <div>
         <label class='form-label'>Address Line 2</label>
-        <input type='text' name='address_line2' value='{{ site.address_line2 or "" }}'
+        <input type='text' name='address_line2' maxlength='{{ column_maxlength('site', 'address_line2') }}' value='{{ site.address_line2 or "" }}'
                class='input'>
       </div>
     </div>
@@ -49,12 +49,12 @@
     <div class='grid grid-cols-2 gap-2'>
       <div>
         <label class='form-label'>City</label>
-        <input type='text' name='city' value='{{ site.city or "" }}'
+        <input type='text' name='city' maxlength='{{ column_maxlength('site', 'city') }}' value='{{ site.city or "" }}'
                class='input'>
       </div>
       <div>
         <label class='form-label'>State</label>
-        <input type='text' name='state' value='{{ site.state or "" }}'
+        <input type='text' name='state' maxlength='{{ column_maxlength('site', 'state') }}' value='{{ site.state or "" }}'
                class='input'>
       </div>
     </div>
@@ -62,12 +62,12 @@
     <div class='grid grid-cols-2 gap-2'>
       <div>
         <label class='form-label'>ZIP</label>
-        <input type='text' name='zip' value='{{ site.zip or "" }}'
+        <input type='text' name='zip' maxlength='{{ column_maxlength('site', 'zip') }}' value='{{ site.zip or "" }}'
                class='input'>
       </div>
       <div>
         <label class='form-label'>Country</label>
-        <input type='text' name='country' value='{{ site.country or "" }}'
+        <input type='text' name='country' maxlength='{{ column_maxlength('site', 'country') }}' value='{{ site.country or "" }}'
                class='input'>
       </div>
     </div>
@@ -75,7 +75,7 @@
     {# Payment terms intentionally absent — managed in the ERP, not the CRM (ISS-031). #}
     <div>
       <label class='form-label'>Shipping Terms</label>
-      <input type='text' name='shipping_terms' value='{{ site.shipping_terms or "" }}'
+      <input type='text' name='shipping_terms' maxlength='{{ column_maxlength('site', 'shipping_terms') }}' value='{{ site.shipping_terms or "" }}'
              placeholder='e.g. FCA'
              class='input'>
     </div>

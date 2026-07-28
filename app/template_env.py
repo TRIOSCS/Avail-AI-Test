@@ -480,6 +480,28 @@ from .constants import CRM_INDUSTRIES  # noqa: E402
 
 templates.env.globals["crm_industries"] = CRM_INDUSTRIES
 
+# CRM Wave 3 item 6 — model-derived maxlength for form inputs. Templates render
+# maxlength="{{ column_maxlength('company', 'name') }}" so the client-side bound can
+# never drift from the server guard (utils/column_limits.ensure_fits_column) — the
+# ORM column declaration is the single source of truth. Models are imported lazily
+# to keep template_env import-order independent.
+from .utils.column_limits import column_max_length as _column_max_length  # noqa: E402
+
+_MAXLEN_MODELS: dict[str, Any] = {}
+
+
+def _column_maxlength(model_key: str, field: str) -> int | None:
+    """Jinja2 global: declared String(n) bound for a model column, or None."""
+    if not _MAXLEN_MODELS:
+        from .models import Company, CustomerSite, SiteContact, VendorCard
+
+        _MAXLEN_MODELS.update(company=Company, site=CustomerSite, contact=SiteContact, vendor=VendorCard)
+    model = _MAXLEN_MODELS.get(model_key)
+    return _column_max_length(model, field) if model is not None else None
+
+
+templates.env.globals["column_maxlength"] = _column_maxlength
+
 # CRM P5 trust — data-completeness scorer exposed as a Jinja2 global so the contact
 # row macro (which doesn't inherit route context) can render a small completeness
 # badge. Auto-dispatches on entity kind: Company → company_completeness, SiteContact

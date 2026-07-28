@@ -1,0 +1,114 @@
+{#
+  resell/_list_rows.html — Rows-only body of the left list (cards + empty state +
+  Load-more). Split out of _lists.html so the debounced search swaps ONLY this
+  container and never the filter bar / input the user is typing in (finding #17,
+  the sightings/knowledge/parts pattern). The "Load more" row replaces itself with
+  the next page (htmx click-to-load), keeping the query-level page cap.
+  Receives: cards [{list, display_title, customer_name, coverage_filled,
+            coverage_total, offer_count, hours_until, is_live, close_at_display}],
+            lens, stage, needs, q, has_more, next_offset, offset (empty state
+            renders only on the offset-0 page), can_see_customer (owner-only
+            coverage/offer gate — D2), can_post.
+  Called by: _lists.html (include), resell.resell_list_rows (search/Load-more swap).
+#}
+{% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text %}
+
+{% if cards %}
+{% for c in cards %}
+{% set el = c.list %}
+<a hx-get="/v2/partials/resell/{{ el.id }}"
+   hx-target="#split-right-resell"
+   hx-swap="innerHTML"
+   hx-push-url="/v2/resell/{{ el.id }}"
+   class="block px-3 py-2.5 border-b border-line-subtle cursor-pointer hover:bg-brand-50/60 transition-colors">
+  <div class="flex items-start justify-between gap-2">
+    <div class="min-w-0 flex-1">
+      {# Owner sees the real free-text title; the "open" lens shows a neutral,
+         id-derived label (customer-hiding — the title is offerer-visible). #}
+      <p class="text-sm font-semibold text-gray-900 truncate">{{ c.display_title }}</p>
+      {% if c.customer_name %}
+      <p class="text-secondary truncate mt-0.5">{{ c.customer_name }}</p>
+      {% else %}
+      <p class="text-secondary truncate mt-0.5 italic">Anonymized posting</p>
+      {% endif %}
+    </div>
+    {# Finding #13: the open↔collecting split is an offer-existence signal (a list flips
+       to collecting on its first inbound bid), so a non-owner sees a neutral 'open'
+       badge for a collecting list — same D2 predicate as the coverage/offer gates. #}
+    {% set badge_status = 'open' if (not can_see_customer and el.status == 'collecting') else el.status %}
+    {{ status_badge(badge_status, status_map={
+      'draft': 'bg-slate-50 text-slate-500 border-slate-200',
+      'open': 'bg-sky-50 text-sky-600 border-sky-200',
+      'collecting': 'bg-amber-50 text-amber-600 border-amber-200',
+      'bid_out': 'bg-violet-50 text-violet-600 border-violet-200',
+      'awarded': 'bg-emerald-50 text-emerald-700 border-emerald-300',
+      'closed': 'bg-gray-50 text-gray-400 border-gray-200',
+      'expired': 'bg-gray-50 text-gray-400 border-gray-200'
+    }) }}
+  </div>
+  <div class="mt-1.5 flex items-center gap-3 text-secondary">
+    {# Offer coverage + count are OWNER-PRIVATE (D2): the "Open to Me" (offerer) lens
+       must not learn how many lines already have offers or how many bids are in —
+       same competitive leak the per-line offer badge hides. The closing time below
+       stays public (offerers need the window). #}
+    {% if can_see_customer %}
+    <span class="inline-flex items-center gap-1.5" title="Offer coverage: {{ c.coverage_filled }} of {{ c.coverage_total }} lines have an offer">
+      {{ coverage_meter(c.coverage_filled, c.coverage_total) }}
+      <span class="tabular-nums">{{ c.coverage_filled }}/{{ c.coverage_total }}</span>
+    </span>
+    {% if c.offer_count %}
+    <span class="inline-flex items-center gap-1 text-amber-600 font-medium">
+      <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      {{ c.offer_count }}
+    </span>
+    {% endif %}
+    {% endif %}
+    {# Countdown ONLY while live (open/collecting); a resolved list shows a muted
+       "closed {date}" and NEVER a red "Overdue" (finding #8). #}
+    {% if c.is_live and c.hours_until is not none %}
+    <span class="ml-auto">{{ time_text(c.hours_until) }}</span>
+    {% elif not c.is_live and c.close_at_display %}
+    <span class="ml-auto text-gray-400">closed {{ c.close_at_display }}</span>
+    {% endif %}
+  </div>
+</a>
+{% endfor %}
+{% if has_more %}
+{# Click-to-load reveal: the button replaces ITSELF with the next page of rows, so the
+   already-rendered cards stay in place (query-level paging, perf item b). #}
+<button type="button"
+        hx-get="/v2/partials/resell/list-rows?lens={{ lens }}&offset={{ next_offset }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}"
+        hx-target="this"
+        hx-swap="outerHTML"
+        data-loading-disable
+        class="block w-full px-3 py-2.5 text-sm font-medium text-accent-600 hover:text-accent-700 hover:bg-brand-50/60 text-center">
+  Load more
+</button>
+{% endif %}
+{% elif offset == 0 %}
+{# Empty state only on the FIRST page (offset 0): a stale Load-more click that races a
+   shrink (rows deleted since the button rendered) gets an empty offset page and must
+   render nothing — not a "board is empty" claim beneath the rows already on screen. #}
+<div class="p-6">
+  <div class="mx-auto max-w-xs text-center text-sm text-gray-500 py-6">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+    </svg>
+    {# Finding #51: the filter branch tests FIRST — a search/stage/needs that merely has
+       no matches must never claim the marketplace/board itself is empty. #}
+    {% if stage or needs or q %}
+      No lists match this filter.
+    {% elif lens == 'open' %}
+      No postings are open to you right now.
+    {% else %}
+      <p>You haven't posted any excess lists yet.</p>
+      {% if can_post %}
+      <button @click="$dispatch('open-modal')"
+              hx-get="/v2/partials/resell/create-form"
+              hx-target="#modal-content"
+              class="mt-4 btn-primary btn-sm">Post a list</button>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}

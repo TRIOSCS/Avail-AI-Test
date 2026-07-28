@@ -776,7 +776,7 @@ async def poll_inbox(
     req_email_map: dict[tuple[int, str], Contact] = {}
     for c in all_contacts:
         if c.graph_conversation_id:
-            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)  # type: ignore[call-overload]  # Column[str] key is str at instance level
+            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)
         # Build req+email map for Tier 2 (all contacts, not just this user's)
         if c.requisition_id and c.vendor_contact:
             req_email_map.setdefault((c.requisition_id, c.vendor_contact.lower()), c)

@@ -3,7 +3,9 @@
    Select: saves on change (onchange requestSubmit); Escape cancels.
 
    Receives: obj (Company|SiteContact ORM object), field (str), entity ('company'|'contact'),
-             meta {label, kind, choices?}, post_url (str), display_url (str).
+             meta {label, kind, choices?, maxlength?}, post_url (str), display_url (str).
+   meta.maxlength is model-derived (_registries.py ← utils/column_limits) so the input's
+   client bound always matches the server-side length guard.
    Called by: field/edit/{field} GET endpoints (htmx_views.py).
 #}
 {% set _val = obj | attr(field) or '' %}
@@ -37,6 +39,7 @@
   <input type='text'
          name='value'
          value='{{ _val }}'
+         {% if meta.maxlength %}maxlength='{{ meta.maxlength }}'{% endif %}
          aria-label='Edit {{ meta.label }}'
          hx-post='{{ post_url }}'
          hx-vals='{"field": "{{ field }}"}'

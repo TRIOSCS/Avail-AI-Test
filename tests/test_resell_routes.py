@@ -617,8 +617,9 @@ def test_import_confirm_skipped_rows_surface_toast(client, db_session, trader_us
         app.dependency_overrides.pop(require_user, None)
 
 
-def test_import_confirm_clean_import_no_toast(client, db_session, trader_user, empty_draft_list):
-    """A clean import (no skipped rows) carries no skipped-row toast."""
+def test_import_confirm_clean_import_success_toast(client, db_session, trader_user, empty_draft_list):
+    """A clean import (no skipped rows) carries the single SERVER-emitted success toast
+    (finding #16 — the old client-side handler is gone) with no skip warning in it."""
     import json as _json
 
     from app.dependencies import require_user
@@ -631,9 +632,10 @@ def test_import_confirm_clean_import_no_toast(client, db_session, trader_user, e
             data={"rows_json": json.dumps([{"part_number": "LM358N", "quantity": 100, "condition": "New"}])},
         )
         assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger")
-        if trigger:
-            assert "showToast" not in _json.loads(trigger)
+        trigger = _json.loads(resp.headers["HX-Trigger"])
+        assert trigger["showToast"]["type"] == "success"
+        assert "Imported 1 line" in trigger["showToast"]["message"]
+        assert "skipped" not in trigger["showToast"]["message"]
     finally:
         app.dependency_overrides.pop(require_user, None)
 

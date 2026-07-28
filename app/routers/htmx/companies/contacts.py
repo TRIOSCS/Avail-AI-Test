@@ -41,6 +41,7 @@ from ....services.company_import_service import confirm_contact_import, parse_cs
 from ....services.crm_field_history import ENTITY_CONTACT, field_history_for, record_field_change
 from ....services.crm_service import company_contact_rows, customer_contacts_list_ctx
 from ....template_env import template_response
+from ....utils.column_limits import ensure_fits_column
 from .._shared import _base_ctx
 from . import router
 from ._registries import BULK_MAX_IDS as _BULK_MAX_IDS
@@ -48,6 +49,7 @@ from ._registries import (
     CANONICAL_ROLES,
     EDITABLE_CONTACT_FIELDS,
     FIELD_LABELS,
+    _backfill_legacy_name_parts,
     _recompose_full_name,
     _validate_role,
     apply_contact_field,
@@ -634,8 +636,33 @@ async def contacts_tab_create(
     if email_val and "@" not in email_val:
         raise HTTPException(400, "Invalid email address")
 
+    # Remaining bounded free-text inputs (parsed here so EVERY length guard runs
+    # before any DB write — the '__new__' site branch flushes an INSERT below).
+    title_val = (form.get("title") or "").strip() or None
+    phone_val = (form.get("phone") or "").strip() or None
+    secondary_email_val = (form.get("secondary_email") or "").strip() or None
+    secondary_phone_val = (form.get("secondary_phone") or "").strip() or None
+    linkedin_url_val = (form.get("linkedin_url") or "").strip() or None
+
     site_id_raw = (form.get("site_id") or "").strip()
     new_site_name = (form.get("new_site_name") or "").strip()
+
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    # SQLite (tests) silently accepts over-length values and masks the failure.
+    for _field, _value, _label in (
+        ("full_name", full_name, "Name"),
+        ("first_name", first_name_val, "First Name"),
+        ("last_name", last_name_val, "Last Name"),
+        ("email", email_val, "Email"),
+        ("title", title_val, "Title"),
+        ("phone", phone_val, "Phone"),
+        ("secondary_email", secondary_email_val, "Secondary Email"),
+        ("secondary_phone", secondary_phone_val, "Secondary Phone"),
+        ("linkedin_url", linkedin_url_val, "LinkedIn"),
+    ):
+        ensure_fits_column(SiteContact, _field, _value, _label)
+    # The '__new__' branch writes CustomerSite.site_name directly (bypasses create_site).
+    ensure_fits_column(CustomerSite, "site_name", new_site_name or None, "Site name")
 
     # ── Resolve or pre-validate the site (no writes yet) ───────────────
     # For existing sites, resolve + validate before any writes so dedup
@@ -730,13 +757,13 @@ async def contacts_tab_create(
         first_name=first_name_val,
         last_name=last_name_val,
         email=email_val,
-        title=(form.get("title") or "").strip() or None,
-        phone=(form.get("phone") or "").strip() or None,
-        secondary_email=(form.get("secondary_email") or "").strip() or None,
-        secondary_phone=(form.get("secondary_phone") or "").strip() or None,
+        title=title_val,
+        phone=phone_val,
+        secondary_email=secondary_email_val,
+        secondary_phone=secondary_phone_val,
         wechat_id=wechat_id_val or None,
         notes=(form.get("notes") or "").strip() or None,
-        linkedin_url=(form.get("linkedin_url") or "").strip() or None,
+        linkedin_url=linkedin_url_val,
         contact_role=role,
         is_priority=is_priority,
         reports_to_id=reports_to_id,
@@ -1673,10 +1700,20 @@ async def edit_site_contact(
     first_name_raw = form.get("first_name")
     last_name_raw = form.get("last_name")
     if first_name_raw is not None or last_name_raw is not None:
-        new_first = (first_name_raw or "").strip() or None
-        new_last = (last_name_raw or "").strip() or None
+        # Legacy full_name-only contact: backfill both parts first (Wave 3 item 2) so a
+        # partial submit can't wipe the un-submitted part. A name field ABSENT from the
+        # form preserves the (possibly just-backfilled) current part — matching the
+        # present-vs-absent rule of the registry loop below; a SUBMITTED blank clears.
+        _backfill_legacy_name_parts(contact)
+        new_first = ((first_name_raw or "").strip() or None) if first_name_raw is not None else contact.first_name
+        new_last = ((last_name_raw or "").strip() or None) if last_name_raw is not None else contact.last_name
         if not new_first and not new_last:
             raise HTTPException(400, "At least one of first_name or last_name is required")
+        # Length guards (Wave 3 item 6) — this atomic block assigns directly,
+        # bypassing the guarded apply_contact_field loop below. full_name is safe
+        # by construction: 120 + space + 120 < 255.
+        ensure_fits_column(SiteContact, "first_name", new_first, "First Name")
+        ensure_fits_column(SiteContact, "last_name", new_last, "Last Name")
         contact.first_name = new_first
         contact.last_name = new_last
         _recompose_full_name(contact)
