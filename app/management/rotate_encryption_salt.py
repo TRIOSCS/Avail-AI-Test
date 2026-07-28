@@ -159,7 +159,11 @@ def rotate_salt(
             new_raw, status = rotate_value(row[col], old_fernet, new_fernet)
             if status == ROTATED:
                 stats.rotated[col] += 1
-                # ROTATED always yields a non-None ciphertext str (see rotate_value).
+                # Locally provable invariant: rotate_value returns ROTATED only on
+                # its final line, paired with a freshly encrypted str — never None.
+                # Assert (not guard) so a broken invariant crashes loudly instead of
+                # silently skipping a rotation and stranding the row on the old salt.
+                assert new_raw is not None
                 updates[col] = new_raw
             elif status == ALREADY:
                 stats.already[col] += 1

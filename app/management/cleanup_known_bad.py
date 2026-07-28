@@ -141,7 +141,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
     for card in cards:
         raw = card.category
         source_before = card.category_source
-        target = normalize_category(raw)  # type: ignore[arg-type]  # legacy Column-model ORM noise
+        target = normalize_category(raw)
         if source_before is None:
             if target is not None:
                 # Unprovenanced junk that resolves to a canonical key: through the
@@ -178,7 +178,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
                         db,
                         card,
                         target,
-                        source=source_before,  # type: ignore[arg-type]  # legacy Column-model ORM noise
+                        source=source_before,
                         force=True,
                         reason="cleanup_known_bad: cleanup_junk_categories Pass 2 (normalized_in_place)",
                     )

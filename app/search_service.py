@@ -1039,7 +1039,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     fresh_prices = [r["unit_price"] for r in results if not r.get("is_material_history") and r.get("unit_price")]
     if fresh_prices:
         median_price = _median(fresh_prices)
-        if median_price > 0:
+        if median_price is not None and median_price > 0:
             for r in results:
                 p = r.get("unit_price")
                 if p and p > median_price * 20:
@@ -1128,6 +1128,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
         norm_name = normalize_vendor_name(clean_vendor)
         base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
         tier = tier_for_sighting(r.get("source_type"), is_auth)
+        raw_moq = r.get("moq")
 
         results.append(
             {
@@ -1150,7 +1151,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
                 "vendor_url": r.get("vendor_url"),
                 "vendor_sku": r.get("vendor_sku"),
                 "condition": normalize_condition(r.get("condition")),
-                "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+                "moq": raw_moq if raw_moq and raw_moq > 0 else None,
                 "date_code": normalize_date_code(r.get("date_code")),
                 "packaging": normalize_packaging(r.get("packaging")),
                 "lead_time_days": normalize_lead_time(r.get("lead_time")),
@@ -2236,6 +2237,7 @@ def _save_sightings(
         clean_packaging = normalize_packaging(r.get("packaging"))
         clean_date_code = normalize_date_code(r.get("date_code"))
         clean_lead_time_days = normalize_lead_time(r.get("lead_time"))
+        raw_moq = r.get("moq")
 
         # Normalize confidence to 0-1 range (connectors use 1-5 integer scale)
         raw_conf = r.get("confidence", 0) or 0
@@ -2260,7 +2262,7 @@ def _save_sightings(
             qty_available=clean_qty,
             unit_price=clean_price,
             currency=clean_currency,
-            moq=r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+            moq=raw_moq if raw_moq and raw_moq > 0 else None,
             source_type=r.get("source_type"),
             is_authorized=is_auth,
             confidence=norm_conf,
@@ -2741,6 +2743,13 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
         return None
 
     card = resolve_material_card(pn, db)
+    if card is None:
+        # resolve_material_card returns None when the card vanished after its
+        # ON CONFLICT insert (concurrent hard-delete / race) — previously this
+        # crashed with AttributeError; skip the upsert defensively instead.
+        # Callers already fall back to resolve_material_card on a None return.
+        logger.warning("MATERIAL_CARD_UPSERT_SKIP: no card resolved for mpn={}", norm)
+        return None
 
     card.search_count = (card.search_count or 0) + 1
     card.last_searched_at = now
@@ -3084,6 +3093,7 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     norm_name = normalize_vendor_name(clean_vendor)
     base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
     tier = tier_for_sighting(r.get("source_type"), is_auth)
+    raw_moq = r.get("moq")
 
     return {
         "vendor_name": clean_vendor,
@@ -3104,7 +3114,7 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
         "vendor_url": r.get("vendor_url"),
         "vendor_sku": r.get("vendor_sku"),
         "condition": normalize_condition(r.get("condition")),
-        "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+        "moq": raw_moq if raw_moq and raw_moq > 0 else None,
         "date_code": normalize_date_code(r.get("date_code")),
         "packaging": normalize_packaging(r.get("packaging")),
         "lead_time_days": normalize_lead_time(r.get("lead_time")),

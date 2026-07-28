@@ -970,8 +970,9 @@ def _mk_buy_plan(
     u: dict,
     *,
     extra: dict,
-) -> BuyPlan | None:
-    """One non-cancelled plan per quote: skip if one already exists."""
+) -> BuyPlan:
+    """One non-cancelled plan per quote: return the existing one if present
+    (idempotent re-runs) instead of creating a duplicate."""
     existing = (
         db.query(BuyPlan)
         .filter(BuyPlan.quote_id == quote.id, BuyPlan.status != BuyPlanStatus.CANCELLED.value)

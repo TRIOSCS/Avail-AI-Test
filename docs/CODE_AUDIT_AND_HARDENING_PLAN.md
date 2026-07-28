@@ -87,8 +87,13 @@ These are confirmed defects shipping today, not style issues.
   precise return/param annotations, generics for the parameterized helpers
   (`QueueManager`, seed `get_or_create`, contact promotion), typed locals at legacy
   Column/relationship reads, and documented `cast()`s at genuine third-party JSON
-  boundaries. `no_strict_optional` remains the last global debt flag (36 errors
-  measured 2026-07-15; see the debt comment in `pyproject.toml`).
+  boundaries. `no_strict_optional` — the last global debt flag — was burned down and
+  flipped OFF 2026-07-28 (the 36 errors measured 2026-07-15 were fixed with real
+  None-narrowing: guards/early returns, correct `| None` annotations, and
+  `Mapped[... | None]` conversions for the written-nullable legacy columns
+  `MaterialCard.category`+provenance, `VendorPartUnavailability.released_at`/
+  `release_trigger`, `ExcessLineItem.best_offer_id`); the pre-commit hook dropped
+  `--no-strict-optional` in the same commit, so strict Optional checking is now live.
   Dangerous codes stay live everywhere: `unused-coroutine`,
   `unused-awaitable`, `call-arg`, `no-redef`, `name-defined`, `unused-ignore`, `return`.
   Note: since P2.9 the pre-commit hook env runs the same mypy 2.1.0 with the key typed
@@ -557,7 +562,9 @@ These are confirmed defects shipping today, not style issues.
   then run the hook's exact command from the repo root:
   `hookenv/bin/mypy --ignore-missing-imports --no-strict-optional
   --config-file=pyproject.toml app/` — exit 0 verified, identical to the
-  full-deps run. Swept the (by-now 61) `, unused-ignore` suffixes: 60 removed —
+  full-deps run. (Since 2026-07-28 the hook no longer passes
+  `--no-strict-optional` — drop it from the replica command too; see the
+  strict-Optional note under P0.5 above.) Swept the (by-now 61) `, unused-ignore` suffixes: 60 removed —
   5 of those ignores (`call-arg` on pydantic `extra="allow"` class kwargs in
   `app/schemas/tags.py`, `app/schemas/knowledge.py`, `app/schemas/v13_features.py`)
   were unused in BOTH envs under mypy 2.1.0 and were deleted outright; the other 55

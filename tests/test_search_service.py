@@ -788,6 +788,30 @@ class TestUpsertMaterialCard:
         count = db_session.query(MaterialCard).count()
         assert count == 0
 
+    def test_resolve_failure_returns_none_without_raising(self, db_session, monkeypatch):
+        """If resolve_material_card yields no card (post-ON-CONFLICT vanish), the upsert
+        skips defensively and returns None instead of raising AttributeError."""
+        import app.search_service as ss
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        now = datetime.now(UTC)
+
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            raw_data={},
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        monkeypatch.setattr(ss, "resolve_material_card", lambda pn, db: None)
+        result = _upsert_material_card("LM317T", [s], db_session, now)
+        assert result is None
+        assert db_session.query(MaterialCard).count() == 0
+
     def test_no_matching_sightings(self, db_session):
         """If no sightings match the pn_key, don't create a card."""
         user = _make_user(db_session)
