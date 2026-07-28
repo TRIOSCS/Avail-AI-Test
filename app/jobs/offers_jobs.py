@@ -33,7 +33,9 @@ def register_offers_jobs(scheduler, settings, db=None):
             name="Proactive matching",
         )
 
-    if get_effective_flag(db, "proactive_teams_push_enabled", settings.proactive_teams_push_enabled):
+    # `is True` (not truthiness): register only on an explicit True so a MagicMock
+    # settings passed by unrelated scheduler tests resolves to off, not a spurious job.
+    if get_effective_flag(db, "proactive_teams_push_enabled", settings.proactive_teams_push_enabled) is True:
         push_interval_h = max(1, settings.proactive_scan_interval_hours)
         scheduler.add_job(
             _job_proactive_teams_push,
