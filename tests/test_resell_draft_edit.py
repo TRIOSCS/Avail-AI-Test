@@ -342,7 +342,7 @@ class TestDraftEditRoutes:
         db_session.refresh(el)
         assert el.title == "Edited title"
 
-    def test_delete_list_route_200_refreshes_left_and_toasts(self, client, db_session, owner, company):
+    def test_delete_list_route_200_redirects_and_toasts(self, client, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
         list_id = el.id
         restore = _as_owner(client, owner)
@@ -352,8 +352,9 @@ class TestDraftEditRoutes:
             restore()
         assert resp.status_code == 200
         assert db_session.get(ExcessList, list_id) is None
-        # The response resets the detail pane (OOB) and fires a toast.
-        assert 'id="split-right-resell"' in resp.text
+        # The route answers with an HX-Redirect to the workspace (finding #15 — works from
+        # both the split pane AND a deep-linked full page) and fires a toast.
+        assert resp.headers.get("HX-Redirect") == "/v2/resell"
         assert "showToast" in resp.headers.get("HX-Trigger", "")
 
     def test_non_owner_delete_line_404_masks_draft(self, client, db_session, owner, company):
@@ -400,9 +401,9 @@ class TestDraftEditRoutes:
         assert resp.status_code == 404
         assert db_session.get(ExcessList, list_id) is not None  # not deleted
 
-    def test_delete_list_route_pushes_workspace_url(self, client, db_session, owner, company):
-        """Deleting a draft rewrites the address bar to the workspace root so a reload
-        does not reopen the now-deleted list id (finding #8)."""
+    def test_delete_list_route_redirects_to_workspace_url(self, client, db_session, owner, company):
+        """Deleting a draft navigates to the workspace root so a reload does not reopen
+        the now-deleted list id (finding #8; HX-Redirect per finding #15)."""
         el = _draft_with_lines(db_session, owner, company)
         restore = _as_owner(client, owner)
         try:
@@ -410,7 +411,7 @@ class TestDraftEditRoutes:
         finally:
             restore()
         assert resp.status_code == 200
-        assert resp.headers.get("HX-Push-Url") == "/v2/resell"
+        assert resp.headers.get("HX-Redirect") == "/v2/resell"
 
 
 class TestHonest409Copy:

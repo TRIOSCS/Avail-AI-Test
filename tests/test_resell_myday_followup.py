@@ -180,6 +180,106 @@ class TestFollowupTaskService:
 
 
 # ---------------------------------------------------------------------------
+# Service layer — auto_create_resell_followup_tasks (batch variant, perf item d)
+# ---------------------------------------------------------------------------
+
+
+class TestFollowupTaskBatch:
+    def test_batch_creates_missing_only_and_commits_once(
+        self, db_session, test_user, owned_list, buyer_card_a, buyer_card_b
+    ):
+        """One existing + one missing buyer → exactly one new task, ONE commit for the
+        whole batch (the per-buyer variant committed per buyer inside a GET render)."""
+        task_service.auto_create_resell_followup_task(
+            db_session,
+            excess_list_id=owned_list.id,
+            vendor_card_id=buyer_card_a.id,
+            owner_id=test_user.id,
+            buyer_name=buyer_card_a.display_name,
+        )
+        commits = 0
+        real_commit = db_session.commit
+
+        def counting_commit():
+            nonlocal commits
+            commits += 1
+            real_commit()
+
+        db_session.commit = counting_commit
+        try:
+            result = task_service.auto_create_resell_followup_tasks(
+                db_session,
+                excess_list_id=owned_list.id,
+                owner_id=test_user.id,
+                buyers=[
+                    (buyer_card_a.id, buyer_card_a.display_name),
+                    (buyer_card_b.id, buyer_card_b.display_name),
+                ],
+            )
+        finally:
+            db_session.commit = real_commit
+        assert commits == 1
+        assert set(result) == {buyer_card_a.id, buyer_card_b.id}
+        assert len(_tasks_for(db_session, test_user.id)) == 2
+
+    def test_batch_idempotent_reload_creates_nothing(
+        self, db_session, test_user, owned_list, buyer_card_a, buyer_card_b
+    ):
+        buyers = [
+            (buyer_card_a.id, buyer_card_a.display_name),
+            (buyer_card_b.id, buyer_card_b.display_name),
+        ]
+        task_service.auto_create_resell_followup_tasks(
+            db_session, excess_list_id=owned_list.id, owner_id=test_user.id, buyers=buyers
+        )
+        commits = 0
+        real_commit = db_session.commit
+
+        def counting_commit():
+            nonlocal commits
+            commits += 1
+            real_commit()
+
+        db_session.commit = counting_commit
+        try:
+            task_service.auto_create_resell_followup_tasks(
+                db_session, excess_list_id=owned_list.id, owner_id=test_user.id, buyers=buyers
+            )
+        finally:
+            db_session.commit = real_commit
+        assert commits == 0, "an all-existing batch must not commit at all"
+        assert len(_tasks_for(db_session, test_user.id)) == 2
+
+    def test_batch_does_not_recreate_completed_task(self, db_session, test_user, owned_list, buyer_card_a):
+        task = task_service.auto_create_resell_followup_task(
+            db_session,
+            excess_list_id=owned_list.id,
+            vendor_card_id=buyer_card_a.id,
+            owner_id=test_user.id,
+            buyer_name=buyer_card_a.display_name,
+        )
+        task.status = TaskStatus.DONE.value
+        task.completed_at = datetime.now(UTC)
+        db_session.commit()
+        result = task_service.auto_create_resell_followup_tasks(
+            db_session,
+            excess_list_id=owned_list.id,
+            owner_id=test_user.id,
+            buyers=[(buyer_card_a.id, buyer_card_a.display_name)],
+        )
+        assert result[buyer_card_a.id].id == task.id
+        assert len(_tasks_for(db_session, test_user.id)) == 1
+
+    def test_batch_empty_is_noop(self, db_session, test_user, owned_list):
+        assert (
+            task_service.auto_create_resell_followup_tasks(
+                db_session, excess_list_id=owned_list.id, owner_id=test_user.id, buyers=[]
+            )
+            == {}
+        )
+
+
+# ---------------------------------------------------------------------------
 # Route layer — GET /v2/partials/resell/{id}/not-yet-strip
 # ---------------------------------------------------------------------------
 

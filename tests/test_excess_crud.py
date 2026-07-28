@@ -316,12 +316,12 @@ class TestConfirmImport:
             {"part_number": "LM358N", "quantity": 500, "asking_price": 0.45},
             {"part_number": "NE555P", "quantity": 1000, "manufacturer": "TI"},
         ]
-        result = confirm_import(db_session, el.id, validated_rows)
+        result = confirm_import(db_session, el.id, trader, validated_rows)
         assert result["imported"] == 2
         db_session.refresh(el)
         assert el.total_line_items == 2
 
     def test_rejects_empty_rows(self, db_session, company, trader):
         el = create_excess_list(db_session, title="Empty", company_id=company.id, owner_id=trader.id)
-        result = confirm_import(db_session, el.id, [])
+        result = confirm_import(db_session, el.id, trader, [])
         assert result["imported"] == 0

@@ -2036,9 +2036,13 @@ a lazy left list and a right detail. Logic stays in `excess_service` (offers/imp
 ```
 GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + splitPanel)
     |
-    +-- GET /v2/partials/resell/lists?lens=&stage=&q=   (left list; rows → detail)
+    +-- GET /v2/partials/resell/lists?lens=&stage=&q=   (left list: filter bar + page 1 of rows)
     |        lens=mine  → lists OWNED by user (seller name VISIBLE)
     |        lens=open  → posted lists owned by OTHERS, customer-ANONYMIZED (pure whitelist)
+    |        rows are CAPPED at the query level (_LIST_PAGE_SIZE, +1-row has_more probe);
+    |        the bar's search input + the "Load more" reveal swap ONLY the rows container via
+    |        +-- GET /v2/partials/resell/list-rows?…&offset=  (rows-only partial _list_rows.html
+    |              — the input is never swapped away mid-typing, finding #17)
     +-- GET /v2/partials/resell/{id}                    (right detail: breadcrumb + chips +
     |        lazy tabs Lines · Offers · Build Bid · Outreach(owner) · Activity; customer chip owner-only)
     |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
@@ -2058,11 +2062,15 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
     |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
     |              also persists each surfaced buyer as an owner-assigned My-Day follow-up via
-    |              task_service.auto_create_resell_followup_task — idempotent per list+buyer+owner)
+    |              task_service.auto_create_resell_followup_tasks — BATCHED: one IN query + one
+    |              commit for the whole strip, idempotent per list+buyer+owner; the single-task
+    |              wrapper delegates to the batch)
     +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
-    +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard;
-    |     re-renders the WHOLE detail via [data-resell-detail-root], not just Lines, so the
-    |     header Post button appears once a fresh draft has lines — RS-5)
+    +-- POST /api/resell/{id}/lines                     (add line → excess_service.add_line:
+    |     _require_owned_draft guard, blank-part-number 400, MaterialCard resolve, counter bump,
+    |     _safe_commit [findings #33/#42]; re-renders the WHOLE detail via
+    |     [data-resell-detail-root], not just Lines, so the header Post button appears once a
+    |     fresh draft has lines — RS-5)
     +-- DRAFT-EDIT set (finding #14 / D4 — all DRAFT-only + owner-only, guarded 404→403→409 in
     |     the service; a draft has no offers/mirror so side-effect-free except total_line_items):
     |        +-- PATCH  /api/resell/{id}/lines/{line_id}  (excess_service.update_line; re-validates
@@ -2071,19 +2079,26 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        +-- DELETE /api/resell/{id}/lines/{line_id}  (excess_service.delete_line; decrements
     |        |     total_line_items; re-renders detail)
     |        +-- PATCH  /api/resell/{id}                   (excess_service.update_excess_list;
-    |        |     title/notes/company_id[re-validates exists]/customer_site_id; re-renders detail)
+    |        |     title/notes/company_id[re-validates exists] — customer_site_id is NOT a param
+    |        |     [finding #40: no form carries it; the old unconditional assignment wiped a
+    |        |     stored site id on every header edit]; re-renders detail)
     |        +-- DELETE /api/resell/{id}                   (excess_service.delete_excess_list; cascade
-    |        |     cleans children → refreshes My-Lists [#resell-list-body] + OOB detail-pane reset
-    |        |     [#split-right-resell] + toast + HX-Push-Url /v2/resell so a reload no longer
-    |        |     reopens the deleted list id [finding #8])
+    |        |     cleans children → answers HX-Redirect /v2/resell + toast [finding #15: works
+    |        |     from BOTH the workspace pane and a deep-linked full page, and fixes the address
+    |        |     bar so a reload no longer reopens the deleted id — finding #8])
     |        +-- GET .../{id}/edit-form, .../{id}/lines/{line_id}/edit-form (pre-filled modals)
     |     [All four mutating routes call _get_list_for_user FIRST so a NON-owner probing a private
     |      draft gets 404 [existence masked], not the service's 403 — matches the GET edit-form
     |      path [finding #3]. Honest 409 copy (×3): "Posted lists are locked. Close this list and
     |      create a new one to make changes." replaces the false "revise as a new version".]
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid;
-    |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6;
-    |     confirm re-renders the whole detail like add-line — RS-5)
+    |     preview ALWAYS renders a re-upload/back affordance even for an all-errors file — RS-6,
+    |     and carries the SAME draft-only 409 as confirm [finding #34]; confirm shape-guards the
+    |     round-tripped payload [list-of-dicts 400, finding #31], routes through
+    |     excess_service.confirm_import(db, list_id, user, rows) → _require_owned_draft
+    |     [finding #41], re-renders the whole detail like add-line — RS-5, and emits ONE
+    |     server-side HX-Trigger toast combining imported + skipped counts [finding #16 —
+    |     no client-side success toast])
     +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror;
     |     GUARDED to draft [409 otherwise — no re-open of a resolved posting]; PRESERVES a future
     |     close_at, clears only a stale one [Phase 5])
@@ -2454,9 +2469,13 @@ buyer; and the internal per-touch **ActivityLog subject** references the list by
 Reply-matching is unaffected — it keys on the PERSISTED `send_subject`, not the prefill default.
 (3) The left-list **`needs`** offer-triage filter (`needs=offers` / `needs=take_all` → lists
 carrying a live/whole-list bid) is the OWNER's board only — gated on `can_see_customer`
-(`resell.py resell_lists`), so a non-owner cannot craft `lens=open&needs=offers` and diff it
+(`resell.py _list_rows_context`), so a non-owner cannot craft `lens=open&needs=offers` and diff it
 against the plain open lens to learn which anonymized `Excess listing #N` postings have already
-drawn a bid (the offer-EXISTENCE sibling of the offer-count chip it hides).
+drawn a bid (the offer-EXISTENCE sibling of the offer-count chip it hides). (4) The list STATUS
+itself: `open → collecting` flips on the first inbound bid, so for non-owners the open-lens
+stage tokens `open`/`collecting`/`live` all merge onto the same `_LIVE_STATUSES` filter and the
+card/header badge collapses `collecting` to a neutral `open` (finding #13 — the same predicate
+gates both).
 
 Same gate on every OTHER cross-trader writer that names the list, since each lands on a surface
 keyed only on `vendor_card_id` (the shared buyer timeline / Tasks tab): the retry resend's

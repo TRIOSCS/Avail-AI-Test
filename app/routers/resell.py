@@ -24,13 +24,13 @@ Depends on: services.excess_service, services.excess_mirror, file_utils,
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import case, func, or_, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from ..constants import (
     PG_INT4_MAX,
@@ -151,12 +151,18 @@ def _close_at_display(close_at: datetime | None) -> str | None:
     return close_at.strftime("%b %d")
 
 
-def _parse_close_at(raw: str) -> datetime | None:
+def _parse_close_at(raw: str, tz_offset_min: str = "") -> datetime | None:
     """Parse the D1 ``datetime-local`` form value into a tz-aware UTC instant (or None).
 
-    An empty field means "no deadline". A ``datetime-local`` input carries a naive
-    wall-clock string (``2026-07-20T15:30``); we stamp UTC so the service's future-check has
-    a tz-aware value. A malformed string is a 400 (the service enforces future+non-past).
+    An empty field means "no deadline". A ``datetime-local`` input carries a naive LOCAL
+    wall-clock string (``2026-07-20T15:30``) with no zone, so the modal posts the browser's
+    UTC offset alongside it (a hidden ``tz_offset_min`` filled from
+    ``Date.getTimezoneOffset()``: minutes such that UTC = local + offset, e.g. 240 at
+    UTC-4). The wall-clock is converted to the real UTC instant here (finding #20 — the old
+    ``replace(tzinfo=UTC)`` stamped the local wall-clock as UTC, shifting the deadline by
+    the user's offset and spuriously 400-ing locally-future deadlines). A missing/invalid
+    offset falls back to treating the wall-clock as UTC (the legacy semantic). A malformed
+    datetime is a 400 (the service enforces future+non-past).
     """
     raw = (raw or "").strip()
     if not raw:
@@ -165,9 +171,13 @@ def _parse_close_at(raw: str) -> datetime | None:
         parsed = datetime.fromisoformat(raw)
     except ValueError as exc:
         raise HTTPException(400, "Invalid offer-close date/time") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed
+    if parsed.tzinfo is not None:
+        return parsed
+    offset = _to_int(tz_offset_min)
+    if offset is not None and -16 * 60 <= offset <= 16 * 60:
+        # UTC = local wall-clock + getTimezoneOffset() minutes.
+        return parsed.replace(tzinfo=UTC) + timedelta(minutes=offset)
+    return parsed.replace(tzinfo=UTC)
 
 
 def _offer_coverage(items: list[ExcessLineItem]) -> tuple[int, int]:
@@ -350,7 +360,18 @@ def _detail_context(
     if items is None:
         items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
     can_see_customer = el.owner_id == user.id
-    offer_count = db.query(func.count(ExcessOffer.id)).filter(ExcessOffer.excess_list_id == el.id).scalar() or 0
+    # The chip / tab badge must count exactly what the Offers tab renders (finding #18):
+    # only _VISIBLE_OFFER_STATUSES — a withdrawn offer drops out of the tab, so it must
+    # drop out of the count too (mirrors take_all_count's status filter below).
+    offer_count = (
+        db.query(func.count(ExcessOffer.id))
+        .filter(
+            ExcessOffer.excess_list_id == el.id,
+            ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
+        )
+        .scalar()
+        or 0
+    )
     take_all_count = (
         db.query(func.count(ExcessOffer.id))
         .filter(
@@ -373,7 +394,14 @@ def _detail_context(
         "take_all_count": take_all_count,
         "can_see_customer": can_see_customer,
         "can_post": excess_service.can_post(user),
-        "can_offer": excess_service.can_offer(user) and el.owner_id != user.id,
+        # Posted-status term (finding #50): a broker who reaches a closed/expired list
+        # (allowed while they hold an offer, to withdraw it) must not see a Submit-offer
+        # button that dead-ends in the offer-form route's 404.
+        "can_offer": (
+            excess_service.can_offer(user)
+            and el.owner_id != user.id
+            and el.status in {s.value for s in _POSTED_STATUSES}
+        ),
         "shape": "single" if len(items) == 1 else "table",
         "hours_until": _hours_until(getattr(el, "close_at", None)),
         # Chip gate (finding #8): countdown only while live; a resolved list shows a muted
@@ -423,17 +451,25 @@ async def resell_workspace(
 # ── Left list partial ────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/resell/lists", response_class=HTMLResponse)
-async def resell_lists(
+# Left-list page size: the workspace list is capped at the query level and revealed
+# page-by-page via a "Load more" row (perf: the old unbounded ``.all()`` re-ran the whole
+# table on every filter keystroke). Counts for the stat cards come from _stat_strip, so
+# capping the visible rows loses nothing.
+_LIST_PAGE_SIZE = 50
+
+
+def _list_rows_context(
     request: Request,
-    lens: str = Query("mine"),
-    stage: str = Query(""),
-    needs: str = Query(""),
-    q: str = Query(""),
-    user: User = Depends(require_access(AccessKey.RESELL)),
-    db: Session = Depends(get_db),
-):
-    """Left list partial — opportunity rows, lens + stage/needs filters + search.
+    db: Session,
+    user: User,
+    *,
+    lens: str,
+    stage: str,
+    needs: str,
+    q: str,
+    offset: int = 0,
+) -> dict:
+    """Build the left-list context shared by the full partial and the rows-only swap.
 
     ``lens=mine`` → lists this user owns (seller identity visible).
     ``lens=open`` → posted lists owned by OTHERS that this user may offer on
@@ -444,6 +480,9 @@ async def resell_lists(
     live, unactioned offer; ``needs=take_all`` → lists with a live whole-list offer. These
     back the "Offers to review" / "Take-all" stat cards (their counts come from offers, not
     a list status), so they need their own filter rather than a status value.
+
+    Rows are paged at the query level (``_LIST_PAGE_SIZE`` per page, ``offset`` from the
+    "Load more" reveal); ``has_more``/``next_offset`` drive the Load-more row.
     """
     lens = lens if lens in ("mine", "open") else "mine"
     needs = needs if needs in ("offers", "take_all") else ""
@@ -473,14 +512,28 @@ async def resell_lists(
     if not can_see_customer:
         needs = ""
 
-    if stage == "live":
+    # Finding #13 (the surviving D2 oracle): in the open lens the open/collecting SPLIT is
+    # itself an offer-existence signal (submit_offer flips open→collecting on the first
+    # inbound bid), so a non-owner diffing ``stage=collecting`` against ``stage=open``
+    # learns exactly which anonymized postings have drawn a competing bid. Merge the three
+    # live-window tokens onto the SAME _LIVE_STATUSES set for non-owners — every one
+    # answers only "can I still bid on it?". Other tokens (bid_out/awarded) are lifecycle
+    # facts, not the protected offer-existence signal, and pass through unchanged. Only the
+    # FILTER merges: the context keeps the REQUESTED token, so the clicked pill keeps its
+    # active state and the search/Load-more URLs echo it (a pure reflection of the request
+    # — no server state — so no oracle; the server re-merges on every round trip).
+    stage_filter = stage
+    if not can_see_customer and stage in ("open", "collecting"):
+        stage_filter = "live"
+
+    if stage_filter == "live":
         # ``live`` = [open, collecting] (finding #16): the "Open" triage card counts BOTH
         # (a list flips open→collecting on its first offer but is still live), so its filter
         # must widen to match its count. The strict ``open`` pill keeps meaning EXACTLY
-        # status=open — only this token widens.
+        # status=open — only this token widens (owner lens; non-owners are merged above).
         query = query.filter(ExcessList.status.in_([ExcessListStatus.OPEN, ExcessListStatus.COLLECTING]))
-    elif stage:
-        query = query.filter(ExcessList.status == stage)
+    elif stage_filter:
+        query = query.filter(ExcessList.status == stage_filter)
     if needs:
         # Lists carrying a live, unactioned offer (take_all = its whole-list slice) — the
         # same offer population the triage stat cards count (_stat_strip).
@@ -507,22 +560,78 @@ async def resell_lists(
         else:
             query = query.filter(ExcessList.title.ilike(f"%{escape_like(q)}%", escape="\\"))
 
-    lists = query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc()).all()
+    offset = max(offset, 0)
+    # Fetch one row beyond the page to learn whether a "Load more" reveal is needed
+    # WITHOUT a second COUNT query.
+    lists = (
+        query.order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc())
+        .offset(offset)
+        .limit(_LIST_PAGE_SIZE + 1)
+        .all()
+    )
+    has_more = len(lists) > _LIST_PAGE_SIZE
+    lists = lists[:_LIST_PAGE_SIZE]
     cards = _list_cards(db, lists, can_see_customer=can_see_customer)
 
+    return {
+        "request": request,
+        "user": user,
+        "lens": lens,
+        "stage": stage,
+        "needs": needs,
+        "q": q,
+        "cards": cards,
+        "has_more": has_more,
+        "next_offset": offset + _LIST_PAGE_SIZE,
+        "offset": offset,
+        "can_see_customer": can_see_customer,
+        "can_post": excess_service.can_post(user),
+    }
+
+
+@router.get("/v2/partials/resell/lists", response_class=HTMLResponse)
+async def resell_lists(
+    request: Request,
+    lens: str = Query("mine"),
+    stage: str = Query(""),
+    needs: str = Query(""),
+    q: str = Query(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Left list partial — filter bar + first page of opportunity rows.
+
+    See :func:`_list_rows_context` for the lens/stage/needs/q semantics. The search input
+    inside the rendered bar swaps ONLY the ``#resell-list-rows`` container (via
+    :func:`resell_list_rows`), so typing never replaces the input itself (finding #17).
+    """
     return template_response(
         "htmx/partials/resell/_lists.html",
-        {
-            "request": request,
-            "user": user,
-            "lens": lens,
-            "stage": stage,
-            "needs": needs,
-            "q": q,
-            "cards": cards,
-            "can_see_customer": can_see_customer,
-            "can_post": excess_service.can_post(user),
-        },
+        _list_rows_context(request, db, user, lens=lens, stage=stage, needs=needs, q=q),
+    )
+
+
+@router.get("/v2/partials/resell/list-rows", response_class=HTMLResponse)
+async def resell_list_rows(
+    request: Request,
+    lens: str = Query("mine"),
+    stage: str = Query(""),
+    needs: str = Query(""),
+    q: str = Query(""),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Rows-only swap for the left list: debounced search + the "Load more" reveal.
+
+    The filter bar (pills + search input) stays OUTSIDE this swap (finding #17 — the
+    sightings/knowledge/parts pattern), so a debounced keystroke never replaces the input
+    being typed in. ``offset`` pages further rows in (perf: the list is capped at
+    ``_LIST_PAGE_SIZE`` per page at the query level).
+    """
+    return template_response(
+        "htmx/partials/resell/_list_rows.html",
+        _list_rows_context(request, db, user, lens=lens, stage=stage, needs=needs, q=q, offset=offset),
     )
 
 
@@ -540,7 +649,9 @@ async def resell_create_form(
     """Render the new-list modal (only for users who can post)."""
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
-    companies = db.query(Company).order_by(Company.name).all()
+    # (id, name) tuples only — the dropdown never needs the full Company entity (perf:
+    # the old full-table ORM load dragged every column of every company into the modal).
+    companies = db.execute(select(Company.id, Company.name).order_by(Company.name)).all()
     return template_response(
         "htmx/partials/resell/create_modal.html",
         {"request": request, "companies": companies},
@@ -885,14 +996,27 @@ async def resell_line_offer_compare(
     if not item or item.excess_list_id != el.id:
         raise HTTPException(404, f"Line item {line_id} not found in list {list_id}")
 
-    rows = []
-    visible = {s.value for s in _VISIBLE_OFFER_STATUSES}
-    for offer in el.offers:
-        if offer.scope != ExcessOfferScope.PER_LINE or offer.status not in visible:
-            continue
-        for line in offer.lines:
-            if line.excess_line_item_id == line_id:
-                rows.append({"offer": offer, "line": line})
+    # Query the target rows DIRECTLY (perf): the old walk over the list's ``offers``
+    # relationship lazy-loaded every offer + every offer's lines (1 + N queries) just to
+    # filter down to one line in Python. One query: offer-lines on THIS line whose parent
+    # offer is per-line and visible, with the offer (+ the broker identity the template's
+    # _broker_label reads) eagerly attached.
+    offer_lines = (
+        db.query(ExcessOfferLine)
+        .join(ExcessOffer, ExcessOfferLine.offer_id == ExcessOffer.id)
+        .filter(
+            ExcessOfferLine.excess_line_item_id == line_id,
+            ExcessOffer.excess_list_id == el.id,
+            ExcessOffer.scope == ExcessOfferScope.PER_LINE,
+            ExcessOffer.status.in_([s.value for s in _VISIBLE_OFFER_STATUSES]),
+        )
+        .options(
+            contains_eager(ExcessOfferLine.offer).joinedload(ExcessOffer.offerer_company),
+            contains_eager(ExcessOfferLine.offer).joinedload(ExcessOffer.offerer_vendor_card),
+        )
+        .all()
+    )
+    rows = [{"offer": line.offer, "line": line} for line in offer_lines]
 
     priced = [r["line"].unit_price for r in rows if r["line"].unit_price is not None]
     return template_response(
@@ -956,9 +1080,10 @@ async def resell_build_bid(
 
     Reveals each line's best-offer planning price + an editable "our offer" input, an
     "Assemble bid" action, and (once assembled) the clean bid summary + a Download-PDF
-    link. Non-owners get 403 (the planning prices are the owner's private view).
+    link. Non-owners get 403 on a posted list; a foreign private DRAFT 404-masks first
+    (finding #48 — existence not revealed).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     return template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
 
@@ -975,9 +1100,10 @@ async def resell_assemble_bid(
 
     ``selections_json`` is a JSON array of ``{excess_line_item_id, customer_unit_price?}``
     (price blank → seeded from best_offer_unit_price). The service enforces owner-only +
-    foreign-line rejection; this layer only parses the form and delegates.
+    foreign-line rejection; this layer only parses the form and delegates. A foreign
+    private DRAFT 404-masks before the owner 403 (finding #48).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     try:
         raw = json.loads(selections_json)
@@ -1015,9 +1141,9 @@ async def resell_bid_pdf(
 
     The bid must belong to *list_id* and the requester must own the list. The PDF
     renders only the whitelisted bid_back_export_context — no broker / trader / seller
-    identity.
+    identity. A foreign private DRAFT 404-masks before the owner 403 (finding #48).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     bid = db.get(CustomerBid, bid_id)
     if not bid or bid.excess_list_id != list_id:
@@ -1200,8 +1326,9 @@ async def resell_offer_form(
     # Only ever rendered to a non-owner (is_owner 403s above), so the header shows the
     # anonymized label — never the seller-named free-text title. ``companies`` backs the
     # optional buyer-attribution select (#17 UI half) — the same CRM company list the create
-    # modal exposes, not competitor-offer data (no can_see_customer leak).
-    companies = db.scalars(select(Company).order_by(Company.name)).all()
+    # modal exposes, not competitor-offer data (no can_see_customer leak). (id, name)
+    # tuples only — the dropdown never needs the full Company entity.
+    companies = db.execute(select(Company.id, Company.name).order_by(Company.name)).all()
     return template_response(
         "htmx/partials/resell/offer_form.html",
         {
@@ -1223,13 +1350,16 @@ async def resell_create_list(
     company_id: int = Form(...),
     notes: str = Form(""),
     close_at: str = Form(""),
+    tz_offset_min: str = Form(""),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
     """Create a new excess list (owner = current user); re-render the My-Lists list.
 
     ``close_at`` is the optional D1 "Offers close by" ``datetime-local`` value (a naive
-    wall-clock string) — parsed to a tz-aware UTC instant; the service rejects a past one.
+    LOCAL wall-clock string); ``tz_offset_min`` is the browser's UTC offset (a hidden
+    input from ``Date.getTimezoneOffset()``) so the wall-clock converts to the real UTC
+    instant (finding #20). The service rejects a past deadline.
     """
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
@@ -1239,7 +1369,7 @@ async def resell_create_list(
         company_id=company_id,
         owner_id=user.id,
         notes=notes or None,
-        close_at=_parse_close_at(close_at),
+        close_at=_parse_close_at(close_at, tz_offset_min),
     )
     return await resell_lists(request, lens="mine", stage="", q="", user=user, db=db)
 
@@ -1257,33 +1387,27 @@ async def resell_add_line(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Add a single line, resolve its MaterialCard, re-render the Lines tab."""
-    el = excess_service.get_excess_list(db, list_id)
-    _require_owner(el, user)
-    if el.status != ExcessListStatus.DRAFT:
-        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
+    """Add a single line via the service, then re-render the whole detail panel.
+
+    HTTP-boundary guards stay here (404-mask, can_post); the line construction, card
+    resolve, counter bump, blank-part-number 400, and the guarded commit live in
+    :func:`excess_service.add_line` (findings #33/#42 — thin-router discipline).
+    """
+    # 404-mask a non-owner on a private draft (finding #48) BEFORE the service's 403.
+    _get_list_for_user(db, list_id, user)
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
-    # L2: a non-positive quantity would reach the ExcessLineItem @validates("quantity")
-    # ValueError and surface as an unhandled 500 — validate the bound here and return a
-    # clear 400 instead.
-    if quantity <= 0:
-        raise HTTPException(400, "Quantity must be a positive whole number")
-
-    item = ExcessLineItem(
-        excess_list_id=list_id,
+    el = excess_service.add_line(
+        db,
+        list_id,
+        user,
         part_number=part_number,
-        normalized_part_number=normalize_mpn_key(part_number) or None,
-        manufacturer=manufacturer or None,
         quantity=quantity,
+        manufacturer=manufacturer or None,
         condition=condition or "New",
         date_code=date_code or None,
         asking_price=_to_decimal(asking_price),
     )
-    db.add(item)
-    excess_service._resolve_line_material_card(db, item)
-    el.total_line_items = (el.total_line_items or 0) + 1
-    db.commit()
     # Re-render the WHOLE detail (not just the Lines tab): adding the first line to a
     # draft is what makes the header Post button appear (line_count > 0), so a Lines-only
     # swap would leave the header stale and the user with no way to publish (RS-5).
@@ -1329,7 +1453,8 @@ async def resell_edit_list_form(
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
         raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
-    companies = db.scalars(select(Company).order_by(Company.name)).all()
+    # (id, name) tuples only — the dropdown never needs the full Company entity.
+    companies = db.execute(select(Company.id, Company.name).order_by(Company.name)).all()
     return template_response(
         "htmx/partials/resell/edit_list_modal.html",
         {"request": request, "list": el, "companies": companies},
@@ -1409,44 +1534,20 @@ async def resell_delete_list(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Delete a whole draft list, then refresh the My-Lists left pane + reset the detail
-    pane.
+    """Delete a whole draft list, then send the user back to the workspace root.
 
-    Returns the refreshed My-Lists partial (primary → #resell-list-body) with an OOB
-    reset of the now-orphaned detail pane (#split-right-resell) and a confirmation
-    toast. Also pushes the workspace URL so the address bar no longer points at the now-
-    deleted list id (finding #8).
+    The route is the single authority on what happens next (finding #15): it answers with
+    an ``HX-Redirect`` to ``/v2/resell`` — correct from BOTH render contexts (the workspace
+    split pane and a deep-linked ``/v2/resell/{id}`` full page, which has no
+    ``#resell-list-body`` to refresh) — mirroring the companies-delete pattern
+    (htmx/companies/core.py). The redirect also fixes the address bar so a reload never
+    reopens the deleted id (finding #8).
     """
     # 404-mask a non-owner on a private draft (finding #3).
     _get_list_for_user(db, list_id, user)
     excess_service.delete_excess_list(db, list_id, user)
-    lists = (
-        db.scalars(
-            select(ExcessList)
-            .options(joinedload(ExcessList.company))
-            .where(ExcessList.owner_id == user.id)
-            .order_by(ExcessList.updated_at.desc().nullslast(), ExcessList.id.desc())
-        )
-        .unique()
-        .all()
-    )
-    resp = template_response(
-        "htmx/partials/resell/_list_after_delete.html",
-        {
-            "request": request,
-            "user": user,
-            "lens": "mine",
-            "stage": "",
-            "needs": "",
-            "q": "",
-            "cards": _list_cards(db, list(lists), can_see_customer=True),
-            "can_see_customer": True,
-            "can_post": excess_service.can_post(user),
-        },
-    )
-    # Rewrite the address bar to the workspace root — the pushed /v2/resell/{deleted_id}
-    # would otherwise reopen a 404/empty detail on reload/bookmark (finding #8).
-    resp.headers["HX-Push-Url"] = "/v2/resell"
+    resp = HTMLResponse("")
+    resp.headers["HX-Redirect"] = "/v2/resell"
     return _toast(resp, "List deleted")
 
 
@@ -1459,8 +1560,13 @@ async def resell_import_preview(
     db: Session = Depends(get_db),
 ):
     """Parse an uploaded file and render the shared import preview grid."""
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a non-owner on a private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
+    # Draft-only guard (finding #34) — identical to the confirm counterpart, so a posted
+    # list fails at upload time instead of after the user reviews the whole preview.
+    if el.status != ExcessListStatus.DRAFT:
+        raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     filename = file.filename or ""
@@ -1500,7 +1606,8 @@ async def resell_import_confirm(
     db: Session = Depends(get_db),
 ):
     """Confirm a previewed import, then re-render the Lines tab."""
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a non-owner on a private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     if el.status != ExcessListStatus.DRAFT:
         raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
@@ -1510,18 +1617,26 @@ async def resell_import_confirm(
         rows = json.loads(rows_json)
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(400, "Invalid import payload") from exc
-    result = excess_service.confirm_import(db, list_id, rows)
+    # Shape guard (finding #31, mirrors resell_assemble_bid): the payload must be a list
+    # of dicts — '5' or '["x"]' would otherwise reach confirm_import's row parser and 500.
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise HTTPException(400, "Invalid import payload")
+    result = excess_service.confirm_import(db, list_id, user, rows)
     # Re-render the WHOLE detail so the header Post button appears once the draft has
     # lines — a Lines-only swap leaves the header stale (RS-5).
     el = excess_service.get_excess_list(db, list_id)
     resp = template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
-    # Silent-failure b: confirm_import re-validates every row server-side and discards any
-    # with a blank part number or non-positive/invalid quantity. Surface that discard count
-    # via a warning toast (same HX-Trigger channel as _toast) rather than dropping it silently.
+    # Single server-side toast emitter (finding #16): the success message and the skipped-
+    # rows warning share ONE HX-Trigger message — the old client-side handler fired a
+    # green 'Imported N lines' unconditionally (even on 4xx) and clobbered this warning.
+    imported = result.get("imported", 0)
     skipped = result.get("skipped", 0)
+    message = f"Imported {imported} line{'s' if imported != 1 else ''}"
     if skipped > 0:
-        message = f"{skipped} row(s) skipped (invalid quantity or blank part number)"
-        resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "warning"}})
+        message += f" — {skipped} row(s) skipped (invalid quantity or blank part number)"
+    resp.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": message, "type": "warning" if skipped else "success"}}
+    )
     return resp
 
 
@@ -1628,8 +1743,11 @@ async def resell_publish(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Publish a list: flip to open + live-mirror every line, then re-render detail."""
-    el = excess_service.get_excess_list(db, list_id)
+    """Publish a list: flip to open + live-mirror every line, then re-render detail.
+
+    A foreign private DRAFT 404-masks before any 403 (finding #48).
+    """
+    el, _ = _get_list_for_user(db, list_id, user)
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
     if el.owner_id != user.id:
@@ -1941,10 +2059,25 @@ def _buyer_panel_context(
     ``preselect_ids`` (buyer ``vendor_card_id``s) seed the panel's checked set so a "not
     yet offered" nudge chip lands with its buyer already selected (RS-8) — one click from
     action instead of re-finding the buyer in the ranked list.
+
+    ``line_ids`` are URL-supplied and MUST be scoped to *el* (findings #35/#49): a foreign
+    list's line ids would otherwise render that list's parts in the scope strip AND skew
+    the ranking toward another deal's commodities. Any id not on this list is a 422 —
+    mirroring the POST twin's ``_target_line_ids`` guard.
     """
+    scope_lines = None
+    if line_ids:
+        scope_lines = (
+            db.query(ExcessLineItem)
+            .filter(ExcessLineItem.id.in_(line_ids), ExcessLineItem.excess_list_id == el.id)
+            .all()
+        )
+        bad = sorted(set(line_ids) - {li.id for li in scope_lines})
+        if bad:
+            raise HTTPException(422, f"Line item(s) {bad} are not on list {el.id}")
+        line_ids = [li.id for li in scope_lines]
     suggestions = _suggestion_rows(db, el, owner, line_ids)
     suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
-    scope_lines = db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_ids)).all() if line_ids else None
     # Line count for the neutral outreach subject prefill (#11) — the campaign's scope:
     # the selected lines, or the whole list. NEVER the title (which names the customer).
     line_count = (
@@ -2059,7 +2192,8 @@ async def resell_offer_buyers_form(
     the buyer "who" + scorecard facts, so it is the owner's private view (403 for a
     non-owner).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     parsed = [lid for lid in (_to_int(x) for x in line_ids.split(",")) if lid is not None] if line_ids else None
     preselect = _to_int(preselect_vendor_card_id)
@@ -2082,7 +2216,8 @@ async def resell_outreach_tracker(
     above the "offered N · M responded · K bid" glance. Owner's private board (403
     otherwise).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     return template_response("htmx/partials/resell/_outreach.html", _outreach_tracker_context(request, db, el, user))
 
@@ -2099,7 +2234,8 @@ async def resell_outreach_export(
     tab: one row per buyer x line touch — buyer · line · channel · by · status · sent ·
     last activity — newest first (identical order to the tab).
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     rows = (
         db.query(ExcessOutreach)
@@ -2153,21 +2289,21 @@ async def resell_not_yet_strip(
     set; task creation is idempotent per (list, buyer, owner) via the Task service, so
     reloading the strip never duplicates a buyer's task.
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     buyers = buyer_affinity_service.not_yet_offered_strip(db, excess_list_id=el.id)
     # Persist the nudge as owner-assigned My-Day follow-up tasks (idempotent). Due today
-    # so it lands under the Tasks page "Due soon" bucket.
-    due = datetime.now(UTC)
-    for b in buyers:
-        task_service.auto_create_resell_followup_task(
-            db,
-            excess_list_id=el.id,
-            vendor_card_id=b.vendor_card_id,
-            owner_id=el.owner_id,
-            buyer_name=b.display_name,
-            due_at=due,
-        )
+    # so it lands under the Tasks page "Due soon" bucket. Batched: ONE existing-task IN
+    # query + ONE commit for the whole strip (the per-buyer loop ran a SELECT + COMMIT per
+    # buyer inside this GET render).
+    task_service.auto_create_resell_followup_tasks(
+        db,
+        excess_list_id=el.id,
+        owner_id=el.owner_id,
+        buyers=[(b.vendor_card_id, b.display_name) for b in buyers],
+        due_at=datetime.now(UTC),
+    )
     return template_response(
         "htmx/partials/resell/_not_yet_strip.html",
         {"request": request, "user": user, "list": el, "buyers": buyers},
@@ -2204,7 +2340,8 @@ async def resell_submit_outreach(
     ``scope`` is ``per_line`` (scoped to ``line_ids``) or ``whole_list``. The service
     enforces the owner + can_post guards.
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     if el.status == ExcessListStatus.DRAFT:
         raise HTTPException(409, "List is not posted")
@@ -2305,7 +2442,8 @@ async def resell_retry_outreach(
     double-sent. 404 when the row is missing / on another list; 409 when it is not in a
     retryable state or is not an email outreach.
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     row = db.get(ExcessOutreach, outreach_id)
     if row is None or row.excess_list_id != el.id:
@@ -2349,7 +2487,8 @@ def _load_outreach_for_owner(
     send has no thread to view or convert). Shared by the reply-viewer + convert-to-offer
     routes so both enforce the same guard.
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     outreach = db.get(ExcessOutreach, outreach_id)
     if outreach is None or outreach.excess_list_id != el.id:
@@ -2374,7 +2513,8 @@ def _load_manual_outreach_for_owner(
     manual log-response/log-bid path is its one remaining outcome-logging route. Shared by
     the manual log-response / log-bid routes.
     """
-    el = excess_service.get_excess_list(db, list_id)
+    # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
+    el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
     outreach = db.get(ExcessOutreach, outreach_id)
     if outreach is None or outreach.excess_list_id != el.id:

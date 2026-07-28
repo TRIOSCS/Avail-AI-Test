@@ -734,6 +734,76 @@ def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: s
     )
 
 
+def auto_create_resell_followup_tasks(
+    db: Session,
+    *,
+    excess_list_id: int,
+    owner_id: int,
+    buyers: list[tuple[int, str]],
+    due_at: datetime | None = None,
+) -> dict[int, RequisitionTask]:
+    """Idempotently create the list owner's My-Day follow-ups for a BATCH of buyers the
+    resell "usually offered, not yet this round" nudge surfaces.
+
+    *buyers* is ``[(vendor_card_id, buyer_name), ...]``. One ``IN`` query fetches every
+    existing task for the strip's source_ref set + assignee, only the missing ones are
+    added, and the whole batch commits ONCE — the per-buyer variant ran a SELECT and a
+    COMMIT per buyer inside a GET partial render. Keyed by (excess list, buyer card,
+    owner) via source_ref + assignee REGARDLESS of status: reloading the strip never
+    duplicates a buyer's task, and a follow-up the owner already completed is not
+    re-created. Returns ``{vendor_card_id: task}`` for every requested buyer.
+    """
+    if not buyers:
+        return {}
+    ref_for = {vc_id: f"resell_notyet:{excess_list_id}:{vc_id}" for vc_id, _name in buyers}
+    existing = {
+        t.source_ref: t
+        for t in db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.source_ref.in_(list(ref_for.values())),
+            RequisitionTask.assigned_to_id == owner_id,
+        )
+        .all()
+    }
+    result: dict[int, RequisitionTask] = {}
+    created: list[RequisitionTask] = []
+    for vc_id, buyer_name in buyers:
+        source_ref = ref_for[vc_id]
+        task = existing.get(source_ref)
+        if task is None:
+            # #12: reference the list by the neutral, id-derived label — NEVER the free-text
+            # title (which traders write as the customer name). This task is scoped to the
+            # buyer's ``vendor_card_id`` and renders on the SHARED cross-trader buyer Tasks
+            # tab (get_open_tasks_for_vendor_card returns every open task on the card, no
+            # assignee filter), so a customer-named title would leak the customer to any
+            # other trader viewing that buyer. Same anonymization gate as the non-owner
+            # "Excess listing #N" label.
+            title = f"Follow up: offer {buyer_name} on Excess listing #{excess_list_id} this round"[:255]
+            task = RequisitionTask(
+                vendor_card_id=vc_id,
+                title=title,
+                task_type="sales",
+                priority=2,
+                assigned_to_id=owner_id,
+                created_by=owner_id,
+                source="system",
+                source_ref=source_ref,
+                due_at=due_at,
+            )
+            db.add(task)
+            created.append(task)
+        result[vc_id] = task
+    if created:
+        db.commit()
+        logger.info(
+            "Resell follow-up tasks created: {} new (list={}, owner={})",
+            len(created),
+            excess_list_id,
+            owner_id,
+        )
+    return result
+
+
 def auto_create_resell_followup_task(
     db: Session,
     *,
@@ -743,56 +813,15 @@ def auto_create_resell_followup_task(
     buyer_name: str,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
-    """Idempotently create the list owner's My-Day follow-up for a buyer the resell
-    "usually offered, not yet this round" nudge surfaces.
-
-    Scoped to the buyer's vendor card (the buyer-side "who"), assigned to the list
-    owner, so the nudge survives a page close as a durable task. Keyed by (excess list,
-    buyer card, owner) via source_ref + assignee REGARDLESS of status: reloading the
-    strip never duplicates a buyer's task, and a follow-up the owner has already
-    completed is not re-created. Returns the task that now represents the nudge
-    (existing or freshly created).
-    """
-    source_ref = f"resell_notyet:{excess_list_id}:{vendor_card_id}"
-    existing = (
-        db.query(RequisitionTask)
-        .filter(
-            RequisitionTask.source_ref == source_ref,
-            RequisitionTask.assigned_to_id == owner_id,
-        )
-        .first()
-    )
-    if existing:
-        return existing
-    # #12: reference the list by the neutral, id-derived label — NEVER the free-text title
-    # (which traders write as the customer name). This task is scoped to the buyer's
-    # ``vendor_card_id`` and renders on the SHARED cross-trader buyer Tasks tab
-    # (get_open_tasks_for_vendor_card returns every open task on the card, no assignee
-    # filter), so a customer-named title would leak the customer to any other trader viewing
-    # that buyer. Same anonymization gate as the non-owner "Excess listing #N" label.
-    title = f"Follow up: offer {buyer_name} on Excess listing #{excess_list_id} this round"[:255]
-    task = RequisitionTask(
-        vendor_card_id=vendor_card_id,
-        title=title,
-        task_type="sales",
-        priority=2,
-        assigned_to_id=owner_id,
-        created_by=owner_id,
-        source="system",
-        source_ref=source_ref,
+    """Single-buyer convenience wrapper — delegates to the batch variant so the
+    idempotency key, title anonymization, and commit discipline can never drift."""
+    return auto_create_resell_followup_tasks(
+        db,
+        excess_list_id=excess_list_id,
+        owner_id=owner_id,
+        buyers=[(vendor_card_id, buyer_name)],
         due_at=due_at,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    logger.info(
-        "Resell follow-up task created: {} (list={}, buyer_card={}, owner={})",
-        task.id,
-        excess_list_id,
-        vendor_card_id,
-        owner_id,
-    )
-    return task
+    )[vendor_card_id]
 
 
 def snooze_task(db: Session, task_id: int, *, days: int | None = None) -> RequisitionTask | None:

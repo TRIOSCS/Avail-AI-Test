@@ -28,6 +28,10 @@
     <div>
       <label class="form-label">Offers close by</label>
       <input type="datetime-local" name="close_at" class="input">
+      {# datetime-local posts a zone-less LOCAL wall-clock; ship the browser's UTC offset
+         alongside it so the server stores the real instant (finding #20). #}
+      <input type="hidden" name="tz_offset_min" :value="new Date().getTimezoneOffset()"
+             x-data value="">
       <p class="text-secondary mt-1">Optional posting deadline. After it passes, an
         un-awarded list auto-expires and stops advertising supply.</p>
     </div>

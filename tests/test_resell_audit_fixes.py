@@ -228,7 +228,7 @@ class TestL2QuantityBound:
 
 
 class TestL3ConfirmImportRevalidation:
-    def test_invalid_row_rejected_server_side(self, db_session, draft_list):
+    def test_invalid_row_rejected_server_side(self, db_session, draft_list, owner):
         """A hand-crafted invalid row (non-positive qty / blank PN) is NOT inserted,
         even though it was posted as if it had passed preview."""
         rows = [
@@ -236,23 +236,25 @@ class TestL3ConfirmImportRevalidation:
             {"part_number": "ZERO-QTY", "quantity": 0},  # tampered — fails preview validation
             {"part_number": "", "quantity": 9},  # tampered — blank part number
         ]
-        result = excess_service.confirm_import(db_session, draft_list.id, rows)
+        result = excess_service.confirm_import(db_session, draft_list.id, owner, rows)
 
         assert result["imported"] == 1
         assert result["skipped"] == 2
         items = db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).all()
         assert [i.part_number for i in items] == ["GOOD-1"]
 
-    def test_negative_quantity_rejected(self, db_session, draft_list):
-        result = excess_service.confirm_import(db_session, draft_list.id, [{"part_number": "NEG", "quantity": -3}])
+    def test_negative_quantity_rejected(self, db_session, draft_list, owner):
+        result = excess_service.confirm_import(
+            db_session, draft_list.id, owner, [{"part_number": "NEG", "quantity": -3}]
+        )
         assert result["imported"] == 0
         assert db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count() == 0
 
-    def test_valid_rows_still_import(self, db_session, draft_list):
+    def test_valid_rows_still_import(self, db_session, draft_list, owner):
         """The legitimate path is unaffected — valid rows import and bump the
         counter."""
         rows = [{"part_number": "A1", "quantity": 10}, {"part_number": "B2", "quantity": 20, "condition": "Used"}]
-        result = excess_service.confirm_import(db_session, draft_list.id, rows)
+        result = excess_service.confirm_import(db_session, draft_list.id, owner, rows)
         assert result["imported"] == 2
         db_session.refresh(draft_list)
         assert draft_list.total_line_items == 2
