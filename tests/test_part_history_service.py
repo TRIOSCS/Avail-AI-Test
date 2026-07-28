@@ -188,6 +188,46 @@ def test_sightings_requirements_price_trend(db_session: Session):
     assert h.price_trend.max_price == Decimal("5.0")
 
 
+def test_sightings_for_card_excludes_resell_mirror(db_session: Session):
+    """A card's dossier sightings/count exclude the resell mirror's synthetic
+    'customer_excess' rows — this surface shows REAL vendor intelligence only (finding
+    #F3, THEME F deep-review #2)."""
+    card = _make_card(db_session)
+    req = _make_requisition(db_session)
+    requirement = Requirement(
+        requisition_id=req.id, primary_mpn="LM317T", material_card_id=card.id, sourcing_status="open"
+    )
+    db_session.add(requirement)
+    db_session.commit()
+    db_session.refresh(requirement)
+    db_session.add(
+        Sighting(
+            requirement_id=requirement.id,
+            material_card_id=card.id,
+            vendor_name="Avnet",
+            qty_available=50,
+            unit_price=Decimal("4.0"),
+            source_type="brokerbin",
+        )
+    )
+    db_session.add(
+        Sighting(
+            requirement_id=requirement.id,
+            material_card_id=card.id,
+            vendor_name="Customer Excess",
+            qty_available=500,
+            unit_price=Decimal("1.2"),
+            source_type="customer_excess",
+        )
+    )
+    db_session.commit()
+
+    h = get_part_history(db_session, "lm317t")
+    assert h.sightings_count == 1
+    assert len(h.sightings) == 1
+    assert all(s.source_type != "customer_excess" for s in h.sightings)
+
+
 def test_price_trend_none_when_no_snapshots(db_session: Session):
     """A card with offers but no price snapshots has no price trend."""
     card = _make_card(db_session)

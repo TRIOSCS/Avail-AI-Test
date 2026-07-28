@@ -26,6 +26,7 @@ from app.models.offers import Offer
 from app.models.price_snapshot import MaterialPriceSnapshot
 from app.models.purchase_history import CustomerPartHistory
 from app.models.sourcing import Requirement, Sighting
+from app.services.excess_mirror import mirror_sighting_filter
 
 TOP_N = 5
 _WON_OFFER_STATUSES = (OfferStatus.WON, OfferStatus.SOLD)
@@ -121,9 +122,13 @@ def customer_purchases_for_card(db: Session, card_id: int, limit: int = TOP_N) -
 
 
 def sightings_for_card(db: Session, card_id: int, limit: int = TOP_N) -> list[Sighting]:
+    # mirror_sighting_filter(): exclude the resell mirror's synthetic "customer_excess"
+    # rows — this part-history/dossier surface shows REAL vendor intelligence only
+    # (finding #F3, THEME F deep-review #2).
     return (
         db.query(Sighting)
         .filter(Sighting.material_card_id == card_id)
+        .filter(mirror_sighting_filter())
         .order_by(Sighting.created_at.desc().nullslast())
         .limit(limit)
         .all()
@@ -242,7 +247,7 @@ def get_part_history(db: Session, normalized_key: str) -> PartHistory:
     confirmed_count = won_offer_count + won_req_count + customer_count
 
     sightings = sightings_for_card(db, card.id)
-    sightings_count = _count(db, Sighting, Sighting.material_card_id == card.id)
+    sightings_count = _count(db, Sighting, Sighting.material_card_id == card.id, mirror_sighting_filter())
     requirements = requirements_for_card(db, card.id)
     requirements_count = _count(db, Requirement, Requirement.material_card_id == card.id)
     price_trend = price_trend_for_card(db, card.id)

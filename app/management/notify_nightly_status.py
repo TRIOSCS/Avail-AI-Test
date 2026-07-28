@@ -62,7 +62,7 @@ def notify_nightly_status(status_line: str, db: Session | None = None) -> bool:
     asyncio.run(post_teams_channel(message))
 
     owns_session = db is None
-    if owns_session:
+    if db is None:
         from app.database import SessionLocal
 
         db = SessionLocal()

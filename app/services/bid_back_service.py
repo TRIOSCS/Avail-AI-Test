@@ -88,15 +88,21 @@ def build_bid_back(
     id-desc select above always surfaces the newest revision.
 
     Guards (raise HTTPException, never silent): the list must exist (404); *owner* must
-    own the list (403 — assembling a bid back is the owner's privilege); and every
-    selected line must belong to *list_id* (404 — never price a foreign line). Returns
-    the persisted draft CustomerBid with its lines loaded.
+    own the list (403 — assembling a bid back is the owner's privilege); the list must be
+    in a state where a bid back makes sense — ``_POSTED_LIST_STATUSES`` (open/collecting/
+    bid_out/awarded), i.e. NOT a draft (no finalized offers to price against yet — every
+    line would export at a null/blank price) and NOT terminal closed/expired (409
+    otherwise, finding #21, THEME E); and every selected line must belong to *list_id*
+    (404 — never price a foreign line). Returns the persisted draft CustomerBid with its
+    lines loaded.
     """
-    from .excess_service import get_excess_list
+    from .excess_service import _POSTED_LIST_STATUSES, get_excess_list
 
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
         raise HTTPException(403, "Only the list owner can build the bid back")
+    if excess_list.status not in {s.value for s in _POSTED_LIST_STATUSES}:
+        raise HTTPException(409, "This list is not in a state that supports a customer bid back")
 
     # Serialize concurrent re-assembles of this list (mirrors excess_service._lock_list_for_award's
     # M9 pattern): a second concurrent build BLOCKS here until the first commits (_safe_commit
@@ -171,7 +177,16 @@ def build_bid_back(
             raise HTTPException(404, f"Line item {line_item_id} is not part of list {list_id}")
 
         override = sel.get("customer_unit_price")
-        unit_price = _to_decimal(override) if override is not None else item.best_offer_unit_price
+        if override is not None:
+            unit_price = _to_decimal(override)
+            # Reject a negative override at the assemble boundary (finding #55, THEME E)
+            # — mirrors the quantity>0 discipline. Zero/positive overrides pass through
+            # unchanged (current semantics); blank/unparseable already resolved to None
+            # upstream and falls back to the rollup price below.
+            if unit_price is not None and unit_price < 0:
+                raise HTTPException(400, "customer_unit_price cannot be negative")
+        else:
+            unit_price = item.best_offer_unit_price
         quantity = sel.get("quantity") or item.quantity
 
         # Resolve provenance against the live rows — a dangling id is dropped (NULL),
@@ -301,20 +316,24 @@ def _default_bid_email(bid: CustomerBid, contact_name: str | None) -> tuple[str,
     return subject, body
 
 
-async def _bid_pdf_attachment(db: Session, bid: CustomerBid):
+async def _bid_pdf_attachment(db: Session, bid: CustomerBid, *, status_override: CustomerBidStatus | None = None):
     """Render the clean bid-back PDF and wrap it as a Graph sendMail attachment.
 
     Runs the (sync, CPU-bound) WeasyPrint render in a thread executor — the same pattern
-    the download endpoint uses — so it never blocks the event loop.
+    the download endpoint uses — so it never blocks the event loop. *status_override* is
+    threaded to :func:`generate_bid_report_pdf` (presentation-only, finding #22 — see
+    :func:`bid_back_export_context`).
     """
     import asyncio
     import base64
+    import functools
 
     from .document_service import generate_bid_report_pdf
     from .rfq_attachments import RfqAttachment
 
     loop = asyncio.get_running_loop()
-    pdf_bytes = await loop.run_in_executor(None, generate_bid_report_pdf, bid.id, db)
+    render = functools.partial(generate_bid_report_pdf, bid.id, db, status_override=status_override)
+    pdf_bytes = await loop.run_in_executor(None, render)
     return RfqAttachment(
         name=f"bid-{bid.id}.pdf",
         content_type="application/pdf",
@@ -334,17 +353,34 @@ async def send_bid_back(
 ) -> CustomerBid:
     """Email the clean bid-back PDF to the seller and flip the bid ``draft -> sent``.
 
-    Owner-only (via :func:`guard_bid_for_owner`). Guards: the bid must be a ``draft``
-    (409 otherwise — a sent/decided bid is not re-sendable; re-assemble first to bump the
-    revision) and carry at least one line (409). The seller contact email must resolve
-    (422 otherwise — never email nobody). Reuses ``email_service.send_batch_rfq`` in its
-    no-requisition mode (DNC-at-send / save-to-sent / retry for free) with the clean PDF
-    as the sole attachment; the PDF is the whitelisted bid_back_export_context, so no
-    broker / trader / source identity crosses into it. Only on a confirmed ``sent`` result
-    does the status flip and ``sent_at`` stamp — a failed send raises 502 and leaves the
-    bid a draft. Commits. Returns the refreshed bid.
+    Owner-only (via :func:`guard_bid_for_owner`). Guards: the list must be in a state that
+    supports sending a bid back — ``_POSTED_LIST_STATUSES`` (409 otherwise, finding #21,
+    THEME E — mirrors the same guard on :func:`build_bid_back`, since the list can decay
+    to terminal between assemble and send); the bid must be a ``draft`` (409 otherwise — a
+    sent/decided bid is not re-sendable; re-assemble first to bump the revision) and carry
+    at least one line (409). The seller contact email must resolve (422 otherwise — never
+    email nobody). Reuses ``email_service.send_batch_rfq`` in its no-requisition mode
+    (DNC-at-send / save-to-sent / retry for free) with the clean PDF as the sole
+    attachment; the PDF is the whitelisted bid_back_export_context, so no broker / trader
+    / source identity crosses into it.
+
+    The one document the customer receives never calls itself a draft (finding #22,
+    THEME E) — via a RENDER-TIME presentation override
+    (``status_override=CustomerBidStatus.SENT`` on the clean-PDF render), NOT a premature
+    status flip: ``send_batch_rfq`` commits the session internally (Contact tracking —
+    on failed/skipped outcomes too), so ANY pending draft→sent mutation made before the
+    send would be durably persisted before the result is even inspected, stranding a
+    failed send as a false ``sent`` stamp that the draft-only guard then 409s on every
+    retry. The bid row therefore stays a genuine ``draft`` throughout the render and the
+    send; only a CONFIRMED ``sent`` result flips ``status``/``sent_at`` and commits — a
+    failed send raises 502 and leaves the bid a retryable draft. Returns the refreshed
+    bid.
     """
     excess_list, bid = guard_bid_for_owner(db, list_id=list_id, bid_id=bid_id, owner=owner)
+    from .excess_service import _POSTED_LIST_STATUSES
+
+    if excess_list.status not in {s.value for s in _POSTED_LIST_STATUSES}:
+        raise HTTPException(409, "This list is not in a state that supports a customer bid back")
     if bid.status != CustomerBidStatus.DRAFT:
         raise HTTPException(409, "Only a draft bid can be sent — re-assemble to revise a sent bid")
     if not bid.lines:
@@ -354,7 +390,10 @@ async def send_bid_back(
     if not contact_email:
         raise HTTPException(422, "No customer contact email on file to send this bid to")
 
-    attachment = await _bid_pdf_attachment(db, bid)
+    # Render with the presentation-only "sent" override (finding #22) — the bid ROW is
+    # deliberately NOT mutated here: send_batch_rfq commits internally on every outcome,
+    # so a pending flip would be durably persisted even when the send fails.
+    attachment = await _bid_pdf_attachment(db, bid, status_override=CustomerBidStatus.SENT)
     if not subject or not body:
         default_subject, default_body = _default_bid_email(bid, contact_name)
         subject = subject or default_subject
@@ -386,6 +425,7 @@ async def send_bid_back(
         reason = result.get("error") or result.get("status") or "unknown error"
         raise HTTPException(502, f"Bid email could not be sent ({reason})")
 
+    # The flip happens ONLY here — after a confirmed successful send.
     bid.status = CustomerBidStatus.SENT
     bid.sent_at = datetime.now(UTC)
     db.commit()
@@ -430,8 +470,14 @@ def record_bid_response(
     return bid
 
 
-def bid_back_export_context(bid: CustomerBid) -> dict:
+def bid_back_export_context(bid: CustomerBid, *, status_override: CustomerBidStatus | None = None) -> dict:
     """Build the CLEAN customer-facing export payload for *bid* (pure whitelist).
+
+    *status_override* is a PRESENTATION-ONLY substitute for the exported ``status`` value
+    (finding #22, THEME E): :func:`send_bid_back` renders the emailed PDF with
+    ``CustomerBidStatus.SENT`` so the one document the customer receives never calls
+    itself a draft — while the bid ROW stays an uncommitted, genuine ``draft`` until the
+    send is confirmed. It never touches the bid object or the session.
 
     The returned dict's ``line_items`` carry ONLY ``part_number`` / ``manufacturer`` /
     ``quantity`` / ``condition`` / ``unit_price`` / ``extended_price`` — every
@@ -474,7 +520,7 @@ def bid_back_export_context(bid: CustomerBid) -> dict:
     return {
         "bid_number": f"BID-{bid.id}",
         "revision": bid.revision or 1,
-        "status": bid.status,
+        "status": status_override if status_override is not None else bid.status,
         "notes": bid.notes,
         "line_items": line_items,
         "subtotal": round(subtotal, 2),

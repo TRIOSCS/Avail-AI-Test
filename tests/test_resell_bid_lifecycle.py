@@ -348,6 +348,123 @@ async def test_send_bid_back_failed_send_502(db_session, owner, seller_company, 
     assert bid.sent_at is None
 
 
+async def test_send_bid_back_failed_send_survives_internal_commit_and_retry_succeeds(
+    db_session, owner, seller_company, priced_list
+):
+    """F22-REGRESSION guard: the REAL ``email_service.send_batch_rfq`` unconditionally
+    calls ``db.commit()`` (Contact tracking — reached on the failed/skipped paths too),
+    so any pending draft→sent flip made BEFORE the send would be durably persisted before
+    the result is even inspected, and a post-hoc ``db.rollback()`` would be a no-op. The
+    mock here commits exactly like the real function; a failed send must still leave the
+    bid a genuine committed ``draft`` with no ``sent_at`` (never a false ``sent`` stamp
+    that 409-blocks every retry behind the draft-only guard), and a retry must then
+    succeed."""
+    _seed_site_email(db_session, seller_company, "buyer@initech.com")
+    bid = _assemble(db_session, priced_list, owner)
+
+    async def _send_failed_committing(**kwargs):
+        kwargs["db"].commit()  # faithful: send_batch_rfq always commits before returning
+        return [{"vendor_email": "buyer@initech.com", "status": "failed", "error": "graph 503"}]
+
+    with (
+        patch("app.email_service.send_batch_rfq", new=_send_failed_committing),
+        patch("app.services.document_service.generate_bid_report_pdf", return_value=b"%PDF stub"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await bid_back_service.send_bid_back(
+                db_session, list_id=priced_list.id, bid_id=bid.id, owner=owner, token="tok"
+            )
+    assert exc.value.status_code == 502
+
+    # Assert against DB truth, not the session cache: the bid must still be a draft.
+    db_session.rollback()
+    db_session.expire_all()
+    fresh = db_session.get(CustomerBid, bid.id)
+    assert fresh.status == CustomerBidStatus.DRAFT
+    assert fresh.sent_at is None
+
+    # The retry must now pass the draft-only guard and flip to sent on a confirmed send.
+    async def _send_ok_committing(**kwargs):
+        kwargs["db"].commit()
+        return _sent_ok("buyer@initech.com")
+
+    with (
+        patch("app.email_service.send_batch_rfq", new=_send_ok_committing),
+        patch("app.services.document_service.generate_bid_report_pdf", return_value=b"%PDF stub"),
+    ):
+        retried = await bid_back_service.send_bid_back(
+            db_session, list_id=priced_list.id, bid_id=bid.id, owner=owner, token="tok"
+        )
+    assert retried.status == CustomerBidStatus.SENT
+    assert retried.sent_at is not None
+
+
+async def test_send_bid_back_rejects_when_list_no_longer_posted(db_session, owner, seller_company, priced_list):
+    """The list can decay to terminal between assemble and send — send re-checks too
+    (finding #21, THEME E), and the bid is left untouched (no false 'sent' stamp)."""
+    _seed_site_email(db_session, seller_company, "buyer@initech.com")
+    bid = _assemble(db_session, priced_list, owner)
+    priced_list.status = ExcessListStatus.CLOSED
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await bid_back_service.send_bid_back(
+            db_session, list_id=priced_list.id, bid_id=bid.id, owner=owner, token="tok"
+        )
+    assert exc.value.status_code == 409
+    db_session.refresh(bid)
+    assert bid.status == CustomerBidStatus.DRAFT
+    assert bid.sent_at is None
+
+
+async def test_send_bid_back_pdf_renders_with_sent_status_not_draft(db_session, owner, seller_company, priced_list):
+    """The one document the customer receives never calls itself a draft (finding #22,
+    THEME E) — via a RENDER-TIME presentation override, not a premature DB flip: the
+    rendered context says ``sent`` while the bid row is still a genuine ``draft`` at
+    render time (the flip happens only after the send is confirmed)."""
+    _seed_site_email(db_session, seller_company, "buyer@initech.com")
+    bid = _assemble(db_session, priced_list, owner)
+
+    captured: dict = {}
+
+    def _fake_render(template_name, **ctx):
+        captured["template"] = template_name
+        captured["status"] = ctx["status"]
+        captured["row_status_at_render"] = db_session.get(CustomerBid, bid.id).status
+        return b"%PDF stub"
+
+    with (
+        patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=_sent_ok("buyer@initech.com"))),
+        patch("app.services.document_service._render_pdf", side_effect=_fake_render),
+    ):
+        result = await bid_back_service.send_bid_back(
+            db_session, list_id=priced_list.id, bid_id=bid.id, owner=owner, token="tok"
+        )
+
+    assert captured["template"] == "bid_report.html"
+    assert captured["status"] == CustomerBidStatus.SENT  # the customer doc says sent
+    assert captured["row_status_at_render"] == CustomerBidStatus.DRAFT  # no premature flip
+    assert result.status == CustomerBidStatus.SENT
+    assert result.sent_at is not None
+
+
+async def test_send_bid_back_pdf_render_failure_leaves_bid_draft(db_session, owner, seller_company, priced_list):
+    """A PDF-render exception (not just a bad send result) leaves the bid untouched — it
+    must never be left 'sent' with no confirmed delivery."""
+    _seed_site_email(db_session, seller_company, "buyer@initech.com")
+    bid = _assemble(db_session, priced_list, owner)
+
+    with patch("app.services.document_service.generate_bid_report_pdf", side_effect=RuntimeError("weasyprint boom")):
+        with pytest.raises(RuntimeError):
+            await bid_back_service.send_bid_back(
+                db_session, list_id=priced_list.id, bid_id=bid.id, owner=owner, token="tok"
+            )
+
+    db_session.refresh(bid)
+    assert bid.status == CustomerBidStatus.DRAFT
+    assert bid.sent_at is None
+
+
 async def test_send_bid_back_non_owner_403(db_session, owner, other_user, seller_company, priced_list):
     """Only the list owner may send the bid (403)."""
     _seed_site_email(db_session, seller_company)
@@ -502,3 +619,72 @@ def test_bid_route_owner_gated(client, db_session, owner, other_user, priced_lis
     # The default client user (test_user, a buyer) is not the list owner.
     resp = client.post(f"/api/resell/{priced_list.id}/bid/{bid.id}/accept")
     assert resp.status_code == 403
+
+
+def test_assemble_bid_route_rejects_negative_price_400(client, db_session, owner, priced_list):
+    """A crafted negative customer_unit_price override 400s via the route (finding #55,
+    THEME E), never reaching the customer-facing export."""
+    import json as _json
+
+    from app.main import app
+
+    items = _lines(db_session, priced_list)
+    restore = _own(app, owner)
+    try:
+        resp = client.post(
+            f"/api/resell/{priced_list.id}/bid",
+            data={"selections_json": _json.dumps([{"excess_line_item_id": items[0].id, "customer_unit_price": "-5"}])},
+        )
+        assert resp.status_code == 400
+        assert "error" in _json.loads(resp.text)
+        assert db_session.query(CustomerBidLine).filter(CustomerBidLine.customer_unit_price < 0).count() == 0
+    finally:
+        restore()
+
+
+def test_assemble_bid_route_rejects_missing_line_id_400(client, db_session, owner, priced_list):
+    """A selection with no (or garbage) excess_line_item_id 400s via the route (finding
+    #56, THEME E) instead of reaching build_bid_back's foreign-line guard as a confusing
+    404 'Line item None is not part of list N'."""
+    import json as _json
+
+    from app.main import app
+
+    restore = _own(app, owner)
+    try:
+        resp = client.post(
+            f"/api/resell/{priced_list.id}/bid",
+            data={"selections_json": _json.dumps([{"customer_unit_price": "1.00"}])},
+        )
+        assert resp.status_code == 400
+        body = _json.loads(resp.text)
+        assert "error" in body
+        assert "None" not in body["error"]
+    finally:
+        restore()
+
+
+def test_assemble_bid_route_rejects_draft_list_409(client, db_session, owner, seller_company):
+    """Assembling a bid back on a never-posted DRAFT list 409s via the route (finding
+    #21, THEME E)."""
+    import json as _json
+
+    from app.main import app
+
+    el = ExcessList(title="Draft via route", company_id=seller_company.id, owner_id=owner.id, status="draft")
+    db_session.add(el)
+    db_session.flush()
+    line = ExcessLineItem(excess_list_id=el.id, part_number="ROUTEDRAFT1", quantity=3)
+    db_session.add(line)
+    db_session.commit()
+
+    restore = _own(app, owner)
+    try:
+        resp = client.post(
+            f"/api/resell/{el.id}/bid",
+            data={"selections_json": _json.dumps([{"excess_line_item_id": line.id}])},
+        )
+        assert resp.status_code == 409
+        assert "error" in _json.loads(resp.text)
+    finally:
+        restore()

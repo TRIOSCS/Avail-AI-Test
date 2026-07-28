@@ -445,7 +445,20 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     inactive (awarded / withdrawn / qty→0) OR when the LIST's posting window has closed
     (bid_out / awarded / closed / expired) — a closed posting stops advertising ALL its
     supply as live, no matter the per-line status (M5). Flushes; does NOT commit (the
-    caller / publish_list commits). Returns ``{"mirrored": int, "retired": int}``.
+    caller / publish_list commits).
+
+    Eagerly rebuilds (finding #F4, THEME F deep-review #2) any REAL requirement's
+    ``VendorSightingSummary`` that could aggregate a GENUINELY revived line's supply —
+    scoped to mirror rows this sync newly CREATES or RESTORES from unavailable (list
+    re-published, a late offer un-awarded, etc.), NOT to every active line on every
+    routine re-sync: an already-live line's in-place refresh changes nothing a summary
+    aggregates by presence, and syncs run inside the caller's locked M9 transaction on
+    every publish/edit/close, so per-sync rebuild fan-out must be earned by an actual
+    state change. Retire already invalidates per-line (finding #27); without the revive
+    half a real requirement's vendor board stays stale (missing the "customer excess"
+    row) until an unrelated search happens to touch the same MPN. Uses
+    ``skip_ai_estimates=True`` so this never issues a synchronous Claude call inside the
+    locked transaction. Returns ``{"mirrored": int, "retired": int}``.
     """
     ensure_virtual_requirement(db, excess_list)
     lines = db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id).all()
@@ -453,13 +466,25 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     posting_closed = _posting_is_closed(excess_list)
     mirrored = 0
     retired = 0
+    revived_card_ids: set[int | None] = set()
     for line in lines:
         if not posting_closed and _line_is_active(line):
+            # Detect a GENUINE revive before the upsert: only a line whose mirror row
+            # this sync newly creates (or restores from unavailable) warrants a
+            # vendor-summary invalidation — an already-live row's in-place refresh does
+            # not (routine syncs must not fan out rebuilds; see docstring).
+            prior = _find_mirror(db, line.id)
+            was_live = prior is not None and not prior.is_unavailable
             if mirror_line(db, line) is not None:
                 mirrored += 1
+                if not was_live:
+                    revived_card_ids.add(line.material_card_id)
         else:
             retire_line(db, line)
             retired += 1
+
+    if revived_card_ids:
+        _invalidate_vendor_summaries_for_cards(db, revived_card_ids)
 
     db.flush()
     logger.info(

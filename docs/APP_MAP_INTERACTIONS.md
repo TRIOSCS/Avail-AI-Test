@@ -2308,6 +2308,24 @@ seller's answer (`sent→accepted/rejected`, stamping `responded_at`/`responded_
 the seller is not a User). Migration **183** adds `customer_bids.sent_at` / `responded_at` /
 `responded_by_id` (the `status`+`revision` columns pre-existed).
 
+**Bid-back guards (deep-review-2 THEME E, findings #21/#22/#55).** `build_bid_back` and
+`send_bid_back` both 409 unless `excess_list.status` is in `excess_service._POSTED_LIST_STATUSES`
+(open/collecting/bid_out/awarded) — a bid back can never be assembled or sent off a never-posted
+`draft` (no finalized offers to price against — every line would export blank) or a terminal
+`closed`/`expired` list; `send_bid_back` re-checks because the list can decay to terminal between
+assemble and send (finding #21); the legacy pre-Resell `ACTIVE`/`BIDDING` statuses deliberately
+409 too, consistent with the shipped `submit_offer`/`upload_bids` guards. `send_bid_back` also
+renders the emailed PDF with a presentation-only `status_override=CustomerBidStatus.SENT`
+(threaded `_bid_pdf_attachment` → `generate_bid_report_pdf` → `bid_back_export_context`), so the
+customer never receives a document stamped "draft" (finding #22) — WITHOUT mutating the bid row:
+`send_batch_rfq` commits the session internally (Contact tracking, on failed/skipped outcomes
+too), so any pending draft→sent flip would be durably persisted even when the send fails. The
+`status`/`sent_at` flip commits ONLY after a confirmed `sent` result; a failed send raises 502 and
+leaves the bid a genuine, retryable `draft` (the owner download/preview path passes no override
+and shows the real status). `build_bid_back` also
+rejects a negative `customer_unit_price` override with 400 at the assemble boundary (finding #55,
+mirrors the quantity>0 discipline) — zero/positive overrides are unchanged.
+
 **List close/expire lifecycle + posting-closed mirror gate (M5).** `close_list` is guarded
 to `open`/`collecting` (409 for a draft or an already-resolved list). The Sighting live-mirror
 is now POSTING-aware: `sync_list_mirror` retires a line when it is individually inactive OR
@@ -2436,6 +2454,36 @@ convention.
   in-place-update comment now describe the CURRENT `excess_line_item_id` line-identity
   upsert key (finding #18, migration 199) — not the retired `(source_company_id,
   material_card_id)` key the "Dedup trap" paragraph used to claim.
+
+**Phase 7 (mirror-consumer follow-ups, deep-review-2 THEME F, re-verification of Phase 6).**
+- *`.nullslast()` re-verified on Postgres (finding #F1).* The three `VendorSightingSummary.score.desc()`
+  order-bys added in Phase 6 (`routers/sightings.py` — board top-vendor pick + the detail-panel
+  list — and `routers/htmx/parts.py`'s `part_tab_sourcing`) are untestable on SQLite (its `DESC`
+  default already sorts NULLs last, the opposite of Postgres). `tests/test_score_nullslast_postgres.py`
+  (`@requires_postgres`) pins a NULL-scored summary sorting LAST — not first — on all three surfaces
+  against a real Postgres engine.
+- *Dashboard-strip + facet-count exclusion tests (finding #F2).* The Phase-6 `is_scratch` filters on
+  `active_req_select` (dashboard counters) and the cached `sightings_stat_counts` query were
+  revert-green (no test asserted the actual numbers). `tests/test_sightings_mirror_exclusion.py`
+  now seeds a scratch mirror requirement shaped to inflate "Urgent"/"Unassigned" and the "open"
+  facet count if leaked, and asserts the counts EXCLUDE it.
+- *Card-scoped surfaces (finding #F3).* Two more card-scoped Sighting queries missed the Phase-6
+  sweep: `part_history_service.sightings_for_card` (+ its `sightings_count` companion, the part
+  history/dossier panel) and `material_card_service.serialize_material_card` (the material-card
+  API's sightings list) both add `excess_mirror.mirror_sighting_filter()`. (`vendor_affinity_service`
+  and the global-search sighting branches were already covered by findings #59/#28; `search_service`'s
+  ungated card-summary count and `sighting_aggregation`'s own scope filter were left as-is — they
+  aggregate ACROSS all sources by design, not a REAL-vendor-only display surface.)
+- *Eager revive (finding #F4).* Retire (`retire_line`) eagerly rebuilt a real requirement's stale
+  "customer excess" `VendorSightingSummary` (finding #27), but a REVIVE (list re-published, a line
+  un-awarded, etc. — `sync_list_mirror` re-mirroring a line back to live) was lazy: the summary only
+  reappeared once an unrelated search rebuilt it. `sync_list_mirror` now collects the `material_card_id`s
+  of every line whose mirror row THIS sync genuinely revives — newly creates, or restores from
+  unavailable (checked against `_find_mirror` before the upsert; an already-live line's in-place
+  refresh does NOT count, so routine publish/edit re-syncs perform zero invalidations) — and calls
+  the SAME `_invalidate_vendor_summaries_for_cards` helper (`skip_ai_estimates=True` — never a
+  synchronous Claude call inside a caller's locked M9 transaction) once at the end, so a
+  retire→revive round-trip restores the summary immediately.
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);

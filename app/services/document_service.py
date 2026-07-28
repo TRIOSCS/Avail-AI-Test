@@ -1,10 +1,13 @@
 """PDF document generation using WeasyPrint."""
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.constants import CustomerBidStatus
 
 _jinja_env = Environment(
     loader=FileSystemLoader("app/templates/documents"),
@@ -78,7 +81,7 @@ def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
     )
 
 
-def generate_bid_report_pdf(bid_id: int, db: Session) -> bytes:
+def generate_bid_report_pdf(bid_id: int, db: Session, *, status_override: "CustomerBidStatus | None" = None) -> bytes:
     """Generate the CLEAN customer-facing bid-back PDF (Chunk E).
 
     Cloned from the Quote report path (``quote_report.html`` → WeasyPrint). The template
@@ -86,6 +89,12 @@ def generate_bid_report_pdf(bid_id: int, db: Session) -> bytes:
     — no Vendor / trader column, no seller-company identity. Cleanliness is enforced at
     assembly (the context strips every leaky field), so the template cannot accidentally
     surface one.
+
+    *status_override* is the presentation-only status substitute (finding #22, THEME E)
+    threaded to ``bid_back_export_context`` — ``send_bid_back`` passes
+    ``CustomerBidStatus.SENT`` so the emailed document says "sent" while the row stays a
+    genuine draft until the send is confirmed. Omitted (the download/preview path), the
+    document shows the bid's real status.
     """
     from app.models.excess import CustomerBid
     from app.services.bid_back_service import bid_back_export_context
@@ -94,5 +103,5 @@ def generate_bid_report_pdf(bid_id: int, db: Session) -> bytes:
     if not bid:
         raise ValueError(f"CustomerBid {bid_id} not found")
 
-    ctx = bid_back_export_context(bid)
+    ctx = bid_back_export_context(bid, status_override=status_override)
     return _render_pdf("bid_report.html", **ctx)

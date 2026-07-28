@@ -19,6 +19,7 @@ from ..models import (
     Requirement,
     Sighting,
 )
+from ..services.excess_mirror import mirror_sighting_filter
 from ..services.price_snapshot_service import record_price_snapshot
 from ..vendor_utils import normalize_vendor_name
 
@@ -79,9 +80,13 @@ def serialize_material_card(card: MaterialCard, db: Session) -> dict:
         .all()
     )
 
+    # mirror_sighting_filter(): exclude the resell mirror's synthetic "customer_excess"
+    # rows — this card-scoped API surfaces REAL vendor intelligence only (finding #F3,
+    # THEME F deep-review #2).
     sightings = (
         db.query(Sighting)
         .filter(Sighting.material_card_id == card.id)
+        .filter(mirror_sighting_filter())
         .order_by(Sighting.created_at.desc())
         .limit(50)
         .all()

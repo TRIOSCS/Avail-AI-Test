@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import CustomerBidStatus, ExcessListStatus
 from app.models import Company, User
-from app.models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer
+from app.models.excess import CustomerBid, CustomerBidLine, ExcessLineItem, ExcessList, ExcessOffer
 from app.services import bid_back_service, excess_service
 from app.utils.normalization import normalize_mpn_key
 
@@ -158,6 +158,145 @@ def test_build_bid_back_non_owner_forbidden(db_session, other_user, priced_list)
             selections=[{"excess_line_item_id": items[0].id}],
         )
     assert exc.value.status_code == 403
+
+
+# ── List-status guard (finding #21, THEME E) ──────────────────────────
+
+
+def test_build_bid_back_rejects_draft_list(db_session, owner, seller_company):
+    """A never-posted DRAFT list has no finalized offers to price against — 409."""
+    el = ExcessList(
+        title="Still a draft", company_id=seller_company.id, owner_id=owner.id, status=ExcessListStatus.DRAFT
+    )
+    db_session.add(el)
+    db_session.flush()
+    line = ExcessLineItem(excess_list_id=el.id, part_number="DRAFTONLY1", quantity=5)
+    db_session.add(line)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session, list_id=el.id, owner=owner, selections=[{"excess_line_item_id": line.id}]
+        )
+    assert exc.value.status_code == 409
+    assert db_session.query(CustomerBid).filter_by(excess_list_id=el.id).count() == 0
+
+
+def test_build_bid_back_rejects_expired_list(db_session, owner, priced_list):
+    """A terminal EXPIRED list is dead — no bid back can be assembled off it."""
+    priced_list.status = ExcessListStatus.EXPIRED
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+        )
+    assert exc.value.status_code == 409
+
+
+def test_build_bid_back_rejects_closed_list(db_session, owner, priced_list):
+    """A terminal CLOSED list is also dead."""
+    priced_list.status = ExcessListStatus.CLOSED
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+        )
+    assert exc.value.status_code == 409
+
+
+def test_build_bid_back_works_on_bid_out_list(db_session, owner, priced_list):
+    """bid_out (offers already collected, out-for-decision) still supports a bid
+    back."""
+    priced_list.status = ExcessListStatus.BID_OUT
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    bid = bid_back_service.build_bid_back(
+        db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+    )
+    assert bid.status == CustomerBidStatus.DRAFT
+
+
+def test_build_bid_back_works_on_awarded_list(db_session, owner, priced_list):
+    """Awarded (a sale already decided) still supports a bid back on the sold lines."""
+    priced_list.status = ExcessListStatus.AWARDED
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    bid = bid_back_service.build_bid_back(
+        db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+    )
+    assert bid.status == CustomerBidStatus.DRAFT
+
+
+@pytest.mark.parametrize("legacy_status", [ExcessListStatus.ACTIVE, ExcessListStatus.BIDDING])
+def test_build_bid_back_rejects_legacy_status_list(db_session, owner, priced_list, legacy_status):
+    """DOCUMENTED POLICY (finding #21 scope note): the pre-Resell backward-compat
+    statuses ``ACTIVE``/``BIDDING`` are deliberately NOT in ``_POSTED_LIST_STATUSES``,
+    so a list still carrying one 409s on bid-back build (and send re-checks the same
+    set) — consistent with the already-shipped ``submit_offer``/``upload_bids`` guards.
+
+    The legacy members retire in the cutover chunk; do not widen the guard for them.
+    """
+    priced_list.status = legacy_status
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+        )
+    assert exc.value.status_code == 409
+
+
+# ── Negative override price rejected (finding #55, THEME E) ──────────
+
+
+def test_build_bid_back_rejects_negative_override(db_session, owner, priced_list):
+    """A negative customer_unit_price override 400s at the assemble boundary."""
+    items = _lines(db_session, priced_list)
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session,
+            list_id=priced_list.id,
+            owner=owner,
+            selections=[{"excess_line_item_id": items[0].id, "customer_unit_price": Decimal("-5.00")}],
+        )
+    assert exc.value.status_code == 400
+    # No CustomerBidLine was ever created carrying the negative price (raised before the
+    # CustomerBidLine insert for this selection — the draft-row-per-list behavior on a
+    # mid-loop raise mirrors the sibling foreign-line 404 guard above).
+    assert db_session.query(CustomerBidLine).filter(CustomerBidLine.customer_unit_price < 0).count() == 0
+
+
+def test_build_bid_back_accepts_zero_override(db_session, owner, priced_list):
+    """A zero override is accepted per current semantics (only negative is rejected)."""
+    items = _lines(db_session, priced_list)
+    bid = bid_back_service.build_bid_back(
+        db_session,
+        list_id=priced_list.id,
+        owner=owner,
+        selections=[{"excess_line_item_id": items[0].id, "customer_unit_price": Decimal("0")}],
+    )
+    line = next(ln for ln in bid.lines if ln.excess_line_item_id == items[0].id)
+    assert line.customer_unit_price == Decimal("0")
+
+
+def test_build_bid_back_accepts_positive_override(db_session, owner, priced_list):
+    """A positive override is accepted (unchanged semantics)."""
+    items = _lines(db_session, priced_list)
+    bid = bid_back_service.build_bid_back(
+        db_session,
+        list_id=priced_list.id,
+        owner=owner,
+        selections=[{"excess_line_item_id": items[0].id, "customer_unit_price": Decimal("12.50")}],
+    )
+    line = next(ln for ln in bid.lines if ln.excess_line_item_id == items[0].id)
+    assert line.customer_unit_price == Decimal("12.50")
 
 
 def test_build_bid_back_rejects_foreign_line(db_session, owner, priced_list, seller_company):
