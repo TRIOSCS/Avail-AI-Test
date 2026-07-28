@@ -667,3 +667,135 @@ class TestRequisitionUpdatedFields:
         db_session.refresh(req)
         assert req.updated_at is not None
         assert req.updated_by is not None
+
+
+# ── T4 Promote → Proactive Re-match (watermark gap) ──────────────────
+
+
+class TestOfferPromoteRematch:
+    """POST /api/offers/{id}/promote must fire the targeted proactive re-match.
+
+    Mirrors TestOfferApproval's approve-route hook test: promote is the fourth router
+    path that moves an offer into a live status from pending_review, so it carries the
+    same post-commit trigger_rematch_on_offer_approval invariant (see the
+    OFFER_TRANSITIONS comment in app/services/status_machine.py).
+    """
+
+    @pytest.fixture()
+    def t4_pending_offer(self, db_session, test_requisition, test_user):
+        """A T4 (medium-confidence mined) offer awaiting review-queue promotion."""
+        o = Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="Mined Vendor",
+            mpn="LM317T",
+            qty_available=250,
+            unit_price=0.55,
+            status="pending_review",
+            evidence_tier="T4",
+            source="email_parse",
+            entered_by_id=test_user.id,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(o)
+        db_session.commit()
+        db_session.refresh(o)
+        return o
+
+    def test_promote_offer_triggers_proactive_rematch(self, client, t4_pending_offer):
+        """Promotion triggers the single-offer proactive re-match hook (patched at its
+        source module, app.services.proactive_matching)."""
+        with patch("app.services.proactive_matching.trigger_rematch_on_offer_approval") as mock_rematch:
+            resp = client.post(f"/api/offers/{t4_pending_offer.id}/promote")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "promoted"
+        mock_rematch.assert_called_once()
+        assert mock_rematch.call_args.args[1].id == t4_pending_offer.id
+
+    def test_promote_past_watermark_offer_creates_proactive_match(self, client, db_session, test_user):
+        """Functional watermark-gap regression: a T4 mined offer created BEFORE the
+        proactive-scan watermark, promoted through the review queue, still yields a
+        ProactiveMatch for the CPH customer (the batch scan would never see it)."""
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from app.models import Company, CustomerSite, MaterialCard, ProactiveMatch, User
+        from app.models.config import SystemConfig
+        from app.models.purchase_history import CustomerPartHistory
+        from app.models.sourcing import Requirement
+
+        owner = User(
+            email="promoter-sales@trioscs.com",
+            name="Promote Sales",
+            role="sales",
+            azure_id="promote-sales-001",
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(owner)
+        db_session.flush()
+        company = Company(name="Promote Match Co", is_active=True, account_owner_id=owner.id)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="Promote HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        card = MaterialCard(normalized_mpn="stm32f407promote", display_mpn="STM32F407PROMOTE", search_count=3)
+        db_session.add(card)
+        db_session.flush()
+        req = Requisition(
+            name="Promote Req",
+            customer_site_id=site.id,
+            status="archived",
+            created_by=owner.id,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(req)
+        db_session.flush()
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn="STM32F407PROMOTE",
+            normalized_mpn="stm32f407promote",
+            material_card_id=card.id,
+        )
+        db_session.add(requirement)
+        db_session.flush()
+        db_session.add(
+            CustomerPartHistory(
+                company_id=company.id,
+                material_card_id=card.id,
+                mpn="STM32F407PROMOTE",
+                source="avail_offer",
+                purchase_count=3,
+                last_purchased_at=datetime.now(UTC) - timedelta(days=60),
+                avg_unit_price=Decimal("12.50"),
+                last_unit_price=Decimal("13.00"),
+                total_quantity=500,
+            )
+        )
+        # Watermark already advanced to now — the batch scan can never see this offer.
+        db_session.add(SystemConfig(key="proactive_last_scan", value=datetime.now(UTC).isoformat()))
+        offer = Offer(
+            requisition_id=req.id,
+            requirement_id=requirement.id,
+            material_card_id=card.id,
+            vendor_name="Arrow",
+            mpn="STM32F407PROMOTE",
+            unit_price=Decimal("8.00"),
+            qty_available=100,
+            status="pending_review",
+            evidence_tier="T4",
+            source="email_parse",
+            entered_by_id=test_user.id,
+            created_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.post(f"/api/offers/{offer.id}/promote")
+        assert resp.status_code == 200
+
+        db_session.refresh(offer)
+        assert offer.status == "active"
+        assert offer.evidence_tier == "T5"
+        matches = db_session.query(ProactiveMatch).filter(ProactiveMatch.offer_id == offer.id).all()
+        assert len(matches) == 1
+        assert matches[0].company_id == company.id

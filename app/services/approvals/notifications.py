@@ -2,17 +2,23 @@
 
 Purpose: Low-level send primitives invoked by the outbox dispatcher.
          Sends email via the Graph API (same pattern as buyplan_notifications)
-         and writes in-app Notification rows.
+         and writes in-app Notification rows (via the shared
+         app.services.in_app_notifications seam, re-exported here).
 
 Called by: app/jobs/approval_outbox.dispatch_pending
-Depends on: app.models.notification, app.models.auth (User),
+Depends on: app.services.in_app_notifications, app.models.auth (User),
             app.utils.graph_client, app.utils.token_manager
 """
 
-from datetime import UTC, datetime
-
 from loguru import logger
 from sqlalchemy.orm import Session
+
+# write_in_app moved to the shared app.services.in_app_notifications seam
+# (nightly-status alerting needed it outside the approvals engine). Re-exported
+# here so existing imports keep working: routers/htmx/buy_plans.py imports it
+# from this module and jobs/approval_outbox.py (and its tests) patch it as an
+# attribute of this module (_ns.write_in_app).
+from app.services.in_app_notifications import write_in_app  # noqa: F401
 
 # ── Lazy imports (Graph client) are done inside functions to match the pattern
 # used by buyplan_notifications and avoid import-time side effects.
@@ -54,27 +60,6 @@ async def send_email(user, subject: str, html_body: str, db: Session) -> None:
         },
     )
     logger.info("approval email sent to {}", user.email)
-
-
-def write_in_app(
-    db: Session,
-    user_id: int,
-    event_type: str,
-    title: str,
-    body: str | None = None,
-) -> None:
-    """Write one in-app Notification row for an approval event."""
-    from app.models.notification import Notification
-
-    notif = Notification(
-        user_id=user_id,
-        event_type=event_type,
-        title=title,
-        body=body,
-        is_read=False,
-        created_at=datetime.now(UTC),
-    )
-    db.add(notif)
 
 
 def _build_email_html(payload: dict) -> tuple[str, str]:
