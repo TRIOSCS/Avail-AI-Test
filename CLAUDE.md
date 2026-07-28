@@ -6,7 +6,8 @@
 **Version:** `APP_VERSION` constant in `app/config.py` (currently `3.1.0`).
 
 It searches supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets,
-Element14, Sourcengine, eBay, AI web search, email mining), tracks vendor intelligence,
+Element14, Sourcengine, eBay, AI web search, email mining, plus browser-worker
+queues for NetComponents, The Broker Forum, and ICsource), tracks vendor intelligence,
 enriches companies/contacts (SAM.gov, Clay, Explorium, Lusha, Hunter + AI web
 search), automates RFQ workflows via Microsoft Graph,
 mines inboxes with Claude AI, and runs a full CRM (companies, quotes, buy plans,
@@ -143,11 +144,14 @@ Tests live in `tests/` (unit/integration) and `tests/e2e/` (Playwright).
 ## Auth Model
 
 OAuth2 via Azure AD — `app/routers/auth.py` handles login/callback/logout.
-Session middleware stores `user_id` in an HTTP-only cookie (15-min expiry).
-`require_fresh_token` re-validates with a 15-min buffer.
+Session middleware stores `user_id` in an HTTP-only cookie (24-hour expiry,
+`max_age=86400` in `app/main.py`). `require_fresh_token` enforces hard token
+expiry only; the 15-min-buffer refresh runs in the background token-refresh
+job (`app/jobs/core_jobs.py`, every 5 min).
 
-Permission dependencies: `require_user` (any login), `require_buyer` (search/RFQ),
-`require_admin` (settings, user management).
+Permission dependencies: `require_user` (any login — includes the search
+views), `require_buyer` (buyer actions: stock-list import, enrichment,
+vendor-contact ops), `require_admin` (settings, user management).
 
 ---
 
@@ -156,7 +160,7 @@ Permission dependencies: `require_user` (any login), `require_buyer` (search/RFQ
 ### Database
 - Use `db.get(Model, id)`, **not** `db.query(Model).get(id)` (SQLAlchemy 2.0 style).
 - Status values: always use `StrEnum` constants from `app/constants.py`, never raw strings
-  (e.g. `RequisitionStatus.OPEN`, `RequirementStatus.FOUND`).
+  (e.g. `RequisitionStatus.OPEN`, `SourcingStatus.OFFERED`).
 - Keep routers thin (HTTP only); put business logic in `app/services/`.
 - **MaterialCard category/spec writes: the F1 tier ladder (`app/services/spec_tiers.py`)
   is the single arbitration point.** ALL such writes go through `set_category()` /
@@ -200,7 +204,7 @@ async def get_vendors(supplier: str): ...
 - Navigation is HTMX-driven: `<a hx-get>` → server HTML fragment → swap into `#main-content`. No client routing, no JSON.
 - State is Alpine.js via `Alpine.store()` (persisted with the `@persist` plugin).
 - Toast: `$store.toast` has `message`, `type`, `show` (boolean) — set them directly; `show` is not a method.
-- Plugin/extension lists: see `app/static/htmx_app.js` and `app/templates/base.html`.
+- Plugin/extension lists: see `app/static/htmx_app.js` and `app/templates/htmx/base.html`.
 - **Before editing any template**, trace `router → view function → template_response()`.
   Routers can render a partial whose path doesn't match the router name — follow the router.
 
@@ -331,7 +335,7 @@ source module, not the import site.
 ### Frontend / E2E
 ```bash
 npm run dev          # Vite dev server (localhost:5173)
-npm run build        # Production build → app/static/dist/ (runs bundle smoke test)
+npm run build        # Production build → app/static/dist/ (postbuild smoke test is a NO-OP — scripts/smoke-test-bundles.mjs missing)
 npm run lint         # ESLint
 npm run test:frontend  # Vitest
 npx playwright test --project=workflows   # E2E (also: dead-ends, visual, accessibility)
@@ -341,8 +345,9 @@ npx playwright test --project=workflows   # E2E (also: dead-ends, visual, access
 
 ## MVP Mode
 
-`config.py: mvp_mode` gates Dashboard, Enrichment, Teams, Task Manager. Core MVP scope:
-Requisitions, Customers, Vendors, Sourcing Engine.
+`config.py: mvp_mode` now gates ONLY the Teams chat integration (webhook 404 +
+subscription skip). Dashboard, Enrichment, and Task Manager are un-gated,
+always on.
 
 ---
 
