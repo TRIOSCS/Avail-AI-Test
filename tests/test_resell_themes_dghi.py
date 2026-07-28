@@ -293,6 +293,9 @@ class TestImportPreviewDraftGuard:
         finally:
             restore()
         assert resp.status_code == 200
+        # The preview grid must actually render the parsed row, not just 200.
+        assert "LM358N" in resp.text
+        assert "Confirm import" in resp.text
 
 
 # ── #17: rows-only search swap ───────────────────────────────────────
