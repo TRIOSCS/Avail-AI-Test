@@ -17,6 +17,7 @@ Depends on: worker_status models, services.teams_notifications, cache.intel_cach
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import overload
 
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -33,8 +34,19 @@ def register_worker_liveness_jobs(scheduler, settings):
     )
 
 
+@overload
+def _as_utc(dt: datetime) -> datetime: ...
+
+
+@overload
+def _as_utc(dt: None) -> None: ...
+
+
 def _as_utc(dt: datetime | None) -> datetime | None:
-    """Coerce a (possibly naive) datetime to UTC-aware — ICS stores naive, NC aware."""
+    """Coerce a (possibly naive) datetime to UTC-aware — ICS stores naive, NC aware.
+
+    None passes through (overloads keep the None-ness visible to callers).
+    """
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)

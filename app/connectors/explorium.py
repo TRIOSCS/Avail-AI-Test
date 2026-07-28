@@ -26,7 +26,8 @@ def _headers(api_key: str) -> dict:
 def _data(resp) -> dict:
     """Extract the `data` envelope from a response, falling back to the full body."""
     body = resp.json() if resp is not None else {}
-    return body.get("data") if isinstance(body.get("data"), dict) else body
+    data = body.get("data")
+    return data if isinstance(data, dict) else body
 
 
 def _fmt_band(obj) -> str | None:

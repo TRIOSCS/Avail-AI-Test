@@ -26,7 +26,7 @@ Depends on: app/constants.UnavailabilityReason (reason vocabulary), Base, users 
 from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, String, Text, func, text
-from sqlalchemy.orm import relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from ..database import UTCDateTime
 from .base import Base
@@ -71,10 +71,12 @@ class VendorPartUnavailability(Base):
     # both user-initiated paths, both via release(). NULLed on re-mark (re_arm()).
     # Non-NULL ⇒ record not active. Moves WITH release_trigger — pair enforced by
     # the ck_vendor_part_unavail_release_pair CHECK below.
-    released_at = Column(UTCDateTime)
+    # Mapped[... | None] (2.0 style) so release()/re_arm() writes type-check under
+    # strict Optional — nullable=True either way, no schema change.
+    released_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # ReleaseTrigger value (vendor_email | offer_received) — renders the advisory
     # hint copy via ReleaseTrigger.label. Validated on write (None allowed).
-    release_trigger = Column(String(32))
+    release_trigger: Mapped[str | None] = mapped_column(String(32))
     # Provenance: the requirement the mark was made from (refreshed on re-mark).
     # SET NULL, not CASCADE — knowledge outlives requirements. Lets
     # clear_unavailability find records whose key no longer matches the
@@ -127,8 +129,8 @@ class VendorPartUnavailability(Base):
         (O3 and the offer hook both route through here)."""
         from ..constants import ReleaseTrigger
 
-        self.release_trigger = ReleaseTrigger(trigger).value  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
-        self.released_at = now  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
+        self.release_trigger = ReleaseTrigger(trigger).value
+        self.released_at = now
 
     def re_arm(self) -> None:
         """Re-mark transition: NULL the release pair together so the record

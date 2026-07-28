@@ -17,7 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
-from sqlalchemy.orm import relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from ..constants import ProactiveMatchStatus
 from ..database import UTCDateTime
@@ -44,7 +44,9 @@ class MaterialCard(Base):
     # Enrichment fields (populated by AI agent)
     lifecycle_status = Column(String(50), index=True)  # active, nrfnd, eol, obsolete, ltb
     package_type = Column(String(100))  # QFP-64, BGA-256, 0603, etc.
-    category = Column(String(255))  # Microcontroller, Capacitor, Connector, etc.
+    # Mapped[str | None] (2.0 style) so ladder/cleanup writes (incl. NULLing junk)
+    # type-check under strict Optional — same nullable column, no schema change.
+    category: Mapped[str | None] = mapped_column(String(255))  # Microcontroller, Capacitor, Connector, etc.
     rohs_status = Column(String(50))  # compliant, non-compliant, exempt
     # Stock condition (broker facet): the constants.MaterialCondition StrEnum vocabulary
     # (New | Recertified | Refurbished | Used | Pulled | Unknown) — always write via that
@@ -88,10 +90,12 @@ class MaterialCard(Base):
     # writers route through set_category; the @validates("category") guard below (SP3)
     # rejects any off-vocab direct assignment, so a future un-routed writer can no
     # longer persist junk past the ladder.
-    category_source = Column(String(50))  # "mpn_decode", "digikey_api", "claude_opus_inferred", ...
-    category_confidence = Column(Float)
-    category_tier = Column(Integer)
-    category_updated_at = Column(UTCDateTime)  # when the category was last (re)written via the ladder
+    # Mapped[... | None] (2.0 style) like `category` above — cleanup_known_bad NULLs
+    # the whole provenance block together; nullable either way, no schema change.
+    category_source: Mapped[str | None] = mapped_column(String(50))  # "mpn_decode", "digikey_api", ...
+    category_confidence: Mapped[float | None] = mapped_column(Float)
+    category_tier: Mapped[int | None] = mapped_column(Integer)
+    category_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # last (re)write via the ladder
 
     # Brand + manufacturer provenance (migration 097 — written via spec_tiers.set_brand /
     # set_manufacturer, governed by the same F1 ladder as category_*). A valued

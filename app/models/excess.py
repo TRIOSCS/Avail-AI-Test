@@ -38,7 +38,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from ..constants import (
     CustomerBidStatus,
@@ -122,7 +122,9 @@ class ExcessLineItem(Base):
     # land/withdraw (spec §Offer-collection). best_offer_id is a plain int (NOT a hard
     # FK) to avoid a circular cascade with excess_offers.
     best_offer_unit_price = Column(Numeric(12, 4), nullable=True)
-    best_offer_id = Column(Integer, nullable=True)
+    # Mapped[int | None] (2.0 style) so NULLing the rollup type-checks under
+    # strict Optional — same nullable Integer column, no schema change.
+    best_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     offer_count = Column(Integer, nullable=False, default=0, server_default="0")
     demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default=ExcessLineItemStatus.AVAILABLE)  # see constants.ExcessLineItemStatus

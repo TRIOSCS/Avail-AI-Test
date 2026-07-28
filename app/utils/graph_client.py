@@ -93,7 +93,7 @@ class GraphClient:
         ({"error": ...} from the retry layer) raises GraphAPIError instead of
         silently returning the short list fetched so far.
         """
-        url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
+        url: str | None = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         items: list[dict] = []
         while url and len(items) < max_items:
             data = await self._request_with_retry(
