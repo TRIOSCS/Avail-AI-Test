@@ -258,6 +258,10 @@ class Settings(BaseSettings):
     proactive_scan_interval_hours: int = 4
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
+    # Push new proactive matches into Teams as an Adaptive Card digest. Default
+    # OFF so enabling delivery is a deliberate admin choice (it sends real Teams
+    # messages). Admin can override via the proactive_teams_push_enabled flag.
+    proactive_teams_push_enabled: bool = False
 
     # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---
     stock_sale_vendor_names: str | list[str] = "trio,trio supply chain,stock,internal"

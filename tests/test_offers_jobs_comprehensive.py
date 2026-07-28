@@ -62,6 +62,7 @@ class TestRegisterOffersJobs:
         mock_settings = MagicMock()
         mock_settings.proactive_matching_enabled = True
         mock_settings.proactive_scan_interval_hours = 4
+        mock_settings.proactive_teams_push_enabled = False  # opt-in job, off by default
 
         from app.jobs.offers_jobs import register_offers_jobs
 
@@ -81,6 +82,7 @@ class TestRegisterOffersJobs:
         mock_scheduler = MagicMock()
         mock_settings = MagicMock()
         mock_settings.proactive_matching_enabled = False
+        mock_settings.proactive_teams_push_enabled = False  # opt-in job, off by default
 
         from app.jobs.offers_jobs import register_offers_jobs
 
@@ -96,6 +98,7 @@ class TestRegisterOffersJobs:
         mock_settings = MagicMock()
         mock_settings.proactive_matching_enabled = True
         mock_settings.proactive_scan_interval_hours = 0  # Below minimum
+        mock_settings.proactive_teams_push_enabled = False  # opt-in job, off by default
 
         from app.jobs.offers_jobs import register_offers_jobs
 
