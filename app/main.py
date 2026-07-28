@@ -6,6 +6,7 @@ setup_logging()  # Must run before any other module logs
 
 import asyncio
 import hmac
+import json
 import logging
 import os
 import re
@@ -268,9 +269,24 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Return structured JSON for all HTTP errors."""
+    """Return structured JSON for all HTTP errors.
+
+    409s on htmx requests additionally carry an ``HX-Trigger`` showToast +
+    ``HX-Reswap: none`` — the SERVER owns 409 messaging app-wide (the client's
+    generic htmx:responseError handler deliberately skips 409, see
+    app/static/htmx_app.js). Stale-guard 409s (services/stale_guard.py) return a
+    direct HTMLResponse with their own trigger and never reach this handler; the
+    HX-Trigger presence check below keeps any future header-carrying 409 from
+    being double-toasted. The JSON body shape is unchanged.
+    """
     req_id = getattr(request.state, "request_id", "unknown")
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail) if exc.detail else "Error"
+    headers: dict[str, str] | None = None
+    if exc.status_code == 409 and request.headers.get("hx-request") == "true":
+        headers = dict(exc.headers or {})
+        if not any(k.lower() == "hx-trigger" for k in headers):
+            headers["HX-Trigger"] = json.dumps({"showToast": {"message": detail, "type": "warning"}})
+            headers["HX-Reswap"] = "none"
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -278,6 +294,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "status_code": exc.status_code,
             "request_id": req_id,
         },
+        headers=headers,
     )
 
 

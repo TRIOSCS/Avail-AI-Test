@@ -26,6 +26,7 @@ from ....database import get_db
 from ....dependencies import can_manage_account, require_user
 from ....models import Company, CustomerSite, SiteContact, User
 from ....template_env import template_response
+from ....utils.column_limits import ensure_fits_column
 from .._shared import _base_ctx
 from . import router
 from .contacts import _render_contacts_list
@@ -67,6 +68,14 @@ async def create_site(
         owner_id=parsed_owner_id,
         is_active=True,
     )
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    for _field, _label in (
+        ("site_name", "Site name"),
+        ("site_type", "Site type"),
+        ("city", "City"),
+        ("country", "Country"),
+    ):
+        ensure_fits_column(CustomerSite, _field, getattr(site, _field), _label)
     db.add(site)
     db.commit()
     db.refresh(site)
@@ -209,6 +218,16 @@ async def create_site_contact(
     # in-memory SQLite test engine ignores VARCHAR lengths, but Postgres 500s).
     if len(wechat_id.strip()) > 100:
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">WeChat ID must be 100 characters or fewer.</div>')
+
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500
+    # on the remaining bounded columns this deprecated route still writes.
+    for _field, _value, _label in (
+        ("full_name", full_name.strip(), "Name"),
+        ("email", email.strip(), "Email"),
+        ("title", title.strip(), "Title"),
+        ("phone", phone.strip(), "Phone"),
+    ):
+        ensure_fits_column(SiteContact, _field, _value or None, _label)
 
     # Dedup by email
     if email:
@@ -397,6 +416,19 @@ async def edit_site(
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    for _field, _label in (
+        ("site_name", "Site name"),
+        ("address_line1", "Address line 1"),
+        ("address_line2", "Address line 2"),
+        ("city", "City"),
+        ("state", "State"),
+        ("zip", "ZIP"),
+        ("country", "Country"),
+        ("site_type", "Site type"),
+        ("shipping_terms", "Shipping terms"),
+    ):
+        ensure_fits_column(CustomerSite, _field, getattr(site, _field), _label)
     site.updated_at = datetime.now(UTC)
     db.commit()
     logger.info("Site {} edited by {}", site_id, user.email)

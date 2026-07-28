@@ -535,6 +535,33 @@ async def scrape_website_contacts(url: str) -> dict:
     return result
 
 
+def sync_card_emails_on_contact_change(
+    card: VendorCard,
+    old_email: str | None,
+    new_email: str | None,
+) -> None:
+    """Keep the legacy ``VendorCard.emails[]`` array in sync with a VendorContact write.
+
+    ``card.emails`` is a live outreach/reachability source (sourcing_leads,
+    resell_outreach_service, vendor_utils), so every contact add/edit/delete must
+    mirror into it. ONE shared arbiter for both the legacy JSON API
+    (app/routers/vendor_contacts.py) and the HTMX endpoints
+    (app/routers/htmx/vendors.py) — CRM Wave 3 item 5.
+
+    Semantics: add → (None, email); edit → (old, new); delete → (email, None).
+    Removes *old_email*, appends *new_email* if absent (no duplicates). On any
+    change it assigns a NEW list so SQLAlchemy's JSON-column change detection
+    fires; a no-op change leaves the attribute untouched.
+    """
+    if old_email == new_email:
+        return
+    emails = [e for e in (card.emails or []) if e != old_email]
+    if new_email and new_email not in emails:
+        emails.append(new_email)
+    if emails != (card.emails or []):
+        card.emails = emails
+
+
 def merge_contact_into_card(
     card: VendorCard,
     emails: list,

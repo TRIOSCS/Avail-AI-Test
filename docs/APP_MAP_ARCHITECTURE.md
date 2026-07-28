@@ -280,7 +280,14 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   collaborators), `merge.py` (company + contact duplicate merge), `tags.py` (segment/contact
   tags), `custom_fields.py`, `saved_views.py` (filter presets), and `_registries.py` (the
   inline-edit field registry — `apply_company_field`/`apply_contact_field` + `CANONICAL_ROLES`/
-  `FIELD_LABELS`). Every submodule imports and decorates the SAME `router` instance created in
+  `FIELD_LABELS`; both apply helpers enforce model-derived length guards via
+  `utils/column_limits.ensure_fits_column` — 400 instead of a Postgres truncation 500 —
+  as do the non-registry bounded writes (Contacts-tab create incl. its `__new__`-site
+  name, `edit_site_contact`'s atomic first/last block, and vendor-contact CRUD in both
+  the HTMX and legacy-JSON routers) —
+  and each registry entry carries a model-derived `maxlength` the inline widget renders;
+  `apply_contact_field` lazily backfills legacy full_name-only contacts into first/last
+  via `_backfill_legacy_name_parts` before any name-part write). Every submodule imports and decorates the SAME `router` instance created in
   `__init__.py` (byte-for-byte the object every route registers on), so the URL space is
   unchanged (`/v2/partials/customers/*` + `/v2/partials/companies/*` redirects +
   `/v2/partials/contacts/*`). **`__init__.py` re-exports every name the old single-file module

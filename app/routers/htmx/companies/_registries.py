@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from ....constants import CRM_INDUSTRIES, ContactRole
 from ....models import Company, SiteContact
 from ....schemas.crm import normalize_website
+from ....utils.column_limits import column_max_length, ensure_fits_column
 from ....utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 
 # Canonical buying-role taxonomy — sourced from the ContactRole StrEnum (single
@@ -88,6 +89,16 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
     # contact_owner_id is intentionally NOT listed here — ownership flows via
     # site → account owner (per-contact picker removed in Phase 1).
 }
+
+# Model-derived maxlength (CRM Wave 3, item 6): each registry entry carries the column's
+# declared String(n) bound (None for unbounded Text / select-constrained fields) so the
+# inline-edit widget (_field_edit.html) renders a matching maxlength attribute and the
+# apply_* guards below enforce the SAME limit server-side — one source of truth: the model.
+for _field, _meta in EDITABLE_ACCOUNT_FIELDS.items():
+    _meta["maxlength"] = column_max_length(Company, _field)
+for _field, _meta in EDITABLE_CONTACT_FIELDS.items():
+    _meta["maxlength"] = column_max_length(SiteContact, _field)
+
 
 # Ordered list: (field, label, kind, choices) — used by the detail template to render the
 # always-visible known-fields grid. Every field here MUST also be in EDITABLE_ACCOUNT_FIELDS
@@ -155,7 +166,27 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
             raise HTTPException(400, str(exc)) from exc
     else:
         setattr(company, field, v or None)
+    # Model-derived length guard — checks the FINAL stored value (post-normalization)
+    # against the column's declared bound; Postgres would 500 on overflow, SQLite
+    # (tests) silently truncates nothing and masks it.
+    ensure_fits_column(Company, field, getattr(company, field), EDITABLE_ACCOUNT_FIELDS[field]["label"])
     company.updated_at = datetime.now(UTC)
+
+
+def _backfill_legacy_name_parts(contact: SiteContact) -> None:
+    """Lazily migrate a legacy full_name-only contact to structured first/last (in-
+    place).
+
+    Legacy rows (pre-migration-134 writers) have full_name set with first_name AND
+    last_name both NULL. Editing one name part on such a row used to destroy the other
+    (recompose saw only the edited part). Before any first/last write, split full_name
+    with the canonical ``split(" ", 1)`` rule (same as the migration backfill and the
+    modal prefill) so the edit lands on structured parts. No-op for structured rows.
+    """
+    if contact.first_name is None and contact.last_name is None and (contact.full_name or "").strip():
+        parts = contact.full_name.strip().split(" ", 1)
+        contact.first_name = parts[0] or None
+        contact.last_name = (parts[1].strip() or None) if len(parts) > 1 else None
 
 
 def _recompose_full_name(contact: SiteContact) -> None:
@@ -186,6 +217,9 @@ def apply_contact_field(
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
     v = value.strip()
     if field in ("first_name", "last_name"):
+        # Legacy full_name-only contact: backfill both parts BEFORE applying the edit
+        # so a single-part write can't destroy the other part on recompose.
+        _backfill_legacy_name_parts(contact)
         setattr(contact, field, v or None)
         # After updating, verify at least one name part remains.
         if not contact.first_name and not contact.last_name:
@@ -215,6 +249,8 @@ def apply_contact_field(
         contact.contact_role = _validate_role(v)
     else:
         setattr(contact, field, v or None)
+    # Model-derived length guard — same rationale as apply_company_field.
+    ensure_fits_column(SiteContact, field, getattr(contact, field), EDITABLE_CONTACT_FIELDS[field]["label"])
     contact.updated_at = datetime.now(UTC)
 
 

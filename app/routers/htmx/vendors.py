@@ -36,9 +36,11 @@ from ...services.crm_service import next_best_touch as _next_best_touch
 from ...services.crm_service import order_by_clock as _order_by_clock
 from ...services.vendor_duplicates import check_vendor_duplicate
 from ...template_env import template_response
+from ...utils.column_limits import ensure_fits_column
 from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
+from ...utils.vendor_helpers import sync_card_emails_on_contact_change
 from .._lookup_helpers import get_vendor_card_or_404
 from ._shared import _base_ctx, _sanitize_hx_params
 from ._shared_tabs import vendor_tab as _vendor_tab_impl
@@ -354,13 +356,21 @@ async def vendor_contacts_partial(
 @router.get("/v2/partials/vendors/create-form", response_class=HTMLResponse)
 async def vendor_create_form_early(
     request: Request,
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the create-vendor form partial (early route to precede /{vendor_id})."""
+    """Return the create-vendor form partial (early route to precede /{vendor_id}).
+
+    Threads the sanitized embed-context params (hx_target/push_url_base — same allowlist
+    as the vendor list) into the form so its submit + Cancel targets work inside the CRM
+    shell as well as standalone (Wave 3 item 8a).
+    """
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
     return template_response(
         "htmx/partials/vendors/create_form.html",
-        {"request": request},
+        {"request": request, "hx_target": hx_target, "push_url_base": push_url_base},
     )
 
 
@@ -400,16 +410,31 @@ async def create_vendor_partial_early(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new VendorCard from the HTMX form (early route to precede
-    /{vendor_id})."""
+    """Create a new VendorCard from the HTMX form (early route to precede /{vendor_id}).
+
+    The create form carries the sanitized embed-context params as hidden inputs
+    (hx_target/push_url_base — Wave 3 item 8a); they're re-sanitized here and threaded
+    into the returned detail so its controls keep targeting the embed container instead
+    of falling back to #main-content one step after create.
+    """
     from ...models import VendorCard
     from ...utils.vendor_helpers import find_vendor_card_by_name
     from ...vendor_utils import normalize_vendor_name
 
     form = await request.form()
+    hx_target, push_url_base = _sanitize_hx_params(
+        str(form.get("hx_target") or "#main-content"),
+        str(form.get("push_url_base") or "/v2/vendors"),
+        "/v2/vendors",
+    )
     display_name = form.get("display_name", "").strip()
     if not display_name:
         raise HTTPException(400, "Vendor name is required")
+
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    ensure_fits_column(VendorCard, "display_name", display_name, "Vendor name")
+    website_val = form.get("website", "").strip() or None
+    ensure_fits_column(VendorCard, "website", website_val, "Website")
 
     norm = normalize_vendor_name(display_name)
     existing = find_vendor_card_by_name(display_name, db)
@@ -424,7 +449,7 @@ async def create_vendor_partial_early(
     card = VendorCard(
         normalized_name=norm,
         display_name=display_name,
-        website=form.get("website", "").strip() or None,
+        website=website_val,
         emails=emails,
         phones=phones,
         industry=form.get("industry", "").strip() or None,
@@ -436,23 +461,46 @@ async def create_vendor_partial_early(
         is_new_vendor=True,
         sighting_count=0,
     )
+    # Remaining bounded columns in this write — same guard as name/website above.
+    for _field, _label in (
+        ("industry", "Industry"),
+        ("hq_city", "HQ city"),
+        ("hq_country", "HQ country"),
+        ("employee_size", "Employee size"),
+    ):
+        ensure_fits_column(VendorCard, _field, getattr(card, _field), _label)
     db.add(card)
     db.commit()
     db.refresh(card)
     logger.info("VendorCard {} created by {}", card.id, user.email)
-    return await vendor_detail_partial(request=request, vendor_id=card.id, user=user, db=db)
+    return await vendor_detail_partial(
+        request=request,
+        vendor_id=card.id,
+        user=user,
+        db=db,
+        hx_target=hx_target,
+        push_url_base=push_url_base,
+    )
 
 
 @router.delete("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def delete_vendor_partial(
     request: Request,
     vendor_id: int,
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Delete a vendor (admin-only) and return the refreshed vendor list."""
+    """Delete a vendor (admin-only) and return the refreshed vendor list.
+
+    Carries the sanitized embed-context params through to the re-rendered list so an
+    embedded delete keeps every list control targeting the embed container (Wave 3 item
+    8a) instead of retargeting the main shell.
+    """
     from ...models import VendorCard
 
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
     card = db.get(VendorCard, vendor_id)
     if not card:
         raise HTTPException(404, "Vendor not found")
@@ -465,7 +513,7 @@ async def delete_vendor_partial(
     db.delete(card)
     db.commit()
     logger.info("VendorCard {} deleted by {}", vendor_id, user.email)
-    # Return the vendor list using safe defaults
+    # Return the vendor list using safe defaults (embed params threaded through)
     return await vendors_list_partial(
         request=request,
         q="",
@@ -476,8 +524,8 @@ async def delete_vendor_partial(
         my_only=False,
         limit=30,
         offset=0,
-        hx_target="#main-content",
-        push_url_base="/v2/vendors",
+        hx_target=hx_target,
+        push_url_base=push_url_base,
         user=user,
         db=db,
     )
@@ -488,10 +536,21 @@ async def vendor_detail_partial(
     request: Request,
     vendor_id: int,
     mpn: str = "",
+    # Plain-string defaults (NOT Query objects): sibling handlers call this
+    # function directly, and a Query sentinel default would leak through as the
+    # value there. FastAPI still infers both as query params on the route.
+    hx_target: str = "#main-content",
+    push_url_base: str = "/v2/vendors",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return vendor detail as HTML partial with safety data and tabs."""
+    """Return vendor detail as HTML partial with safety data and tabs.
+
+    hx_target/push_url_base (sanitized, Wave 3 item 8a) thread the embed context into
+    the template's Delete button URL so an embedded delete re-renders the list inside
+    the embed container; safe defaults apply standalone.
+    """
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
     vendor = get_vendor_card_or_404(db, vendor_id)
 
     contacts = (
@@ -553,6 +612,8 @@ async def vendor_detail_partial(
             "cadence_state": vendor_cadence,
             "next_best_touch": vendor_nbt,
             "now_utc": now_utc,
+            "hx_target": hx_target,
+            "push_url_base": push_url_base,
         }
     )
     return template_response("htmx/partials/vendors/detail.html", ctx)
@@ -603,16 +664,24 @@ async def edit_vendor(
         display_name = display_name_raw.strip()
         if not display_name:
             raise HTTPException(400, "Vendor name is required.")
+        ensure_fits_column(VendorCard, "display_name", display_name, "Vendor name")
         vendor.display_name = display_name
         from ...vendor_utils import normalize_vendor_name
 
         vendor.normalized_name = normalize_vendor_name(display_name)
 
-    website = form.get("website", "").strip()
-    vendor.website = website or vendor.website
+    # website/emails/phones follow the same present-vs-absent rule as display_name
+    # (Wave 3 item 3): a field ABSENT from the form is a partial edit (preserved); a
+    # SUBMITTED blank is an explicit clear — the edit form prefills all three, so blank
+    # means the user cleared it.
+    website_raw = form.get("website")
+    if website_raw is not None:
+        website = website_raw.strip() or None
+        ensure_fits_column(VendorCard, "website", website, "Website")
+        vendor.website = website
 
-    emails_raw = form.get("emails", "").strip()
-    if emails_raw:
+    emails_raw = form.get("emails")
+    if emails_raw is not None:
         emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
         # Reject anything that isn't a plausible address — an entry without an
         # '@' is a data-entry mistake, not a contactable email.
@@ -621,8 +690,8 @@ async def edit_vendor(
             raise HTTPException(400, f"Invalid email address: {', '.join(invalid)}")
         vendor.emails = emails
 
-    phones_raw = form.get("phones", "").strip()
-    if phones_raw:
+    phones_raw = form.get("phones")
+    if phones_raw is not None:
         vendor.phones = [p.strip() for p in phones_raw.split(",") if p.strip()]
 
     vendor.updated_at = datetime.now(UTC)
@@ -737,6 +806,15 @@ async def vendor_contact_add(
     title = (form.get("title") or "").strip()
     phone = (form.get("phone") or "").strip()
 
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    for _field, _value, _label in (
+        ("email", email, "Email"),
+        ("full_name", full_name, "Name"),
+        ("title", title, "Title"),
+        ("phone", phone, "Phone"),
+    ):
+        ensure_fits_column(VC, _field, _value or None, _label)
+
     # Deduplicate by (vendor_card_id, email)
     existing = db.query(VC).filter(VC.vendor_card_id == vendor_id, VC.email == email).first()
     if existing:
@@ -755,6 +833,9 @@ async def vendor_contact_add(
         is_primary=False,
     )
     db.add(vc)
+    # Mirror into the legacy card.emails[] reachability array — shared helper with the
+    # JSON API (app/routers/vendor_contacts.py), Wave 3 item 5.
+    sync_card_emails_on_contact_change(vendor, None, email)
     db.commit()
     db.refresh(vc)
     logger.info("VendorContact {} added to vendor {} by {}", vc.id, vendor_id, user.email)
@@ -786,6 +867,16 @@ async def vendor_contact_edit(
     email = (form.get("email") or "").strip()
     phone = (form.get("phone") or "").strip()
 
+    # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
+    for _field, _value, _label in (
+        ("email", email, "Email"),
+        ("full_name", full_name, "Name"),
+        ("title", title, "Title"),
+        ("phone", phone, "Phone"),
+    ):
+        ensure_fits_column(VC, _field, _value or None, _label)
+
+    old_email = vc.email
     if full_name:
         vc.full_name = full_name
         vc.contact_type = "individual"
@@ -799,6 +890,8 @@ async def vendor_contact_edit(
     if phone:
         vc.phone = phone
 
+    # Mirror the address change into card.emails[] — shared helper, Wave 3 item 5.
+    sync_card_emails_on_contact_change(vendor, old_email, vc.email)
     db.commit()
     db.refresh(vc)
     logger.info("VendorContact {} updated by {}", contact_id, user.email)
@@ -819,11 +912,13 @@ async def vendor_contact_delete(
     """
     from ...models.vendors import VendorContact as VC
 
-    get_vendor_card_or_404(db, vendor_id)
+    vendor = get_vendor_card_or_404(db, vendor_id)
     vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
     if not vc:
         raise HTTPException(404, "Contact not found")
 
+    # Remove the address from card.emails[] — shared helper, Wave 3 item 5.
+    sync_card_emails_on_contact_change(vendor, vc.email, None)
     db.delete(vc)
     db.commit()
     logger.info("VendorContact {} deleted by {}", contact_id, user.email)
