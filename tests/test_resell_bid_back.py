@@ -233,6 +233,26 @@ def test_build_bid_back_works_on_awarded_list(db_session, owner, priced_list):
     assert bid.status == CustomerBidStatus.DRAFT
 
 
+@pytest.mark.parametrize("legacy_status", [ExcessListStatus.ACTIVE, ExcessListStatus.BIDDING])
+def test_build_bid_back_rejects_legacy_status_list(db_session, owner, priced_list, legacy_status):
+    """DOCUMENTED POLICY (finding #21 scope note): the pre-Resell backward-compat
+    statuses ``ACTIVE``/``BIDDING`` are deliberately NOT in ``_POSTED_LIST_STATUSES``,
+    so a list still carrying one 409s on bid-back build (and send re-checks the same
+    set) — consistent with the already-shipped ``submit_offer``/``upload_bids`` guards.
+
+    The legacy members retire in the cutover chunk; do not widen the guard for them.
+    """
+    priced_list.status = legacy_status
+    db_session.commit()
+    items = _lines(db_session, priced_list)
+
+    with pytest.raises(HTTPException) as exc:
+        bid_back_service.build_bid_back(
+            db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
+        )
+    assert exc.value.status_code == 409
+
+
 # ── Negative override price rejected (finding #55, THEME E) ──────────
 
 

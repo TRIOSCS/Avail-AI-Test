@@ -831,6 +831,46 @@ def test_sync_list_mirror_revive_eagerly_restores_vendor_summary(db_session: Ses
     assert revived.tier != "Poor"
 
 
+def test_sync_list_mirror_noop_resync_skips_summary_invalidation(db_session: Session, monkeypatch):
+    """The revive invalidation is scoped to GENUINE revives — mirror rows newly created
+    (or restored) by THIS sync.
+
+    A routine re-sync where every active line is already
+    live-mirrored performs the in-place refresh but must NOT fan out
+    ``_invalidate_vendor_summaries_for_cards`` → ``rebuild_vendor_summaries`` (finding
+    #F4 follow-up: syncs run inside the caller's locked M9 transaction on every
+    publish/edit/close, so per-sync rebuild work must be earned by an actual state
+    change, not paid on every pass).
+    """
+    from app.services import excess_mirror
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM7805CT"])
+
+    calls: list[set] = []
+    real_invalidate = excess_mirror._invalidate_vendor_summaries_for_cards
+
+    def _spy(db, card_ids):
+        calls.append(set(card_ids))
+        return real_invalidate(db, card_ids)
+
+    monkeypatch.setattr(excess_mirror, "_invalidate_vendor_summaries_for_cards", _spy)
+
+    # First sync CREATES the mirror rows — a genuine revive, so it invalidates once.
+    first = sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert first["mirrored"] == 1
+    assert len(calls) == 1, "a newly-created mirror row is a genuine revive and must invalidate"
+
+    # Second sync is a pure no-op refresh (same line, still live) — no invalidation.
+    calls.clear()
+    second = sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert second["mirrored"] == 1  # the line is still refreshed in place
+    assert calls == [], "a no-op re-sync must not invalidate vendor summaries"
+
+
 def test_teardown_invalidates_real_requirement_vendor_summary(db_session: Session):
     """teardown_list_mirror (list/company deletion) also drops the stale 'customer
     excess' VendorSightingSummary on any real requirement it was advertised on."""

@@ -2292,12 +2292,16 @@ the seller is not a User). Migration **183** adds `customer_bids.sent_at` / `res
 (open/collecting/bid_out/awarded) — a bid back can never be assembled or sent off a never-posted
 `draft` (no finalized offers to price against — every line would export blank) or a terminal
 `closed`/`expired` list; `send_bid_back` re-checks because the list can decay to terminal between
-assemble and send (finding #21). `send_bid_back` also flips the in-memory `status` to `sent` (and
-stamps `sent_at`) BEFORE rendering the PDF, not after — `generate_bid_report_pdf` re-fetches the
-bid via `db.get`, which returns the SAME identity-mapped, already-mutated object, so the customer
-never receives a document stamped "draft" (finding #22). The flip stays uncommitted until the send
-is CONFIRMED: any failure (PDF render error or a non-`sent` result) rolls the session back first,
-so a failed send always leaves the bid a genuine `draft` in the database. `build_bid_back` also
+assemble and send (finding #21); the legacy pre-Resell `ACTIVE`/`BIDDING` statuses deliberately
+409 too, consistent with the shipped `submit_offer`/`upload_bids` guards. `send_bid_back` also
+renders the emailed PDF with a presentation-only `status_override=CustomerBidStatus.SENT`
+(threaded `_bid_pdf_attachment` → `generate_bid_report_pdf` → `bid_back_export_context`), so the
+customer never receives a document stamped "draft" (finding #22) — WITHOUT mutating the bid row:
+`send_batch_rfq` commits the session internally (Contact tracking, on failed/skipped outcomes
+too), so any pending draft→sent flip would be durably persisted even when the send fails. The
+`status`/`sent_at` flip commits ONLY after a confirmed `sent` result; a failed send raises 502 and
+leaves the bid a genuine, retryable `draft` (the owner download/preview path passes no override
+and shows the real status). `build_bid_back` also
 rejects a negative `customer_unit_price` override with 400 at the assemble boundary (finding #55,
 mirrors the quantity>0 discipline) — zero/positive overrides are unchanged.
 
@@ -2453,9 +2457,12 @@ convention.
   "customer excess" `VendorSightingSummary` (finding #27), but a REVIVE (list re-published, a line
   un-awarded, etc. — `sync_list_mirror` re-mirroring a line back to live) was lazy: the summary only
   reappeared once an unrelated search rebuilt it. `sync_list_mirror` now collects the `material_card_id`s
-  of every line it (re-)mirrors in one pass and calls the SAME `_invalidate_vendor_summaries_for_cards`
-  helper (`skip_ai_estimates=True` — never a synchronous Claude call inside a caller's locked M9
-  transaction) once at the end, so a retire→revive round-trip restores the summary immediately.
+  of every line whose mirror row THIS sync genuinely revives — newly creates, or restores from
+  unavailable (checked against `_find_mirror` before the upsert; an already-live line's in-place
+  refresh does NOT count, so routine publish/edit re-syncs perform zero invalidations) — and calls
+  the SAME `_invalidate_vendor_summaries_for_cards` helper (`skip_ai_estimates=True` — never a
+  synchronous Claude call inside a caller's locked M9 transaction) once at the end, so a
+  retire→revive round-trip restores the summary immediately.
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
