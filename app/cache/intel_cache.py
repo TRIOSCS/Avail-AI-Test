@@ -10,6 +10,7 @@ unavailable (e.g., during development without Docker).
 import os
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from urllib.parse import urlsplit
 
 from loguru import logger
 from sqlalchemy import CursorResult, text
@@ -29,6 +30,22 @@ def _rkey(cache_key: str) -> str:
 def _ttl_seconds(ttl_days: float) -> int:
     """Convert a fractional-day TTL to whole seconds for Redis EXPIRE/SETEX."""
     return int(ttl_days * 86400)
+
+
+def _mask_url_password(url: str) -> str:
+    """Return *url* with any userinfo password replaced by ``***``.
+
+    The connect log goes to every loguru sink (stdout / docker logs), so the
+    AUTH password embedded in ``redis://:password@host`` must never be logged
+    verbatim. Host and port are kept byte-for-byte (netloc split at the last
+    ``@``) so the masked URL stays usable for diagnosing WHERE we connected.
+    """
+    parts = urlsplit(url)
+    if parts.password is None:
+        return url
+    userinfo, _, hostport = parts.netloc.rpartition("@")
+    user = userinfo.split(":", 1)[0]
+    return parts._replace(netloc=f"{user}:***@{hostport}").geturl()
 
 
 def _connect_intel_redis():
@@ -57,7 +74,7 @@ def _connect_intel_redis():
         retry_on_timeout=True,
     )
     client.ping()
-    logger.info("Redis cache connected: {}", settings.redis_url)
+    logger.info("Redis cache connected: {}", _mask_url_password(settings.redis_url))
     return client
 
 

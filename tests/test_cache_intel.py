@@ -370,3 +370,50 @@ class TestIncrHashCount:
         mock_get_cached.return_value = None
         assert cache_mod.incr_hash_count("k", "x|y|corroboration", ttl_days=35.0) == 1
         mock_set_cached.assert_called_once_with("k", {"x|y|corroboration": 1}, ttl_days=35.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Connect-log credential masking (the log line must never leak the Redis
+# password embedded in settings.redis_url)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestConnectLogMasksPassword:
+    def test_mask_url_password_masks_password(self):
+        assert cache_mod._mask_url_password("redis://:s3cret@redis:6379/0") == "redis://:***@redis:6379/0"
+
+    def test_mask_url_password_keeps_username(self):
+        assert cache_mod._mask_url_password("redis://user:pw@host:6379/1") == "redis://user:***@host:6379/1"
+
+    def test_mask_url_password_without_credentials_is_unchanged(self):
+        assert cache_mod._mask_url_password("redis://redis:6379/0") == "redis://redis:6379/0"
+
+    def test_connect_log_never_contains_password(self, monkeypatch):
+        """The INFO line emitted on a successful connect masks the password.
+
+        Drives the REAL _connect_intel_redis (TESTING unset, redis.from_url stubbed) and
+        captures loguru output — the assertion is on what actually reaches the log
+        sinks, not on the helper in isolation.
+        """
+        import redis
+        from loguru import logger
+
+        from app.config import settings
+
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setattr(settings, "cache_backend", "redis")
+        monkeypatch.setattr(settings, "redis_url", "redis://:supersecretpw@redis:6379/0")
+        fake_client = MagicMock()
+        monkeypatch.setattr(redis, "from_url", MagicMock(return_value=fake_client))
+
+        records: list[str] = []
+        sink_id = logger.add(lambda m: records.append(str(m)), level="INFO")
+        try:
+            client = cache_mod._connect_intel_redis()
+        finally:
+            logger.remove(sink_id)
+
+        assert client is fake_client
+        joined = "".join(records)
+        assert "supersecretpw" not in joined
+        assert "redis://:***@redis:6379/0" in joined
