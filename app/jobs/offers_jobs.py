@@ -33,6 +33,17 @@ def register_offers_jobs(scheduler, settings, db=None):
             name="Proactive matching",
         )
 
+    # `is True` (not truthiness): register only on an explicit True so a MagicMock
+    # settings passed by unrelated scheduler tests resolves to off, not a spurious job.
+    if get_effective_flag(db, "proactive_teams_push_enabled", settings.proactive_teams_push_enabled) is True:
+        push_interval_h = max(1, settings.proactive_scan_interval_hours)
+        scheduler.add_job(
+            _job_proactive_teams_push,
+            IntervalTrigger(hours=push_interval_h),
+            id="proactive_teams_push",
+            name="Push new proactive matches to Teams",
+        )
+
     scheduler.add_job(
         _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Scoring and leaderboards"
     )
@@ -103,6 +114,28 @@ async def _job_proactive_matching():
         logger.exception(f"Proactive matching error: {e}")
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_proactive_teams_push():
+    """Push not-yet-pushed NEW proactive matches to Teams as an Adaptive Card digest.
+
+    Flag-gated (proactive_teams_push_enabled, default off). Idempotent via a
+    SystemConfig watermark, so it is safe to run every scan cycle.
+    """
+    from ..database import SessionLocal
+    from ..services.proactive_teams_push import push_new_matches_to_teams
+
+    db = SessionLocal()
+    try:
+        result = await push_new_matches_to_teams(db)
+        if result["pushed"]:
+            logger.info(f"Proactive Teams push: delivered {result['pushed']} new match(es)")
+    except Exception as e:
+        logger.exception(f"Proactive Teams push error: {e}")
+        db.rollback()
     finally:
         db.close()
 
