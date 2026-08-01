@@ -26,29 +26,30 @@ ERP and send them.
   write. It is manual by design. Do not propose otherwise.
 - **ERP-neutral field naming.** We move to Dynamics 365 Business
   Central in 2027. Never hardcode a vendor name into a field,
-  model, or column. `erp_so_number`, not `acctivate_so_number`.
+  model, or column. Existing columns are neutral by omission
+  (`sales_order_number`, `customer_po_number`, `po_number`);
+  keep new ones the same way.
 - AVAIL stores external ERP document numbers as references only.
   It never owns the SO/PO lifecycle.
 
 ## Business context
 
-**The Quality Plan is the hub document.** One QP per TSO, today an
-Excel workbook in a SharePoint library. It contains four sections
-in one sheet:
+**The Quality Plan is the hub document.** One QP per TSO, native
+in AVAIL (`app/models/quality_plan.py`, migration 161) — it
+replaced the per-TSO Excel workbook on SharePoint. Sections:
 
 ```
 QUALITY PLAN (per TSO)
-├── SALES section        → gated by Sales Order approval
-├── PURCHASING section   → gated by PO approval
-├── BUY PLAN section     → gated by Buy Plan approval
+├── SALES section        → QP_SALES approval gate
+├── PURCHASING section   → QP_PURCHASING approval gate
 └── SERIAL / FRU section → ops / receiving tracking
-    + Vendor Prepayment approval (standalone, tied to a PO)
+    + Vendor Prepayment (standalone gate, tied to buy plan + line)
 ```
 
-The Buy Plan already in AVAIL is a section inside the QP, not a
-sibling of it. Approved QPs render back into the same SharePoint
-library path so existing approval-card attachment links keep
-working.
+In the data model the Buy Plan (`buy_plans_v3`) is the root and
+the QP hangs off it (get-or-create at /v2/qp/for-buy-plan/{bp_id});
+the buy plan has its own BUY_PLAN gate. Rendering approved QPs
+back to the SharePoint library is planned, NOT built.
 
 **Order types:** New, Revision, Testing Service, Comps Program,
 Stock Sale. Some order types have no buy plan.
@@ -60,35 +61,44 @@ plan shares the sales order's single manager approval. The detail
 pane is a working editor at every stage; every change is
 audit-logged.
 
-**Two-screen model:** the Approvals workspace is the approval desk
-(all decide actions). A full-page Deal view is the home for
-build/fix work — draft, submit, line edits, issues,
-request-prepayment.
+**One-screen model:** the Approvals workspace is both the
+approval desk and the working editor — draft, submit, line edits,
+and prepayment requests all happen in its panes. The old full-page
+Deal view is retired; /v2/buy-plans 308-redirects into the
+workspace.
 
-**Approval routing:** SO, buy plan, and PO run day to day through
-one manager, with two others as any-of-3 first-responder-wins
-backup. Prepayments route to two accounting approvers, plus the
-owner on higher value.
+**Approval routing:** eligibility is per-user toggles, not roles
+(`can_approve_buy_plans` / `_purchase_orders` / `_prepayments`,
+each with an optional per-user amount limit). A request opens ONE
+any-of step over everyone eligible; first responder wins. One
+manager day-to-day with two backups is practice (data), not code.
+Prepayments: managers approve in AVAIL; accounting confirms
+payment via a tokenized pay link (no login). The owner is
+notified, never a required approver.
 
-**Auto-approve rule:** deals under $5K revenue auto-approve.
-Everything else is a one-click approval with drill-in to edit.
+**No auto-approve (frozen scope):** every plan goes to the one
+manager approval regardless of value; the old sub-$5K rule was
+removed (`auto_approved` column is vestigial). Approval is one
+click with drill-in to edit.
 
-**Roles:** sales, buyer, manager, admin. No sub-roles. Internally,
-sales staff only sell, buyers only buy, traders do both.
+**Roles:** buyer, sales, trader, manager, admin (an `agent` role
+also exists in constants). Sales staff only sell, buyers only
+buy, traders do both — practice, not enforced in code.
 
 **Resell module:** the inverse of sourcing. Post customer excess,
 internal traders submit offers, owner builds a bid back to the
-customer. ExcessList/ExcessLine mirrors the
+customer. ExcessList/ExcessLineItem mirrors the
 Requisition/Requirement pattern. Posted lines dual-write into the
 existing Sighting table so the matcher picks them up. Offers are
 scoped per-line or take-all. Customer identity is hidden on
-postings. Match on part number only — no price ranking, no margin
-math.
+postings. Match on part number only — price never affects matching; no
+margin math (a display-only best-bid rollup ranks by highest
+unit price).
 
 ## Code conventions
 
 - Structure: `routers/` (thin), `services/` (fat), `models/`,
-  `schemas/`, `specs/`, `test_fixtures/`, `tests/`
+  `schemas/`, `specs/`, `tests/` (fixtures in `tests/fixtures/`)
 - Routers call services. Business logic never lives in a router.
 - Loguru, never `print()`
 - Header docstring on every new file
