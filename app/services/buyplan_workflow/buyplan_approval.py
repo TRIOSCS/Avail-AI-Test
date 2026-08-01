@@ -55,8 +55,9 @@ def submit_buy_plan(
 ) -> BuyPlan:
     """Submit a draft buy plan with SO# and optional line edits.
 
-    Flow: draft → pending (needs manager) OR draft → active (auto-approved).
-    Auto-approve when total cost < threshold AND no critical AI flags.
+    Flow: draft → pending, always. Every plan routes to the single manager
+    approval regardless of value — no auto-approve (frozen scope; the old
+    sub-$5K rule was removed, ``auto_approved`` column is vestigial).
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:

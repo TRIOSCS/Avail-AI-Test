@@ -105,12 +105,13 @@ Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
 
 # Pre-compute delete order (respects FK dependencies via reversed create order).
 #
-# The companies <-> customer_sites <-> site_contacts trio is an FK cycle that
-# ``sorted_tables`` cannot topologically order (it emits SAWarning 'unresolvable
-# cycles' and drops those FK edges from the sort). Delete the cycle explicitly in
-# child -> parent order FIRST, then everything else in reverse-create order. The
-# per-table resilient cleanup below is what actually guarantees isolation, but a
-# correct base order means the happy path never needs the retry.
+# The companies <-> customer_sites <-> site_contacts trio forms an FK cycle whose
+# back-edge (companies.primary_contact_id) is declared use_alter=True, so
+# ``sorted_tables`` orders it cleanly (guarded by tests/test_metadata_hygiene.py).
+# The explicit child -> parent order below is kept as belt-and-suspenders: it stays
+# correct even if a future FK re-forms the cycle. The per-table resilient cleanup
+# below is what actually guarantees isolation, but a correct base order means the
+# happy path never needs the retry.
 _CYCLE_DELETE_FIRST = ("site_contacts", "customer_sites", "companies")
 _tables_by_name = {t.name: t for t in Base.metadata.sorted_tables}
 _delete_order_names = [n for n in _CYCLE_DELETE_FIRST if n in _tables_by_name] + [

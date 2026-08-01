@@ -59,6 +59,15 @@ def _scrub_nested_body(data, sensitive_vars: set[str]):
     return data
 
 
+def _sentry_enabled() -> bool:
+    """Sentry initializes only with a DSN configured AND outside TESTING.
+
+    Serial test runs on the server inherit the real .env DSN — without the TESTING
+    guard, test-generated errors ship to the production Sentry project as live events.
+    """
+    return bool(settings.sentry_dsn) and not os.environ.get("TESTING")
+
+
 @asynccontextmanager
 async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
@@ -96,8 +105,8 @@ async def lifespan(app):
                 "the ACS webhook will reject all events until it's configured."
             )
 
-    # Sentry error tracking (conditional on DSN being set)
-    if settings.sentry_dsn:
+    # Sentry error tracking (DSN set and not under TESTING)
+    if _sentry_enabled():
         import sentry_sdk
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.httpx import HttpxIntegration
