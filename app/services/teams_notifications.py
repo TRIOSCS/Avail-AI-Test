@@ -88,9 +88,24 @@ async def post_teams_channel_card(card: dict, webhook_url: str | None = None) ->
 async def send_teams_dm(user, message: str, db=None) -> None:
     """Send a direct Teams message to a user via Graph API.
 
-    Creates (or gets) a 1:1 chat with the user and posts the message.
-    Silently skips if no valid token is available or if Graph API
-    rejects the chat creation (e.g. missing Chat.ReadWrite permissions).
+    Resolves the sending account (the token owner) via Graph ``/me``, then
+    creates (or gets) the chat and posts the message. Graph requires a
+    ``oneOnOne`` chat's members array to list EVERY participant including the
+    caller, so:
+
+    - Sender != recipient → two members: the token owner bound by AAD object
+      id and the recipient bound by email.
+    - Sender == recipient (the usual case here — DMs are sent with the
+      recipient's own delegated token) → the Graph self-chat form: a single
+      member bound by the caller's AAD object id. Chosen over skipping because
+      it actually delivers — the message lands in the user's Teams self-chat
+      and surfaces as a notification. (The old single-member payload bound by
+      EMAIL is what Graph rejected with "Creation of 'OneOnOne' chat requires
+      2 members".)
+
+    Silently skips (DEBUG/WARNING log, never raises) if no valid token is
+    available, ``/me`` cannot be resolved, or Graph rejects the chat creation
+    (e.g. missing Chat.ReadWrite permissions).
 
     Args:
         user: User model instance (needs .email, .access_token)
@@ -113,20 +128,34 @@ async def send_teams_dm(user, message: str, db=None) -> None:
             logger.debug("No valid token for {}, skipping Teams DM", user.email)
             return
         gc = GraphClient(token)
-        # Create or get 1:1 chat with the user (self-chat acts as notification)
-        chat = await gc.post_json(
-            "/chats",
-            {
-                "chatType": "oneOnOne",
-                "members": [
-                    {
-                        "@odata.type": "#microsoft.graph.aadUserConversationMember",
-                        "roles": ["owner"],
-                        "user@odata.bind": f"https://graph.microsoft.com/v1.0/users/{user.email}",
-                    }
-                ],
-            },
-        )
+        # Resolve the sending account — chat membership must include the
+        # caller, bound by AAD object id.
+        me = await gc.get_json("/me")
+        sender_id = me.get("id")
+        if not sender_id:
+            logger.warning("Teams DM to {} skipped — could not resolve sender via /me: {}", user.email, me)
+            return
+        sender_emails = {e.lower() for e in (me.get("mail"), me.get("userPrincipalName")) if isinstance(e, str) and e}
+        graph_users = "https://graph.microsoft.com/v1.0/users"
+        sender_member = {
+            "@odata.type": "#microsoft.graph.aadUserConversationMember",
+            "roles": ["owner"],
+            "user@odata.bind": f"{graph_users}/{sender_id}",
+        }
+        if (user.email or "").lower() in sender_emails:
+            # Self-chat: exactly one member — the caller, bound by AAD id.
+            members = [sender_member]
+        else:
+            members = [
+                sender_member,
+                {
+                    "@odata.type": "#microsoft.graph.aadUserConversationMember",
+                    "roles": ["owner"],
+                    "user@odata.bind": f"{graph_users}/{user.email}",
+                },
+            ]
+        # Create or get the 1:1 chat (Graph returns the existing chat if one exists)
+        chat = await gc.post_json("/chats", {"chatType": "oneOnOne", "members": members})
         chat_id = chat.get("id")
         if chat_id:
             await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})

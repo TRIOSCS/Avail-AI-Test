@@ -202,6 +202,7 @@ class TestTeamsNotifications:
 
         user = SimpleNamespace(email="user@test.com", access_token="token123")
         mock_gc = MagicMock()
+        mock_gc.get_json = AsyncMock(return_value={"id": "sender-guid", "mail": "sender@test.com"})
         mock_gc.post_json = AsyncMock(side_effect=[{"id": "chat123"}, {}])
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -214,6 +215,7 @@ class TestTeamsNotifications:
 
         user = SimpleNamespace(email="user@test.com", access_token=None)
         mock_gc = MagicMock()
+        mock_gc.get_json = AsyncMock(return_value={"id": "sender-guid", "mail": "sender@test.com"})
         mock_gc.post_json = AsyncMock(side_effect=[{"id": "chat123"}, {}])
 
         with (
@@ -237,6 +239,7 @@ class TestTeamsNotifications:
 
         user = SimpleNamespace(email="user@test.com", access_token="token123")
         mock_gc = MagicMock()
+        mock_gc.get_json = AsyncMock(return_value={"id": "sender-guid", "mail": "sender@test.com"})
         mock_gc.post_json = AsyncMock(return_value={})  # no "id" key
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
