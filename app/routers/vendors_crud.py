@@ -208,9 +208,14 @@ async def list_vendors(
                     query = query.order_by(None).order_by(sort_col.asc().nullsfirst())
 
         total = query.count()
+        if offset and offset >= total:
+            # Stale offset beyond the (re)filtered result set — e.g. a bookmarked or
+            # hand-edited URL. Never blindly trust a round-tripped offset: snap back
+            # to page 1 (same clamp as crm_service.customer_contacts_context).
+            offset = 0
         cards = query.limit(limit).offset(offset).all()
         if not cards:
-            return {"vendors": [], "total": 0, "limit": limit, "offset": offset}
+            return {"vendors": [], "total": total, "limit": limit, "offset": offset}
         # card_ids is non-empty here -- the empty-cards case returned above.
         card_ids = [c.id for c in cards]
         # Batch fetch review stats -- single query instead of N+1

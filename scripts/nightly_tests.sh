@@ -74,6 +74,10 @@ COVERAGE=$(grep -oP 'TOTAL\s+\d+\s+\d+\s+\K\d+' "$LOG_FILE" || echo "0")
 # cache; node_modules/ is gitignored so `git clean -qfd` above does not wipe it,
 # but npm ci rebuilds it deterministically either way). npm run build produces
 # the Vite assets (app/static/dist/) the TESTING uvicorn serves.
+# `npx playwright install chromium` self-heals the host browser cache
+# (/root/.cache/ms-playwright): when a dependency bump pins a new browser build
+# the host doesn't have, every E2E run fails at launch until someone installs it
+# by hand. Idempotent and near-instant when the pinned build is already present.
 echo "" >> "$LOG_FILE"
 echo "=== E2E (TS Playwright) ===" >> "$LOG_FILE"
 set +e
@@ -81,6 +85,7 @@ set +e
     cd "$WT" \
         && npm ci --no-audit --no-fund \
         && npm run build \
+        && npx playwright install chromium \
         && npx playwright test
 ) >> "$LOG_FILE" 2>&1
 E2E_EXIT=$?

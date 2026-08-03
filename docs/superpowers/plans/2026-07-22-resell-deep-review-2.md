@@ -350,6 +350,8 @@ The only floor on the per-line price is the client-side `min="0"` on the number 
 
 **Fix:** Reject negative (and absurdly large) customer_unit_price in build_bid_back with a 400, mirroring the quantity>0 validator.
 
+**Resolution: FIXED.** `build_bid_back` now rejects a negative `customer_unit_price` override at the assemble boundary with a 400 ("customer_unit_price cannot be negative") — see `app/services/bid_back_service.py:182-187` (the guard cites this finding inline). Zero/positive overrides pass through unchanged; blank/unparseable resolves to None upstream and falls back to the rollup price, preserving current semantics. Tests: `tests/test_resell_bid_back.py::test_build_bid_back_rejects_negative_override` (service boundary; also asserts no CustomerBidLine is created carrying the negative price) and `tests/test_resell_bid_lifecycle.py::test_assemble_bid_route_rejects_negative_price_400` (router level). The "absurdly large" upper bound from the fix suggestion was not added — only the negative floor, mirroring the quantity>0 discipline.
+
 ### 57. [P3] CustomerBid.status column default is the raw string "draft" instead of CustomerBidStatus.DRAFT
 **Where:** `app/models/excess.py:255` (dimension: gap:bid-back-export)
 

@@ -181,6 +181,10 @@ async def bulk_vendor_contacts(
         .order_by(VendorContact.id)
     )
     total = query.count()
+    if offset and offset >= total:
+        # Stale offset beyond the result set — snap back to page 1 with the real
+        # total (same clamp as crm_service.customer_contacts_context).
+        offset = 0
     contacts = query.offset(offset).limit(limit).all()
     items = [
         {
