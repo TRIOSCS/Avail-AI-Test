@@ -550,9 +550,24 @@ connector._do_search(part_number)
     +-- 400 (bad input) --> log + return []   (input-domain error, not contract)
     +-- 401/403 (auth)  --> raise ConnectorAuthError
     +-- 429 (rate)      --> raise ConnectorRateLimitError
+    +-- 403 (rate body) --> raise ConnectorRateLimitError
     +-- explicit quota  --> raise ConnectorQuotaError
     +-- 5xx             --> raise (httpx.HTTPStatusError via raise_for_status)
 ```
+
+**403 rate-vs-auth body classification (2026-08-03).** Mouser and element14
+return HTTP 403 for BOTH credential rejection AND their transient rate caps
+(Mouser "Maximum calls per minute exceeded"; element14 "Account Over Rate
+Limit" / "Account Over Queries Per Second Limit"). Each connector classifies
+by body markers: a 403 whose body names a rate/minute/second limit (and, for
+element14, carries no auth-failure marker — auth wins) raises
+`ConnectorRateLimitError`; every other 401/403 stays `ConnectorAuthError`.
+This matters for the nightly enrichment run:
+`authoritative_enrichment_service.fetch_authoritative` puts a
+`ConnectorRateLimitError` source on a 5-min in-run cooldown and re-enables it
+automatically, while `ConnectorAuthError`/`ConnectorQuotaError` disable the
+source for the rest of the run (oemsecrets 401 "User is not accepted or has
+run out of api calls" stays on this disable path by design).
 
 The `BaseConnector.search` wrapper:
 - Re-raises `ConnectorError` immediately without retry (hard failures

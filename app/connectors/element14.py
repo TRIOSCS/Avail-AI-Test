@@ -20,8 +20,13 @@ from ._vendor_spec_map import extract_vendor_specs
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
-# Markers that mean a 403 is a credential rejection (not a transient QPS cap).
+# Markers that mean a 403 is a credential rejection (not a transient rate cap).
 _AUTH_MARKERS = ("invalid", "unauthorized", "forbidden", "api key", "not accepted")
+
+# Markers that mean a 403 is a transient rate cap — the per-second QPS cap ("Account
+# Over Queries Per Second Limit") or the per-minute account cap ("Account Over Rate
+# Limit"). Auth markers win over these (see _api_search).
+_RATE_LIMIT_MARKERS = ("queries per second", "rate limit", "per minute")
 
 
 def _product_category(prod: dict, attrs: Any) -> str | None:
@@ -108,12 +113,20 @@ class Element14Connector(BaseConnector):
         # circuits the keyword fallback in _do_search — auto-recovers
         # when the next ping returns 200. See
         # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
-        # element14 returns HTTP 403 for BOTH credential rejection AND a per-second
-        # rate cap ("Account Over Queries Per Second Limit"). Distinguish by body:
-        # QPS errors contain "queries per second" but no auth-failure markers.
+        # element14 returns HTTP 403 for BOTH credential rejection AND its transient
+        # rate caps — per-second ("Account Over Queries Per Second Limit") and
+        # per-minute ("Account Over Rate Limit"). Distinguish by body: rate-cap
+        # errors carry a _RATE_LIMIT_MARKERS phrase and no auth-failure markers;
+        # they raise ConnectorRateLimitError so fetch_authoritative cools the
+        # source down and re-enables it within the same run instead of disabling
+        # it run-long.
         body = r.text.lower()
-        if r.status_code == 403 and "queries per second" in body and not any(m in body for m in _AUTH_MARKERS):
-            raise ConnectorRateLimitError(f"element14 rate limited (QPS): {r.text[:200]}")
+        if (
+            r.status_code == 403
+            and any(m in body for m in _RATE_LIMIT_MARKERS)
+            and not any(m in body for m in _AUTH_MARKERS)
+        ):
+            raise ConnectorRateLimitError(f"element14 rate limited: {r.text[:200]}")
         if r.status_code in (401, 403):
             # 401 = bad/expired API key; 403 = key rejected for the requested
             # store/region. Both require operator credential rotation.

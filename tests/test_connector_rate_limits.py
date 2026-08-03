@@ -186,6 +186,24 @@ class TestMouser403:
                 await c._do_search("SN74HC595N")
 
     @pytest.mark.asyncio
+    async def test_403_per_minute_rate_limit_raises_rate_limit_error(self):
+        """HTTP 403 'Maximum calls per minute exceeded' is a transient per-minute cap.
+
+        Must raise ConnectorRateLimitError (NOT ConnectorAuthError) so
+        fetch_authoritative applies a short cooldown instead of disabling mouser for the
+        entire nightly run.
+        """
+        from app.connectors.errors import ConnectorRateLimitError
+
+        c = self._make_connector()
+        resp = _mock_response(403, text="Maximum calls per minute exceeded")
+
+        with patch("app.connectors.mouser.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorRateLimitError, match="Mouser rate limited"):
+                await c._do_search("SN74HC595N")
+
+    @pytest.mark.asyncio
     async def test_429_raises_rate_limit_error(self):
         """HTTP 429 raises ConnectorRateLimitError.
 

@@ -29,7 +29,14 @@ class ConnectorAuthError(ConnectorError):
 
 
 class ConnectorRateLimitError(ConnectorError):
-    """429 — rate limited, persistent across in-connector retries.
+    """Transient rate cap: 429, or a 403 whose body names a rate/minute limit
+    (Mouser "Maximum calls per minute exceeded", element14 "Account Over Rate
+    Limit" / "Account Over Queries Per Second Limit"), persistent across
+    in-connector retries.
+
+    fetch_authoritative applies a short cooldown and re-enables the source
+    within the same run — never a run-long disable (that path is reserved for
+    ConnectorAuthError/ConnectorQuotaError).
 
     Operator action: usually none; auto-recovers when the upstream's
     rate-limit window expires and the next health ping returns 200.
