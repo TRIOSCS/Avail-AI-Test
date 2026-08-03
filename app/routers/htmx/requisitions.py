@@ -1437,3 +1437,90 @@ async def delete_requisition_task_endpoint(
     delete_task(db, task_id)
     logger.info("Requisition task {} deleted from req {} by {}", task_id, req_id, user.email)
     return HTMLResponse("")
+
+
+def _get_board_task_or_403(db: Session, req_id: int, task_id: int, user: User) -> tuple[Requisition, RequisitionTask]:
+    """Shared guard chain for the board task edit endpoints.
+
+    req 404 → requisition access → task IDOR 404 → mutation gate 403 (same skeleton as
+    the complete endpoint). Returns (req, task) once every check passes.
+    """
+    req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
+    task = db.get(RequisitionTask, task_id)
+    if not task or task.requisition_id != req_id:
+        raise HTTPException(404, "Task not found")
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, "Only the task's creator, assignee, or an admin can modify it")
+    return req, task
+
+
+@router.get("/api/requisitions/{req_id}/tasks/{task_id}/row", response_class=HTMLResponse)
+async def requisition_task_row_endpoint(
+    req_id: int,
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Re-render one board task row (outerHTML swap) — the edit form's Cancel target."""
+    req, task = _get_board_task_or_403(db, req_id, task_id, user)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["t"] = task
+    return template_response("htmx/partials/requisitions/tabs/_task_row.html", ctx)
+
+
+@router.get("/api/requisitions/{req_id}/tasks/{task_id}/edit-form", response_class=HTMLResponse)
+async def requisition_task_edit_form_endpoint(
+    req_id: int,
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the inline title+due edit form for a board task (outerHTML row swap)."""
+    req, task = _get_board_task_or_403(db, req_id, task_id, user)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["t"] = task
+    ctx["error"] = None
+    return template_response("htmx/partials/requisitions/tabs/_task_edit_form.html", ctx)
+
+
+@router.post("/api/requisitions/{req_id}/tasks/{task_id}/edit", response_class=HTMLResponse)
+async def edit_requisition_task_endpoint(
+    req_id: int,
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save title + due for a board task; return the re-rendered row (outerHTML swap).
+
+    Empty title re-renders the edit form with an inline error. Due is parsed via the
+    shared _parse_task_due_date; an empty value clears the stored due date (explicit
+    set, same rationale as the CRM edit in archive.py). Same guard chain as
+    complete/delete plus the shared mutation gate.
+    """
+    req, task = _get_board_task_or_403(db, req_id, task_id, user)
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    if not title:
+        ctx = _base_ctx(request, user, "requisitions")
+        ctx["req"] = req
+        ctx["t"] = task
+        ctx["error"] = "Title is required."
+        return template_response("htmx/partials/requisitions/tabs/_task_edit_form.html", ctx)
+    due_at = _parse_task_due_date(form.get("due_at"))
+    # Set both controlled fields directly so an empty due_at clears the existing value
+    # (update_task skips None values; bypass that for explicit edits — see archive.py).
+    task.title = title
+    task.due_at = due_at
+    db.commit()
+    db.refresh(task)
+    logger.info("Requisition task {} edited on req {} by {}", task_id, req_id, user.email)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["t"] = task
+    return template_response("htmx/partials/requisitions/tabs/_task_row.html", ctx)
