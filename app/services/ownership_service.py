@@ -307,7 +307,7 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
             <p>No activity has been logged on <strong>{html.escape(str(company.name))}</strong> in <strong>{days_inactive} days</strong>.</p>
             <p>You'll lose ownership in <strong>{days_remaining} day{"s" if days_remaining != 1 else ""}</strong> unless you make contact.</p>
             <p style="margin-top: 20px;">
-                <a href="{settings.app_url}/companies/{company.id}"
+                <a href="{settings.app_url}/v2/customers/{company.id}"
                    style="background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
                     View Account & Re-engage
                 </a>
