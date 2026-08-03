@@ -62,17 +62,18 @@ class TestCreateTask:
         assert task.title == "Manual Task"
         assert task.source == "manual"
 
-    def test_create_system_task_no_due_constraint(self, db_session: Session, requisition: Requisition):
+    def test_create_system_task_no_due_constraint(self, db_session: Session, requisition: Requisition, test_user: User):
         task = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
             title="System Task",
             source="system",
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.source == "system"
 
-    def test_manual_task_within_24h_raises(self, db_session: Session, requisition: Requisition):
+    def test_manual_task_within_24h_raises(self, db_session: Session, requisition: Requisition, test_user: User):
         due = datetime.now(UTC) + timedelta(hours=10)
         with pytest.raises(ValueError, match="24 hours"):
             task_service.create_task(
@@ -80,10 +81,11 @@ class TestCreateTask:
                 requisition_id=requisition.id,
                 title="Too Soon",
                 source="manual",
+                assigned_to_id=test_user.id,
                 due_at=due,
             )
 
-    def test_manual_task_naive_due_raises(self, db_session: Session, requisition: Requisition):
+    def test_manual_task_naive_due_raises(self, db_session: Session, requisition: Requisition, test_user: User):
         due = datetime.utcnow() + timedelta(hours=5)  # naive, < 24h
         with pytest.raises(ValueError):
             task_service.create_task(
@@ -91,10 +93,11 @@ class TestCreateTask:
                 requisition_id=requisition.id,
                 title="Naive Due",
                 source="manual",
+                assigned_to_id=test_user.id,
                 due_at=due,
             )
 
-    def test_create_with_description_and_priority(self, db_session: Session, requisition: Requisition):
+    def test_create_with_description_and_priority(self, db_session: Session, requisition: Requisition, test_user: User):
         task = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
@@ -102,6 +105,7 @@ class TestCreateTask:
             description="Important task",
             priority=3,
             source="system",
+            assigned_to_id=test_user.id,
         )
         assert task.priority == 3
         assert task.description == "Important task"
@@ -179,8 +183,10 @@ class TestGetMyTasksSummary:
 
 
 class TestUpdateTask:
-    def test_update_title(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="Old", source="system")
+    def test_update_title(self, db_session: Session, requisition: Requisition, test_user: User):
+        task = task_service.create_task(
+            db_session, requisition_id=requisition.id, title="Old", source="system", assigned_to_id=test_user.id
+        )
         updated = task_service.update_task(db_session, task.id, title="New")
         assert updated.title == "New"
 
@@ -188,13 +194,17 @@ class TestUpdateTask:
         result = task_service.update_task(db_session, 99999, title="X")
         assert result is None
 
-    def test_update_to_done_sets_completed_at(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
+    def test_update_to_done_sets_completed_at(self, db_session: Session, requisition: Requisition, test_user: User):
+        task = task_service.create_task(
+            db_session, requisition_id=requisition.id, title="T", source="system", assigned_to_id=test_user.id
+        )
         updated = task_service.update_task(db_session, task.id, status=TaskStatus.DONE)
         assert updated.completed_at is not None
 
-    def test_update_from_done_clears_completed_at(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
+    def test_update_from_done_clears_completed_at(self, db_session: Session, requisition: Requisition, test_user: User):
+        task = task_service.create_task(
+            db_session, requisition_id=requisition.id, title="T", source="system", assigned_to_id=test_user.id
+        )
         task_service.update_task(db_session, task.id, status=TaskStatus.DONE)
         updated = task_service.update_task(db_session, task.id, status=TaskStatus.TODO)
         assert updated.completed_at is None
@@ -232,8 +242,10 @@ class TestCompleteTask:
 
 
 class TestDeleteTask:
-    def test_delete_existing(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
+    def test_delete_existing(self, db_session: Session, requisition: Requisition, test_user: User):
+        task = task_service.create_task(
+            db_session, requisition_id=requisition.id, title="T", source="system", assigned_to_id=test_user.id
+        )
         result = task_service.delete_task(db_session, task.id)
         assert result is True
 

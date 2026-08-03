@@ -164,6 +164,7 @@ class TestCreateVendorTask:
             vendor_card_id=vendor_card.id,
             title="Review pricing with Test Vendor",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.vendor_card_id == vendor_card.id
@@ -180,6 +181,7 @@ class TestCreateVendorTask:
             vendor_card_id=vendor_card.id,
             title="Done task",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         task.status = TaskStatus.DONE
         db_session.commit()
@@ -200,6 +202,7 @@ class TestVendorTaskComplete:
             vendor_card_id=vendor_card.id,
             title="Follow up call",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         before = _count_activity(db_session)
         result = complete_crm_task(db_session, task.id, test_user.id, is_admin=False)
@@ -302,6 +305,7 @@ class TestVendorTaskEndpoints:
             vendor_card_id=vendor_card.id,
             title="HTTP complete test",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         before = _count_activity(db_session)
         response = client.post(f"/v2/partials/tasks/{task.id}/complete")
@@ -322,6 +326,7 @@ class TestVendorTaskEndpoints:
             vendor_card_id=vendor_card.id,
             title="To delete",
             created_by=admin_user.id,
+            assigned_to_id=admin_user.id,
         )
         response = admin_client.delete(f"/v2/partials/tasks/{task.id}")
         assert response.status_code == 200
@@ -347,6 +352,7 @@ class TestVendorTaskEndpoints:
             vendor_card_id=vendor_card.id,
             title="Admin created task",
             created_by=admin_user.id,
+            assigned_to_id=admin_user.id,
         )
 
         # Override deps to be test_user (non-admin) — require_admin still returns test_user
@@ -451,6 +457,7 @@ class TestVendorTaskEditForm:
             vendor_card_id=vendor_card.id,
             title="Edit me",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         response = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
         assert response.status_code == 200
@@ -474,6 +481,7 @@ class TestVendorTaskEditForm:
             vendor_card_id=vendor_card.id,
             title="Edit me",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         response = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
         assert response.status_code == 200
@@ -489,6 +497,7 @@ class TestVendorTaskEditForm:
             vendor_card_id=vendor_card.id,
             title="Edit me",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         response = client.post(
             f"/v2/partials/tasks/{task.id}/edit",

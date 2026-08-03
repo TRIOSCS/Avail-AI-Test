@@ -137,13 +137,14 @@ class TestMigration135CheckConstraint:
             db_session.commit()
         db_session.rollback()
 
-    def test_task_with_requisition_id_only_passes(self, db_session: Session, test_requisition):
+    def test_task_with_requisition_id_only_passes(self, db_session: Session, test_requisition, test_user):
         """Existing pattern: requisition_id set, company/contact NULL — still valid."""
         task = create_task(
             db_session,
             requisition_id=test_requisition.id,
             title="Req-scoped task",
             source="system",
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.company_id is None
@@ -162,6 +163,7 @@ class TestCreateAccountTask:
             company_id=test_company.id,
             title="Call Acme by Friday",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.company_id == test_company.id
@@ -175,6 +177,7 @@ class TestCreateAccountTask:
             company_id=test_company.id,
             title="Follow up",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         fetched = db_session.get(RequisitionTask, task.id)
         assert fetched is not None
@@ -198,6 +201,7 @@ class TestCreateContactTask:
             site_contact_id=test_site_contact.id,
             title="Send intro deck to Alice",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.site_contact_id == test_site_contact.id
@@ -212,13 +216,19 @@ class TestCreateContactTask:
 
 class TestGetOpenTasksForCompany:
     def test_returns_open_tasks(self, db_session: Session, test_company: Company, test_user):
-        create_company_task(db_session, company_id=test_company.id, title="T1", created_by=test_user.id)
-        create_company_task(db_session, company_id=test_company.id, title="T2", created_by=test_user.id)
+        create_company_task(
+            db_session, company_id=test_company.id, title="T1", created_by=test_user.id, assigned_to_id=test_user.id
+        )
+        create_company_task(
+            db_session, company_id=test_company.id, title="T2", created_by=test_user.id, assigned_to_id=test_user.id
+        )
         tasks = get_open_tasks_for_company(db_session, test_company.id)
         assert len(tasks) == 2
 
     def test_excludes_done(self, db_session: Session, test_company: Company, test_user):
-        task = create_company_task(db_session, company_id=test_company.id, title="Done", created_by=test_user.id)
+        task = create_company_task(
+            db_session, company_id=test_company.id, title="Done", created_by=test_user.id, assigned_to_id=test_user.id
+        )
         task.status = TaskStatus.DONE
         db_session.commit()
         tasks = get_open_tasks_for_company(db_session, test_company.id)
@@ -234,6 +244,7 @@ class TestGetOpenTasksForCompany:
             title="Far future",
             due_at=now + timedelta(days=10),
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         t_near = create_company_task(
             db_session,
@@ -241,6 +252,7 @@ class TestGetOpenTasksForCompany:
             title="Near future",
             due_at=now + timedelta(days=2),
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         next_task = get_next_task_for_company(db_session, test_company.id)
         assert next_task is not None
@@ -254,7 +266,13 @@ class TestGetOpenTasksForContact:
         test_site_contact: SiteContact,
         test_user,
     ):
-        create_contact_task(db_session, site_contact_id=test_site_contact.id, title="CT1", created_by=test_user.id)
+        create_contact_task(
+            db_session,
+            site_contact_id=test_site_contact.id,
+            title="CT1",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+        )
         tasks = get_open_tasks_for_contact(db_session, test_site_contact.id)
         assert len(tasks) == 1
 
@@ -269,6 +287,7 @@ class TestGetOpenTasksForContact:
             site_contact_id=test_site_contact.id,
             title="Done CT",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         task.status = TaskStatus.DONE
         db_session.commit()
@@ -294,6 +313,7 @@ class TestNoActivityLogOnTaskComplete:
             company_id=test_company.id,
             title="Call by Friday",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         before = _count_activity(db_session)
         result = complete_crm_task(db_session, task.id, test_user.id, "Done")
@@ -375,6 +395,7 @@ class TestExistingRequisitionTasksUnaffected:
             requisition_id=test_requisition.id,
             title="Existing requisition task",
             source="system",
+            assigned_to_id=test_user.id,
         )
         assert task.requisition_id == test_requisition.id
         assert task.company_id is None
@@ -437,6 +458,7 @@ class TestAccountTaskEndpoints:
             company_id=test_company.id,
             title="HTTP complete test",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
         )
         before = _count_activity(db_session)
         response = client.post(f"/v2/partials/tasks/{task.id}/complete")
@@ -639,7 +661,13 @@ class TestCrmCompleteNote:
     ):
         """POST /v2/partials/tasks/{id}/complete persists an optional completion_note
         instead of discarding it (the endpoint previously hard-coded "")."""
-        task = create_company_task(db_session, company_id=test_company.id, title="Note me", created_by=test_user.id)
+        task = create_company_task(
+            db_session,
+            company_id=test_company.id,
+            title="Note me",
+            created_by=test_user.id,
+            assigned_to_id=test_user.id,
+        )
         resp = client.post(
             f"/v2/partials/tasks/{task.id}/complete",
             data={"completion_note": "Closed via email"},
