@@ -232,11 +232,16 @@ async def test_exact_miss_returns_empty_single_call(connector, monkeypatch):
         # ConnectorRateLimitError so fetch_authoritative applies a cooldown instead of
         # disabling the source.
         ("Account Over Queries Per Second Limit", "ConnectorRateLimitError"),
+        # 403 'Account Over Rate Limit' (the nightly per-minute cap, no auth marker) is
+        # ALSO transient → ConnectorRateLimitError, not a run-long disable.
+        ("Account Over Rate Limit", "ConnectorRateLimitError"),
         # 403 whose body contains BOTH 'queries per second' AND an auth marker is a
         # credential rejection → ConnectorAuthError (auth wins over rate limit).
         ("Invalid API key - queries per second", "ConnectorAuthError"),
+        # A plain 403 with no rate marker stays a credential rejection.
+        ("Forbidden", "ConnectorAuthError"),
     ],
-    ids=["qps_only_rate_limit", "qps_with_auth_marker_auth"],
+    ids=["qps_only_rate_limit", "over_rate_limit_rate_limit", "qps_with_auth_marker_auth", "plain_403_auth"],
 )
 async def test_403_body_classification(connector, monkeypatch, body, expected_error_attr):
     """A 403 body is classified as a rate-limit vs.

@@ -17,6 +17,10 @@ from ._core_attrs import clean_str, generic_attribute, map_lifecycle, safe_pin_c
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
+# Body markers meaning a 403 is a transient rate cap (e.g. "Maximum calls per minute
+# exceeded"), not a credential rejection. Mouser returns HTTP 403 for BOTH.
+_RATE_LIMIT_MARKERS = ("per minute", "per second", "rate limit", "too many")
+
 
 class MouserConnector(BaseConnector):
     """Mouser Search API — simple API key auth."""
@@ -57,11 +61,16 @@ class MouserConnector(BaseConnector):
             timeout=self.timeout,
         )
 
-        # 403 — bad/revoked key, quota-rejected, or region-locked. Raise
-        # so health_monitor flips status='error' and the source is excluded
-        # from user searches; auto-recovers on next ping success if it was
-        # transient.
+        # Mouser returns HTTP 403 for BOTH a transient rate cap ("Maximum calls
+        # per minute exceeded") AND bad/revoked/region-locked keys. Distinguish
+        # by body: rate-cap 403s raise ConnectorRateLimitError so
+        # fetch_authoritative applies a short cooldown and re-enables the source
+        # within the same run; credential 403s raise ConnectorAuthError so
+        # health_monitor flips status='error' and the source is excluded from
+        # user searches until the operator rotates the key.
         if r.status_code == 403:
+            if any(m in r.text.lower() for m in _RATE_LIMIT_MARKERS):
+                raise ConnectorRateLimitError(f"Mouser rate limited: HTTP 403 {r.text[:200]}")
             raise ConnectorAuthError(f"Mouser auth error: HTTP 403 {r.text[:200]}")
 
         # 429 — explicit rate limit. Auto-recovers on next ping success.
