@@ -141,9 +141,26 @@ async def test_post_teams_channel_catches_exception():
 # ---------------------------------------------------------------------------
 
 
+GRAPH_USERS = "https://graph.microsoft.com/v1.0/users"
+
+SENDER_ME = {
+    "id": "sender-guid-1",
+    "mail": "notifier@trioscs.com",
+    "userPrincipalName": "notifier@trioscs.com",
+}
+
+
 def _make_user(email="buyer@trioscs.com", access_token="tok-123"):
     """Create a lightweight user-like object for DM tests."""
     return SimpleNamespace(email=email, access_token=access_token)
+
+
+def _make_gc(me=SENDER_ME, chat={"id": "chat-id-123"}):
+    """Mock GraphClient instance: /me identity + chat-create/message-post responses."""
+    gc = MagicMock()
+    gc.get_json = AsyncMock(return_value=me)
+    gc.post_json = AsyncMock(side_effect=[chat, {}])
+    return gc
 
 
 @pytest.mark.asyncio
@@ -181,16 +198,56 @@ async def test_send_teams_dm_skips_when_token_refresh_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_send_teams_dm_uses_access_token_when_no_db():
-    """Uses user.access_token directly when no db session is provided."""
+async def test_send_teams_dm_creates_chat_with_two_members():
+    """POST /chats carries BOTH members: token owner (by AAD id) + recipient (by email).
+
+    Graph rejects oneOnOne chats with fewer than 2 members ("Creation of 'OneOnOne' chat
+    requires 2 members"), so the payload must bind the sender resolved via /me AND the
+    recipient.
+    """
     user = _make_user(access_token="direct-token")
-    mock_gc_instance = MagicMock()
-    mock_gc_instance.post_json = AsyncMock(
-        side_effect=[
-            {"id": "chat-id-123"},  # /chats response
-            {},  # /chats/{id}/messages response
-        ]
+    mock_gc_instance = _make_gc()
+
+    with patch(
+        "app.utils.graph_client.GraphClient",
+        return_value=mock_gc_instance,
+    ) as mock_gc_cls:
+        from app.services.teams_notifications import send_teams_dm
+
+        await send_teams_dm(user, "notification text")
+
+    # GraphClient constructed with the user's token; sender resolved via /me
+    mock_gc_cls.assert_called_once_with("direct-token")
+    mock_gc_instance.get_json.assert_awaited_once_with("/me")
+
+    chat_call = mock_gc_instance.post_json.await_args_list[0]
+    assert chat_call.args[0] == "/chats"
+    payload = chat_call.args[1]
+    assert payload["chatType"] == "oneOnOne"
+    members = payload["members"]
+    assert len(members) == 2
+    for m in members:
+        assert m["@odata.type"] == "#microsoft.graph.aadUserConversationMember"
+        assert m["roles"] == ["owner"]
+    assert members[0]["user@odata.bind"] == f"{GRAPH_USERS}/sender-guid-1"
+    assert members[1]["user@odata.bind"] == f"{GRAPH_USERS}/{user.email}"
+
+    mock_gc_instance.post_json.assert_any_await(
+        "/chats/chat-id-123/messages",
+        {"body": {"content": "notification text"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_send_teams_dm_self_chat_when_sender_is_recipient():
+    """Sender == recipient → Graph self-chat: ONE member bound by the caller's AAD id.
+
+    Duplicate members would be rejected, and the old email-bound single member is
+    exactly the payload Graph 400s on. Email match is case-insensitive.
+    """
+    user = _make_user(email="Buyer@trioscs.com")
+    me = {"id": "self-guid", "mail": "buyer@trioscs.com", "userPrincipalName": "buyer@trioscs.com"}
+    mock_gc_instance = _make_gc(me=me)
 
     with patch(
         "app.utils.graph_client.GraphClient",
@@ -198,26 +255,39 @@ async def test_send_teams_dm_uses_access_token_when_no_db():
     ):
         from app.services.teams_notifications import send_teams_dm
 
-        await send_teams_dm(user, "notification text")
+        await send_teams_dm(user, "self note")
 
-    # Verify GraphClient was constructed with the user's token
-    mock_gc_instance.post_json.assert_any_call(
-        "/chats",
-        {
-            "chatType": "oneOnOne",
-            "members": [
-                {
-                    "@odata.type": "#microsoft.graph.aadUserConversationMember",
-                    "roles": ["owner"],
-                    "user@odata.bind": f"https://graph.microsoft.com/v1.0/users/{user.email}",
-                }
-            ],
-        },
-    )
-    mock_gc_instance.post_json.assert_any_call(
+    chat_call = mock_gc_instance.post_json.await_args_list[0]
+    assert chat_call.args[0] == "/chats"
+    members = chat_call.args[1]["members"]
+    assert len(members) == 1
+    # Bound by AAD object id, NOT by email
+    assert members[0]["user@odata.bind"] == f"{GRAPH_USERS}/self-guid"
+
+    mock_gc_instance.post_json.assert_any_await(
         "/chats/chat-id-123/messages",
-        {"body": {"content": "notification text"}},
+        {"body": {"content": "self note"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_send_teams_dm_skips_when_me_unresolved():
+    """If /me yields no id (e.g. error dict from the retry layer), no chat is
+    attempted."""
+    user = _make_user()
+    mock_gc_instance = _make_gc(me={"error": 401, "detail": "token expired"})
+
+    with _capture_logs("WARNING") as captured:
+        with patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc_instance,
+        ):
+            from app.services.teams_notifications import send_teams_dm
+
+            await send_teams_dm(user, "never sent")
+
+        assert any("could not resolve sender" in m for m in captured)
+    mock_gc_instance.post_json.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -225,19 +295,13 @@ async def test_send_teams_dm_refreshes_token_via_db():
     """When db is provided, uses get_valid_token for a fresh token."""
     user = _make_user(access_token=None)
     mock_db = MagicMock()
-    mock_gc_instance = MagicMock()
-    mock_gc_instance.post_json = AsyncMock(
-        side_effect=[
-            {"id": "chat-abc"},
-            {},
-        ]
-    )
+    mock_gc_instance = _make_gc(chat={"id": "chat-abc"})
 
     with (
         patch(
             "app.utils.graph_client.GraphClient",
             return_value=mock_gc_instance,
-        ),
+        ) as mock_gc_cls,
         patch(
             "app.scheduler.get_valid_token",
             new_callable=AsyncMock,
@@ -248,6 +312,7 @@ async def test_send_teams_dm_refreshes_token_via_db():
 
         await send_teams_dm(user, "dm text", db=mock_db)
 
+    mock_gc_cls.assert_called_once_with("refreshed-token")
     assert mock_gc_instance.post_json.call_count == 2
 
 
@@ -255,7 +320,7 @@ async def test_send_teams_dm_refreshes_token_via_db():
 async def test_send_teams_dm_skips_message_when_no_chat_id():
     """If /chats returns no id, the message post is skipped."""
     user = _make_user()
-    mock_gc_instance = MagicMock()
+    mock_gc_instance = _make_gc()
     mock_gc_instance.post_json = AsyncMock(return_value={})  # no "id" key
 
     with patch(
