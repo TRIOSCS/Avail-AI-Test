@@ -21,8 +21,8 @@ from ...dependencies import require_access
 from ...models import User
 from ...models.task import RequisitionTask
 from ...services.task_service import (
-    _is_crm_task_authorized,
     create_personal_task,
+    is_task_mutation_authorized,
     snooze_task,
     update_task,
 )
@@ -163,7 +163,7 @@ async def snooze_my_day_task(
     """Snooze one of my tasks forward by ``days`` (quick options 1 / 3 / 7). Re-renders
     the filtered results so the task re-buckets in place.
 
-    Authz mirrors the CRM/vendor Snooze gate (task_service._is_crm_task_authorized):
+    Authz mirrors the CRM/vendor Snooze gate (task_service.is_task_mutation_authorized):
     assignee, creator, parent account owner, or admin. A personal / requisition-scoped
     task has no parent company, so that resolves to assignee-or-creator-or-admin — a
     non-owner cannot snooze someone else's task.
@@ -171,7 +171,7 @@ async def snooze_my_day_task(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to snooze this task")
     snooze_task(db, task_id, days=days if days in (1, 3, 7) else 1)
     logger.info("Task {} snoozed +{}d from My Day by {}", task_id, days, user.email)
@@ -196,7 +196,7 @@ async def reopen_my_day_task(
     """Reopen one of my done tasks (status → todo, clears completed_at). Re-renders the
     filtered results so the task leaves the Done view.
 
-    Authz mirrors the Snooze gate (task_service._is_crm_task_authorized): assignee,
+    Authz mirrors the Snooze gate (task_service.is_task_mutation_authorized): assignee,
     creator, parent account owner, or admin — a non-owner cannot reopen someone else's
     task. Reuses update_task, which clears completed_at on any non-done status
     transition.
@@ -204,7 +204,7 @@ async def reopen_my_day_task(
     task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to reopen this task")
     update_task(db, task_id, status=TaskStatus.TODO)
     logger.info("Task {} reopened from My Day by {}", task_id, user.email)

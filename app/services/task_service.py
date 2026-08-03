@@ -535,8 +535,12 @@ def get_open_tasks_for_vendor_card(db: Session, vendor_card_id: int) -> list[Req
     )
 
 
-def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
-    """Return True if user_id is allowed to mutate the given CRM/vendor task.
+def is_task_mutation_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
+    """Return True if user_id is allowed to mutate (edit/complete/delete) the given
+    task.
+
+    The single mutation gate for every task surface (CRM, vendor, requisition board,
+    My Day).
 
     Allowed if any of:
       - user is an admin
@@ -587,7 +591,7 @@ def complete_crm_task(
     task = db.get(RequisitionTask, task_id)
     if not task:
         return None
-    if not _is_crm_task_authorized(db, task, user_id, is_admin):
+    if not is_task_mutation_authorized(db, task, user_id, is_admin):
         raise PermissionError("Not authorized to complete this task")
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(UTC)

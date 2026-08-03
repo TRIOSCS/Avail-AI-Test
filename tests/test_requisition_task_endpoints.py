@@ -40,8 +40,13 @@ from app.models.task import RequisitionTask
 
 
 @pytest.fixture()
-def existing_task(db_session: Session, test_requisition: Requisition) -> RequisitionTask:
-    """A todo task on the requisition, unassigned (board tasks need not be assigned)."""
+def existing_task(db_session: Session, test_requisition: Requisition, test_user: User) -> RequisitionTask:
+    """A todo task on the requisition created by test_user, unassigned (legacy row
+    shape:
+
+    pre-backfill tasks may still lack an assignee; the mutation gate admits the
+    creator).
+    """
     t = RequisitionTask(
         requisition_id=test_requisition.id,
         title="Review incoming offers",
@@ -49,6 +54,7 @@ def existing_task(db_session: Session, test_requisition: Requisition) -> Requisi
         status=TaskStatus.TODO,
         priority=2,
         source="manual",
+        created_by=test_user.id,
         created_at=datetime.now(UTC),
     )
     db_session.add(t)
@@ -253,8 +259,9 @@ class TestCompleteRequisitionTask:
     def test_complete_works_for_unassigned_board_task(
         self, client, db_session: Session, test_requisition: Requisition, existing_task: RequisitionTask
     ):
-        """The shared board must complete tasks even when assigned_to_id is None (the
-        assignee-only part-comms path would reject these)."""
+        """A legacy unassigned board task (pre-backfill row) is still completable by its
+        creator — the mutation gate admits creator | assignee | admin, so a NULL
+        assignee alone must not dead-end the task."""
         assert existing_task.assigned_to_id is None
         resp = client.post(f"/api/requisitions/{test_requisition.id}/tasks/{existing_task.id}/complete")
         assert resp.status_code == 200

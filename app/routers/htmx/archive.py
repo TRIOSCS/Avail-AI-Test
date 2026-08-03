@@ -487,13 +487,11 @@ async def delete_task_endpoint(
     is_crm_task = task.company_id is not None or task.site_contact_id is not None
     if not is_crm_task and not is_vendor_task:
         raise HTTPException(400, "Not a CRM task")
-    from app.services.task_service import _is_crm_task_authorized
+    from app.services.task_service import is_task_mutation_authorized
 
-    # Vendor task delete requires admin; customer task uses the full authz gate.
-    if is_vendor_task and not is_crm_task:
-        if user.role != UserRole.ADMIN:
-            raise HTTPException(403, "Only admins can delete vendor tasks")
-    elif not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    # One gate for every task kind: creator, assignee, admin, or (customer tasks)
+    # the parent account owner. Vendor delete is no longer admin-only.
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to delete this task")
     # Capture parent refs before deletion
     company_id = task.company_id
@@ -593,9 +591,9 @@ async def task_edit_form(
     is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
     if not task.company_id and not task.site_contact_id and not is_vendor_task:
         raise HTTPException(400, "Not a CRM task")
-    from app.services.task_service import _is_crm_task_authorized
+    from app.services.task_service import is_task_mutation_authorized
 
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
     return _render_task_edit_form(request, user, db, task)
 
@@ -615,9 +613,9 @@ async def edit_task_endpoint(
     """
 
     from app.services.task_service import (
-        _is_crm_task_authorized,
         get_open_tasks_for_company,
         get_open_tasks_for_contact,
+        is_task_mutation_authorized,
     )
 
     task = db.get(RequisitionTask, task_id)
@@ -626,7 +624,7 @@ async def edit_task_endpoint(
     _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
     if not task.company_id and not task.site_contact_id and not _is_vendor:
         raise HTTPException(400, "Not a CRM task")
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to edit this task")
     # Validation errors re-render the id-bearing edit form (NOT a bare <p>): the
     # response outerHTML-swaps the #…-tasks-{id} container, which must survive.
@@ -703,9 +701,9 @@ async def snooze_task_endpoint(
     Returns the refreshed parent task list (account, contact, or vendor card).
     """
     from app.services.task_service import (
-        _is_crm_task_authorized,
         get_open_tasks_for_company,
         get_open_tasks_for_contact,
+        is_task_mutation_authorized,
         snooze_task,
     )
 
@@ -715,7 +713,7 @@ async def snooze_task_endpoint(
     _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
     if not task.company_id and not task.site_contact_id and not _is_vendor:
         raise HTTPException(400, "Not a CRM task")
-    if not _is_crm_task_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to snooze this task")
     snooze_task(db, task_id)
     logger.info("Task {} snoozed by user {}", task_id, user.id)
