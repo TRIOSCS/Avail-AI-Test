@@ -908,6 +908,55 @@ def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
         mock_merge.assert_not_called()
 
 
+def test_sync_user_contacts_delta_call_sends_no_odata_params(scheduler_db, test_user):
+    """Graph 400s ErrorInvalidUrlQuery on $select/$top with /me/contacts/delta.
+
+    Change tracking over the Contacts resource supports NO OData query params —
+    page size must travel via the Prefer: odata.maxpagesize header (delta_query's
+    max_page_size). A normal delta page must still flow into the VendorCard
+    sync path (merge calls fire, delta token persisted).
+    """
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.delta_query = AsyncMock(
+        return_value=(
+            [
+                {
+                    "companyName": "Delta Page Co",
+                    "displayName": "Del Ta",
+                    "emailAddresses": [{"address": "del@deltapageco.com"}],
+                    "businessPhones": ["+1-555-0100"],
+                    "mobilePhone": None,
+                }
+            ],
+            "delta-token",
+        )
+    )
+
+    with (
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="delta page co"),
+        patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e,
+        patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p,
+    ):
+        from app.jobs.email_jobs import _sync_user_contacts
+
+        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
+
+    call = mock_gc.delta_query.call_args
+    assert call.args[0] == "/me/contacts/delta"
+    sent_params = call.kwargs.get("params")
+    assert not sent_params, f"contacts delta must not send OData query params, got: {sent_params}"
+    # Page size rides the Prefer: odata.maxpagesize header instead
+    assert call.kwargs.get("max_page_size") == 100
+    # Normal delta page still processes into the sync path
+    mock_merge_e.assert_called_once()
+    mock_merge_p.assert_called_once()
+    assert test_user.last_contacts_sync is not None
+
+
 def test_sync_user_contacts_graph_error(scheduler_db, test_user):
     """Graph API error during contacts sync is handled."""
     test_user.access_token = "at_sync"

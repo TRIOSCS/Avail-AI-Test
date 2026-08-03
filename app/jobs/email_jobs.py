@@ -621,13 +621,13 @@ async def _sync_user_contacts(user, db):
         # No initial_lookback_days: contacts deltas don't support the
         # receivedDateTime filter, and an address book is a finite collection —
         # draining it fully on the initial round IS the desired full sync.
+        # No OData params either: change tracking over the Contacts resource
+        # rejects $select/$top/$filter/etc. with 400 ErrorInvalidUrlQuery —
+        # page size rides the Prefer: odata.maxpagesize header (max_page_size)
+        # and full contact objects come back, which is fine.
         contacts, new_token = await gc.delta_query(
             "/me/contacts/delta",
             delta_token=delta_token,
-            params={
-                "$select": "displayName,emailAddresses,businessPhones,mobilePhone,companyName",
-                "$top": "100",
-            },
             max_items=2500,
             max_page_size=100,
         )
