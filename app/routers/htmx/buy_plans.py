@@ -588,11 +588,7 @@ async def buy_plan_submit_partial(
     db: Session = Depends(get_db),
 ):
     """Submit a draft buy plan with SO# — returns refreshed detail partial."""
-    from ...services.buyplan_notifications import (
-        notify_approved,
-        notify_submitted,
-        run_notify_bg,
-    )
+    from ...services.buyplan_notifications import notify_submitted, run_notify_bg
     from ...services.buyplan_workflow import submit_buy_plan
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
@@ -613,10 +609,11 @@ async def buy_plan_submit_partial(
             salesperson_notes=form.get("salesperson_notes") or None,
         )
         db.commit()
-        if plan.auto_approved:
-            await run_notify_bg(notify_approved, plan.id)
-        else:
-            await run_notify_bg(notify_submitted, plan.id)
+        # Every submit goes to the manager gate — the sub-$5K auto-approve rule is
+        # gone (auto_approved is vestigial; kept only as historical display truth in
+        # buyplan_reports). A legacy auto_approved row must not fire an approved
+        # notification here.
+        await run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 

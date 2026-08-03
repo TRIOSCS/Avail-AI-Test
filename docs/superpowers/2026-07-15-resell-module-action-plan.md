@@ -1,5 +1,7 @@
 # Resell Module — Prioritized Action Plan (2026-07-15)
 
+> **SUPERSEDED** by `docs/superpowers/plans/2026-07-22-resell-deep-review-2.md` — that deep review re-verified this module post-remediation and carries the current findings + FIXED annotations; treat this plan as historical.
+
 Synthesized from a five-lens deep review (function, workflow, data, silent-failures, performance) plus a tests lens, adversarially verified against current main (post #731/#734/#735/#736) and the live staging DB. 33 findings confirmed, 0 refuted, 34 unverified P2 polish notes. Findings that multiple lenses hit independently are merged below with the agreeing lenses named — cross-lens agreement is the strongest confidence signal in this review.
 
 ## 1. Executive summary

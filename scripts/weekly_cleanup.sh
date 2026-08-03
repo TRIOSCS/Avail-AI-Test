@@ -13,11 +13,15 @@ echo "=== Cleanup started $(date -u) ===" >> "$LOG"
 docker builder prune -af --filter "until=168h" >> "$LOG" 2>&1 || true
 
 # 2. Rotate backups — keep last 3 SQL dumps and last 3 .dump files
+# Empty-glob-safe: with no match, `ls *.sql` exits 2 (the unexpanded glob), and under
+# `set -euo pipefail` that single pipeline killed the WHOLE script here — every step
+# below (journal vacuum, debug-log prune, image prune) silently never ran. Rotation
+# is best-effort like the other steps, so each pipeline gets `|| true`.
 cd /root/backups 2>/dev/null && {
-    ls -t *.sql 2>/dev/null | tail -n +4 | xargs -r rm -v >> "$LOG" 2>&1
-    ls -t *.dump 2>/dev/null | tail -n +4 | xargs -r rm -v >> "$LOG" 2>&1
+    ls -t *.sql 2>/dev/null | tail -n +4 | xargs -r rm -v >> "$LOG" 2>&1 || true
+    ls -t *.dump 2>/dev/null | tail -n +4 | xargs -r rm -v >> "$LOG" 2>&1 || true
     # Remove old code backup dirs (keep last 2)
-    ls -dt code_* 2>/dev/null | tail -n +3 | xargs -r rm -rf
+    ls -dt code_* 2>/dev/null | tail -n +3 | xargs -r rm -rf || true
 }
 
 # 3. Cap journal logs at 200MB

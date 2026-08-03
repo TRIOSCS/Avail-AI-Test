@@ -4,11 +4,14 @@ Browser-automation worker that searches thebrokersite.com — a European broker
 marketplace — for electronic component inventory listings. Mirrors the architecture
 of the ICsource worker (`app/services/ics_worker/`).
 
-**Phase 1 ships DORMANT:** the full scaffold + DB + ops + registration exist, but the
-four site-specific files (`session_manager`, `search_engine`, `result_parser`,
-`circuit_breaker`) carry placeholder selectors marked `# TODO(phase2)`. The worker
-stays idle until member credentials and real selectors (from a logged-in capture) are
-in place.
+**Currently DORMANT — for lack of credentials, not code.** The site-specific files
+(`session_manager`, `search_engine`, `result_parser`, `circuit_breaker`) carry real
+selectors and a full login flow (form `form:has(input[name='password'])`, email +
+password fill, logged-in health check). The worker stays dormant because no member
+credentials are configured: with `TBF_USERNAME` / `TBF_PASSWORD` empty the initial
+login fails and the worker exits ("initial login failed, exiting"), and the
+`avail-tbf-worker` systemd unit is not started on the host. Set credentials in
+`.env.tbf-worker` and start the service to activate it.
 
 ## Quick Start
 
@@ -28,13 +31,13 @@ DISPLAY=:99 PYTHONPATH=/root/availai python -m app.services.tbf_worker.worker
 tbf_worker/
 ├── worker.py          # Main loop: gate → poll → search → parse → save
 ├── config.py          # TBF_* env vars with defaults
-├── session_manager.py # Patchright browser + TBF login            (phase-2 selectors)
-├── search_engine.py   # Browser search via form fill + click       (phase-2 selectors)
-├── result_parser.py   # BeautifulSoup HTML → TbfSighting dataclass  (phase-2 selectors)
+├── session_manager.py # Patchright browser + TBF login
+├── search_engine.py   # Browser search via form fill + click
+├── result_parser.py   # BeautifulSoup HTML → TbfSighting dataclass
 ├── sighting_writer.py # TbfSighting → AVAIL Sighting DB records
 ├── queue_manager.py   # Enqueue, dedup, poll, status updates
 ├── ai_gate.py         # Claude Haiku commodity classification (in-memory cache)
-├── circuit_breaker.py # Detection avoidance                         (phase-2 markers)
+├── circuit_breaker.py # Detection avoidance
 ├── scheduler.py       # Log-normal delays, breaks, business hours
 ├── human_behavior.py  # Keystroke timing, click jitter
 ├── mpn_normalizer.py  # Strip packaging suffixes for dedup
@@ -76,10 +79,10 @@ Created by migration `130_tbf_search_tables`:
 
 (No TBF classification-cache DB table — the AI gate caches in-process only.)
 
-## Rollout (3-week ramp, Phase 2)
+## Rollout (3-week ramp)
 
-After a logged-in capture fills the four stub files' selectors and credentials live
-in `.env.tbf-worker`, ramp the daily cap conservatively:
+Once member credentials live in `.env.tbf-worker` and the service is started, ramp
+the daily cap conservatively:
 
 1. **Week 1** — `TBF_MAX_DAILY_SEARCHES=50`, watch `journalctl -u avail-tbf-worker`
    for login health and the circuit breaker.
@@ -90,9 +93,9 @@ in `.env.tbf-worker`, ramp the daily cap conservatively:
 
 ## Troubleshooting
 
-- **Login fails**: Check `TBF_USERNAME` / `TBF_PASSWORD` in `.env.tbf-worker`.
-- **`NotImplementedError: phase2: selectors`**: expected in Phase 1 — selectors not
-  yet encoded; the worker is intentionally dormant.
+- **Login fails / worker exits at startup**: Check `TBF_USERNAME` / `TBF_PASSWORD`
+  in `.env.tbf-worker` — with them empty the worker logs "initial login failed,
+  exiting" and stops. This is the expected dormant state until credentials exist.
 - **Browser crashes**: Ensure Xvfb is running: `systemctl status avail-xvfb`.
-- **Session expired**: Worker auto-reconnects (once Phase 2 markers exist). Check
-  `TBF_BROWSER_PROFILE_DIR` exists and is writable.
+- **Session expired**: Worker auto-reconnects. Check `TBF_BROWSER_PROFILE_DIR`
+  exists and is writable.

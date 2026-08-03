@@ -394,14 +394,15 @@ These are known-but-deferred items. None blocks rollout but each is real:
 
 | Item | Why | Where |
 |---|---|---|
-| `test_api_health.py` duplicate tests with stale fixture assumptions | 4 pytest failures on main — fixture doesn't commit sources before `run_health_checks` opens its separate session | `tests/test_api_health.py` vs `tests/test_health_monitor.py` — dedupe |
-| ESLint errors for `confirm` / `cancelAnimationFrame` | Browser globals not declared in eslint config | `.eslintrc` — add `env: { browser: true }` |
+| ESLint errors for `confirm` / `cancelAnimationFrame` | **RESOLVED** — the flat config declares both as readonly browser globals | `eslint.config.mjs` (globals block, lines 26-27) |
 | mypy full-tree scan shows 2080 errors | Strict typing on SQLAlchemy 2.0 ORM — pre-existing, not introduced by any recent PR | Ongoing cleanup; pre-commit only scans changed files so it doesn't block PRs |
-| Duplicate `ENABLE_PASSWORD_LOGIN` in `.env` (line 108 & 114) | Fragile — last-one-wins dependency | Manual dedup on droplet, no git commit (file is ignored) |
-| `.env.example` drift — 35 extras in `.env`, 7 stubs missing | Template diverged from reality | Sync both ways during a calm window |
-| Sourcengine + eBay connectors disabled for missing creds | Expected per current ops; not in scope for rollout | Revisit if more coverage needed post-rollout |
-| TLS cert renewal strategy (Gate 3) | Currently-valid cert hides the fact that renewal will fail | Before May 2026, either repoint DNS or configure DNS-01 |
+| Duplicate `ENABLE_PASSWORD_LOGIN` in `.env` (lines 99 & 106 as of 2026-08-03) | Fragile — last-one-wins dependency | Manual dedup on droplet, no git commit (file is ignored) |
+| `.env.example` drift — dozens of keys differ each way (re-checked 2026-08-03) | Template diverged from reality | Sync both ways during a calm window |
+| Sourcengine + eBay connectors disabled for missing creds | Expected per current ops; keys present but empty in `.env` (re-checked 2026-08-03) | Revisit if more coverage needed post-rollout |
+| TLS cert renewal (Gate 3) | **RESOLVED 2026-06-12** — public DNS points at the droplet, and the Caddyfile has no custom `tls` directive, so Caddy's automatic HTTPS auto-renews via HTTP-01; confirmed by a successful auto-renewal (Gate 3 note) | Recurring verification = Gate 3a / 3b |
+
+(The former `test_api_health.py` row — "4 pytest failures on main" — was disproven: the file passes in the current suite, so the row is removed.)
 
 ---
 
-_Last updated: 2026-06-08 (folded in the `/requisitions2` column-width review from issue #88); originally 2026-04-22 during the sourcing-engine Phase 4 repair session._
+_Last updated: 2026-08-03 (tech-debt table re-verified: disproven `test_api_health` row removed, ESLint + TLS rows marked resolved with evidence, `.env` rows re-checked); previously 2026-06-08 (folded in the `/requisitions2` column-width review from issue #88); originally 2026-04-22 during the sourcing-engine Phase 4 repair session._
