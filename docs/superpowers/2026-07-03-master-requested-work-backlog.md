@@ -191,6 +191,12 @@ Buyers/salespeople need to group + collapse/expand + reset their working lists s
 | **Sightings** — collapsible brand/manufacturer groups + clean/reset | Collapse groups they don't want to work on now, open the ones they do; a "clean & reset" function to reset view/groupings. (grouping already exists in the query — add collapse + reset) |
 | **Sales Hub** — nested grouping customer › requisition › requirement lines | Requirement lines grouped by requisition, requisitions grouped by customer (2-level). Easy expand/collapse (and/or filter) — cleanest, most efficient structure. |
 
+### 📥 New ideas (2026-08-03 session — captured, not yet planned)
+| Item | Ask |
+|------|-----|
+| **Sightings — VIA buttons deep-link to the source listing** | Clicking a VIA (source) button on a sighting should open the specific listing on the API-connected site (DigiKey, OEMsecrets, etc.) when available. Note: `Sighting` has no listing-URL column — the connector payload lives in `raw_data` JSON, so this needs per-connector URL extraction (or ingest-time capture into a real column) + the VIA chip becomes an external link only when a URL exists. |
+| **Sightings — consolidated "Build RFQ" (vendor-centric) instead of Build-Quote** | Buyers should build ONE RFQ to a vendor covering multiple requirements from different customers for similar material the vendor specializes in — one request instead of many. Existing machinery is requirement-scoped (`draft_rfq`, composer, `log_rfq_activity`); the ask is cross-requisition, vendor-first batching. Needs a planning session (grouping rules, what happens to the existing quote button, reply attribution back to multiple requirements). |
+
 ## 🧑 USER-SIDE (yours, not code — whenever)
 
 - SFDC data import (no near-term date); March enrichment recovery (SFDC Weekly Export).
