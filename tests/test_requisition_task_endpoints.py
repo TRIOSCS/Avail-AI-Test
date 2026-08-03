@@ -170,14 +170,14 @@ class TestCreateRequisitionTask:
         assert task.requirement_id is None
 
     def test_due_date_stored_as_aware_datetime_not_string(
-        self, client, db_session: Session, test_requisition: Requisition
+        self, client, db_session: Session, test_requisition: Requisition, test_user: User
     ):
         """The H2 trap: a raw 'YYYY-MM-DD' string bound to the timestamptz column would
         round-trip as a string (AttributeError on .strftime). The endpoint must parse it
         to an aware UTC-midnight datetime."""
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/tasks",
-            data={"title": "With due date", "due_at": "2026-07-10"},
+            data={"title": "With due date", "due_at": "2026-07-10", "assigned_to_id": str(test_user.id)},
         )
         assert resp.status_code == 200
         task = db_session.query(RequisitionTask).filter(RequisitionTask.title == "With due date").first()
@@ -187,30 +187,34 @@ class TestCreateRequisitionTask:
         # renders without raising (the string bug would blow up here)
         assert task.due_at.strftime("%b %d") == "Jul 10"
 
-    def test_create_without_due_date_is_none(self, client, db_session: Session, test_requisition: Requisition):
+    def test_create_without_due_date_is_none(
+        self, client, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/tasks",
-            data={"title": "No due date", "due_at": ""},
+            data={"title": "No due date", "due_at": "", "assigned_to_id": str(test_user.id)},
         )
         assert resp.status_code == 200
         task = db_session.query(RequisitionTask).filter(RequisitionTask.title == "No due date").first()
         assert task.due_at is None
 
-    def test_create_defaults_type_and_priority(self, client, db_session: Session, test_requisition: Requisition):
+    def test_create_defaults_type_and_priority(
+        self, client, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/tasks",
-            data={"title": "Bare task"},
+            data={"title": "Bare task", "assigned_to_id": str(test_user.id)},
         )
         assert resp.status_code == 200
         task = db_session.query(RequisitionTask).filter(RequisitionTask.title == "Bare task").first()
         assert task.task_type == "general"
         assert task.priority == 2
-        assert task.assigned_to_id is None
+        assert task.assigned_to_id == test_user.id
 
-    def test_create_first_task_clears_empty_state(self, client, test_requisition: Requisition):
+    def test_create_first_task_clears_empty_state(self, client, test_requisition: Requisition, test_user: User):
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/tasks",
-            data={"title": "First task ever"},
+            data={"title": "First task ever", "assigned_to_id": str(test_user.id)},
         )
         assert resp.status_code == 200
         assert "First task ever" in resp.text

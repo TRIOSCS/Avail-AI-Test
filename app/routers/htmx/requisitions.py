@@ -1344,6 +1344,9 @@ async def create_requisition_task_endpoint(
     title = (form.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Title is required")
+    assigned_to_id = _parse_int_or_none(form.get("assigned_to_id"))
+    if assigned_to_id is None:
+        raise HTTPException(422, "Assignee is required")
 
     create_requisition_task(
         db,
@@ -1351,7 +1354,7 @@ async def create_requisition_task_endpoint(
         title=title,
         task_type=(form.get("task_type") or "general").strip() or "general",
         priority=_coerce_task_priority(form.get("priority")),
-        assigned_to_id=_parse_int_or_none(form.get("assigned_to_id")),
+        assigned_to_id=assigned_to_id,
         created_by=user.id,
         due_at=_parse_task_due_date(form.get("due_at")),
     )

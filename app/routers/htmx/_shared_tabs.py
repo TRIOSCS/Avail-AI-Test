@@ -133,6 +133,8 @@ async def requisition_tab(
         users = db.query(User).order_by(User.name).all()
         ctx["tasks"] = tasks
         ctx["users"] = users
+        # The add-task form pre-selects the current user as assignee.
+        ctx["user"] = user
         return template_response("htmx/partials/requisitions/tabs/tasks.html", ctx)
 
     elif tab == "responses":

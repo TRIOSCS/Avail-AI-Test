@@ -130,6 +130,30 @@ def test_auto_create_skips_when_requisition_missing(db_session: Session):
     assert db_session.query(RequisitionTask).count() == 0
 
 
+# ---------------------------------------------------------------------------
+# Requisition board endpoint: empty/invalid assignee → 422; form has no
+# "Unassigned" option and pre-selects the current user
+# ---------------------------------------------------------------------------
+
+
+class TestBoardCreateRequiresAssignee:
+    @pytest.mark.parametrize("raw", ["", "abc"])
+    def test_board_create_empty_or_invalid_assignee_422(self, client, db_session: Session, test_requisition, raw):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/tasks",
+            data={"title": "Needs assignee", "assigned_to_id": raw},
+        )
+        assert resp.status_code == 422
+        assert "Assignee is required" in resp.text
+        assert db_session.query(RequisitionTask).count() == 0
+
+    def test_board_form_defaults_to_current_user_no_unassigned(self, client, test_requisition, test_user):
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/tasks")
+        assert resp.status_code == 200
+        assert "Unassigned" not in resp.text
+        assert f'value="{test_user.id}" selected' in resp.text
+
+
 def test_auto_create_skips_when_requisition_has_no_owner(db_session: Session):
     req = Requisition(name="Ownerless", status="open", created_by=None, claimed_by_id=None)
     db_session.add(req)
