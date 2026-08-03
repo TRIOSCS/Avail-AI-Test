@@ -25,7 +25,7 @@ itsdangerous>=2.1.0
 pybreaker>=1.4.1
 
 # Linting
-ruff>=0.16.0
+ruff>=0.16.1
 
 # Type checking
 mypy>=2.3.0

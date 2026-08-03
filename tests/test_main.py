@@ -1131,3 +1131,34 @@ class TestModuleLevelBranches:
 
 
 # ── Cache warmup (lines 121-123) ───────────────────────────────────────
+
+
+# ── Sentry init guard (_sentry_enabled) ────────────────────────────────
+class TestSentryEnabled:
+    """Sentry must never initialize under TESTING, even when the .env DSN is set (serial
+    test runs on the server inherit the real .env — test noise must not reach the
+    production Sentry project)."""
+
+    def test_disabled_under_testing_even_with_dsn(self, monkeypatch):
+        from app.config import settings
+        from app.main import _sentry_enabled
+
+        monkeypatch.setenv("TESTING", "1")
+        monkeypatch.setattr(settings, "sentry_dsn", "https://key@sentry.example/1")
+        assert _sentry_enabled() is False
+
+    def test_enabled_with_dsn_outside_testing(self, monkeypatch):
+        from app.config import settings
+        from app.main import _sentry_enabled
+
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setattr(settings, "sentry_dsn", "https://key@sentry.example/1")
+        assert _sentry_enabled() is True
+
+    def test_disabled_without_dsn(self, monkeypatch):
+        from app.config import settings
+        from app.main import _sentry_enabled
+
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setattr(settings, "sentry_dsn", "")
+        assert _sentry_enabled() is False

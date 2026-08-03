@@ -58,8 +58,13 @@ class Company(Base):
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
-    # Step 3: Account-level primary contact (distinct from per-site is_primary)
-    primary_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
+    # Step 3: Account-level primary contact (distinct from per-site is_primary).
+    # use_alter breaks the companies → site_contacts → customer_sites FK cycle in
+    # metadata sorting (name matches the live constraint; use_alter DDL needs one).
+    primary_contact_id = Column(
+        Integer,
+        ForeignKey("site_contacts.id", ondelete="SET NULL", use_alter=True, name="fk_companies_primary_contact"),
+    )
     # Step 3: Parent company (self-referential hierarchy)
     parent_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
