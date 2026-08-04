@@ -1,9 +1,13 @@
 """Regression tests for the confirmed Prospecting audit findings (2026-07-03 audit).
 
-Each test names the finding it locks down (H8, M1, M7-M10, M12, M13, M15-M19). They are
-fail-before/pass-after guards: the assertion fails against the pre-fix code and passes
-against the fix. Grouped by finding for traceability against
+Each test names the finding it locks down (M1, M5, M7, M9, M10, M12, M13, M15-M19).
+They are fail-before/pass-after guards: the assertion fails against the pre-fix code and
+passes against the fix. Grouped by finding for traceability against
 docs/superpowers/specs/2026-07-03-prospecting-audit.md.
+
+W1 (docs/W1_JOB_DISPOSITION.md): the H8, M8, and M15-scheduler guards were removed with
+their subject, app/services/prospect_scheduler.py (the deleted Explorium
+discovery-machine monthly jobs).
 
 Depends on: conftest db_session fixture; external paid APIs are always mocked.
 """
@@ -15,9 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.responses import HTMLResponse
 
-from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
-from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.enrichment_credit_guard import ProviderQuotaError
 
 EXPL = "app.services.prospect_discovery_explorium"
@@ -36,47 +38,6 @@ def _prospect(db, **kw) -> ProspectAccount:
     db.commit()
     db.refresh(p)
     return p
-
-
-def _batch(db, **kw) -> DiscoveryBatch:
-    from datetime import datetime
-
-    defaults = {
-        "batch_id": "audit-batch",
-        "source": "explorium",
-        "status": "running",
-        "started_at": datetime.now(UTC),
-    }
-    defaults.update(kw)
-    b = DiscoveryBatch(**defaults)
-    db.add(b)
-    db.commit()
-    db.refresh(b)
-    return b
-
-
-# ── H8 — one duplicate domain must not abort the whole discovery persist ──────
-
-
-class TestH8DiscoveryPersistPerRow:
-    def test_duplicate_domain_does_not_abort_batch(self, db_session):
-        from app.services.prospect_scheduler import _persist_discovery_results
-
-        batch = _batch(db_session, batch_id="h8")
-        # Occupy the unique domain that a re-discovery will collide with.
-        db_session.add(ProspectAccount(name="Existing", domain="dup-h8.com", discovery_source="manual"))
-        db_session.commit()
-
-        results = [
-            ProspectAccountCreate(name="Dup", domain="dup-h8.com", discovery_source="explorium"),
-            ProspectAccountCreate(name="Fresh", domain="fresh-h8.com", discovery_source="explorium"),
-            ProspectAccountCreate(name="Dup2", domain="dup-h8.com", discovery_source="explorium"),
-        ]
-        saved = _persist_discovery_results(db_session, batch, results)
-        db_session.commit()  # pre-fix: IntegrityError aborts the whole batch here
-
-        assert saved == 1
-        assert db_session.query(ProspectAccount).filter_by(domain="fresh-h8.com").first() is not None
 
 
 # ── M15 — discovery credits_used must be recorded ─────────────────────────────
@@ -103,70 +64,6 @@ class TestM15CreditsRecorded:
                 "m15", set(), segment_keys=["aerospace_defense"], region_keys=["US"], credit_meter=meter
             )
         assert meter["credits_est"] == 2
-
-    @pytest.mark.asyncio
-    async def test_scheduler_writes_credits_used(self, db_session):
-        from app.services.prospect_scheduler import job_discover_prospects
-
-        async def _explorium(*_a, credit_meter=None, **_k):
-            if credit_meter is not None:
-                credit_meter["credits_est"] = 9
-            return [ProspectAccountCreate(name="C", domain="c-m15.com", discovery_source="explorium")]
-
-        with (
-            patch("app.database.SessionLocal", return_value=db_session),
-            patch.object(db_session, "close"),
-            patch.dict(
-                "sys.modules",
-                {EXPL: MagicMock(run_explorium_discovery_batch=AsyncMock(side_effect=_explorium))},
-            ),
-        ):
-            await job_discover_prospects()
-
-        batch = (
-            db_session.query(DiscoveryBatch).filter_by(source="explorium").order_by(DiscoveryBatch.id.desc()).first()
-        )
-        assert batch is not None
-        assert batch.credits_used == 9
-
-
-# ── M8 — scheduler refresh uses the shared scorers (historical bonus + composite) ─
-
-
-class TestM8SharedScorers:
-    @pytest.mark.asyncio
-    async def test_refresh_applies_historical_bonus(self, db_session):
-        from datetime import datetime
-
-        from app.services.prospect_scheduler import job_refresh_scores
-
-        p = ProspectAccount(
-            name="Warm Co",
-            domain="warm-m8.com",
-            discovery_source="reactivation",
-            status="suggested",
-            historical_context={
-                "bought_before": True,
-                "quote_count": 25,
-                "last_activity": str(datetime.now(UTC).year),
-            },
-        )
-        db_session.add(p)
-        db_session.commit()
-
-        with (
-            patch("app.database.SessionLocal", return_value=db_session),
-            patch.object(db_session, "close"),
-            patch("app.services.prospect_scheduler.calculate_fit_score", return_value=(50, "base")),
-            patch("app.services.prospect_scheduler.calculate_readiness_score", return_value=(40, {})),
-        ):
-            await job_refresh_scores()
-
-        db_session.refresh(p)
-        # bought_before → fit +15; recent last_activity → readiness +10; quote_count>20 → +5.
-        # Pre-fix: no bonus applied → fit stayed 50, readiness 40.
-        assert p.fit_score == 65
-        assert p.readiness_score == 55
 
 
 # ── M16 — email-discovery exclusion sets must be unbounded ────────────────────

@@ -683,7 +683,9 @@ class PendingBatchStatus(StrEnum):
 
 class DiscoveryBatchStatus(StrEnum):
     """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run) audit
-    records — app.services.prospect_scheduler.job_discover_prospects is the sole writer.
+    records — historical rows only; the sole writer
+    (app.services.prospect_scheduler.job_discover_prospects) was deleted in W1
+    (docs/W1_JOB_DISPOSITION.md).
 
     FAILED is not currently written (an unhandled exception leaves the row at RUNNING
     and is only surfaced via the job's log/return value) but is reserved here to match

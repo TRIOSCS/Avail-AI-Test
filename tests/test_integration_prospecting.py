@@ -5,8 +5,7 @@ A. Discovery → scoring → enrichment → claim → briefing
 B. Edge cases: dedup, concurrent claims, JSONB null handling, malformed data
 """
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
@@ -274,43 +273,9 @@ class TestDismissFlow:
         assert p.readiness_signals["intent"]["strength"] == "strong"
 
 
-class TestExpireResurfaceFlow:
-    @pytest.mark.asyncio
-    async def test_expire_then_resurface(self, db_session):
-        """Prospect expires, gets fresh signals, resurfaces."""
-        from app.services.prospect_scheduler import job_expire_and_resurface
-
-        # Create an old low-readiness prospect
-        p = _make_prospect(
-            db_session,
-            name="Cycle Corp",
-            domain="cyclecorp.com",
-            readiness_score=30,
-            readiness_signals={},
-            created_at=datetime.now(UTC) - timedelta(days=120),
-            last_enriched_at=datetime.now(UTC) - timedelta(days=90),
-        )
-
-        # Run expire
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-
-        db_session.refresh(p)
-        assert p.status == "expired"
-
-        # Simulate fresh signals arriving
-        p.readiness_signals = {"intent": {"strength": "strong"}}
-        p.readiness_score = 55
-        p.last_enriched_at = datetime.now(UTC) - timedelta(days=5)
-        db_session.commit()
-
-        # Run again — should resurface
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            result = await job_expire_and_resurface()
-
-        db_session.refresh(p)
-        assert p.status == "suggested"
-        assert result["resurfaced"] >= 1
+# TestExpireResurfaceFlow was deleted in W1 (docs/W1_JOB_DISPOSITION.md): its subject,
+# prospect_scheduler.job_expire_and_resurface, was removed with the Explorium
+# discovery-machine monthly jobs.
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -1,7 +1,9 @@
 """test_sp4_jobs.py — Tests for SP4 account sweep and reactivation scheduler jobs.
 
 Covers: register_sweep_jobs(), _job_account_sweep, _job_auto_surface_reactivation
-delegation tests.
+delegation tests. W1 (docs/W1_JOB_DISPOSITION.md): the auto_surface_reactivation
+registration is PARKED (removed; comeback = team exists, spec §5.4) — the
+implementation and its delegation test remain.
 
 Called by: pytest
 Depends on: app/jobs/prospecting_jobs.py, app/scheduler.py
@@ -63,24 +65,17 @@ def test_sweep_job_not_registered_when_disabled(scheduler_db):
     assert "account_sweep" not in ids
 
 
-def test_reactivation_job_registered(scheduler_db):
-    """auto_surface_reactivation job is registered when
-    account_reactivation_sweep_enabled=True."""
+@pytest.mark.parametrize("flag", [True, False], ids=["flag_on", "flag_off"])
+def test_reactivation_job_never_registered(scheduler_db, flag):
+    """auto_surface_reactivation is parked (W1): never registered, even when
+    account_reactivation_sweep_enabled=True.
+
+    Comeback: team exists (spec §5.4).
+    """
     from app.config import Settings
     from app.jobs.prospecting_jobs import register_sweep_jobs
 
-    s = Settings(account_reactivation_sweep_enabled=True)
-    register_sweep_jobs(scheduler, s)
-    ids = [j.id for j in scheduler.get_jobs()]
-    assert "auto_surface_reactivation" in ids
-
-
-def test_reactivation_job_not_registered_when_disabled(scheduler_db):
-    """auto_surface_reactivation job is NOT registered when disabled."""
-    from app.config import Settings
-    from app.jobs.prospecting_jobs import register_sweep_jobs
-
-    s = Settings(account_reactivation_sweep_enabled=False)
+    s = Settings(account_reactivation_sweep_enabled=flag)
     register_sweep_jobs(scheduler, s)
     ids = [j.id for j in scheduler.get_jobs()]
     assert "auto_surface_reactivation" not in ids
@@ -123,9 +118,9 @@ def test_no_sweep_jobs_when_prospecting_disabled(scheduler_db):
     assert "auto_surface_reactivation" not in ids
 
 
-def test_both_sweep_jobs_register_when_both_flags_true(scheduler_db):
-    """Both sweep jobs register when prospecting_enabled=True and per-feature flags are
-    True."""
+def test_only_account_sweep_registers_when_both_flags_true(scheduler_db):
+    """Only account_sweep registers when prospecting_enabled=True and both per-feature
+    flags are True — the reactivation registration was parked in W1."""
     from app.config import Settings
     from app.jobs.prospecting_jobs import register_sweep_jobs
 
@@ -133,7 +128,7 @@ def test_both_sweep_jobs_register_when_both_flags_true(scheduler_db):
     register_sweep_jobs(scheduler, s)
     ids = [j.id for j in scheduler.get_jobs()]
     assert "account_sweep" in ids
-    assert "auto_surface_reactivation" in ids
+    assert "auto_surface_reactivation" not in ids
 
 
 # ── Settings-derived job name ────────────────────────────────────────────────
