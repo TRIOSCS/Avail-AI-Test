@@ -29,14 +29,14 @@ warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 - [x] W1.6 Keys-off honesty: search "external sources off" notice + AI-intent plain-search fallback (§7)
 - [x] W1.7 Keys-off honesty: CRM Enrich free SAM.gov path (fix 503 guard) + paid providers labeled off (§7)
 - [x] W1.8 Badge consolidation: 6 pollers → one badge endpoint (§5.5)
-- [ ] W1.9 Dead statuses removed (prod-copy zero-use evidence per status) (§5.3/§9)
-- [ ] W1.10 Delete the 2 dead transition tables (§9)
+- [x] W1.9 Dead statuses removed — 10 members, three-way evidence each; kept-with-reasons list for Wave 3 (§5.3/§9)
+- [x] W1.10 Deleted BUY_PLAN_TRANSITIONS + REQUISITION_TRANSITIONS; live tables untouched (§9)
 - [x] W1.11 Kernel-walk E2E script against the deployed instance (18 passed / 2 honest skips live); simp-nightly.sh runs it (§3/§6)
 - [x] W1.11b Nightly failure pages ONE admin — RED verdict invokes the existing notify_nightly_status seam with a SIMPLIFICATION marker (§6)
-- [ ] W1.17 Keys-off honesty: resell outreach manual-channel log must not require a fresh M365 token (route-level Depends blocks the whole door keys-off; found by kernel walk) (§7 family)
-- [ ] W1.18 Keys-off honesty: existing quote Won/Lost buttons render for draft quotes too (server already accepts draft→won; UI only offers it from 'sent', which needs Graph) (§7 family)
+- [x] W1.17 Resell outreach manual-channel log no longer requires an M365 token (in-branch acquisition for email only) (§7 family)
+- [x] W1.18 Quote Won/Lost buttons render for draft quotes (draft→won/lost verified legal in QUOTE_TRANSITIONS) (§7 family)
 - [x] W1.12 Backup verify-timer unit files ready in repo; installation deferred to cutover (§6; CUTOVER.md §5)
-- [ ] W1.13 Task statuses → open/done (§5.4, v1.1 §0.6)
+- [x] W1.13 Task statuses → open/done; migration 205 round-tripped on throwaway PG, applied to simp copy at deploy (§5.4, v1.1 §0.6)
 - [x] W1.14 Trouble-ticket AI calls gate behind AI flag, regex fallback per brief §4.5 (§5.5, v1.1 §0.6)
 - [x] W1.15 token_refresh skips-with-notice when Azure creds unset (48h-gate killer found by pre-flight: ~1,150 warnings/48h keys-off; docs/evidence/w1-quiet-preflight.md) (§7 spirit, §11)
 - [x] W1.16 worker_liveness_check skips workers whose enabling creds are unset (48h-gate killer; DB-refresh re-imports is_running=true each wave, so the guard must be code-level) (§7 spirit, §11)
@@ -55,7 +55,7 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 | LOC app/routers/sightings.py | 3,812 | 3,812 |
 | LOC app/static/htmx_app.js | 3,654 | 3,654 |
 | LOC app/search_service.py | 3,604 | 3,604 |
-| Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 114 |
+| Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 103 (−10 dead, Task 3→2) |
 | Test file count (pytest) | 1,113 | 1,107 |
 | E2E spec files (Playwright) | 12 | 12 |
 | Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | 10 |
@@ -71,6 +71,8 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 - 2026-08-04 W1: simp-DB worker singletons (ics/nc/tbf_worker_status.is_running) flipped false on the copy so the watchdog stops firing pre-W1.16; the durable fix is W1.16 since every wave-start refresh re-imports prod's true.
 - 2026-08-04 W1: rule 3.5 relaxed for the shrink batch — W1.1–W1.16 landed as 14 module-scoped commits (not one per checklist item): parallel agent execution interleaved items inside shared files; each commit message enumerates its items, so packet assembly and surgical rollback hold at module granularity.
 - 2026-08-04 W1: suite gate — 23,740 passed / 19 failed on first full run; all 19 root-caused and fixed same-session (14 = W1.15 guard needed Azure-configured test fixtures; 3 = tests pinned the pre-fix CRM-enrich 503; 2 = tests pinned the six-poller nav markup). Zero failures on the affected files after fix; confirmation full-suite run recorded in the packet.
+
+- 2026-08-04 W1: 48h quiet-log window restarted at 22:55 UTC with the FINAL Wave-1 build (fa00466f deployed; migration 205 applied to the copy = cutover rehearsal #2). All W1 build items complete; only W1.A (Packet 1, after the window ~Wed 22:55 UTC) remains. Owner may shorten the window to 24h ("24h window") — pre-flight evidence supports it; 48h recommended.
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)
