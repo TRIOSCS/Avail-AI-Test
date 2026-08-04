@@ -25,7 +25,6 @@ def register_all_jobs(scheduler, settings):
     from .resell_jobs import register_resell_jobs
     from .tagging_jobs import register_tagging_jobs
     from .task_jobs import register_task_jobs
-    from .teams_call_jobs import register_teams_call_jobs
     from .worker_liveness_jobs import register_worker_liveness_jobs
 
     # Short-lived session so flag-reading registrars resolve the DB-authoritative
@@ -48,7 +47,6 @@ def register_all_jobs(scheduler, settings):
         register_eight_by_eight_jobs(scheduler, settings)
         register_task_jobs(scheduler, settings)
         register_quality_jobs(scheduler, settings)
-        register_teams_call_jobs(scheduler, settings)
         register_worker_liveness_jobs(scheduler, settings)
         register_approval_outbox_job(scheduler)
     finally:

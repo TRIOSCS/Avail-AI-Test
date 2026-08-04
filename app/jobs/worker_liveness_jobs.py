@@ -126,6 +126,9 @@ async def _emit_alert(label: str, message: str, debounce_minutes: int) -> None:
         logger.warning("Worker watchdog Teams alert failed: {}", e)
 
 
+_skip_noticed: set[str] = set()
+
+
 @_traced_job
 async def _job_monitor_worker_heartbeats():
     from ..config import settings
@@ -136,15 +139,28 @@ async def _job_monitor_worker_heartbeats():
     stale_minutes = settings.worker_heartbeat_stale_minutes
     debounce = settings.worker_alert_debounce_minutes
 
+    import os
+
+    # Third element: the env var whose presence means this worker is expected to
+    # run in this deployment. Keys-off honesty (spec §7): a stack with no ICS/NC/
+    # TBF credentials runs no scrape workers, but a restored production DB copy
+    # still carries is_running=true singletons — every wave-start refresh
+    # re-imports them, so alerting must be gated in code, not data (§11 48h gate).
+    # Enrichment has no credential gate: its worker is part of every stack.
     checks = (
-        ("ICS", IcsWorkerStatus),
-        ("NetComponents", NcWorkerStatus),
-        ("The Broker Forum", TbfWorkerStatus),
-        ("Enrichment", EnrichmentWorkerStatus),
+        ("ICS", IcsWorkerStatus, "ICS_USERNAME"),
+        ("NetComponents", NcWorkerStatus, "NC_USERNAME"),
+        ("The Broker Forum", TbfWorkerStatus, "TBF_USERNAME"),
+        ("Enrichment", EnrichmentWorkerStatus, None),
     )
     db = SessionLocal()
     try:
-        for label, model in checks:
+        for label, model, cred_env in checks:
+            if cred_env is not None and not os.environ.get(cred_env):
+                if label not in _skip_noticed:
+                    _skip_noticed.add(label)
+                    logger.info(f"{label} worker liveness not monitored — {cred_env} not configured")
+                continue
             row = db.get(model, 1)
             if row is None:
                 continue
