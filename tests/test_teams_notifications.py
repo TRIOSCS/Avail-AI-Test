@@ -155,12 +155,37 @@ def _make_user(email="buyer@trioscs.com", access_token="tok-123"):
     return SimpleNamespace(email=email, access_token=access_token)
 
 
-def _make_gc(me=SENDER_ME, chat={"id": "chat-id-123"}):
-    """Mock GraphClient instance: /me identity + chat-create/message-post responses."""
+def _make_gc(me=SENDER_ME, chat={"id": "chat-id-123"}, chats_page=None):
+    """Mock GraphClient instance: routes /me and /me/chats GETs; POSTs create+send."""
     gc = MagicMock()
-    gc.get_json = AsyncMock(return_value=me)
+
+    async def _get(url, *a, **k):
+        if url.startswith("/me/chats") or "chats" in url:
+            return chats_page if chats_page is not None else {"value": []}
+        return me
+
+    gc.get_json = AsyncMock(side_effect=_get)
     gc.post_json = AsyncMock(side_effect=[chat, {}])
     return gc
+
+
+def _self_chats_page(self_guid="self-guid", chat_id="self-chat-id-9"):
+    """A /me/chats page: one 2-member chat (decoy) + the single-member self-chat."""
+    return {
+        "value": [
+            {
+                "id": "other-chat-1",
+                "chatType": "oneOnOne",
+                "members": [{"userId": self_guid}, {"userId": "someone-else"}],
+            },
+            {"id": "group-1", "chatType": "group", "members": [{"userId": self_guid}]},
+            {
+                "id": chat_id,
+                "chatType": "oneOnOne",
+                "members": [{"userId": self_guid}],
+            },
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -240,14 +265,16 @@ async def test_send_teams_dm_creates_chat_with_two_members():
 
 @pytest.mark.asyncio
 async def test_send_teams_dm_self_chat_when_sender_is_recipient():
-    """Sender == recipient → Graph self-chat: ONE member bound by the caller's AAD id.
+    """Sender == recipient → find the EXISTING self-chat via /me/chats and post to it.
 
-    Duplicate members would be rejected, and the old email-bound single member is
-    exactly the payload Graph 400s on. Email match is case-insensitive.
+    Graph cannot CREATE a single-member oneOnOne chat at all — both v1.0 and beta reject
+    it with "Creation of 'OneOnOne' chat requires 2 members" (verified live 2026-08-04,
+    both /users/{id} and /users('{id}') bind formats). The Teams-provisioned self-chat
+    ("Chat with self") is the only deliverable channel. Email match is case-insensitive.
     """
     user = _make_user(email="Buyer@trioscs.com")
     me = {"id": "self-guid", "mail": "buyer@trioscs.com", "userPrincipalName": "buyer@trioscs.com"}
-    mock_gc_instance = _make_gc(me=me)
+    mock_gc_instance = _make_gc(me=me, chats_page=_self_chats_page())
 
     with patch(
         "app.utils.graph_client.GraphClient",
@@ -257,17 +284,82 @@ async def test_send_teams_dm_self_chat_when_sender_is_recipient():
 
         await send_teams_dm(user, "self note")
 
-    chat_call = mock_gc_instance.post_json.await_args_list[0]
-    assert chat_call.args[0] == "/chats"
-    members = chat_call.args[1]["members"]
-    assert len(members) == 1
-    # Bound by AAD object id, NOT by email
-    assert members[0]["user@odata.bind"] == f"{GRAPH_USERS}/self-guid"
-
-    mock_gc_instance.post_json.assert_any_await(
-        "/chats/chat-id-123/messages",
+    # NO chat creation attempted — the message goes straight to the found self-chat.
+    posted_urls = [c.args[0] for c in mock_gc_instance.post_json.await_args_list]
+    assert "/chats" not in posted_urls
+    mock_gc_instance.post_json.assert_awaited_once_with(
+        "/chats/self-chat-id-9/messages",
         {"body": {"content": "self note"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_send_teams_dm_self_chat_not_found_warns_and_skips():
+    """No single-member self-chat in /me/chats → warn and skip; never attempt a single-
+    member /chats create (Graph rejects it)."""
+    user = _make_user(email="buyer@trioscs.com")
+    me = {"id": "self-guid", "mail": "buyer@trioscs.com", "userPrincipalName": "buyer@trioscs.com"}
+    no_self = {
+        "value": [{"id": "c1", "chatType": "oneOnOne", "members": [{"userId": "self-guid"}, {"userId": "other"}]}]
+    }
+    mock_gc_instance = _make_gc(me=me, chats_page=no_self)
+
+    with _capture_logs("WARNING") as captured:
+        with patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc_instance,
+        ):
+            from app.services.teams_notifications import send_teams_dm
+
+            await send_teams_dm(user, "never sent")
+
+        assert any("self-chat not found" in m for m in captured)
+    mock_gc_instance.post_json.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_teams_dm_warns_when_chat_create_rejected():
+    """Two-member path: an error dict from POST /chats is a FAILURE — warn, do not
+    silently report success (the retry layer returns {"error": status} on 4xx
+    instead of raising)."""
+    user = _make_user(email="other.person@trioscs.com")
+    mock_gc_instance = _make_gc()
+    mock_gc_instance.post_json = AsyncMock(return_value={"error": 400, "detail": "requires 2 members"})
+
+    with _capture_logs("WARNING") as captured:
+        with patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc_instance,
+        ):
+            from app.services.teams_notifications import send_teams_dm
+
+            await send_teams_dm(user, "never sent")
+
+        assert any("chat creation" in m for m in captured)
+    # Only the /chats attempt — no message post after a rejected create.
+    assert mock_gc_instance.post_json.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_send_teams_dm_warns_when_message_post_rejected():
+    """Self path: an error dict from the message POST is a FAILURE — warn, and do
+    not log the 'Teams DM sent' success line."""
+    user = _make_user(email="buyer@trioscs.com")
+    me = {"id": "self-guid", "mail": "buyer@trioscs.com", "userPrincipalName": "buyer@trioscs.com"}
+    mock_gc_instance = _make_gc(me=me, chats_page=_self_chats_page())
+    mock_gc_instance.post_json = AsyncMock(return_value={"error": 403, "detail": "forbidden"})
+
+    with _capture_logs("INFO") as captured:
+        with patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc_instance,
+        ):
+            from app.services.teams_notifications import send_teams_dm
+
+            await send_teams_dm(user, "rejected message")
+
+        assert any("message post" in m and "WARNING" in m for m in captured)
+        assert not any("Teams DM sent" in m for m in captured)
 
 
 @pytest.mark.asyncio
@@ -318,19 +410,22 @@ async def test_send_teams_dm_refreshes_token_via_db():
 
 @pytest.mark.asyncio
 async def test_send_teams_dm_skips_message_when_no_chat_id():
-    """If /chats returns no id, the message post is skipped."""
+    """If /chats returns no id, the message post is skipped and a warning is logged (an
+    id-less create is a failure, not a silent no-op)."""
     user = _make_user()
     mock_gc_instance = _make_gc()
     mock_gc_instance.post_json = AsyncMock(return_value={})  # no "id" key
 
-    with patch(
-        "app.utils.graph_client.GraphClient",
-        return_value=mock_gc_instance,
-    ):
-        from app.services.teams_notifications import send_teams_dm
+    with _capture_logs("WARNING") as captured:
+        with patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc_instance,
+        ):
+            from app.services.teams_notifications import send_teams_dm
 
-        await send_teams_dm(user, "should not send message")
+            await send_teams_dm(user, "should not send message")
 
+        assert any("chat creation" in m for m in captured)
     # Only one call (/chats), no second call for messages
     assert mock_gc_instance.post_json.call_count == 1
 
