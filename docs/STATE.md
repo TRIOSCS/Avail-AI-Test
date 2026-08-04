@@ -9,24 +9,29 @@ discipline, wins on conflict) and SIMPLIFICATION_SPEC.md (work order).
 
 - [x] S1.1 Create simplification branch (worktree /root/availai-worktrees/simplification, base bcfb9a54)
 - [x] S1.2 Commit brief v2 + spec + this file to docs/
-- [ ] S1.3 Baseline metrics recorded (table below)
-- [ ] S1.4 Parallel instance up: prod-DB copy restored, boots clean, reachable
+- [x] S1.3 Baseline metrics recorded (table below)
+- [x] S1.4 Parallel instance up: prod-DB copy restored, boots clean, reachable at https://app.availai.net:8443 (project availai-simp; db localhost:5433; restore ritual = scripts/simp-refresh-db.sh)
 - [ ] S1.5 docs/CUTOVER.md v0 written
 - [ ] S1.6 Nightly E2E pointed at the parallel instance
 - [ ] S1.7 Wave 1 decomposed into checklist below; Wave 1 begun
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
+All numbers independently re-derived by a second pass before recording.
+Route count = runtime `app.routes` (flattened), not decorator grep.
+
 | Metric | Baseline (2026-08-04 @ bcfb9a54) | Current |
 |---|---|---|
-| Route count | TO RECORD (S1.3) | — |
-| Scheduled job count | TO RECORD (S1.3) | — |
-| LOC app/routers/sightings.py | TO RECORD (S1.3) | — |
-| LOC htmx_app.js | TO RECORD (S1.3) | — |
-| LOC app/services/search_service.py | TO RECORD (S1.3) | — |
-| Status count per entity | TO RECORD (S1.3) | — |
-| Test file count | TO RECORD (S1.3) | — |
-| Nav tab count | TO RECORD (S1.3) | — |
+| Route count | 809 (268 /api, 516 /v2, 25 other; 753 unique paths) | 809 |
+| Scheduled job count (in-app) | 59 (all in app/jobs/*.py, 17 modules) | 59 |
+| Host cron jobs (prod droplet) | 5 (nightly tests, weekly cleanup, legacy pg backup, FRU check, coverage report) | 5 |
+| LOC app/routers/sightings.py | 3,812 | 3,812 |
+| LOC app/static/htmx_app.js | 3,654 | 3,654 |
+| LOC app/search_service.py | 3,604 | 3,604 |
+| Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 114 |
+| Test file count (pytest) | 1,113 | 1,113 |
+| E2E spec files (Playwright) | 12 | 12 |
+| Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | 10 |
 
 ## Deviation log (Rule 3.4 — one line each, surfaced in the wave packet)
 
