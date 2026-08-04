@@ -42,6 +42,30 @@ warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 - [x] W1.16 worker_liveness_check skips workers whose enabling creds are unset (48h-gate killer; DB-refresh re-imports is_running=true each wave, so the guard must be code-level) (§7 spirit, §11)
 - [ ] W1.A Acceptance checks pass → assemble + deliver Packet 1 (brief §6; include spec v1.1 §12 final-read checkboxes)
 
+## Wave 2 — the delete/park sweep (spec §10; ADOPTED under owner's continuous-autonomy directive 2026-08-04)
+
+Owner directive: "work thru all waves autonomously" — packets delivered as
+reversible reports, no waiting; ONLY glossary application, screen-diet
+application, and cutover stay on the owner's word (brief §4.1/§4.2/§5).
+Full 38-item decomposition: docs/evidence/w2-checklist-draft.md. Build on
+branch now; first W2 deploy AFTER the W1 quiet window closes (~Tue 23:00 UTC)
+with the deferred wave-start DB refresh + migration rerun at that moment.
+
+- [ ] W2.1 Nav 10→5 + Settings gear outside the bar (§4; Search/Sightings nav-only folds, W4 does the merges)
+- [ ] W2.2 Proactive parks whole — workspace + engine + badge, one unit, existing flag (§4/§5.4/§8)
+- [ ] W2.3 Trader lane + buyer intelligence parked behind existing flags (§5.3; if no flag exists: smallest mechanism = registration/nav removal, deviation-logged, NO new framework)
+- [ ] W2.4 Prospecting → CRM lens (§5.4)
+- [ ] W2.5 Materials → contextual lookup from Deals/CRM (§4)
+- [ ] W2.6 Orphan /api delete batches B0–B13 per docs/evidence/w2-delete-manifest.md (107 routes, with the manifest's two corrections: error-report alias decorators only; e2e/api.spec.ts re-pointed not deleted) (§8)
+- [ ] W2.7 Coverage farm deleted + diff-coverage gate lands same PR (§9 Decision K)
+- [ ] W2.8 Surface deletes: Sourcing Leads, Dashboard/Knowledge, Email-Intelligence dashboard, contact-intelligence, standalone cross-company contact pages (§5.4/§8)
+- [ ] W2.9 Backfill graveyard + startup.py backfills → alembic; write-only Notification table + writers deleted (§8/§5.5)
+- [ ] W2.10 Legacy JSON create endpoint (POST /api/requisitions) deleted (§5.1, spec-named)
+- [ ] W2.11 QP serial/FRU relink from workspace QP pane (§5.2 Decision E)
+- [ ] W2.12 Resell→Sighting mirror dual-write stopped (§5.3; drafted W2, flip to W3 noted)
+- [ ] W2.13 Glossary old→new table + screen-diet cut list FINALIZED for Packet 2 (application SIGN-OFF-GATED)
+- [ ] W2.A Acceptance: exactly 5 tabs + gear; deleted surfaces 404; fresh-DB drift-gate boot green; kernel E2E green → Packet 2
+
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
 All numbers independently re-derived by a second pass before recording.
@@ -73,6 +97,9 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 - 2026-08-04 W1: suite gate — 23,740 passed / 19 failed on first full run; all 19 root-caused and fixed same-session (14 = W1.15 guard needed Azure-configured test fixtures; 3 = tests pinned the pre-fix CRM-enrich 503; 2 = tests pinned the six-poller nav markup). Zero failures on the affected files after fix; confirmation full-suite run recorded in the packet.
 
 - 2026-08-04 W1: 48h quiet-log window restarted at 22:55 UTC with the FINAL Wave-1 build (fa00466f deployed; migration 205 applied to the copy = cutover rehearsal #2). All W1 build items complete; only W1.A (Packet 1, after the window ~Wed 22:55 UTC) remains. Owner may shorten the window to 24h ("24h window") — pre-flight evidence supports it; 48h recommended.
+
+- 2026-08-04 W2: wave-start DB refresh deferred to W2's first deploy (post-window, ~Tue) — refreshing mid-window would disturb the W1 quiet evidence and the owner's live test data; build proceeds on branch (rule 3.7 deviation).
+- 2026-08-04: OWNER DIRECTIVE — continuous autonomous execution through Wave 4; packets delivered as reversible reports without waiting; glossary/screen-diet application + cutover remain owner-gated.
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)
