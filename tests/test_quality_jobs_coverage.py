@@ -1,6 +1,9 @@
 """Tests for app/jobs/quality_jobs.py — AI quality scoring background job.
 
-Targets missing branches to bring coverage from 37% to 85%+.
+W1 simplification (2026-08-04): quality_score_activities is PARKED per
+docs/W1_JOB_DISPOSITION.md (spec §5.4 — Activity Scorecard is its only consumer;
+comeback: team exists) — register_quality_jobs is a no-op, but the job
+implementation (``_job_score_activities``) stays and keeps its tests.
 
 Called by: pytest
 Depends on: app.jobs.quality_jobs, app.services.activity_quality_service
@@ -26,8 +29,9 @@ class TestRegisterQualityJobs:
 
         assert callable(register_quality_jobs)
 
-    def test_register_quality_jobs_adds_job(self):
-        """register_quality_jobs adds exactly one job to the scheduler."""
+    def test_register_quality_jobs_registers_nothing_parked(self):
+        """W1 (2026-08-04): the quality_score_activities registration is PARKED —
+        register_quality_jobs is a no-op (comeback: team exists, spec §5.4)."""
         from app.jobs.quality_jobs import register_quality_jobs
 
         mock_scheduler = MagicMock()
@@ -35,23 +39,7 @@ class TestRegisterQualityJobs:
 
         register_quality_jobs(mock_scheduler, mock_settings)
 
-        mock_scheduler.add_job.assert_called_once()
-        call_kwargs = mock_scheduler.add_job.call_args
-        assert call_kwargs[1]["id"] == "quality_score_activities"
-
-    def test_register_quality_jobs_uses_interval_trigger(self):
-        """register_quality_jobs uses an IntervalTrigger."""
-        from apscheduler.triggers.interval import IntervalTrigger
-
-        from app.jobs.quality_jobs import register_quality_jobs
-
-        mock_scheduler = MagicMock()
-        register_quality_jobs(mock_scheduler, MagicMock())
-
-        args, kwargs = mock_scheduler.add_job.call_args
-        # Trigger is the second positional argument
-        trigger = args[1] if len(args) > 1 else kwargs.get("trigger")
-        assert isinstance(trigger, IntervalTrigger)
+        mock_scheduler.add_job.assert_not_called()
 
 
 class TestJobScoreActivities:

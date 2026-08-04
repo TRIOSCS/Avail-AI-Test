@@ -1,14 +1,13 @@
-"""Tests for selective auto-task triggers — bid due, buy plan, email offer, new offers.
+"""Tests for selective auto-task triggers — buy plan, email offer, new offers.
 
-Verifies that task events create the right tasks, respect dedup,
-and that the scheduler job only fires for approaching deadlines.
+Verifies that inline task events create the right tasks and respect dedup.
+(The bid_due_alerts scheduler job and its ``on_bid_due_soon`` hook were deleted
+in the W1 simplification, 2026-08-04, per docs/W1_JOB_DISPOSITION.md — their
+tests went with them.)
 
-Depends on: conftest.py fixtures, app/jobs/task_jobs.py, app/services/task_service.py
+Depends on: conftest.py fixtures, app/services/task_service.py
 """
 
-from datetime import UTC, datetime, timedelta
-
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requisition, User
@@ -117,68 +116,3 @@ class TestOnBuyPlanAssigned:
         task_service.on_buy_plan_assigned(db_session, test_requisition.id, test_user.id, "DigiKey", "LM317T", 7)
         tasks = _req_tasks(db_session, test_requisition.id)
         assert len(tasks) == 1
-
-
-# ---------------------------------------------------------------------------
-# Bid due alert tasks
-# ---------------------------------------------------------------------------
-
-
-class TestOnBidDueSoon:
-    def test_creates_bid_due_task(self, db_session: Session, test_user: User, test_requisition: Requisition):
-        task_service.on_bid_due_soon(db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001")
-        tasks = _req_tasks(db_session, test_requisition.id)
-        assert len(tasks) == 1
-        assert "Bid due" in tasks[0].title
-        assert tasks[0].source_ref == f"bid_due:{test_requisition.id}"
-        assert tasks[0].due_at is not None
-
-    def test_dedup_same_requisition(self, db_session: Session, test_user: User, test_requisition: Requisition):
-        task_service.on_bid_due_soon(db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001")
-        task_service.on_bid_due_soon(db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001")
-        tasks = _req_tasks(db_session, test_requisition.id)
-        assert len(tasks) == 1
-
-
-# ---------------------------------------------------------------------------
-# Scheduler job constants / selectivity
-# ---------------------------------------------------------------------------
-
-
-class TestSchedulerSelectivity:
-    def test_cap_constant_is_reasonable(self):
-        from app.jobs.task_jobs import _BID_DUE_CAP
-
-        assert 1 <= _BID_DUE_CAP <= 50
-
-    def test_only_active_req_statuses(self):
-        from app.constants import RequisitionStatus
-        from app.jobs.task_jobs import _ACTIVE_REQ_STATUSES
-
-        assert RequisitionStatus.WON not in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.LOST not in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.CANCELLED not in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.OPEN in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.OFFERS in _ACTIVE_REQ_STATUSES
-        assert RequisitionStatus.QUOTED in _ACTIVE_REQ_STATUSES
-
-    def test_deadline_within_window_would_fire(self):
-        """Deadlines within 2 days should be in scope."""
-        now = datetime.now(UTC)
-        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        deadline_dt = datetime.fromisoformat(tomorrow).replace(tzinfo=UTC)
-        horizon = now + timedelta(days=2)
-        assert deadline_dt <= horizon
-
-    def test_deadline_far_future_would_not_fire(self):
-        """Deadlines 10 days away should NOT be in scope."""
-        now = datetime.now(UTC)
-        far = (now + timedelta(days=10)).strftime("%Y-%m-%d")
-        deadline_dt = datetime.fromisoformat(far).replace(tzinfo=UTC)
-        horizon = now + timedelta(days=2)
-        assert deadline_dt > horizon
-
-    def test_asap_deadline_skipped(self):
-        """'ASAP' is not a parseable ISO date and would be skipped."""
-        with pytest.raises(ValueError):
-            datetime.fromisoformat("ASAP")

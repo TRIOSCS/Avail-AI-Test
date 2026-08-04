@@ -5,7 +5,7 @@ from system events (offers, RFQs, quotes) and auto-closes them when
 the triggering action is completed.
 
 Called by: routers/htmx/* task endpoints, routers/htmx_views.py (My Day),
-    jobs/task_jobs.py, and service hooks (email_service, buyplan_workflow, resell).
+    and service hooks (email_service, buyplan_workflow, resell).
 Depends on: models/task.py, models/auth.py
 """
 
@@ -747,19 +747,6 @@ def on_buy_plan_assigned(
         source_ref=f"buyline:{line_id}",
         priority=3,
         assigned_to_id=buyer_id,
-    )
-
-
-def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: str):
-    """Auto-generate 'Bid due' alert task for a requisition approaching deadline."""
-    auto_create_task(
-        db,
-        requisition_id=requisition_id,
-        title=f"Bid due {deadline} — {req_name}",
-        task_type="sourcing",
-        source_ref=f"bid_due:{requisition_id}",
-        priority=3,
-        due_at=datetime.now(UTC) + timedelta(days=1),
     )
 
 

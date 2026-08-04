@@ -314,9 +314,3 @@ class TestConvenienceHelpers:
         tasks = _req_tasks(db_session, requisition.id)
         assert len(tasks) == 1
         assert tasks[0].task_type == "buying"
-
-    def test_on_bid_due_soon(self, db_session: Session, requisition: Requisition):
-        task_service.on_bid_due_soon(db_session, requisition.id, "2026-12-31", "Test REQ")
-        tasks = _req_tasks(db_session, requisition.id)
-        assert len(tasks) == 1
-        assert "Bid due" in tasks[0].title

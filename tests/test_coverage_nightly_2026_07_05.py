@@ -29,84 +29,20 @@ os.environ["TESTING"] = "1"
 
 
 class TestResellJobs:
-    """Cover the error branches and zero-result path in _job_expire_resell_lists."""
+    """register_resell_jobs is a no-op since W1 (2026-08-04).
 
-    def _make_job(self):
-        from app.jobs.resell_jobs import _job_expire_resell_lists
+    expire_resell_lists + sweep_stale_sending_outreach were DELETED and
+    recompute_buyer_scores PARKED (buyer intelligence, spec §5.3 — comeback: second
+    trader user) per docs/W1_JOB_DISPOSITION.md.
+    """
 
-        return _job_expire_resell_lists
-
-    @pytest.mark.asyncio
-    async def test_zero_expired_no_log(self):
-        job = self._make_job()
-        mock_db = MagicMock()
-        # Lazy imports inside function body — patch at the source module
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.excess_service.expire_overdue_lists", return_value=0),
-        ):
-            # when expired=0 the "if expired:" branch is skipped — no raise
-            await job.__wrapped__()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_positive_expired_logs(self):
-        job = self._make_job()
-        mock_db = MagicMock()
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.excess_service.expire_overdue_lists", return_value=3),
-        ):
-            await job.__wrapped__()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_sqlalchemy_error_rollback(self):
-        import sqlalchemy.exc
-
-        job = self._make_job()
-        mock_db = MagicMock()
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.excess_service.expire_overdue_lists",
-                side_effect=sqlalchemy.exc.SQLAlchemyError("db error"),
-            ),
-        ):
-            await job.__wrapped__()  # Must NOT raise
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_generic_exception_rollback(self):
-        job = self._make_job()
-        mock_db = MagicMock()
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.excess_service.expire_overdue_lists",
-                side_effect=RuntimeError("unexpected"),
-            ),
-        ):
-            await job.__wrapped__()  # Must NOT raise
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    def test_register_resell_jobs(self):
+    def test_register_resell_jobs_registers_nothing(self):
         from app.jobs.resell_jobs import register_resell_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         register_resell_jobs(scheduler, settings)
-        # Three lifecycle jobs: list-expiry backstop + stale-'sending' sweeper +
-        # the Phase-5 nightly BuyerScore recompute backstop (finding #17).
-        assert scheduler.add_job.call_count == 3
-        job_ids = {c.kwargs.get("id") for c in scheduler.add_job.call_args_list}
-        assert job_ids == {
-            "expire_resell_lists",
-            "sweep_stale_sending_outreach",
-            "recompute_buyer_scores",
-        }
+        scheduler.add_job.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────

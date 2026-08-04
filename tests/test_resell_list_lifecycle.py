@@ -1,41 +1,29 @@
-"""test_resell_list_lifecycle.py — List close/expire lifecycle + mirror retire (M5).
+"""test_resell_list_lifecycle.py — List close lifecycle + mirror retire (M5).
 
 Covers the M5 rework of the ExcessList posting-window lifecycle:
   • ``close_list`` is guarded to ``open``/``collecting`` only (409 for a draft or an
     already-resolved list) and RETIRES the Sighting mirror on close (a closed posting
     stops advertising its supply as live);
-  • ``expire_overdue_lists`` flips past-``close_at`` unresolved (open/collecting) lists to
-    ``expired`` + retires their mirror, skips current / already-resolved ones, and is
-    idempotent; a PARTIALLY-AWARDED list (any awarded line / won offer) instead steps to
-    the non-terminal ``bid_out`` so its remaining live bids stay awardable (finding #1,
-    deep-review #2);
-  • the nightly ``_job_expire_resell_lists`` job delegates to that service;
-  • ``register_resell_jobs`` registers the expiry job;
-  • the list-view stage filter now offers the ``closed`` / ``expired`` stages.
+  • ``close_list_without_bid`` → the terminal ``closed`` state (D5);
+  • the list-view stage filter offers the ``closed`` / ``expired`` stages.
+
+(The nightly expiry job + ``expire_overdue_lists`` service and their tests were
+removed in the W1 simplification per docs/W1_JOB_DISPOSITION.md; git restores.)
 
 Called by: pytest
-Depends on: app.services.excess_service, app.services.excess_mirror, app.jobs.resell_jobs,
+Depends on: app.services.excess_service, app.services.excess_mirror,
     app.models.excess, app.models.sourcing, tests.conftest
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
-
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.constants import (
-    ExcessLineItemStatus,
-    ExcessListStatus,
-    ExcessOfferStatus,
-    OfferLineMatchStatus,
-)
+from app.constants import ExcessListStatus
 from app.models import Company, User
-from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
+from app.models.excess import ExcessList
 from app.models.sourcing import Sighting
 from app.services import excess_service
 from app.services.excess_mirror import publish_list
@@ -267,20 +255,6 @@ def test_close_without_bid_non_owner_403(db_session, owner, other_user, company)
     assert exc.value.status_code == 403
 
 
-def test_closed_list_is_not_auto_expired(db_session, owner, company):
-    """CLOSED is terminal — a past-close_at CLOSED list is NOT swept to expired."""
-    from datetime import timedelta
-
-    el = _make_list(db_session, owner, company)
-    el.status = ExcessListStatus.CLOSED
-    el.close_at = datetime.now(UTC) - timedelta(days=2)
-    db_session.commit()
-
-    assert excess_service.expire_overdue_lists(db_session) == 0
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.CLOSED
-
-
 def test_close_without_bid_route_200_and_forbidden(client, db_session, owner, company):
     """Owner POST closes without bidding → 200 + CLOSED; a non-owner is 403."""
     from app.dependencies import require_user
@@ -316,229 +290,6 @@ def test_workspace_bid_out_subtitle_is_accurate(client, db_session, owner):
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert "Sent to the customer" not in body
-
-
-# ── expire_overdue_lists (the nightly service) ───────────────────────
-
-
-def _published_list_with_deadline(
-    db: Session, owner: User, company: Company, *, parts=("LM358N",)
-) -> tuple[ExcessList, datetime]:
-    """A published (open) list whose REAL, create-set + publish-preserved close_at is in
-    the near future — the nightly sweep is then driven with a ``now=`` past that
-    deadline, so no hand-set past close_at is needed (T1: the deadline flows create →
-    publish → expiry)."""
-    close = datetime.now(UTC) + timedelta(hours=1)
-    el = create_excess_list(db, title="Excess", company_id=company.id, owner_id=owner.id, close_at=close)
-    import_line_items(db, el.id, [{"part_number": p, "quantity": "100"} for p in parts])
-    publish_list(db, el.id, owner)  # → open, mirrored; close_at PRESERVED (the T1 fix)
-    db.refresh(el)
-    assert el.close_at is not None  # the create-set deadline survived publishing
-    return el, close
-
-
-def test_expire_overdue_flips_and_retires(db_session, owner, company):
-    """A published open list whose (preserved) close_at has lapsed expires + retires its
-    mirror — driven by evaluating the nightly sweep at a ``now`` past the real
-    deadline."""
-    el, close = _published_list_with_deadline(db_session, owner, company)
-    assert len(_sightings(db_session, company.id)) == 1
-
-    n = excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2))
-
-    assert n == 1
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.EXPIRED
-    assert _sightings(db_session, company.id) == []
-
-
-def test_expire_skips_future_and_null_close_at(db_session, owner, company):
-    """A future deadline and a null close_at are both left alone."""
-    future = _make_list(db_session, owner, company, parts=("MAX232",))
-    publish_list(db_session, future.id, owner)
-    future.close_at = datetime.now(UTC) + timedelta(days=3)
-    no_deadline = _make_list(db_session, owner, company, parts=("NE555P",))
-    publish_list(db_session, no_deadline.id, owner)  # close_at stays None
-    db_session.commit()
-
-    assert excess_service.expire_overdue_lists(db_session) == 0
-    db_session.refresh(future)
-    db_session.refresh(no_deadline)
-    assert future.status == ExcessListStatus.OPEN
-    assert no_deadline.status == ExcessListStatus.OPEN
-
-
-def test_expire_skips_resolved_lists(db_session, owner, company):
-    """A bid_out list past close_at is NOT expired (only open/collecting are
-    eligible)."""
-    el = _make_list(db_session, owner, company)
-    el.status = ExcessListStatus.BID_OUT
-    el.close_at = datetime.now(UTC) - timedelta(days=1)
-    db_session.commit()
-
-    assert excess_service.expire_overdue_lists(db_session) == 0
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.BID_OUT
-
-
-def test_expire_is_idempotent(db_session, owner, company):
-    """A second run finds nothing left to expire."""
-    _el, close = _published_list_with_deadline(db_session, owner, company)
-    later = close + timedelta(hours=2)
-    assert excess_service.expire_overdue_lists(db_session, now=later) == 1
-    assert excess_service.expire_overdue_lists(db_session, now=later) == 0
-
-
-def test_expire_stale_read_cannot_clobber_concurrent_award(db_session, owner, company, monkeypatch):
-    """Finding R2: ``expire_overdue_lists`` had no per-list row lock — a concurrent award
-    landing between the batch SELECT and this list's per-list write must not be clobbered
-    to a terminal ``expired`` (or a stale ``bid_out``).
-
-    The batch SELECT is a real query (it always reflects fresh committed data), so a race
-    can only land BETWEEN that fetch and the per-list processing turn — simulated here by
-    making the lock hook itself perform a raw core UPDATE (bypassing the ORM, exactly like
-    a second transaction's committed award) the instant this list's turn arrives, then
-    calling through to the real lock. Without the per-list re-guard, the sweep would
-    blindly overwrite the just-awarded status.
-    """
-    from sqlalchemy import text as sa_text
-
-    el, close = _published_list_with_deadline(db_session, owner, company)
-    el.status = ExcessListStatus.COLLECTING
-    db_session.commit()
-
-    real_lock = excess_service._lock_list_row
-
-    def _award_lands_mid_sweep(db, excess_list_id):
-        db.execute(sa_text("UPDATE excess_lists SET status = 'awarded' WHERE id = :id").bindparams(id=excess_list_id))
-        return real_lock(db, excess_list_id)
-
-    monkeypatch.setattr(excess_service, "_lock_list_row", _award_lands_mid_sweep)
-
-    n = excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2))
-
-    assert n == 0  # skipped — no longer unresolved post-lock
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.AWARDED  # never clobbered to bid_out/expired
-
-
-def _matched_open_offer(
-    db: Session, excess_list: ExcessList, submitter: User, line: ExcessLineItem, unit_price: Decimal
-) -> ExcessOffer:
-    """An OPEN per-line ExcessOffer carrying one MATCHED line — ready to be awarded."""
-    offer = ExcessOffer(
-        excess_list_id=excess_list.id,
-        submitted_by=submitter.id,
-        scope="per_line",
-        status=ExcessOfferStatus.OPEN,
-    )
-    db.add(offer)
-    db.flush()
-    db.add(
-        ExcessOfferLine(
-            offer_id=offer.id,
-            excess_line_item_id=line.id,
-            mpn_raw=line.part_number,
-            quantity=line.quantity,
-            unit_price=unit_price,
-            match_status=OfferLineMatchStatus.MATCHED,
-        )
-    )
-    db.flush()
-    return offer
-
-
-def test_expire_partially_awarded_list_steps_to_bid_out_not_expired(db_session, owner, other_user, company):
-    """Regression (deep-review #2, finding #1): the nightly sweep must NOT send a
-    partially-awarded list to terminal ``expired``.
-
-    A partial award deliberately keeps the list COLLECTING (offers are still being
-    collected on the rest), so it lands in the sweep's open/collecting net. Flipping it to
-    ``expired`` (terminal) would 409 every later ``award_offer``, stranding the still-live
-    bids on the remaining lines. Instead the sweep steps it to ``bid_out`` — window
-    closed, mirror retired like any closed posting, but the remaining bids stay awardable.
-    """
-    close = datetime.now(UTC) + timedelta(hours=1)
-    el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=owner.id, close_at=close)
-    import_line_items(
-        db_session,
-        el.id,
-        [{"part_number": "LM358N", "quantity": "100"}, {"part_number": "NE555P", "quantity": "50"}],
-    )
-    publish_list(db_session, el.id, owner)  # → open, mirrored; close_at preserved
-    db_session.refresh(el)
-    line_a, line_b = sorted(el.line_items, key=lambda li: li.id)
-    winner = _matched_open_offer(db_session, el, other_user, line_a, Decimal("0.50"))
-    remaining = _matched_open_offer(db_session, el, other_user, line_b, Decimal("0.40"))
-    el.status = ExcessListStatus.COLLECTING  # what submit_offer stamps on the first inbound offer
-    db_session.commit()
-
-    excess_service.award_offer(db_session, winner.id, owner)  # partial → list stays collecting
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.COLLECTING
-
-    n = excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2))
-
-    assert n == 1
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.BID_OUT  # non-terminal: window closed, sale preserved
-    assert _sightings(db_session, company.id) == []  # mirror retired like any closed window
-
-    # The still-live bid on the remaining line is resolvable — award works on bid_out.
-    awarded = excess_service.award_offer(db_session, remaining.id, owner)
-    assert awarded.status == ExcessOfferStatus.WON
-    db_session.refresh(line_b)
-    assert line_b.status == ExcessLineItemStatus.AWARDED
-
-
-def test_expire_unawarded_list_still_expires(db_session, owner, other_user, company):
-    """An overdue list holding only a still-OPEN (never awarded) offer expires as before
-    — the bid_out carve-out is strictly for lists that already SOLD something."""
-    close = datetime.now(UTC) + timedelta(hours=1)
-    el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=owner.id, close_at=close)
-    import_line_items(db_session, el.id, [{"part_number": "LM358N", "quantity": "100"}])
-    publish_list(db_session, el.id, owner)
-    db_session.refresh(el)
-    _matched_open_offer(db_session, el, other_user, el.line_items[0], Decimal("0.30"))
-    el.status = ExcessListStatus.COLLECTING
-    db_session.commit()
-
-    assert excess_service.expire_overdue_lists(db_session, now=close + timedelta(hours=2)) == 1
-    db_session.refresh(el)
-    assert el.status == ExcessListStatus.EXPIRED
-
-
-# ── Nightly job + registration ───────────────────────────────────────
-
-
-async def test_nightly_job_expires_overdue(db_session, owner, company):
-    """The job runs expire_overdue_lists against a fresh session (SessionLocal
-    patched)."""
-    el, _close = _published_list_with_deadline(db_session, owner, company)
-    # The job uses the real clock (no now-override), so simulate the deadline lapsing after
-    # publish — the deadline is still a genuine create-set + publish-preserved value.
-    el.close_at = datetime.now(UTC) - timedelta(hours=1)
-    db_session.commit()
-    from app.jobs.resell_jobs import _job_expire_resell_lists
-
-    list_id = el.id
-    with patch("app.database.SessionLocal", return_value=db_session):
-        await _job_expire_resell_lists()
-
-    # The job closes its (patched) session in `finally`, detaching `el` — re-read by id;
-    # the commit is visible on the shared test connection.
-    refreshed = db_session.get(ExcessList, list_id)
-    assert refreshed.status == ExcessListStatus.EXPIRED
-
-
-def test_register_resell_jobs_adds_expiry_job():
-    """register_resell_jobs registers the expire_resell_lists cron job."""
-    from app.jobs.resell_jobs import register_resell_jobs
-
-    scheduler = MagicMock()
-    register_resell_jobs(scheduler, settings=None)
-    ids = {c.kwargs.get("id") for c in scheduler.add_job.call_args_list}
-    assert "expire_resell_lists" in ids
 
 
 # ── List views/filters consume the terminal states ──────────────────

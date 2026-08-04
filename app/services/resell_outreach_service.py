@@ -887,7 +887,7 @@ _RETRYABLE_STATUSES = {
 }
 
 # A ``sending`` row this old is presumed orphaned (its background send job died mid-flight)
-# — the nightly sweeper flips it to ``interrupted`` so it stops polling and becomes
+# — ``reclassify_stale_sending`` flips it to ``interrupted`` so it stops polling and becomes
 # retryable. Generous enough to never race an in-flight multi-buyer send.
 _STALE_SENDING_MINUTES = 30
 
@@ -1068,13 +1068,14 @@ def reclassify_stale_sending(
     Sent-folder lookup before any resend). Idempotent, commits once (only when something
     was flipped), returns the count flipped.
 
-    Previously this reclassification only ran once nightly (:func:`sweep_stale_sending_outreach`),
-    so an orphaned row was unactionable — stuck showing ``sending`` and hard-409ing Retry —
-    for up to ~24h even though the code's own threshold already knew it was orphaned.
+    Previously this reclassification only ran once nightly (a ``sweep_stale_sending_outreach``
+    cron wrapper, removed in the W1 simplification), so an orphaned row was unactionable —
+    stuck showing ``sending`` and hard-409ing Retry — for up to ~24h even though the code's
+    own threshold already knew it was orphaned.
     ``excess_list_id`` / ``outreach_id`` optionally SCOPE the reclassification to just the
     rows a caller is about to read (the outreach tab context builder, or the retry guard for
-    one specific row) so it becomes actionable the instant that surface is loaded, without
-    waiting for the nightly cron. Omitting both scopes the whole table (the nightly sweep).
+    one specific row) so it becomes actionable the instant that surface is loaded. Omitting
+    both scopes the whole table.
     """
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(minutes=_STALE_SENDING_MINUTES)
@@ -1095,17 +1096,6 @@ def reclassify_stale_sending(
     if stale:
         db.commit()
     return len(stale)
-
-
-def sweep_stale_sending_outreach(db: Session, *, now: datetime | None = None) -> int:
-    """Nightly backstop — reclassify EVERY stale ``sending`` row table-wide.
-
-    Thin wrapper over :func:`reclassify_stale_sending` (no scope) kept as the cron entry
-    point / stable public name; see that function for the full contract.
-    """
-    swept = reclassify_stale_sending(db, now=now)
-    logger.info("Swept {} stale 'sending' outreach row(s) to 'interrupted'", swept)
-    return swept
 
 
 # ═══════════════════════════════════════════════════════════════════════

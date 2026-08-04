@@ -602,8 +602,8 @@ def recompute_all_buyer_scores(db: Session) -> int:
     Walks every VendorCard that has either an ExcessOffer or an ExcessOutreach against
     it and recomputes its BuyerScore. Returns the count SUCCESSFULLY recomputed.
 
-    Deep-review #2 finding B44: each buyer is wrapped in its own try/except + commit,
-    mirroring ``excess_service.expire_overdue_lists``'s per-list isolation — a single bad
+    Deep-review #2 finding B44: each buyer is wrapped in its own try/except + commit
+    (per-row batch isolation) — a single bad
     buyer (an IntegrityError racing a concurrent ``recompute_buyer_score_on_win``, or any
     other transient DB error) is rolled back and skipped, logged, and the batch continues
     reconciling the rest. Previously one exception mid-batch propagated to the job wrapper

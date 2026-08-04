@@ -1,7 +1,8 @@
 """test_nightly_coverage_2026_07_08.py — bring 3 modules from below 85% to 85%+.
 
-Targets (from CI coverage report 2026-07-06):
-  - app/jobs/resell_jobs.py         73%  (miss=6  of 22)
+Targets (from CI coverage report 2026-07-06; the resell_jobs error-path section
+was removed in W1 2026-08-04 — _job_expire_resell_lists was deleted per
+docs/W1_JOB_DISPOSITION.md):
   - app/services/prepayment_notifications.py  75%  (miss=62 of 251)
   - app/services/ticket_prompt_service.py     82%  (miss=11 of 61)
 
@@ -20,7 +21,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import sqlalchemy.exc
 from sqlalchemy.orm import Session
 
 from app.constants import PrepaymentStatus, TicketType
@@ -112,72 +112,6 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
     db.add(pp)
     db.commit()
     return pp
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 1. app/jobs/resell_jobs.py — cover SQLAlchemyError + generic Exception paths
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestResellJobsErrorPaths:
-    """Cover the two except branches in _job_expire_resell_lists (lines 45-50)."""
-
-    @pytest.mark.asyncio
-    async def test_sqlalchemy_error_is_caught_and_rolled_back(self, db_session: Session):
-        from app.jobs.resell_jobs import _job_expire_resell_lists
-
-        mock_db = MagicMock()
-        mock_db.rollback = MagicMock()
-        mock_db.close = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.excess_service.expire_overdue_lists",
-                side_effect=sqlalchemy.exc.SQLAlchemyError("db exploded"),
-            ),
-        ):
-            # Must not raise — error is swallowed and DB rolled back
-            await _job_expire_resell_lists()
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_generic_exception_is_caught_and_rolled_back(self, db_session: Session):
-        from app.jobs.resell_jobs import _job_expire_resell_lists
-
-        mock_db = MagicMock()
-        mock_db.rollback = MagicMock()
-        mock_db.close = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.excess_service.expire_overdue_lists",
-                side_effect=RuntimeError("something weird"),
-            ),
-        ):
-            await _job_expire_resell_lists()
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_zero_expired_logs_nothing(self, db_session: Session):
-        """When expire_overdue_lists returns 0 (falsy), the logger.info line is
-        skipped."""
-        from app.jobs.resell_jobs import _job_expire_resell_lists
-
-        mock_db = MagicMock()
-        mock_db.close = MagicMock()
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.excess_service.expire_overdue_lists", return_value=0),
-        ):
-            await _job_expire_resell_lists()
-
-        mock_db.close.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

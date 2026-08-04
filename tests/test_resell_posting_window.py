@@ -8,8 +8,9 @@ Hard correctness points:
     and rejects a naive or past one with a 400 (an owner cannot schedule a window in the
     past, and a naive wall-clock is ambiguous).
   - ``publish_list`` PRESERVES a future ``close_at`` (was: unconditionally nulled it) and
-    only clears a stale/past one — so a real, create-set deadline survives publishing and
-    the nightly ``expire_overdue_lists`` finally has live rows to act on.
+    only clears a stale/past one — so a real, create-set deadline survives publishing.
+    (The nightly ``expire_overdue_lists`` sweep was removed in W1, 2026-08-04; the
+    deadline still drives the countdown chip and manual close.)
   - The resell chip context exposes ``is_live`` (open/collecting only) + ``close_at_display``
     so the countdown chip renders ONLY while live; a resolved (bid_out/closed/awarded/
     expired) list yields ``is_live=False`` and never a red "Overdue".

@@ -489,7 +489,8 @@ class TestStaleSendingSweeper:
     ):
         """A ``sending`` row older than the threshold is flipped to ``interrupted`` (its
         background job died mid-flight); a fresh ``sending`` row and any already-settled
-        row are untouched.
+        row are untouched. (Unscoped ``reclassify_stale_sending`` — the nightly cron
+        wrapper was removed in W1.)
 
         The sweep NEVER assumes not-sent (interrupted, not no_response), and never
         resends.
@@ -507,7 +508,7 @@ class TestStaleSendingSweeper:
         )
         db_session.commit()
 
-        flipped = outreach_svc.sweep_stale_sending_outreach(db_session, now=now)
+        flipped = outreach_svc.reclassify_stale_sending(db_session, now=now)
 
         assert flipped == 1
         db_session.expire_all()
@@ -585,34 +586,3 @@ class TestOfferedSummaryExcludesNonSent:
 
         ctx = _outreach_tracker_context(None, db_session, el, trader)
         assert ctx["summary"]["offered"] == 1
-
-
-class TestExpiryPerListIsolation:
-    def test_one_bad_list_mirror_error_does_not_block_the_others(self, db_session: Session, test_company: Company):
-        """One overdue list whose mirror-sync raises must NOT abort the whole batch —
-        the other overdue lists still expire (finding #6 silent-failure isolation)."""
-        from unittest.mock import patch
-
-        from app.services import excess_service
-
-        trader = _make_trader(db_session)
-        past = datetime.now(UTC) - timedelta(hours=1)
-        bad = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
-        good = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
-        bad.close_at = past
-        good.close_at = past
-        db_session.commit()
-        bad_id, good_id = bad.id, good.id
-
-        def _sync(_db, el):
-            if el.id == bad_id:
-                raise RuntimeError("mirror boom")
-
-        with patch("app.services.excess_mirror.sync_list_mirror", side_effect=_sync):
-            expired = excess_service.expire_overdue_lists(db_session, now=datetime.now(UTC))
-
-        db_session.expire_all()
-        # The good list expired despite the bad list's mirror error; the bad one stayed put.
-        assert db_session.get(ExcessList, good_id).status == ExcessListStatus.EXPIRED
-        assert db_session.get(ExcessList, bad_id).status == ExcessListStatus.COLLECTING
-        assert expired == 1

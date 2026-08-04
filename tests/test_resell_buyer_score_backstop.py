@@ -5,9 +5,11 @@ BuyerScore row can never silently drift from truth when an on-win / on-send hook
 
 - ``recompute_all_buyer_scores`` reconciles a stale BuyerScore to ground truth and returns
   the walked-card count (RESELL-TEST-4 drift).
-- ``_job_recompute_buyer_scores`` mirrors the expiry job: success path plus the
-  SQLAlchemyError and generic-Exception branches roll back and never crash the scheduler.
-- ``register_resell_jobs`` registers the 3rd cron job at a distinct minute.
+- ``_job_recompute_buyer_scores``: success path plus the SQLAlchemyError and
+  generic-Exception branches roll back and never crash the scheduler.
+- ``register_resell_jobs`` registers NOTHING since W1 (2026-08-04): the job is PARKED
+  per docs/W1_JOB_DISPOSITION.md (spec §5.3 buyer intelligence; comeback = second
+  trader user) — the implementation stays, the cron registration is gone.
 
 Called by: pytest
 Depends on: app.jobs.resell_jobs, app.services.buyer_affinity_service, app.models, conftest
@@ -126,7 +128,7 @@ def test_backstop_returns_zero_with_no_buyers(db_session: Session):
 def test_backstop_one_poisoned_buyer_does_not_strand_the_others(db_session: Session):
     """Finding B44: recompute_buyer_score has no per-buyer error isolation — one buyer
     raising must roll back ONLY that buyer and let the batch continue reconciling the
-    rest, mirroring excess_service.expire_overdue_lists's per-list isolation."""
+    rest (per-row batch isolation)."""
     el, line, owner = _list_with_cap_line(db_session)
     good_buyer_a = _buyer(db_session, "GoodBuyerA")
     poisoned_buyer = _buyer(db_session, "PoisonedBuyer")
@@ -209,14 +211,12 @@ async def test_job_generic_exception_rolls_back(db_session: Session):
     mock_rollback.assert_called_once()
 
 
-def test_register_resell_jobs_adds_buyer_score_job():
-    """register_resell_jobs registers the recompute_buyer_scores cron job at a distinct
-    minute so the three nightly jobs do not collide."""
+def test_register_resell_jobs_registers_nothing_parked():
+    """W1 (2026-08-04): recompute_buyer_scores is PARKED — register_resell_jobs is a no-
+    op; the job implementation above stays for the buyer-intelligence comeback (second
+    trader user, spec §5.3)."""
     from app.jobs.resell_jobs import register_resell_jobs
 
     scheduler = MagicMock()
     register_resell_jobs(scheduler, settings=None)
-    ids = {c.kwargs.get("id") for c in scheduler.add_job.call_args_list}
-    assert "recompute_buyer_scores" in ids
-    # All three nightly jobs registered.
-    assert {"expire_resell_lists", "sweep_stale_sending_outreach", "recompute_buyer_scores"} <= ids
+    scheduler.add_job.assert_not_called()

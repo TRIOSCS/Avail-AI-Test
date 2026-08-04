@@ -188,10 +188,12 @@ def _list_has_offers(db: Session, el: ExcessList) -> bool:
 def _refresh_demo_window(db: Session, el: ExcessList, *, close_in_days: int) -> None:
     """Re-arm a decayed demo posting window on an idempotent re-seed (finding #62).
 
-    The nightly expiry job (``expire_overdue_lists``) flips any open/collecting list past
-    ``close_at`` to terminal ``expired`` and retires its Sighting mirror — so the flagship
-    collecting demo silently dies a few nights after seeding, and find-by-title used to
-    return early without restoring it. On a found (not created) list, when the demo has
+    The nightly expiry job (``expire_overdue_lists``, removed in the W1 simplification)
+    used to flip any open/collecting list past ``close_at`` to terminal ``expired`` and
+    retire its Sighting mirror — so the flagship collecting demo silently died a few
+    nights after seeding, and find-by-title used to return early without restoring it;
+    a pre-W1 database may still hold such decayed rows. On a found (not created) list,
+    when the demo has
     decayed — status ``expired``, or a still-unresolved (open/collecting) window whose
     ``close_at`` has lapsed — re-stamp what a fresh seed would set: status back to
     ``COLLECTING``, ``close_at`` pushed ``close_in_days`` forward, ``updated_at`` now, and

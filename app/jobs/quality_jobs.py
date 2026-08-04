@@ -1,31 +1,27 @@
-"""AI quality scoring background job.
+"""AI quality scoring background job — PARKED since W1 simplification (2026-08-04).
 
-Scores unscored non-email ActivityLog entries every 15 minutes
-using Claude Haiku via the activity_quality_service.
+The quality_score_activities registration (every 15 min, Claude Haiku scoring of
+unscored non-email ActivityLog entries) was removed per docs/W1_JOB_DISPOSITION.md
+(spec §5.4 park list — the Activity Scorecard is its only consumer). The job
+implementation below stays. Comeback trigger: team exists (§5.4) — re-add the
+``scheduler.add_job`` call then.
 
-Called by: app/jobs/__init__.py (registered with APScheduler)
+Called by: app/jobs/__init__.py (register_quality_jobs, now a no-op)
 Depends on: app/services/activity_quality_service.py
 """
 
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
 
 
 def register_quality_jobs(scheduler, settings):
-    """Register AI quality scoring jobs."""
-    scheduler.add_job(
-        _job_score_activities,
-        IntervalTrigger(minutes=15),
-        id="quality_score_activities",
-        name="AI quality score unscored activities",
-    )
+    """Register AI quality scoring jobs — none since W1 (parked, no-op)."""
 
 
 @_traced_job
 async def _job_score_activities():
-    """Batch score unscored ActivityLog entries."""
+    """PARKED (not registered) — batch score unscored ActivityLog entries."""
     from ..database import SessionLocal
 
     db = SessionLocal()

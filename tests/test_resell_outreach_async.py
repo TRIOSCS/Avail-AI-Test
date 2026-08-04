@@ -1608,7 +1608,7 @@ def test_retry_route_refreshes_created_at_so_sweeper_cannot_flip(
     """Finding #6: the optimistic retry flip refreshes ``created_at`` so the row is not
     'born stale'.
 
-    The nightly stale-sending sweeper selects on ``created_at < now - 30min``;
+    The stale-sending reclassifier selects on ``created_at < now - 30min``;
     a retried row still carrying its original (hours-old) enqueue time would be flipped to
     ``interrupted`` mid-resend. After the refresh the sweeper leaves the in-flight retry
     alone.
@@ -1631,7 +1631,7 @@ def test_retry_route_refreshes_created_at_so_sweeper_cannot_flip(
         assert db_session.get(ExcessOutreach, row_id).status == ExcessOutreachStatus.SENDING
 
         # The sweeper must NOT flip the freshly-retried SENDING row (created_at was refreshed).
-        flipped = svc.sweep_stale_sending_outreach(db_session, now=datetime.now(UTC))
+        flipped = svc.reclassify_stale_sending(db_session, now=datetime.now(UTC))
         assert flipped == 0
         db_session.expire_all()
         assert db_session.get(ExcessOutreach, row_id).status == ExcessOutreachStatus.SENDING
