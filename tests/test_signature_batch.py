@@ -516,22 +516,3 @@ def test_process_results_confidence_partial(mock_results, mock_redis, db_session
     db_session.refresh(record)
     # phone + title = 2 fields => 0.5 + 2*0.08 = 0.66
     assert record.confidence == pytest.approx(0.66, abs=0.01)
-
-
-# ── core_jobs registration tests ─────────────────────────────────────
-
-
-def test_signature_batch_jobs_registered():
-    """Both signature batch jobs are registered in core_jobs."""
-    from app.jobs.core_jobs import register_core_jobs
-
-    scheduler = MagicMock()
-    settings = MagicMock()
-    settings.inbox_scan_interval_min = 30
-    settings.activity_tracking_enabled = False
-
-    register_core_jobs(scheduler, settings)
-
-    job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
-    assert "batch_parse_signatures" in job_ids
-    assert "poll_signature_batch" in job_ids

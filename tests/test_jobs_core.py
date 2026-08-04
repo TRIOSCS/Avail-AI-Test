@@ -1,8 +1,8 @@
 """test_jobs_core.py — Tests for core background jobs (token refresh, batch results,
-inbox scan, webhooks)
+inbox scan)
 
 Tests cover: _job_token_refresh, _job_batch_results, _job_inbox_scan,
-_job_webhook_subscriptions, plus get_valid_token, refresh_user_token, and _refresh_access_token
+plus get_valid_token, refresh_user_token, and _refresh_access_token
 helper functions.
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
@@ -19,6 +19,25 @@ from sqlalchemy.orm import Session
 from app.scheduler import scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _azure_configured_for_token_jobs():
+    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
+    tests exercise a CONFIGURED deployment.
+
+    The guard's own test lives in
+    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
+    """
+    from unittest.mock import patch as _patch
+
+    from app.config import settings as _settings
+
+    with (
+        _patch.object(_settings, "azure_client_id", "test-client"),
+        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
+    ):
+        yield
 
 
 @pytest.fixture()
@@ -656,41 +675,6 @@ def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
             asyncio.run(_job_inbox_scan())
 
         scheduler_db.commit = original_commit
-
-
-# ── _job_webhook_subscriptions() ──────────────────────────────────────
-
-
-def test_webhook_subscriptions_delegates(scheduler_db):
-    """Webhook job calls renew_expiring + ensure_all_users_subscribed."""
-    with (
-        patch(
-            "app.services.webhook_service.renew_expiring_subscriptions",
-            new_callable=AsyncMock,
-        ) as mock_renew,
-        patch(
-            "app.services.webhook_service.ensure_all_users_subscribed",
-            new_callable=AsyncMock,
-        ) as mock_ensure,
-    ):
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        asyncio.run(_job_webhook_subscriptions())
-        mock_renew.assert_called_once_with(scheduler_db)
-        mock_ensure.assert_called_once_with(scheduler_db)
-
-
-def test_webhook_subscriptions_error_handling(scheduler_db):
-    """Webhook job re-raises errors for _traced_job/Sentry capture."""
-    with patch(
-        "app.services.webhook_service.renew_expiring_subscriptions",
-        new_callable=AsyncMock,
-        side_effect=Exception("Graph API error"),
-    ):
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        with pytest.raises(Exception, match="Graph API error"):
-            asyncio.run(_job_webhook_subscriptions())
 
 
 # ── _traced_job exception path ────────────────────────────────────────

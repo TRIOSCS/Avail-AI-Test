@@ -22,13 +22,12 @@ class TestRegisterCoreJobs:
     """Tests for register_core_jobs()."""
 
     def test_registers_base_jobs(self):
-        """All standard jobs are registered (without activity tracking)."""
+        """The three kernel core jobs are registered — nothing else."""
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 5
-        settings.activity_tracking_enabled = False
 
         register_core_jobs(scheduler, settings)
 
@@ -36,43 +35,21 @@ class TestRegisterCoreJobs:
         assert "token_refresh" in job_ids
         assert "inbox_scan" in job_ids
         assert "batch_results" in job_ids
-        assert "batch_parse_signatures" in job_ids
-        assert "poll_signature_batch" in job_ids
-        # Webhook subs NOT registered when activity_tracking_enabled=False
+        # Deleted W1 (spec §3 kernel-only): signature batch pipeline + webhook subs
+        assert "batch_parse_signatures" not in job_ids
+        assert "poll_signature_batch" not in job_ids
         assert "webhook_subs" not in job_ids
 
-    def test_registers_webhook_job_when_activity_tracking(self):
-        """Webhook subscription job registered when activity_tracking_enabled=True."""
-        from app.jobs.core_jobs import register_core_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.inbox_scan_interval_min = 5
-        settings.activity_tracking_enabled = True
-
-        register_core_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
-        assert "webhook_subs" in job_ids
-
-    @pytest.mark.parametrize(
-        ("activity_tracking_enabled", "expected_count"),
-        [
-            pytest.param(False, 5, id="without_webhooks"),
-            pytest.param(True, 6, id="with_webhooks"),
-        ],
-    )
-    def test_total_job_count(self, activity_tracking_enabled: bool, expected_count: int):
-        """Exactly 5 jobs without activity tracking, 6 with it enabled."""
+    def test_total_job_count(self):
+        """Exactly the 3 kernel core jobs are registered."""
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 10
-        settings.activity_tracking_enabled = activity_tracking_enabled
 
         register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == expected_count
+        assert scheduler.add_job.call_count == 3
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -82,6 +59,18 @@ class TestRegisterCoreJobs:
 
 class TestJobTokenRefresh:
     """Tests for _job_token_refresh()."""
+
+    @pytest.fixture(autouse=True)
+    def _azure_configured(self):
+        # W1.15 keys-off guard: the job exits early without Azure creds, so this
+        # class simulates a configured deployment (the keys-off test overrides).
+        from app.config import settings
+
+        with (
+            patch.object(settings, "azure_client_id", "test-client"),
+            patch.object(settings, "azure_tenant_id", "test-tenant"),
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_refreshes_expiring_tokens(self, db_session: Session, test_user: User):
@@ -97,7 +86,11 @@ class TestJobTokenRefresh:
         mock_redis = MagicMock()
         mock_redis.set.return_value = True  # acquired lock
 
+        from app.config import settings
+
         with (
+            patch.object(settings, "azure_client_id", "test-client"),
+            patch.object(settings, "azure_tenant_id", "test-tenant"),
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
             patch("app.utils.token_manager.refresh_user_token", mock_refresh),
@@ -106,6 +99,33 @@ class TestJobTokenRefresh:
             await _job_token_refresh.__wrapped__()
 
         mock_refresh.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_keys_off_skips_with_notice(self, db_session: Session, test_user: User):
+        """W1.15 (48h-gate): no Azure creds -> skip entirely, no per-user 404
+        warnings."""
+        import app.jobs.core_jobs as core_jobs
+        from app.jobs.core_jobs import _job_token_refresh
+
+        test_user.refresh_token = "rt-test-123"
+        test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        db_session.commit()
+
+        from app.config import settings
+
+        core_jobs._token_refresh_skip_noticed = False
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(settings, "azure_client_id", ""),
+            patch.object(settings, "azure_tenant_id", ""),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
+        ):
+            await _job_token_refresh.__wrapped__()
+
+        mock_refresh.assert_not_awaited()
+        assert core_jobs._token_refresh_skip_noticed is True
 
     @pytest.mark.asyncio
     async def test_skips_users_without_refresh_token(self, db_session: Session, test_user: User):
@@ -117,7 +137,11 @@ class TestJobTokenRefresh:
 
         mock_refresh = AsyncMock()
 
+        from app.config import settings
+
         with (
+            patch.object(settings, "azure_client_id", "test-client"),
+            patch.object(settings, "azure_tenant_id", "test-tenant"),
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
             patch("app.utils.token_manager.refresh_user_token", mock_refresh),
@@ -469,145 +493,4 @@ class TestJobBatchResults:
             with pytest.raises(expected_exc, match=match):
                 await _job_batch_results.__wrapped__()
 
-        mock_db.close.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  _job_batch_parse_signatures / _job_poll_signature_batch
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestJobBatchParseSignatures:
-    """Tests for _job_batch_parse_signatures()."""
-
-    @pytest.mark.asyncio
-    async def test_submits_batch(self):
-        """Successful signature parse returns batch_id."""
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = MagicMock()
-        mock_parse = AsyncMock(return_value="sig-batch-123")
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.batch_parse_signatures", mock_parse),
-            patch("asyncio.wait_for", mock_parse),
-        ):
-            await _job_batch_parse_signatures.__wrapped__()
-
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.parametrize(
-        ("side_effect", "expected_exc", "match"),
-        [
-            pytest.param(TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
-            pytest.param(RuntimeError("parse error"), RuntimeError, "parse error", id="exception"),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_reraises_and_rolls_back(self, side_effect, expected_exc, match):
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.batch_parse_signatures", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=side_effect),
-        ):
-            with pytest.raises(expected_exc, match=match):
-                await _job_batch_parse_signatures.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-
-
-class TestJobPollSignatureBatch:
-    """Tests for _job_poll_signature_batch()."""
-
-    @pytest.mark.asyncio
-    async def test_processes_results(self):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = MagicMock()
-        mock_poll = AsyncMock(return_value={"applied": 5, "errors": 0})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.process_signature_batch_results", mock_poll),
-            patch("asyncio.wait_for", mock_poll),
-        ):
-            await _job_poll_signature_batch.__wrapped__()
-
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.parametrize(
-        ("side_effect", "expected_exc", "match"),
-        [
-            pytest.param(TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
-            pytest.param(RuntimeError("poll error"), RuntimeError, "poll error", id="exception"),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_reraises_and_rolls_back(self, side_effect, expected_exc, match):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.process_signature_batch_results", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=side_effect),
-        ):
-            with pytest.raises(expected_exc, match=match):
-                await _job_poll_signature_batch.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  _job_webhook_subscriptions
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestJobWebhookSubscriptions:
-    """Tests for _job_webhook_subscriptions()."""
-
-    @pytest.mark.asyncio
-    async def test_calls_renew_and_ensure(self):
-        """Both renew and ensure functions are called."""
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        mock_db = MagicMock()
-        mock_renew = AsyncMock()
-        mock_ensure = AsyncMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.webhook_service.renew_expiring_subscriptions", mock_renew),
-            patch("app.services.webhook_service.ensure_all_users_subscribed", mock_ensure),
-        ):
-            await _job_webhook_subscriptions.__wrapped__()
-
-        mock_renew.assert_awaited_once()
-        mock_ensure.assert_awaited_once()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_exception(self):
-        """Exception causes rollback and re-raise."""
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.webhook_service.renew_expiring_subscriptions",
-                AsyncMock(side_effect=RuntimeError("webhook error")),
-            ),
-        ):
-            with pytest.raises(RuntimeError, match="webhook error"):
-                await _job_webhook_subscriptions.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()

@@ -20,6 +20,25 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _azure_configured_for_token_jobs():
+    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
+    tests exercise a CONFIGURED deployment.
+
+    The guard's own test lives in
+    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
+    """
+    from unittest.mock import patch as _patch
+
+    from app.config import settings as _settings
+
+    with (
+        _patch.object(_settings, "azure_client_id", "test-client"),
+        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
+    ):
+        yield
+
+
 def _make_fake_db(fail_on_query=True):
     """Return a mock SessionLocal instance that raises on query() if requested."""
     db = MagicMock()
@@ -78,25 +97,6 @@ class TestCoreJobsPropagation:
                 await fn()
             db.close.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_webhook_subscriptions_reraises(self):
-        db = _make_fake_db(fail_on_query=False)
-        with (
-            patch("app.database.SessionLocal", _make_session_local_factory(db)),
-            patch(
-                "app.services.webhook_service.renew_expiring_subscriptions",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("webhook boom"),
-            ),
-        ):
-            from app.jobs.core_jobs import _job_webhook_subscriptions
-
-            fn = _job_webhook_subscriptions.__wrapped__
-            with pytest.raises(RuntimeError, match="webhook boom"):
-                await fn()
-            db.rollback.assert_called_once()
-            db.close.assert_called_once()
-
 
 # ---------------------------------------------------------------------------
 # email_jobs — top-level exception propagation
@@ -105,17 +105,6 @@ class TestCoreJobsPropagation:
 
 class TestEmailJobsPropagation:
     """Verify email_jobs top-level handlers re-raise."""
-
-    @pytest.mark.asyncio
-    async def test_contacts_sync_reraises(self):
-        db = _make_fake_db()
-        with patch("app.database.SessionLocal", _make_session_local_factory(db)):
-            from app.jobs.email_jobs import _job_contacts_sync
-
-            fn = _job_contacts_sync.__wrapped__
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await fn()
-            db.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ownership_sweep_reraises(self):
@@ -132,54 +121,6 @@ class TestEmailJobsPropagation:
 
             fn = _job_ownership_sweep.__wrapped__
             with pytest.raises(RuntimeError, match="ownership boom"):
-                await fn()
-            db.rollback.assert_called_once()
-            db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_contact_status_compute_reraises(self):
-        db = _make_fake_db()
-        with patch("app.database.SessionLocal", _make_session_local_factory(db)):
-            from app.jobs.email_jobs import _job_contact_status_compute
-
-            fn = _job_contact_status_compute.__wrapped__
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await fn()
-            db.rollback.assert_called_once()
-            db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_email_health_update_reraises(self):
-        db = _make_fake_db(fail_on_query=False)
-        with (
-            patch("app.database.SessionLocal", _make_session_local_factory(db)),
-            patch(
-                "app.services.response_analytics.batch_update_email_health",
-                side_effect=RuntimeError("health boom"),
-            ),
-        ):
-            from app.jobs.email_jobs import _job_email_health_update
-
-            fn = _job_email_health_update.__wrapped__
-            with pytest.raises(RuntimeError, match="health boom"):
-                await fn()
-            db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_email_reverification_reraises(self):
-        db = _make_fake_db(fail_on_query=False)
-        with (
-            patch("app.database.SessionLocal", _make_session_local_factory(db)),
-            patch(
-                "app.services.customer_enrichment_batch.run_email_reverification",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("reverify boom"),
-            ),
-        ):
-            from app.jobs.email_jobs import _job_email_reverification
-
-            fn = _job_email_reverification.__wrapped__
-            with pytest.raises(RuntimeError, match="reverify boom"):
                 await fn()
             db.rollback.assert_called_once()
             db.close.assert_called_once()
@@ -204,25 +145,6 @@ class TestEmailJobsPropagation:
             fn = _job_scan_sent_folders.__wrapped__
             with pytest.raises(RuntimeError, match="DB connection lost"):
                 await fn()
-            db.close.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# knowledge_jobs — top-level exception propagation
-# ---------------------------------------------------------------------------
-
-
-class TestKnowledgeJobsPropagation:
-    """Verify knowledge_jobs top-level handlers re-raise."""
-
-    @pytest.mark.asyncio
-    async def test_expire_stale_reraises(self):
-        db = _make_fake_db()
-        with patch("app.database.SessionLocal", _make_session_local_factory(db)):
-            from app.jobs.knowledge_jobs import _job_expire_stale
-
-            with pytest.raises(RuntimeError, match="DB connection lost"):
-                await _job_expire_stale()
             db.close.assert_called_once()
 
 

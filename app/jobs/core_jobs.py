@@ -1,13 +1,12 @@
-"""Core background jobs — token refresh, inbox scan, batch results, webhooks.
+"""Core background jobs — token refresh, inbox scan, batch results.
 
 Called by: app/jobs/__init__.py via register_core_jobs()
-Depends on: app.database, app.models, app.email_service, app.services.webhook_service
+Depends on: app.database, app.models, app.email_service
 """
 
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import sqlalchemy.exc
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -20,40 +19,38 @@ from ..utils.token_manager import _utc
 def register_core_jobs(scheduler, settings, db=None):
     """Register core jobs with the scheduler.
 
-    *db* (when provided) lets inbox_scan_interval_min and activity_tracking_enabled
-    resolve from the system_config DB row (admin toggle) instead of only the env
-    default.
+    *db* (when provided) lets inbox_scan_interval_min resolve from the system_config DB
+    row (admin toggle) instead of only the env default.
     """
-    from ..services.admin_service import get_effective_flag, get_effective_int
+    from ..services.admin_service import get_effective_int
 
     scan_interval_min = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
     scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
     scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=scan_interval_min), id="inbox_scan", name="Inbox scan")
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
-    scheduler.add_job(
-        _job_batch_parse_signatures,
-        IntervalTrigger(minutes=10),
-        id="batch_parse_signatures",
-        name="Batch parse signatures",
-    )
-    scheduler.add_job(
-        _job_poll_signature_batch,
-        IntervalTrigger(minutes=5),
-        id="poll_signature_batch",
-        name="Poll signature batch results",
-    )
-    if get_effective_flag(db, "activity_tracking_enabled", settings.activity_tracking_enabled):
-        scheduler.add_job(
-            _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
-        )
+
+
+_token_refresh_skip_noticed = False
 
 
 @_traced_job
 async def _job_token_refresh():
     """Refresh tokens for all users with refresh tokens."""
+    from ..config import settings
     from ..database import SessionLocal
     from ..models import User
     from ..utils.token_manager import refresh_user_token
+
+    # Keys-off honesty (spec §7): without Azure app credentials every refresh
+    # attempt 404s against login.microsoftonline.com — twice per 5-minute run,
+    # which alone fails the 48h zero-recurring-warnings gate (§11). Skip with
+    # one notice instead of warning forever.
+    global _token_refresh_skip_noticed
+    if not (settings.azure_client_id and settings.azure_tenant_id):
+        if not _token_refresh_skip_noticed:
+            _token_refresh_skip_noticed = True
+            logger.info("Token refresh skipped — Azure credentials not configured (M365 is off)")
+        return
 
     selector_db = SessionLocal()
     users_to_refresh: list[int] = []
@@ -222,77 +219,4 @@ async def _job_batch_results():
             db.rollback()
         except sqlalchemy.exc.SQLAlchemyError:
             logger.debug("Batch results cleanup rollback", exc_info=True)
-        db.close()
-
-
-@_traced_job
-async def _job_batch_parse_signatures():
-    """Submit low-confidence regex-parsed signatures to Claude Batch API (runs every 10
-    min)."""
-    from ..database import SessionLocal
-    from ..services.signature_parser import batch_parse_signatures
-
-    db = SessionLocal()
-    try:
-        batch_id = await asyncio.wait_for(batch_parse_signatures(db), timeout=120)
-        if batch_id:
-            logger.info(f"Signature batch parse submitted: {batch_id}")
-    except TimeoutError:
-        logger.error("Signature batch parse timed out (120s)")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.exception(f"Signature batch parse error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_poll_signature_batch():
-    """Poll and apply signature batch parsing results (runs every 5 min)."""
-    from ..database import SessionLocal
-    from ..services.signature_parser import process_signature_batch_results
-
-    db = SessionLocal()
-    try:
-        result = await asyncio.wait_for(process_signature_batch_results(db), timeout=120)
-        if result is not None:
-            logger.info(f"Signature batch results: {result['applied']} applied, {result['errors']} errors")
-    except TimeoutError:
-        logger.error("Signature batch poll timed out (120s)")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.exception(f"Signature batch poll error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_webhook_subscriptions():
-    """Manage Graph webhook subscriptions."""
-    from ..database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        from ..services.webhook_service import (
-            ensure_all_users_subscribed,
-            renew_expiring_subscriptions,
-        )
-
-        await renew_expiring_subscriptions(db)
-        await ensure_all_users_subscribed(db)
-    except (httpx.HTTPError, httpx.TimeoutException) as e:
-        logger.error(f"Webhook subscription HTTP error: {e}")
-        db.rollback()
-        raise
-    except Exception as e:
-        logger.exception(f"Webhook subscription error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
         db.close()
