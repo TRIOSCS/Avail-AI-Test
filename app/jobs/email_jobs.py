@@ -4,11 +4,11 @@ Called by: app/jobs/__init__.py via register_email_jobs()
 Depends on: app.database, app.models, app.connectors.email_mining, app.services.*
 
 Includes:
-  - Contacts sync (Outlook -> VendorCards via delta query)
-  - Inbox scanning (vendor replies, stock lists, outbound RFQs)
+  - Inbox scanning helpers (vendor replies, stock lists, outbound RFQs)
   - Sent folder scanning (track outbound emails, link to requisitions)
-  - Deep email mining, contact scoring, calendar scan
-  - Email health, reverification, ownership sweep
+  - Ownership sweeps (parked: registration gated by OWNERSHIP_SWEEP_ENABLED, default off)
+  - Calendar scan (parked: implementation kept, registration removed —
+    comeback per simplification spec §5.4/§8 when a team exists)
 """
 
 import asyncio
@@ -23,7 +23,6 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 from ..shared_constants import RFQ_SUBJECT_TAG_RE
-from ..utils.token_manager import _utc
 
 
 def register_email_jobs(scheduler, settings, db=None):
@@ -36,9 +35,6 @@ def register_email_jobs(scheduler, settings, db=None):
 
     activity_tracking = get_effective_flag(db, "activity_tracking_enabled", settings.activity_tracking_enabled)
 
-    if settings.contacts_sync_enabled:
-        scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24), id="contacts_sync", name="Contacts sync")
-
     if activity_tracking and settings.ownership_sweep_enabled:
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12), id="ownership_sweep", name="Ownership sweep")
         scheduler.add_job(
@@ -50,38 +46,9 @@ def register_email_jobs(scheduler, settings, db=None):
     elif activity_tracking:
         logger.info("Ownership sweep disabled (OWNERSHIP_SWEEP_ENABLED=false) — activity tracking still active")
 
-    if settings.contact_scoring_enabled:
-        scheduler.add_job(
-            _job_contact_scoring,
-            CronTrigger(hour=2, minute=0),
-            id="contact_scoring",
-            name="Contact relationship scoring",
-        )
-
-    scheduler.add_job(
-        _job_contact_status_compute,
-        CronTrigger(hour=3, minute=0),
-        id="contact_status_compute",
-        name="Contact status auto-compute",
-    )
-
-    scheduler.add_job(
-        _job_email_health_update,
-        CronTrigger(hour=1, minute=0),
-        id="email_health_update",
-        name="Vendor email health scores",
-    )
-
-    if activity_tracking:
-        scheduler.add_job(
-            _job_calendar_scan,
-            CronTrigger(hour=6, minute=0),
-            id="calendar_scan",
-            name="Calendar vendor meeting scan",
-        )
-        # TODO Phase 3 follow-up: switch to /me/calendarView/delta for incremental
-        # UPDATES/CANCELLATIONS (cheaper, captures edits) using SyncState plumbing
-        # already in place for contacts_sync and sent-folder scan.
+    # calendar_scan PARKED (simplification spec §5.4/§8, org-scale CRM trimmings):
+    # registration removed because activity_tracking_enabled defaults ON.
+    # _job_calendar_scan implementation kept; comeback trigger = team exists.
 
     # Sent folder scan — track outbound emails, link [AVAIL-] tagged messages
     scheduler.add_job(
@@ -90,56 +57,6 @@ def register_email_jobs(scheduler, settings, db=None):
         id="scan_sent_folders",
         name="Sent folder scan",
     )
-
-    if settings.customer_enrichment_enabled:
-        scheduler.add_job(
-            _job_email_reverification,
-            CronTrigger(month="2,5,8,11", day=15, hour=5, minute=0),
-            id="email_reverification",
-            name="Quarterly email re-verification",
-        )
-
-
-@_traced_job
-async def _job_contacts_sync():
-    """Sync Outlook contacts for all connected users."""
-    from ..database import SessionLocal
-    from ..models import User
-
-    # Short-lived session to identify users needing sync
-    db = SessionLocal()
-    try:
-        now = datetime.now(UTC)
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        user_ids = []
-        for user in users:
-            if not user.access_token or not user.m365_connected:
-                continue
-            should_sync = not user.last_contacts_sync or now - _utc(user.last_contacts_sync) > timedelta(hours=24)
-            if should_sync:
-                user_ids.append(user.id)
-    except Exception as e:
-        logger.exception(f"Contacts sync job error: {e}")
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-    # Sync each user with its own session
-    for user_id in user_ids:
-        sync_db = SessionLocal()
-        try:
-            user = sync_db.get(User, user_id)
-            if not user:
-                continue
-            await asyncio.wait_for(_sync_user_contacts(user, sync_db), timeout=300)
-        except TimeoutError:
-            logger.warning(f"Contacts sync timed out for user {user_id}")
-            sync_db.rollback()
-        except Exception as e:
-            logger.warning(f"Contacts sync failed for user {user_id}: {e}")
-            sync_db.rollback()
-        finally:
-            sync_db.close()
 
 
 @_traced_job
@@ -177,140 +94,6 @@ async def _job_site_ownership_sweep():
         await asyncio.get_running_loop().run_in_executor(None, run_site_ownership_sweep, db)
     except Exception as e:
         logger.exception(f"Site ownership sweep error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_contact_scoring():
-    """Nightly: compute relationship scores for all vendor contacts."""
-    from ..database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        from ..services.contact_intelligence import compute_all_contact_scores
-
-        loop = asyncio.get_running_loop()
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_all_contact_scores, db),
-            timeout=300,
-        )
-        logger.info(f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped")
-    except TimeoutError:
-        logger.error("Contact scoring timed out after 300s")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.exception(f"Contact scoring error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_contact_status_compute():
-    """Auto-compute contact_status for SiteContacts based on activity history.
-
-    Rules:
-      - Never downgrade 'champion' (manual designation only)
-      - Last activity ≤7 days → 'active'
-      - Last activity 7-30 days → keep current (no auto-downgrade from active)
-      - Last activity 30-90 days → 'quiet'
-      - Last activity >90 days → 'inactive'
-      - No activity ever → keep 'new' or set 'inactive' if created >90 days ago
-    """
-    from sqlalchemy import func
-
-    from ..database import SessionLocal
-    from ..models import SiteContact
-    from ..models.intelligence import ActivityLog
-
-    db = SessionLocal()
-    try:
-        now = datetime.now(UTC)
-
-        # Subquery: most recent activity per site_contact_id
-        last_activity_sq = (
-            db.query(
-                ActivityLog.site_contact_id,
-                func.max(ActivityLog.created_at).label("last_at"),
-            )
-            .filter(ActivityLog.site_contact_id.isnot(None))
-            .group_by(ActivityLog.site_contact_id)
-            .subquery()
-        )
-
-        # Fetch all active site contacts with their last activity
-        contacts = (
-            db.query(SiteContact, last_activity_sq.c.last_at)
-            .outerjoin(last_activity_sq, SiteContact.id == last_activity_sq.c.site_contact_id)
-            .filter(SiteContact.is_active.is_(True))
-            .all()
-        )
-
-        updated = 0
-        for sc, last_at in contacts:
-            # Never downgrade champion
-            if sc.contact_status == "champion":
-                continue
-
-            if last_at is not None:
-                last_at = _utc(last_at)
-                days = (now - last_at).days
-                if days <= 7:
-                    new_status = "active"
-                elif days <= 30:
-                    # Don't auto-downgrade active contacts in the 7-30 day window
-                    continue
-                elif days <= 90:
-                    new_status = "quiet"
-                else:
-                    new_status = "inactive"
-            else:
-                # No activity ever
-                created = _utc(sc.created_at) if sc.created_at else now
-                days_since_created = (now - created).days
-                if days_since_created > 90:
-                    new_status = "inactive"
-                else:
-                    continue  # Keep 'new' status
-
-            if sc.contact_status != new_status:
-                sc.contact_status = new_status
-                updated += 1
-
-        db.commit()
-        logger.info(f"Contact status compute: {updated} contacts updated out of {len(contacts)}")
-    except Exception as e:
-        logger.exception(f"Contact status compute error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_email_health_update():
-    """Daily: recompute email health scores for active vendors."""
-    from ..database import SessionLocal
-    from ..services.response_analytics import batch_update_email_health
-
-    db = SessionLocal()
-    try:
-        result = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(None, batch_update_email_health, db),
-            timeout=300,
-        )
-        logger.info(f"Email health update: {result.get('updated', 0)} vendors scored")
-    except TimeoutError:
-        logger.error("Email health update timed out after 300s")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.exception(f"Email health update error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -371,32 +154,6 @@ async def _job_calendar_scan():
         await asyncio.gather(*[_safe_cal_scan(u.id) for u in users_to_scan])
 
 
-@_traced_job
-async def _job_email_reverification():
-    """Quarterly: re-verify emails older than 90 days."""
-    from ..database import SessionLocal
-    from ..services.customer_enrichment_batch import run_email_reverification
-
-    db = SessionLocal()
-    try:
-        # NOTE: the service param is `_max_contacts` (default 200); pass nothing and let
-        # the default apply. Passing max_contacts=<n> raised TypeError on every quarterly
-        # run. Re-add an explicit batch size here once a real verifier replaces the stub.
-        result = await run_email_reverification(db)
-        db.commit()
-        logger.info(
-            "Email re-verification: {} processed, {} invalidated",
-            result.get("processed", 0),
-            result.get("invalidated", 0),
-        )
-    except Exception as e:
-        logger.exception(f"Email re-verification error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
 # ── Inbox Scanning Helpers ──────────────────────────────────────────────
 
 
@@ -435,9 +192,18 @@ async def _scan_user_inbox(user, db):
     # access to the same SQLAlchemy Session object.
     sub_ops: list[tuple[str, Callable]] = [
         ("stock_scan", lambda: _scan_stock_list_attachments(user, db, is_backfill)),
-        ("mine_contacts", lambda: _mine_vendor_contacts(user, db, is_backfill)),
-        ("outbound_scan", lambda: _scan_outbound_rfqs(user, db, is_backfill)),
     ]
+    # The EmailMiner side-harvest (vendor-contact mining + outbound RFQ scan) is
+    # email_mining machinery — spec §6/§8 parks it (Data Capture Initiative), so
+    # it runs only when the existing email_mining_enabled flag is on. The reply
+    # scan (poll_inbox above) and stock-list scan are kernel and stay unconditional.
+    from ..services.admin_service import get_effective_flag
+
+    if get_effective_flag(db, "email_mining_enabled", settings.email_mining_enabled):
+        sub_ops += [
+            ("mine_contacts", lambda: _mine_vendor_contacts(user, db, is_backfill)),
+            ("outbound_scan", lambda: _scan_outbound_rfqs(user, db, is_backfill)),
+        ]
     sub_op_failures: list[str] = []
     for name, fn in sub_ops:
         try:
@@ -593,137 +359,6 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
             logger.info(f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated")
     except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Outbound scan commit failed for {user.email}: {e}")
-        db.rollback()
-
-
-# ── Contacts Sync (Outlook → VendorCards) ───────────────────────────────
-
-
-async def _sync_user_contacts(user, db):
-    """Pull contacts from Outlook into VendorCards using delta query for efficiency."""
-    from app.utils.graph_client import GraphClient, GraphSyncStateExpired
-
-    from ..models import SyncState, VendorCard
-    from ..vendor_utils import (
-        merge_emails_into_card,
-        merge_phones_into_card,
-        normalize_vendor_name,
-    )
-
-    gc = GraphClient(user.access_token)
-
-    # Load delta token for incremental sync
-    folder_key = "contacts_sync"
-    sync_state = db.query(SyncState).filter(SyncState.user_id == user.id, SyncState.folder == folder_key).first()
-    delta_token = sync_state.delta_token if sync_state else None
-
-    try:
-        # No initial_lookback_days: contacts deltas don't support the
-        # receivedDateTime filter, and an address book is a finite collection —
-        # draining it fully on the initial round IS the desired full sync.
-        # No OData params either: change tracking over the Contacts resource
-        # rejects $select/$top/$filter/etc. with 400 ErrorInvalidUrlQuery —
-        # page size rides the Prefer: odata.maxpagesize header (max_page_size)
-        # and full contact objects come back, which is fine.
-        contacts, new_token = await gc.delta_query(
-            "/me/contacts/delta",
-            delta_token=delta_token,
-            max_items=2500,
-            max_page_size=100,
-        )
-        # Persist new delta token
-        if new_token:
-            if sync_state:
-                sync_state.delta_token = new_token
-                sync_state.last_sync_at = datetime.now(UTC)
-            else:
-                db.add(
-                    SyncState(
-                        user_id=user.id,
-                        folder=folder_key,
-                        delta_token=new_token,
-                        last_sync_at=datetime.now(UTC),
-                    )
-                )
-            db.flush()
-    except GraphSyncStateExpired:
-        logger.warning(f"Contacts delta token expired for {user.email} — full resync")
-        if sync_state:
-            sync_state.delta_token = None
-            db.flush()
-        # Fall back to full pull
-        try:
-            contacts = await gc.get_all_pages(
-                "/me/contacts",
-                params={
-                    "$top": "500",
-                    "$select": "displayName,emailAddresses,businessPhones,mobilePhone,companyName",
-                },
-                max_items=2500,
-            )
-        except Exception as e:
-            logger.warning(f"Contacts sync failed for {user.email}: {e}")
-            return
-    except Exception as e:
-        # Typed error page or network failure — no token was returned, so the
-        # stored one still covers the unfetched data; next run resumes from it.
-        logger.warning(f"Contacts sync failed for {user.email} (token kept): {e}")
-        return
-
-    enriched = 0
-
-    # Pre-load existing VendorCards in one query instead of per-contact
-    sync_norm_names = []
-    for c in contacts:
-        company = c.get("companyName") or c.get("displayName") or ""
-        if company and len(company) >= 2:
-            sync_norm_names.append(normalize_vendor_name(company))
-    sync_card_map = {}
-    if sync_norm_names:
-        for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(sync_norm_names)).all():
-            sync_card_map[vc.normalized_name] = vc
-
-    for c in contacts:
-        company = c.get("companyName") or c.get("displayName") or ""
-        if not company or len(company) < 2:
-            continue
-
-        norm = normalize_vendor_name(company)
-        card = sync_card_map.get(norm)
-        if not card:
-            card = VendorCard(
-                normalized_name=norm,
-                display_name=company,
-                emails=[],
-                phones=[],
-                source="outlook_contacts",
-            )
-            db.add(card)
-            try:
-                db.flush()
-                sync_card_map[norm] = card
-            except sqlalchemy.exc.IntegrityError as e:
-                logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
-                db.rollback()
-                continue
-
-        # Merge emails from Outlook contact
-        outlook_emails = [(addr.get("address") or "").strip() for addr in c.get("emailAddresses", [])]
-        enriched += merge_emails_into_card(card, outlook_emails)
-
-        # Merge phones from Outlook contact
-        all_phones = list(c.get("businessPhones", []) or [])
-        mobile = c.get("mobilePhone")
-        if mobile:
-            all_phones.append(mobile)
-        merge_phones_into_card(card, all_phones)
-
-    try:
-        user.last_contacts_sync = datetime.now(UTC)
-        db.commit()
-        logger.info(f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails")
-    except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
 
 

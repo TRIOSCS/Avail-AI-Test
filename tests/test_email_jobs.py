@@ -1,7 +1,7 @@
 """Tests for app/jobs/email_jobs.py — Email, contacts, and calendar background jobs.
 
-Covers: register_email_jobs, all job functions, inbox scanning helpers,
-contact mining, outbound RFQ scanning, vendor scoring, contacts sync,
+Covers: register_email_jobs, ownership sweeps, calendar scan (parked),
+inbox scanning helpers, contact mining, outbound RFQ scanning,
 sent folder scanning, attachment detection.
 
 Called by: pytest
@@ -71,10 +71,10 @@ class TestRegisterEmailJobs:
             customer_enrichment=True,
         )
         register_email_jobs(scheduler, settings)
-        # At minimum: contacts_sync, ownership_sweep, site_ownership_sweep,
-        # contact_scoring, contact_status_compute, email_health_update,
-        # calendar_scan, scan_sent_folders, email_reverification
-        assert scheduler.add_job.call_count >= 9
+        # W1 disposition: only ownership_sweep, site_ownership_sweep, and
+        # scan_sent_folders remain registrable; deleted/parked jobs never register.
+        job_ids = [call.kwargs.get("id") for call in scheduler.add_job.call_args_list]
+        assert sorted(job_ids) == ["ownership_sweep", "scan_sent_folders", "site_ownership_sweep"]
 
     def test_register_minimal(self):
         from app.jobs.email_jobs import register_email_jobs
@@ -82,11 +82,10 @@ class TestRegisterEmailJobs:
         scheduler = MagicMock()
         settings = _make_settings()
         register_email_jobs(scheduler, settings)
-        # Always registered: contact_status_compute, email_health, scan_sent_folders
-        # calendar_scan is gated behind activity_tracking_enabled (FIX 3a)
-        assert scheduler.add_job.call_count >= 3
+        # Always registered: scan_sent_folders only (kernel job).
+        # calendar_scan is parked (W1) — never registered.
         job_ids = [call.kwargs.get("id") for call in scheduler.add_job.call_args_list]
-        assert "calendar_scan" not in job_ids
+        assert job_ids == ["scan_sent_folders"]
 
     def test_register_activity_without_ownership(self):
         from app.jobs.email_jobs import register_email_jobs
@@ -97,98 +96,6 @@ class TestRegisterEmailJobs:
         # No ownership_sweep or site_ownership_sweep, but logs info
         job_ids = [call.kwargs.get("id") or call.args[2] for call in scheduler.add_job.call_args_list]
         assert "ownership_sweep" not in job_ids
-
-
-# ── _job_contacts_sync ───────────────────────────────────────────────
-
-
-class TestJobContactsSync:
-    @pytest.mark.asyncio
-    @patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock)
-    async def test_contacts_sync_no_users(self, mock_sync):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.filter.return_value.all.return_value = []
-            MockSL.return_value = mock_db
-            await _job_contacts_sync()
-        mock_sync.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock)
-    async def test_contacts_sync_with_user(self, mock_sync):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        user = MagicMock()
-        user.id = 1
-        user.access_token = "tok"
-        user.m365_connected = True
-        user.last_contacts_sync = None
-        user.refresh_token = "ref"
-
-        with patch("app.database.SessionLocal") as MockSL:
-            list_db = MagicMock()
-            list_db.query.return_value.filter.return_value.all.return_value = [user]
-            sync_db = MagicMock()
-            sync_db.get.return_value = user
-            MockSL.side_effect = [list_db, sync_db]
-            await _job_contacts_sync()
-        mock_sync.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock, side_effect=asyncio.TimeoutError)
-    async def test_contacts_sync_timeout(self, mock_sync):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        user = MagicMock()
-        user.id = 1
-        user.access_token = "tok"
-        user.m365_connected = True
-        user.last_contacts_sync = None
-
-        with patch("app.database.SessionLocal") as MockSL:
-            list_db = MagicMock()
-            list_db.query.return_value.filter.return_value.all.return_value = [user]
-            sync_db = MagicMock()
-            sync_db.get.return_value = user
-            MockSL.side_effect = [list_db, sync_db]
-            # Should not raise - timeout is handled
-            await _job_contacts_sync()
-
-    @pytest.mark.asyncio
-    async def test_contacts_sync_skips_no_token(self):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        user = MagicMock()
-        user.id = 1
-        user.access_token = None  # no token
-        user.m365_connected = True
-        user.last_contacts_sync = None
-        user.refresh_token = "ref"
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.filter.return_value.all.return_value = [user]
-            MockSL.return_value = mock_db
-            await _job_contacts_sync()
-
-    @pytest.mark.asyncio
-    async def test_contacts_sync_skips_recent(self):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        user = MagicMock()
-        user.id = 1
-        user.access_token = "tok"
-        user.m365_connected = True
-        user.refresh_token = "ref"
-        user.last_contacts_sync = datetime.now(UTC) - timedelta(hours=1)  # recent
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.filter.return_value.all.return_value = [user]
-            MockSL.return_value = mock_db
-            await _job_contacts_sync()
 
 
 # ── _job_ownership_sweep ─────────────────────────────────────────────
@@ -262,165 +169,6 @@ class TestJobSiteOwnershipSweep:
             mock_db.rollback.assert_called_once()
 
 
-# ── _job_contact_scoring ─────────────────────────────────────────────
-
-
-class TestJobContactScoring:
-    @pytest.mark.asyncio
-    async def test_contact_scoring(self):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch(
-                "app.services.contact_intelligence.compute_all_contact_scores",
-                return_value={"updated": 5, "skipped": 2},
-            ),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            await _job_contact_scoring()
-
-    @pytest.mark.asyncio
-    async def test_contact_scoring_timeout(self):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        def slow_fn(*a, **kw):
-            import time
-
-            time.sleep(10)
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch("app.services.contact_intelligence.compute_all_contact_scores", side_effect=slow_fn),
-            patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            with pytest.raises(asyncio.TimeoutError):
-                await _job_contact_scoring()
-            mock_db.rollback.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_contact_scoring_error(self):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch(
-                "app.services.contact_intelligence.compute_all_contact_scores",
-                side_effect=Exception("score err"),
-            ),
-            patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=Exception("score err")),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            with pytest.raises(Exception, match="score err"):
-                await _job_contact_scoring()
-            mock_db.rollback.assert_called_once()
-
-
-# ── _job_contact_status_compute ──────────────────────────────────────
-
-
-class TestJobContactStatusCompute:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("initial_status", "created_days_ago", "last_days_ago", "expected_status"),
-        [
-            pytest.param("new", 2, 3, "active", id="active"),
-            pytest.param("active", 100, 60, "quiet", id="quiet"),
-            pytest.param("active", 200, 100, "inactive", id="inactive_old"),
-            # champion is never auto-downgraded; created_at left unset (not read)
-            pytest.param("champion", None, 365, "champion", id="champion_not_downgraded"),
-            # No activity (last_days_ago=None) + old creation → inactive
-            pytest.param("new", 120, None, "inactive", id="no_activity_old_creation"),
-            # No activity but created < 90 days ago → keep 'new'
-            pytest.param("new", 10, None, "new", id="no_activity_new_creation"),
-            # 7-30 day window → no auto-downgrade; created_at left unset (not read)
-            pytest.param("active", None, 15, "active", id="7_to_30_day_window_no_downgrade"),
-        ],
-    )
-    async def test_status_compute(self, initial_status, created_days_ago, last_days_ago, expected_status):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        now = datetime.now(UTC)
-        sc = MagicMock()
-        sc.contact_status = initial_status
-        sc.is_active = True
-        if created_days_ago is not None:
-            sc.created_at = now - timedelta(days=created_days_ago)
-        last_at = None if last_days_ago is None else now - timedelta(days=last_days_ago)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            assert sc.contact_status == expected_status
-
-    @pytest.mark.asyncio
-    async def test_status_compute_error(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.side_effect = Exception("DB down")
-            MockSL.return_value = mock_db
-            with pytest.raises(Exception, match="DB down"):
-                await _job_contact_status_compute()
-            mock_db.rollback.assert_called_once()
-
-
-# ── _job_email_health_update ─────────────────────────────────────────
-
-
-class TestJobEmailHealthUpdate:
-    @pytest.mark.asyncio
-    async def test_email_health_update(self):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch(
-                "app.services.response_analytics.batch_update_email_health",
-                return_value={"updated": 10},
-            ) as mock_fn,
-            patch("app.jobs.email_jobs.asyncio.wait_for", new_callable=AsyncMock, return_value={"updated": 10}),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            await _job_email_health_update()
-
-    @pytest.mark.asyncio
-    async def test_email_health_timeout(self):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            with pytest.raises(asyncio.TimeoutError):
-                await _job_email_health_update()
-            mock_db.rollback.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_email_health_error(self):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=RuntimeError("fail")),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            with pytest.raises(RuntimeError, match="fail"):
-                await _job_email_health_update()
-            mock_db.rollback.assert_called_once()
-
-
 # ── _job_calendar_scan ───────────────────────────────────────────────
 
 
@@ -460,46 +208,6 @@ class TestJobCalendarScan:
             scan_db.get.return_value = user
             MockSL.side_effect = [list_db, scan_db]
             await _job_calendar_scan()
-
-
-# ── _job_email_reverification ────────────────────────────────────────
-
-
-class TestJobEmailReverification:
-    @pytest.mark.asyncio
-    async def test_reverification(self):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch(
-                "app.services.customer_enrichment_batch.run_email_reverification",
-                new_callable=AsyncMock,
-                return_value={"processed": 50, "invalidated": 3},
-            ),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            await _job_email_reverification()
-            mock_db.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_reverification_error(self):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        with (
-            patch("app.database.SessionLocal") as MockSL,
-            patch(
-                "app.services.customer_enrichment_batch.run_email_reverification",
-                new_callable=AsyncMock,
-                side_effect=Exception("verify err"),
-            ),
-        ):
-            mock_db = MagicMock()
-            MockSL.return_value = mock_db
-            with pytest.raises(Exception, match="verify err"):
-                await _job_email_reverification()
-            mock_db.rollback.assert_called_once()
 
 
 # ── _scan_user_inbox ─────────────────────────────────────────────────
@@ -717,118 +425,6 @@ class TestScanOutboundRfqs:
         ):
             await _scan_outbound_rfqs(user, mock_db)
             assert card.total_outreach == 7  # 5 + 2
-
-
-# ── _sync_user_contacts ─────────────────────────────────────────────
-
-
-class TestSyncUserContacts:
-    @pytest.mark.asyncio
-    async def test_sync_basic(self):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        user = MagicMock()
-        user.id = 1
-        user.email = "buyer@trioscs.com"
-        user.access_token = "tok"
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        gc_mock = MagicMock()
-        gc_mock.delta_query = AsyncMock(
-            return_value=(
-                [
-                    {
-                        "companyName": "Arrow Electronics",
-                        "displayName": "John Sales",
-                        "emailAddresses": [{"address": "john@arrow.com"}],
-                        "businessPhones": ["+1-555-0100"],
-                        "mobilePhone": "+1-555-0200",
-                    }
-                ],
-                "new-delta-token",
-            )
-        )
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-            patch("app.vendor_utils.merge_emails_into_card", return_value=1),
-            patch("app.vendor_utils.merge_phones_into_card"),
-        ):
-            await _sync_user_contacts(user, mock_db)
-            mock_db.commit.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_sync_delta_expired(self):
-        from app.jobs.email_jobs import _sync_user_contacts
-        from app.utils.graph_client import GraphSyncStateExpired
-
-        user = MagicMock()
-        user.id = 1
-        user.email = "buyer@trioscs.com"
-        user.access_token = "tok"
-
-        sync_state = MagicMock()
-        sync_state.delta_token = "old-token"
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = sync_state
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        gc_mock = MagicMock()
-        gc_mock.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("expired"))
-        gc_mock.get_all_pages = AsyncMock(return_value=[])
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        ):
-            await _sync_user_contacts(user, mock_db)
-            assert sync_state.delta_token is None
-
-    @pytest.mark.asyncio
-    async def test_sync_general_error(self):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        user = MagicMock()
-        user.id = 1
-        user.email = "buyer@trioscs.com"
-        user.access_token = "tok"
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-
-        gc_mock = MagicMock()
-        gc_mock.delta_query = AsyncMock(side_effect=Exception("Network error"))
-
-        with patch("app.utils.graph_client.GraphClient", return_value=gc_mock):
-            # Should not raise — error handled gracefully
-            await _sync_user_contacts(user, mock_db)
-
-    @pytest.mark.asyncio
-    async def test_sync_skips_short_company_names(self):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        user = MagicMock()
-        user.id = 1
-        user.email = "buyer@trioscs.com"
-        user.access_token = "tok"
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        gc_mock = MagicMock()
-        gc_mock.delta_query = AsyncMock(
-            return_value=(
-                [
-                    {"companyName": "A", "emailAddresses": [], "businessPhones": []},  # too short
-                    {"companyName": "", "emailAddresses": [], "businessPhones": []},  # empty
-                ],
-                None,
-            )
-        )
-
-        with patch("app.utils.graph_client.GraphClient", return_value=gc_mock):
-            await _sync_user_contacts(user, mock_db)
-            mock_db.commit.assert_called()
 
 
 # ── _job_scan_sent_folders ───────────────────────────────────────────

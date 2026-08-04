@@ -1,10 +1,7 @@
 """test_jobs_email.py — Tests for email-related background jobs.
 
 Covers: _scan_user_inbox, _mine_vendor_contacts, _scan_outbound_rfqs,
-_sync_user_contacts, _job_contacts_sync,
-_job_contact_scoring, _job_contact_status_compute, _job_email_reverification,
-_job_email_health_update, _job_calendar_scan, _job_ownership_sweep,
-_job_site_ownership_sweep, _compute_vendor_scores_job.
+_job_calendar_scan, _job_ownership_sweep, _job_site_ownership_sweep.
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
 to return the test DB session with close() disabled.
@@ -17,7 +14,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import ActivityLog
 from app.scheduler import scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -43,119 +39,12 @@ def _clear_scheduler_jobs():
         job.remove()
 
 
-# ── _job_contacts_sync() ─────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("m365_connected", "last_sync", "should_sync"),
-    [
-        pytest.param(True, None, True, id="eligible_no_prior_sync"),
-        pytest.param(True, timedelta(hours=12), False, id="skips_recently_synced"),
-        pytest.param(False, None, False, id="skips_disconnected"),
-        pytest.param(True, timedelta(hours=30), True, id="syncs_stale_user"),
-    ],
-)
-def test_contacts_sync_eligibility(scheduler_db, test_user, m365_connected, last_sync, should_sync):
-    """Eligible/stale connected users get synced; recently-synced or disconnected users
-    are skipped."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = m365_connected
-    test_user.last_contacts_sync = None if last_sync is None else datetime.now(UTC) - last_sync
-    scheduler_db.commit()
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        asyncio.run(_job_contacts_sync())
-        if should_sync:
-            mock_sync.assert_called_once()
-        else:
-            mock_sync.assert_not_called()
-
-
-def test_contacts_sync_handles_per_user_error(scheduler_db, test_user):
-    """Errors during per-user sync do not crash the job."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        mock_sync.side_effect = Exception("Graph API down")
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        # Should not raise
-        asyncio.run(_job_contacts_sync())
-
-
-def test_contacts_sync_error_in_user_gathering(scheduler_db):
-    """Error during user-gathering is re-raised for _traced_job/Sentry."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        with pytest.raises(Exception, match="DB error"):
-            asyncio.run(_job_contacts_sync())
-
-
-def test_contacts_sync_timeout(scheduler_db, test_user):
-    """Timeout during contacts sync is handled gracefully."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    async def _mock_wait_for(coro, timeout=None):
-        try:
-            coro.close()
-        except Exception:
-            pass
-        raise TimeoutError()
-
-    with (
-        patch("asyncio.wait_for", side_effect=_mock_wait_for),
-        patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock),
-    ):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        # Should not raise
-        asyncio.run(_job_contacts_sync())
-
-
-def test_contacts_sync_user_not_found(scheduler_db, test_user):
-    """_job_contacts_sync continues when user is not found in sync session."""
-    test_user.refresh_token = "rt_nf"
-    test_user.access_token = "at_nf"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    original_get = scheduler_db.get
-    get_count = [0]
-
-    def _get_none_on_second(model, id_):
-        get_count[0] += 1
-        if get_count[0] >= 1:
-            return None
-        return original_get(model, id_)
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        scheduler_db.get = _get_none_on_second
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        asyncio.run(_job_contacts_sync())
-        scheduler_db.get = original_get
-
-        mock_sync.assert_not_called()
-
-
 # ── _scan_user_inbox ──────────────────────────────────────────────────
 
 
 def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
-    """First-time scan (last_inbox_scan=None) triggers backfill."""
+    """First-time scan (last_inbox_scan=None) triggers backfill; EmailMiner sub-ops run
+    when email_mining_enabled is on."""
     test_user.access_token = "at_scan"
     test_user.last_inbox_scan = None
     scheduler_db.commit()
@@ -166,6 +55,7 @@ def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
         patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock) as mock_outbound,
+        patch("app.services.admin_service.get_effective_flag", return_value=True),
         patch("app.config.settings") as mock_settings,
     ):
         mock_settings.inbox_backfill_days = 180
@@ -178,6 +68,35 @@ def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
         mock_mine.assert_called_once()
         mock_outbound.assert_called_once()
         assert mock_stock.call_args[0][2] is True
+        assert test_user.last_inbox_scan is not None
+
+
+def test_scan_user_inbox_email_mining_off_skips_miner_sub_ops(scheduler_db, test_user):
+    """With email_mining_enabled off (the default), the EmailMiner side-harvest sub-ops
+    are skipped; the kernel poll + stock scan still run."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=["resp1"]) as mock_poll,
+        patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
+        patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
+        patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock) as mock_outbound,
+        patch("app.services.admin_service.get_effective_flag", return_value=False),
+        patch("app.config.settings") as mock_settings,
+    ):
+        mock_settings.inbox_backfill_days = 180
+
+        from app.jobs.email_jobs import _scan_user_inbox
+
+        asyncio.run(_scan_user_inbox(test_user, scheduler_db))
+
+        mock_poll.assert_called_once()
+        mock_stock.assert_called_once()
+        mock_mine.assert_not_called()
+        mock_outbound.assert_not_called()
         assert test_user.last_inbox_scan is not None
 
 
@@ -239,6 +158,7 @@ def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
         patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock) as mock_outbound,
+        patch("app.services.admin_service.get_effective_flag", return_value=True),
         patch("app.config.settings") as mock_settings,
     ):
         mock_settings.inbox_backfill_days = 180
@@ -326,6 +246,7 @@ def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
         patch(
             "app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock, side_effect=Exception("outbound error")
         ),
+        patch("app.services.admin_service.get_effective_flag", return_value=True),
         patch("app.config.settings") as mock_settings,
     ):
         mock_settings.inbox_backfill_days = 180
@@ -787,441 +708,6 @@ def test_scan_outbound_rfqs_final_commit_error(scheduler_db, test_user, test_ven
         mock_db.rollback.assert_called()
 
 
-# ── _sync_user_contacts ───────────────────────────────────────────────
-
-
-def test_sync_user_contacts_empty(scheduler_db, test_user):
-    """No contacts from Graph API updates sync timestamp only."""
-    test_user.access_token = "at_sync"
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(return_value=([], "delta-token"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    assert test_user.last_contacts_sync is not None
-
-
-def test_sync_user_contacts_creates_vendor_card(scheduler_db, test_user):
-    """Outlook contacts create VendorCard entries."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "New Outlook Co",
-                    "displayName": "Jane Doe",
-                    "emailAddresses": [{"address": "jane@outlookco.com"}],
-                    "businessPhones": ["+1-555-0001"],
-                    "mobilePhone": "+1-555-0002",
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="new outlook co"),
-        patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e,
-        patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p,
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-        mock_merge_e.assert_called_once()
-        mock_merge_p.assert_called_once()
-        phones_arg = mock_merge_p.call_args[0][1]
-        assert "+1-555-0002" in phones_arg
-
-
-def test_sync_user_contacts_uses_display_name_fallback(scheduler_db, test_user):
-    """When companyName is empty, displayName is used."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": None,
-                    "displayName": "Solo Contact",
-                    "emailAddresses": [{"address": "solo@example.com"}],
-                    "businessPhones": [],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="solo contact"),
-        patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-        patch("app.vendor_utils.merge_phones_into_card"),
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-
-def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
-    """Companies with names shorter than 2 chars are skipped."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "X",
-                    "displayName": "X",
-                    "emailAddresses": [],
-                    "businessPhones": [],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.merge_emails_into_card") as mock_merge,
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-        mock_merge.assert_not_called()
-
-
-def test_sync_user_contacts_delta_call_sends_no_odata_params(scheduler_db, test_user):
-    """Graph 400s ErrorInvalidUrlQuery on $select/$top with /me/contacts/delta.
-
-    Change tracking over the Contacts resource supports NO OData query params —
-    page size must travel via the Prefer: odata.maxpagesize header (delta_query's
-    max_page_size). A normal delta page must still flow into the VendorCard
-    sync path (merge calls fire, delta token persisted).
-    """
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "Delta Page Co",
-                    "displayName": "Del Ta",
-                    "emailAddresses": [{"address": "del@deltapageco.com"}],
-                    "businessPhones": ["+1-555-0100"],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="delta page co"),
-        patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e,
-        patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p,
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    call = mock_gc.delta_query.call_args
-    assert call.args[0] == "/me/contacts/delta"
-    sent_params = call.kwargs.get("params")
-    assert not sent_params, f"contacts delta must not send OData query params, got: {sent_params}"
-    # Page size rides the Prefer: odata.maxpagesize header instead
-    assert call.kwargs.get("max_page_size") == 100
-    # Normal delta page still processes into the sync path
-    mock_merge_e.assert_called_once()
-    mock_merge_p.assert_called_once()
-    assert test_user.last_contacts_sync is not None
-
-
-def test_sync_user_contacts_graph_error(scheduler_db, test_user):
-    """Graph API error during contacts sync is handled."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    import httpx
-
-    mock_gc.delta_query = AsyncMock(side_effect=httpx.HTTPError("Graph API error"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    assert test_user.last_contacts_sync is None
-
-
-def test_sync_user_contacts_commit_error(scheduler_db, test_user):
-    """Commit failure during contacts sync is handled."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "Commit Fail Co",
-                    "displayName": "Test",
-                    "emailAddresses": [],
-                    "businessPhones": [],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    original_commit = scheduler_db.commit
-    call_count = [0]
-
-    def _failing_commit():
-        call_count[0] += 1
-        if call_count[0] > 1:
-            raise Exception("commit failed")
-        return original_commit()
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="commit fail co"),
-        patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-        patch("app.vendor_utils.merge_phones_into_card"),
-    ):
-        scheduler_db.commit = _failing_commit
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-        scheduler_db.commit = original_commit
-
-
-def test_sync_user_contacts_flush_conflict(scheduler_db, test_user):
-    """Flush conflict for new VendorCard is handled gracefully."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "Conflict Co",
-                    "displayName": "Test",
-                    "emailAddresses": [{"address": "test@conflict.com"}],
-                    "businessPhones": [],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    original_flush = scheduler_db.flush
-
-    def _failing_flush():
-        raise Exception("unique constraint violation")
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="conflict co"),
-    ):
-        scheduler_db.flush = _failing_flush
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-        scheduler_db.flush = original_flush
-
-
-def test_sync_user_contacts_existing_card(scheduler_db, test_user, test_vendor_card):
-    """Existing vendor cards get updated with Outlook contact data."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(
-        return_value=(
-            [
-                {
-                    "companyName": "Arrow Electronics",
-                    "displayName": "Arrow Rep",
-                    "emailAddresses": [{"address": "rep@arrow.com"}],
-                    "businessPhones": ["+1-555-0300"],
-                    "mobilePhone": None,
-                }
-            ],
-            "delta-token",
-        )
-    )
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"),
-        patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e,
-        patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p,
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-        mock_merge_e.assert_called_once()
-        mock_merge_p.assert_called_once()
-
-
-def test_sync_user_contacts_delta_token_update_existing(scheduler_db, test_user):
-    """Existing sync_state gets delta_token updated."""
-    from app.models.pipeline import SyncState
-
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    ss = SyncState(user_id=test_user.id, folder="contacts_sync", delta_token="old-token")
-    scheduler_db.add(ss)
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(return_value=([], "new-delta-token"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    scheduler_db.refresh(ss)
-    assert ss.delta_token == "new-delta-token"
-
-
-def test_sync_user_contacts_delta_expired_with_sync_state(scheduler_db, test_user):
-    """GraphSyncStateExpired with existing sync_state clears delta_token."""
-    from app.models.pipeline import SyncState
-    from app.utils.graph_client import GraphSyncStateExpired
-
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    ss = SyncState(user_id=test_user.id, folder="contacts_sync", delta_token="expired-token")
-    scheduler_db.add(ss)
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("token expired"))
-    mock_gc.get_all_pages = AsyncMock(return_value=[])
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    scheduler_db.refresh(ss)
-    assert ss.delta_token is None
-
-
-def test_sync_user_contacts_delta_expired_full_resync_fails(scheduler_db, test_user):
-    """GraphSyncStateExpired followed by full pull failure returns early."""
-    from app.utils.graph_client import GraphSyncStateExpired
-
-    test_user.access_token = "at_sync"
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("token expired"))
-    import httpx
-
-    mock_gc.get_all_pages = AsyncMock(side_effect=httpx.HTTPError("Full pull failed"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-    assert test_user.last_contacts_sync is None
-
-
-def test_sync_user_contacts_vendor_card_flush_conflict(scheduler_db, test_user):
-    """VendorCard flush conflict rolls back and continues."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    contact = {
-        "companyName": "Conflict Co",
-        "displayName": "Someone",
-        "emailAddresses": [{"address": "x@conflict.com"}],
-        "businessPhones": [],
-        "mobilePhone": None,
-    }
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(return_value=([contact], "delta-token"))
-
-    original_flush = scheduler_db.flush
-    flush_call_count = 0
-
-    def flaky_flush(*args, **kwargs):
-        nonlocal flush_call_count
-        flush_call_count += 1
-        if flush_call_count == 2:
-            from sqlalchemy.exc import IntegrityError
-
-            raise IntegrityError("insert", {}, Exception("Uniqueness conflict"))
-        return original_flush(*args, **kwargs)
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch.object(scheduler_db, "flush", side_effect=flaky_flush),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="conflict co"),
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-
-def test_sync_user_contacts_commit_error_final(scheduler_db, test_user):
-    """Commit failure in final sync."""
-    test_user.access_token = "at_sync"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(return_value=([], "delta-token"))
-
-    original_commit = scheduler_db.commit
-
-    def failing_commit(*args, **kwargs):
-        from sqlalchemy.exc import OperationalError
-
-        raise OperationalError("commit", {}, Exception("Commit failed"))
-
-    with (
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch.object(scheduler_db, "commit", side_effect=failing_commit),
-    ):
-        from app.jobs.email_jobs import _sync_user_contacts
-
-        asyncio.run(_sync_user_contacts(test_user, scheduler_db))
-
-
 # ── _job_ownership_sweep() ────────────────────────────────────────────
 
 
@@ -1272,287 +758,6 @@ def test_site_ownership_sweep_error_handling(scheduler_db):
 
         with pytest.raises(Exception, match="Sweep failed"):
             asyncio.run(_job_site_ownership_sweep())
-
-
-# ── _job_contact_scoring() ────────────────────────────────────────────
-
-
-def test_contact_scoring_runs_successfully(scheduler_db):
-    """Contact scoring job delegates to compute_all_contact_scores."""
-    with patch("app.services.contact_intelligence.compute_all_contact_scores") as mock_compute:
-        mock_compute.return_value = {"updated": 10, "skipped": 0}
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        asyncio.run(_job_contact_scoring())
-        mock_compute.assert_called_once_with(scheduler_db)
-
-
-def test_contact_scoring_timeout(scheduler_db):
-    """Contact scoring re-raises TimeoutError for _traced_job/Sentry capture."""
-
-    async def _mock_wait_for(coro, timeout=None):
-        try:
-            coro.close()
-        except Exception:
-            pass
-        raise TimeoutError()
-
-    with (
-        patch("app.services.contact_intelligence.compute_all_contact_scores"),
-        patch("asyncio.wait_for", side_effect=_mock_wait_for),
-    ):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        with pytest.raises(asyncio.TimeoutError):
-            asyncio.run(_job_contact_scoring())
-
-
-def test_contact_scoring_general_error(scheduler_db):
-    """Contact scoring re-raises general exceptions for _traced_job/Sentry."""
-    with patch(
-        "app.services.contact_intelligence.compute_all_contact_scores",
-        side_effect=Exception("Scoring crashed"),
-    ):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        with pytest.raises(Exception, match="Scoring crashed"):
-            asyncio.run(_job_contact_scoring())
-
-
-# ── _job_contact_status_compute() ─────────────────────────────────────
-
-
-def test_contact_status_compute_7_to_30_day_window(scheduler_db, test_user, test_company, test_customer_site):
-    """Contacts with last activity 7-30 days ago keep current status."""
-    from app.models import SiteContact
-
-    sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Seven Day Contact",
-        is_active=True,
-        contact_status="active",
-    )
-    scheduler_db.add(sc)
-    scheduler_db.flush()
-
-    activity = ActivityLog(
-        user_id=test_user.id,
-        activity_type="email_sent",
-        channel="outlook",
-        site_contact_id=sc.id,
-        auto_logged=True,
-        occurred_at=datetime.now(UTC) - timedelta(days=15),
-        created_at=datetime.now(UTC) - timedelta(days=15),
-    )
-    scheduler_db.add(activity)
-    scheduler_db.commit()
-
-    from app.jobs.email_jobs import _job_contact_status_compute
-
-    asyncio.run(_job_contact_status_compute())
-
-    scheduler_db.refresh(sc)
-    assert sc.contact_status == "active"
-
-
-def test_contact_status_compute_champion_not_downgraded(scheduler_db, test_user, test_company, test_customer_site):
-    """Champion contacts are never downgraded."""
-    from app.models import SiteContact
-
-    sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Champion Contact",
-        is_active=True,
-        contact_status="champion",
-    )
-    scheduler_db.add(sc)
-    scheduler_db.commit()
-
-    from app.jobs.email_jobs import _job_contact_status_compute
-
-    asyncio.run(_job_contact_status_compute())
-
-    scheduler_db.refresh(sc)
-    assert sc.contact_status == "champion"
-
-
-def test_contact_status_compute_active_recent(scheduler_db, test_user, test_company, test_customer_site):
-    """Contact with activity <= 7 days ago becomes active."""
-    from app.models import SiteContact
-
-    sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Recent Contact",
-        is_active=True,
-        contact_status="new",
-    )
-    scheduler_db.add(sc)
-    scheduler_db.flush()
-
-    activity = ActivityLog(
-        user_id=test_user.id,
-        activity_type="email_sent",
-        channel="outlook",
-        site_contact_id=sc.id,
-        auto_logged=True,
-        occurred_at=datetime.now(UTC) - timedelta(days=3),
-        created_at=datetime.now(UTC) - timedelta(days=3),
-    )
-    scheduler_db.add(activity)
-    scheduler_db.commit()
-
-    from app.jobs.email_jobs import _job_contact_status_compute
-
-    asyncio.run(_job_contact_status_compute())
-
-    scheduler_db.refresh(sc)
-    assert sc.contact_status == "active"
-
-
-def test_contact_status_compute_quiet_and_inactive(scheduler_db, test_user, test_company, test_customer_site):
-    """30-90 days -> quiet, >90 days -> inactive."""
-    from app.models import SiteContact
-
-    quiet_sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Quiet Contact",
-        is_active=True,
-        contact_status="active",
-    )
-    inactive_sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Inactive Contact",
-        is_active=True,
-        contact_status="active",
-    )
-    scheduler_db.add_all([quiet_sc, inactive_sc])
-    scheduler_db.flush()
-
-    quiet_activity = ActivityLog(
-        user_id=test_user.id,
-        activity_type="email_sent",
-        channel="outlook",
-        site_contact_id=quiet_sc.id,
-        auto_logged=True,
-        occurred_at=datetime.now(UTC) - timedelta(days=60),
-        created_at=datetime.now(UTC) - timedelta(days=60),
-    )
-    inactive_activity = ActivityLog(
-        user_id=test_user.id,
-        activity_type="email_sent",
-        channel="outlook",
-        site_contact_id=inactive_sc.id,
-        auto_logged=True,
-        occurred_at=datetime.now(UTC) - timedelta(days=120),
-        created_at=datetime.now(UTC) - timedelta(days=120),
-    )
-    scheduler_db.add_all([quiet_activity, inactive_activity])
-    scheduler_db.commit()
-
-    from app.jobs.email_jobs import _job_contact_status_compute
-
-    asyncio.run(_job_contact_status_compute())
-
-    scheduler_db.refresh(quiet_sc)
-    scheduler_db.refresh(inactive_sc)
-    assert quiet_sc.contact_status == "quiet"
-    assert inactive_sc.contact_status == "inactive"
-
-
-def test_contact_status_compute_no_activity_old_created(scheduler_db, test_user, test_company, test_customer_site):
-    """No activity + created >90 days ago -> inactive; recent created -> keep 'new'."""
-    from app.models import SiteContact
-
-    old_sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="Old No Activity",
-        is_active=True,
-        contact_status="new",
-        created_at=datetime.now(UTC) - timedelta(days=120),
-    )
-    new_sc = SiteContact(
-        customer_site_id=test_customer_site.id,
-        full_name="New No Activity",
-        is_active=True,
-        contact_status="new",
-        created_at=datetime.now(UTC) - timedelta(days=30),
-    )
-    scheduler_db.add_all([old_sc, new_sc])
-    scheduler_db.commit()
-
-    from app.jobs.email_jobs import _job_contact_status_compute
-
-    asyncio.run(_job_contact_status_compute())
-
-    scheduler_db.refresh(old_sc)
-    scheduler_db.refresh(new_sc)
-    assert old_sc.contact_status == "inactive"
-    assert new_sc.contact_status == "new"
-
-
-def test_contact_status_compute_error_handler(scheduler_db):
-    """Exception in _job_contact_status_compute is re-raised for _traced_job/Sentry."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        with pytest.raises(Exception, match="DB crash"):
-            asyncio.run(_job_contact_status_compute())
-
-
-# ── _job_email_reverification() ───────────────────────────────────────
-
-
-def test_email_reverification_success(scheduler_db):
-    """_job_email_reverification happy path."""
-    mock_reverify = AsyncMock(return_value={"processed": 20, "invalidated": 3})
-    with patch("app.services.customer_enrichment_batch.run_email_reverification", mock_reverify):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        asyncio.run(_job_email_reverification())
-    mock_reverify.assert_called_once()
-
-
-def test_email_reverification_error(scheduler_db):
-    """Exception rolls back and re-raises for _traced_job/Sentry."""
-    mock_reverify = AsyncMock(side_effect=Exception("Reverify failed"))
-    with patch("app.services.customer_enrichment_batch.run_email_reverification", mock_reverify):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        with pytest.raises(Exception, match="Reverify failed"):
-            asyncio.run(_job_email_reverification())
-
-
-# ── _job_email_health_update() ────────────────────────────────────────
-
-
-def test_email_health_update_timeout(scheduler_db):
-    """asyncio.TimeoutError rolls back and re-raises for _traced_job/Sentry."""
-    with patch("app.services.response_analytics.batch_update_email_health", side_effect=Exception("slow")):
-        with patch("asyncio.wait_for", new_callable=AsyncMock, side_effect=asyncio.TimeoutError):
-            from app.jobs.email_jobs import _job_email_health_update
-
-            with pytest.raises(asyncio.TimeoutError):
-                asyncio.run(_job_email_health_update())
-
-
-def test_email_health_update_success(scheduler_db):
-    """Happy path logs result."""
-    mock_health = MagicMock(return_value={"updated": 15})
-    with patch("app.services.response_analytics.batch_update_email_health", mock_health):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        asyncio.run(_job_email_health_update())
-    mock_health.assert_called_once()
-
-
-def test_email_health_update_generic_error(scheduler_db):
-    """Generic exception rolls back and re-raises for _traced_job/Sentry."""
-    mock_health = MagicMock(side_effect=RuntimeError("DB error"))
-    with patch("app.services.response_analytics.batch_update_email_health", mock_health):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        with pytest.raises(RuntimeError, match="DB error"):
-            asyncio.run(_job_email_health_update())
 
 
 # ── _job_calendar_scan() ──────────────────────────────────────────────

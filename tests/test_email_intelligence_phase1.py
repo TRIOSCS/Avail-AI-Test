@@ -5,7 +5,6 @@ Covers:
   Bug 2: _mark_processed savepoint pattern (avoids bare rollback)
   Bug 3: deep_scan_inbox passes last_body for signature extraction
   Bug 4: stock_lists_found field removed from scan_inbox return
-  Bug 5: contacts sync uses delta query with SyncState token
 
 Called by: pytest
 Depends on: conftest fixtures, app.config, app.connectors.email_mining,
@@ -120,75 +119,3 @@ class TestStockListsFieldRemoved:
         assert "stock_lists_found" not in result
         assert "vendors_found" in result
         assert "messages_scanned" in result
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  Bug 5: contacts sync delta query
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestContactsSyncDelta:
-    @staticmethod
-    def _run_sync(mock_gc, test_user, db_session):
-        """Wire access_token + GraphClient(mock_gc) and run _sync_user_contacts to
-        completion."""
-        test_user.access_token = "fake-token"
-        db_session.commit()
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.jobs.email_jobs import _sync_user_contacts
-
-            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
-
-    def test_sync_user_contacts_uses_delta_query(self, db_session, test_user):
-        """_sync_user_contacts uses delta_query instead of get_all_pages."""
-        mock_gc = MagicMock()
-        mock_gc.delta_query = AsyncMock(
-            return_value=(
-                [
-                    {
-                        "displayName": "John Sales",
-                        "companyName": "Arrow Electronics",
-                        "emailAddresses": [{"address": "john@arrow.com"}],
-                        "businessPhones": ["+1-555-0100"],
-                        "mobilePhone": None,
-                    },
-                ],
-                "delta-token-123",
-            )
-        )
-
-        self._run_sync(mock_gc, test_user, db_session)
-
-        # Verify delta_query was called (not get_all_pages)
-        mock_gc.delta_query.assert_called_once()
-        assert "/me/contacts/delta" in mock_gc.delta_query.call_args[0]
-
-    def test_sync_user_contacts_stores_delta_token(self, db_session, test_user):
-        """After successful delta sync, SyncState record is created with new token."""
-        from app.models import SyncState
-
-        mock_gc = MagicMock()
-        mock_gc.delta_query = AsyncMock(return_value=([], "new-delta-token"))
-
-        self._run_sync(mock_gc, test_user, db_session)
-
-        sync = (
-            db_session.query(SyncState)
-            .filter(SyncState.user_id == test_user.id, SyncState.folder == "contacts_sync")
-            .first()
-        )
-        assert sync is not None
-        assert sync.delta_token == "new-delta-token"
-
-    def test_sync_user_contacts_fallback_on_expired_token(self, db_session, test_user):
-        """On GraphSyncStateExpired, falls back to full get_all_pages pull."""
-        from app.utils.graph_client import GraphSyncStateExpired
-
-        mock_gc = MagicMock()
-        mock_gc.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("expired"))
-        mock_gc.get_all_pages = AsyncMock(return_value=[])
-
-        self._run_sync(mock_gc, test_user, db_session)
-
-        mock_gc.get_all_pages.assert_called_once()

@@ -9,7 +9,7 @@
 # Depends on: app.main.app (route registry) + the TestClient/db fixtures in conftest.
 
 import inspect
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -43,42 +43,6 @@ def test_run_email_reverification_rejects_legacy_kwarg():
     with pytest.raises(TypeError):
         sig.bind(sentinel, max_contacts=200)
     sig.bind(sentinel)  # the fixed call binds fine
-
-
-@pytest.mark.asyncio
-async def test_email_reverification_job_runs_without_crashing():
-    """_job_email_reverification must complete against the REAL stub (no kwarg
-    TypeError).
-
-    Regression for inventory Bug 1: the old call raised
-    'unexpected keyword argument max_contacts' on every quarterly run and re-raised it
-    to Sentry. run_email_reverification is left unpatched here so a bad kwarg would surface.
-    """
-    from app.jobs.email_jobs import _job_email_reverification
-
-    with patch("app.database.SessionLocal") as mock_sessionlocal:
-        mock_sessionlocal.return_value = MagicMock()
-        await _job_email_reverification()
-
-
-def test_email_reverification_job_still_scheduled_when_enrichment_enabled():
-    """The kwarg fix (not an unschedule) keeps the job registered so it can no-op
-    cleanly."""
-    from types import SimpleNamespace
-
-    from app.jobs.email_jobs import register_email_jobs
-
-    scheduler = MagicMock()
-    settings = SimpleNamespace(
-        contacts_sync_enabled=False,
-        ownership_sweep_enabled=False,
-        contact_scoring_enabled=False,
-        activity_tracking_enabled=False,
-        customer_enrichment_enabled=True,
-    )
-    register_email_jobs(scheduler, settings)
-    job_ids = [call.kwargs.get("id") for call in scheduler.add_job.call_args_list]
-    assert "email_reverification" in job_ids
 
 
 # ── BUG 2: dashboard "Refresh insights" 404 ─────────────────────────────────

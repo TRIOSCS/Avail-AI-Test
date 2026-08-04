@@ -68,39 +68,44 @@ class TestRegisterEmailJobs:
         [
             pytest.param(
                 {},
-                ["contact_status_compute", "email_health_update", "scan_sent_folders"],
-                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification", "calendar_scan"],
+                ["scan_sent_folders"],
+                [
+                    "contacts_sync",
+                    "ownership_sweep",
+                    "contact_scoring",
+                    "contact_status_compute",
+                    "email_health_update",
+                    "email_reverification",
+                    "calendar_scan",
+                ],
                 id="always_on_jobs",
             ),
             pytest.param(
-                {"activity_tracking_enabled": True},
-                ["calendar_scan"],
-                [],
-                id="calendar_scan_when_tracking_enabled",
-            ),
-            pytest.param(
-                {"contacts_sync_enabled": True},
-                ["contacts_sync"],
-                [],
-                id="contacts_sync_when_enabled",
+                # Deleted/parked jobs never register, even with their old flags on
+                # (W1 disposition: contacts_sync/contact_scoring/email_reverification
+                # deleted; calendar_scan parked out of the scheduler).
+                {
+                    "activity_tracking_enabled": True,
+                    "contacts_sync_enabled": True,
+                    "contact_scoring_enabled": True,
+                    "customer_enrichment_enabled": True,
+                },
+                ["scan_sent_folders"],
+                [
+                    "contacts_sync",
+                    "contact_scoring",
+                    "contact_status_compute",
+                    "email_health_update",
+                    "email_reverification",
+                    "calendar_scan",
+                ],
+                id="deleted_and_parked_jobs_never_register",
             ),
             pytest.param(
                 {"activity_tracking_enabled": True, "ownership_sweep_enabled": True},
                 ["ownership_sweep", "site_ownership_sweep"],
                 [],
                 id="ownership_when_both_enabled",
-            ),
-            pytest.param(
-                {"contact_scoring_enabled": True},
-                ["contact_scoring"],
-                [],
-                id="contact_scoring_when_enabled",
-            ),
-            pytest.param(
-                {"customer_enrichment_enabled": True},
-                ["email_reverification"],
-                [],
-                id="reverification_when_enrichment_enabled",
             ),
             pytest.param(
                 {"activity_tracking_enabled": True, "ownership_sweep_enabled": False},
@@ -220,52 +225,6 @@ class TestAvailTagRegex:
         assert RFQ_SUBJECT_TAG_RE.search("Regular email subject") is None
 
 
-class TestJobContactsSync:
-    """Test _job_contacts_sync() — syncs Outlook contacts for all users."""
-
-    @pytest.mark.asyncio
-    @patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock)
-    async def test_syncs_eligible_users(self, mock_sync):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_user.access_token = "token"
-        mock_user.m365_connected = True
-        mock_user.last_contacts_sync = None
-        mock_user.refresh_token = "rt"
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_user]
-        mock_db.get.return_value = mock_user
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            await _job_contacts_sync.__wrapped__()
-
-        # Should have attempted sync for one user
-        assert mock_sync.called or mock_db.get.called
-
-    @pytest.mark.asyncio
-    @patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock)
-    async def test_skips_users_without_token(self, mock_sync):
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_user.access_token = None  # No token
-        mock_user.m365_connected = True
-        mock_user.last_contacts_sync = None
-        mock_user.refresh_token = "rt"
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_user]
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            await _job_contacts_sync.__wrapped__()
-
-        mock_sync.assert_not_called()
-
-
 class TestJobOwnershipSweep:
     """Test _job_ownership_sweep()."""
 
@@ -299,80 +258,6 @@ class TestJobOwnershipSweep:
         ):
             with pytest.raises(Exception, match="db error"):
                 await _job_ownership_sweep.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobEmailHealthUpdate:
-    """Test _job_email_health_update()."""
-
-    @pytest.mark.asyncio
-    async def test_calls_batch_update(self):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        mock_db = MagicMock()
-        mock_update = MagicMock(return_value={"updated": 5})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.response_analytics.batch_update_email_health", mock_update),
-        ):
-            await _job_email_health_update.__wrapped__()
-
-    @pytest.mark.asyncio
-    async def test_rollback_on_timeout(self):
-        from app.jobs.email_jobs import _job_email_health_update
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.response_analytics.batch_update_email_health",
-                side_effect=Exception("timeout"),
-            ),
-        ):
-            with pytest.raises(Exception):
-                await _job_email_health_update.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-
-
-class TestJobEmailReverification:
-    """Test _job_email_reverification()."""
-
-    @pytest.mark.asyncio
-    async def test_calls_reverification_and_commits(self):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        mock_db = MagicMock()
-        mock_reverify = AsyncMock(return_value={"processed": 10, "invalidated": 2})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.customer_enrichment_batch.run_email_reverification", mock_reverify),
-        ):
-            await _job_email_reverification.__wrapped__()
-
-        # Call site passes db only (default _max_contacts); the old max_contacts= kwarg
-        # raised TypeError against the run_email_reverification(_max_contacts=...) signature.
-        mock_reverify.assert_called_once_with(mock_db)
-        mock_db.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_rollback_on_error(self):
-        from app.jobs.email_jobs import _job_email_reverification
-
-        mock_db = MagicMock()
-        mock_reverify = AsyncMock(side_effect=RuntimeError("API down"))
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.customer_enrichment_batch.run_email_reverification", mock_reverify),
-        ):
-            with pytest.raises(RuntimeError, match="API down"):
-                await _job_email_reverification.__wrapped__()
 
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
@@ -487,7 +372,7 @@ class TestScanUserInbox:
 
     @pytest.mark.asyncio
     async def test_handles_sub_op_failure(self):
-        """If a sub-op fails, other sub-ops still run."""
+        """If a sub-op fails, other sub-ops still run (email_mining flag on)."""
         from app.jobs.email_jobs import _scan_user_inbox
 
         mock_user = MagicMock()
@@ -505,6 +390,7 @@ class TestScanUserInbox:
             ),
             patch("app.jobs.email_jobs._mine_vendor_contacts", AsyncMock()) as mock_mine,
             patch("app.jobs.email_jobs._scan_outbound_rfqs", AsyncMock()) as mock_outbound,
+            patch("app.services.admin_service.get_effective_flag", return_value=True),
         ):
             await _scan_user_inbox(mock_user, mock_db)
 
@@ -563,28 +449,6 @@ class TestJobCalendarScan:
             patch("app.services.calendar_intelligence.scan_calendar_events", mock_scan),
         ):
             await _job_calendar_scan.__wrapped__()
-
-
-class TestJobContactScoring:
-    """Test _job_contact_scoring()."""
-
-    @pytest.mark.asyncio
-    async def test_calls_scoring_and_logs_result(self):
-        from app.jobs.email_jobs import _job_contact_scoring
-
-        mock_db = MagicMock()
-        mock_result = {"updated": 15, "skipped": 3}
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.contact_intelligence.compute_all_contact_scores",
-                return_value=mock_result,
-            ),
-        ):
-            await _job_contact_scoring.__wrapped__()
-
-        mock_db.close.assert_called_once()
 
 
 class TestMineVendorContacts:

@@ -7,12 +7,10 @@ Individual job function tests have been split into domain-specific files:
   - test_jobs_core.py (token refresh, batch results, inbox scan, webhooks)
   - test_jobs_email.py (contacts sync, deep email mining, vendor contacts, outbound RFQs, calendar)
   - test_jobs_enrichment.py (engagement scoring, deep enrichment, customer enrichment)
-  - test_jobs_health.py (health ping, health deep, usage log cleanup, monthly reset)
-  - test_jobs_inventory.py (PO verification, stock autocomplete, stock list import)
-  - test_jobs_maintenance.py (cache cleanup, connector errors, attribution, dedup, integrity)
-  - test_jobs_offers.py (proactive matching, performance tracking, offer expiry, stale offers)
-  - test_jobs_prospecting.py (pool health, discover, enrich, contacts, scores, expire)
-  - test_jobs_tagging.py (material enrichment, nexar validate, connector enrichment)
+  - test_jobs_inventory.py (stock list import helpers)
+  - test_jobs_offers.py (proactive matching)
+(The health/maintenance/tagging/prospecting job test files went with their jobs
+in W1 — docs/W1_JOB_DISPOSITION.md.)
 """
 
 from datetime import UTC, datetime, timedelta, timezone
@@ -102,8 +100,12 @@ def test_utc_none_returns_none():
             ("contacts_sync", "proactive_matching", "deep_email_mining", "deep_enrichment"),
             id="conditional_flags_off",
         ),
-        pytest.param(("po_verification", "stock_autocomplete"), (), id="buyplan_jobs"),
-        pytest.param(("performance_tracking", "cache_cleanup"), (), id="performance_and_cache"),
+        # W1 (docs/W1_JOB_DISPOSITION.md): po_verification + stock_autocomplete
+        # deleted, buyplan_nudge parked — inventory registers nothing.
+        pytest.param((), ("po_verification", "stock_autocomplete", "buyplan_nudge"), id="buyplan_jobs"),
+        # performance_tracking is parked (Wave 1) — registration removed;
+        # cache_cleanup deleted in W1.
+        pytest.param((), ("performance_tracking", "cache_cleanup"), id="performance_and_cache"),
     ],
 )
 def test_configure_scheduler_default_settings_jobs(expected_present, expected_absent):
@@ -131,18 +133,25 @@ def test_configure_scheduler_conditional_flags_on():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "contacts_sync" in job_ids
-    assert "proactive_matching" in job_ids
+    # contacts_sync is deleted (W1, docs/W1_JOB_DISPOSITION.md): absent even
+    # with contacts_sync_enabled=True.
+    assert "contacts_sync" not in job_ids
+    # calendar_scan is parked (W1): registration removed because
+    # activity_tracking_enabled defaults ON, so it stays absent with the flag set.
+    assert "calendar_scan" not in job_ids
+    # proactive_matching is parked (Wave 1): its registration was removed because
+    # the flag defaulted ON, so it stays absent even with the flag set.
+    assert "proactive_matching" not in job_ids
 
 
 def test_configure_scheduler_activity_tracking_jobs():
-    """Activity tracking flag controls webhook_subs; ownership_sweep needs its own
-    flag."""
+    """webhook_subs is deleted (W1, spec §3 kernel-only) — absent even with activity
+    tracking on; ownership_sweep needs its own flag."""
     with patch("app.config.settings", _mock_settings(activity_tracking_enabled=True)):
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "webhook_subs" in job_ids
+    assert "webhook_subs" not in job_ids
     # ownership_sweep requires OWNERSHIP_SWEEP_ENABLED=true separately
     assert "ownership_sweep" not in job_ids
 
@@ -157,44 +166,21 @@ def test_configure_scheduler_ownership_sweep_enabled():
     assert "site_ownership_sweep" in job_ids
 
 
-@pytest.mark.parametrize(
-    "configured_hours, expected_hours",
-    [
-        pytest.param(6, 6, id="configurable_interval"),
-        pytest.param(0, 1, id="interval_minimum_1h"),  # clamped to at least 1 hour
-    ],
-)
-def test_proactive_matching_interval(configured_hours, expected_hours):
-    """Proactive matching interval is configurable, clamped to a 1-hour minimum."""
-    with patch(
-        "app.config.settings",
-        _mock_settings(
-            proactive_matching_enabled=True,
-            proactive_scan_interval_hours=configured_hours,
-        ),
-    ):
-        configure_scheduler()
-
-    job = scheduler.get_job("proactive_matching")
-    assert job is not None
-    assert job.trigger.interval.total_seconds() == expected_hours * 3600
-
-
-def test_reset_connector_errors_registered():
-    """configure_scheduler registers the reset_connector_errors job."""
+def test_reset_connector_errors_not_registered():
+    """reset_connector_errors was deleted in W1 (docs/W1_JOB_DISPOSITION.md) and must
+    never re-appear in the scheduler."""
     configure_scheduler()
     job_ids = [j.id for j in scheduler.get_jobs()]
-    assert "reset_connector_errors" in job_ids
+    assert "reset_connector_errors" not in job_ids
     scheduler.remove_all_jobs()
 
 
-def test_ai_tagging_job_registered():
-    """AI tagging job is registered (Claude Haiku, replaced nexar_backfill +
-    connector_enrichment)."""
+def test_ai_tagging_job_not_registered():
+    """ai_tagging was deleted in W1 (docs/W1_JOB_DISPOSITION.md — on-demand management
+    command only) and must never re-appear in the scheduler."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
-    job = scheduler.get_job("ai_tagging")
-    assert job is not None
-    # Runs every 4 hours (was 30 minutes, changed during redesign)
-    assert job.trigger.interval.total_seconds() == 14400
+    job_ids = [j.id for j in scheduler.get_jobs()]
+    assert "ai_tagging" not in job_ids
+    scheduler.remove_all_jobs()

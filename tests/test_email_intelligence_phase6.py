@@ -3,8 +3,7 @@
 Tests for:
 - Fix 1: email_mining stores ALL classified emails (no regex gate)
 - Fix 2: needs_review logic skips spam/ooo/general
-- Fix 3: _job_email_health_update scheduler job
-- Fix 4: _job_calendar_scan scheduler job
+- Fix 4: _job_calendar_scan job implementation (parked: not scheduler-registered)
 
 Called by: pytest
 Depends on: app.connectors.email_mining, app.services.email_intelligence_service,
@@ -32,26 +31,6 @@ def _fake_msg(msg_id="msg-1", body="Test body", subject="Test subject"):
         "receivedDateTime": "2026-02-28T10:00:00Z",
         "conversationId": "conv-1",
     }
-
-
-def _scheduler_settings():
-    """Minimal settings MagicMock for configure_scheduler() registration tests."""
-    return MagicMock(
-        inbox_scan_interval_min=30,
-        contacts_sync_enabled=False,
-        activity_tracking_enabled=False,
-        po_verify_interval_min=15,
-        buyplan_auto_complete_hour=18,
-        buyplan_auto_complete_tz="UTC",
-        proactive_matching_enabled=False,
-        contact_scoring_enabled=False,
-        eight_by_eight_enabled=False,
-        prospecting_enabled=False,
-        customer_enrichment_enabled=False,
-        worker_liveness_check_minutes=5,
-        worker_heartbeat_stale_minutes=15,
-        worker_alert_debounce_minutes=60,
-    )
 
 
 class TestScanInboxStoresRegexEmails:
@@ -205,66 +184,6 @@ class TestNeedsReviewLogic:
         assert rec.auto_applied is auto_applied
 
 
-# ── Fix 3: _job_email_health_update ────────────────────────────────────
-
-
-class TestJobEmailHealthUpdate:
-    """Tests for the _job_email_health_update scheduler job."""
-
-    @pytest.mark.asyncio
-    async def test_calls_batch_update(self):
-        """Job calls batch_update_email_health and logs result."""
-        mock_batch = MagicMock(return_value={"updated": 42, "skipped": 5})
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.response_analytics.batch_update_email_health",
-                mock_batch,
-            ),
-        ):
-            from app.jobs.email_jobs import _job_email_health_update
-
-            await _job_email_health_update()
-
-            mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_error(self):
-        """Job logs, rolls back, and re-raises for _traced_job/Sentry capture."""
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.response_analytics.batch_update_email_health",
-                side_effect=RuntimeError("db down"),
-            ),
-        ):
-            from app.jobs.email_jobs import _job_email_health_update
-
-            with pytest.raises(RuntimeError, match="db down"):
-                await _job_email_health_update()
-
-            mock_db.rollback.assert_called()
-            mock_db.close.assert_called_once()
-
-    def test_registered_in_scheduler(self):
-        """email_health_update job is registered in configure_scheduler."""
-        from app.scheduler import configure_scheduler
-
-        mock_scheduler = MagicMock()
-        with (
-            patch("app.scheduler.scheduler", mock_scheduler),
-            patch("app.config.settings", _scheduler_settings()),
-        ):
-            configure_scheduler()
-
-            job_ids = [c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list]
-            assert "email_health_update" in job_ids
-
-
 # ── Fix 4: _job_calendar_scan ──────────────────────────────────────────
 
 
@@ -368,19 +287,3 @@ class TestJobCalendarScan:
             await _job_calendar_scan()
 
             mock_scan.assert_not_called()
-
-    def test_registered_in_scheduler(self):
-        """calendar_scan job is registered when activity_tracking_enabled=True."""
-        from app.scheduler import configure_scheduler
-
-        settings = _scheduler_settings()
-        settings.activity_tracking_enabled = True
-        mock_scheduler = MagicMock()
-        with (
-            patch("app.scheduler.scheduler", mock_scheduler),
-            patch("app.config.settings", settings),
-        ):
-            configure_scheduler()
-
-            job_ids = [c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list]
-            assert "calendar_scan" in job_ids
