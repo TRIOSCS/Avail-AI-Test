@@ -48,6 +48,7 @@ from ...models import (
     RequisitionTask,
     User,
 )
+from ...services.credential_service import get_credential_cached
 from ...services.freeform_parser_service import parse_freeform_rfq
 from ...services.task_service import create_requisition_task, delete_task, is_task_mutation_authorized, update_task
 from ...template_env import template_response
@@ -578,6 +579,21 @@ async def requisition_import_parse(
 ):
     """Parse pasted text or uploaded file with AI, return editable preview."""
     json_mode = request.query_params.get("format") == "json"
+
+    # Keys-off honesty (spec §7): with no AI key the parse cannot run — say so
+    # instead of 500ing inside claude_client (ClaudeUnavailableError). Manual row
+    # entry in the modal keeps working; only the bulk AI fill is off.
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+        message = "AI is off — enter lines or paste when enabled"
+        if json_mode:
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"error": message, "requirements": []})
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-800 bg-amber-50 rounded-lg border border-amber-200">'
+            f"{message}"
+            "</div>"
+        )
 
     # Extract text from file if uploaded
     text = raw_text.strip()

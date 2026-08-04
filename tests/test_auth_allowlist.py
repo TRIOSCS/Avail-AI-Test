@@ -30,6 +30,15 @@ from app.models import User
 from tests.test_routers_auth import _get_oauth_state, _mock_graph_me, _mock_token_response
 
 
+@pytest.fixture(autouse=True)
+def _azure_configured(monkeypatch):
+    """OAuth-flow tests need a configured Azure client id — with it unset the keys-off
+    guard (spec §7 addition) redirects home instead of issuing the authorize URL."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+
+
 @pytest.fixture()
 def auth_client(db_session: Session) -> TestClient:
     """TestClient WITHOUT auth overrides — mirrors the fixture in test_routers_auth.

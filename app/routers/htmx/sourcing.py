@@ -30,7 +30,7 @@ from ...models import (
     User,
 )
 from ...template_env import page_response, template_response, templates
-from ..auth import _password_login_enabled
+from ..auth import _password_login_enabled, m365_login_enabled
 from ._shared import _base_ctx, _vite_assets
 
 router = APIRouter(tags=["htmx-views"])
@@ -82,7 +82,13 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
     user = get_user(request, db)
     if not user:
         return template_response(
-            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+            "htmx/login.html",
+            {
+                "request": request,
+                "password_login": _password_login_enabled(),
+                "m365_login": m365_login_enabled(),
+                **_vite_assets(),
+            },
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
@@ -95,7 +101,13 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
     user = get_user(request, db)
     if not user:
         return template_response(
-            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+            "htmx/login.html",
+            {
+                "request": request,
+                "password_login": _password_login_enabled(),
+                "m365_login": m365_login_enabled(),
+                **_vite_assets(),
+            },
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
@@ -403,7 +415,13 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
     user = get_user(request, db)
     if not user:
         return template_response(
-            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+            "htmx/login.html",
+            {
+                "request": request,
+                "password_login": _password_login_enabled(),
+                "m365_login": m365_login_enabled(),
+                **_vite_assets(),
+            },
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"

@@ -390,6 +390,28 @@ def test_market_no_banner_when_only_unconfigured(client):
     assert "unavailable" not in resp.text
 
 
+def test_market_banner_external_sources_off_when_fully_keyless(client):
+    """Keys-off honesty (spec §7): with NO live-market connector able to run at all
+    (available == 0, nothing down — everything unconfigured), the market section shows
+    the neutral 'external sources off — showing local data' state instead of looking
+    mysteriously empty."""
+    health = {
+        "available": 0,
+        "total": 0,
+        "down": [],
+        "unconfigured": [
+            {"name": "ebay", "display": "eBay", "reason": "No API key configured"},
+            {"name": "mouser", "display": "Mouser", "reason": "No API key configured"},
+        ],
+    }
+    with patch("app.search_service.get_market_source_health", return_value=health):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    assert "External sources are off" in resp.text
+    assert "showing local data" in resp.text
+    assert "unavailable" not in resp.text  # not styled as a problem/degraded state
+
+
 # ── Market-baseline strip — helper unit tests ──────────────────────────────
 
 

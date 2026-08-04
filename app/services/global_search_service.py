@@ -671,8 +671,13 @@ async def ai_search(query: str, db: Session, user: User | None = None) -> dict:
             timeout=10,
         )
     except ClaudeUnavailableError:
+        # Keys-off honesty (spec §7): fall back to plain search AND tell the UI,
+        # so the dropdown can say "AI search is off" instead of silently
+        # pretending the results were AI-ranked.
         logger.info("Claude not configured — falling back to fast_search")
-        return fast_search(query, db, user)
+        result = fast_search(query, db, user)
+        result["ai_off"] = True
+        return result
     except ClaudeError as e:
         logger.warning("Claude AI failed for search intent: {}", e)
         return fast_search(query, db, user)

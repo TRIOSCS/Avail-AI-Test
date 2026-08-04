@@ -6,6 +6,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ...config import settings
 from ...database import get_db
 from ...dependencies import can_manage_account, require_admin, require_buyer, require_user
 from ...models import Company, CustomerSite, SiteContact, User, VendorCard, VendorContact
@@ -30,18 +31,32 @@ def _wants_html(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
 
 
-def _require_enrichment_provider() -> None:
-    """Raise 503 unless at least one enrichment provider credential is configured."""
-    has_provider = (
+def _paid_provider_configured() -> bool:
+    """True when at least one keyed (paid) enrichment provider credential is set."""
+    return bool(
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         or get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
+        or get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
     )
-    if not has_provider:
-        raise HTTPException(
-            503,
-            "No enrichment providers configured — set EXPLORIUM_API_KEY, ANTHROPIC_API_KEY, or HUNTER_API_KEY in .env",
-        )
+
+
+def _require_enrichment_provider() -> None:
+    """Raise 503 only when NO enrichment path can run at all.
+
+    Keys-off honesty (spec §7): the SAM.gov path is free — it needs no credential (the
+    connector falls back to the public DEMO_KEY tier), so a fully keyless instance still
+    enriches from SAM.gov. The old guard 503'd whenever the paid keys were absent,
+    blocking the free path. Only when the SAM.gov feature gate is off AND no paid key is
+    configured is there genuinely nothing to run.
+    """
+    if settings.sam_gov_enrichment_enabled or _paid_provider_configured():
+        return
+    raise HTTPException(
+        503,
+        "Enrichment is off — enable SAM.gov (SAM_GOV_ENRICHMENT_ENABLED) or set a "
+        "provider key (EXPLORIUM_API_KEY, ANTHROPIC_API_KEY, HUNTER_API_KEY, or LUSHA_API_KEY)",
+    )
 
 
 # ── Enrichment (shared for vendors + customers) ─────────────────────────
@@ -236,6 +251,7 @@ async def enrich_company_status(
             "active_sites": active_sites,
             "add_target": "closest li",
             "add_swap": "outerHTML",
+            "paid_providers_off": not _paid_provider_configured(),
         },
     )
     response.status_code = 286  # htmx's stop-polling status — the result panel still swaps in.
@@ -293,6 +309,7 @@ async def enrich_vendor_card(
             "entity_type": "vendor",
             "updated_fields": updated,
             "show_contacts": False,
+            "paid_providers_off": not _paid_provider_configured(),
         },
     )
 

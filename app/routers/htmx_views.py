@@ -29,7 +29,7 @@ from ..database import get_db
 from ..dependencies import get_user, require_access, require_buyer, user_has_access
 from ..models import User
 from ..template_env import page_response, template_response, templates  # noqa: F401 — templates re-exported for tests
-from .auth import _password_login_enabled
+from .auth import _password_login_enabled, m365_login_enabled
 from .htmx._shared import _base_ctx, _safe_int, _vite_assets  # noqa: F401 — _safe_int re-exported for tests
 from .htmx.email_views import router as _email_views_router
 from .htmx.email_views import send_email_reply  # noqa: F401 — re-exported for tests
@@ -161,7 +161,13 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
     if not user:
         return template_response(
-            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+            "htmx/login.html",
+            {
+                "request": request,
+                "password_login": _password_login_enabled(),
+                "m365_login": m365_login_enabled(),
+                **_vite_assets(),
+            },
         )
     # First matching segment wins — order is load-bearing (e.g. /vendor-contacts before
     # /vendors). Anything unmatched defaults to the requisitions view.

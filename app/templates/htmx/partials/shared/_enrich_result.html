@@ -13,6 +13,7 @@
     errored_providers — list[str]         (company only)
     active_sites  — list[CustomerSite]    (company only)
     add_target / add_swap — hx-target / hx-swap for each contact's Add form (company only)
+    paid_providers_off — bool  no paid enrichment key configured (keys-off honesty note)
 
   Depends on: shared/_contact_row.html, shared/source_badge.html, |timeago filter.
 #}
@@ -100,6 +101,10 @@
   <p class='mt-3 text-xs text-gray-600'>Already up to date — no new fields found.</p>
   {% else %}
   <p class='mt-3 text-xs text-emerald-700'>Updated {{ updated_fields | length }} field{{ 's' if updated_fields | length != 1 }}.</p>
+  {% endif %}
+  {% if paid_providers_off %}
+  {# Keys-off honesty (spec §7): the free SAM.gov path ran; name what didn't. #}
+  <p class='mt-1 text-xs text-gray-500'>Paid enrichment providers are off — free SAM.gov data only.</p>
   {% endif %}
 
   {# ── Discovered contacts (company only) ─────────────────────────────── #}

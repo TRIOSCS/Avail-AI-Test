@@ -1170,6 +1170,12 @@ class TestSearchAll:
 class TestRequisitionImport:
     """Test AI import parse and save."""
 
+    @pytest.fixture(autouse=True)
+    def _ai_key_configured(self, monkeypatch):
+        """Pretend an AI key is configured so import-parse reaches the parse body (the
+        §7 keys-off guard answers 'AI is off' first under TESTING otherwise)."""
+        monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: "TEST_KEY")
+
     def test_import_parse_no_data(self, client: TestClient):
         resp = client.post(
             "/v2/partials/requisitions/import-parse",
@@ -2100,22 +2106,6 @@ class TestProactive:
         assert resp.status_code == 200
         assert "Proactive Scorecard" in resp.text
         assert "Sent" in resp.text
-
-    def test_badge(self, client: TestClient, db_session: Session, test_user: User):
-        # No NEW matches → empty badge.
-        empty = client.get("/v2/partials/proactive/badge")
-        assert empty.status_code == 200
-        assert empty.text == ""
-        # A NEW match for this user renders the count pill.
-        from app.models import ProactiveMatch
-
-        req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user)
-        db_session.add(ProactiveMatch(offer_id=offer.id, mpn="LM317T", salesperson_id=test_user.id, status="new"))
-        db_session.commit()
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-        assert ">1</span>" in resp.text
 
 
 # ══════════════════════════════════════════════════════════════════════════

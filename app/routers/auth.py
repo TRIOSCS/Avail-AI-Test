@@ -49,8 +49,25 @@ async def index(request: Request):
     return RedirectResponse(url="/v2/requisitions", status_code=302)
 
 
+def m365_login_enabled() -> bool:
+    """True when Azure OAuth is configured (AZURE_CLIENT_ID set) on this instance.
+
+    Keys-off honesty (spec §7 addition): with no client id the authorize URL is
+    malformed — Microsoft answers with an error document instead of a login. The login
+    page uses this to render the M365 button as an honest disabled state, and
+    /auth/login refuses to redirect into the broken flow.
+    """
+    return bool(settings.azure_client_id)
+
+
 @router.get("/auth/login")
 async def login(request: Request):
+    if not m365_login_enabled():
+        # No AZURE_CLIENT_ID — redirecting to Microsoft would produce a malformed
+        # authorize URL (an error page/download on phones). Land back on the login
+        # page, which shows the honest "M365 sign-in is off" state.
+        logger.warning("M365 login attempted but AZURE_CLIENT_ID is not configured")
+        return RedirectResponse("/")
     state = secrets.token_urlsafe(32)
     request.session["oauth_state"] = state
     params = urlencode(

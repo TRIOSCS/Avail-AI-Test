@@ -550,7 +550,8 @@ async def run_contact_enrichment_batch(min_fit_score: int | None = None) -> dict
     ``readiness_signals['contacts_verified_count']`` so the buyer-ready score can credit
     verified decision-makers. Commits per prospect so one failure never aborts the batch.
 
-    Called by: prospect_scheduler.job_find_contacts.
+    Called by: nothing since W1 (its scheduler caller, prospect_scheduler.job_find_contacts,
+    was deleted per docs/W1_JOB_DISPOSITION.md — kept as an on-demand entry point).
     Returns ``{"prospects_processed", "total_verified", "total_contacts", "errors"}``.
     """
     from app.config import settings as _settings

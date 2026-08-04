@@ -764,9 +764,14 @@ class TestCompaniesAdditional:
 
 
 class TestEnrichment:
+    # W1.5-7 keys-off honesty: no paid provider no longer 503s by itself — the free
+    # SAM.gov path runs. "Nothing to run" now requires the SAM.gov gate off too.
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_enrich_company_no_provider(self, mock_cred, client, db_session, test_company):
-        resp = client.post(f"/api/enrich/company/{test_company.id}")
+        from app.config import settings
+
+        with patch.object(settings, "sam_gov_enrichment_enabled", False):
+            resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 503
 
     @patch(
@@ -841,7 +846,10 @@ class TestEnrichment:
 
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_enrich_vendor_no_provider(self, mock_cred, client, db_session, test_vendor_card):
-        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
+        from app.config import settings
+
+        with patch.object(settings, "sam_gov_enrichment_enabled", False):
+            resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
         assert resp.status_code == 503
 
     @patch(
@@ -902,7 +910,10 @@ class TestEnrichment:
 
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_suggested_contacts_no_provider(self, mock_cred, client):
-        resp = client.get("/api/suggested-contacts", params={"domain": "acme.com"})
+        from app.config import settings
+
+        with patch.object(settings, "sam_gov_enrichment_enabled", False):
+            resp = client.get("/api/suggested-contacts", params={"domain": "acme.com"})
         assert resp.status_code == 503
 
     @patch(

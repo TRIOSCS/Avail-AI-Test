@@ -13,6 +13,13 @@ from app.models import Company
 from app.models.crm import CustomerSite
 
 
+@pytest.fixture(autouse=True)
+def _ai_key_configured(monkeypatch):
+    """Pretend an AI key is configured so import-parse reaches the parse body (the §7
+    keys-off guard answers 'AI is off' first under TESTING otherwise)."""
+    monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: "TEST_KEY")
+
+
 @pytest.mark.parametrize(
     "endpoint",
     [

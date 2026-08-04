@@ -7,6 +7,42 @@ Calls: app/routers/htmx_views.py → requisition_import_parse
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _ai_key_configured(monkeypatch):
+    """Pretend an AI key is configured so requests reach the parse body.
+
+    The keys-off honesty guard (spec §7) answers "AI is off" before the parser runs when
+    ANTHROPIC_API_KEY is absent — which it always is under TESTING.
+    """
+    monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: "TEST_KEY")
+
+
+def test_import_parse_keys_off_honest_state(client, db_session, monkeypatch):
+    """With no AI key, JSON mode answers the honest 'AI is off' state — no 500."""
+    monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: None)
+    resp = client.post(
+        "/v2/partials/requisitions/import-parse?format=json",
+        data={"raw_text": "LM317T 500", "name": "Test"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["error"] == "AI is off — enter lines or paste when enabled"
+    assert data["requirements"] == []
+
+
+def test_import_parse_keys_off_html_mode(client, db_session, monkeypatch):
+    """With no AI key, the HTML path renders the honest state — no 500."""
+    monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: None)
+    resp = client.post(
+        "/v2/partials/requisitions/import-parse",
+        data={"raw_text": "LM317T 500", "name": "Test"},
+    )
+    assert resp.status_code == 200
+    assert "AI is off — enter lines or paste when enabled" in resp.text
+
 
 def _patch_parse(monkeypatch, result):
     """Patch parse_freeform_rfq to return ``result`` (its async return value)."""

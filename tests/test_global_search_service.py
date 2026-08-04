@@ -341,3 +341,56 @@ def test_restricted_role_does_not_surface_vendor_via_foreign_offer(db_session, t
     # An unrestricted buyer-less call (user=None) DOES surface it (no restriction).
     open_result = fast_search("SECRET99", db_session, user=None)
     assert any(v["display_name"] == "QuietVendor" for v in open_result["groups"]["vendors"])
+
+
+# ── Keys-off honesty (spec §7): AI intent falls back to plain search with a notice ──
+
+
+@pytest.mark.asyncio
+async def test_ai_search_keyless_falls_back_with_ai_off_flag(search_db, test_user, monkeypatch):
+    """With no ANTHROPIC_API_KEY, ai_search returns fast_search results tagged
+    ai_off=True so the dropdown can say 'AI search is off' honestly."""
+    from app.services import global_search_service
+    from app.utils.claude_errors import ClaudeUnavailableError
+
+    async def _raise(*a, **k):
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
+
+    monkeypatch.setattr(global_search_service, "claude_structured", _raise)
+
+    result = await global_search_service.ai_search("Acme Electronics", search_db, user=test_user)
+    assert result["ai_off"] is True
+    # The plain-search results still come back (same structure as fast_search).
+    assert any(c["name"] == "Acme Electronics" for c in result["groups"]["companies"])
+
+
+@pytest.mark.asyncio
+async def test_ai_search_transient_error_fallback_has_no_ai_off_flag(search_db, test_user, monkeypatch):
+    """A transient ClaudeError fallback is NOT the keys-off state — no ai_off flag."""
+    from app.services import global_search_service
+    from app.utils.claude_errors import ClaudeError
+
+    async def _raise(*a, **k):
+        raise ClaudeError("upstream 529")
+
+    monkeypatch.setattr(global_search_service, "claude_structured", _raise)
+
+    result = await global_search_service.ai_search("Acme Electronics", search_db, user=test_user)
+    assert "ai_off" not in result
+
+
+def test_ai_search_endpoint_keyless_shows_notice(client, search_db, monkeypatch):
+    """POST /v2/partials/search/ai with keys off renders the honest notice in the
+    dropdown instead of claiming 'AI-powered results'."""
+    from app.services import global_search_service
+    from app.utils.claude_errors import ClaudeUnavailableError
+
+    async def _raise(*a, **k):
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
+
+    monkeypatch.setattr(global_search_service, "claude_structured", _raise)
+
+    resp = client.post("/v2/partials/search/ai", data={"q": "Acme Electronics"})
+    assert resp.status_code == 200
+    assert "AI search is off — showing standard results" in resp.text
+    assert "AI-powered results" not in resp.text

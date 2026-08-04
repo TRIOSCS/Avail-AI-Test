@@ -53,6 +53,19 @@ def _get_oauth_state(client):
 
 
 @pytest.fixture(autouse=True)
+def _azure_configured(monkeypatch):
+    """Give the OAuth-flow tests a configured Azure client id.
+
+    With AZURE_CLIENT_ID unset the keys-off guard (spec §7 addition) answers the honest
+    redirect-home instead of the Microsoft authorize URL — the keyless behavior itself
+    is covered by TestM365KeysOff below.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+
+
+@pytest.fixture(autouse=True)
 def _legacy_open_provisioning(monkeypatch):
     """Disable the login allowlist for this module's callback tests.
 
@@ -111,6 +124,41 @@ def test_login_url_encodes_scope(auth_client):
     location = resp.headers["location"]
     # Spaces in scope should be encoded as + or %20, not raw spaces
     assert " " not in location.split("?", 1)[1], "Query string contains unencoded spaces"
+
+
+class TestM365KeysOff:
+    """Keys-off honesty (spec §7 addition): AZURE_CLIENT_ID unset must never send the
+    browser to a malformed Microsoft authorize URL."""
+
+    @pytest.fixture(autouse=True)
+    def _azure_unset(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "azure_client_id", "")
+
+    def test_login_keyless_redirects_home_not_microsoft(self, auth_client):
+        """GET /auth/login with no client id lands back home, not on Microsoft."""
+        resp = auth_client.get("/auth/login", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/"
+        assert "microsoftonline" not in resp.headers["location"]
+
+    def test_login_page_shows_m365_off_state(self, auth_client):
+        """The login page renders the honest disabled state instead of the button."""
+        resp = auth_client.get("/v2/requisitions")
+        assert resp.status_code == 200
+        assert "M365 sign-in is off on this instance" in resp.text
+        assert 'href="/auth/login"' not in resp.text
+
+    def test_login_page_shows_button_when_configured(self, auth_client, monkeypatch):
+        """With a client id set, the normal Microsoft button renders."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+        resp = auth_client.get("/v2/requisitions")
+        assert resp.status_code == 200
+        assert "Sign in with Microsoft" in resp.text
+        assert "M365 sign-in is off" not in resp.text
 
 
 @pytest.mark.parametrize(

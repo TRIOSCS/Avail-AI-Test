@@ -90,8 +90,11 @@
     </div>
     {% endif %}
 
-    {# Microsoft sign-in button #}
+    {# Microsoft sign-in button — honest disabled state when Azure creds are unset
+       (keys-off honesty, spec §7): a live link would redirect to a malformed
+       authorize URL and Microsoft's error page. Password form stays primary. #}
     <div class="{% if password_login %}mt-4{% else %}mt-12{% endif %} login-animate login-animate-delay{% if not password_login %}-2{% endif %}">
+      {% if m365_login %}
       <a href="/auth/login"
          class="inline-flex items-center gap-3 px-6 py-3 border border-gray-300 rounded
                 text-sm font-medium text-gray-700 bg-white
@@ -106,6 +109,19 @@
         </svg>
         Sign in with Microsoft
       </a>
+      {% else %}
+      <div aria-disabled="true"
+           class="inline-flex items-center gap-3 px-6 py-3 border border-gray-200 rounded
+                  text-sm font-medium text-gray-400 bg-gray-50 cursor-not-allowed select-none">
+        <svg class="h-[18px] w-[18px] flex-shrink-0 opacity-40" viewBox="0 0 21 21">
+          <path fill="#9ca3af" d="M0 0h10v10H0z"/>
+          <path fill="#9ca3af" d="M0 11h10v10H0z"/>
+          <path fill="#9ca3af" d="M11 0h10v10H11z"/>
+          <path fill="#9ca3af" d="M11 11h10v10H11z"/>
+        </svg>
+        M365 sign-in is off on this instance
+      </div>
+      {% endif %}
     </div>
 
     {# Footer #}

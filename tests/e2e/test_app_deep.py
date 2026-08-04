@@ -63,12 +63,19 @@ NAV_ITEMS = [
 
 class TestPageLoad:
     def test_login_page_shows_for_unauthenticated(self, page, base_url):
-        """Unauthenticated users see the login screen with Microsoft sign-in."""
+        """Unauthenticated users see the login screen with the M365 control.
+
+        With Azure creds configured that is the live "Sign in with Microsoft" link; on a
+        keyless instance it is the honest "M365 sign-in is off" state (keys-off honesty,
+        spec §7) — never a link to a malformed authorize URL.
+        """
         page.goto(base_url, wait_until="networkidle")
-        # Login page has a link to /auth/login with Microsoft sign-in text
         ms_link = page.locator("a[href='/auth/login']")
-        expect(ms_link).to_be_visible()
-        expect(ms_link).to_contain_text("Sign in with Microsoft")
+        if ms_link.count() > 0:
+            expect(ms_link).to_be_visible()
+            expect(ms_link).to_contain_text("Sign in with Microsoft")
+        else:
+            expect(page.get_by_text("M365 sign-in is off on this instance")).to_be_visible()
 
     def test_login_page_has_logo(self, page, base_url):
         """Login page displays the AVAIL logo."""
