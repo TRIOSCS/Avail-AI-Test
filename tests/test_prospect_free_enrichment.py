@@ -19,7 +19,6 @@ from app.services.prospect_free_enrichment import (
     enrich_contacts_for_prospect,
     enrich_from_google_news,
     enrich_from_sam_gov,
-    run_contact_enrichment_batch,
     run_free_enrichment,
     run_free_enrichment_batch,
 )
@@ -648,52 +647,3 @@ class TestEnrichContactsForProspect:
 
         assert result["enriched"] is True
         mock_c.assert_awaited_once()
-
-
-class TestRunContactEnrichmentBatch:
-    """The monthly Job 3 batch entry point (previously dead — imported a nonexistent
-    symbol, C1)."""
-
-    def test_aggregates_and_commits_per_prospect(self):
-        mock_session = _mock_batch_session([(1,), (2,)])
-
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch(
-                "app.services.prospect_free_enrichment.enrich_contacts_for_prospect",
-                new_callable=AsyncMock,
-                return_value={"enriched": True, "verified": 2, "unverified": 1},
-            ) as mock_enrich:
-                result = _run(run_contact_enrichment_batch(min_fit_score=60))
-
-        assert result["prospects_processed"] == 2
-        assert result["total_verified"] == 4
-        assert result["total_contacts"] == 6
-        assert result["errors"] == 0
-        assert mock_enrich.await_count == 2
-        assert mock_session.commit.call_count == 2
-
-    def test_one_failure_does_not_abort_batch(self):
-        mock_session = _mock_batch_session([(1,), (2,)])
-
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch(
-                "app.services.prospect_free_enrichment.enrich_contacts_for_prospect",
-                new_callable=AsyncMock,
-                side_effect=[RuntimeError("provider down"), {"enriched": True, "verified": 1, "unverified": 0}],
-            ):
-                result = _run(run_contact_enrichment_batch(min_fit_score=60))
-
-        assert result["errors"] == 1
-        assert result["prospects_processed"] == 1
-        assert result["total_verified"] == 1
-        assert mock_session.rollback.call_count == 1
-
-    def test_defaults_min_fit_from_settings(self):
-        """min_fit_score=None resolves settings.prospecting_min_fit_for_contacts."""
-        mock_session = _mock_batch_session([])
-
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            result = _run(run_contact_enrichment_batch())
-
-        assert result["prospects_processed"] == 0
-        assert result["errors"] == 0

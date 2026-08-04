@@ -22,60 +22,50 @@ _SESSION_TARGET = "app.database.SessionLocal"
 
 
 class TestAiTaggingMain:
-    def test_returns_early_when_no_untagged_cards(self):
-        """Main() returns before any Claude call when no untagged cards exist."""
+    """The command is a thin wrapper (W1 simplify pass): batching, concurrency, and the
+    Claude-unconfigured early exit live in tagging_ai_batch.run_ai_backfill and are
+    tested in tests/test_tagging_ai.py.
+
+    These tests pin only the wrapper contract.
+    """
+
+    def test_delegates_to_service_with_limit_and_internal_exclusion(self):
         mock_db = MagicMock()
-        # Query chain for untagged cards resolves to an empty list.
-        (mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value) = []
-        mock_classify = AsyncMock()
+        mock_backfill = AsyncMock(return_value={"processed": 3, "matched": 2, "unknown": 1})
 
         with (
             patch(_SESSION_TARGET, return_value=mock_db),
-            patch("app.services.tagging_ai.classify_parts_with_ai", mock_classify),
-        ):
-            from app.management.ai_tagging import main
-
-            asyncio.run(main())
-
-        mock_classify.assert_not_called()
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    def test_classifies_and_applies_results(self):
-        """Main() classifies untagged cards and applies results via
-        _apply_ai_results."""
-        row = MagicMock()
-        row.id = 1
-        row.normalized_mpn = "lm317t"
-
-        mock_db = MagicMock()
-        (mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value) = [
-            row
-        ]
-        classified = [{"mpn": "lm317t", "manufacturer": "TI", "category": "Voltage Regulators"}]
-        mock_classify = AsyncMock(return_value=classified)
-        mock_apply = MagicMock(return_value=(1, 0))
-
-        with (
-            patch(_SESSION_TARGET, return_value=mock_db),
-            patch("app.services.tagging_ai.classify_parts_with_ai", mock_classify),
-            patch("app.services.tagging_ai._apply_ai_results", mock_apply),
+            patch("app.services.tagging_ai_batch.run_ai_backfill", mock_backfill),
         ):
             from app.management.ai_tagging import main
 
             asyncio.run(main(limit=10))
 
-        mock_classify.assert_called_once_with(["lm317t"])
-        mock_apply.assert_called_once_with(classified, [(1, "lm317t")], mock_db)
-        mock_db.commit.assert_called_once()
+        mock_backfill.assert_awaited_once_with(mock_db, limit=10, exclude_internal=True)
         mock_db.close.assert_called_once()
 
-    def test_db_error_rolls_back_and_reraises(self):
-        """A DB failure rolls back, re-raises, and still closes the session."""
+    def test_default_limit_is_500(self):
         mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("DB crashed")
+        mock_backfill = AsyncMock(return_value={})
 
-        with patch(_SESSION_TARGET, return_value=mock_db):
+        with (
+            patch(_SESSION_TARGET, return_value=mock_db),
+            patch("app.services.tagging_ai_batch.run_ai_backfill", mock_backfill),
+        ):
+            from app.management.ai_tagging import main
+
+            asyncio.run(main())
+
+        mock_backfill.assert_awaited_once_with(mock_db, limit=500, exclude_internal=True)
+
+    def test_service_error_rolls_back_and_reraises(self):
+        mock_db = MagicMock()
+        mock_backfill = AsyncMock(side_effect=Exception("DB crashed"))
+
+        with (
+            patch(_SESSION_TARGET, return_value=mock_db),
+            patch("app.services.tagging_ai_batch.run_ai_backfill", mock_backfill),
+        ):
             from app.management.ai_tagging import main
 
             with pytest.raises(Exception, match="DB crashed"):

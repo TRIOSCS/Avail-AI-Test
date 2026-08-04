@@ -15,16 +15,11 @@ def register_all_jobs(scheduler, settings):
     from .core_jobs import register_core_jobs
     from .eight_by_eight_jobs import register_eight_by_eight_jobs
     from .email_jobs import register_email_jobs
-    from .health_jobs import register_health_jobs
     from .inventory_jobs import register_inventory_jobs
-    from .knowledge_jobs import register_knowledge_jobs
-    from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
-    from .prospecting_jobs import register_prospecting_jobs, register_sweep_jobs
+    from .prospecting_jobs import register_sweep_jobs
     from .quality_jobs import register_quality_jobs
     from .resell_jobs import register_resell_jobs
-    from .tagging_jobs import register_tagging_jobs
-    from .task_jobs import register_task_jobs
     from .worker_liveness_jobs import register_worker_liveness_jobs
 
     # Short-lived session so flag-reading registrars resolve the DB-authoritative
@@ -37,15 +32,9 @@ def register_all_jobs(scheduler, settings):
         register_email_jobs(scheduler, settings, db)
         register_inventory_jobs(scheduler, settings)
         register_offers_jobs(scheduler, settings, db)
-        register_prospecting_jobs(scheduler, settings)
         register_sweep_jobs(scheduler, settings)
         register_resell_jobs(scheduler, settings)
-        register_tagging_jobs(scheduler, settings)
-        register_maintenance_jobs(scheduler, settings)
-        register_health_jobs(scheduler, settings)
-        register_knowledge_jobs(scheduler, settings)
         register_eight_by_eight_jobs(scheduler, settings)
-        register_task_jobs(scheduler, settings)
         register_quality_jobs(scheduler, settings)
         register_worker_liveness_jobs(scheduler, settings)
         register_approval_outbox_job(scheduler)

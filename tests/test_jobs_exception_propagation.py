@@ -8,7 +8,7 @@ These tests verify that each top-level job function properly re-raises after
 performing cleanup (logging + db.rollback).
 
 Called by: pytest
-Depends on: app.jobs.core_jobs, app.jobs.email_jobs, app.jobs.knowledge_jobs
+Depends on: app.jobs.core_jobs, app.jobs.email_jobs
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,25 +18,6 @@ import pytest
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _azure_configured_for_token_jobs():
-    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
-    tests exercise a CONFIGURED deployment.
-
-    The guard's own test lives in
-    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
-    """
-    from unittest.mock import patch as _patch
-
-    from app.config import settings as _settings
-
-    with (
-        _patch.object(_settings, "azure_client_id", "test-client"),
-        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
-    ):
-        yield
 
 
 def _make_fake_db(fail_on_query=True):

@@ -40,15 +40,10 @@ def _mock_settings(**overrides):
     """Build a mock settings object with defaults for scheduler tests."""
     defaults = dict(
         inbox_scan_interval_min=30,
-        contacts_sync_enabled=False,
         activity_tracking_enabled=False,
         ownership_sweep_enabled=False,
         proactive_matching_enabled=False,
         proactive_scan_interval_hours=4,
-        po_verify_interval_min=30,
-        buyplan_auto_complete_hour=18,
-        buyplan_auto_complete_tz="America/New_York",
-        contact_scoring_enabled=False,
         eight_by_eight_enabled=False,
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
@@ -125,7 +120,6 @@ def test_configure_scheduler_conditional_flags_on():
     with patch(
         "app.config.settings",
         _mock_settings(
-            contacts_sync_enabled=True,
             activity_tracking_enabled=True,
             proactive_matching_enabled=True,
         ),
@@ -133,8 +127,8 @@ def test_configure_scheduler_conditional_flags_on():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    # contacts_sync is deleted (W1, docs/W1_JOB_DISPOSITION.md): absent even
-    # with contacts_sync_enabled=True.
+    # contacts_sync is deleted (W1, docs/W1_JOB_DISPOSITION.md — its
+    # contacts_sync_enabled flag went with it): always absent.
     assert "contacts_sync" not in job_ids
     # calendar_scan is parked (W1): registration removed because
     # activity_tracking_enabled defaults ON, so it stays absent with the flag set.

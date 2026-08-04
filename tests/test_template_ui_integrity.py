@@ -168,6 +168,12 @@ class TestHxTriggerEventFilterPlacement:
                     before_bracket = spec[: spec.index("[")]
                     # Valid: the bracket directly follows the event token, so nothing
                     # but the event name precedes it (no spaces / modifiers).
+                    # EXCEPTION — conditional polling: `every <interval> [cond]` is the
+                    # documented htmx form; the 2.0.10 parser consumes the interval,
+                    # skips whitespace, then reads the filter (htmx.js ~2243-2252,
+                    # `maybeGenerateConditional` after `pollInterval`).
+                    if re.match(r"^every\s+\S+\s*$", before_bracket):
+                        continue
                     if " " in before_bracket:
                         rel = os.path.relpath(path, _REPO_ROOT)
                         offenders.append(f"{rel}: {spec}")

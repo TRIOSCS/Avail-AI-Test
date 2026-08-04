@@ -27,25 +27,6 @@ from sqlalchemy.orm import Session
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _azure_configured_for_token_jobs():
-    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
-    tests exercise a CONFIGURED deployment.
-
-    The guard's own test lives in
-    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
-    """
-    from unittest.mock import patch as _patch
-
-    from app.config import settings as _settings
-
-    with (
-        _patch.object(_settings, "azure_client_id", "test-client"),
-        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
-    ):
-        yield
-
-
 def _run(coro):
     """Run an async coroutine synchronously."""
     loop = asyncio.new_event_loop()
@@ -295,21 +276,6 @@ class TestJobPerformanceTracking:
 # ===========================================================================
 
 
-class TestRegisterInventoryJobs:
-    def test_registers_no_jobs(self):
-        """register_inventory_jobs registers NOTHING (W1 simplification, 2026-08-04).
-
-        po_verification + stock_autocomplete deleted, buyplan_nudge parked
-        (implementation kept, registration removed) per docs/W1_JOB_DISPOSITION.md.
-        """
-        from app.jobs.inventory_jobs import register_inventory_jobs
-
-        scheduler = MagicMock()
-        register_inventory_jobs(scheduler, MagicMock())
-
-        scheduler.add_job.assert_not_called()
-
-
 class TestParseStockFile:
     """Tests for _parse_stock_file()."""
 
@@ -354,14 +320,24 @@ class TestParseStockFile:
 
 class TestRegisterCoreJobs:
     def test_registers(self):
-        """Exactly the 3 kernel core jobs (token refresh, inbox scan, batch results)."""
+        """Exactly the 3 kernel core jobs (token refresh, inbox scan, batch results).
+
+        M365-configured is the kernel assumption — token_refresh registration is gated
+        on m365_configured() (keys-off gate covered in tests/test_core_jobs.py).
+        """
+        from app.config import settings as app_settings
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 5
 
-        register_core_jobs(scheduler, settings)
+        with (
+            patch.object(app_settings, "azure_client_id", "test-client"),
+            patch.object(app_settings, "azure_client_secret", "test-secret"),
+            patch.object(app_settings, "azure_tenant_id", "test-tenant"),
+        ):
+            register_core_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == 3
 
 

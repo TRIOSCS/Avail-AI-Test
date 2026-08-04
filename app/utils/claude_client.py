@@ -47,6 +47,15 @@ MODELS = {
 }
 
 
+def claude_configured() -> bool:
+    """True when an Anthropic API key is configured (DB credential or env).
+
+    The single AI-on/off predicate: every claude_* entrypoint checks this before calling
+    the API, and routers use it to render honest keys-off states.
+    """
+    return bool(get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"))
+
+
 def _headers(*, cache: bool = False) -> dict:
     """Build API headers.
 
@@ -233,7 +242,7 @@ async def claude_structured_with_usage(
     ``max_attempts`` defaults to 3 (unchanged behavior). See
     :func:`claude_structured`'s docstring for the interactive-caller use case.
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+    if not claude_configured():
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
 
     # Extended thinking requires Sonnet
@@ -360,7 +369,7 @@ async def claude_text(
         ClaudeServerError: API returned 5xx
         ClaudeError: Network/timeout or all retries exhausted
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+    if not claude_configured():
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
 
     model = MODELS.get(model_tier, MODELS["fast"])
@@ -550,7 +559,7 @@ async def claude_batch_submit(
         Batch ID string for polling, or None on failure.
         50% cost reduction vs individual calls; up to 24h processing.
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+    if not claude_configured():
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
     if not requests:
         return None
@@ -616,7 +625,7 @@ async def claude_batch_results(
         Dict of {custom_id: parsed_dict} when batch is complete.
         Entries with errors will have value None.
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+    if not claude_configured():
         raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
     if not batch_id:
         return None

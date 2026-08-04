@@ -2,13 +2,12 @@
 # What it does: imports each module touched by the comment/docstring truth-fix and
 #   asserts observable behavior is unchanged (no behavior edits were made).
 # Called by: pytest.
-# Depends on: app.main, app.routers.htmx_views, app.jobs.knowledge_jobs,
-#   app.utils.file_validation, app.services.vendor_unavailability.
+# Depends on: app.main, app.routers.htmx_views, app.utils.file_validation,
+#   app.services.vendor_unavailability.
 import inspect
 
 
 def test_modules_import():
-    import app.jobs.knowledge_jobs
     import app.main
     import app.routers.htmx_views
     import app.services.vendor_unavailability

@@ -155,7 +155,6 @@ def test_sp4_config_defaults(monkeypatch):
         "ACCOUNT_SWEEP_ENABLED",
         "ACCOUNT_SWEEP_INACTIVITY_DAYS",
         "ACCOUNT_SWEEP_MANAGER_EMAIL",
-        "ACCOUNT_REACTIVATION_SWEEP_ENABLED",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -164,7 +163,6 @@ def test_sp4_config_defaults(monkeypatch):
     assert s.account_sweep_inactivity_days == 45
     assert s.account_sweep_reclaim_cooldown_days == 30
     assert s.account_sweep_manager_email == ""
-    assert s.account_reactivation_sweep_enabled is True
 
 
 # ── Task 3: get_last_activity_at ─────────────────────────────────────────────

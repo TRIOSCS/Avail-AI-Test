@@ -1,0 +1,12 @@
+{#
+  _ai_off_banner.html — shared amber "AI is off" banner (keys-off honesty, spec §7).
+  Rendered wherever an AI-backed action is requested while no Anthropic key is
+  configured. Amber styling matches the AI-off note in search_results.html.
+  Called by: routers/error_reports.py (_ai_off_response), routers/htmx/requisitions.py
+    (import-parse), htmx/partials/tickets/list.html (ai_off flag)
+  Context vars:
+    - message: str (optional) — call-site-specific text; generic default below.
+#}
+<div class="p-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
+  {{ message|default("AI is off — no Anthropic key configured.") }}
+</div>

@@ -766,8 +766,9 @@ class TestCompaniesAdditional:
 class TestEnrichment:
     # W1.5-7 keys-off honesty: no paid provider no longer 503s by itself — the free
     # SAM.gov path runs. "Nothing to run" now requires the SAM.gov gate off too.
+    @patch("app.routers.crm.enrichment.claude_configured", return_value=False)
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
-    def test_enrich_company_no_provider(self, mock_cred, client, db_session, test_company):
+    def test_enrich_company_no_provider(self, mock_cred, mock_claude, client, db_session, test_company):
         from app.config import settings
 
         with patch.object(settings, "sam_gov_enrichment_enabled", False):
@@ -776,7 +777,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
@@ -798,7 +799,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     def test_enrich_company_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/company/99999")
@@ -806,7 +807,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
@@ -824,7 +825,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
@@ -844,8 +845,9 @@ class TestEnrichment:
         assert resp.status_code == 200
         mock_enrich.assert_called_once_with("override-domain.com", test_company.name)
 
+    @patch("app.routers.crm.enrichment.claude_configured", return_value=False)
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
-    def test_enrich_vendor_no_provider(self, mock_cred, client, db_session, test_vendor_card):
+    def test_enrich_vendor_no_provider(self, mock_cred, mock_claude, client, db_session, test_vendor_card):
         from app.config import settings
 
         with patch.object(settings, "sam_gov_enrichment_enabled", False):
@@ -854,7 +856,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
@@ -870,7 +872,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     def test_enrich_vendor_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/vendor/99999")
@@ -878,7 +880,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
@@ -892,7 +894,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
@@ -908,8 +910,9 @@ class TestEnrichment:
         )
         assert resp.status_code == 200
 
+    @patch("app.routers.crm.enrichment.claude_configured", return_value=False)
     @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
-    def test_suggested_contacts_no_provider(self, mock_cred, client):
+    def test_suggested_contacts_no_provider(self, mock_cred, mock_claude, client):
         from app.config import settings
 
         with patch.object(settings, "sam_gov_enrichment_enabled", False):
@@ -918,7 +921,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     def test_suggested_contacts_no_domain(self, mock_cred, client):
         resp = client.get("/api/suggested-contacts")
@@ -926,7 +929,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.find_suggested_contacts", new_callable=AsyncMock)
     def test_suggested_contacts_success(self, mock_contacts, mock_cred, client):
@@ -1117,7 +1120,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.routers.crm.enrichment._run_company_enrichment", new_callable=AsyncMock)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
@@ -1146,7 +1149,7 @@ class TestEnrichment:
 
     @patch(
         "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
@@ -2308,7 +2311,7 @@ class TestReqStatusTransitions:
 
     @patch(
         "app.routers.crm.offers.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
     )
     def test_create_offer_triggers_vendor_enrichment(
         self, mock_cred, client, db_session, test_requisition, monkeypatch

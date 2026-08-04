@@ -36,6 +36,7 @@ from ..dependencies import get_user
 from ..http_client import http
 from ..models import User
 from ..rate_limit import limiter
+from ..utils.token_manager import m365_configured
 
 router = APIRouter()
 
@@ -50,14 +51,15 @@ async def index(request: Request):
 
 
 def m365_login_enabled() -> bool:
-    """True when Azure OAuth is configured (AZURE_CLIENT_ID set) on this instance.
+    """True when Azure OAuth is fully configured on this instance.
 
-    Keys-off honesty (spec §7 addition): with no client id the authorize URL is
-    malformed — Microsoft answers with an error document instead of a login. The login
-    page uses this to render the M365 button as an honest disabled state, and
-    /auth/login refuses to redirect into the broken flow.
+    Keys-off honesty (spec §7 addition): with the Azure app credentials incomplete the
+    OAuth flow cannot finish — Microsoft answers with an error document instead of a
+    login. The login page uses this to render the M365 button as an honest disabled
+    state, and /auth/login refuses to redirect into the broken flow. Delegates to the
+    single M365 predicate (utils.token_manager.m365_configured).
     """
-    return bool(settings.azure_client_id)
+    return m365_configured()
 
 
 @router.get("/auth/login")

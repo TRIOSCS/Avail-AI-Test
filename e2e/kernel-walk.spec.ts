@@ -86,6 +86,21 @@ async function openModal(button: ReturnType<Page['locator']>, readySelector: str
   }
 }
 
+/**
+ * Open an Approvals-workspace tab, filter the list by the run's SO number
+ * (keyup-triggered search — type key-by-key, then wait out the debounce), and
+ * return the first row matching `rowSelector` inside #aw-list. The caller
+ * asserts/clicks — some rows are legitimately absent for this viewer.
+ */
+async function openApprovalRow(tab: string, rowSelector: string) {
+  await page.goto(`/v2/approvals?tab=${tab}`);
+  const search = page.locator("#aw-filters input[name='q']");
+  await expect(search).toBeVisible({ timeout: 20_000 });
+  await search.pressSequentially(SO_NUMBER, { delay: 20 });
+  await settle(900);
+  return page.locator(`#aw-list ${rowSelector}`).first();
+}
+
 test.beforeAll(async ({ browser, baseURL }) => {
   context = await browser.newContext({ baseURL });
   const res = await context.request.post('/auth/login', {
@@ -334,13 +349,7 @@ test('submit the plan for approval with the SO number', async () => {
 
 test('QP sales section is editable in the workspace pane (pending plan)', async () => {
   // QP-sales locks once the plan is ACTIVE (spec §7 matrix) — edit while PENDING.
-  await page.goto('/v2/approvals?tab=sales-orders');
-  const search = page.locator("#aw-filters input[name='q']");
-  await expect(search).toBeVisible({ timeout: 20_000 });
-  // The list search triggers on keyup — type key-by-key, then wait out the debounce.
-  await search.pressSequentially(SO_NUMBER, { delay: 20 });
-  await settle(900);
-  const row = page.locator(`#aw-list [data-row-key="plan-${planId}"]`);
+  const row = await openApprovalRow('sales-orders', `[data-row-key="plan-${planId}"]`);
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.click();
 
@@ -390,10 +399,11 @@ test('buy instruction → enter PO number (+ QP purchasing) → per-line verify'
   const approve = pane.locator("form[hx-post*='verify-po']").getByRole('button', { name: 'Approve' });
   if ((await approve.count()) === 0) {
     test.skip(
-      !poVerifyRightOn,
-      'seeded admin has can_approve_purchase_orders OFF (checked read-only in Settings → Users) — buy instruction + PO number exercised; per-line verify needs the toggle granted',
+      true,
+      poVerifyRightOn
+        ? 'seeded admin cannot verify this PO line (dollar limit) — confirm path exercised'
+        : 'seeded admin has can_approve_purchase_orders OFF (checked read-only in Settings → Users) — buy instruction + PO number exercised; per-line verify needs the toggle granted',
     );
-    test.skip(true, 'seeded admin cannot verify this PO line (dollar limit) — confirm path exercised');
   }
   await approve.first().click();
   await expect(page.locator('#aw-pane')).toContainText(/Approved|Verified/i, { timeout: 20_000 });
@@ -416,12 +426,7 @@ test('prepayment request + OK-to-pay (pay-link confirm stays keys-off)', async (
   await settle(800);
 
   // Decide it in the Prepayments tab.
-  await page.goto('/v2/approvals?tab=prepayments');
-  const search = page.locator("#aw-filters input[name='q']");
-  await expect(search).toBeVisible({ timeout: 20_000 });
-  await search.pressSequentially(SO_NUMBER, { delay: 20 });
-  await settle(900);
-  const row = page.locator('#aw-list [data-row-key^="prepay-"]').first();
+  const row = await openApprovalRow('prepayments', '[data-row-key^="prepay-"]');
   if ((await row.count()) === 0) {
     test.skip(true, 'prepayment row not surfaced for this viewer — request path exercised');
   }

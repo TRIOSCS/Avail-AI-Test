@@ -1174,7 +1174,7 @@ class TestRequisitionImport:
     def _ai_key_configured(self, monkeypatch):
         """Pretend an AI key is configured so import-parse reaches the parse body (the
         §7 keys-off guard answers 'AI is off' first under TESTING otherwise)."""
-        monkeypatch.setattr("app.routers.htmx.requisitions.get_credential_cached", lambda *a, **k: "TEST_KEY")
+        monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
 
     def test_import_parse_no_data(self, client: TestClient):
         resp = client.post(

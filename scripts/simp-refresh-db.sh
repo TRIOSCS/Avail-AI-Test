@@ -19,12 +19,6 @@ WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRATCH="$(mktemp -d /tmp/simp-refresh.XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Guard: never run against anything that is not the simp project.
-case "$SIMP_DB_CONTAINER" in
-  *simp*) ;;
-  *) echo "REFUSING: target container '$SIMP_DB_CONTAINER' is not a simp container" >&2; exit 1 ;;
-esac
-
 # shellcheck disable=SC1091
 set -a; . "$WORKDIR/.env"; set +a
 

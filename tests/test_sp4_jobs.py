@@ -65,17 +65,16 @@ def test_sweep_job_not_registered_when_disabled(scheduler_db):
     assert "account_sweep" not in ids
 
 
-@pytest.mark.parametrize("flag", [True, False], ids=["flag_on", "flag_off"])
-def test_reactivation_job_never_registered(scheduler_db, flag):
-    """auto_surface_reactivation is parked (W1): never registered, even when
-    account_reactivation_sweep_enabled=True.
+def test_reactivation_job_never_registered(scheduler_db):
+    """auto_surface_reactivation is parked (W1): never registered.
 
-    Comeback: team exists (spec §5.4).
+    Comeback: team exists (spec §5.4). Its old gate flag
+    (account_reactivation_sweep_enabled) was removed with the registration.
     """
     from app.config import Settings
     from app.jobs.prospecting_jobs import register_sweep_jobs
 
-    s = Settings(account_reactivation_sweep_enabled=flag)
+    s = Settings()
     register_sweep_jobs(scheduler, s)
     ids = [j.id for j in scheduler.get_jobs()]
     assert "auto_surface_reactivation" not in ids
@@ -111,7 +110,7 @@ def test_no_sweep_jobs_when_prospecting_disabled(scheduler_db):
     from app.config import Settings
     from app.jobs.prospecting_jobs import register_sweep_jobs
 
-    s = Settings(prospecting_enabled=False, account_sweep_enabled=True, account_reactivation_sweep_enabled=True)
+    s = Settings(prospecting_enabled=False, account_sweep_enabled=True)
     register_sweep_jobs(scheduler, s)
     ids = [j.id for j in scheduler.get_jobs()]
     assert "account_sweep" not in ids
@@ -119,12 +118,12 @@ def test_no_sweep_jobs_when_prospecting_disabled(scheduler_db):
 
 
 def test_only_account_sweep_registers_when_both_flags_true(scheduler_db):
-    """Only account_sweep registers when prospecting_enabled=True and both per-feature
-    flags are True — the reactivation registration was parked in W1."""
+    """Only account_sweep registers when prospecting_enabled=True and
+    account_sweep_enabled=True — the reactivation registration was parked in W1."""
     from app.config import Settings
     from app.jobs.prospecting_jobs import register_sweep_jobs
 
-    s = Settings(prospecting_enabled=True, account_sweep_enabled=True, account_reactivation_sweep_enabled=True)
+    s = Settings(prospecting_enabled=True, account_sweep_enabled=True)
     register_sweep_jobs(scheduler, s)
     ids = [j.id for j in scheduler.get_jobs()]
     assert "account_sweep" in ids

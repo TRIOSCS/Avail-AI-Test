@@ -227,7 +227,6 @@ class Settings(BaseSettings):
     inbox_scan_interval_min: int = 30
     digest_cooldown_seconds: int = 120  # min seconds between AI digest regenerations per entity
     inbox_backfill_days: int = 180
-    contacts_sync_enabled: bool = True
 
     # --- Admin (CSV env var, parsed to list[str] by model_validator) ---
     admin_emails: str | list[str] = ""
@@ -281,9 +280,6 @@ class Settings(BaseSettings):
     # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---
     stock_sale_vendor_names: str | list[str] = "trio,trio supply chain,stock,internal"
     stock_sale_notify_emails: str | list[str] = "logistics@trioscs.com,accounting@trioscs.com"
-    buyplan_auto_complete_hour: int = 18
-    buyplan_auto_complete_tz: str = "America/New_York"
-    po_verify_interval_min: int = 30
 
     # --- Buy Plan V3 ---
     buyplan_stale_offer_days: int = 5
@@ -323,7 +319,6 @@ class Settings(BaseSettings):
     ai_search_timeout_s: float = 20.0
 
     # --- Contact intelligence ---
-    contact_scoring_enabled: bool = True
     contact_nudge_dormant_days: int = 30
     contact_nudge_cooling_days: int = 14
 
@@ -417,9 +412,6 @@ class Settings(BaseSettings):
     account_sweep_reclaim_cooldown_days: int = 30
     # Manager email that receives the nightly sweep digest (blank = no digest sent).
     account_sweep_manager_email: str = ""
-    # Auto-surface previously swept accounts that have become active again (new RFQ,
-    # inbound email, etc.) — re-adds them to the prospect pool as suggested.
-    account_reactivation_sweep_enabled: bool = True
 
     # --- SP3: AI Account Screening ---
     # Feature gate — default off; flip on when ready to spend Claude credits on screening.

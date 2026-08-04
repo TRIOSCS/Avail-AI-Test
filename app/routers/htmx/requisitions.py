@@ -48,10 +48,10 @@ from ...models import (
     RequisitionTask,
     User,
 )
-from ...services.credential_service import get_credential_cached
 from ...services.freeform_parser_service import parse_freeform_rfq
 from ...services.task_service import create_requisition_task, delete_task, is_task_mutation_authorized, update_task
 from ...template_env import template_response
+from ...utils.claude_client import claude_configured
 from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
@@ -583,16 +583,15 @@ async def requisition_import_parse(
     # Keys-off honesty (spec §7): with no AI key the parse cannot run — say so
     # instead of 500ing inside claude_client (ClaudeUnavailableError). Manual row
     # entry in the modal keeps working; only the bulk AI fill is off.
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+    if not claude_configured():
         message = "AI is off — enter lines or paste when enabled"
         if json_mode:
             from fastapi.responses import JSONResponse
 
             return JSONResponse({"error": message, "requirements": []})
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-amber-800 bg-amber-50 rounded-lg border border-amber-200">'
-            f"{message}"
-            "</div>"
+        return template_response(
+            "htmx/partials/shared/_ai_off_banner.html",
+            {"request": request, "message": message},
         )
 
     # Extract text from file if uploaded

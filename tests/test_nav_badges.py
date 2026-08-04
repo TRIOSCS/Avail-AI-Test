@@ -3,8 +3,9 @@
 GET /v2/partials/nav/badges replaces the six per-badge pollers: it returns every
 {key}-nav-badge pill as an hx-swap-oob="innerHTML" span in ONE response. Covers:
 all six spans always present (empty at 0 so stale pills clear), per-source counts
-landing in the right span, the proactive flag/access gate, the amber follow-ups
-pill, fail-quiet behavior, and the mobile_nav template's single poller.
+landing in the right span, the proactive flag gate, the module_access_map gate
+(hidden modules skip their count queries), the amber follow-ups pill, fail-quiet
+behavior, and the mobile_nav template's single visibility-filtered poller.
 
 Called by: pytest
 Depends on: tests/conftest.py (client, db_session, test_user, test_requisition,
@@ -130,6 +131,44 @@ def test_collect_badge_counts_fail_quiet_per_source(db_session, test_user):
     assert set(counts) == set(NAV_BADGE_KEYS)
 
 
+def test_badge_key_registry_colors():
+    """One registry drives both span order and pill color: amber follow-ups only."""
+    assert NAV_BADGE_KEYS["follow-ups"] == "amber"
+    assert all(color == "emerald" for key, color in NAV_BADGE_KEYS.items() if key != "follow-ups")
+
+
+def test_hidden_module_contributes_zero_without_queries(db_session, test_user):
+    """A module the nav gate hides never pays its count queries (buy-plans is the
+    expensive one) — but its key still resolves to 0 so the span clears."""
+    seen_tabs: list[str] = []
+
+    def spy(db, user, tab):
+        seen_tabs.append(tab)
+        return 5
+
+    with (
+        patch("app.services.nav_badges.count_for_tab", side_effect=spy),
+        patch("app.routers.admin.users.module_access_map", return_value={"buy-plans": False}),
+    ):
+        counts = collect_badge_counts(db_session, test_user)
+    assert counts["buy-plans"] == 0
+    assert "buy-plans" not in seen_tabs
+    assert "requisitions" in seen_tabs  # unhidden tabs still counted
+    assert set(counts) == set(NAV_BADGE_KEYS)
+
+
+def test_follow_ups_gated_by_requisitions_access(db_session, test_user):
+    """The amber pill hangs on the Sales Hub item, so requisitions access gates it."""
+    with (
+        patch("app.routers.admin.users.module_access_map", return_value={"requisitions": False}),
+        patch("app.services.nav_badges._follow_up_count") as follow_up,
+    ):
+        counts = collect_badge_counts(db_session, test_user)
+    assert counts["follow-ups"] == 0
+    assert counts["requisitions"] == 0
+    assert not follow_up.called
+
+
 # ── nav template: ONE poller, no per-badge pollers ─────────────────────────
 
 
@@ -141,7 +180,9 @@ class TestMobileNavSinglePoller:
         nav = self._nav()
         assert nav.count('hx-get="/v2/partials/nav/badges"') == 1
         poller = nav[nav.index('id="nav-badge-poller"') :]
-        assert 'hx-trigger="load, every 60s"' in poller
+        # The visibility filter skips the 60s poll in hidden tabs. It must never
+        # grow nested [..] — nested brackets kill the htmx trigger parse.
+        assert "hx-trigger=\"load, every 60s [document.visibilityState==='visible']\"" in poller
         assert 'hx-swap="none"' in poller
         assert 'hx-push-url="false"' in poller
 

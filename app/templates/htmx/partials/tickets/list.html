@@ -4,6 +4,11 @@
    without any client-side state (mirrors sightings/table.html). #}
 {% from "htmx/partials/tickets/_icons.html" import chevron_icon -%}
 
+{# ── Keys-off honesty banner (analyze with no Anthropic key) ──────── #}
+{% if ai_off %}
+{% with message = ai_off_message %}{% include "htmx/partials/shared/_ai_off_banner.html" %}{% endwith %}
+{% endif %}
+
 {# ── Filter bar: status (left) + kind (right) ─────────────────────── #}
 <div class="flex items-center gap-2 flex-wrap mb-4">
   {% set status_pills = [('', 'All'), ('open', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}

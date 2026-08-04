@@ -1,11 +1,11 @@
 """test_tickets_ai_gating.py — Wave-1 keys-off gating for the trouble-ticket AI calls.
 
 Spec §5.5/§7: the ticket flow's hidden Anthropic calls (submit-time summary, admin
-diagnose single/bulk, analyze grouping, create-prompt) all gate on the same
-``get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")`` check the rest of the
-app uses. Keys absent → the call is skipped, the ticket is still created/updated
-un-enriched, and the admin surfaces show an honest "AI is off" state. Keys present →
-the calls still go through.
+diagnose single/bulk, analyze grouping, create-prompt) all gate on the same AI
+predicate the rest of the app uses (``claude_configured`` via ``_ai_keys_present``).
+Keys absent → the call is skipped, the ticket is still created/updated un-enriched,
+and the admin surfaces show an honest "AI is off" state. Keys present → the calls
+still go through.
 
 Called by: pytest
 Depends on: conftest.py fixtures (db_session), app/routers/error_reports.py
@@ -25,7 +25,7 @@ from app.main import app
 from app.models import User
 from app.models.trouble_ticket import TroubleTicket
 
-_KEYS = "app.routers.error_reports.get_credential_cached"
+_KEYS = "app.routers.error_reports._ai_keys_present"
 _DIAG = "app.services.ticket_diagnosis_service.claude_structured_with_usage"
 _PROMPT = "app.services.ticket_prompt_service.claude_text"
 _SUMMARY = "app.utils.claude_client.claude_text"
@@ -75,7 +75,7 @@ def _make_ticket(db: Session, *, num: str = "TT-0101", **kw) -> TroubleTicket:
 
 def test_submit_keys_off_creates_unenriched_ticket(db_session, test_user):
     client = _admin_client(db_session, test_user)
-    with patch(_KEYS, return_value=None), patch(_SUMMARY, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_SUMMARY, new_callable=AsyncMock) as claude:
         resp = client.post(
             "/api/trouble-tickets/submit",
             json={"description": "Broken with keys off", "page_url": "/v2/sightings"},
@@ -91,7 +91,7 @@ def test_submit_keys_off_creates_unenriched_ticket(db_session, test_user):
 def test_generate_ai_summary_keys_off_skips_call():
     from app.routers.error_reports import _generate_ai_summary
 
-    with patch(_KEYS, return_value=None), patch(_SUMMARY, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_SUMMARY, new_callable=AsyncMock) as claude:
         asyncio.run(_generate_ai_summary(999999))
     claude.assert_not_awaited()
 
@@ -102,7 +102,7 @@ def test_generate_ai_summary_keys_off_skips_call():
 def test_diagnose_keys_off_shows_ai_off(db_session, test_user):
     client = _admin_client(db_session, test_user)
     ticket = _make_ticket(db_session)
-    with patch(_KEYS, return_value=None), patch(_DIAG, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_DIAG, new_callable=AsyncMock) as claude:
         resp = client.post(f"/api/trouble-tickets/{ticket.id}/diagnose")
     assert resp.status_code == 200
     assert "AI is off" in resp.text
@@ -113,7 +113,7 @@ def test_diagnose_keys_on_still_calls_claude(db_session, test_user):
     client = _admin_client(db_session, test_user)
     ticket = _make_ticket(db_session, num="TT-0102")
     with (
-        patch(_KEYS, return_value="sk-test"),
+        patch(_KEYS, return_value=True),
         patch(_DIAG, new_callable=AsyncMock, return_value=(_FAKE_DIAGNOSIS, _FAKE_USAGE)) as claude,
     ):
         resp = client.post(f"/api/trouble-tickets/{ticket.id}/diagnose")
@@ -124,7 +124,7 @@ def test_diagnose_keys_on_still_calls_claude(db_session, test_user):
 def test_diagnose_bulk_keys_off_returns_503(db_session, test_user):
     client = _admin_client(db_session, test_user)
     ticket = _make_ticket(db_session, num="TT-0103")
-    with patch(_KEYS, return_value=None), patch(_DIAG, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_DIAG, new_callable=AsyncMock) as claude:
         resp = client.post("/api/trouble-tickets/diagnose-bulk", json={"ticket_ids": [ticket.id]})
     assert resp.status_code == 503
     assert "AI is off" in resp.text
@@ -137,7 +137,7 @@ def test_diagnose_bulk_keys_off_returns_503(db_session, test_user):
 def test_generate_prompt_keys_off_persists_notes_without_ai(db_session, test_user):
     client = _admin_client(db_session, test_user)
     ticket = _make_ticket(db_session, num="TT-0104")
-    with patch(_KEYS, return_value=None), patch(_PROMPT, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_PROMPT, new_callable=AsyncMock) as claude:
         resp = client.post(
             f"/api/trouble-tickets/{ticket.id}/generate-prompt",
             data={"admin_notes": "Fix the thing"},
@@ -156,7 +156,7 @@ def test_generate_prompt_keys_off_persists_notes_without_ai(db_session, test_use
 def test_analyze_keys_off_shows_state_and_keeps_list(db_session, test_user):
     client = _admin_client(db_session, test_user)
     _make_ticket(db_session, num="TT-0105")
-    with patch(_KEYS, return_value=None), patch(_ANALYZE, new_callable=AsyncMock) as claude:
+    with patch(_KEYS, return_value=False), patch(_ANALYZE, new_callable=AsyncMock) as claude:
         resp = client.post("/api/trouble-tickets/analyze")
     assert resp.status_code == 200
     assert "AI is off" in resp.text

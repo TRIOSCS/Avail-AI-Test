@@ -3,7 +3,7 @@
 Handles large-scale MPN classification via the Batch API (50% cheaper, no rate limits)
 and concurrent real-time backfill as fallback.
 
-Called by: app.routers.tagging_admin
+Called by: app.routers.tagging_admin, app.management.ai_tagging (run_ai_backfill)
 Depends on: tagging_ai_classify, app.utils.claude_client, app.http_client
 """
 
@@ -80,8 +80,13 @@ def _read_batch_meta(meta_path: str) -> dict:
         return cast(dict, json.load(f))
 
 
-def _untagged_by_brand(db: Session) -> list:
-    """Cards with NO brand tag — (id, normalized_mpn) rows, ordered by id."""
+def _untagged_by_brand(db: Session, *, limit: int | None = None, exclude_internal: bool = False) -> list:
+    """Cards with NO brand tag — (id, normalized_mpn) rows, ordered by id.
+
+    ``exclude_internal`` drops internal parts (the management-CLI waterfall runs
+    prefix_backfill first and never spends AI calls on internal part numbers);
+    ``limit`` caps the rows returned (None = all).
+    """
     tagged_brand_ids = (
         db.query(MaterialTag.material_card_id)
         .join(Tag, MaterialTag.tag_id == Tag.id)
@@ -89,12 +94,15 @@ def _untagged_by_brand(db: Session) -> list:
         .distinct()
         .subquery()
     )
-    return (
-        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
-        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
-        .order_by(MaterialCard.id)
-        .all()
+    query = db.query(MaterialCard.id, MaterialCard.normalized_mpn).filter(
+        ~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id))
     )
+    if exclude_internal:
+        query = query.filter(MaterialCard.is_internal_part.is_(False))
+    query = query.order_by(MaterialCard.id)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # pragma: no cover
@@ -270,16 +278,34 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     }
 
 
-async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 10) -> dict:  # pragma: no cover
+async def run_ai_backfill(
+    db: Session,
+    batch_size: int = 50,
+    concurrency: int = 10,
+    limit: int | None = None,
+    exclude_internal: bool = False,
+) -> dict:
     """Classify remaining untagged parts after Nexar. Concurrent API calls.
 
     Args:
         batch_size: MPNs per Claude API call (default 50)
         concurrency: Parallel API calls (default 10, so 500 MPNs per round)
+        limit: Cap on cards per run (None = all) — the management CLI reruns to
+            work through the backlog
+        exclude_internal: Skip internal parts (management-CLI waterfall)
 
     Returns: {total_processed, total_matched, total_unknown}
     """
-    untagged = _untagged_by_brand(db)
+    from app.services.credential_service import get_credential_cached
+
+    # One up-front configured check — without a key every classify call would
+    # fail ClaudeUnavailableError and the loop would walk all cards writing
+    # 0.30 "Unknown" tags. Exit with one INFO instead.
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+        logger.info("AI backfill skipped — Claude not configured (ANTHROPIC_API_KEY missing)")
+        return {"total_processed": 0, "total_matched": 0, "total_unknown": 0}
+
+    untagged = _untagged_by_brand(db, limit=limit, exclude_internal=exclude_internal)
 
     if not untagged:
         logger.info("No untagged cards for AI backfill")

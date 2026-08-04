@@ -23,6 +23,18 @@ def _utc(dt):
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
+def m365_configured() -> bool:
+    """True when the Azure app registration is fully configured.
+
+    The single M365-on/off predicate: requires client id, client secret, AND tenant id —
+    the strictest form (matching services/graph_app_auth) because a deployment missing
+    any of the three cannot complete a login or refresh a token.
+    """
+    from ..config import settings
+
+    return bool(settings.azure_client_id and settings.azure_client_secret and settings.azure_tenant_id)
+
+
 async def get_valid_token(user, db) -> str | None:
     """Get a valid Graph API token for user, refreshing if expired/near-expiry.
 

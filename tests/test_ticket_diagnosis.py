@@ -48,7 +48,7 @@ def _clear_overrides():
 @pytest.fixture(autouse=True)
 def _ai_keys_on():
     """W1.14 gates ticket AI calls on the Anthropic key; these tests assume AI is on."""
-    with patch("app.routers.error_reports.get_credential_cached", return_value="sk-test"):
+    with patch("app.routers.error_reports._ai_keys_present", return_value=True):
         yield
 
 

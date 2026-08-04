@@ -1,18 +1,24 @@
 """Tests for the worker liveness watchdog (app/jobs/worker_liveness_jobs.py).
 
 Alerts (debounced) when a worker that should be running has a stale heartbeat
-(hung/crashed) or an open circuit breaker; stays quiet otherwise.
+(hung/crashed) or an open circuit breaker; stays quiet otherwise. The monitored worker
+list is computed once (registration-time credential gate) — the job iterates the stored
+list.
 """
 
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 import app.jobs.worker_liveness_jobs as liveness
 from app.jobs.worker_liveness_jobs import (
     _job_monitor_worker_heartbeats,
+    _monitored_checks,
     heartbeat_is_stale,
+    register_worker_liveness_jobs,
     should_alert_stale_heartbeat,
 )
 from app.models import IcsWorkerStatus
@@ -23,13 +29,30 @@ NOW = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
 # honesty — a stack without ICS creds runs no ICS worker, so its restored
 # is_running singleton must not alert). Tests below simulate a CONFIGURED
 # deployment unless they test the skip itself.
-_ICS_CONFIGURED = {"ICS_USERNAME": "test-user"}
+_ICS_CONFIGURED = {"ICS_USERNAME": "test-user", "ICS_PASSWORD": "test-pass"}
+
+_ALL_CRED_VARS = (
+    "ICS_USERNAME",
+    "ICS_PASSWORD",
+    "NC_ACCOUNT_NUMBER",
+    "NC_USERNAME",
+    "NC_PASSWORD",
+    "TBF_USERNAME",
+    "TBF_PASSWORD",
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_checks():
+    """Restore the module-level monitored list after each test."""
+    saved = list(liveness._checks)
+    yield
+    liveness._checks[:] = saved
 
 
 def _run(db_session, env=_ICS_CONFIGURED):
-    """Run the watchdog job against the test DB with no debounce; return the Teams
-    mock."""
-    liveness._skip_noticed.clear()
+    """Recompute the monitored list under ``env``, run the watchdog job against the test
+    DB with no debounce; return the Teams mock."""
     teams = AsyncMock()
     with (
         patch.dict(os.environ, env, clear=False),
@@ -38,6 +61,7 @@ def _run(db_session, env=_ICS_CONFIGURED):
         patch("app.cache.intel_cache.set_cached"),
         patch("app.services.teams_notifications.post_teams_channel", teams),
     ):
+        liveness._checks[:] = _monitored_checks()
         asyncio.run(_job_monitor_worker_heartbeats())
     return teams
 
@@ -47,6 +71,11 @@ def _ics(db_session, **kwargs):
     db_session.add(row)
     db_session.commit()
     return row
+
+
+def _delenv_all_creds(monkeypatch):
+    for var in _ALL_CRED_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 def test_stale_running_worker_alerts(db_session):
@@ -88,7 +117,6 @@ def test_missing_rows_no_error(db_session):
 
 def test_debounce_suppresses_repeat(db_session):
     _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(minutes=20))
-    liveness._skip_noticed.clear()
     teams = AsyncMock()
     with (
         patch.dict(os.environ, _ICS_CONFIGURED, clear=False),
@@ -97,34 +125,60 @@ def test_debounce_suppresses_repeat(db_session):
         patch("app.cache.intel_cache.set_cached"),
         patch("app.services.teams_notifications.post_teams_channel", teams),
     ):
+        liveness._checks[:] = _monitored_checks()
         asyncio.run(_job_monitor_worker_heartbeats())
     teams.assert_not_awaited()
+
+
+# ── Registration-time credential gate (W1.16 48h-gate) ───────────────────
 
 
 def test_unconfigured_worker_not_monitored(db_session, monkeypatch):
     # W1.16 (48h-gate): a restored prod copy says ICS is_running=true, but this
     # deployment has no ICS credentials — the watchdog must skip, not alert.
-    monkeypatch.delenv("ICS_USERNAME", raising=False)
+    _delenv_all_creds(monkeypatch)
     _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(hours=5))
     teams = _run(db_session, env={})
     teams.assert_not_awaited()
 
 
-def test_unconfigured_skip_notice_logged_once(db_session, monkeypatch):
-    monkeypatch.delenv("ICS_USERNAME", raising=False)
+def test_registration_stores_monitored_list_once(db_session, monkeypatch):
+    # No scrape-worker credentials: registration stores Enrichment only, and a
+    # second job run against a stale unconfigured ICS row still stays quiet
+    # (the gate lives in the stored list, not per-run env reads).
+    _delenv_all_creds(monkeypatch)
     _ics(db_session, is_running=True, last_heartbeat=None)
-    _run(db_session, env={})
-    assert "ICS" in liveness._skip_noticed
-    # Second run: still skipped, notice set unchanged (no repeat spam path).
-    teams = AsyncMock()
-    with (
-        patch("app.database.SessionLocal", return_value=db_session),
-        patch("app.cache.intel_cache.get_cached", return_value=None),
-        patch("app.cache.intel_cache.set_cached"),
-        patch("app.services.teams_notifications.post_teams_channel", teams),
-    ):
-        asyncio.run(_job_monitor_worker_heartbeats())
-    teams.assert_not_awaited()
+
+    scheduler = MagicMock()
+    register_worker_liveness_jobs(scheduler, MagicMock(worker_liveness_check_minutes=5))
+    scheduler.add_job.assert_called_once()
+    assert [label for label, _ in liveness._checks] == ["Enrichment"]
+
+    for _ in range(2):
+        teams = AsyncMock()
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch("app.cache.intel_cache.get_cached", return_value=None),
+            patch("app.cache.intel_cache.set_cached"),
+            patch("app.services.teams_notifications.post_teams_channel", teams),
+        ):
+            asyncio.run(_job_monitor_worker_heartbeats())
+        teams.assert_not_awaited()
+
+
+def test_partial_credentials_not_monitored(monkeypatch):
+    # Username without password does NOT satisfy the session manager's
+    # is_configured semantics — the worker cannot log in, so it is not monitored.
+    _delenv_all_creds(monkeypatch)
+    monkeypatch.setenv("ICS_USERNAME", "test-user")
+    assert [label for label, _ in _monitored_checks()] == ["Enrichment"]
+
+
+def test_full_credentials_monitored(monkeypatch):
+    _delenv_all_creds(monkeypatch)
+    monkeypatch.setenv("ICS_USERNAME", "test-user")
+    monkeypatch.setenv("ICS_PASSWORD", "test-pass")
+    assert [label for label, _ in _monitored_checks()] == ["ICS", "Enrichment"]
 
 
 def test_null_heartbeat_treated_as_stale(db_session):

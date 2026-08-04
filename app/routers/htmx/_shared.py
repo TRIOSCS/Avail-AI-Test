@@ -64,6 +64,22 @@ def _vite_assets() -> dict:
     return {"js_file": js_file, "css_files": css_files}
 
 
+def _login_ctx(request: Request) -> dict:
+    """Template context for htmx/login.html (unauthenticated full-page load).
+
+    Single home for the login-page flags + Vite assets so every full-page route that can
+    land on the login screen stays in sync.
+    """
+    from ..auth import _password_login_enabled, m365_login_enabled
+
+    return {
+        "request": request,
+        "password_login": _password_login_enabled(),
+        "m365_login": m365_login_enabled(),
+        **_vite_assets(),
+    }
+
+
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
     from ..admin.users import module_access_map

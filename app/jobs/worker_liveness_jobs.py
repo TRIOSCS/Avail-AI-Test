@@ -16,6 +16,7 @@ Depends on: worker_status models, services.teams_notifications, cache.intel_cach
             (debounce store — Redis-backed, no schema/column), search_worker_base.monitoring (Sentry).
 """
 
+import os
 from datetime import UTC, datetime, timedelta
 from typing import overload
 
@@ -24,8 +25,42 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 
+# (label, status model) pairs the watchdog iterates. Filled at registration from
+# _monitored_checks() — the credential gate is decided once per process, not per run.
+_checks: list[tuple[str, type]] = []
+
+
+def _monitored_checks() -> list[tuple[str, type]]:
+    """Compute the (label, model) pairs this deployment should monitor.
+
+    Keys-off honesty (spec §7): a stack with no ICS/NC/TBF credentials runs no scrape
+    workers, but a restored production DB copy still carries is_running=true singletons
+    — every wave-start refresh re-imports them, so monitoring must be gated in code, not
+    data (§11 48h gate). A worker is monitored only when every credential its own
+    session manager requires (is_configured semantics in
+    app/services/*_worker/session_manager.py) is present in the environment. Enrichment
+    has no credential gate: its worker is part of every stack.
+    """
+    from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+
+    candidates: tuple[tuple[str, type, tuple[str, ...]], ...] = (
+        ("ICS", IcsWorkerStatus, ("ICS_USERNAME", "ICS_PASSWORD")),
+        ("NetComponents", NcWorkerStatus, ("NC_ACCOUNT_NUMBER", "NC_USERNAME", "NC_PASSWORD")),
+        ("The Broker Forum", TbfWorkerStatus, ("TBF_USERNAME", "TBF_PASSWORD")),
+        ("Enrichment", EnrichmentWorkerStatus, ()),
+    )
+    monitored: list[tuple[str, type]] = []
+    for label, model, cred_envs in candidates:
+        missing = [env for env in cred_envs if not os.environ.get(env)]
+        if missing:
+            logger.info(f"{label} worker liveness not monitored — {', '.join(missing)} not configured")
+        else:
+            monitored.append((label, model))
+    return monitored
+
 
 def register_worker_liveness_jobs(scheduler, settings):
+    _checks[:] = _monitored_checks()
     scheduler.add_job(
         _job_monitor_worker_heartbeats,
         IntervalTrigger(minutes=settings.worker_liveness_check_minutes),
@@ -126,46 +161,23 @@ async def _emit_alert(label: str, message: str, debounce_minutes: int) -> None:
         logger.warning("Worker watchdog Teams alert failed: {}", e)
 
 
-_skip_noticed: set[str] = set()
-
-
 @_traced_job
 async def _job_monitor_worker_heartbeats():
     from ..config import settings
     from ..database import SessionLocal
-    from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
 
     now = datetime.now(UTC)
     stale_minutes = settings.worker_heartbeat_stale_minutes
     debounce = settings.worker_alert_debounce_minutes
 
-    import os
-
-    # Third element: the env var whose presence means this worker is expected to
-    # run in this deployment. Keys-off honesty (spec §7): a stack with no ICS/NC/
-    # TBF credentials runs no scrape workers, but a restored production DB copy
-    # still carries is_running=true singletons — every wave-start refresh
-    # re-imports them, so alerting must be gated in code, not data (§11 48h gate).
-    # Enrichment has no credential gate: its worker is part of every stack.
-    checks = (
-        ("ICS", IcsWorkerStatus, "ICS_USERNAME"),
-        ("NetComponents", NcWorkerStatus, "NC_USERNAME"),
-        ("The Broker Forum", TbfWorkerStatus, "TBF_USERNAME"),
-        ("Enrichment", EnrichmentWorkerStatus, None),
-    )
     db = SessionLocal()
     try:
-        for label, model, cred_env in checks:
-            if cred_env is not None and not os.environ.get(cred_env):
-                if label not in _skip_noticed:
-                    _skip_noticed.add(label)
-                    logger.info(f"{label} worker liveness not monitored — {cred_env} not configured")
-                continue
+        for label, model in _checks:
             row = db.get(model, 1)
             if row is None:
                 continue
-            is_running = bool(row.is_running)  # type: ignore[attr-defined]  # dynamic per-worker status model
-            hb = row.last_heartbeat  # type: ignore[attr-defined]  # dynamic per-worker status model
+            is_running = bool(row.is_running)  # dynamic per-worker status model
+            hb = row.last_heartbeat  # dynamic per-worker status model
 
             # Stale: claims to be running but the heartbeat went silent (or never landed).
             if should_alert_stale_heartbeat(

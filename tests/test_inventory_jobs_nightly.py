@@ -1,7 +1,6 @@
 """test_inventory_jobs_nightly.py — Additional coverage for app/jobs/inventory_jobs.py.
 
 Targets the gaps not covered by test_jobs_inventory.py:
-  - register_inventory_jobs (no-op since W1 — docs/W1_JOB_DISPOSITION.md)
   - _job_buyplan_nudge (PARKED in W1: implementation kept, registration removed;
     comeback = second buyer/ops user, spec §5.4): buyer/ops nudge paths,
     last_nudge_at stamp, per-line exception handling, outer exception rollback
@@ -27,23 +26,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
-
-# ── register_inventory_jobs ───────────────────────────────────────────
-
-
-def test_register_inventory_jobs_registers_nothing():
-    """register_inventory_jobs must register NOTHING (W1 simplification, 2026-08-04).
-
-    po_verification + stock_autocomplete deleted; buyplan_nudge parked (implementation
-    kept below, registration removed) per docs/W1_JOB_DISPOSITION.md.
-    """
-    from app.jobs.inventory_jobs import register_inventory_jobs
-
-    mock_scheduler = MagicMock()
-    register_inventory_jobs(mock_scheduler, MagicMock())
-
-    mock_scheduler.add_job.assert_not_called()
-
 
 # ── _job_buyplan_nudge ────────────────────────────────────────────────
 

@@ -23,6 +23,7 @@ def _keyless(monkeypatch):
     import app.routers.crm.enrichment as enr
 
     monkeypatch.setattr(enr, "get_credential_cached", lambda *a, **k: None)
+    monkeypatch.setattr(enr, "claude_configured", lambda: False)
 
 
 @pytest.fixture(autouse=True)

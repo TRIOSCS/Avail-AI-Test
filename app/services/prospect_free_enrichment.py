@@ -15,7 +15,6 @@ from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.constants import ProspectAccountStatus
 from app.models.prospect_account import ProspectAccount
 
 # ── Seniority Inference + Prospect Helpers ──────────────────────────────────
@@ -372,8 +371,7 @@ async def enrich_contacts_for_prospect(prospect: ProspectAccount, db: Session, *
     Does NOT commit — the caller owns the transaction. Returns
     ``{"enriched": bool, "verified": int, "unverified": int}``.
 
-    Called by: run_enrichment_job (per-prospect UI enrich), run_contact_enrichment_batch
-    (monthly Job 3).
+    Called by: run_enrichment_job (per-prospect UI enrich).
     """
     from app.config import settings as _settings
     from app.enrichment_service import enrich_entity, find_suggested_contacts
@@ -535,63 +533,6 @@ async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
                 summary["errors"] += 1
 
         logger.info("Free enrichment batch complete: {}", summary)
-        return summary
-
-    finally:
-        db.close()
-
-
-async def run_contact_enrichment_batch(min_fit_score: int | None = None) -> dict:
-    """Monthly Job 3 — find procurement contacts for high-fit suggested prospects.
-
-    For each SUGGESTED prospect with ``fit_score >= min_fit_score`` (defaults to
-    ``settings.prospecting_min_fit_for_contacts``), runs the paid contact-finder
-    (``enrich_contacts_for_prospect``) and persists ``contacts_preview`` +
-    ``readiness_signals['contacts_verified_count']`` so the buyer-ready score can credit
-    verified decision-makers. Commits per prospect so one failure never aborts the batch.
-
-    Called by: nothing since W1 (its scheduler caller, prospect_scheduler.job_find_contacts,
-    was deleted per docs/W1_JOB_DISPOSITION.md — kept as an on-demand entry point).
-    Returns ``{"prospects_processed", "total_verified", "total_contacts", "errors"}``.
-    """
-    from app.config import settings as _settings
-    from app.database import SessionLocal
-
-    if min_fit_score is None:
-        min_fit_score = _settings.prospecting_min_fit_for_contacts
-
-    db = SessionLocal()
-    try:
-        rows = (
-            db.query(ProspectAccount.id)
-            .filter(
-                ProspectAccount.status == ProspectAccountStatus.SUGGESTED,
-                ProspectAccount.fit_score >= min_fit_score,
-            )
-            .order_by(ProspectAccount.fit_score.desc())
-            .limit(50)  # batch limit — mirrors run_free_enrichment_batch
-            .all()
-        )
-
-        summary = {"prospects_processed": 0, "total_verified": 0, "total_contacts": 0, "errors": 0}
-
-        for (prospect_id,) in rows:
-            prospect = db.get(ProspectAccount, prospect_id)
-            if prospect is None:
-                continue
-            try:
-                result = await enrich_contacts_for_prospect(prospect, db)
-                db.commit()
-                if result["enriched"]:
-                    summary["prospects_processed"] += 1
-                    summary["total_verified"] += result["verified"]
-                    summary["total_contacts"] += result["verified"] + result["unverified"]
-            except Exception as e:
-                logger.error("Contact enrichment error for prospect {}: {}", prospect_id, e)
-                db.rollback()
-                summary["errors"] += 1
-
-        logger.info("Contact enrichment batch complete: {}", summary)
         return summary
 
     finally:

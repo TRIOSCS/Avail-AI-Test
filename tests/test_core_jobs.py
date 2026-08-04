@@ -5,6 +5,7 @@ Depends on: conftest fixtures, unittest.mock
 """
 
 import asyncio
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,18 +19,37 @@ from app.models import User
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@contextmanager
+def _m365_creds(client_id="test-client", client_secret="test-secret", tenant_id="test-tenant"):
+    """Patch the real app settings' Azure creds (all three) for m365_configured()."""
+    from app.config import settings
+
+    with (
+        patch.object(settings, "azure_client_id", client_id),
+        patch.object(settings, "azure_client_secret", client_secret),
+        patch.object(settings, "azure_tenant_id", tenant_id),
+    ):
+        yield
+
+
 class TestRegisterCoreJobs:
     """Tests for register_core_jobs()."""
 
     def test_registers_base_jobs(self):
-        """The three kernel core jobs are registered — nothing else."""
+        """The three kernel core jobs are registered — nothing else.
+
+        M365-configured is the kernel assumption: token_refresh registration is gated
+        on m365_configured(), so the scheduler's kernel-7 total holds only when the
+        Azure creds are set (as here).
+        """
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 5
 
-        register_core_jobs(scheduler, settings)
+        with _m365_creds():
+            register_core_jobs(scheduler, settings)
 
         job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
         assert "token_refresh" in job_ids
@@ -41,15 +61,44 @@ class TestRegisterCoreJobs:
         assert "webhook_subs" not in job_ids
 
     def test_total_job_count(self):
-        """Exactly the 3 kernel core jobs are registered."""
+        """3 kernel core jobs when M365 is configured, 2 when it is not."""
         from app.jobs.core_jobs import register_core_jobs
 
-        scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 10
 
-        register_core_jobs(scheduler, settings)
+        scheduler = MagicMock()
+        with _m365_creds():
+            register_core_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == 3
+
+        scheduler = MagicMock()
+        with _m365_creds("", "", ""):
+            register_core_jobs(scheduler, settings)
+        assert scheduler.add_job.call_count == 2
+
+    def test_keys_off_skips_with_notice(self):
+        """W1.15 (48h-gate), enforced at registration (the sibling register_*_jobs
+        idiom): no Azure creds -> token_refresh is never registered and ONE honest INFO
+        notice is logged; creds set -> registered."""
+        from app.jobs.core_jobs import register_core_jobs
+
+        settings = MagicMock()
+        settings.inbox_scan_interval_min = 5
+
+        scheduler = MagicMock()
+        with _m365_creds("", "", ""), patch("app.jobs.core_jobs.logger") as mock_logger:
+            register_core_jobs(scheduler, settings)
+        job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
+        assert "token_refresh" not in job_ids
+        notices = [c for c in mock_logger.info.call_args_list if "Token refresh not registered" in c.args[0]]
+        assert len(notices) == 1
+
+        scheduler = MagicMock()
+        with _m365_creds():
+            register_core_jobs(scheduler, settings)
+        job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
+        assert "token_refresh" in job_ids
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -58,19 +107,11 @@ class TestRegisterCoreJobs:
 
 
 class TestJobTokenRefresh:
-    """Tests for _job_token_refresh()."""
+    """Tests for _job_token_refresh().
 
-    @pytest.fixture(autouse=True)
-    def _azure_configured(self):
-        # W1.15 keys-off guard: the job exits early without Azure creds, so this
-        # class simulates a configured deployment (the keys-off test overrides).
-        from app.config import settings
-
-        with (
-            patch.object(settings, "azure_client_id", "test-client"),
-            patch.object(settings, "azure_tenant_id", "test-tenant"),
-        ):
-            yield
+    The job body no longer guards on Azure creds — registration is gated instead
+    (TestRegisterCoreJobs.test_keys_off_skips_with_notice) — so no creds fixture.
+    """
 
     @pytest.mark.asyncio
     async def test_refreshes_expiring_tokens(self, db_session: Session, test_user: User):
@@ -86,11 +127,7 @@ class TestJobTokenRefresh:
         mock_redis = MagicMock()
         mock_redis.set.return_value = True  # acquired lock
 
-        from app.config import settings
-
         with (
-            patch.object(settings, "azure_client_id", "test-client"),
-            patch.object(settings, "azure_tenant_id", "test-tenant"),
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
             patch("app.utils.token_manager.refresh_user_token", mock_refresh),
@@ -99,33 +136,6 @@ class TestJobTokenRefresh:
             await _job_token_refresh.__wrapped__()
 
         mock_refresh.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_keys_off_skips_with_notice(self, db_session: Session, test_user: User):
-        """W1.15 (48h-gate): no Azure creds -> skip entirely, no per-user 404
-        warnings."""
-        import app.jobs.core_jobs as core_jobs
-        from app.jobs.core_jobs import _job_token_refresh
-
-        test_user.refresh_token = "rt-test-123"
-        test_user.token_expires_at = datetime.now(UTC) + timedelta(minutes=5)
-        db_session.commit()
-
-        from app.config import settings
-
-        core_jobs._token_refresh_skip_noticed = False
-        mock_refresh = AsyncMock()
-        with (
-            patch.object(settings, "azure_client_id", ""),
-            patch.object(settings, "azure_tenant_id", ""),
-            patch("app.database.SessionLocal", return_value=db_session),
-            patch.object(db_session, "close"),
-            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
-        ):
-            await _job_token_refresh.__wrapped__()
-
-        mock_refresh.assert_not_awaited()
-        assert core_jobs._token_refresh_skip_noticed is True
 
     @pytest.mark.asyncio
     async def test_skips_users_without_refresh_token(self, db_session: Session, test_user: User):
@@ -137,11 +147,7 @@ class TestJobTokenRefresh:
 
         mock_refresh = AsyncMock()
 
-        from app.config import settings
-
         with (
-            patch.object(settings, "azure_client_id", "test-client"),
-            patch.object(settings, "azure_tenant_id", "test-tenant"),
             patch("app.database.SessionLocal", return_value=db_session),
             patch.object(db_session, "close"),
             patch("app.utils.token_manager.refresh_user_token", mock_refresh),

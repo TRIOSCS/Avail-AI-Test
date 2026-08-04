@@ -35,7 +35,7 @@ router = APIRouter()
 def _badge_html(count: int, color: str = "emerald") -> str:
     """The inner count pill (empty at 0).
 
-    Emerald everywhere except the amber follow-ups.
+    Emerald everywhere except the amber follow-ups (colors come from NAV_BADGE_KEYS).
     """
     if count > 0:
         return (
@@ -45,35 +45,39 @@ def _badge_html(count: int, color: str = "emerald") -> str:
     return ""
 
 
+def _oob_span(key: str, count: int) -> str:
+    """The {key}-nav-badge hx-swap-oob span — shared by the poll + seen endpoints.
+
+    Zero counts render an EMPTY span so a stale pill clears when its count drops.
+    """
+    pill = _badge_html(count, NAV_BADGE_KEYS.get(key, "emerald"))
+    return f'<span id="{key}-nav-badge" hx-swap-oob="innerHTML">{pill}</span>'
+
+
 @router.get("/v2/partials/nav/badges", response_class=HTMLResponse)
-async def nav_badges(
+def nav_badges(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Every nav badge pill in ONE response (spec §5.5).
 
-    Each span is an hx-swap-oob="innerHTML" fragment targeting its {key}-nav-badge
-    element; the nav's single hidden poller requests this with hx-swap="none" so only
-    the OOB spans apply. Spans whose target is not rendered (module hidden for this
-    user) are simply dropped by htmx. Zero counts render an EMPTY span so a stale pill
-    clears when its count drops. Fail-quiet.
+    Plain (non-async) def on purpose: the badge collection runs a dozen-plus sync
+    SQLAlchemy queries, polled every 60s per open tab — FastAPI's threadpool keeps them
+    off the event loop. Each span is an hx-swap-oob="innerHTML" fragment targeting its
+    {key}-nav-badge element; the nav's single hidden poller requests this with hx-
+    swap="none" so only the OOB spans apply. Spans whose target is not rendered (module
+    hidden for this user) are simply dropped by htmx. Fail-quiet.
     """
     try:
         counts = collect_badge_counts(db, user)
     except Exception:
         logger.exception("nav badge collection failed")
         counts = {}
-    parts = []
-    for key in NAV_BADGE_KEYS:
-        color = "amber" if key == "follow-ups" else "emerald"
-        parts.append(
-            f'<span id="{key}-nav-badge" hx-swap-oob="innerHTML">{_badge_html(counts.get(key, 0), color)}</span>'
-        )
-    return HTMLResponse("".join(parts))
+    return HTMLResponse("".join(_oob_span(key, counts.get(key, 0)) for key in NAV_BADGE_KEYS))
 
 
 @router.post("/v2/partials/alerts/{kind}/seen", response_class=HTMLResponse)
-async def alert_seen(
+def alert_seen(
     kind: str,
     ref_ids: str = Form(...),
     user: User = Depends(require_user),
@@ -84,7 +88,7 @@ async def alert_seen(
     ``ref_ids`` is comma-separated so one row's whole batch of refs is a single request.
     Returns the owning tab's refreshed nav badge as an OOB swap so it updates instantly;
     the in-tab pill is decremented client-side. Idempotent + fully fail-quiet (a cosmetic
-    seen-ping must never 500).
+    seen-ping must never 500). Plain def (sync queries → threadpool), like nav_badges.
     """
     for raw in ref_ids.split(","):
         raw = raw.strip()
@@ -103,4 +107,4 @@ async def alert_seen(
     except Exception:
         logger.exception("alert seen badge recompute failed for tab {}", tab_key)
         return HTMLResponse("")
-    return HTMLResponse(f'<span id="{tab_key}-nav-badge" hx-swap-oob="innerHTML">{_badge_html(count)}</span>')
+    return HTMLResponse(_oob_span(tab_key, count))

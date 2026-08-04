@@ -30,8 +30,7 @@ from ...models import (
     User,
 )
 from ...template_env import page_response, template_response, templates
-from ..auth import _password_login_enabled, m365_login_enabled
-from ._shared import _base_ctx, _vite_assets
+from ._shared import _base_ctx, _login_ctx
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -81,15 +80,7 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
     """Full page load for sourcing results."""
     user = get_user(request, db)
     if not user:
-        return template_response(
-            "htmx/login.html",
-            {
-                "request": request,
-                "password_login": _password_login_enabled(),
-                "m365_login": m365_login_enabled(),
-                **_vite_assets(),
-            },
-        )
+        return template_response("htmx/login.html", _login_ctx(request))
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
     return page_response(ctx)
@@ -100,15 +91,7 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
     """Full page load for lead detail."""
     user = get_user(request, db)
     if not user:
-        return template_response(
-            "htmx/login.html",
-            {
-                "request": request,
-                "password_login": _password_login_enabled(),
-                "m365_login": m365_login_enabled(),
-                **_vite_assets(),
-            },
-        )
+        return template_response("htmx/login.html", _login_ctx(request))
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
     return page_response(ctx)
@@ -414,15 +397,7 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
     """Full page load for sourcing workspace (split-panel view)."""
     user = get_user(request, db)
     if not user:
-        return template_response(
-            "htmx/login.html",
-            {
-                "request": request,
-                "password_login": _password_login_enabled(),
-                "m365_login": m365_login_enabled(),
-                **_vite_assets(),
-            },
-        )
+        return template_response("htmx/login.html", _login_ctx(request))
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
     return page_response(ctx)

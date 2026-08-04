@@ -47,10 +47,8 @@ def _register_and_get_job_ids(**enabled_flags):
 
     scheduler = MagicMock()
     settings = MagicMock()
-    settings.contacts_sync_enabled = False
     settings.activity_tracking_enabled = False
     settings.ownership_sweep_enabled = False
-    settings.contact_scoring_enabled = False
     settings.customer_enrichment_enabled = False
     for name, value in enabled_flags.items():
         setattr(settings, name, value)
@@ -86,8 +84,6 @@ class TestRegisterEmailJobs:
                 # deleted; calendar_scan parked out of the scheduler).
                 {
                     "activity_tracking_enabled": True,
-                    "contacts_sync_enabled": True,
-                    "contact_scoring_enabled": True,
                     "customer_enrichment_enabled": True,
                 },
                 ["scan_sent_folders"],

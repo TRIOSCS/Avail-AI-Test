@@ -21,25 +21,6 @@ from app.scheduler import scheduler
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _azure_configured_for_token_jobs():
-    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
-    tests exercise a CONFIGURED deployment.
-
-    The guard's own test lives in
-    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
-    """
-    from unittest.mock import patch as _patch
-
-    from app.config import settings as _settings
-
-    with (
-        _patch.object(_settings, "azure_client_id", "test-client"),
-        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
-    ):
-        yield
-
-
 @pytest.fixture()
 def scheduler_db(db_session: Session):
     """Patch SessionLocal so scheduler jobs use the test DB."""

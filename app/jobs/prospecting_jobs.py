@@ -4,26 +4,20 @@ W1 simplification (2026-08-04, docs/W1_JOB_DISPOSITION.md):
 - DELETED: the 6 Explorium discovery-machine monthly jobs (pool_health_report,
   discover_prospects, enrich_pool, find_contacts, refresh_scores,
   expire_and_resurface) and their implementation module
-  app/services/prospect_scheduler.py. register_prospecting_jobs is kept as a
-  no-op only because app/jobs/__init__.py imports it by name.
-- PARKED: auto_surface_reactivation — its gate defaulted ON
-  (prospecting_enabled AND account_reactivation_sweep_enabled), so the
+  app/services/prospect_scheduler.py.
+- PARKED: auto_surface_reactivation — its gate defaulted ON, so the
   registration call was removed; the implementation below stays.
   Comeback trigger: team exists (spec §5.4).
 - PARKED (no change): account_sweep — already gated off by default via
   account_sweep_enabled=False. Comeback trigger: team exists (spec §5.4).
 
-Called by: app/jobs/__init__.py via register_prospecting_jobs() / register_sweep_jobs()
+Called by: app/jobs/__init__.py via register_sweep_jobs()
 Depends on: app.services.prospect_reclamation
 """
 
 from apscheduler.triggers.cron import CronTrigger
 
 from ..scheduler import _traced_job
-
-
-def register_prospecting_jobs(scheduler, settings):
-    """No-op since W1 — the six Explorium monthly jobs were deleted (see header)."""
 
 
 def register_sweep_jobs(scheduler, settings):

@@ -13,7 +13,7 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 from ..services.m365_status import REASON_TRANSIENT, reason_for
-from ..utils.token_manager import _utc
+from ..utils.token_manager import _utc, m365_configured
 
 
 def register_core_jobs(scheduler, settings, db=None):
@@ -21,36 +21,33 @@ def register_core_jobs(scheduler, settings, db=None):
 
     *db* (when provided) lets inbox_scan_interval_min resolve from the system_config DB
     row (admin toggle) instead of only the env default.
+
+    Keys-off honesty (spec §7): without the Azure app credentials every token-refresh
+    attempt 404s against login.microsoftonline.com — twice per 5-minute run, which alone
+    fails the 48h zero-recurring-warnings gate (§11). Gate the registration itself (the
+    register_email_jobs/register_offers_jobs idiom) with one notice.
     """
     from ..services.admin_service import get_effective_int
 
     scan_interval_min = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
-    scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
+    if m365_configured():
+        scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
+    else:
+        logger.info("Token refresh not registered — Azure credentials not configured (M365 is off)")
     scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=scan_interval_min), id="inbox_scan", name="Inbox scan")
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
 
 
-_token_refresh_skip_noticed = False
-
-
 @_traced_job
 async def _job_token_refresh():
-    """Refresh tokens for all users with refresh tokens."""
-    from ..config import settings
+    """Refresh tokens for all users with refresh tokens.
+
+    Registered only when M365 is configured (see register_core_jobs), so the job body
+    carries no keys-off guard.
+    """
     from ..database import SessionLocal
     from ..models import User
     from ..utils.token_manager import refresh_user_token
-
-    # Keys-off honesty (spec §7): without Azure app credentials every refresh
-    # attempt 404s against login.microsoftonline.com — twice per 5-minute run,
-    # which alone fails the 48h zero-recurring-warnings gate (§11). Skip with
-    # one notice instead of warning forever.
-    global _token_refresh_skip_noticed
-    if not (settings.azure_client_id and settings.azure_tenant_id):
-        if not _token_refresh_skip_noticed:
-            _token_refresh_skip_noticed = True
-            logger.info("Token refresh skipped — Azure credentials not configured (M365 is off)")
-        return
 
     selector_db = SessionLocal()
     users_to_refresh: list[int] = []

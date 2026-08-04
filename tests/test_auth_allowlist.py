@@ -32,11 +32,14 @@ from tests.test_routers_auth import _get_oauth_state, _mock_graph_me, _mock_toke
 
 @pytest.fixture(autouse=True)
 def _azure_configured(monkeypatch):
-    """OAuth-flow tests need a configured Azure client id — with it unset the keys-off
-    guard (spec §7 addition) redirects home instead of issuing the authorize URL."""
+    """OAuth-flow tests need a fully configured Azure app registration — with any cred
+    unset the keys-off guard (spec §7 addition) redirects home instead of issuing the
+    authorize URL (m365_configured() requires client id, secret, AND tenant)."""
     from app.config import settings
 
     monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+    monkeypatch.setattr(settings, "azure_client_secret", "test-azure-secret")
+    monkeypatch.setattr(settings, "azure_tenant_id", "test-azure-tenant")
 
 
 @pytest.fixture()

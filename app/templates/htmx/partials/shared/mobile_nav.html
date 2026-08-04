@@ -179,11 +179,13 @@
   {# ONE badge poller for the whole nav (spec §5.5): fetches /v2/partials/nav/badges,
      which returns every *-nav-badge pill as an hx-swap-oob="innerHTML" span — replaces
      the six per-badge pollers. hx-swap="none" so only the OOB spans apply; spans whose
-     target is hidden for this user are dropped by htmx. hx-push-url must stay 'false'
-     (it is inherited otherwise). #}
+     target is hidden for this user are dropped by htmx. The trigger filter skips the
+     60s poll while the tab is hidden (htmx re-evaluates it each interval; keep the
+     filter free of nested [..] — nested brackets kill the trigger parse). hx-push-url
+     must stay 'false' (it is inherited otherwise). #}
   <div id="nav-badge-poller" class="hidden"
        hx-get="/v2/partials/nav/badges"
-       hx-trigger="load, every 60s"
+       hx-trigger="load, every 60s [document.visibilityState==='visible']"
        hx-swap="none"
        hx-push-url="false"></div>
 </nav>

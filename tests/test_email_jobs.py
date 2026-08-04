@@ -43,17 +43,13 @@ def _make_user(db: Session, email="sync@trioscs.com", **kw) -> User:
 
 def _make_settings(
     *,
-    contacts_sync=False,
     activity_tracking=False,
     ownership_sweep=False,
-    contact_scoring=False,
     customer_enrichment=False,
 ) -> MagicMock:
     settings = MagicMock()
-    settings.contacts_sync_enabled = contacts_sync
     settings.activity_tracking_enabled = activity_tracking
     settings.ownership_sweep_enabled = ownership_sweep
-    settings.contact_scoring_enabled = contact_scoring
     settings.customer_enrichment_enabled = customer_enrichment
     return settings
 
@@ -64,10 +60,8 @@ class TestRegisterEmailJobs:
 
         scheduler = MagicMock()
         settings = _make_settings(
-            contacts_sync=True,
             activity_tracking=True,
             ownership_sweep=True,
-            contact_scoring=True,
             customer_enrichment=True,
         )
         register_email_jobs(scheduler, settings)

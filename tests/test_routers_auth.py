@@ -54,15 +54,17 @@ def _get_oauth_state(client):
 
 @pytest.fixture(autouse=True)
 def _azure_configured(monkeypatch):
-    """Give the OAuth-flow tests a configured Azure client id.
+    """Give the OAuth-flow tests a fully configured Azure app registration.
 
-    With AZURE_CLIENT_ID unset the keys-off guard (spec §7 addition) answers the honest
+    With the Azure creds unset the keys-off guard (spec §7 addition) answers the honest
     redirect-home instead of the Microsoft authorize URL — the keyless behavior itself
-    is covered by TestM365KeysOff below.
+    is covered by TestM365KeysOff below. m365_configured() requires all three creds.
     """
     from app.config import settings
 
     monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+    monkeypatch.setattr(settings, "azure_client_secret", "test-azure-secret")
+    monkeypatch.setattr(settings, "azure_tenant_id", "test-azure-tenant")
 
 
 @pytest.fixture(autouse=True)
@@ -151,10 +153,12 @@ class TestM365KeysOff:
         assert 'href="/auth/login"' not in resp.text
 
     def test_login_page_shows_button_when_configured(self, auth_client, monkeypatch):
-        """With a client id set, the normal Microsoft button renders."""
+        """With the Azure creds fully set, the normal Microsoft button renders."""
         from app.config import settings
 
         monkeypatch.setattr(settings, "azure_client_id", "test-azure-client-id")
+        monkeypatch.setattr(settings, "azure_client_secret", "test-azure-secret")
+        monkeypatch.setattr(settings, "azure_tenant_id", "test-azure-tenant")
         resp = auth_client.get("/v2/requisitions")
         assert resp.status_code == 200
         assert "Sign in with Microsoft" in resp.text

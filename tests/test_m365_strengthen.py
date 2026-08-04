@@ -380,11 +380,9 @@ def test_scan_sent_folders_job_registered():
 
     mock_scheduler = MagicMock()
     mock_settings = MagicMock()
-    mock_settings.contacts_sync_enabled = False
     mock_settings.activity_tracking_enabled = False
     mock_settings.ownership_sweep_enabled = False
     mock_settings.deep_email_mining_enabled = False
-    mock_settings.contact_scoring_enabled = False
     mock_settings.customer_enrichment_enabled = False
 
     register_email_jobs(mock_scheduler, mock_settings)

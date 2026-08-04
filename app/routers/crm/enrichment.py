@@ -14,6 +14,7 @@ from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
 from ...template_env import template_response
+from ...utils.claude_client import claude_configured
 
 router = APIRouter()
 
@@ -35,7 +36,7 @@ def _paid_provider_configured() -> bool:
     """True when at least one keyed (paid) enrichment provider credential is set."""
     return bool(
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+        or claude_configured()
         or get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
         or get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
     )
