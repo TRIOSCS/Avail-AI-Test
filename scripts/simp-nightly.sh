@@ -4,12 +4,14 @@
 # What: (1) smoke-checks the DEPLOYED parallel instance at
 #       https://app.availai.net:8443 (health, ready, auth chain, static,
 #       instance header); (2) runs the TS Playwright suite from this worktree
-#       (self-contained webServer on BRANCH code, same as prod nightly).
+#       (self-contained webServer on BRANCH code, same as prod nightly);
+#       (3) W1.11: runs the spec §3 kernel walk (e2e/kernel-walk.spec.ts via
+#       playwright.kernel.config.ts) against the DEPLOYED instance — a red
+#       walk fails the nightly.
 # Cron: 0 4 * * * (host crontab; prod nightly at 02:30 is untouched)
 # Logs: /var/log/avail_simp_nightly/nightly_YYYYMMDD.log (14 kept)
-# Note: Wave 1 replaces the smoke section with the scripted kernel walk
-#       (spec §3/§10) run against the deployed instance and wires failure
-#       paging to ONE admin (spec §6).
+# Note: single-admin failure paging (spec §6) is not wired yet — the verdict
+#       lands in LAST_STATUS + the exit code only.
 
 set -uo pipefail
 
@@ -56,7 +58,16 @@ if [ "$FAIL" -eq 0 ] || true; then
     fi
 fi
 
-# 3) Verdict + retention
+# 3) Kernel walk (spec §3/§10) against the DEPLOYED instance — the nightly's real
+#    acceptance signal. Runs AFTER the branch suite; a red walk fails the nightly.
+log "=== E2E (kernel walk vs deployed) ==="
+if ! npx playwright test --config=playwright.kernel.config.ts >> "$LOG" 2>&1; then
+    log "FAIL kernel walk (deployed instance)"; FAIL=1
+else
+    log "OK   kernel walk (deployed instance)"
+fi
+
+# 4) Verdict + retention
 if [ "$FAIL" -eq 0 ]; then echo "GREEN $(date -u +%FT%TZ)" > "$STATUS_FILE"; log "=== GREEN ==="; else echo "RED $(date -u +%FT%TZ)" > "$STATUS_FILE"; log "=== RED ==="; fi
 ls -t "$LOG_DIR"/nightly_*.log 2>/dev/null | tail -n +15 | xargs -r rm --
 exit "$FAIL"
