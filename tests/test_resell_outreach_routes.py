@@ -1008,3 +1008,85 @@ def test_no_contact_selection_purged_on_switch_back_to_email(client, db_session,
     assert "setChannel(" in body
     # The bare assignment that skipped the purge is gone.
     assert "@click=\"channel = '" not in body
+
+
+# ── W1.17 — keys-off outreach: manual log needs no M365 token ────────────────
+# The route-level Depends(require_fresh_token) 401'd EVERY channel, but only the
+# email channel actually sends via Graph. The token is now acquired in-branch for
+# email only; a manual/phone log must work with no token, and a keys-off email
+# submit gets an honest 409 (M365 not connected), not a login-bounce 401.
+
+
+def test_submit_outreach_manual_channel_needs_no_token(client, db_session, trader_user, posted_list):
+    """A phone-channel log succeeds with NO fresh-token override in place at all.
+
+    Pops the conftest require_fresh_token override for the request, so a route-level
+    Depends(require_fresh_token) would run for real and 401 (no session user) — the
+    regression this guards: manual logging must never demand an M365 token.
+    """
+    from app.dependencies import require_fresh_token
+    from app.main import app
+
+    buyer = _reachable_buyer(db_session, "Keysoff Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    saved_override = app.dependency_overrides.pop(require_fresh_token, None)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach",
+            data={
+                "vendor_card_ids": str(buyer.id),
+                "scope": "whole_list",
+                "channel": "phone",
+                "notes": "logged keys-off",
+            },
+        )
+        assert resp.status_code == 200
+        rows = db_session.query(ExcessOutreach).filter_by(excess_list_id=posted_list.id).all()
+        assert len(rows) == 1
+        assert rows[0].channel == "phone"
+    finally:
+        if saved_override is not None:
+            app.dependency_overrides[require_fresh_token] = saved_override
+        restore()
+
+
+def test_submit_outreach_email_keys_off_honest_409(client, db_session, trader_user, posted_list):
+    """A keys-off EMAIL submit returns the honest 409 (M365 not connected), no rows.
+
+    Simulates production keys-off: TESTING unset for the request (so the in-branch
+    acquisition actually runs) and require_fresh_token raising its real 401. The route
+    must rewrite that to the app's honest 409 (toast-surfaced app-wide by the global
+    handler) instead of bouncing a logged-in user to login — and must write NO
+    tracker rows.
+    """
+    import os as _os
+
+    from fastapi import HTTPException as _HTTPException
+
+    buyer = _reachable_buyer(db_session, "Keysoff Email Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    token_mock = AsyncMock(side_effect=_HTTPException(401, "No access token — please log in"))
+    try:
+        with (
+            patch.dict(_os.environ, {"TESTING": "0"}),
+            patch("app.routers.resell.require_fresh_token", new=token_mock),
+        ):
+            resp = client.post(
+                f"/api/resell/{posted_list.id}/outreach",
+                data={
+                    "vendor_card_ids": str(buyer.id),
+                    "scope": "whole_list",
+                    "channel": "email",
+                    "subject": "Excess offer",
+                    "body": "We have these parts available.",
+                },
+            )
+        assert resp.status_code == 409
+        assert "Microsoft 365" in resp.json()["error"]
+        token_mock.assert_awaited_once()
+        rows = db_session.query(ExcessOutreach).filter_by(excess_list_id=posted_list.id).all()
+        assert rows == []
+    finally:
+        restore()

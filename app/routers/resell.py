@@ -23,6 +23,7 @@ Depends on: services.excess_service, services.excess_mirror, file_utils,
 """
 
 import json
+import os
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -1990,7 +1991,6 @@ async def resell_assign_offer_line(
 
 # Outreach statuses that count as a buyer ENGAGED at all (the tracker "responded" tally).
 _RESPONDED_OUTREACH = (
-    ExcessOutreachStatus.OPENED,
     ExcessOutreachStatus.RESPONDED,
     ExcessOutreachStatus.BID,
     ExcessOutreachStatus.DECLINED,
@@ -2331,7 +2331,6 @@ async def resell_submit_outreach(
     body: str = Form(""),
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
-    token: str = Depends(require_fresh_token),
 ):
     """Submit an outreach campaign (owner-only), then re-render the tracker.
 
@@ -2345,6 +2344,12 @@ async def resell_submit_outreach(
     to the final status. Any other channel is a manual log via :func:`submit_outreach`.
     ``scope`` is ``per_line`` (scoped to ``line_ids``) or ``whole_list``. The service
     enforces the owner + can_post guards.
+
+    Only the EMAIL channel actually sends via Graph, so the M365 token is acquired
+    in-branch there (the quotes.py send / offers rfq.py precedent) instead of a
+    route-level ``Depends(require_fresh_token)`` — logging a manual/phone outreach must
+    work with no M365 token at all. A keys-off email submit gets an honest 409 naming
+    the missing M365 connection, not a login-bounce 401 for a user who IS logged in.
     """
     # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
     el, _ = _get_list_for_user(db, list_id, user)
@@ -2365,6 +2370,20 @@ async def resell_submit_outreach(
     if channel == ExcessOutreachChannel.EMAIL:
         if not subject.strip() or not body.strip():
             raise HTTPException(400, "An email outreach needs a subject and a message")
+        # In-branch token acquisition (see docstring). Skipped in TESTING — a direct call
+        # (not Depends) would 401 in tests, and the service skips the real Graph send
+        # there anyway; the 401→409 rewrite keeps the failure honest for a logged-in
+        # user with no (or an expired) M365 connection.
+        token = ""
+        if os.environ.get("TESTING") != "1":
+            try:
+                token = await require_fresh_token(request, db)
+            except HTTPException as exc:
+                raise HTTPException(
+                    409,
+                    "Microsoft 365 isn't connected, so this email can't be sent — "
+                    "reconnect M365, or log the outreach under a manual channel.",
+                ) from exc
         # Phase 1 (fast, inline): write the rows as ``sending`` and return at once.
         _rows, plan = resell_outreach_service.enqueue_outreach_email(
             db,

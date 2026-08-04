@@ -126,7 +126,10 @@
     </button>
     {% endif %}
 
-    {% if quote.status == 'sent' %}
+    {# Won/Lost also offered on DRAFT — an out-of-band result (customer decided off a
+       quote never formally sent from AVAIL) is logged directly; the status machine
+       already allows draft→won/lost (QUOTE_TRANSITIONS in services/status_machine.py). #}
+    {% if quote.status in ('draft', 'sent') %}
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/result"
             hx-target="#main-content"
             hx-vals='{"result": "won"}'
