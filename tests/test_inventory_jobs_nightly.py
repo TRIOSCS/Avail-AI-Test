@@ -1,9 +1,10 @@
 """test_inventory_jobs_nightly.py — Additional coverage for app/jobs/inventory_jobs.py.
 
 Targets the gaps not covered by test_jobs_inventory.py:
-  - register_inventory_jobs (lines 23-35)
-  - _job_buyplan_nudge (lines 130-192): buyer/ops nudge paths, last_nudge_at stamp,
-    per-line exception handling, outer exception rollback
+  - register_inventory_jobs (no-op since W1 — docs/W1_JOB_DISPOSITION.md)
+  - _job_buyplan_nudge (PARKED in W1: implementation kept, registration removed;
+    comeback = second buyer/ops user, spec §5.4): buyer/ops nudge paths,
+    last_nudge_at stamp, per-line exception handling, outer exception rollback
   - _scan_stock_list_attachments OSError/ValueError/KeyError branch (line 228)
   - _download_and_import_stock_list: norm_key=None skip (line 356),
     no-reqs continue (line 495), zero/negative qty gate (line 500),
@@ -30,23 +31,18 @@ from sqlalchemy.orm import Session
 # ── register_inventory_jobs ───────────────────────────────────────────
 
 
-def test_register_inventory_jobs_adds_three_jobs():
-    """register_inventory_jobs must register exactly 3 jobs."""
+def test_register_inventory_jobs_registers_nothing():
+    """register_inventory_jobs must register NOTHING (W1 simplification, 2026-08-04).
+
+    po_verification + stock_autocomplete deleted; buyplan_nudge parked (implementation
+    kept below, registration removed) per docs/W1_JOB_DISPOSITION.md.
+    """
     from app.jobs.inventory_jobs import register_inventory_jobs
 
     mock_scheduler = MagicMock()
-    mock_settings = MagicMock()
-    mock_settings.po_verify_interval_min = 30
-    mock_settings.buyplan_auto_complete_hour = 18
-    mock_settings.buyplan_auto_complete_tz = "America/New_York"
+    register_inventory_jobs(mock_scheduler, MagicMock())
 
-    register_inventory_jobs(mock_scheduler, mock_settings)
-
-    assert mock_scheduler.add_job.call_count == 3
-    job_ids = [call[1]["id"] for call in mock_scheduler.add_job.call_args_list]
-    assert "po_verification" in job_ids
-    assert "stock_autocomplete" in job_ids
-    assert "buyplan_nudge" in job_ids
+    mock_scheduler.add_job.assert_not_called()
 
 
 # ── _job_buyplan_nudge ────────────────────────────────────────────────

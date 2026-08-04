@@ -1,20 +1,19 @@
-"""test_jobs_inventory.py — Tests for inventory/stock background jobs.
+"""test_jobs_inventory.py — Tests for inventory/stock background-job helpers.
 
-Covers: _job_po_verification, _job_stock_autocomplete, _parse_stock_file,
-_scan_stock_list_attachments, _download_and_import_stock_list.
+Covers: _parse_stock_file, _scan_stock_list_attachments,
+_download_and_import_stock_list. (_job_po_verification and
+_job_stock_autocomplete were deleted in W1 — docs/W1_JOB_DISPOSITION.md.)
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
 to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import BuyPlan
 from app.scheduler import scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -65,182 +64,6 @@ def _run_download(user, db, *, filename="stock.csv", vendor_name="Arrow", vendor
             vendor_email=vendor_email,
         )
     )
-
-
-# ── _job_po_verification() ────────────────────────────────────────────
-
-
-def _make_pending_verify_plan(db, test_user, test_requisition, test_quote):
-    """Create an active buy plan with a single pending_verify line."""
-    from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus
-
-    plan = BuyPlan(
-        requisition_id=test_requisition.id,
-        quote_id=test_quote.id,
-        status="active",
-        submitted_by_id=test_user.id,
-    )
-    db.add(plan)
-    db.flush()
-    db.add(
-        BuyPlanLine(
-            buy_plan_id=plan.id,
-            quantity=10,
-            status=BuyPlanLineStatus.PENDING_VERIFY.value,
-        )
-    )
-    db.commit()
-    return plan
-
-
-def test_po_verification_verifies_po_entered_plans(
-    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
-):
-    """PO verification scans active buy plans with pending_verify lines."""
-    plan = _make_pending_verify_plan(scheduler_db, test_user, test_requisition, test_quote)
-
-    with patch(
-        "app.services.buyplan_workflow.verify_po_sent",
-        new_callable=AsyncMock,
-    ) as mock_verify:
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        asyncio.run(_job_po_verification())
-        mock_verify.assert_called_once()
-        call_args = mock_verify.call_args
-        assert call_args[0][0].id == plan.id
-
-
-def test_po_verification_skips_when_no_plans(scheduler_db):
-    """No verification calls when there are no po_entered plans."""
-    with patch(
-        "app.services.buyplan_workflow.verify_po_sent",
-        new_callable=AsyncMock,
-    ) as mock_verify:
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        asyncio.run(_job_po_verification())
-        mock_verify.assert_not_called()
-
-
-def test_po_verification_handles_per_plan_error(
-    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
-):
-    """Errors during per-plan verification do not crash the job."""
-    _make_pending_verify_plan(scheduler_db, test_user, test_requisition, test_quote)
-
-    with patch(
-        "app.services.buyplan_workflow.verify_po_sent",
-        new_callable=AsyncMock,
-        side_effect=Exception("Verification failed"),
-    ):
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        asyncio.run(_job_po_verification())
-
-
-def test_po_verification_outer_exception(scheduler_db):
-    """Outer exception rolls back and re-raises so _traced_job can capture it."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        with pytest.raises(Exception, match="DB crash"):
-            asyncio.run(_job_po_verification())
-
-
-# ── _job_stock_autocomplete() ─────────────────────────────────────────
-
-
-def test_stock_autocomplete_completes_stuck_plans(
-    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
-):
-    """Stock auto-complete marks stuck stock sale plans as completed."""
-    plan = BuyPlan(
-        requisition_id=test_requisition.id,
-        quote_id=test_quote.id,
-        status="active",
-        is_stock_sale=True,
-        submitted_by_id=test_user.id,
-        approved_at=datetime.now(UTC) - timedelta(hours=2),
-    )
-    scheduler_db.add(plan)
-    scheduler_db.commit()
-
-    from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-    asyncio.run(_job_stock_autocomplete())
-    scheduler_db.refresh(plan)
-    assert plan.status == "completed"
-
-
-def test_stock_autocomplete_blocked_by_pending_verify_line(
-    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
-):
-    """The job must NOT complete past an undecided PO: a stuck stock-sale plan with a
-    PENDING_VERIFY line stays ACTIVE (_complete_plan's _has_open_po_gate guard) and no
-    completion notification fires."""
-    from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus
-
-    plan = BuyPlan(
-        requisition_id=test_requisition.id,
-        quote_id=test_quote.id,
-        status="active",
-        is_stock_sale=True,
-        submitted_by_id=test_user.id,
-        approved_at=datetime.now(UTC) - timedelta(hours=2),
-    )
-    scheduler_db.add(plan)
-    scheduler_db.flush()
-    scheduler_db.add(BuyPlanLine(buy_plan_id=plan.id, quantity=10, status=BuyPlanLineStatus.PENDING_VERIFY.value))
-    scheduler_db.commit()
-
-    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock) as mock_bg:
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        asyncio.run(_job_stock_autocomplete())
-
-    scheduler_db.refresh(plan)
-    assert plan.status == "active"
-    assert plan.completed_at is None
-    mock_bg.assert_not_called()
-
-
-def test_stock_autocomplete_handles_zero(scheduler_db):
-    """Job runs cleanly when no plans to complete."""
-    from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-    asyncio.run(_job_stock_autocomplete())
-
-
-def test_stock_autocomplete_error_handling(scheduler_db):
-    """Stock auto-complete rolls back and re-raises so _traced_job can capture it."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        with pytest.raises(Exception, match="DB error"):
-            asyncio.run(_job_stock_autocomplete())
-
-
-def test_stock_autocomplete_skips_recent_plans(
-    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
-):
-    """Stock auto-complete skips plans approved less than 1 hour ago."""
-    plan = BuyPlan(
-        requisition_id=test_requisition.id,
-        quote_id=test_quote.id,
-        status="active",
-        is_stock_sale=True,
-        submitted_by_id=test_user.id,
-        approved_at=datetime.now(UTC) - timedelta(minutes=30),
-    )
-    scheduler_db.add(plan)
-    scheduler_db.commit()
-
-    from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-    asyncio.run(_job_stock_autocomplete())
-    scheduler_db.refresh(plan)
-    assert plan.status == "active"  # not yet completed
 
 
 # ── _parse_stock_file() ──────────────────────────────────────────────

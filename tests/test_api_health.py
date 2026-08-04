@@ -561,16 +561,17 @@ def test_list_sources_does_not_auto_set_status(admin_client, db_session):
 # ── Scheduler Integration Tests ──────────────────────────────────────
 
 
-def test_scheduler_has_health_jobs():
-    """Scheduler registers health check jobs."""
+def test_scheduler_has_no_health_jobs():
+    """The four health jobs were deleted in W1 (docs/W1_JOB_DISPOSITION.md) and must
+    never re-appear in the scheduler."""
     from app.scheduler import configure_scheduler, scheduler
 
     configure_scheduler()
     job_ids = [j.id for j in scheduler.get_jobs()]
-    assert "health_ping" in job_ids
-    assert "health_deep" in job_ids
-    assert "cleanup_usage_log" in job_ids
-    assert "reset_monthly_usage" in job_ids
+    assert "health_ping" not in job_ids
+    assert "health_deep" not in job_ids
+    assert "cleanup_usage_log" not in job_ids
+    assert "reset_monthly_usage" not in job_ids
     scheduler.remove_all_jobs()
 
 

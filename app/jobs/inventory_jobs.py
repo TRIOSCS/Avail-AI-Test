@@ -1,16 +1,24 @@
-"""Inventory background jobs — PO verification, stock auto-complete, stock list parsing.
+"""Inventory background jobs — buy-plan nudge (parked) + stock list parsing helpers.
 
-Called by: app/jobs/__init__.py via register_inventory_jobs()
-Depends on: app.database, app.models, app.services.buyplan_workflow
+W1 simplification (2026-08-04, docs/W1_JOB_DISPOSITION.md):
+- po_verification DELETED (the interactive verify action in
+  routers/htmx/approvals_hub.py keeps calling verify_po_sent; §2: the gate is
+  the approver action, not a poller).
+- stock_autocomplete DELETED (zero stock-sale buy plans ever; git restores).
+- buyplan_nudge PARKED: registration removed, implementation + tests kept.
+  Comeback trigger: team exists (second buyer/ops user, per spec §5.4).
+The stock-list helpers below are NOT scheduler jobs — email_jobs.py inbox_scan
+(kernel) calls _scan_stock_list_attachments.
+
+Called by: app/jobs/__init__.py via register_inventory_jobs();
+           app/jobs/email_jobs.py via _scan_stock_list_attachments()
+Depends on: app.database, app.models, app.services.buyplan_notifications
 """
 
-import asyncio
 import base64
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy.exc
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..constants import RequisitionStatus
@@ -19,107 +27,11 @@ from ..services.price_snapshot_service import record_price_snapshot
 
 
 def register_inventory_jobs(scheduler, settings):
-    """Register inventory/buy-plan jobs with the scheduler."""
-    scheduler.add_job(
-        _job_po_verification,
-        IntervalTrigger(minutes=settings.po_verify_interval_min),
-        id="po_verification",
-        name="PO verification",
-    )
-    scheduler.add_job(
-        _job_stock_autocomplete,
-        CronTrigger(hour=settings.buyplan_auto_complete_hour, timezone=settings.buyplan_auto_complete_tz),
-        id="stock_autocomplete",
-        name="Stock sale auto-complete",
-    )
-    scheduler.add_job(
-        _job_buyplan_nudge,
-        IntervalTrigger(minutes=30),
-        id="buyplan_nudge",
-        name="Buy plan unconfirmed-instruction nudge",
-    )
+    """Register inventory/buy-plan jobs with the scheduler — none since W1 (no-op).
 
-
-@_traced_job
-async def _job_po_verification():
-    """Verify PO sent status for active buy plans with pending_verify lines."""
-    from ..database import SessionLocal
-    from ..models.buy_plan import BuyPlan, BuyPlanLineStatus, BuyPlanStatus
-
-    db = SessionLocal()
-    try:
-        from ..services.buyplan_workflow import verify_po_sent
-
-        # Find active plans that have lines in pending_verify status
-        plans = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.ACTIVE.value).all()
-        # Filter to plans with at least one pending_verify line
-        plans_to_verify = [
-            p for p in plans if any(line.status == BuyPlanLineStatus.PENDING_VERIFY.value for line in p.lines)
-        ]
-
-        async def _safe_verify(plan):
-            try:
-                await verify_po_sent(plan, db)
-            except Exception as e:
-                logger.exception(f"PO verify error for plan {plan.id}: {e}")
-
-        if plans_to_verify:
-            await asyncio.gather(*[_safe_verify(p) for p in plans_to_verify])
-            # verify_po_sent flushes (not commits); the job owns the transaction.
-            db.commit()
-    except Exception as e:
-        logger.exception(f"PO verification scan error: {e}")
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_stock_autocomplete():
-    """Auto-complete stock sales stuck in active for 1+ hours (safety net)."""
-    from ..database import SessionLocal
-    from ..models.buy_plan import BuyPlan, BuyPlanStatus
-
-    db = SessionLocal()
-    try:
-        cutoff = datetime.now(UTC) - timedelta(hours=1)
-        stuck = (
-            db.query(BuyPlan)
-            .filter(
-                BuyPlan.is_stock_sale == True,  # noqa: E712
-                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
-                BuyPlan.approved_at < cutoff,
-            )
-            .all()
-        )
-
-        from ..services.buyplan_notifications import notify_stock_sale_approved, run_notify_bg
-        from ..services.buyplan_workflow import _complete_plan
-
-        completed_ids = []
-        for plan in stuck:
-            # Route through the shared completion helper so a case report is generated
-            # (matches the normal auto-complete path; no silent direct status flip).
-            # _complete_plan REFUSES (warn + no-op) while a line's PO is still
-            # PENDING_VERIFY — never auto-complete past an undecided PO sign-off.
-            _complete_plan(plan, db)
-            if plan.status != BuyPlanStatus.COMPLETED.value:
-                continue
-            logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
-            completed_ids.append(plan.id)
-
-        if completed_ids:
-            db.commit()
-            logger.info(f"Stock sale auto-complete: {len(completed_ids)} plan(s) completed")
-            for plan_id in completed_ids:
-                await run_notify_bg(notify_stock_sale_approved, plan_id)
-    except Exception as e:
-        logger.exception(f"Stock sale auto-complete error: {e}")
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    buyplan_nudge is parked (implementation below); po_verification and
+    stock_autocomplete were deleted. See the module docstring.
+    """
 
 
 @_traced_job

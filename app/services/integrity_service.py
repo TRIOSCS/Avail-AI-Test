@@ -3,11 +3,12 @@
 Provides continuous integrity monitoring and self-healing for the material card
 linkage system.  Designed to catch and repair data issues before they cost deals.
 
-Checks run every 6 hours via scheduler.  Any orphaned records (have MPN but no
-material_card_id) are automatically re-linked.  Alert-level log lines use the
-prefix INTEGRITY_ALERT for easy monitoring.
+Checks run on demand only — the 6-hourly scheduler job (integrity_check) was
+deleted in W1 (docs/W1_JOB_DISPOSITION.md).  Any orphaned records (have MPN but
+no material_card_id) are automatically re-linked.  Alert-level log lines use
+the prefix INTEGRITY_ALERT for easy monitoring.
 
-Called by: scheduler.py (_job_integrity_check)
+Called by: routers/admin/system.py (on-demand integrity endpoint)
 Depends on: models (MaterialCard, Requirement, Sighting, Offer), search_service
 """
 
