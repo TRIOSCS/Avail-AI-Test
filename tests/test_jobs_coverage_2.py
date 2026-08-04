@@ -27,6 +27,25 @@ from sqlalchemy.orm import Session
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _azure_configured_for_token_jobs():
+    """W1.15: the token-refresh job skips without Azure creds (keys-off guard); these
+    tests exercise a CONFIGURED deployment.
+
+    The guard's own test lives in
+    tests/test_core_jobs.py::TestJobTokenRefresh::test_keys_off_skips_with_notice.
+    """
+    from unittest.mock import patch as _patch
+
+    from app.config import settings as _settings
+
+    with (
+        _patch.object(_settings, "azure_client_id", "test-client"),
+        _patch.object(_settings, "azure_tenant_id", "test-tenant"),
+    ):
+        yield
+
+
 def _run(coro):
     """Run an async coroutine synchronously."""
     loop = asyncio.new_event_loop()
@@ -78,26 +97,23 @@ def _digikey_config():
 
 
 class TestRegisterOffersJobs:
-    """Tests for register_offers_jobs()."""
+    """Tests for register_offers_jobs() after the Wave-1 park/delete pass."""
 
     @pytest.mark.parametrize(
-        "enabled, scan_interval_hours, expected_jobs",
+        "push_enabled, expected_jobs",
         [
-            # 6 jobs: proactive_matching + performance_tracking + proactive_offer_expiry
-            # + flag_stale_offers + expire_strategic_vendors + warn_strategic_expiring
-            pytest.param(True, 4, 6, id="enabled"),
-            # 5 jobs (no proactive_matching)
-            pytest.param(False, None, 5, id="disabled"),
-            pytest.param(True, 0, 6, id="interval_below_min"),
+            # Only proactive_teams_push remains registrable, on an explicit True.
+            pytest.param(True, 1, id="push_enabled"),
+            pytest.param(False, 0, id="push_disabled"),
         ],
     )
-    def test_register(self, enabled, scan_interval_hours, expected_jobs):
+    def test_register(self, push_enabled, expected_jobs):
         from app.jobs.offers_jobs import register_offers_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
-        settings.proactive_matching_enabled = enabled
-        settings.proactive_scan_interval_hours = scan_interval_hours
+        settings.proactive_teams_push_enabled = push_enabled
+        settings.proactive_scan_interval_hours = 4
 
         register_offers_jobs(scheduler, settings)
         assert scheduler.add_job.call_count == expected_jobs
@@ -274,436 +290,24 @@ class TestJobPerformanceTracking:
         mock_db.close.assert_called_once()
 
 
-class TestJobProactiveOfferExpiry:
-    """Tests for _job_proactive_offer_expiry()."""
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_expires_stale_offers(self, mock_logger):
-        from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 3
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_proactive_offer_expiry.__wrapped__())
-
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_no_stale_offers(self, mock_logger):
-        from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 0
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_proactive_offer_expiry.__wrapped__())
-
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_sqlalchemy_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = sqlalchemy.exc.SQLAlchemyError("db error")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_proactive_offer_expiry.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = RuntimeError("boom")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_proactive_offer_expiry.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobFlagStaleOffers:
-    """Tests for _job_flag_stale_offers()."""
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_flags_stale_offers(self, mock_logger):
-        from app.jobs.offers_jobs import _job_flag_stale_offers
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 5
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_flag_stale_offers.__wrapped__())
-
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_no_stale_offers(self, mock_logger):
-        from app.jobs.offers_jobs import _job_flag_stale_offers
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.return_value = 0
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_flag_stale_offers.__wrapped__())
-
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_sqlalchemy_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.offers_jobs import _job_flag_stale_offers
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.update.side_effect = sqlalchemy.exc.SQLAlchemyError("err")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_flag_stale_offers.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobExpireStrategicVendors:
-    """Tests for _job_expire_strategic_vendors()."""
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_expires_vendors(self, mock_logger):
-        from app.jobs.offers_jobs import _job_expire_strategic_vendors
-
-        mock_db = _mock_db()
-
-        with patch("app.services.strategic_vendor_service.expire_stale", return_value=3) as mock_expire:
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_expire_strategic_vendors.__wrapped__())
-
-        mock_expire.assert_called_once_with(mock_db)
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_no_expired_vendors(self, mock_logger):
-        from app.jobs.offers_jobs import _job_expire_strategic_vendors
-
-        mock_db = _mock_db()
-
-        with patch("app.services.strategic_vendor_service.expire_stale", return_value=0):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_expire_strategic_vendors.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_sqlalchemy_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.offers_jobs import _job_expire_strategic_vendors
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.strategic_vendor_service.expire_stale",
-            side_effect=sqlalchemy.exc.SQLAlchemyError("err"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_expire_strategic_vendors.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.offers_jobs import _job_expire_strategic_vendors
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.strategic_vendor_service.expire_stale",
-            side_effect=RuntimeError("boom"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_expire_strategic_vendors.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobWarnStrategicExpiring:
-    """Tests for _job_warn_strategic_expiring()."""
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_warns_expiring_vendors(self, mock_logger):
-        from app.jobs.offers_jobs import _job_warn_strategic_expiring
-
-        mock_db = _mock_db()
-
-        sv = MagicMock()
-        sv.id = 1
-        sv.user_id = 10
-        sv.expires_at = datetime.now(UTC) + timedelta(days=3)
-        sv.vendor_card.display_name = "Acme Parts"
-
-        # No existing log entry
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-
-        with patch(
-            "app.services.strategic_vendor_service.get_expiring_soon",
-            return_value=[sv],
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_warn_strategic_expiring.__wrapped__())
-
-        mock_db.add.assert_called_once()
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_skips_existing_warning(self, mock_logger):
-        from app.jobs.offers_jobs import _job_warn_strategic_expiring
-
-        mock_db = _mock_db()
-
-        sv = MagicMock()
-        sv.id = 1
-        sv.user_id = 10
-        sv.expires_at = datetime.now(UTC) + timedelta(days=3)
-        sv.vendor_card.display_name = "Acme Parts"
-
-        # Existing log entry found
-        mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(id=99)
-
-        with patch(
-            "app.services.strategic_vendor_service.get_expiring_soon",
-            return_value=[sv],
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_warn_strategic_expiring.__wrapped__())
-
-        mock_db.add.assert_not_called()
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_naive_expires_at(self, mock_logger):
-        """Test that naive datetime gets tzinfo added."""
-        from app.jobs.offers_jobs import _job_warn_strategic_expiring
-
-        mock_db = _mock_db()
-
-        sv = MagicMock()
-        sv.id = 1
-        sv.user_id = 10
-        sv.expires_at = datetime(2026, 3, 30, 12, 0)  # naive
-        sv.vendor_card.display_name = "NaiveTZ Corp"
-
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-
-        with patch(
-            "app.services.strategic_vendor_service.get_expiring_soon",
-            return_value=[sv],
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_warn_strategic_expiring.__wrapped__())
-
-        mock_db.add.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_no_expiring_vendors(self, mock_logger):
-        from app.jobs.offers_jobs import _job_warn_strategic_expiring
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.strategic_vendor_service.get_expiring_soon",
-            return_value=[],
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_warn_strategic_expiring.__wrapped__())
-
-        mock_db.add.assert_not_called()
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_sqlalchemy_error(self, mock_logger):
-        import sqlalchemy.exc
-
-        from app.jobs.offers_jobs import _job_warn_strategic_expiring
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.strategic_vendor_service.get_expiring_soon",
-            side_effect=sqlalchemy.exc.SQLAlchemyError("err"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_warn_strategic_expiring.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
 # ===========================================================================
 # inventory_jobs.py
 # ===========================================================================
 
 
 class TestRegisterInventoryJobs:
-    def test_registers_three_jobs(self):
+    def test_registers_no_jobs(self):
+        """register_inventory_jobs registers NOTHING (W1 simplification, 2026-08-04).
+
+        po_verification + stock_autocomplete deleted, buyplan_nudge parked
+        (implementation kept, registration removed) per docs/W1_JOB_DISPOSITION.md.
+        """
         from app.jobs.inventory_jobs import register_inventory_jobs
 
         scheduler = MagicMock()
-        settings = MagicMock()
-        settings.po_verify_interval_min = 15
-        settings.buyplan_auto_complete_hour = 3
-        settings.buyplan_auto_complete_tz = "UTC"
+        register_inventory_jobs(scheduler, MagicMock())
 
-        register_inventory_jobs(scheduler, settings)
-        # po_verification + stock_autocomplete + buyplan_nudge
-        assert scheduler.add_job.call_count == 3
-
-
-class TestJobPoVerification:
-    """Tests for _job_po_verification()."""
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_no_plans_to_verify(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_po_verification.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_plans_with_pending_verify_lines(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        mock_db = _mock_db()
-
-        line = MagicMock()
-        line.status = "pending_verify"
-        plan = MagicMock()
-        plan.id = 1
-        plan.lines = [line]
-        mock_db.query.return_value.filter.return_value.all.return_value = [plan]
-
-        with patch(
-            "app.services.buyplan_workflow.verify_po_sent",
-            new_callable=AsyncMock,
-        ) as mock_verify:
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_po_verification.__wrapped__())
-
-            mock_verify.assert_called_once_with(plan, mock_db)
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_verify_error_per_plan(self, mock_logger):
-        """Individual plan verify errors are caught per-plan (not propagated)."""
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        mock_db = _mock_db()
-
-        line = MagicMock()
-        line.status = "pending_verify"
-        plan = MagicMock()
-        plan.id = 1
-        plan.lines = [line]
-        mock_db.query.return_value.filter.return_value.all.return_value = [plan]
-
-        with patch(
-            "app.services.buyplan_workflow.verify_po_sent",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("verify failed"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                # Should NOT raise — _safe_verify catches it
-                _run(_job_po_verification.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_scan_error(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_po_verification
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.side_effect = RuntimeError("db boom")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(RuntimeError, match="db boom"):
-                _run(_job_po_verification.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobStockAutocomplete:
-    """Tests for _job_stock_autocomplete()."""
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_completes_stuck_plans(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        mock_db = _mock_db()
-
-        plan = MagicMock()
-        plan.id = 1
-        plan.is_stock_sale = True
-        plan.status = "active"
-        plan.approved_at = datetime.now(UTC) - timedelta(hours=2)
-        mock_db.query.return_value.filter.return_value.all.return_value = [plan]
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_stock_autocomplete.__wrapped__())
-
-        assert plan.status == "completed"
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_no_stuck_plans(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            _run(_job_stock_autocomplete.__wrapped__())
-
-        mock_db.commit.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.inventory_jobs.logger")
-    def test_error_rolls_back(self, mock_logger):
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.all.side_effect = RuntimeError("fail")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with pytest.raises(RuntimeError, match="fail"):
-                _run(_job_stock_autocomplete.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
+        scheduler.add_job.assert_not_called()
 
 
 class TestParseStockFile:
@@ -749,23 +353,16 @@ class TestParseStockFile:
 
 
 class TestRegisterCoreJobs:
-    @pytest.mark.parametrize(
-        "activity_tracking_enabled, expected_jobs",
-        [
-            pytest.param(True, 6, id="with_activity_tracking"),
-            pytest.param(False, 5, id="without_activity_tracking"),
-        ],
-    )
-    def test_registers(self, activity_tracking_enabled, expected_jobs):
+    def test_registers(self):
+        """Exactly the 3 kernel core jobs (token refresh, inbox scan, batch results)."""
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 5
-        settings.activity_tracking_enabled = activity_tracking_enabled
 
         register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == expected_jobs
+        assert scheduler.add_job.call_count == 3
 
 
 class TestJobTokenRefresh:
@@ -913,175 +510,6 @@ class TestJobBatchResults:
                 with pytest.raises(ValueError, match="bad"):
                     _run(_job_batch_results.__wrapped__())
 
-        mock_db.close.assert_called_once()
-
-
-class TestJobBatchParseSignatures:
-    """Tests for _job_batch_parse_signatures()."""
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_happy_path(self, mock_logger):
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            return_value="batch-123",
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_batch_parse_signatures.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_no_batch(self, mock_logger):
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_batch_parse_signatures.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_timeout(self, mock_logger):
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            side_effect=asyncio.TimeoutError,
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                with pytest.raises(asyncio.TimeoutError):
-                    _run(_job_batch_parse_signatures.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobPollSignatureBatch:
-    """Tests for _job_poll_signature_batch()."""
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_happy_path(self, mock_logger):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            return_value={"applied": 5, "errors": 1},
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_poll_signature_batch.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_no_results(self, mock_logger):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_poll_signature_batch.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.jobs.core_jobs.asyncio.wait_for",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("fail"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                with pytest.raises(RuntimeError, match="fail"):
-                    _run(_job_poll_signature_batch.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobWebhookSubscriptions:
-    """Tests for _job_webhook_subscriptions()."""
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_happy_path(self, mock_logger):
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.webhook_service.renew_expiring_subscriptions",
-            new_callable=AsyncMock,
-        ):
-            with patch(
-                "app.services.webhook_service.ensure_all_users_subscribed",
-                new_callable=AsyncMock,
-            ):
-                with patch("app.database.SessionLocal", return_value=mock_db):
-                    _run(_job_webhook_subscriptions.__wrapped__())
-
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_http_error(self, mock_logger):
-        import httpx
-
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.webhook_service.renew_expiring_subscriptions",
-            new_callable=AsyncMock,
-            side_effect=httpx.HTTPError("network error"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                with pytest.raises(httpx.HTTPError):
-                    _run(_job_webhook_subscriptions.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.core_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.core_jobs import _job_webhook_subscriptions
-
-        mock_db = _mock_db()
-
-        with patch(
-            "app.services.webhook_service.renew_expiring_subscriptions",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("fail"),
-        ):
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                with pytest.raises(RuntimeError, match="fail"):
-                    _run(_job_webhook_subscriptions.__wrapped__())
-
-        mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
 
@@ -1844,59 +1272,6 @@ class TestApplyEnrichmentToCard:
                     _apply_enrichment_to_card(card, enrichment, db)
 
         mock_tag.assert_called_once()
-
-
-class TestBoostConfidenceInternal:
-    def test_no_rows_to_boost(self):
-        from app.services.enrichment import boost_confidence_internal
-
-        db = MagicMock(spec=Session)
-        # All query chains return empty lists for .all()
-        # The function has 3 while-True loops that all call .all() and break on empty
-        chain = MagicMock()
-        chain.all.return_value = []
-        chain.join.return_value = chain
-        chain.filter.return_value = chain
-        chain.order_by.return_value = chain
-        chain.limit.return_value = chain
-        chain.update.return_value = 0
-        db.query.return_value = chain
-
-        result = boost_confidence_internal(db)
-        assert result["total_boosted"] == 0
-        assert result["sighting_boosted"] == 0
-        assert result["multi_source_boosted"] == 0
-
-    def test_boosts_single_phase1_row(self):
-        from app.services.enrichment import boost_confidence_internal
-
-        db = MagicMock(spec=Session)
-
-        row = MagicMock()
-        row.id = 1
-
-        # Use a counter to return rows on first call, empty on subsequent
-        all_calls = [0]
-
-        def all_side_effect():
-            all_calls[0] += 1
-            # First .all() call (Phase 1, batch 1) returns a row
-            if all_calls[0] == 1:
-                return [row]
-            # All subsequent .all() calls return empty (exit loops)
-            return []
-
-        chain = MagicMock()
-        chain.all.side_effect = all_side_effect
-        chain.join.return_value = chain
-        chain.filter.return_value = chain
-        chain.order_by.return_value = chain
-        chain.limit.return_value = chain
-        chain.update.return_value = 1
-        db.query.return_value = chain
-
-        result = boost_confidence_internal(db)
-        assert result["total_boosted"] == 1
 
 
 class TestNexarBulkValidate:

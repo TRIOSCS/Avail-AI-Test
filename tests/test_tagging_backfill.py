@@ -1,7 +1,7 @@
 """Tests for tagging backfill service and admin endpoints.
 
 Called by: pytest
-Depends on: app.services.tagging_backfill, app.routers.tagging_admin, app.models
+Depends on: app.services.tagging_backfill, app.models
 """
 
 from datetime import UTC, datetime
@@ -33,22 +33,6 @@ def _make_card(db, mpn, manufacturer=None, category=None):
     db.commit()
     db.refresh(card)
     return card
-
-
-def _add_sighting(db, req_item, card, vendor_name, manufacturer, mpn):
-    """Add a test Sighting linking a requirement to a material card."""
-    from app.models.sourcing import Sighting
-
-    s = Sighting(
-        requirement_id=req_item.id,
-        material_card_id=card.id,
-        vendor_name=vendor_name,
-        manufacturer=manufacturer,
-        mpn_matched=mpn,
-        source_type="test",
-    )
-    db.add(s)
-    return s
 
 
 # ── seed_from_existing_manufacturers ───────────────────────────────────
@@ -255,141 +239,6 @@ def test_analyze_untagged_prefixes_empty(db_session):
 
     results = analyze_untagged_prefixes(db_session)
     assert results == []
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  backfill_manufacturer_from_sightings — lines 204-299
-# ═══════════════════════════════════════════════════════════════════════
-
-
-def test_backfill_mfr_sightings_no_untagged(db_session):
-    """No untagged cards → early return with zeros."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result == {"total_processed": 0, "total_tagged": 0, "total_skipped": 0}
-
-
-def test_backfill_mfr_sightings_consensus_3_plus(db_session, test_requisition):
-    """3+ sightings same manufacturer → sighting_consensus at 0.95."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-CONSENSUS-3")
-    req_item = test_requisition.requirements[0]
-
-    for i in range(3):
-        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Texas Instruments", "BF-CONSENSUS-3")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_tagged"] == 1
-    assert result["total_skipped"] == 0
-    db_session.refresh(card)
-    assert card.manufacturer == "Texas Instruments"
-
-
-def test_backfill_mfr_sightings_2_agree(db_session, test_requisition):
-    """2 sightings same manufacturer → sighting_consensus at 0.90."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-TWOVOTE")
-    req_item = test_requisition.requirements[0]
-
-    for i in range(2):
-        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Analog Devices", "BF-TWOVOTE")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_tagged"] == 1
-
-
-def test_backfill_mfr_sightings_single_skipped(db_session, test_requisition):
-    """Single sighting with single distinct source → skipped (below 0.90 floor)."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-SINGLE")
-    req_item = test_requisition.requirements[0]
-
-    _add_sighting(db_session, req_item, card, "Vendor1", "OnSemi", "BF-SINGLE")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_skipped"] == 1
-    assert result["total_tagged"] == 0
-
-
-def test_backfill_mfr_sightings_junk_filtered(db_session, test_requisition):
-    """Junk manufacturers ('Unknown', 'N/A', etc.) are filtered out."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-JUNK")
-    req_item = test_requisition.requirements[0]
-
-    for junk in ["Unknown", "N/A", "Various"]:
-        _add_sighting(db_session, req_item, card, "Vendor", junk, "BF-JUNK")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_skipped"] == 1
-
-
-def test_backfill_mfr_sightings_no_sightings(db_session):
-    """Card with no sightings → skipped."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    _make_card(db_session, "BF-NOSIGHT")
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_skipped"] == 1
-
-
-def test_backfill_mfr_sightings_keeps_existing_manufacturer(db_session, test_requisition):
-    """If card.manufacturer already set, don't overwrite."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-KEEPMFR", manufacturer="Original Corp")
-    req_item = test_requisition.requirements[0]
-
-    for i in range(3):
-        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Different Corp", "BF-KEEPMFR")
-    db_session.flush()
-
-    backfill_manufacturer_from_sightings(db_session)
-    db_session.refresh(card)
-    assert card.manufacturer == "Original Corp"
-
-
-def test_backfill_mfr_sightings_distinct_sources_triggers_consensus(db_session, test_requisition):
-    """2+ distinct manufacturers (even with count=1 each) → sighting_consensus at
-    0.90."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    card = _make_card(db_session, "BF-MULTISRC")
-    req_item = test_requisition.requirements[0]
-
-    _add_sighting(db_session, req_item, card, "VendorA", "TI", "BF-MULTISRC")
-    _add_sighting(db_session, req_item, card, "VendorB", "Analog Devices", "BF-MULTISRC")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session)
-    assert result["total_tagged"] == 1
-
-
-def test_backfill_mfr_sightings_batch_processing(db_session, test_requisition):
-    """Processes cards across batch boundaries."""
-    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
-
-    req_item = test_requisition.requirements[0]
-
-    for i in range(3):
-        card = _make_card(db_session, f"BF-BATCH{i}")
-        for j in range(3):
-            _add_sighting(db_session, req_item, card, f"Vendor{j}", "TI", f"BF-BATCH{i}")
-    db_session.flush()
-
-    result = backfill_manufacturer_from_sightings(db_session, batch_size=2)
-    assert result["total_processed"] == 3
-    assert result["total_tagged"] == 3
 
 
 # ═══════════════════════════════════════════════════════════════════════

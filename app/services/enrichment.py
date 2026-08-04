@@ -4,7 +4,7 @@ Queries DigiKey, Mouser, Element14, OEMSecrets, BrokerBin, and Nexar to
 enrich MaterialCards with manufacturer and category information. Used for
 both live enrichment (new cards) and background backfill (low-confidence).
 
-Called by: app.search_service (live hook), app.routers.tagging_admin, app.scheduler
+Called by: app.search_service (live hook)
 Depends on: app.connectors.*, app.services.credential_service, app.services.tagging
 """
 
@@ -12,7 +12,6 @@ import asyncio
 import importlib
 
 from loguru import logger
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -374,146 +373,6 @@ async def harvest_ebay_titles(mpn: str, card: MaterialCard, db: Session) -> int:
     except Exception:
         logger.exception("eBay-title mining failed for card_id={}", card.id)
     return written
-
-
-def _run_boost_loop(db: Session, base_query, confidence: float, source: str, label: str, batch_size: int) -> int:
-    """Page through a tag-id query and bulk-upgrade each batch to (confidence, source).
-
-    ``base_query`` selects ``MaterialTag.id`` with all phase-specific filters EXCEPT the
-    ``MaterialTag.id > last_id`` keyset cursor, which this loop appends per batch. Returns
-    the total number of tags upgraded.
-    """
-    from app.models.tags import MaterialTag
-
-    boosted = 0
-    last_id = 0
-
-    while True:
-        rows = base_query.filter(MaterialTag.id > last_id).order_by(MaterialTag.id).limit(batch_size).all()
-        if not rows:
-            break
-
-        mt_ids = list({r.id for r in rows})
-        last_id = max(mt_ids)
-
-        boosted += (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update({"confidence": confidence, "source": source}, synchronize_session="fetch")
-        )
-        db.commit()
-        logger.info(f"{label}: {boosted} tags upgraded so far")
-
-    return boosted
-
-
-def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
-    """Boost confidence for AI tags confirmed by internal data (no API calls).
-
-    Phase 1: Cards where MaterialCard.manufacturer matches the AI-classified brand tag.
-    If the card's manufacturer field (set from sightings/connectors) agrees with
-    the AI tag, the AI was right — upgrade confidence from 0.7 to 0.90.
-
-    Processes in batches to avoid locking the DB.
-
-    Returns: {total_boosted, total_checked}
-    """
-    from sqlalchemy import func
-
-    from app.models.sourcing import Sighting
-    from app.models.tags import MaterialTag, Tag
-
-    # A sighting manufacturer confirms a brand tag when the two names match exactly or
-    # one contains the other (the SQL twin of ``_manufacturers_agree``).
-    sighting_confirms_tag = or_(
-        func.lower(Sighting.manufacturer) == func.lower(Tag.name),
-        func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
-        func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
-    )
-
-    # Phase 1: card manufacturer confirms an AI-classified brand tag.
-    total_boosted = _run_boost_loop(
-        db,
-        db.query(MaterialTag.id)
-        .join(Tag, MaterialTag.tag_id == Tag.id)
-        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-        .filter(
-            Tag.tag_type == "brand",
-            MaterialTag.source == "ai_classified",
-            MaterialTag.confidence < 0.9,
-            MaterialTag.confidence > 0.3,  # Skip "Unknown"
-            MaterialCard.manufacturer.isnot(None),
-            MaterialCard.manufacturer != "",
-            func.lower(MaterialCard.manufacturer) == func.lower(Tag.name),
-        ),
-        confidence=0.90,
-        source="ai_confirmed_internal",
-        label="Confidence boost",
-        batch_size=batch_size,
-    )
-    logger.info(f"Internal confidence boost complete: {total_boosted} tags upgraded to 0.90")
-
-    # Phase 2 (fuzzy boost to 0.85) and Phase 3 (commodity boost to 0.85) removed —
-    # both produce sub-0.90 confidence, below the minimum floor.
-    fuzzy_boosted = 0
-    commodity_boosted = 0
-
-    # Phase 4: Sighting-confirmed — sighting manufacturer confirms existing brand tag (0.30-0.89).
-    sighting_boosted = _run_boost_loop(
-        db,
-        db.query(MaterialTag.id)
-        .join(Tag, MaterialTag.tag_id == Tag.id)
-        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-        .join(Sighting, Sighting.material_card_id == MaterialCard.id)
-        .filter(
-            Tag.tag_type == "brand",
-            MaterialTag.confidence < 0.9,
-            MaterialTag.confidence > 0.3,
-            Sighting.manufacturer.isnot(None),
-            Sighting.manufacturer != "",
-            sighting_confirms_tag,
-        ),
-        confidence=0.90,
-        source="sighting_confirmed",
-        label="Sighting-confirmed boost",
-        batch_size=batch_size,
-    )
-    if sighting_boosted:
-        logger.info(f"Sighting-confirmed boost: {sighting_boosted} tags upgraded to 0.90")
-
-    # Phase 5: Multi-source agreement — AI + sighting independently agree → 0.95.
-    multi_boosted = _run_boost_loop(
-        db,
-        db.query(MaterialTag.id)
-        .join(Tag, MaterialTag.tag_id == Tag.id)
-        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-        .join(Sighting, Sighting.material_card_id == MaterialCard.id)
-        .filter(
-            Tag.tag_type == "brand",
-            MaterialTag.source.in_(
-                ["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]
-            ),
-            MaterialTag.confidence < 0.95,
-            MaterialTag.confidence >= 0.7,
-            Sighting.manufacturer.isnot(None),
-            Sighting.manufacturer != "",
-            sighting_confirms_tag,
-        ),
-        confidence=0.95,
-        source="multi_source_confirmed",
-        label="Multi-source boost",
-        batch_size=batch_size,
-    )
-    if multi_boosted:
-        logger.info(f"Multi-source boost: {multi_boosted} tags upgraded to 0.95")
-
-    return {
-        "total_boosted": total_boosted,
-        "fuzzy_boosted": fuzzy_boosted,
-        "commodity_boosted": commodity_boosted,
-        "sighting_boosted": sighting_boosted,
-        "multi_source_boosted": multi_boosted,
-    }
 
 
 async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:

@@ -6,7 +6,7 @@ Two-step process:
 
 Both are idempotent (skip already-tagged cards) and batched for memory safety.
 
-Called by: app.scheduler, app.routers.tagging_admin
+Called by: app/management/prefix_backfill.py (on-demand; W1 removed the scheduled jobs)
 Depends on: app.models.tags, app.models.intelligence, app.services.tagging
 """
 
@@ -17,7 +17,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
-from app.models.sourcing import Sighting
 from app.models.tags import MaterialTag
 from app.services.tagging import (
     classify_material_card,
@@ -25,7 +24,6 @@ from app.services.tagging import (
     get_or_create_commodity_tag,
     tag_material_card,
 )
-from app.shared_constants import JUNK_MANUFACTURERS
 
 
 def _untagged_card_filter(db: Session):
@@ -197,111 +195,6 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
         "total_unmatched": total_unmatched,
         "new_brands_discovered": len(new_brands),
     }
-
-
-def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> dict:
-    """Mine sighting manufacturer data for untagged material cards.
-
-    For each untagged card, find the most common non-empty manufacturer
-    across its sightings (majority vote). Apply as brand tag with
-    confidence based on agreement level:
-    - 3+ sources agree: 0.95 (source='sighting_consensus')
-    - 2 sources agree: 0.90 (source='sighting_consensus')
-    - 1 source only: 0.85 (source='sighting_single')
-
-    Called by: app.routers.tagging_admin, app.scheduler
-    """
-    total_untagged = _count_untagged_cards(db)
-
-    if not total_untagged:
-        logger.info("Sighting mining: no untagged cards")
-        return {"total_processed": 0, "total_tagged": 0, "total_skipped": 0}
-
-    logger.info(f"Sighting mining: {total_untagged} untagged cards to process")
-
-    total_processed = 0
-    total_tagged = 0
-    total_skipped = 0
-    last_id = 0
-
-    while True:
-        cards = (
-            db.query(MaterialCard)
-            .filter(
-                _untagged_card_filter(db),
-                MaterialCard.id > last_id,
-            )
-            .order_by(MaterialCard.id)
-            .limit(batch_size)
-            .all()
-        )
-        if not cards:
-            break
-
-        for card in cards:
-            last_id = card.id
-            total_processed += 1
-
-            # Get distinct manufacturer values from sightings for this card
-            sighting_mfrs = (
-                db.query(Sighting.manufacturer)
-                .filter(
-                    Sighting.material_card_id == card.id,
-                    Sighting.manufacturer.isnot(None),
-                    Sighting.manufacturer != "",
-                )
-                .all()
-            )
-
-            # Filter junk and count occurrences
-            mfr_counts: Counter = Counter()
-            for (mfr,) in sighting_mfrs:
-                cleaned = mfr.strip()
-                if cleaned.lower() not in JUNK_MANUFACTURERS:
-                    mfr_counts[cleaned] += 1
-
-            if not mfr_counts:
-                total_skipped += 1
-                continue
-
-            # Majority vote: pick the most common manufacturer
-            winner, count = mfr_counts.most_common(1)[0]
-            distinct_sources = len(mfr_counts)
-
-            # Confidence based on agreement level (min 0.90 floor)
-            if count >= 3:
-                confidence = 0.95
-                source = "sighting_consensus"
-            elif count >= 2 or distinct_sources >= 2:
-                confidence = 0.90
-                source = "sighting_consensus"
-            else:
-                # Single sighting = 0.85, below 0.90 floor — skip
-                total_skipped += 1
-                continue
-
-            # Update card manufacturer if not set
-            if not card.manufacturer:
-                card.manufacturer = winner
-
-            # Create brand tag
-            brand_tag = get_or_create_brand_tag(winner, db)
-            if brand_tag.id is None:
-                db.flush()
-            tag_material_card(
-                card.id,
-                [{"tag_id": brand_tag.id, "source": source, "confidence": confidence}],
-                db,
-            )
-            total_tagged += 1
-
-        db.commit()
-        logger.info(f"Sighting mining: {total_processed}/{total_untagged} — {total_tagged} tagged")
-
-    logger.info(
-        f"Sighting mining complete: {total_processed} processed, {total_tagged} tagged, {total_skipped} skipped"
-    )
-    return {"total_processed": total_processed, "total_tagged": total_tagged, "total_skipped": total_skipped}
 
 
 def purge_unknown_tags(db: Session, batch_size: int = 1000) -> dict:

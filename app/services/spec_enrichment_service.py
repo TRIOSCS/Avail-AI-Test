@@ -2,8 +2,8 @@
 
 What: Extracts per-commodity structured specs for material cards via Claude and
       writes them through record_spec (specs_structured JSONB + material_spec_facets).
-Called by: jobs/tagging_jobs.py (_job_spec_enrichment), routers/htmx_views.py
-           (enrich button), app/management/enrich_specs.py (backfill).
+Called by: routers/htmx_views.py (enrich button), app/management/enrich_specs.py
+           (on-demand backfill; W1 removed the scheduled spec_enrichment job).
 Depends on: commodity_registry.get_batch_spec_schema, spec_write_service.record_spec,
             utils.claude_client.claude_structured.
 """
@@ -241,9 +241,9 @@ async def enrich_card_specs(
             #     on this commit; that batch's results are lost, and the cards simply
             #     re-enter via the next batch's re-selection because enrichment_status
             #     rolled back with them);
-            # (2) three of the four callers (the 2h scheduler job _job_spec_enrichment,
-            #     the htmx Enrich button, app/management/enrich_specs.py) have NO
-            #     commit of their own — this commit IS their persistence;
+            # (2) two of the three callers (the htmx Enrich button and
+            #     app/management/enrich_specs.py) have NO commit of their own —
+            #     this commit IS their persistence;
             # (3) the enrichment worker (run_one_batch) shares its batch session, so
             #     the FIRST chunk commit here also persists the batch's pending
             #     core-attr/decode/crosswalk writes; the worker's batch-final commit

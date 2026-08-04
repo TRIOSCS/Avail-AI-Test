@@ -1,22 +1,19 @@
 """test_jobs_coverage.py — Coverage gap tests for job modules at 0%.
 
 Covers missing tests for:
-  - health_jobs: register_health_jobs
-  - prospecting_jobs: register_prospecting_jobs (enabled + disabled)
-  - task_jobs: register_task_jobs, _job_bid_due_alerts (all branches)
-  - knowledge_jobs: _job_expire_stale
-  - tagging_jobs: register_tagging_jobs, _job_internal_boost, _job_prefix_backfill,
-                  _job_sighting_mining, _job_ai_tagging
-  - maintenance_jobs: register_maintenance_jobs, _job_contact_dedup
+  - health_jobs: register_health_jobs (no-op since W1 — pollers removed)
+  - prospecting_jobs: register_prospecting_jobs (W1 no-op guard)
+  - task_jobs: register_task_jobs (no-op since W1 — bid_due_alerts deleted)
+  - knowledge_jobs: register_knowledge_jobs (no-op since W1)
+  - tagging_jobs: register_tagging_jobs (no-op since W1 — tagging runs on-demand
+                  via app/management commands)
+  - maintenance_jobs: register_maintenance_jobs (no-op since W1)
 
 Called by: pytest
 Depends on: conftest.py fixtures, app/jobs/*
 """
 
-import asyncio
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -52,20 +49,19 @@ def _clear_scheduler_jobs():
 
 
 class TestRegisterHealthJobs:
-    def test_registers_four_jobs(self):
-        """register_health_jobs adds 4 jobs to the scheduler."""
+    def test_registers_no_jobs(self):
+        """register_health_jobs registers NOTHING (W1 simplification, 2026-08-04).
+
+        health_ping / health_deep / cleanup_usage_log / reset_monthly_usage were removed
+        per docs/W1_JOB_DISPOSITION.md; the health-check fan-out stays code-complete in
+        app/services/health_monitor.py.
+        """
         from app.jobs.health_jobs import register_health_jobs
 
         mock_scheduler = MagicMock()
-        mock_settings = MagicMock()
-        register_health_jobs(mock_scheduler, mock_settings)
+        register_health_jobs(mock_scheduler, MagicMock())
 
-        assert mock_scheduler.add_job.call_count == 4
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "health_ping" in job_ids
-        assert "health_deep" in job_ids
-        assert "cleanup_usage_log" in job_ids
-        assert "reset_monthly_usage" in job_ids
+        mock_scheduler.add_job.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -74,558 +70,93 @@ class TestRegisterHealthJobs:
 
 
 class TestRegisterProspectingJobs:
-    def test_registers_six_jobs_when_enabled(self):
-        """register_prospecting_jobs adds 6 jobs when prospecting is enabled."""
+    def test_registers_nothing_since_w1_delete(self):
+        """register_prospecting_jobs is a no-op — the 6 Explorium monthly jobs were
+        deleted in W1 (docs/W1_JOB_DISPOSITION.md) and must never re-appear."""
         from app.jobs.prospecting_jobs import register_prospecting_jobs
 
         mock_scheduler = MagicMock()
         mock_settings = MagicMock(prospecting_enabled=True)
         register_prospecting_jobs(mock_scheduler, mock_settings)
 
-        assert mock_scheduler.add_job.call_count == 6
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "pool_health_report" in job_ids
-        assert "discover_prospects" in job_ids
-        assert "enrich_pool" in job_ids
-        assert "find_contacts" in job_ids
-        assert "refresh_scores" in job_ids
-        assert "expire_and_resurface" in job_ids
-
-    def test_skips_when_disabled(self):
-        """register_prospecting_jobs does nothing when prospecting is disabled."""
-        from app.jobs.prospecting_jobs import register_prospecting_jobs
-
-        mock_scheduler = MagicMock()
-        mock_settings = MagicMock(prospecting_enabled=False)
-        register_prospecting_jobs(mock_scheduler, mock_settings)
-
         mock_scheduler.add_job.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# task_jobs — register_task_jobs, _job_bid_due_alerts
+# task_jobs — register_task_jobs (no-op since W1)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestRegisterTaskJobs:
-    def test_registers_one_job(self):
-        """register_task_jobs adds 1 job."""
+    def test_registers_no_jobs(self):
+        """register_task_jobs registers NOTHING (W1 simplification, 2026-08-04).
+
+        bid_due_alerts (daily bid-due tasks; 2 ever created) was deleted per
+        docs/W1_JOB_DISPOSITION.md — inline task hooks are unaffected.
+        """
         from app.jobs.task_jobs import register_task_jobs
 
         mock_scheduler = MagicMock()
         mock_settings = MagicMock()
         register_task_jobs(mock_scheduler, mock_settings)
 
-        assert mock_scheduler.add_job.call_count == 1
-        assert mock_scheduler.add_job.call_args_list[0].kwargs["id"] == "bid_due_alerts"
+        mock_scheduler.add_job.assert_not_called()
 
 
-def _make_req_mock(id_, deadline, req_name):
-    """Create a MagicMock for Requisition with proper name handling.
+class TestRegisterKnowledgeJobs:
+    def test_registers_no_jobs(self):
+        """register_knowledge_jobs registers NOTHING (W1 simplification, 2026-08-04).
 
-    MagicMock.name is reserved, so we use a SimpleNamespace instead.
-    """
-    return SimpleNamespace(id=id_, deadline=deadline, name=req_name, status="open")
+        knowledge_expire_stale (log-only count of expired entries) was removed per
+        docs/W1_JOB_DISPOSITION.md; expiry is applied at query time, not by a job.
+        """
+        from app.jobs.knowledge_jobs import register_knowledge_jobs
 
+        mock_scheduler = MagicMock()
+        register_knowledge_jobs(mock_scheduler, MagicMock())
 
-def _db_returning_reqs(mock_db, reqs):
-    """Wire mock_db.query so the bid-due-alerts query returns ``reqs``."""
-    mock_query = MagicMock()
-    mock_query.filter.return_value.limit.return_value.all.return_value = reqs
-    mock_db.query.return_value = mock_query
-
-
-class TestJobBidDueAlerts:
-    def test_creates_tasks_for_approaching_deadlines(self):
-        """_job_bid_due_alerts creates tasks for requisitions with deadlines within 2
-        days."""
-        mock_db = MagicMock()
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-001")])
-
-        mock_on_bid_due = MagicMock(return_value=MagicMock())
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_called_once_with(mock_db, 1, tomorrow, "REQ-001")
-        mock_db.close.assert_called_once()
-
-    def test_skips_non_iso_deadlines(self):
-        """_job_bid_due_alerts skips requisitions with non-ISO deadlines."""
-        mock_db = MagicMock()
-        _db_returning_reqs(mock_db, [_make_req_mock(1, "not-a-date", "REQ-002")])
-
-        mock_on_bid_due = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.parametrize(
-        ("days_offset", "req_name"),
-        [
-            pytest.param(10, "REQ-003", id="far_future_deadlines"),
-            pytest.param(-5, "REQ-004", id="old_past_deadlines"),
-        ],
-    )
-    def test_skips_out_of_window_deadlines(self, days_offset, req_name):
-        """_job_bid_due_alerts skips deadlines > 2 days out or > 1 day in the past."""
-        mock_db = MagicMock()
-        deadline = (datetime.now(UTC) + timedelta(days=days_offset)).strftime("%Y-%m-%dT%H:%M:%S")
-        _db_returning_reqs(mock_db, [_make_req_mock(1, deadline, req_name)])
-
-        mock_on_bid_due = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_not_called()
-
-    def test_respects_bid_due_cap(self):
-        """_job_bid_due_alerts stops creating tasks after reaching _BID_DUE_CAP."""
-        from app.jobs.task_jobs import _BID_DUE_CAP
-
-        mock_db = MagicMock()
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(_BID_DUE_CAP + 5)]
-        _db_returning_reqs(mock_db, mock_reqs)
-
-        mock_on_bid_due = MagicMock(return_value=MagicMock())  # Always returns a task
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        assert mock_on_bid_due.call_count == _BID_DUE_CAP
-
-    def test_no_reqs_found(self):
-        """_job_bid_due_alerts handles no matching requisitions."""
-        mock_db = MagicMock()
-        _db_returning_reqs(mock_db, [])
-
-        mock_on_bid_due = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_not_called()
-        mock_db.close.assert_called_once()
-
-    def test_on_bid_due_returns_none_not_counted(self):
-        """When on_bid_due_soon returns None (duplicate), it does not count toward
-        cap."""
-        mock_db = MagicMock()
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(3)]
-        _db_returning_reqs(mock_db, mock_reqs)
-
-        mock_on_bid_due = MagicMock(side_effect=[MagicMock(), None, MagicMock()])
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        assert mock_on_bid_due.call_count == 3
-
-    def test_db_error_rollback_and_reraise(self):
-        """DB error triggers rollback and re-raises."""
-        mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("Connection lost")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            with pytest.raises(Exception, match="Connection lost"):
-                asyncio.run(_job_bid_due_alerts())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    def test_deadline_without_timezone_gets_utc(self):
-        """Naive datetime deadlines are treated as UTC."""
-        mock_db = MagicMock()
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
-        _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-TZ")])
-
-        mock_on_bid_due = MagicMock(return_value=MagicMock())
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_called_once()
-
-
-class TestJobExpireStale:
-    def test_logs_expired_count(self):
-        """_job_expire_stale queries and logs expired + total counts."""
-        mock_db = MagicMock()
-
-        expired_query = MagicMock()
-        expired_query.filter.return_value.count.return_value = 5
-
-        total_query = MagicMock()
-        total_query.count.return_value = 100
-
-        call_count = [0]
-
-        def side_effect_query(model):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return expired_query
-            return total_query
-
-        mock_db.query.side_effect = side_effect_query
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.knowledge_jobs import _job_expire_stale
-
-            asyncio.run(_job_expire_stale())
-
-        mock_db.close.assert_called_once()
-
-    def test_db_error_reraises(self):
-        """DB error in expire_stale re-raises for _traced_job."""
-        mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("Query failed")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.knowledge_jobs import _job_expire_stale
-
-            with pytest.raises(Exception, match="Query failed"):
-                asyncio.run(_job_expire_stale())
-
-        mock_db.close.assert_called_once()
+        mock_scheduler.add_job.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# tagging_jobs — register, boost, prefix, sighting, ai_tagging
+# tagging_jobs — register (no-op since W1 simplification)
 # ═══════════════════════════════════════════════════════════════════════
-
-
-async def _run_fn_to_thread(fn, *args):
-    """asyncio.to_thread stand-in that runs the callable synchronously."""
-    return fn(*args)
 
 
 class TestRegisterTaggingJobs:
-    def test_registers_all_jobs_unconditionally(self):
-        """register_tagging_jobs adds the 5 tagging/spec jobs unconditionally.
+    def test_registers_no_jobs(self):
+        """register_tagging_jobs registers NOTHING (W1 simplification, 2026-08-04).
 
-        SP1 (2026-06-09): the gated 'material_enrichment' Haiku job was removed and
-        replaced with an always-on 'spec_enrichment' backlog sweep.
+        The five scheduled tagging jobs were removed per docs/W1_JOB_DISPOSITION.md:
+        internal_confidence_boost + sighting_mining deleted (zero yield);
+        prefix_backfill / ai_tagging / spec_enrichment run on-demand via app/management
+        commands only.
         """
         from app.jobs.tagging_jobs import register_tagging_jobs
 
         mock_scheduler = MagicMock()
-        mock_settings = MagicMock()
-        register_tagging_jobs(mock_scheduler, mock_settings)
+        register_tagging_jobs(mock_scheduler, MagicMock())
 
-        assert mock_scheduler.add_job.call_count == 5
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "internal_confidence_boost" in job_ids
-        assert "prefix_backfill" in job_ids
-        assert "sighting_mining" in job_ids
-        assert "ai_tagging" in job_ids
-        assert "spec_enrichment" in job_ids
-        # The removed Haiku card-enrichment job must never re-appear.
-        assert "material_enrichment" not in job_ids
-
-
-class TestJobInternalBoost:
-    def test_calls_boost_confidence_internal(self):
-        """_job_internal_boost delegates to enrichment.boost_confidence_internal."""
-        mock_db = MagicMock()
-        mock_boost = MagicMock(return_value={"boosted": 10})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.enrichment.boost_confidence_internal", mock_boost),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_internal_boost
-
-            asyncio.run(_job_internal_boost())
-
-        mock_boost.assert_called_once_with(mock_db)
-        mock_db.close.assert_called_once()
-
-    def test_error_rollback_and_reraise(self):
-        """Exception rolls back and re-raises."""
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.enrichment.boost_confidence_internal", side_effect=Exception("Boost failed")),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_internal_boost
-
-            with pytest.raises(Exception, match="Boost failed"):
-                asyncio.run(_job_internal_boost())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobPrefixBackfill:
-    def test_calls_run_prefix_backfill(self):
-        """_job_prefix_backfill delegates to tagging_backfill.run_prefix_backfill."""
-        mock_db = MagicMock()
-        mock_backfill = MagicMock(return_value={"tagged": 5})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.tagging_backfill.run_prefix_backfill", mock_backfill),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_prefix_backfill
-
-            asyncio.run(_job_prefix_backfill())
-
-        mock_backfill.assert_called_once_with(mock_db)
-        mock_db.close.assert_called_once()
-
-    def test_error_rollback_and_reraise(self):
-        """Exception rolls back and re-raises."""
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.tagging_backfill.run_prefix_backfill", side_effect=Exception("Backfill failed")),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_prefix_backfill
-
-            with pytest.raises(Exception, match="Backfill failed"):
-                asyncio.run(_job_prefix_backfill())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobSightingMining:
-    def test_calls_backfill_manufacturer_from_sightings(self):
-        """_job_sighting_mining delegates to backfill_manufacturer_from_sightings."""
-        mock_db = MagicMock()
-        mock_mining = MagicMock(return_value={"mined": 3})
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.tagging_backfill.backfill_manufacturer_from_sightings", mock_mining),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_sighting_mining
-
-            asyncio.run(_job_sighting_mining())
-
-        mock_mining.assert_called_once_with(mock_db)
-        mock_db.close.assert_called_once()
-
-    def test_error_rollback_and_reraise(self):
-        """Exception rolls back and re-raises."""
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch(
-                "app.services.tagging_backfill.backfill_manufacturer_from_sightings",
-                side_effect=Exception("Mining failed"),
-            ),
-            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
-        ):
-            from app.jobs.tagging_jobs import _job_sighting_mining
-
-            with pytest.raises(Exception, match="Mining failed"):
-                asyncio.run(_job_sighting_mining())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
-class TestJobAiTagging:
-    def test_no_untagged_cards_returns_early(self):
-        """_job_ai_tagging returns early when no untagged cards found."""
-        mock_db = MagicMock()
-
-        mock_subquery = MagicMock()
-        mock_subquery.c.material_card_id = "material_card_id"
-
-        tag_query = MagicMock()
-        tag_query.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = mock_subquery
-
-        untagged_query = MagicMock()
-        untagged_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-
-        call_count = [0]
-
-        def side_effect_query(model, *args):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return tag_query
-            return untagged_query
-
-        mock_db.query.side_effect = side_effect_query
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.tagging_jobs import _job_ai_tagging
-
-            asyncio.run(_job_ai_tagging())
-
-        mock_db.close.assert_called_once()
-
-    def test_processes_untagged_cards(self):
-        """_job_ai_tagging classifies untagged cards and applies results."""
-        mock_db = MagicMock()
-
-        mock_subquery = MagicMock()
-        mock_subquery.c.material_card_id = "material_card_id"
-
-        tag_query = MagicMock()
-        tag_query.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = mock_subquery
-
-        mock_cards = [
-            SimpleNamespace(id=1, normalized_mpn="LM317T"),
-            SimpleNamespace(id=2, normalized_mpn="NE555P"),
-            SimpleNamespace(id=3, normalized_mpn="STM32F4"),
-        ]
-        untagged_query = MagicMock()
-        untagged_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_cards
-
-        call_count = [0]
-
-        def side_effect_query(model, *args):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return tag_query
-            return untagged_query
-
-        mock_db.query.side_effect = side_effect_query
-
-        mock_classify = AsyncMock(return_value={"LM317T": "TI", "NE555P": "TI", "STM32F4": "ST"})
-        mock_apply = MagicMock(return_value=(2, 1))
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.tagging_ai.classify_parts_with_ai", mock_classify),
-            patch("app.services.tagging_ai._apply_ai_results", mock_apply),
-        ):
-            from app.jobs.tagging_jobs import _job_ai_tagging
-
-            asyncio.run(_job_ai_tagging())
-
-        mock_classify.assert_called_once()
-        mock_apply.assert_called_once()
-        mock_db.commit.assert_called()
-        mock_db.close.assert_called_once()
-
-    def test_error_rollback_and_reraise(self):
-        """Top-level exception rolls back and re-raises."""
-        mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("DB crashed")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.tagging_jobs import _job_ai_tagging
-
-            with pytest.raises(Exception, match="DB crashed"):
-                asyncio.run(_job_ai_tagging())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_scheduler.add_job.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# maintenance_jobs — register, _job_contact_dedup
+# maintenance_jobs — register (no-op since W1 simplification)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestRegisterMaintenanceJobs:
-    def test_registers_six_jobs(self):
-        """register_maintenance_jobs adds 6 jobs to the scheduler."""
+    def test_registers_no_jobs(self):
+        """register_maintenance_jobs registers NOTHING (W1 simplification, 2026-08-04).
+
+        The six maintenance jobs (cache_cleanup, auto_attribute_activities, auto_dedup,
+        reset_connector_errors, integrity_check, contact_dedup) were removed per
+        docs/W1_JOB_DISPOSITION.md; the manual merge path and the on-demand /api/admin
+        integrity route remain.
+        """
         from app.jobs.maintenance_jobs import register_maintenance_jobs
 
         mock_scheduler = MagicMock()
-        mock_settings = MagicMock()
-        register_maintenance_jobs(mock_scheduler, mock_settings)
+        register_maintenance_jobs(mock_scheduler, MagicMock())
 
-        assert mock_scheduler.add_job.call_count == 6
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "cache_cleanup" in job_ids
-        assert "auto_attribute_activities" in job_ids
-        assert "auto_dedup" in job_ids
-        assert "reset_connector_errors" in job_ids
-        assert "integrity_check" in job_ids
-        assert "contact_dedup" in job_ids
-
-
-class TestJobContactDedup:
-    def test_no_duplicates_found(self):
-        """No duplicates found — nothing merged."""
-        mock_db = MagicMock()
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.group_by.return_value.having.return_value.all.return_value = []
-        mock_db.query.return_value = mock_query
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.maintenance_jobs import _job_contact_dedup
-
-            asyncio.run(_job_contact_dedup())
-
-        mock_db.commit.assert_called_once()
-        mock_db.close.assert_called_once()
-
-    # Merge behaviour (keeper selection, loser deletion, scalar backfill, and the
-    # critical child-row reassignment so attachments/tasks are NOT cascade-deleted)
-    # is covered against the real DB in tests/test_maintenance_jobs_dedup_cascade.py.
-    # A mock session can't exercise the real ORM cascade the old delete-based code
-    # data-lost on, so those assertions live there, not here.
-
-    def test_error_rollback_and_reraise(self):
-        """DB error triggers rollback and re-raises."""
-        mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("DB error")
-
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.maintenance_jobs import _job_contact_dedup
-
-            with pytest.raises(Exception, match="DB error"):
-                asyncio.run(_job_contact_dedup())
-
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_scheduler.add_job.assert_not_called()

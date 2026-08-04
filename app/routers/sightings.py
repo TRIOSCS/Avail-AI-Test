@@ -1895,8 +1895,8 @@ def _find_affinity_in_thread(mpn: str) -> list[dict]:
 
     SQLAlchemy sessions are not thread-safe, so the request session never crosses the
     to_thread boundary — each call opens and closes a fresh SessionLocal (the
-    established thread-work pattern: description_service._collect_db_descriptions,
-    jobs/tagging_jobs). find_vendor_affinity is imported lazily so tests mock it at
+    established thread-work pattern: description_service._collect_db_descriptions).
+    find_vendor_affinity is imported lazily so tests mock it at
     the source module (app.services.vendor_affinity_service), never the import site.
     """
     from ..database import SessionLocal
