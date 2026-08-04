@@ -7,7 +7,15 @@ production copy (10/10 queries confirmed by an independent verify
 pass). This table drives W1.1–W1.4; each disposition lands as its own
 commit. Deletes are git-restorable; parks use EXISTING flags only.
 
-**Result: keep 7 · park 11 · delete 41.**
+**Result: keep 7 · park 12 · delete 40** (reconciled to spec v1.1, 2026-08-04: 8x8 CDR poll moved delete → park per §0.3/§6 Data Capture Initiative).
+
+v1.1 reconciliation notes: **eight_by_eight_poll** parks behind its existing
+`eight_by_eight_enabled` flag (already False), comeback = Data Capture
+Initiative (kernel E2E green in production + launch declared). The other
+call/email-capture deletes stand — **teams_call_records_sync** and
+**contacts_sync** are not named in §6's initiative (Outlook email + 8x8
+calls) and have zero-yield evidence; git history is their path back into
+the initiative rebuild, which §6 describes as "rebuilt properly" anyway.
 
 ## Kernel mapping (spec §3 — scheduler must equal this exactly)
 
@@ -60,7 +68,7 @@ commit. Deletes are git-restorable; parks use EXISTING flags only.
 | contact_status_compute | DELETE | §5.4 cut: contact-intelligence layer (computed, displayed nowhere); §3 kernel exclusivity | Writes SiteContact.contact_status (active/quiet/inactive) from ActivityLog recency; zero template reads it (grep of app/templates). DB: 17 site_contacts — 12 'new', 4 NULL, 1 'active' — the job has effectively moved one row ever. |
 | contacts_sync | DELETE | §3 kernel-only; §8 delete (duplicated/zero-yield) | Outlook /me/contacts/delta → VendorCards. DB: 0 of 1,332 vendor_cards have source='outlook_contacts' (email_mining produced 1,312); no 'contacts_sync' sync_state delta row ever persisted; users.last_contacts_sync stale since 20… |
 | discover_prospects | DELETE | §6 Explorium discovery machine (6 monthly jobs): DELETE | Runs run_explorium_discovery_batch per segment rotation, writes DiscoveryBatch(source='explorium') + prospect_accounts. DB: 5 monthly explorium batches (2026-04-01..08-01) produced 5 prospect_accounts total — all still status='… |
-| eight_by_eight_poll | DELETE | §6 8x8 CDR polling: CUT (zero CDRs ever); §5.4 cuts per-user 8x8 toggle | Polls 8x8 CDR API every 30min, writes matched calls to activity_log. DB: 0 activity_log rows with details source='8x8_cdr' EVER, while the system_config '8x8_last_poll' watermark advanced to 2026-08-04T12:49Z — polling runs con… Comeback: actually routing calls through 8x8 in production (§6) — noted, but spec mechanic is DELETE |
+| eight_by_eight_poll | PARK | §6 v1.1: 8x8 CDR polling PARKED, not deleted (§0.3 Data Capture Initiative) | Polls 8x8 CDR API every 30min, writes matched calls to activity_log. DB: 0 activity_log rows with details source='8x8_cdr' EVER, while the system_config '8x8_last_poll' watermark advanced to 2026-08-04T12:49Z — needs an integration pass, not a restart. Parks behind existing eight_by_eight_enabled flag (already False). Comeback: Data Capture Initiative — kernel E2E green in production + launch declared |
 | email_health_update | DELETE | §3 kernel exclusivity + §6 email pipelines (keep = reply-scan only) | batch_update_email_health writes VendorCard.email_health_score; DB: 0 of 1,332 vendor_cards have a score — zero rows ever written by this daily job. Sole reader (sightings.py responsiveness rank) falls back to engagement_score … |
 | email_reverification | DELETE | §8 DELETE (dead code); §3 kernel exclusivity | run_email_reverification is a stub: logs 'Hunter connector removed, no provider configured' and returns {status: no_provider, processed: 0} — reads nothing, writes nothing, every quarterly run is a no-op. |
 | enrich_pool | DELETE | §6 Explorium discovery machine (6 monthly jobs): DELETE | Monthly (2nd, 2AM) signals/similar-customers/AI-writeup enrichment of pool prospects (prospect_scheduler.job_enrich_pool); enrichment arm of the deleted machine — 5-row pool, zero actioned. |

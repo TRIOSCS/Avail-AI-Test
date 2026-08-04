@@ -20,9 +20,9 @@ discipline, wins on conflict) and SIMPLIFICATION_SPEC.md (work order).
 Acceptance: scheduler runs ONLY kernel jobs (§3); zero recurring
 warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 
-- [x] W1.0 Job disposition table: 59 jobs → keep 7 / park 11 / delete 41, code+DB evidence, 10/10 spot-checks confirmed → docs/W1_JOB_DISPOSITION.md (§3/§6); 4 flip-ables queued for Packet 1
+- [x] W1.0 Job disposition table: 59 jobs → keep 7 / park 12 / delete 40, code+DB evidence, 10/10 spot-checks confirmed → docs/W1_JOB_DISPOSITION.md (§3/§6, reconciled to v1.1); 4 flip-ables queued for Packet 1
 - [ ] W1.1 Delete Explorium discovery machine jobs (6 monthly) (§6)
-- [ ] W1.2 Delete 8x8 CDR poll job (§6)
+- [ ] W1.2 Park 8x8 CDR poll job — off the scheduler, existing flag, Data Capture Initiative comeback (§6 v1.1)
 - [ ] W1.3 Tagging suite: delete 2 zero-yield jobs; prefix/spec jobs → on-demand management commands; AI tagging on-demand only (§6)
 - [ ] W1.4 Park remaining non-kernel jobs per disposition table; scheduler == kernel list exactly (§3, §11)
 - [ ] W1.5 Keys-off honesty: BOM "Parse with AI" honest state, no 500 (§7)
@@ -33,6 +33,8 @@ warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 - [ ] W1.10 Delete the 2 dead transition tables (§9)
 - [ ] W1.11 Kernel-walk E2E script against the deployed instance, failure pages ONE admin; simp-nightly.sh runs it (§3/§6)
 - [ ] W1.12 Backup verify-timer unit files ready in repo; installation deferred to cutover (§6; CUTOVER.md §5)
+- [ ] W1.13 Task statuses → open/done (§5.4, v1.1 §0.6)
+- [ ] W1.14 Trouble-ticket AI calls gate behind AI flag, regex fallback per brief §4.5 (§5.5, v1.1 §0.6)
 - [ ] W1.A Acceptance checks pass → assemble + deliver Packet 1 (brief §6)
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
@@ -55,7 +57,7 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 
 ## Deviation log (Rule 3.4 — one line each, surfaced in the wave packet)
 
-- 2026-08-04 S1: Brief v2 references "Spec v1.1"; the only spec that exists anywhere on disk is v1.0 (header still says AWAITING OWNER REVIEW). Operative work order = spec v1.0 + Brief §4 amendments (brief wins on conflict). If a v1.1 document exists in the owner's chat, drop it into docs/ and it will be reconciled next session.
+- 2026-08-04 S1 (RESOLVED same day): Session started on spec v1.0 (only version on disk); owner supplied v1.1 mid-session. docs/SIMPLIFICATION_SPEC.md replaced with v1.1 verbatim; deltas folded in: 8x8 poll delete→park (Data Capture Initiative), Proactive parks whole, task statuses + trouble-ticket gating added to Wave 1 (W1.13/W1.14), Settings gear outside a literal 5-tab bar, resell 34→5 named statuses with Wave-3 remap. Disposition table reconciled (keep 7 / park 12 / delete 40).
 - 2026-08-04 S1: Login visual-regression baseline was stale on main (snapshot from the original frontend-testing commit; login.html restyled twice since — password form + light theme are deliberate). Re-baselined on this branch after image inspection; note: PRODUCTION's own nightly is red on this same test and stays red until main gets the same re-baseline (owner's call — outside this branch's scope).
 - 2026-08-04 S1: Nightly E2E v0 = deployed-instance smoke + branch Playwright suite (with Vite build step — missing dist/ renders every page unstyled). The deployed-app kernel-walk script replaces the smoke in W1.11 per spec §10.
 - 2026-08-04 S1: Host-level cron jobs (backup_postgres.sh 6-hourly, daily_coverage_report.sh, check_fru_matrix_refresh.sh, weekly_cleanup.sh, nightly_tests.sh) operate on PRODUCTION; spec §6 removals of host-side duplicates are deferred to cutover and recorded in CUTOVER.md instead of being executed during Wave 1. In-app scheduler shrink proceeds normally on the branch.
