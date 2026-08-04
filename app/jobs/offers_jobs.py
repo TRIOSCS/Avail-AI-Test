@@ -1,37 +1,40 @@
-"""Offers background jobs — proactive matching, offer expiry, stale flagging, scoring.
+"""Offers background jobs — proactive matching pair (parked) + performance tracking
+(parked).
+
+Wave-1 simplification (docs/W1_JOB_DISPOSITION.md):
+- proactive_matching: PARKED — registration removed (its flag defaulted ON);
+  implementation kept. Comeback: Proactive workspace revival / Deals-merge
+  badge wiring (spec §4, Wave 4).
+- proactive_teams_push: PARKED — registration stays but only fires on an
+  explicit proactive_teams_push_enabled=True (defaults False). Same comeback.
+- performance_tracking: PARKED — registration removed; implementation kept.
+  Comeback: team exists (spec §5.4).
+- proactive_offer_expiry, flag_stale_offers, expire_strategic_vendors,
+  warn_strategic_expiring: DELETED (git restores).
 
 Called by: app/jobs/__init__.py via register_offers_jobs()
-Depends on: app.database, app.models, app.services.proactive_matching, app.services.avail_score_service
+Depends on: app.database, app.models, app.services.proactive_matching,
+app.services.proactive_teams_push, app.services.avail_score_service
 """
 
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-import sqlalchemy.exc
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import ActivityType, OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
+from ..constants import ProactiveMatchStatus
 from ..scheduler import _traced_job
 
 
 def register_offers_jobs(scheduler, settings, db=None):
     """Register offer-related jobs with the scheduler.
 
-    *db* (when provided) lets proactive_matching_enabled resolve from the system_config
-    DB row (admin toggle) instead of only the env default.
+    Only the proactive Teams push remains registrable, behind its existing flag
+    (defaults off). *db* (when provided) lets the flag resolve from the system_config DB
+    row (admin toggle) instead of only the env default.
     """
     from ..services.admin_service import get_effective_flag
-
-    if get_effective_flag(db, "proactive_matching_enabled", settings.proactive_matching_enabled):
-        interval_h = max(1, settings.proactive_scan_interval_hours)
-        scheduler.add_job(
-            _job_proactive_matching,
-            IntervalTrigger(hours=interval_h),
-            id="proactive_matching",
-            name="Proactive matching",
-        )
 
     # `is True` (not truthiness): register only on an explicit True so a MagicMock
     # settings passed by unrelated scheduler tests resolves to off, not a spurious job.
@@ -44,39 +47,13 @@ def register_offers_jobs(scheduler, settings, db=None):
             name="Push new proactive matches to Teams",
         )
 
-    scheduler.add_job(
-        _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Scoring and leaderboards"
-    )
-
-    scheduler.add_job(
-        _job_proactive_offer_expiry,
-        CronTrigger(hour=4, minute=30),
-        id="proactive_offer_expiry",
-        name="Expire stale proactive offers",
-    )
-
-    scheduler.add_job(
-        _job_flag_stale_offers, CronTrigger(hour=5, minute=0), id="flag_stale_offers", name="Flag stale offers (14d+)"
-    )
-
-    scheduler.add_job(
-        _job_expire_strategic_vendors,
-        CronTrigger(hour=6, minute=0),
-        id="expire_strategic_vendors",
-        name="Expire strategic vendors (39d TTL)",
-    )
-
-    scheduler.add_job(
-        _job_warn_strategic_expiring,
-        CronTrigger(hour=8, minute=0),
-        id="warn_strategic_expiring",
-        name="Warn strategic vendors expiring soon",
-    )
-
 
 @_traced_job
 async def _job_proactive_matching():
-    """Scan new offers/sightings for proactive matching via CPH + archived reqs."""
+    """Scan new offers/sightings for proactive matching via CPH + archived reqs.
+
+    PARKED (not registered) — kept for the Proactive workspace comeback.
+    """
     from ..database import SessionLocal
 
     db = SessionLocal()
@@ -143,7 +120,10 @@ async def _job_proactive_teams_push():
 @_traced_job
 async def _job_performance_tracking():
     """Compute vendor scorecards, buyer leaderboard, Avail Scores, and other scoring
-    metrics."""
+    metrics.
+
+    PARKED (not registered) — kept for the team-exists comeback (spec §5.4).
+    """
     from ..database import SessionLocal
 
     db = SessionLocal()
@@ -196,153 +176,6 @@ async def _job_performance_tracking():
         db.rollback()
     except Exception as e:
         logger.exception(f"Performance tracking error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_proactive_offer_expiry():
-    """Daily — expire proactive offers with status='sent' that are older than 14 days.
-
-    Proactive offers that never got a customer response should not linger indefinitely.
-    After 14 days, mark them as 'expired' so they don't clutter the active pipeline.
-    """
-    from ..database import SessionLocal
-    from ..models.intelligence import ProactiveOffer
-
-    db = SessionLocal()
-    try:
-        cutoff = datetime.now(UTC) - timedelta(days=14)
-        expired_count = (
-            db.query(ProactiveOffer)
-            .filter(
-                ProactiveOffer.status == ProactiveOfferStatus.SENT,
-                ProactiveOffer.sent_at < cutoff,
-            )
-            .update({"status": ProactiveOfferStatus.EXPIRED}, synchronize_session="fetch")
-        )
-        if expired_count:
-            db.commit()
-            logger.info(f"Expired {expired_count} stale proactive offer(s)")
-    except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error(f"Proactive offer expiry DB error: {e}")
-        db.rollback()
-    except Exception as e:
-        logger.exception(f"Proactive offer expiry error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_flag_stale_offers():
-    """Daily — flag active offers older than 14 days as is_stale.
-
-    Display-only metadata. Stale offers remain fully visible everywhere. "Leave no stone
-    unturned" — we never hide or filter by is_stale.
-    """
-    from ..database import SessionLocal
-    from ..models.offers import Offer
-
-    db = SessionLocal()
-    try:
-        cutoff = datetime.now(UTC) - timedelta(days=14)
-        flagged = (
-            db.query(Offer)
-            .filter(
-                Offer.status == OfferStatus.ACTIVE,
-                Offer.is_stale.is_(False),
-                Offer.created_at < cutoff,
-            )
-            .update({"is_stale": True}, synchronize_session="fetch")
-        )
-        if flagged:
-            db.commit()
-            logger.info(f"Flagged {flagged} offer(s) as stale (14d+)")
-    except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error(f"Offer stale flagging DB error: {e}")
-        db.rollback()
-    except Exception as e:
-        logger.exception(f"Offer stale flagging error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_expire_strategic_vendors():
-    """Daily 6 AM — expire strategic vendors past their 39-day TTL."""
-    from ..database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        from ..services.strategic_vendor_service import expire_stale
-
-        count = expire_stale(db)
-        if count:
-            logger.info(f"Expired {count} strategic vendor assignment(s)")
-    except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error(f"Strategic vendor expiry DB error: {e}")
-        db.rollback()
-    except Exception as e:
-        logger.exception(f"Strategic vendor expiry error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_warn_strategic_expiring():
-    """Daily 8 AM — notify buyers whose strategic vendors expire within 7 days."""
-    from ..database import SessionLocal
-    from ..models.intelligence import ActivityLog
-
-    db = SessionLocal()
-    try:
-        from ..services.strategic_vendor_service import get_expiring_soon
-
-        expiring = get_expiring_soon(db, days=7)
-        for sv in expiring:
-            now = datetime.now(UTC)
-            expires = sv.expires_at
-            if expires and expires.tzinfo is None:
-                expires = expires.replace(tzinfo=UTC)
-            days_left = max(0, (expires - now).days)
-            vendor_name = sv.vendor_card.display_name if sv.vendor_card else "Unknown"
-
-            # Dedup: only one warning per strategic vendor assignment
-            existing = (
-                db.query(ActivityLog.id)
-                .filter(
-                    ActivityLog.user_id == sv.user_id,
-                    ActivityLog.activity_type == ActivityType.STRATEGIC_VENDOR_EXPIRING,
-                    ActivityLog.external_id == str(sv.id),
-                    ActivityLog.dismissed_at.is_(None),
-                )
-                .first()
-            )
-            if existing:
-                continue
-
-            db.add(
-                ActivityLog(
-                    user_id=sv.user_id,
-                    activity_type=ActivityType.STRATEGIC_VENDOR_EXPIRING,
-                    channel="system",
-                    contact_name=vendor_name,
-                    subject=f"Strategic vendor {vendor_name} expires in {days_left} days — get an offer to keep them",
-                    external_id=str(sv.id),
-                )
-            )
-        db.commit()
-        if expiring:
-            logger.info(f"Warned about {len(expiring)} strategic vendor(s) expiring soon")
-    except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error(f"Strategic vendor warning DB error: {e}")
-        db.rollback()
-    except Exception as e:
-        logger.exception(f"Strategic vendor warning error: {e}")
         db.rollback()
     finally:
         db.close()

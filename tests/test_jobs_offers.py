@@ -1,14 +1,13 @@
 """test_jobs_offers.py — Tests for offer-related background jobs.
 
-Covers: _job_proactive_matching, _job_proactive_offer_expiry,
-_job_flag_stale_offers.
+Covers: _job_proactive_matching (parked implementation, kept for the
+Proactive workspace comeback).
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
 to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -130,84 +129,3 @@ def test_proactive_matching_expired_branch(scheduler_db):
         from app.jobs.offers_jobs import _job_proactive_matching
 
         asyncio.run(_job_proactive_matching())
-
-
-# ── _job_proactive_offer_expiry() ─────────────────────────────────────
-
-
-def test_proactive_offer_expiry_expires_old(scheduler_db, test_user, test_company, test_customer_site):
-    """_job_proactive_offer_expiry marks old sent offers as expired."""
-    from app.models.intelligence import ProactiveOffer
-
-    old_offer = ProactiveOffer(
-        customer_site_id=test_customer_site.id,
-        salesperson_id=test_user.id,
-        line_items=[],
-        status="sent",
-        sent_at=datetime.now(UTC) - timedelta(days=20),
-    )
-    scheduler_db.add(old_offer)
-    scheduler_db.commit()
-
-    from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-    asyncio.run(_job_proactive_offer_expiry())
-
-    scheduler_db.refresh(old_offer)
-    assert old_offer.status == "expired"
-
-
-def test_proactive_offer_expiry_no_expired(scheduler_db):
-    """No offers to expire — no commit needed."""
-    from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-    asyncio.run(_job_proactive_offer_expiry())
-
-
-def test_proactive_offer_expiry_error(scheduler_db):
-    """DB error rolls back."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
-        from app.jobs.offers_jobs import _job_proactive_offer_expiry
-
-        asyncio.run(_job_proactive_offer_expiry())
-
-
-# ── _job_flag_stale_offers() ──────────────────────────────────────────
-
-
-def test_flag_stale_offers_flags_old(scheduler_db, test_user, test_requisition):
-    """_job_flag_stale_offers sets is_stale on old active offers."""
-    from app.models.offers import Offer
-
-    old_offer = Offer(
-        requisition_id=test_requisition.id,
-        vendor_name="Test Vendor",
-        mpn="LM317T",
-        status="active",
-        is_stale=False,
-        created_at=datetime.now(UTC) - timedelta(days=20),
-    )
-    scheduler_db.add(old_offer)
-    scheduler_db.commit()
-
-    from app.jobs.offers_jobs import _job_flag_stale_offers
-
-    asyncio.run(_job_flag_stale_offers())
-
-    scheduler_db.refresh(old_offer)
-    assert old_offer.is_stale is True
-
-
-def test_flag_stale_offers_no_matches(scheduler_db):
-    """No stale offers — no commit."""
-    from app.jobs.offers_jobs import _job_flag_stale_offers
-
-    asyncio.run(_job_flag_stale_offers())
-
-
-def test_flag_stale_offers_error(scheduler_db):
-    """DB error rolls back."""
-    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
-        from app.jobs.offers_jobs import _job_flag_stale_offers
-
-        asyncio.run(_job_flag_stale_offers())
