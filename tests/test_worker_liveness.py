@@ -5,9 +5,11 @@ Alerts (debounced) when a worker that should be running has a stale heartbeat
 """
 
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import app.jobs.worker_liveness_jobs as liveness
 from app.jobs.worker_liveness_jobs import (
     _job_monitor_worker_heartbeats,
     heartbeat_is_stale,
@@ -17,12 +19,20 @@ from app.models import IcsWorkerStatus
 
 NOW = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
 
+# The watchdog only monitors workers whose credentials are configured (keys-off
+# honesty — a stack without ICS creds runs no ICS worker, so its restored
+# is_running singleton must not alert). Tests below simulate a CONFIGURED
+# deployment unless they test the skip itself.
+_ICS_CONFIGURED = {"ICS_USERNAME": "test-user"}
 
-def _run(db_session):
+
+def _run(db_session, env=_ICS_CONFIGURED):
     """Run the watchdog job against the test DB with no debounce; return the Teams
     mock."""
+    liveness._skip_noticed.clear()
     teams = AsyncMock()
     with (
+        patch.dict(os.environ, env, clear=False),
         patch("app.database.SessionLocal", return_value=db_session),
         patch("app.cache.intel_cache.get_cached", return_value=None),
         patch("app.cache.intel_cache.set_cached"),
@@ -78,10 +88,38 @@ def test_missing_rows_no_error(db_session):
 
 def test_debounce_suppresses_repeat(db_session):
     _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(minutes=20))
+    liveness._skip_noticed.clear()
+    teams = AsyncMock()
+    with (
+        patch.dict(os.environ, _ICS_CONFIGURED, clear=False),
+        patch("app.database.SessionLocal", return_value=db_session),
+        patch("app.cache.intel_cache.get_cached", return_value={"alerted": 1}),  # already alerted
+        patch("app.cache.intel_cache.set_cached"),
+        patch("app.services.teams_notifications.post_teams_channel", teams),
+    ):
+        asyncio.run(_job_monitor_worker_heartbeats())
+    teams.assert_not_awaited()
+
+
+def test_unconfigured_worker_not_monitored(db_session, monkeypatch):
+    # W1.16 (48h-gate): a restored prod copy says ICS is_running=true, but this
+    # deployment has no ICS credentials — the watchdog must skip, not alert.
+    monkeypatch.delenv("ICS_USERNAME", raising=False)
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(UTC) - timedelta(hours=5))
+    teams = _run(db_session, env={})
+    teams.assert_not_awaited()
+
+
+def test_unconfigured_skip_notice_logged_once(db_session, monkeypatch):
+    monkeypatch.delenv("ICS_USERNAME", raising=False)
+    _ics(db_session, is_running=True, last_heartbeat=None)
+    _run(db_session, env={})
+    assert "ICS" in liveness._skip_noticed
+    # Second run: still skipped, notice set unchanged (no repeat spam path).
     teams = AsyncMock()
     with (
         patch("app.database.SessionLocal", return_value=db_session),
-        patch("app.cache.intel_cache.get_cached", return_value={"alerted": 1}),  # already alerted
+        patch("app.cache.intel_cache.get_cached", return_value=None),
         patch("app.cache.intel_cache.set_cached"),
         patch("app.services.teams_notifications.post_teams_channel", teams),
     ):
