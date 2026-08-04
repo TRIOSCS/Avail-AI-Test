@@ -20,11 +20,20 @@ Depends on: conftest.py fixtures (client = admin-capable, db_session, test_user)
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import TicketStatus
 from app.models import User
 from app.models.trouble_ticket import TroubleTicket
+
+
+@pytest.fixture(autouse=True)
+def _ai_keys_on():
+    """W1.14 gates ticket AI calls on the Anthropic key; these tests assume AI is on."""
+    with patch("app.routers.error_reports.get_credential_cached", return_value="sk-test"):
+        yield
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

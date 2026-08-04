@@ -45,6 +45,13 @@ def _clear_overrides():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _ai_keys_on():
+    """W1.14 gates ticket AI calls on the Anthropic key; these tests assume AI is on."""
+    with patch("app.routers.error_reports.get_credential_cached", return_value="sk-test"):
+        yield
+
+
 def _admin_client(db_session: Session, user: User) -> TestClient:
     """Client where require_admin succeeds as *user* (admin happy path)."""
     app.dependency_overrides[get_db] = lambda: db_session

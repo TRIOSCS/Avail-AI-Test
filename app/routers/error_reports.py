@@ -26,6 +26,7 @@ from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import User
 from ..models.trouble_ticket import TroubleTicket
+from ..services.credential_service import get_credential_cached
 from ..template_env import template_response
 
 router = APIRouter(tags=["error-reports"])
@@ -35,6 +36,19 @@ UPLOAD_DIR = "/app/uploads/tickets"
 MAX_SCREENSHOT_B64_SIZE = 2 * 1024 * 1024  # 2MB base64
 
 _upload_dir_ready = False
+
+# Wave-1 keys-off honesty (spec §5.5/§7): every Anthropic call in the ticket flow is
+# gated on the same key check the rest of the app uses. Keys absent → the call is
+# skipped and the ticket simply stays un-enriched (no ai_summary / diagnosis / prompt).
+_AI_OFF_HTML = (
+    '<div class="p-3 text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg">'
+    "AI is off — no Anthropic key configured. The ticket keeps its captured context.</div>"
+)
+
+
+def _ai_keys_present() -> bool:
+    """True when an Anthropic key is configured (same check as the rest of the app)."""
+    return bool(get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"))
 
 
 class ErrorReportCreate(BaseModel):
@@ -145,10 +159,15 @@ def _create_ticket(
 async def _generate_ai_summary(ticket_id: int):
     """Generate a one-sentence AI summary for a trouble ticket.
 
-    Runs as BackgroundTask.
+    Runs as BackgroundTask. Keys-off: skipped entirely — the ticket stays un-enriched
+    (ai_summary NULL) rather than logging a warning per submit.
     """
     from ..database import SessionLocal
     from ..utils.claude_client import claude_text
+
+    if not _ai_keys_present():
+        logger.debug("AI is off — skipping summary for ticket {}", ticket_id)
+        return
 
     db = SessionLocal()
     try:
@@ -452,6 +471,17 @@ async def analyze_tickets(
     from ..utils.claude_client import claude_structured
     from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
+    if not _ai_keys_present():
+        # Honest keys-off state: banner + the unchanged list (this swap targets
+        # #ticket-list, so returning the banner alone would wipe the list).
+        from .htmx.archive import _build_ticket_list_context
+
+        listing = template_response(
+            "htmx/partials/tickets/list.html",
+            {"request": request, **_build_ticket_list_context(db, "open")},
+        ).body.decode()
+        return HTMLResponse(_AI_OFF_HTML + listing)
+
     tickets = (
         db.query(TroubleTicket)
         .filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
@@ -595,6 +625,9 @@ async def diagnose_ticket_endpoint(
     if not ticket:
         raise HTTPException(404, "Ticket not found")
 
+    if not _ai_keys_present():
+        return HTMLResponse(_AI_OFF_HTML)
+
     try:
         await diagnose_ticket(db, ticket)
     except (ClaudeUnavailableError, ClaudeError) as e:
@@ -647,6 +680,10 @@ async def generate_prompt_endpoint(
         ticket.updated_at = datetime.now(UTC)
         db.commit()
 
+    if not _ai_keys_present():
+        # Notes above are still persisted; only the AI call is skipped.
+        return HTMLResponse(_AI_OFF_HTML)
+
     try:
         prompt = await generate_ticket_prompt(db, ticket)
     except (ClaudeUnavailableError, ClaudeError) as e:
@@ -678,6 +715,11 @@ async def diagnose_bulk_endpoint(
 ):
     """Admin: AI-diagnose the selected tickets concurrently."""
     from ..services.ticket_diagnosis_service import diagnose_tickets_bulk
+
+    if not _ai_keys_present():
+        # 503 (not 200): the caller's JS toasts "Diagnosis started" on any 2xx,
+        # which would be dishonest when nothing ran.
+        return HTMLResponse(_AI_OFF_HTML, status_code=503)
 
     tickets = (
         db.query(TroubleTicket)

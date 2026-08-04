@@ -28,6 +28,13 @@ _PROMPT_PATCH = "app.services.ticket_prompt_service.claude_text"
 
 
 @pytest.fixture(autouse=True)
+def _ai_keys_on():
+    """W1.14 gates ticket AI calls on the Anthropic key; these tests assume AI is on."""
+    with patch("app.routers.error_reports.get_credential_cached", return_value="sk-test"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_overrides():
     yield
     app.dependency_overrides.clear()

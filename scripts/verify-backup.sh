@@ -14,9 +14,11 @@
 #   ./scripts/verify-backup.sh
 #
 # Install as a weekly systemd timer (Sun 04:00) — from the repo root on the
-# target server:
+# target server (all THREE units: the service's OnFailure= hook needs
+# avail-backup-verify-alert.service installed too, or failures alert nowhere):
 #   sudo cp scripts/systemd/avail-backup-verify.service \
-#           scripts/systemd/avail-backup-verify.timer /etc/systemd/system/
+#           scripts/systemd/avail-backup-verify.timer \
+#           scripts/systemd/avail-backup-verify-alert.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now avail-backup-verify.timer
 #   systemctl list-timers avail-backup-verify.timer   # confirm the next run
