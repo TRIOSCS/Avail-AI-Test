@@ -70,8 +70,11 @@ def create_task(
 ) -> RequisitionTask:
     """Create a task on a requisition.
 
-    For manual tasks that pass a due_at, the due date must be >= 24 hours from now.
+    Requires an assignee. For manual tasks that pass a due_at, the due date must be >=
+    24 hours from now.
     """
+    if assigned_to_id is None:
+        raise ValueError("Assignee is required")
     # Belt-and-suspenders 24h check for manual tasks with an explicit due date.
     if source == "manual" and due_at:
         now = datetime.now(UTC)
@@ -113,6 +116,8 @@ def create_requisition_task(
     NULL: these are requisition-level tasks, not part-level ones. Callers must pass an
     already-parsed aware `due_at` datetime (never a raw date string — see UTCDateTime).
     """
+    if assigned_to_id is None:
+        raise ValueError("Assignee is required")
     task = RequisitionTask(
         requisition_id=requisition_id,
         title=title,
@@ -398,7 +403,12 @@ def create_company_task(
     created_by: int | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
-    """Create a task scoped to an account (company)."""
+    """Create a task scoped to an account (company).
+
+    Requires an assignee.
+    """
+    if assigned_to_id is None:
+        raise ValueError("Assignee is required")
     task = _persist_task(
         db,
         company_id=company_id,
@@ -426,7 +436,12 @@ def create_contact_task(
     created_by: int | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
-    """Create a task scoped to a contact."""
+    """Create a task scoped to a contact.
+
+    Requires an assignee.
+    """
+    if assigned_to_id is None:
+        raise ValueError("Assignee is required")
     task = _persist_task(
         db,
         site_contact_id=site_contact_id,
@@ -484,7 +499,12 @@ def create_vendor_task(
     created_by: int | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
-    """Create a task scoped to a vendor card."""
+    """Create a task scoped to a vendor card.
+
+    Requires an assignee.
+    """
+    if assigned_to_id is None:
+        raise ValueError("Assignee is required")
     task = _persist_task(
         db,
         vendor_card_id=vendor_card_id,
@@ -515,8 +535,12 @@ def get_open_tasks_for_vendor_card(db: Session, vendor_card_id: int) -> list[Req
     )
 
 
-def _is_crm_task_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
-    """Return True if user_id is allowed to mutate the given CRM/vendor task.
+def is_task_mutation_authorized(db: Session, task: RequisitionTask, user_id: int, is_admin: bool) -> bool:
+    """Return True if user_id is allowed to mutate (edit/complete/delete) the given
+    task.
+
+    The single mutation gate for every task surface (CRM, vendor, requisition board,
+    My Day).
 
     Allowed if any of:
       - user is an admin
@@ -567,7 +591,7 @@ def complete_crm_task(
     task = db.get(RequisitionTask, task_id)
     if not task:
         return None
-    if not _is_crm_task_authorized(db, task, user_id, is_admin):
+    if not is_task_mutation_authorized(db, task, user_id, is_admin):
         raise PermissionError("Not authorized to complete this task")
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(UTC)
@@ -634,12 +658,17 @@ def auto_create_task(
     When no ``assigned_to_id`` is provided, the task defaults to the requisition's claiming
     buyer, else its creator (``coalesce(claimed_by_id, created_by)`` via
     ``_default_auto_assignee``) so it lands on that user's My Day. An explicitly-passed
-    ``assigned_to_id`` is never overridden.
+    ``assigned_to_id`` is never overridden. When the default chain resolves to nobody
+    (deleted or ownerless requisition), the task is skipped entirely — an unassigned
+    task would never surface on anyone's My Day.
     """
     if _find_open_task_by_ref(db, requisition_id, source_ref):
         return None  # Don't create duplicates
     if assigned_to_id is None:
         assigned_to_id = _default_auto_assignee(db, requisition_id)
+    if assigned_to_id is None:
+        logger.warning("auto_create_task: no resolvable assignee for req {} ({}); skipping", requisition_id, source_ref)
+        return None
     return create_task(
         db,
         requisition_id=requisition_id,

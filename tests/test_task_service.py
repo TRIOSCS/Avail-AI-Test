@@ -51,24 +51,26 @@ def _req_tasks(db: Session, requisition_id: int) -> list[RequisitionTask]:
 
 
 class TestCreateTask:
-    def test_creates_task(self, db_session: Session, test_requisition):
+    def test_creates_task(self, db_session: Session, test_requisition, test_user):
         task = create_task(
             db_session,
             requisition_id=test_requisition.id,
             title="Test task",
             source="system",
+            assigned_to_id=test_user.id,
         )
         assert task.id is not None
         assert task.title == "Test task"
         assert task.status == "todo"
 
-    def test_manual_task_requires_24h_due(self, db_session: Session, test_requisition):
+    def test_manual_task_requires_24h_due(self, db_session: Session, test_requisition, test_user):
         with pytest.raises(ValueError, match="24 hours"):
             create_task(
                 db_session,
                 requisition_id=test_requisition.id,
                 title="Bad due",
                 source="manual",
+                assigned_to_id=test_user.id,
                 due_at=datetime.now(UTC) + timedelta(hours=1),
             )
 
@@ -84,22 +86,24 @@ class TestCreateTask:
         )
         assert task.id is not None
 
-    def test_system_task_no_due_check(self, db_session: Session, test_requisition):
+    def test_system_task_no_due_check(self, db_session: Session, test_requisition, test_user):
         # System tasks bypass the 24h check
         task = create_task(
             db_session,
             requisition_id=test_requisition.id,
             title="System task",
             source="system",
+            assigned_to_id=test_user.id,
             due_at=datetime.now(UTC) + timedelta(hours=1),
         )
         assert task.id is not None
 
-    def test_defaults(self, db_session: Session, test_requisition):
+    def test_defaults(self, db_session: Session, test_requisition, test_user):
         task = create_task(
             db_session,
             requisition_id=test_requisition.id,
             title="Defaults",
+            assigned_to_id=test_user.id,
         )
         assert task.task_type == "general"
         assert task.priority == 2
@@ -213,8 +217,10 @@ class TestGetMyTasksSummary:
 
 
 class TestUpdateTask:
-    def test_updates_fields(self, db_session: Session, test_requisition):
-        t = create_task(db_session, requisition_id=test_requisition.id, title="Old", source="system")
+    def test_updates_fields(self, db_session: Session, test_requisition, test_user):
+        t = create_task(
+            db_session, requisition_id=test_requisition.id, title="Old", source="system", assigned_to_id=test_user.id
+        )
         updated = update_task(db_session, t.id, title="New", priority=3)
         assert updated.title == "New"
         assert updated.priority == 3
@@ -222,13 +228,17 @@ class TestUpdateTask:
     def test_returns_none_for_missing(self, db_session: Session):
         assert update_task(db_session, 99999, title="X") is None
 
-    def test_sets_completed_at_when_done(self, db_session: Session, test_requisition):
-        t = create_task(db_session, requisition_id=test_requisition.id, title="T", source="system")
+    def test_sets_completed_at_when_done(self, db_session: Session, test_requisition, test_user):
+        t = create_task(
+            db_session, requisition_id=test_requisition.id, title="T", source="system", assigned_to_id=test_user.id
+        )
         updated = update_task(db_session, t.id, status=TaskStatus.DONE)
         assert updated.completed_at is not None
 
-    def test_clears_completed_at_when_moved_back(self, db_session: Session, test_requisition):
-        t = create_task(db_session, requisition_id=test_requisition.id, title="T", source="system")
+    def test_clears_completed_at_when_moved_back(self, db_session: Session, test_requisition, test_user):
+        t = create_task(
+            db_session, requisition_id=test_requisition.id, title="T", source="system", assigned_to_id=test_user.id
+        )
         update_task(db_session, t.id, status=TaskStatus.DONE)
         updated = update_task(db_session, t.id, status="todo")
         assert updated.completed_at is None

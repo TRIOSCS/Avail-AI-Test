@@ -1,0 +1,22 @@
+{# _task_edit_form.html — inline edit form (title + due) for one requisition-board task row.
+   Receives: t (RequisitionTask), req (Requisition), error (str | None).
+   Called by: the edit-form GET / edit POST validation branches in routers/htmx/requisitions.py.
+   Row-shaped: outerHTML-swaps #task-{{ t.id }}, so it must re-carry that id — Save re-posts
+   the form, Cancel restores the plain row via the .../row endpoint.
+   Depends on: RequisitionTask model (app/models/task.py), HTMX.
+#}
+<div id="task-{{ t.id }}" class="p-3 bg-white rounded-lg border border-brand-300">
+  <form hx-post="/api/requisitions/{{ req.id }}/tasks/{{ t.id }}/edit"
+        hx-target="#task-{{ t.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
+    <input type="text" name="title" value="{{ t.title }}" required aria-label="Task title"
+           class="flex-1 px-2 py-1 text-sm border border-gray-300 rounded input-focus">
+    <input type="date" name="due_at" aria-label="Due date"
+           value="{{ t.due_at.strftime('%Y-%m-%d') if t.due_at else '' }}"
+           class="px-2 py-1 text-sm border border-gray-300 rounded input-focus">
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    <button type="button" class="btn btn-secondary btn-sm"
+            hx-get="/api/requisitions/{{ req.id }}/tasks/{{ t.id }}/row"
+            hx-target="#task-{{ t.id }}" hx-swap="outerHTML">Cancel</button>
+  </form>
+  {% if error %}<p class="mt-1 text-xs text-rose-600">{{ error }}</p>{% endif %}
+</div>

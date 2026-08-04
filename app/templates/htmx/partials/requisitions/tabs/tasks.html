@@ -51,9 +51,8 @@
       <div>
         <label class="form-label">Assignee</label>
         <select name="assigned_to_id" class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm input-focus">
-          <option value="">Unassigned</option>
           {% for u in users %}
-          <option value="{{ u.id }}">{{ u.name }}</option>
+          <option value="{{ u.id }}"{{ ' selected' if u.id == user.id else '' }}>{{ u.name }}</option>
           {% endfor %}
         </select>
       </div>
