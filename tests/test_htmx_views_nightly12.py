@@ -58,7 +58,7 @@ def _make_task(
         requisition_id=req.id,
         requirement_id=requirement.id if requirement else None,
         title="Test Task",
-        status="todo",
+        status="open",
         created_by=user.id,
         assigned_to_id=user.id,
         source="manual",
@@ -251,7 +251,7 @@ class TestReopenTask:
         resp = client.post(f"/v2/partials/parts/tasks/{task.id}/reopen")
         assert resp.status_code == 200
         db_session.refresh(task)
-        assert task.status == "todo"
+        assert task.status == "open"
 
     def test_reopen_not_found(self, client: TestClient) -> None:
         resp = client.post("/v2/partials/parts/tasks/99999/reopen")

@@ -206,7 +206,7 @@ class TestUpdateTask:
             db_session, requisition_id=requisition.id, title="T", source="system", assigned_to_id=test_user.id
         )
         task_service.update_task(db_session, task.id, status=TaskStatus.DONE)
-        updated = task_service.update_task(db_session, task.id, status=TaskStatus.TODO)
+        updated = task_service.update_task(db_session, task.id, status=TaskStatus.OPEN)
         assert updated.completed_at is None
 
 

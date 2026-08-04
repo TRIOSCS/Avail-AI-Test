@@ -266,7 +266,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         select(sqlfunc.count(Contact.id))
         .where(
             Contact.requisition_id == Requisition.id,
-            Contact.status.in_([ContactStatus.SENT, ContactStatus.OPENED]),
+            Contact.status == ContactStatus.SENT,
         )
         .correlate(Requisition)
         .scalar_subquery()

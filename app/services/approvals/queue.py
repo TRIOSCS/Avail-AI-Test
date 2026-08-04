@@ -51,7 +51,6 @@ RESOLVED_STATUSES = (
     ApprovalRequestStatus.APPROVED,
     ApprovalRequestStatus.REJECTED,
     ApprovalRequestStatus.CANCELLED,
-    ApprovalRequestStatus.EXPIRED,
 )
 RESOLVED_LIMIT = 10
 # Defensive ceiling on the org-wide pending list (it is naturally self-clearing, but

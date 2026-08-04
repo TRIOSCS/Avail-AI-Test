@@ -1090,7 +1090,7 @@ async def create_part_task(
         assigned_to_id=_safe_int(form.get("assigned_to")),
         created_by=user.id,
         due_at=_parse_task_due_date(form.get("due_date")),
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         source="manual",
     )
     db.add(task)

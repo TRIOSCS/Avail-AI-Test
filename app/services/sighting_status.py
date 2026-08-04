@@ -87,7 +87,7 @@ def compute_vendor_statuses(
         for row in db.query(Contact.vendor_name)
         .filter(
             Contact.requisition_id == requisition_id,
-            Contact.status.in_([ContactStatus.SENT, ContactStatus.OPENED, ContactStatus.RESPONDED]),
+            Contact.status.in_([ContactStatus.SENT, ContactStatus.RESPONDED]),
         )
         .all()
     )

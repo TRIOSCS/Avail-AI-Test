@@ -233,16 +233,17 @@ def test_build_bid_back_works_on_awarded_list(db_session, owner, priced_list):
     assert bid.status == CustomerBidStatus.DRAFT
 
 
-@pytest.mark.parametrize("legacy_status", [ExcessListStatus.ACTIVE, ExcessListStatus.BIDDING])
+@pytest.mark.parametrize("legacy_status", ["active", "bidding"])
 def test_build_bid_back_rejects_legacy_status_list(db_session, owner, priced_list, legacy_status):
     """DOCUMENTED POLICY (finding #21 scope note): the pre-Resell backward-compat
-    statuses ``ACTIVE``/``BIDDING`` are deliberately NOT in ``_POSTED_LIST_STATUSES``,
-    so a list still carrying one 409s on bid-back build (and send re-checks the same
-    set) — consistent with the already-shipped ``submit_offer``/``upload_bids`` guards.
-
-    The legacy members retire in the cutover chunk; do not widen the guard for them.
-    """
-    priced_list.status = legacy_status
+    statuses ``active``/``bidding`` (enum members removed in the W1.9 dead-status sweep;
+    raw strings here stand in for a stray legacy row) are NOT in
+    ``_POSTED_LIST_STATUSES``, so a list still carrying one 409s on bid-back build (and
+    send re-checks the same set) — consistent with the already-shipped
+    ``submit_offer``/``upload_bids`` guards."""
+    # Bypass the ORM @validates guard (which now rejects the retired vocabulary) the
+    # way a legacy DB row would: write the column directly.
+    db_session.query(type(priced_list)).filter_by(id=priced_list.id).update({"status": legacy_status})
     db_session.commit()
     items = _lines(db_session, priced_list)
 

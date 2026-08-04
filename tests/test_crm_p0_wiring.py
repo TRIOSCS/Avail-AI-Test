@@ -645,7 +645,7 @@ def requisition_task(db_session: Session, test_user: User):
         requisition_id=req.id,
         title="Req-scoped task",
         task_type="general",
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         source="manual",
         created_by=test_user.id,
     )

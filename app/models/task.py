@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..constants import TaskStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -43,8 +44,8 @@ class RequisitionTask(Base):
 
     # sourcing | sales | general
     task_type = Column(String(20), nullable=False, default="general")
-    # todo | in_progress | done
-    status = Column(String(20), nullable=False, default="todo")
+    # open | done (TaskStatus; W1.13 two-state model, migration 205)
+    status = Column(String(20), nullable=False, default=TaskStatus.OPEN.value)
     # 1=low, 2=medium, 3=high
     priority = Column(Integer, nullable=False, default=2)
 

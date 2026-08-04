@@ -149,7 +149,8 @@ class TestExcessOutreachModel:
             assert ExcessOutreach(excess_list_id=1, submitted_by=1, channel=ch).channel == ch
 
     def test_all_statuses_accepted(self):
-        for st in ("sent", "opened", "responded", "bid", "declined", "no_response"):
+        # "opened" removed from ExcessOutreachStatus in the W1.9 dead-status sweep.
+        for st in ("sent", "responded", "bid", "declined", "no_response"):
             assert ExcessOutreach(excess_list_id=1, submitted_by=1, status=st).status == st
 
 

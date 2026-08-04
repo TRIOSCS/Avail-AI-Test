@@ -61,7 +61,7 @@ class TestCreateTask:
         )
         assert task.id is not None
         assert task.title == "Test task"
-        assert task.status == "todo"
+        assert task.status == "open"
 
     def test_manual_task_requires_24h_due(self, db_session: Session, test_requisition, test_user):
         with pytest.raises(ValueError, match="24 hours"):
@@ -240,7 +240,7 @@ class TestUpdateTask:
             db_session, requisition_id=test_requisition.id, title="T", source="system", assigned_to_id=test_user.id
         )
         update_task(db_session, t.id, status=TaskStatus.DONE)
-        updated = update_task(db_session, t.id, status="todo")
+        updated = update_task(db_session, t.id, status="open")
         assert updated.completed_at is None
 
 

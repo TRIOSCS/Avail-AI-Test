@@ -113,7 +113,7 @@ def _board_task(
         requisition_id=req.id,
         title=title,
         task_type="general",
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         priority=2,
         source="manual",
         created_by=created_by,
@@ -139,7 +139,7 @@ class TestBoardMutationGate:
         resp = stranger_client.post(f"/api/requisitions/{test_requisition.id}/tasks/{task.id}/complete")
         assert resp.status_code == 403
         db_session.expire_all()
-        assert db_session.get(RequisitionTask, task.id).status == TaskStatus.TODO
+        assert db_session.get(RequisitionTask, task.id).status == TaskStatus.OPEN
 
     def test_uninvolved_user_cannot_delete_board_task(
         self, stranger_client, db_session: Session, test_requisition: Requisition, test_user: User
@@ -194,7 +194,7 @@ class TestVendorDeleteOpensToCreator:
             vendor_card_id=test_vendor_card.id,
             title="My vendor task",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
             created_by=test_user.id,
             assigned_to_id=test_user.id,

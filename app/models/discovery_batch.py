@@ -1,4 +1,8 @@
-"""Discovery batch model — tracks every enrichment/discovery run."""
+"""Discovery batch model — historical audit rows for past enrichment/discovery runs.
+
+Read-only since W1: the sole writer (prospect_scheduler.job_discover_prospects) was
+deleted (docs/W1_JOB_DISPOSITION.md); nothing constructs new rows.
+"""
 
 from datetime import UTC, datetime
 
@@ -26,8 +30,9 @@ class DiscoveryBatch(Base):
     regions = Column(JSONB, default=list)
     search_filters = Column(JSONB, default=dict)
 
-    # Run status — see app.constants.DiscoveryBatchStatus
-    status = Column(String(20), default=DiscoveryBatchStatus.RUNNING.value)
+    # Run status — see app.constants.DiscoveryBatchStatus (historical rows are all
+    # 'completed'; the RUNNING default died with the writer in the W1.9 sweep)
+    status = Column(String(20), default=DiscoveryBatchStatus.COMPLETED.value)
     prospects_found = Column(Integer, default=0)
     prospects_new = Column(Integer, default=0)
     prospects_updated = Column(Integer, default=0)

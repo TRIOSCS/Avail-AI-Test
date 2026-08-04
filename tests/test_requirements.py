@@ -136,7 +136,7 @@ class TestListRequirements:
             requisition_id=test_requisition.id,
             title="Test task",
             task_type="general",
-            status="todo",
+            status="open",
             source="manual",
             source_ref=f"requirement:{req_item.id}",
             created_by=test_user.id,

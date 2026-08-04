@@ -125,7 +125,7 @@ class TestVendorTaskCheckConstraint:
             vendor_card_id=vendor_card.id,
             title="Call vendor",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(task)
@@ -142,7 +142,7 @@ class TestVendorTaskCheckConstraint:
         orphan = RequisitionTask(
             title="Orphan",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(orphan)
@@ -529,7 +529,7 @@ class TestVendorContactOnlyTaskEndpoints:
             vendor_contact_id=vendor_contact.id,
             title=title,
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
             created_by=test_user.id,
         )
@@ -570,7 +570,7 @@ class TestVendorContactOnlyTaskEndpoints:
             vendor_contact_id=vendor_contact.id,
             title="Delete contact-only task",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
             created_by=admin_user.id,
         )
@@ -662,7 +662,7 @@ class TestMigration142Roundtrip:
             vendor_card_id=vendor_card.id,
             title="vendor-only downgrade test",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(vendor_only_task)

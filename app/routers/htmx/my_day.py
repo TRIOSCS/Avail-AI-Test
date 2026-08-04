@@ -193,7 +193,7 @@ async def reopen_my_day_task(
     user: User = Depends(require_access(AccessKey.MY_DAY)),
     db: Session = Depends(get_db),
 ):
-    """Reopen one of my done tasks (status → todo, clears completed_at). Re-renders the
+    """Reopen one of my done tasks (status → open, clears completed_at). Re-renders the
     filtered results so the task leaves the Done view.
 
     Authz mirrors the Snooze gate (task_service.is_task_mutation_authorized): assignee,
@@ -206,7 +206,7 @@ async def reopen_my_day_task(
         raise HTTPException(404, "Task not found")
     if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
         raise HTTPException(403, "You are not allowed to reopen this task")
-    update_task(db, task_id, status=TaskStatus.TODO)
+    update_task(db, task_id, status=TaskStatus.OPEN)
     logger.info("Task {} reopened from My Day by {}", task_id, user.email)
     form = await request.form()
     return _my_day_results_response(

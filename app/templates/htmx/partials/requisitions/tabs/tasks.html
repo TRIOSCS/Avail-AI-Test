@@ -8,7 +8,7 @@
   {# Filter buttons #}
   <div class="flex items-center justify-between mb-4">
     <div class="flex gap-2">
-      {% for f, label in [('all', 'All'), ('todo', 'To Do'), ('in_progress', 'In Progress'), ('done', 'Done')] %}
+      {% for f, label in [('all', 'All'), ('open', 'Open'), ('done', 'Done')] %}
       <button @click="taskFilter = '{{ f }}'"
               :class="taskFilter === '{{ f }}' ? 'bg-accent-500 text-white shadow-sm' : 'bg-white text-gray-700 border border-gray-200 hover:bg-accent-50 hover:border-accent-200'"
               class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors">

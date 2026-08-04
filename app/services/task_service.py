@@ -196,7 +196,7 @@ def create_personal_task(
 
     Hangs the task off the creator's hidden "Personal" requisition
     (``get_or_create_personal_requisition``) so ``ck_task_has_parent`` is satisfied without
-    a real business parent. task_type="general", source="manual", status="todo". Callers
+    a real business parent. task_type="general", source="manual", status="open". Callers
     must pass an already-parsed aware ``due_at`` datetime (never a raw date string).
     """
     req = get_or_create_personal_requisition(db, user_id)
@@ -204,7 +204,7 @@ def create_personal_task(
         requisition_id=req.id,
         title=title,
         task_type="general",
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         priority=priority,
         assigned_to_id=user_id,
         created_by=user_id,
@@ -366,7 +366,7 @@ def reopen_task(
         return None
     if task.assigned_to_id != user_id:
         raise PermissionError("Only the assignee can reopen this task")
-    task.status = TaskStatus.TODO
+    task.status = TaskStatus.OPEN
     task.completed_at = None
     db.commit()
     db.refresh(task)

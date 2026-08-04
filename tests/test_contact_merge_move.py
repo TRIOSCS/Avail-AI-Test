@@ -246,7 +246,7 @@ class TestMergeContactsService:
             site_contact_id=loser.id,
             title="Follow up call",
             task_type="general",
-            status="todo",
+            status="open",
             created_at=datetime.now(UTC),
         )
         db_session.add(task)

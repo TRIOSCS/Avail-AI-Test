@@ -61,10 +61,11 @@ def test_contact_status():
     assert ContactStatus.DECLINED == "declined"
     assert ContactStatus.RESPONDED == "responded"
     assert ContactStatus.PENDING == "pending"
-    assert ContactStatus.OPENED == "opened"
     assert ContactStatus.OOO == "ooo"
     assert ContactStatus.BOUNCED == "bounced"
-    assert ContactStatus.RETRIED == "retried"
+    # OPENED / RETRIED removed in the W1.9 dead-status sweep (zero rows, no writer).
+    assert "opened" not in set(ContactStatus)
+    assert "retried" not in set(ContactStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -189,8 +190,10 @@ def test_excess_list_status():
     assert ExcessListStatus.AWARDED == "awarded"
     assert ExcessListStatus.CLOSED == "closed"
     assert ExcessListStatus.EXPIRED == "expired"
-    assert ExcessListStatus.ACTIVE == "active"
-    assert ExcessListStatus.BIDDING == "bidding"
+    # Legacy pre-Resell members removed in the W1.9 dead-status sweep
+    # (migration 193 remapped every row; no writer remained).
+    assert "active" not in set(ExcessListStatus)
+    assert "bidding" not in set(ExcessListStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +288,7 @@ def test_excess_outreach_status():
     from app.constants import ExcessOutreachStatus
 
     assert ExcessOutreachStatus.SENT == "sent"
-    assert ExcessOutreachStatus.OPENED == "opened"
+    assert "opened" not in set(ExcessOutreachStatus)  # removed in W1.9 (no open-tracking)
     assert ExcessOutreachStatus.RESPONDED == "responded"
     assert ExcessOutreachStatus.BID == "bid"
     assert ExcessOutreachStatus.DECLINED == "declined"
@@ -446,7 +449,7 @@ def test_proactive_offer_status():
 
     assert ProactiveOfferStatus.SENT == "sent"
     assert ProactiveOfferStatus.CONVERTED == "converted"
-    assert ProactiveOfferStatus.EXPIRED == "expired"
+    assert "expired" not in set(ProactiveOfferStatus)  # removed in W1.9 (no expiry clock)
 
 
 # ---------------------------------------------------------------------------
@@ -646,11 +649,13 @@ def test_company_disposition():
 
 
 def test_task_status():
+    """W1.13 two-state model: open/done only (todo/in_progress remapped by migration
+    205)."""
     from app.constants import TaskStatus
 
-    assert TaskStatus.TODO == "todo"
-    assert TaskStatus.IN_PROGRESS == "in_progress"
+    assert TaskStatus.OPEN == "open"
     assert TaskStatus.DONE == "done"
+    assert len(TaskStatus) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1170,7 +1175,7 @@ def test_approval_request_status():
     assert ApprovalRequestStatus.APPROVED == "approved"
     assert ApprovalRequestStatus.REJECTED == "rejected"
     assert ApprovalRequestStatus.CANCELLED == "cancelled"
-    assert ApprovalRequestStatus.EXPIRED == "expired"
+    assert "expired" not in set(ApprovalRequestStatus)  # removed in W1.9 (no expiry job)
 
 
 # ---------------------------------------------------------------------------

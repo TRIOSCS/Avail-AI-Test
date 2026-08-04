@@ -56,7 +56,12 @@ class ProactiveMatchStatus(StrEnum):
 
 
 class ContactStatus(StrEnum):
-    """Status lifecycle for outbound Contact records (RFQ emails, calls)."""
+    """Status lifecycle for outbound Contact records (RFQ emails, calls).
+
+    OPENED / RETRIED were removed in the W1.9 dead-status sweep: zero rows ever carried
+    them (no open-tracking exists; no retry path ever stamped one) and no code path
+    wrote them.
+    """
 
     SENT = "sent"
     FAILED = "failed"
@@ -64,10 +69,8 @@ class ContactStatus(StrEnum):
     DECLINED = "declined"
     RESPONDED = "responded"
     PENDING = "pending"
-    OPENED = "opened"
     OOO = "ooo"
     BOUNCED = "bounced"
-    RETRIED = "retried"
 
 
 class OfferStatus(StrEnum):
@@ -157,8 +160,9 @@ class ExcessListStatus(StrEnum):
     Resell (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
     -> awarded -> closed/expired. The new members are chosen to map onto existing
     ``status_badge`` keys (open->sky, collecting/sourcing->amber, bid_out/quoted->
-    violet, awarded/won->emerald). ACTIVE / BIDDING are the pre-Resell members,
-    kept for backward-compat (additive reshape — a later cutover chunk retires them).
+    violet, awarded/won->emerald). The pre-Resell legacy members ACTIVE / BIDDING
+    were retired in the W1.9 dead-status sweep (migration 193 had already remapped
+    every legacy row: active->open, bidding->collecting; no writer remained).
     """
 
     DRAFT = "draft"
@@ -168,9 +172,6 @@ class ExcessListStatus(StrEnum):
     AWARDED = "awarded"
     CLOSED = "closed"
     EXPIRED = "expired"
-    # --- Legacy (kept for backward-compat; retired in the cutover chunk) ---
-    ACTIVE = "active"
-    BIDDING = "bidding"
 
 
 class ExcessOfferStatus(StrEnum):
@@ -250,7 +251,7 @@ class ExcessOutreachChannel(StrEnum):
 class ExcessOutreachStatus(StrEnum):
     """Response lifecycle for a resell outreach (ExcessOutreach.status).
 
-    sending -> sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer)
+    sending -> sent -> responded -> bid (the buyer submitted an ExcessOffer)
     or declined. ``sending`` is the transient optimistic state a multi-buyer email
     campaign is written in while its background send job runs (the modal returns
     immediately) — the job then advances each row to its outcome.
@@ -268,14 +269,14 @@ class ExcessOutreachStatus(StrEnum):
     don't-forget nudge is designed around — it would be reached ONLY after a real
     ``sent`` that the buyer never answered, never as a catch-all for a send that failed.
     Deep-review #2 finding B45: as of this writing NO production path advances a row to
-    ``no_response`` (nor to ``opened``) — a genuinely-silent buyer's row simply stays
-    ``sent`` forever. The member stays in the enum (a future aging job is the natural
-    writer) rather than being removed.
+    ``no_response`` — a genuinely-silent buyer's row simply stays ``sent`` forever. The
+    member stays in the enum (rows carry it; a future aging job is the natural writer).
+    OPENED was removed in the W1.9 dead-status sweep (no open-tracking ever existed:
+    zero rows, no writer).
     """
 
     SENDING = "sending"
     SENT = "sent"
-    OPENED = "opened"
     RESPONDED = "responded"
     BID = "bid"
     DECLINED = "declined"
@@ -444,11 +445,14 @@ ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
 
 
 class ProactiveOfferStatus(StrEnum):
-    """Status lifecycle for ProactiveOffer records."""
+    """Status lifecycle for ProactiveOffer records.
+
+    EXPIRED was removed in the W1.9 dead-status sweep (zero rows, no writer — no offer-
+    expiry clock was ever built).
+    """
 
     SENT = "sent"
     CONVERTED = "converted"
-    EXPIRED = "expired"
 
 
 class TicketStatus(StrEnum):
@@ -643,13 +647,16 @@ class RiskFlagType(StrEnum):
 
 
 class ProspectAccountStatus(StrEnum):
-    """Status lifecycle for ProspectAccount records in the prospect pool."""
+    """Status lifecycle for ProspectAccount records in the prospect pool.
+
+    EXPIRED was removed in the W1.9 dead-status sweep (zero rows, no writer — the
+    reclamation sweep dismisses stale claims, it never expires them).
+    """
 
     SUGGESTED = "suggested"
     CLAIMED = "claimed"
     DISMISSED = "dismissed"
     CONVERTED = "converted"
-    EXPIRED = "expired"
 
 
 class CompanyDisposition(StrEnum):
@@ -666,10 +673,14 @@ class CompanyDisposition(StrEnum):
 
 
 class TaskStatus(StrEnum):
-    """Status lifecycle for RequisitionTask records."""
+    """Status lifecycle for RequisitionTask records — two states only (spec §5.4).
 
-    TODO = "todo"
-    IN_PROGRESS = "in_progress"
+    W1.13 collapsed the old todo/in_progress/done ladder: a task is OPEN (being worked,
+    however far along) or DONE. Migration 205 remapped existing 'todo'/'in_progress'
+    rows to 'open'.
+    """
+
+    OPEN = "open"
     DONE = "done"
 
 
@@ -682,19 +693,16 @@ class PendingBatchStatus(StrEnum):
 
 
 class DiscoveryBatchStatus(StrEnum):
-    """Status lifecycle for DiscoveryBatch (prospect discovery/enrichment run) audit
-    records — historical rows only; the sole writer
+    """Status of historical DiscoveryBatch (prospect discovery/enrichment run) audit
+    rows — read-only; the sole writer
     (app.services.prospect_scheduler.job_discover_prospects) was deleted in W1
     (docs/W1_JOB_DISPOSITION.md).
 
-    FAILED is not currently written (an unhandled exception leaves the row at RUNNING
-    and is only surfaced via the job's log/return value) but is reserved here to match
-    the PendingBatchStatus run-lifecycle convention.
+    RUNNING / FAILED were removed in the W1.9 dead-status sweep: every surviving row
+    is ``completed`` and nothing constructs DiscoveryBatch rows anymore.
     """
 
-    RUNNING = "running"
     COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class SearchQueueStatus(StrEnum):
@@ -1280,14 +1288,15 @@ class ApprovalRequestStatus(StrEnum):
     requested  — created, awaiting at least one recipient to act. approved   — all
     required recipients approved (or any, per rule). rejected   — at least one required
     recipient rejected. cancelled  — withdrawn by the requester before resolution.
-    expired    — deadline passed without resolution.
+
+    EXPIRED (deadline passed without resolution) was removed in the W1.9 dead-status
+    sweep: no expiry job was ever built (zero rows, no writer).
     """
 
     REQUESTED = "requested"
     APPROVED = "approved"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
-    EXPIRED = "expired"
 
 
 class ApprovalRecipientStatus(StrEnum):

@@ -35,7 +35,7 @@ def my_open_task(db_session: Session, test_user, test_requisition) -> Requisitio
     t = RequisitionTask(
         requisition_id=test_requisition.id,
         title="Source LM317T",
-        status=TaskStatus.TODO.value,
+        status=TaskStatus.OPEN.value,
         assigned_to_id=test_user.id,
         due_at=datetime.now(UTC) - timedelta(days=1),
         created_at=datetime.now(UTC),
@@ -77,7 +77,7 @@ def test_other_users_task_not_counted(db_session, test_user, manager_user, test_
         RequisitionTask(
             requisition_id=test_requisition.id,
             title="Manager's task",
-            status=TaskStatus.TODO.value,
+            status=TaskStatus.OPEN.value,
             assigned_to_id=manager_user.id,
             created_at=datetime.now(UTC),
         )
@@ -101,7 +101,7 @@ def test_count_equals_items_len(db_session, test_user, my_open_task, test_requis
         RequisitionTask(
             requisition_id=test_requisition.id,
             title="Second task",
-            status=TaskStatus.TODO.value,
+            status=TaskStatus.OPEN.value,
             assigned_to_id=test_user.id,
             created_at=datetime.now(UTC),
         )

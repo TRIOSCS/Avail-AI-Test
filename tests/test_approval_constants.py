@@ -38,13 +38,13 @@ def test_approval_gate_type_members() -> None:
 
 
 def test_approval_request_status_members() -> None:
-    """All five request-status members present."""
+    """All four request-status members present (EXPIRED removed in W1.9 — no expiry
+    job)."""
     assert ApprovalRequestStatus.REQUESTED == "requested"
     assert ApprovalRequestStatus.APPROVED == "approved"
     assert ApprovalRequestStatus.REJECTED == "rejected"
     assert ApprovalRequestStatus.CANCELLED == "cancelled"
-    assert ApprovalRequestStatus.EXPIRED == "expired"
-    assert len(ApprovalRequestStatus) == 5
+    assert len(ApprovalRequestStatus) == 4
 
 
 def test_approval_recipient_status_members() -> None:

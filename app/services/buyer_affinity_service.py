@@ -78,7 +78,6 @@ _RESPONDED_STATUSES = {
     ExcessOutreachStatus.RESPONDED,
     ExcessOutreachStatus.BID,
     ExcessOutreachStatus.DECLINED,
-    ExcessOutreachStatus.OPENED,
 }
 # Outreach statuses where the send did NOT actually reach the buyer — a transient
 # ``sending`` row, a ``failed`` send, or an ``interrupted`` (orphaned) one. The SINGLE

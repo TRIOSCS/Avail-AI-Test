@@ -350,7 +350,7 @@ def test_comms_tab_renders_overdue_task_via_shared_helper(client, test_requisiti
         requirement_id=req.id,
         title="Overdue comms task",
         task_type="general",
-        status="todo",
+        status="open",
         source="manual",
         created_by=test_user.id,
         due_at=datetime(2020, 1, 15, tzinfo=UTC),

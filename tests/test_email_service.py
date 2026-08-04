@@ -259,8 +259,10 @@ class TestProgressContactStatus:
             pytest.param("sent", "partial_availability", "responded", id="partial_availability_sets_responded"),
             # Unknown / None classification falls to the else branch.
             pytest.param("sent", "unknown_type", "responded", id="unknown_classification_sent_to_responded"),
-            pytest.param("opened", "anything", "responded", id="unknown_classification_opened_to_responded"),
-            # Not in ("sent", "opened") so status doesn't change from the else branch.
+            # "opened" was removed from ContactStatus in the W1.9 dead-status sweep;
+            # a stray legacy row is left untouched by the else branch (only "sent" advances).
+            pytest.param("opened", "anything", "opened", id="retired_opened_status_left_untouched"),
+            # Not "sent" so status doesn't change from the else branch.
             pytest.param("responded", "something_else", "responded", id="unknown_classification_responded_stays"),
             # None -> empty string -> falls to else branch -> sent->responded.
             pytest.param("sent", None, "responded", id="none_classification"),

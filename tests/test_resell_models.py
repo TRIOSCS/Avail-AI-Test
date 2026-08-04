@@ -116,10 +116,11 @@ class TestTradingConstants:
 
     def test_excess_list_status_extended_additively(self):
         values = {e.value for e in ExcessListStatus}
-        # New lifecycle members the Trading spec uses.
+        # Lifecycle members the Trading spec uses.
         assert {"draft", "open", "collecting", "bid_out", "awarded", "closed", "expired"} <= values
-        # Backward-compat: pre-existing members are NOT removed in this additive chunk.
-        assert {"active", "bidding"} <= values
+        # W1.9: legacy pre-Resell vocab ('active'/'bidding') removed — zero rows
+        # (migration 193 remapped them) and zero writers. Guard the removal.
+        assert {"active", "bidding"} & values == set()
 
 
 # ── ExcessOffer (header) ─────────────────────────────────────────────

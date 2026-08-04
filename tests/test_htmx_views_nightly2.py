@@ -422,7 +422,7 @@ class TestPartTasks:
             title="Test task",
             created_by=test_user.id,
             assigned_to_id=test_user.id,
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(task)
@@ -506,7 +506,7 @@ class TestPartTasks:
             title="Other's task",
             created_by=other.id,
             assigned_to_id=other.id,
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(task)
@@ -516,7 +516,7 @@ class TestPartTasks:
         assert resp.status_code == 403
 
         db_session.refresh(task)
-        assert task.status == TaskStatus.TODO, "Task must not have transitioned"
+        assert task.status == TaskStatus.OPEN, "Task must not have transitioned"
 
 
 # ── Archive System ────────────────────────────────────────────────────

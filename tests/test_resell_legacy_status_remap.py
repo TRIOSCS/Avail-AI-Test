@@ -61,8 +61,15 @@ def owner(db_session: Session) -> User:
 
 
 def _make_list(db: Session, owner: User, company: Company, *, status: str, open_at=None) -> ExcessList:
-    el = ExcessList(title="L", company_id=company.id, owner_id=owner.id, status=status, open_at=open_at)
+    # Legacy vocab ('active'/'bidding') was removed from ExcessListStatus in W1.9,
+    # so the model validator rejects it at assignment. These tests exist precisely
+    # to prove the migration handles such rows, so seed valid then write the raw
+    # legacy string past the validator — exactly how a legacy DB row exists.
+    el = ExcessList(title="L", company_id=company.id, owner_id=owner.id, status=ExcessListStatus.DRAFT, open_at=open_at)
     db.add(el)
+    db.flush()
+    db.query(ExcessList).filter(ExcessList.id == el.id).update({"status": status, "open_at": open_at})
+    db.expire(el)
     db.commit()
     db.refresh(el)
     return el

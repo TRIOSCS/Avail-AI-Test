@@ -39,7 +39,7 @@ def board_task(db_session: Session, test_requisition: Requisition, test_user: Us
         requisition_id=test_requisition.id,
         title="Original title",
         task_type="general",
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         priority=2,
         source="manual",
         created_by=test_user.id,

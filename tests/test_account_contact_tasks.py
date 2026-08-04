@@ -128,7 +128,7 @@ class TestMigration135CheckConstraint:
         orphan = RequisitionTask(
             title="Orphan task",
             task_type="general",
-            status=TaskStatus.TODO,
+            status=TaskStatus.OPEN,
             source="manual",
         )
         db_session.add(orphan)

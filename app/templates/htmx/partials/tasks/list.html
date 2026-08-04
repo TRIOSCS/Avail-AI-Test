@@ -80,8 +80,6 @@
               hx-include="[name='priority'], [name='due']"
               class="input input-sm">
         <option value="" {% if not filter_status %}selected{% endif %}>Open</option>
-        <option value="todo" {% if filter_status == 'todo' %}selected{% endif %}>To do</option>
-        <option value="in_progress" {% if filter_status == 'in_progress' %}selected{% endif %}>In progress</option>
         <option value="done" {% if filter_status == 'done' %}selected{% endif %}>Done</option>
       </select>
     </label>

@@ -99,7 +99,8 @@ class TestProspectAccountModel:
         db_session.add(pa)
         db_session.commit()
 
-        for new_status in ("claimed", "converted", "dismissed", "expired"):
+        # "expired" removed from ProspectAccountStatus in the W1.9 dead-status sweep.
+        for new_status in ("claimed", "converted", "dismissed"):
             pa.status = new_status
             db_session.commit()
             db_session.refresh(pa)
@@ -268,7 +269,7 @@ class TestDiscoveryBatchModel:
         db_session.rollback()
 
     def test_batch_defaults(self, db_session: Session):
-        """Default values: status=running, counts=0."""
+        """Default values: status=completed (historical-rows-only model, W1.9), counts=0."""
         batch = DiscoveryBatch(
             batch_id="defaults-batch",
             source="email_mining",
@@ -278,7 +279,7 @@ class TestDiscoveryBatchModel:
         db_session.commit()
         db_session.refresh(batch)
 
-        assert batch.status == "running"
+        assert batch.status == "completed"
         assert batch.prospects_found == 0
         assert batch.prospects_new == 0
         assert batch.prospects_updated == 0

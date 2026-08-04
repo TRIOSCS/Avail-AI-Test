@@ -39,7 +39,7 @@ def _add_task(
     title: str,
     company=None,
     created_by: int | None = None,
-    status: str = TaskStatus.TODO.value,
+    status: str = TaskStatus.OPEN.value,
     priority: int = 2,
     due_at=None,
 ) -> RequisitionTask:
@@ -125,7 +125,7 @@ class TestCreatePersonalTaskService:
         assert t.assigned_to_id == test_user.id
         assert t.created_by == test_user.id
         assert t.task_type == "general"
-        assert t.status == TaskStatus.TODO.value
+        assert t.status == TaskStatus.OPEN.value
         req = db_session.get(Requisition, t.requisition_id)
         assert req is not None
         assert req.is_scratch is True
@@ -147,7 +147,7 @@ class TestCreatePersonalTaskRoute:
         task = db_session.query(RequisitionTask).filter_by(title="Call the vendor back").first()
         assert task is not None
         assert task.assigned_to_id == test_user.id
-        assert task.status == TaskStatus.TODO.value
+        assert task.status == TaskStatus.OPEN.value
 
     def test_create_requires_title(self, client: TestClient):
         resp = client.post("/v2/partials/my-day/tasks", data={"title": "   "})
@@ -248,7 +248,7 @@ class TestReopenRoute:
         resp = client.post(f"/v2/partials/my-day/tasks/{t.id}/reopen")
         assert resp.status_code == 200
         db_session.refresh(t)
-        assert t.status == TaskStatus.TODO.value
+        assert t.status == TaskStatus.OPEN.value
         assert t.completed_at is None
 
     def test_reopen_from_done_view_removes_row(

@@ -46,7 +46,7 @@ def _add_task(
     title: str,
     company=None,
     req=None,
-    status: str = TaskStatus.TODO.value,
+    status: str = TaskStatus.OPEN.value,
     priority: int = 2,
     due_at=None,
 ) -> RequisitionTask:

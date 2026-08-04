@@ -51,7 +51,7 @@ def existing_task(db_session: Session, test_requisition: Requisition, test_user:
         requisition_id=test_requisition.id,
         title="Review incoming offers",
         task_type="sourcing",
-        status=TaskStatus.TODO,
+        status=TaskStatus.OPEN,
         priority=2,
         source="manual",
         created_by=test_user.id,

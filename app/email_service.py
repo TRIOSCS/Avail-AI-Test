@@ -1237,7 +1237,7 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
         contact.status = ContactStatus.RESPONDED
     else:
         # Generic response — at least we know they replied
-        if contact.status in (ContactStatus.SENT, ContactStatus.OPENED):
+        if contact.status == ContactStatus.SENT:
             contact.status = ContactStatus.RESPONDED
 
     contact.status_updated_at = now

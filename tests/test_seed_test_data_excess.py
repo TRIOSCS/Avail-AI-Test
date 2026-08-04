@@ -48,9 +48,10 @@ class TestSeedExcessLists:
         lists = db_session.query(ExcessList).all()
         assert len(lists) == 5
         statuses = {el.status for el in lists}
-        # The legacy pre-rework members must never be seeded again (finding #63a).
-        assert ExcessListStatus.ACTIVE.value not in statuses
-        assert ExcessListStatus.BIDDING.value not in statuses
+        # The legacy pre-rework statuses must never be seeded again (finding #63a;
+        # the enum members themselves were removed in the W1.9 dead-status sweep).
+        assert "active" not in statuses
+        assert "bidding" not in statuses
         assert statuses == {
             ExcessListStatus.DRAFT.value,
             ExcessListStatus.OPEN.value,
