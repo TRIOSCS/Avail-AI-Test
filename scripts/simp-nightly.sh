@@ -41,6 +41,11 @@ if [ "$HDR" -ge 1 ]; then log "OK   instance header"; else log "FAIL instance he
 # 2) Branch-code Playwright suite (self-contained webServer, like prod nightly)
 cd "$WT" || { log "FAIL cd worktree"; FAIL=1; }
 if [ "$FAIL" -eq 0 ] || true; then
+    # Vite build first: the webServer serves from the source tree, and without
+    # app/static/dist/ every page renders unstyled (found S1 — the visual spec
+    # fails on a bare-HTML login page). Prod nightly does the same build.
+    log "=== npm run build (assets for webServer) ==="
+    if ! npm run build >> "$LOG" 2>&1; then log "FAIL npm run build"; FAIL=1; fi
     log "=== E2E (TS Playwright, branch code) ==="
     if ! npx playwright test >> "$LOG" 2>&1; then
         # Self-heal missing browser build once, then retry (mirrors prod nightly)
