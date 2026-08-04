@@ -1,0 +1,195 @@
+# docker-compose.simp.yml — AVAIL simplification parallel instance
+#
+# What: standalone compose stack for the simplification branch, running next
+#       to production on the same droplet with an isolated DB (restored from
+#       the latest production backup), its own redis, and its own Caddy on
+#       :8443. Production's stack (project `availai`) is never touched.
+# Run:  docker compose -p availai-simp -f docker-compose.simp.yml up -d \
+#         db redis app enrichment-worker caddy
+# Why standalone (not an override file): compose merges `ports:` lists, which
+#       would make the simp caddy fight production for 80/443.
+# See:  docs/CUTOVER.md for the restore/refresh ritual (Brief rule 3.7).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    # Same tuning shape as production but half the memory: this instance
+    # serves one tester, not the workload the prod flags are sized for.
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=256MB
+      -c random_page_cost=1.1
+      -c checkpoint_completion_target=0.9
+      -c log_min_duration_statement=500
+      -c log_checkpoints=on
+      -c log_lock_waits=on
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-availai}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '1.0'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: >
+      redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a ${REDIS_PASSWORD} --no-auth-warning} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  app:
+    build: .
+    restart: always
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.29.0.0/24"]
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+    stop_grace_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+      - static_files:/srv/static
+      - applogs:/var/log/avail
+      - ./scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  enrichment-worker:
+    build: .
+    restart: always
+    command: ["python", "-m", "app.services.enrichment_worker"]
+    env_file: .env
+    stop_grace_period: 60s
+    environment:
+      - ENRICHMENT_BATCH_SIZE=${ENRICHMENT_BATCH_SIZE:-5}
+      - ENRICHMENT_DAILY_CAP=${ENRICHMENT_DAILY_CAP:-0}
+      - ENRICHMENT_WEB_DAILY_CAP=${ENRICHMENT_WEB_DAILY_CAP:-0}
+      - ENRICHMENT_LOOP_SLEEP_SECONDS=${ENRICHMENT_LOOP_SLEEP_SECONDS:-60}
+      - ENRICHMENT_IDLE_SLEEP_SECONDS=${ENRICHMENT_IDLE_SLEEP_SECONDS:-300}
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile.simp:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_files:/srv/static:ro
+      # TLS cert/key copied from production caddy (see docs/CUTOVER.md —
+      # refreshed each wave start; prod renews via Let's Encrypt).
+      - /root/availai-simp-secrets/certs:/certs:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  uploads:
+  redisdata:
+  caddy_data:
+  caddy_config:
+  static_files:
+  applogs:
+
+networks:
+  # Different subnet from production's 172.28.0.0/24 — two networks cannot
+  # share a subnet on one host. Must match the app `command:` forwarded IPs.
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

@@ -1,0 +1,73 @@
+# Caddyfile.simp — AVAIL simplification parallel instance (:8443)
+# Same routing/security shape as the production Caddyfile, with three changes:
+#   1. listens on app.availai.net:8443 (production owns 80/443)
+#   2. TLS uses the cert copied from production's caddy volume (/certs, see
+#      docs/CUTOVER.md) instead of this instance running its own ACME
+#   3. every response carries X-Avail-Instance: simplification so the two
+#      instances are never confused in a browser or curl
+
+(backend) {
+	reverse_proxy app:8000 {
+		lb_try_duration 30s
+		lb_try_interval 1s
+		health_uri /health
+		health_interval 5s
+		health_timeout 3s
+		transport http {
+			keepalive 30s
+			keepalive_idle_conns 10
+		}
+	}
+}
+
+app.availai.net:8443 {
+	encode gzip zstd
+
+	tls /certs/app.availai.net.crt /certs/app.availai.net.key
+
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Avail-Instance "simplification"
+	}
+
+	@blocked path /metrics /docs /redoc /openapi.json
+	handle @blocked {
+		respond 403
+	}
+
+	@hashed path /static/assets/*
+	handle @hashed {
+		header Cache-Control "public, max-age=31536000, immutable"
+		root * /srv
+		file_server
+	}
+
+	@static path /static/*
+	handle @static {
+		header Cache-Control "public, max-age=3600"
+		root * /srv
+		file_server
+	}
+
+	@api path /api/* /auth/*
+	handle @api {
+		header Cache-Control "no-cache, no-store, must-revalidate"
+		import backend
+	}
+
+	handle {
+		header Cache-Control "no-store, must-revalidate"
+		header Pragma "no-cache"
+		import backend
+	}
+}
