@@ -32,7 +32,7 @@ warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 - [ ] W1.9 Dead statuses removed (prod-copy zero-use evidence per status) (§5.3/§9)
 - [ ] W1.10 Delete the 2 dead transition tables (§9)
 - [x] W1.11 Kernel-walk E2E script against the deployed instance (18 passed / 2 honest skips live); simp-nightly.sh runs it (§3/§6)
-- [ ] W1.11b Nightly failure pages ONE admin via the existing approval-outbox email path (§6 — deferred by the E2E agent pending channel choice; approval outbox is the reuse answer)
+- [x] W1.11b Nightly failure pages ONE admin — RED verdict invokes the existing notify_nightly_status seam with a SIMPLIFICATION marker (§6)
 - [ ] W1.17 Keys-off honesty: resell outreach manual-channel log must not require a fresh M365 token (route-level Depends blocks the whole door keys-off; found by kernel walk) (§7 family)
 - [ ] W1.18 Keys-off honesty: existing quote Won/Lost buttons render for draft quotes too (server already accepts draft→won; UI only offers it from 'sent', which needs Graph) (§7 family)
 - [x] W1.12 Backup verify-timer unit files ready in repo; installation deferred to cutover (§6; CUTOVER.md §5)
@@ -49,14 +49,14 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 
 | Metric | Baseline (2026-08-04 @ bcfb9a54) | Current |
 |---|---|---|
-| Route count | 809 (268 /api, 516 /v2, 25 other; 753 unique paths) | 809 |
-| Scheduled job count (in-app) | 59 (all in app/jobs/*.py, 17 modules) | 59 |
+| Route count | 809 (268 /api, 516 /v2, 25 other; 753 unique paths) | ≈804 (6 badge endpoints → 1; runtime re-count at Packet 1) |
+| Scheduled job count (in-app) | 59 (all in app/jobs/*.py, 17 modules) | **7 kernel** (6 live keys-off — token_refresh registration-gated; 11 modules) |
 | Host cron jobs (prod droplet) | 5 (nightly tests, weekly cleanup, legacy pg backup, FRU check, coverage report) | 5 |
 | LOC app/routers/sightings.py | 3,812 | 3,812 |
 | LOC app/static/htmx_app.js | 3,654 | 3,654 |
 | LOC app/search_service.py | 3,604 | 3,604 |
 | Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 114 |
-| Test file count (pytest) | 1,113 | 1,113 |
+| Test file count (pytest) | 1,113 | 1,107 |
 | E2E spec files (Playwright) | 12 | 12 |
 | Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | 10 |
 
