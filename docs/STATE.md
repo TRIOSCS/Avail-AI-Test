@@ -20,7 +20,7 @@ discipline, wins on conflict) and SIMPLIFICATION_SPEC.md (work order).
 Acceptance: scheduler runs ONLY kernel jobs (§3); zero recurring
 warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 
-- [ ] W1.0 Job disposition table: 59 jobs → keep/park/delete with code+DB evidence → docs/W1_JOB_DISPOSITION.md (§3/§6)
+- [x] W1.0 Job disposition table: 59 jobs → keep 7 / park 11 / delete 41, code+DB evidence, 10/10 spot-checks confirmed → docs/W1_JOB_DISPOSITION.md (§3/§6); 4 flip-ables queued for Packet 1
 - [ ] W1.1 Delete Explorium discovery machine jobs (6 monthly) (§6)
 - [ ] W1.2 Delete 8x8 CDR poll job (§6)
 - [ ] W1.3 Tagging suite: delete 2 zero-yield jobs; prefix/spec jobs → on-demand management commands; AI tagging on-demand only (§6)
