@@ -1,10 +1,18 @@
 """status_machine.py — State machine validation for domain entity status transitions.
 
-Purpose: Prevents invalid status transitions on offers, quotes, requisitions,
-         and buy plans. Enforces valid state transitions and provides clear error
-         messages when invalid transitions are attempted.
+Purpose: Prevents invalid status transitions on offers, quotes, and requirements
+         (per-part sourcing status). Enforces valid state transitions and provides
+         clear error messages when invalid transitions are attempted.
 
-Called by: routers/crm/offers.py, routers/crm/quotes.py
+         Requisition transitions are enforced by requisition_state.transition
+         (its ALLOWED_TRANSITIONS table); buy-plan transitions are enforced
+         inline by buyplan_workflow/buyplan_approval.py. Neither routes
+         through this module.
+
+Called by: routers/crm/offers.py, routers/crm/quotes.py, routers/htmx/offers/crud.py,
+           routers/htmx/quotes.py, routers/sightings.py, services/quote_send.py,
+           services/po_cancellation_service.py, services/sourcing_auto_progress.py,
+           services/requirement_status.py
 Depends on: nothing (pure logic)
 """
 
@@ -12,10 +20,8 @@ from fastapi import HTTPException
 from loguru import logger
 
 from ..constants import (
-    BuyPlanStatus,
     OfferStatus,
     QuoteStatus,
-    RequisitionStatus,
     SourcingStatus,
 )
 
@@ -47,67 +53,6 @@ QUOTE_TRANSITIONS: dict[str, set[str]] = {
     QuoteStatus.REVISED: {QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST},
     QuoteStatus.WON: {QuoteStatus.DRAFT, QuoteStatus.REVISED, QuoteStatus.SENT},  # can be re-opened
     QuoteStatus.LOST: {QuoteStatus.DRAFT, QuoteStatus.REVISED, QuoteStatus.SENT},  # can be re-opened
-}
-
-# ── Buy Plan Status Transitions ─────────────────────────────────────────
-BUY_PLAN_TRANSITIONS: dict[str, set[str]] = {
-    BuyPlanStatus.DRAFT: {BuyPlanStatus.PENDING, BuyPlanStatus.CANCELLED},
-    BuyPlanStatus.PENDING: {BuyPlanStatus.ACTIVE, BuyPlanStatus.CANCELLED, BuyPlanStatus.DRAFT},
-    BuyPlanStatus.ACTIVE: {BuyPlanStatus.COMPLETED, BuyPlanStatus.HALTED, BuyPlanStatus.CANCELLED},
-    BuyPlanStatus.HALTED: {BuyPlanStatus.DRAFT, BuyPlanStatus.CANCELLED},
-    BuyPlanStatus.COMPLETED: set(),  # terminal
-    BuyPlanStatus.CANCELLED: {BuyPlanStatus.DRAFT},  # can be reset
-}
-
-# ── Requisition Status Transitions ──────────────────────────────────────
-# Mirror of app/services/requisition_state.ALLOWED_TRANSITIONS — the Sales Hub
-# pipeline. There is no archive/hide capability; a req ends in WON or LOST.
-REQUISITION_TRANSITIONS: dict[str, set[str]] = {
-    RequisitionStatus.DRAFT: {
-        RequisitionStatus.OPEN,
-        RequisitionStatus.HOTLIST,
-    },
-    RequisitionStatus.OPEN: {
-        RequisitionStatus.RFQS_SENT,
-        RequisitionStatus.OFFERS,
-        RequisitionStatus.QUOTED,
-        RequisitionStatus.WON,
-        RequisitionStatus.LOST,
-        RequisitionStatus.HOTLIST,
-    },
-    RequisitionStatus.RFQS_SENT: {
-        RequisitionStatus.OPEN,
-        RequisitionStatus.OFFERS,
-        RequisitionStatus.QUOTED,
-        RequisitionStatus.WON,
-        RequisitionStatus.LOST,
-        RequisitionStatus.HOTLIST,
-    },
-    RequisitionStatus.OFFERS: {
-        RequisitionStatus.OPEN,
-        RequisitionStatus.QUOTED,
-        RequisitionStatus.WON,
-        RequisitionStatus.LOST,
-        RequisitionStatus.HOTLIST,
-    },
-    RequisitionStatus.QUOTED: {
-        RequisitionStatus.OPEN,
-        RequisitionStatus.OFFERS,
-        RequisitionStatus.WON,
-        RequisitionStatus.LOST,
-        RequisitionStatus.HOTLIST,
-    },
-    RequisitionStatus.WON: {RequisitionStatus.OPEN},
-    RequisitionStatus.LOST: {RequisitionStatus.OPEN, RequisitionStatus.HOTLIST},
-    RequisitionStatus.HOTLIST: {
-        RequisitionStatus.OPEN,
-        RequisitionStatus.RFQS_SENT,
-        RequisitionStatus.OFFERS,
-        RequisitionStatus.QUOTED,
-        RequisitionStatus.WON,
-        RequisitionStatus.LOST,
-    },
-    RequisitionStatus.CANCELLED: {RequisitionStatus.OPEN},
 }
 
 # ── Sourcing Status Transitions (Requirement-level) ────────────────────
@@ -185,8 +130,6 @@ def validate_transition(
     transition_map = {
         "offer": OFFER_TRANSITIONS,
         "quote": QUOTE_TRANSITIONS,
-        "buy_plan": BUY_PLAN_TRANSITIONS,
-        "requisition": REQUISITION_TRANSITIONS,
         "requirement": SOURCING_TRANSITIONS,
     }
 

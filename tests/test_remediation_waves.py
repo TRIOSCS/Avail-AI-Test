@@ -16,7 +16,7 @@ from app.services.status_machine import require_valid_transition, validate_trans
 
 
 class TestStatusMachine:
-    """Status transition validation for offers, quotes, buy plans."""
+    """Status transition validation for offers and quotes."""
 
     def test_offer_valid_transitions(self):
         assert validate_transition("offer", "pending_review", "active") is True
@@ -40,21 +40,6 @@ class TestStatusMachine:
     def test_quote_invalid_transition(self):
         with pytest.raises(ValueError):
             validate_transition("quote", "revised", "draft")
-
-    def test_buy_plan_valid_transitions(self):
-        assert validate_transition("buy_plan", "draft", "pending") is True
-        assert validate_transition("buy_plan", "pending", "active") is True
-        assert validate_transition("buy_plan", "active", "completed") is True
-        assert validate_transition("buy_plan", "halted", "draft") is True
-
-    def test_buy_plan_invalid_transition(self):
-        with pytest.raises(ValueError):
-            validate_transition("buy_plan", "completed", "active")
-
-    def test_requisition_transitions(self):
-        assert validate_transition("requisition", "draft", "open") is True
-        assert validate_transition("requisition", "open", "offers") is True
-        assert validate_transition("requisition", "offers", "quoted") is True
 
     def test_unknown_entity_allows_transition(self):
         assert validate_transition("unknown_entity", "a", "b") is True
@@ -84,5 +69,5 @@ class TestRequireValidTransition:
 
     def test_terminal_state_raises_http_409(self):
         with pytest.raises(HTTPException) as exc_info:
-            require_valid_transition("buy_plan", "completed", "active")
+            require_valid_transition("offer", "rejected", "active")
         assert exc_info.value.status_code == 409
