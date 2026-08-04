@@ -475,28 +475,6 @@ class TestProactiveScorecardAndBadge:
             resp = client.get("/v2/partials/proactive/scorecard")
             assert resp.status_code == 200
 
-    def test_badge_no_matches_returns_empty(
-        self,
-        client: TestClient,
-        db_session: Session,
-    ):
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-        assert resp.text == ""
-
-    def test_badge_with_matches_returns_count(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_offer: Offer,
-        test_user: User,
-        test_customer_site: CustomerSite,
-    ):
-        make_proactive_match(db_session, test_offer, test_user, test_customer_site, status="new")
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-        assert "1" in resp.text
-
 
 # ── Section 9: Proactive do-not-offer ────────────────────────────────────
 

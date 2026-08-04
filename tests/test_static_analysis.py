@@ -681,12 +681,19 @@ def test_nav_poll_badges_optout_of_push_url():
     html = Path("app/templates/htmx/partials/shared/mobile_nav.html").read_text()
     # The inheritance hazard exists only because the nav <a> pushes a URL.
     assert 'hx-push-url="{{ href }}"' in html, "nav <a> hx-push-url contract changed — revisit this guard"
-    badges = re.findall(r"<span[^>]*hx-get=\"[^\"]*/badge\"[^>]*>", html, re.DOTALL)
-    assert badges, "expected bottom-nav badge spans with hx-get to a /badge endpoint"
-    offenders = [b[:100] for b in badges if 'hx-push-url="false"' not in b]
+    # W1.8 consolidated the six per-badge pollers into ONE nav-badge-poller div
+    # (OOB swaps from /v2/partials/nav/badges). The bug class is unchanged: any
+    # polling hx-get inside this template inherits hx-push-url and rewrites the
+    # address bar on every poll unless it opts out.
+    pollers = re.findall(r"<\w+[^>]*hx-get=\"[^\"]*\"[^>]*hx-trigger=\"[^\"]*every[^\"]*\"[^>]*>", html, re.DOTALL)
+    assert pollers, "expected the consolidated nav badge poller (hx-get + every-trigger)"
+    assert any("nav-badge-poller" in p for p in pollers), (
+        "nav-badge-poller div missing — badge polling contract changed, revisit this guard"
+    )
+    offenders = [p[:120] for p in pollers if 'hx-push-url="false"' not in p]
     assert not offenders, (
-        "bottom-nav badge poll spans inherit the nav <a>'s hx-push-url and rewrite the "
-        'address bar; add hx-push-url="false":\n' + "\n".join(offenders)
+        "polling elements in mobile_nav inherit the nav <a>'s hx-push-url and rewrite "
+        'the address bar; add hx-push-url="false":\n' + "\n".join(offenders)
     )
 
 

@@ -76,26 +76,6 @@ class TestProactiveScorecard:
         assert "Proactive Scorecard" in resp.text
 
 
-# ── Proactive Badge ─────────────────────────────────────────────────
-
-
-class TestProactiveBadge:
-    def test_badge_with_matches(self, client: TestClient, proactive_match):
-        resp = client.get(
-            "/v2/partials/proactive/badge",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_badge_empty(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/proactive/badge",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert resp.text == ""
-
-
 # ── Do Not Offer ────────────────────────────────────────────────────
 
 

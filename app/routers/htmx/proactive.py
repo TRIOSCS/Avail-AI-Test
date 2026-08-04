@@ -2,7 +2,7 @@
 
 Server-rendered HTML partials for the proactive-selling surface: the match list,
 refresh/scan, batch-dismiss, the prepare page + draft + send flow, the legacy
-send/convert routes, scorecard, badge, and do-not-offer. Extracted verbatim from
+send/convert routes, scorecard, and do-not-offer. Extracted verbatim from
 htmx_views.py (same `/v2/partials/proactive` + `/v2/proactive` paths, same
 `htmx-views` tag).
 
@@ -586,28 +586,6 @@ async def proactive_scorecard(
         "htmx/partials/proactive/scorecard.html",
         {"request": request, "stats": stats},
     )
-
-
-@router.get("/v2/partials/proactive/badge", response_class=HTMLResponse)
-async def proactive_badge(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return proactive match count badge for nav sidebar."""
-    from ...models import ProactiveMatch
-
-    count = (
-        db.query(sqlfunc.count(ProactiveMatch.id))
-        .filter(ProactiveMatch.salesperson_id == user.id, ProactiveMatch.status == ProactiveMatchStatus.NEW)
-        .scalar()
-        or 0
-    )
-    if count > 0:
-        return HTMLResponse(
-            f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-emerald-500 rounded-full">{count}</span>'
-        )
-    return HTMLResponse("")
 
 
 @router.post("/v2/partials/proactive/do-not-offer", response_class=HTMLResponse)

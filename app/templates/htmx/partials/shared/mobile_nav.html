@@ -70,34 +70,17 @@
              stroke-linecap="round" stroke-linejoin="round">
           <path d="{{ icon_path }}"/>
         </svg>
-        {% if id == 'proactive' %}
-        <span id="proactive-nav-badge"
-              hx-get="/v2/partials/proactive/badge"
-              hx-trigger="load, every 60s"
-              hx-target="#proactive-nav-badge"
-              hx-swap="innerHTML"
-              hx-push-url="false"
-              class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
-        {% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}
-        {# Cross-app alert badge — same emerald pill as proactive, fed by the AlertSource registry #}
+        {# Badge pills are static targets filled by the nav's SINGLE badge poller below
+           (spec §5.5) via hx-swap-oob spans from /v2/partials/nav/badges. #}
+        {% if id in ('proactive', 'requisitions', 'buy-plans', 'crm', 'my-day') %}
         <span id="{{ id }}-nav-badge"
-              hx-get="/v2/partials/alerts/{{ id }}/badge"
-              hx-trigger="load, every 60s"
-              hx-target="#{{ id }}-nav-badge"
-              hx-swap="innerHTML"
-              hx-push-url="false"
               class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
         {% endif %}
         {% if id == 'requisitions' %}
-        {# Follow-up queue count (stale RFQ replies to chase) — amber pill, lazy-polled like
-           the proactive/alert badges. Positioned bottom-right so it coexists with the
-           Sales-Hub emerald alert badge above rather than overlapping it. #}
+        {# Follow-up queue count (stale RFQ replies to chase) — amber pill. Positioned
+           bottom-right so it coexists with the Sales-Hub emerald alert badge above
+           rather than overlapping it. #}
         <span id="follow-ups-nav-badge"
-              hx-get="/v2/partials/follow-ups/badge"
-              hx-trigger="load, every 60s"
-              hx-target="#follow-ups-nav-badge"
-              hx-swap="innerHTML"
-              hx-push-url="false"
               class="absolute -bottom-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
         {% endif %}
       </div>
@@ -192,4 +175,15 @@
       </div>
     </div>
   </div>
+
+  {# ONE badge poller for the whole nav (spec §5.5): fetches /v2/partials/nav/badges,
+     which returns every *-nav-badge pill as an hx-swap-oob="innerHTML" span — replaces
+     the six per-badge pollers. hx-swap="none" so only the OOB spans apply; spans whose
+     target is hidden for this user are dropped by htmx. hx-push-url must stay 'false'
+     (it is inherited otherwise). #}
+  <div id="nav-badge-poller" class="hidden"
+       hx-get="/v2/partials/nav/badges"
+       hx-trigger="load, every 60s"
+       hx-swap="none"
+       hx-push-url="false"></div>
 </nav>

@@ -3900,15 +3900,19 @@ the new rows. Each tab registers one or more `AlertSource`s; a tab's badge count
 is the SUM of its sources' counts.
 
 ```
-Badge poll (every 60s, same pattern as Proactive):
-    GET /v2/partials/alerts/{tab_key}/badge   (tab_key ∈ requisitions|buy-plans|crm)
+Badge poll (ONE consolidated poller in mobile_nav.html, every 60s — spec §5.5):
+    GET /v2/partials/nav/badges
         |
         v
-    routers/alerts.py -> registry.count_for_tab(db, user, tab_key)
-        |  (sum of the tab's AlertSource.count_for_user; FAIL-QUIET per source —
-        |   a badge must never break the nav)
+    routers/alerts.py -> services/nav_badges.collect_badge_counts(db, user)
+        |  (registry.count_for_tab for requisitions|buy-plans|crm|my-day — sum of the
+        |   tab's AlertSource.count_for_user — plus the Proactive count, gated by the
+        |   proactive_matching_enabled flag + PROACTIVE module key, and follow_up_count;
+        |   FAIL-QUIET per source — a badge must never break the nav)
         v
-    emerald pill HTML (empty at 0) swapped into #{tab_key}-nav-badge
+    ONE response of hx-swap-oob="innerHTML" spans, one per #{key}-nav-badge target
+    (emerald pills; amber for follow-ups; empty at 0 so stale pills clear; the poller
+    itself uses hx-swap="none" so only the OOB spans apply)
 
 Tab list render (parts list / buy_plans list / CDM account list):
     registry.markers_for_tab(db, user, tab_key)

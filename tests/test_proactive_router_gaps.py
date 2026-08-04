@@ -864,42 +864,6 @@ class TestProactiveScorecard:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 8: badge count > 0 path (lines 524-536)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestProactiveBadge:
-    """Cover lines 524-536: badge endpoint with and without matches."""
-
-    def test_badge_no_matches_returns_empty(self, db_session: Session):
-        data = _build_scenario(db_session)
-        user = data["owner"]
-
-        # Mark match as dismissed so count=0
-        data["match"].status = "dismissed"
-        db_session.commit()
-
-        for client in _make_client(db_session, user):
-            resp = client.get("/v2/partials/proactive/badge", headers=HX)
-
-        assert resp.status_code == 200
-        assert resp.text == ""
-
-    def test_badge_with_matches_returns_count_span(self, db_session: Session):
-        """When user has new matches, badge shows count span."""
-        data = _build_scenario(db_session)
-        user = data["owner"]
-        # match is already status="new" from _build_scenario
-
-        for client in _make_client(db_session, user):
-            resp = client.get("/v2/partials/proactive/badge", headers=HX)
-
-        assert resp.status_code == 200
-        assert "1" in resp.text
-        assert "span" in resp.text
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 9: do-not-offer DNO creation (lines 556-579)
 # ═══════════════════════════════════════════════════════════════════════════════
 

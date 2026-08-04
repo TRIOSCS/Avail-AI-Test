@@ -657,10 +657,6 @@ class TestProactiveRoutes:
                 resp = client.get("/v2/partials/proactive")
         assert resp.status_code == 200
 
-    def test_proactive_badge_empty(self, client, db_session: Session):
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-
     def test_proactive_scorecard(self, client, db_session: Session):
         with patch(
             "app.services.proactive_service.get_scorecard",

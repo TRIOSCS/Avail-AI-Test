@@ -2,9 +2,9 @@
 
 Mirrors the BuyplanActionSource test: count_for_user returns the open-assigned count,
 new_items_for_user returns one item per open task, seen does not change the count
-(ACTION temperament), and the badge endpoint /v2/partials/alerts/my-day/badge renders
-the count for a user with open tasks. Also asserts the source is registered under the
-'my-day' tab.
+(ACTION temperament), and the consolidated badge endpoint /v2/partials/nav/badges
+renders the count in the my-day span for a user with open tasks. Also asserts the
+source is registered under the 'my-day' tab.
 
 Depends on: services/alerts/sources/tasks.TasksActionSource,
             services/alerts/base.record_seen, conftest fixtures.
@@ -137,20 +137,28 @@ def test_sources_for_my_day_tab_contains_tasks_source():
     assert AlertKind.TASKS_ACTION in kinds
 
 
-# ── badge endpoint ─────────────────────────────────────────────────────────
+# ── badge endpoint (consolidated — spec §5.5) ──────────────────────────────
+
+
+def _my_day_span(text: str) -> str:
+    import re
+
+    m = re.search(r'<span id="my-day-nav-badge" hx-swap-oob="innerHTML">(.*?)</span>', text)
+    assert m is not None
+    return m.group(1)
 
 
 def test_my_day_badge_shows_count(client, my_open_task):
-    """GET /v2/partials/alerts/my-day/badge returns the open-task count for the user."""
-    resp = client.get("/v2/partials/alerts/my-day/badge")
+    """GET /v2/partials/nav/badges carries the open-task count in the my-day span."""
+    resp = client.get("/v2/partials/nav/badges")
     assert resp.status_code == 200
-    assert ">1</span>" in resp.text
+    assert "1" in _my_day_span(resp.text)
 
 
 def test_my_day_badge_empty_when_no_tasks(client):
-    resp = client.get("/v2/partials/alerts/my-day/badge")
+    resp = client.get("/v2/partials/nav/badges")
     assert resp.status_code == 200
-    assert resp.text == ""
+    assert _my_day_span(resp.text) == ""
 
 
 def test_my_day_seen_returns_oob_nav_badge(client):

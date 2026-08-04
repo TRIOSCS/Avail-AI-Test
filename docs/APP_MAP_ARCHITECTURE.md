@@ -323,7 +323,7 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   save-parsed-offers` — plus offer CRUD + review/promote/reject/changelog
   (`/v2/partials/offers/*`) and quote-from-offers), `rfq.py` (RFQ compose form, AI cleanup/
   rephrase, RFQ send, `rfq_prepare_panel`), `follow_ups.py` (follow-up queue
-  list/send/ai-draft/batch/badge), and `replies.py` (vendor-response review/reply, manual
+  list/send/ai-draft/batch + `follow_up_count`, the count read by the consolidated nav badge), and `replies.py` (vendor-response review/reply, manual
   activity/phone-call logging). `__init__.py` builds its own `router` and `include_router()`s
   all four sub-routers so `app/main.py` keeps mounting a single `htmx_offers_router` with no
   change. **Test-patch note:** `template_response`/`requisition_tab`/`maybe_release_on_offer`/
@@ -371,7 +371,7 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   the inline add-contact affordance on Prepare
   (`POST /v2/partials/proactive/prepare/{site_id}/add-contact` → re-renders `_contact_picker.html`
   into `#proactive-contact-list`, auto-selecting the new contact so Send unblocks — PROACTIVE-04),
-  the legacy send/convert routes, scorecard, badge, and do-not-offer.
+  the legacy send/convert routes, scorecard, and do-not-offer (the nav badge count moved into `services/nav_badges.py` — spec §5.5).
 - `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
   detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
   spec editors, notes save, per-part tasks, and the part archive/unarchive (single + bulk) actions.
@@ -613,7 +613,7 @@ sources' counts. See APP_MAP_INTERACTIONS § Cross-app alerts.
 | `registry.py` | tab→sources registry — `register`, `sources_for_tab`, `source_for_kind`, `tab_for_kind`, `count_for_tab` (sum, fail-quiet per source), `markers_for_tab` (per-anchor spotlight markers for the list partials). |
 | `sources/` | Concrete sources, registered centrally on import: `OfferConfirmedSource`→`requisitions` (Sales Hub, FYI), `BuyplanActionSource`→`buy-plans` (ACTION), `InboundCustomerSource`→`crm` (FYI). Tab keys match the `mobile_nav.html` nav ids. |
 
-Router `app/routers/alerts.py` (registered in `main.py`): `GET /v2/partials/alerts/{tab_key}/badge` (emerald nav pill, fail-quiet) + `POST /v2/partials/alerts/{kind}/seen` (idempotent; returns the owning tab's refreshed nav badge as an OOB swap). Constants: `AlertKind` StrEnum (`app/constants.py`). Config: `alert_recency_days` (30) + `alerts_epoch` (`app/config.py`). Frontend: emerald count badges in `mobile_nav.html` (Sales Hub / Buy Plans / CRM, polled every 60s — same pattern as Proactive); the shared spotlight module + `.alert-rail`/`.tab-alert-pill` styles in `htmx_app.js` / `styles.css`; rows stamped by the `alert_row_attrs` macro in `partials/shared/_alert_macros.html` (fed by `markers_for_tab` via the parts list, buy_plans list, and CDM account list).
+Router `app/routers/alerts.py` (registered in `main.py`): `GET /v2/partials/nav/badges` (spec §5.5 — ALL nav badge pills in one fail-quiet response, each as an `hx-swap-oob="innerHTML"` span; counts collected by `services/nav_badges.collect_badge_counts`, which sums the four AlertSource tabs plus the Proactive count — gated by the `proactive_matching_enabled` flag + PROACTIVE module key — and `follow_up_count`) + `POST /v2/partials/alerts/{kind}/seen` (idempotent; returns the owning tab's refreshed nav badge as an OOB swap). Constants: `AlertKind` StrEnum (`app/constants.py`). Config: `alert_recency_days` (30) + `alerts_epoch` (`app/config.py`). Frontend: static `*-nav-badge` pill targets in `mobile_nav.html`, filled by its ONE hidden poller (`#nav-badge-poller`, every 60s, `hx-swap="none"` so only the OOB spans apply); the shared spotlight module + `.alert-rail`/`.tab-alert-pill` styles in `htmx_app.js` / `styles.css`; rows stamped by the `alert_row_attrs` macro in `partials/shared/_alert_macros.html` (fed by `markers_for_tab` via the parts list, buy_plans list, and CDM account list).
 
 ## Enrichment Worker Modules (`app/services/enrichment_worker/`)
 

@@ -1,24 +1,13 @@
 """Endpoint tests for the cross-app alert router (Phase 1).
 
-Covers the per-tab badge endpoint (renders the emerald pill / empty, fail-quiet on an
-unknown tab) and the mark-seen endpoint (idempotent upsert + OOB nav-badge response,
-fail-quiet on an unknown kind). The `client` fixture is authenticated as `test_user`.
+Covers the mark-seen endpoint (idempotent upsert + OOB nav-badge response, fail-quiet
+on an unknown kind). The per-tab badge GET was replaced by the consolidated
+/v2/partials/nav/badges endpoint — see tests/test_nav_badges.py. The `client` fixture
+is authenticated as `test_user`.
 """
 
 from app.constants import AlertKind
 from app.models.alert_seen import AlertSeen
-
-
-def test_badge_empty_when_no_items(client):
-    r = client.get("/v2/partials/alerts/requisitions/badge")
-    assert r.status_code == 200
-    assert r.text == ""
-
-
-def test_badge_unknown_tab_is_empty_not_error(client):
-    r = client.get("/v2/partials/alerts/nonsense-tab/badge")
-    assert r.status_code == 200
-    assert r.text == ""
 
 
 def test_seen_records_row_and_returns_oob_badge(client, db_session, test_user):

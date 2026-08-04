@@ -592,18 +592,3 @@ class TestProactiveScorecardBadge:
             resp = client.get("/v2/partials/proactive/scorecard")
 
         assert resp.status_code == 200
-
-    def test_badge_no_matches_returns_empty_html(self, client, db_session):
-        """No new ProactiveMatches → empty HTML response (not a badge span)."""
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-        # Empty or just whitespace when no matches
-        assert resp.text.strip() == "" or "span" not in resp.text
-
-    def test_badge_with_new_matches_returns_count_span(self, client, db_session, test_requisition, test_user):
-        """With new ProactiveMatches → response contains the count badge."""
-        _seed_proactive_match(db_session, test_requisition, test_user)
-
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-        assert "span" in resp.text and "1" in resp.text

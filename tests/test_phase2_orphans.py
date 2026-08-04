@@ -4,7 +4,8 @@
 #   WIRE  — the three endpoints that were built-but-unwired and are now finished:
 #           * vendor response-status control (PATCH .../responses/{id}/status)
 #           * log-phone-call form (POST .../log-phone) returning the refreshed activity
-#           * nav follow-up badge (GET /v2/partials/follow-ups/badge) mounted in the nav
+#           * nav follow-up badge target (fed by GET /v2/partials/nav/badges — the
+#             consolidated badge poller, spec §5.5) mounted in the nav
 #   DELETE — the superseded/orphaned routes that were removed are no longer registered,
 #            their superseding twins remain, and nothing breaks on import.
 #
@@ -142,20 +143,29 @@ class TestLogPhoneCall:
 # ══════════════════════════════════════════════════════════════════════════
 class TestFollowUpBadge:
     def test_badge_mounted_in_nav_template(self):
-        """mobile_nav.html mounts the follow-up badge with lazy-poll, like
-        proactive/alert."""
+        """mobile_nav.html mounts the follow-up badge target; counts arrive via the
+        single consolidated badge poller (spec §5.5)."""
         nav = (_TEMPLATES / "shared" / "mobile_nav.html").read_text()
         assert 'id="follow-ups-nav-badge"' in nav
-        assert 'hx-get="/v2/partials/follow-ups/badge"' in nav
+        assert 'hx-get="/v2/partials/nav/badges"' in nav
         assert "hx-trigger=" in nav and "every 60s" in nav
 
     def test_badge_endpoint_counts_stale_contacts(
         self, client: TestClient, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """A stale email contact surfaces an amber count pill; none → empty response."""
-        empty = client.get("/v2/partials/follow-ups/badge")
+        """A stale email contact surfaces an amber count pill in the consolidated badge
+        payload; none → empty follow-ups span."""
+
+        def follow_ups_span(text: str) -> str:
+            import re
+
+            m = re.search(r'<span id="follow-ups-nav-badge" hx-swap-oob="innerHTML">(.*?)</span>', text)
+            assert m is not None
+            return m.group(1)
+
+        empty = client.get("/v2/partials/nav/badges")
         assert empty.status_code == 200
-        assert empty.text.strip() == ""
+        assert follow_ups_span(empty.text).strip() == ""
 
         stale = RfqContact(
             requisition_id=test_requisition.id,
@@ -169,10 +179,10 @@ class TestFollowUpBadge:
         db_session.add(stale)
         db_session.commit()
 
-        resp = client.get("/v2/partials/follow-ups/badge")
+        resp = client.get("/v2/partials/nav/badges")
         assert resp.status_code == 200
-        assert "1" in resp.text
-        assert "bg-amber-500" in resp.text
+        assert "1" in follow_ups_span(resp.text)
+        assert "bg-amber-500" in follow_ups_span(resp.text)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -194,10 +204,10 @@ _SUPERSEDING = [
     ("/api/leads/{lead_id}/feedback", "POST"),
     # the /api vendor-contact timeline (JSON) stays; only the htmx twin was removed
     ("/api/vendors/{card_id}/contacts/{contact_id}/summary", "GET"),
-    # wired endpoints remain registered
+    # wired endpoints remain registered (badge counts consolidated — spec §5.5)
     ("/v2/partials/requisitions/{req_id}/responses/{response_id}/status", "PATCH"),
     ("/v2/partials/requisitions/{req_id}/log-phone", "POST"),
-    ("/v2/partials/follow-ups/badge", "GET"),
+    ("/v2/partials/nav/badges", "GET"),
 ]
 
 _DELETED_TEMPLATES = [

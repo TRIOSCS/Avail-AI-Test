@@ -522,10 +522,6 @@ class TestProactiveRoutes:
                 resp = client.get("/v2/partials/proactive?tab=sent")
         assert resp.status_code == 200
 
-    def test_proactive_badge_no_matches(self, client: TestClient):
-        resp = client.get("/v2/partials/proactive/badge")
-        assert resp.status_code == 200
-
     def test_proactive_scorecard(self, client: TestClient):
         with patch(
             "app.services.proactive_service.get_scorecard", return_value={"total_sent": 0, "total_converted": 0}
@@ -655,10 +651,6 @@ class TestEmailRoutes:
 
     def test_email_intelligence(self, client: TestClient):
         resp = client.get("/v2/partials/email-intelligence")
-        assert resp.status_code == 200
-
-    def test_follow_ups_badge(self, client: TestClient):
-        resp = client.get("/v2/partials/follow-ups/badge")
         assert resp.status_code == 200
 
 

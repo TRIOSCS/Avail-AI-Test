@@ -1,7 +1,8 @@
 """test_alerts_router_nightly.py — Coverage boost for app/routers/alerts.py.
 
-Targets missing lines: _badge_html branches, exception-quiet paths in alert_badge
-and alert_seen, tab_for_kind returning None.
+Targets missing lines: _badge_html branches, exception-quiet paths in alert_seen,
+tab_for_kind returning None. The consolidated badge GET (/v2/partials/nav/badges)
+is covered in tests/test_nav_badges.py.
 
 Called by: pytest
 Depends on: tests/conftest.py (client, db_session, test_user)
@@ -32,31 +33,10 @@ class TestBadgeHtml:
         assert "3" in html
         assert "emerald" in html or "px-" in html  # pill class present
 
+    def test_badge_html_amber_variant(self):
+        from app.routers.alerts import _badge_html
 
-# ── GET /v2/partials/alerts/{tab_key}/badge ───────────────────────────
-
-
-class TestAlertBadgeEndpoint:
-    def test_alert_badge_with_count(self, client):
-        """count_for_tab returns 5 → HTML contains '5'."""
-        with patch("app.routers.alerts.count_for_tab", return_value=5):
-            resp = client.get("/v2/partials/alerts/inbox/badge")
-        assert resp.status_code == 200
-        assert "5" in resp.text
-
-    def test_alert_badge_zero_returns_empty(self, client):
-        """count_for_tab returns 0 → response body is empty string."""
-        with patch("app.routers.alerts.count_for_tab", return_value=0):
-            resp = client.get("/v2/partials/alerts/inbox/badge")
-        assert resp.status_code == 200
-        assert resp.text == ""
-
-    def test_alert_badge_exception_is_quiet(self, client):
-        """count_for_tab raises → endpoint returns 200 with empty body (no 500)."""
-        with patch("app.routers.alerts.count_for_tab", side_effect=RuntimeError("boom")):
-            resp = client.get("/v2/partials/alerts/inbox/badge")
-        assert resp.status_code == 200
-        assert resp.text == ""
+        assert "bg-amber-500" in _badge_html(2, "amber")
 
 
 # ── POST /v2/partials/alerts/{kind}/seen ─────────────────────────────

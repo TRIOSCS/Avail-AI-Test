@@ -2,9 +2,10 @@
 Alpine).
 
 Server-rendered HTML partials for the cross-requisition follow-up queue: the
-list partial, single-contact send, AI-drafted follow-up body, the send-all batch
-(with an honest per-contact tally + toast), and the nav sidebar badge. Split out
-of the monolithic offers.py (P4.3) along the follow-up seam.
+list partial, single-contact send, AI-drafted follow-up body, and the send-all batch
+(with an honest per-contact tally + toast). Split out of the monolithic offers.py
+(P4.3) along the follow-up seam. The nav badge count (follow_up_count) is served by
+the consolidated /v2/partials/nav/badges endpoint (services/nav_badges, spec §5.5).
 
 Called by: app/routers/htmx/offers/__init__.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.config, app.utils.graph_client,
@@ -274,8 +275,8 @@ async def send_batch_follow_up(
         sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
     )
     # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
-    # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
-    # batch acts on.
+    # stay global. Keep this in lockstep with follow_up_count so the nav badge counts what
+    # the batch acts on.
     if user.role in RESTRICTED_ROLES:
         q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
     stale = q.limit(50).all()
@@ -338,9 +339,10 @@ async def send_batch_follow_up(
 def follow_up_count(db: Session, user: User) -> int:
     """Count stale RFQ contacts due for follow-up, scoped to what this user may act on.
 
-    The single source of truth for the follow-up count: the nav badge AND any other
-    surface that wants the number (e.g. the Sightings workspace quick-link) call this so
-    they never drift from the queue/batch predicate (see ``_build_follow_ups_ctx``).
+    The single source of truth for the follow-up count: the consolidated nav-badge
+    payload (services/nav_badges) AND any other surface that wants the number (e.g. the
+    Sightings workspace quick-link) call this so they never drift from the queue/batch
+    predicate (see ``_build_follow_ups_ctx``).
     """
     threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
     q = db.query(sqlfunc.count(RfqContact.id)).filter(
@@ -353,18 +355,3 @@ def follow_up_count(db: Session, user: User) -> int:
     if user.role in RESTRICTED_ROLES:
         q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
     return q.scalar() or 0
-
-
-@router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
-async def follow_up_badge(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return follow-up count badge for nav sidebar."""
-    count = follow_up_count(db, user)
-    if count > 0:
-        return HTMLResponse(
-            f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-amber-500 rounded-full">{count}</span>'
-        )
-    return HTMLResponse("")

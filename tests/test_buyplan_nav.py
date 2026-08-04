@@ -54,13 +54,15 @@ class TestMobileNavTemplate:
         assert "'/v2/reporting'" not in src
 
     def test_badge_elif_has_buy_plans(self):
-        """Badge elif block wires 'buy-plans' into the cross-app alert-badge tuple.
+        """Badge membership tuple wires 'buy-plans' into the alert-badge targets.
 
-        Anchored on the exact ``{% elif id in (...) %}`` membership tuple so this
+        Anchored on the exact ``{% if id in (...) %}`` membership tuple so this
         verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
+        (W1.8: spans are static OOB targets for the single nav-badge poller now,
+        so the block is an ``if``, and 'proactive' joined the tuple.)
         """
         src = _TEMPLATE.read_text()
-        assert "{% elif id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
+        assert "{% if id in ('proactive', 'requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
 
 
 class TestNavIdAlias:
