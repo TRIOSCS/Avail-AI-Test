@@ -85,27 +85,49 @@ async def post_teams_channel_card(card: dict, webhook_url: str | None = None) ->
         logger.error("Teams channel card post failed: {}", e)
 
 
+async def _find_self_chat(gc, sender_id: str) -> str | None:
+    """Return the id of the caller's Teams self-chat ("Chat with self"), or None.
+
+    The self-chat is the oneOnOne chat in ``/me/chats`` whose only member is the
+    caller. Follows @odata.nextLink a few pages in case it is buried below more
+    recently active chats.
+    """
+    url = "/me/chats?$expand=members&$top=50"
+    for _ in range(4):
+        page = await gc.get_json(url)
+        for chat in page.get("value", []):
+            members = chat.get("members") or []
+            member_ids = {m.get("userId") for m in members if m.get("userId")}
+            if chat.get("chatType") == "oneOnOne" and members and member_ids <= {sender_id}:
+                chat_id = chat.get("id")
+                return chat_id if isinstance(chat_id, str) else None
+        url = page.get("@odata.nextLink")
+        if not url:
+            break
+    return None
+
+
 async def send_teams_dm(user, message: str, db=None) -> None:
     """Send a direct Teams message to a user via Graph API.
 
-    Resolves the sending account (the token owner) via Graph ``/me``, then
-    creates (or gets) the chat and posts the message. Graph requires a
-    ``oneOnOne`` chat's members array to list EVERY participant including the
-    caller, so:
+    Resolves the sending account (the token owner) via Graph ``/me``, then:
 
-    - Sender != recipient → two members: the token owner bound by AAD object
-      id and the recipient bound by email.
+    - Sender != recipient → POST /chats with two members (token owner bound by
+      AAD object id, recipient bound by email), then post the message.
     - Sender == recipient (the usual case here — DMs are sent with the
-      recipient's own delegated token) → the Graph self-chat form: a single
-      member bound by the caller's AAD object id. Chosen over skipping because
-      it actually delivers — the message lands in the user's Teams self-chat
-      and surfaces as a notification. (The old single-member payload bound by
-      EMAIL is what Graph rejected with "Creation of 'OneOnOne' chat requires
-      2 members".)
+      recipient's own delegated token) → find the EXISTING Teams self-chat
+      ("Chat with self") in ``/me/chats`` — the oneOnOne chat whose only
+      member is the caller — and post to it. Graph cannot CREATE a
+      single-member oneOnOne chat at all: v1.0 and beta both reject it with
+      "Creation of 'OneOnOne' chat requires 2 members" regardless of bind
+      format (verified live 2026-08-04), so creation is never attempted.
 
-    Silently skips (DEBUG/WARNING log, never raises) if no valid token is
-    available, ``/me`` cannot be resolved, or Graph rejects the chat creation
-    (e.g. missing Chat.ReadWrite permissions).
+    Never raises. Skips with a DEBUG log when no valid token is available and
+    a WARNING when ``/me`` cannot be resolved, the self-chat is missing
+    (user must open "Chat with self" in Teams once), or Graph rejects the
+    chat creation / message post — the retry layer returns
+    ``{"error": status}`` dicts on 4xx, which are treated as failures here,
+    never as silent success.
 
     Args:
         user: User model instance (needs .email, .access_token)
@@ -136,29 +158,39 @@ async def send_teams_dm(user, message: str, db=None) -> None:
             logger.warning("Teams DM to {} skipped — could not resolve sender via /me: {}", user.email, me)
             return
         sender_emails = {e.lower() for e in (me.get("mail"), me.get("userPrincipalName")) if isinstance(e, str) and e}
-        graph_users = "https://graph.microsoft.com/v1.0/users"
-        sender_member = {
-            "@odata.type": "#microsoft.graph.aadUserConversationMember",
-            "roles": ["owner"],
-            "user@odata.bind": f"{graph_users}/{sender_id}",
-        }
         if (user.email or "").lower() in sender_emails:
-            # Self-chat: exactly one member — the caller, bound by AAD id.
-            members = [sender_member]
+            chat_id = await _find_self_chat(gc, sender_id)
+            if not chat_id:
+                logger.warning(
+                    "Teams DM to {} skipped — self-chat not found via /me/chats "
+                    "(open 'Chat with self' in Teams once to provision it)",
+                    user.email,
+                )
+                return
         else:
+            graph_users = "https://graph.microsoft.com/v1.0/users"
             members = [
-                sender_member,
+                {
+                    "@odata.type": "#microsoft.graph.aadUserConversationMember",
+                    "roles": ["owner"],
+                    "user@odata.bind": f"{graph_users}/{sender_id}",
+                },
                 {
                     "@odata.type": "#microsoft.graph.aadUserConversationMember",
                     "roles": ["owner"],
                     "user@odata.bind": f"{graph_users}/{user.email}",
                 },
             ]
-        # Create or get the 1:1 chat (Graph returns the existing chat if one exists)
-        chat = await gc.post_json("/chats", {"chatType": "oneOnOne", "members": members})
-        chat_id = chat.get("id")
-        if chat_id:
-            await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
-            logger.info("Teams DM sent to {}", user.email)
+            # Create or get the 1:1 chat (Graph returns the existing chat if one exists)
+            chat = await gc.post_json("/chats", {"chatType": "oneOnOne", "members": members})
+            chat_id = chat.get("id")
+            if not chat_id:
+                logger.warning("Teams DM to {} failed — chat creation rejected: {}", user.email, chat)
+                return
+        resp = await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
+        if isinstance(resp, dict) and resp.get("error"):
+            logger.warning("Teams DM to {} failed — message post rejected: {}", user.email, resp)
+            return
+        logger.info("Teams DM sent to {}", user.email)
     except Exception as e:
         logger.warning("Teams DM to {} failed (may not have Chat permissions): {}", user.email, e)
