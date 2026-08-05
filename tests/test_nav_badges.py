@@ -35,6 +35,16 @@ def _span_inner(text: str, key: str) -> str:
     return m.group(1)
 
 
+def _span_absent(text: str, key: str) -> bool:
+    return f'id="{key}-nav-badge"' not in text
+
+
+# The spans the endpoint emits = every rendered nav target. The proactive pill left
+# the nav with the W2 park, and a targetless OOB span raises htmx:oobErrorNoTarget —
+# so the endpoint must never emit it (it returns with the nav item on the comeback).
+EMITTED_KEYS = [k for k in NAV_BADGE_KEYS if k != "proactive"]
+
+
 def _stale_contact(db, user, requisition, days: int = 30) -> RfqContact:
     c = RfqContact(
         requisition_id=requisition.id,
@@ -53,11 +63,12 @@ def _stale_contact(db, user, requisition, days: int = 30) -> RfqContact:
 # ── endpoint ───────────────────────────────────────────────────────────────
 
 
-def test_all_six_spans_present_and_empty_when_no_counts(client):
+def test_all_emitted_spans_present_and_empty_when_no_counts(client):
     r = client.get("/v2/partials/nav/badges")
     assert r.status_code == 200
-    for key in NAV_BADGE_KEYS:
+    for key in EMITTED_KEYS:
         assert _span_inner(r.text, key) == ""
+    assert _span_absent(r.text, "proactive")
 
 
 def test_count_lands_in_its_own_span_only(client):
@@ -65,19 +76,19 @@ def test_count_lands_in_its_own_span_only(client):
         r = client.get("/v2/partials/nav/badges")
     assert r.status_code == 200
     assert "3" in _span_inner(r.text, "requisitions")
-    for key in NAV_BADGE_KEYS:
+    for key in EMITTED_KEYS:
         if key != "requisitions":
             assert _span_inner(r.text, key) == ""
 
 
-def test_proactive_new_match_renders_emerald_pill(client, db_session, test_user, test_offer, proactive_flag_on):
-    """Flag-on comeback path (W2 parks Proactive off by default — spec §4/§8)."""
+def test_proactive_span_not_emitted_even_flag_on(client, db_session, test_user, test_offer, proactive_flag_on):
+    """Even on the flag-on comeback path the CURRENT nav has no proactive target (the
+    item returns only with the un-park nav change) — emitting the span would raise
+    htmx:oobErrorNoTarget on every poll, so it stays server-side-skipped."""
     db_session.add(ProactiveMatch(offer_id=test_offer.id, mpn="LM317T", salesperson_id=test_user.id, status="new"))
     db_session.commit()
     r = client.get("/v2/partials/nav/badges")
-    inner = _span_inner(r.text, "proactive")
-    assert "1" in inner
-    assert "bg-emerald-500" in inner
+    assert _span_absent(r.text, "proactive")
 
 
 def test_proactive_flag_off_zeroes_count(client, db_session, test_user, test_offer):
@@ -86,7 +97,7 @@ def test_proactive_flag_off_zeroes_count(client, db_session, test_user, test_off
     db_session.commit()
     with patch("app.services.nav_badges.get_effective_flag", return_value=False):
         r = client.get("/v2/partials/nav/badges")
-    assert _span_inner(r.text, "proactive") == ""
+    assert _span_absent(r.text, "proactive")
 
 
 def test_proactive_access_revoked_zeroes_count(client, db_session, test_user, test_offer, proactive_flag_on):
@@ -95,7 +106,7 @@ def test_proactive_access_revoked_zeroes_count(client, db_session, test_user, te
     test_user.access_overrides = {"proactive": False}
     db_session.commit()
     r = client.get("/v2/partials/nav/badges")
-    assert _span_inner(r.text, "proactive") == ""
+    assert _span_absent(r.text, "proactive")
 
 
 def test_follow_up_stale_contact_renders_amber_pill(client, db_session, test_user, test_requisition):
@@ -107,11 +118,11 @@ def test_follow_up_stale_contact_renders_amber_pill(client, db_session, test_use
 
 
 def test_collection_failure_is_quiet(client):
-    """Service blows up → 200 with all six spans empty, never a 500."""
+    """Service blows up → 200 with every emitted span empty, never a 500."""
     with patch("app.routers.alerts.collect_badge_counts", side_effect=RuntimeError("boom")):
         r = client.get("/v2/partials/nav/badges")
     assert r.status_code == 200
-    for key in NAV_BADGE_KEYS:
+    for key in EMITTED_KEYS:
         assert _span_inner(r.text, key) == ""
 
 

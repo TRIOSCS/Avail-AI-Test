@@ -124,8 +124,12 @@ approval) verified by test.
   sold/scrapped/withdrawn) + close_list_without_bid stamps no_bids +
   detail-pane form + POST /api/resell/{id}/close-awarded + kernel-walk
   outcome step (tests: test_resell_close_outcome.py, 10 green).
-- [ ] W3.A Acceptance: semantics tests green (TTL ✅ / dup ✅ / every-deal
-  ✅ already), kernel walk parity on the deployed W3 build → Packet 3.
+- [~] W3.A Acceptance: semantics tests green (TTL ✅ / dup ✅ / every-deal
+  ✅); W3 build DEPLOYED to :8443 2026-08-05 ~19:15 UTC (refresh rehearsal
+  #4 — fresh prod copy → head 208, remaps spot-checked; BOTH images
+  rebuilt); kernel walk GREEN on the deployed build: 18 passed / 2 honest
+  keys-off skips, now including the award→outcome tail. Packet 3 assembles
+  after W3.3 lands.
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
@@ -199,6 +203,24 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 - 2026-08-05 W3: 5 stale test pins fixed (display-form normalized_mpn ×2,
   display-form packaging ×2, deleted create-route 200 ×1) +
   seed_test_data.py display-form/`condition="New"` drift; suite green after.
+
+- 2026-08-05 W3 acceptance debugging (5 walk runs → green; each fix
+  root-caused, none retried-away): (a) REAL APP BUG — the parts tab's
+  post-search self-refresher (`load delay:8s` → #tab-content) fired after a
+  tab switch and clobbered the offers view (offer added in that window
+  vanished from screen); fixed with an Alpine isConnected guard at fire
+  time. (b) REAL LEFTOVER — /v2/partials/nav/badges still emitted the
+  parked proactive OOB span; a targetless OOB span raises
+  htmx:oobErrorNoTarget every poll (the "htmx drops it silently" comment
+  was wrong); span no longer emitted, returns with the comeback.
+  (c) WALK-DATA COLLISION — vendor resolution fuzzy-merges names ≥88 into
+  the existing card (INTENDED canonicalization); run-stamped broker names
+  differed only in digits, so every walk after the first on the same DB
+  silently reused night one's vendor card — broker names now digit-dominant.
+  (d) 2 walk hardenings, third+fourth instances of the known
+  htmx-wiring-vs-Playwright-speed class (upload-form binding wait;
+  outcome step reloads detail — the award swap only re-renders the offers
+  tab body, so the header form appears on next render, matching real UX).
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)

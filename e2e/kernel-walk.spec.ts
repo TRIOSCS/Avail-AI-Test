@@ -38,7 +38,11 @@ const COMPANY = `E2E-KERNEL Customer ${RUN}`;
 const REQ_NAME = `E2E-KERNEL Req ${RUN}`;
 const MPN = `E2E-KERNEL-MPN-${RUN}`;
 const COMMON_MPN = 'LM317T'; // a real part so local sightings may attach keys-off
-const BROKER = `E2E-KERNEL Broker ${RUN}`;
+// The digits must DOMINATE the name: vendor resolution fuzzy-merges names scoring
+// >=88 into the existing card (intended canonicalization), and a shared
+// "E2E-KERNEL Broker " prefix with only the run stamp differing scores above that —
+// every walk after the first on the same DB would silently reuse night one's card.
+const BROKER = `E2E-KERNEL-BKR-${RUN}-${RUN}`;
 const SO_NUMBER = `E2E-KERNEL-SO-${RUN}`;
 const PO_NUMBER = `E2E-KERNEL-PO-${RUN}`;
 const RESELL_TITLE = `E2E-KERNEL Excess ${RUN}`;
@@ -246,9 +250,13 @@ test('manual Add-offer door creates an offer', async () => {
   const tab = page.locator('#tab-content');
   await expect(tab.getByRole('button', { name: 'Add Offer' })).toBeVisible({ timeout: 20_000 });
   await tab.getByRole('button', { name: 'Add Offer' }).click();
-  await tab.getByRole('button', { name: 'Manual Entry' }).click();
 
-  const form = page.locator('#parse-area form');
+  // W3.6: the ONE Add-offer form loads inline into #parse-area — manual fields
+  // plus an optional paste box (its own form; an honest AI-off note keys-off).
+  // Filter to the form that carries the manual fields.
+  const form = page
+    .locator('#parse-area form')
+    .filter({ has: page.locator('input[name="vendor_name"]') });
   await expect(form.locator('input[name="vendor_name"]')).toBeVisible({ timeout: 15_000 });
   await form.locator('input[name="vendor_name"]').fill(BROKER);
   await form.locator('input[name="mpn"]').fill(MPN);
@@ -502,6 +510,19 @@ test('resell: log one broker bid via the compiled-sheet upload door', async () =
   const modal = page.locator('#modal-content');
   const fileInput = modal.locator('input[type="file"][name="file"]');
   await expect(fileInput).toBeAttached({ timeout: 15_000 });
+  // Freshly swapped-in forms can receive input before their HTMX wiring settles —
+  // the @change → requestSubmit() then falls through to a NATIVE GET navigation
+  // (third instance of this race class; see openModal and the W2.A Edit hardening).
+  // Wait for htmx's internal binding on the form before firing the change event.
+  await page.waitForFunction(
+    () =>
+      !!(
+        document.querySelector('#modal-content form[hx-post*="bids/upload-preview"]') as
+          | (Element & Record<string, unknown>)
+          | null
+      )?.['htmx-internal-data'],
+    { timeout: 15_000 },
+  );
   const csv = `bidder,mpn,qty,price\n${BROKER},${RESELL_MPN},50,1.25\n`;
   await fileInput.setInputFiles({ name: 'e2e-kernel-bids.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
 
@@ -534,11 +555,17 @@ test('resell: award the bid, assemble the bid-back, record the outcome path', as
   await test.step('bid send + Mark accepted — SKIPPED keys-off: Send emails the PDF via Graph; accept/reject only unlock on a SENT bid', async () => {});
 
   // The ladder's last step (award → outcome, spec §5.3): close the awarded list
-  // with a recorded outcome — the form lives in the always-visible header action
-  // bar of the awarded detail pane. Keys-off legal — no send involved.
-  const outcomeSelect = detail.locator('[data-testid="close-outcome"]');
+  // with a recorded outcome. The award action swaps only the offers tab body, so
+  // the header (where the close-with-outcome form renders on awarded state) is
+  // re-rendered by reloading the list detail — the same thing a returning owner's
+  // navigation does. Keys-off legal — no send involved.
+  await page.goto(`/v2/resell/${resellListId}`);
+  await settle(800);
+  // Direct-URL render does not nest the detail under #split-right-resell — scope
+  // the outcome controls to the page.
+  const outcomeSelect = page.locator('[data-testid="close-outcome"]');
   await expect(outcomeSelect).toBeVisible({ timeout: 20_000 });
   await outcomeSelect.selectOption('sold');
-  await detail.getByRole('button', { name: 'Close with outcome' }).click(); // hx-confirm auto-accepted
-  await expect(detail.locator('[data-testid="list-outcome"]')).toContainText('sold', { timeout: 20_000 });
+  await page.getByRole('button', { name: 'Close with outcome' }).click(); // hx-confirm auto-accepted
+  await expect(page.locator('[data-testid="list-outcome"]')).toContainText('sold', { timeout: 20_000 });
 });

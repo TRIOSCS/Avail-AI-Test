@@ -65,15 +65,21 @@ def nav_badges(
     SQLAlchemy queries, polled every 60s per open tab — FastAPI's threadpool keeps them
     off the event loop. Each span is an hx-swap-oob="innerHTML" fragment targeting its
     {key}-nav-badge element; the nav's single hidden poller requests this with hx-
-    swap="none" so only the OOB spans apply. Spans whose target is not rendered (module
-    hidden for this user) are simply dropped by htmx. Fail-quiet.
+    swap="none" so only the OOB spans apply. Spans whose target is not rendered are NOT
+    emitted — htmx raises a console `htmx:oobErrorNoTarget` for a targetless OOB span
+    (it does not silently drop it), so the parked proactive pill (W2, flag off) must be
+    skipped server-side. Fail-quiet.
     """
     try:
         counts = collect_badge_counts(db, user)
     except Exception:
         logger.exception("nav badge collection failed")
         counts = {}
-    return HTMLResponse("".join(_oob_span(key, counts.get(key, 0)) for key in NAV_BADGE_KEYS))
+    # The proactive pill left the nav with the W2 park — its OOB span has no target
+    # anywhere, so emitting it errors every poll. It returns with the nav item on the
+    # Proactive comeback.
+    keys = [k for k in NAV_BADGE_KEYS if k != "proactive"]
+    return HTMLResponse("".join(_oob_span(key, counts.get(key, 0)) for key in keys))
 
 
 @router.post("/v2/partials/alerts/{kind}/seen", response_class=HTMLResponse)

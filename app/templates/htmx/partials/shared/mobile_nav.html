@@ -70,8 +70,9 @@
         </svg>
         {# Badge pills are static targets filled by the nav's SINGLE badge poller below
            (spec §5.5) via hx-swap-oob spans from /v2/partials/nav/badges. The proactive
-           span left with its nav item (W2 park); its OOB span in the poll response is
-           dropped by htmx (no target). #}
+           span left with its nav item (W2 park) and the badges endpoint no longer emits
+           its OOB span — a targetless OOB span raises htmx:oobErrorNoTarget, it is NOT
+           silently dropped. #}
         {% if id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}
         <span id="{{ id }}-nav-badge"
               class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>

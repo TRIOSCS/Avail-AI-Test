@@ -184,9 +184,15 @@
   </div>
 
   {% if search_triggered is defined and search_triggered %}
+  {# The delayed self-refresh must NOT fire after the user switches tabs — a stale
+     "load delay" timer survives the tab swap and would clobber #tab-content with
+     the parts view (offers added in that window vanish). Alpine re-checks the
+     element is still connected at fire time; htmx only listens for the event. #}
   <div class="mb-3 px-3 py-2 bg-brand-50 border border-brand-200 rounded-lg text-sm text-brand-700 flex items-center gap-2"
+       x-data
+       x-init="setTimeout(() => { if ($el.isConnected) htmx.trigger($el, 'refresh-parts') }, 8000)"
        hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
-       hx-trigger="load delay:8s"
+       hx-trigger="refresh-parts"
        hx-target="#tab-content"
        hx-swap="innerHTML">
     <svg class="h-4 w-4 animate-spin flex-none" fill="none" viewBox="0 0 24 24">
