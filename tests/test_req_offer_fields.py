@@ -195,7 +195,9 @@ class TestAddRequirementWithNewFields:
         assert item.customer_pn == "CUST-ABC"
         assert item.need_by_date == date(2026, 5, 1)
         assert item.condition == "new"
-        assert item.packaging == "Tape & Reel"
+        # Normalized to the chk_req_packaging vocabulary (migration 048) by the
+        # W3 requirement pipeline — raw display forms would 500 on fresh DBs.
+        assert item.packaging == "reel"
         assert item.firmware == "v2.0"
         assert item.notes == "Urgent order"
 
@@ -272,7 +274,7 @@ class TestAddOfferWithNewFields:
         assert offer is not None
         assert offer.spq == 50
         assert offer.manufacturer == "Texas Instruments"
-        assert offer.packaging == "Tube"
+        assert offer.packaging == "tube"  # chk_offer_packaging vocab (048)
         assert offer.warranty == "1 year"
         assert offer.country_of_origin == "US"
         assert offer.valid_until == date(2026, 12, 31)

@@ -5,7 +5,7 @@ database: MaterialCard enrichment, sighting raw_data from prior searches. Does
 NOT call external distributor APIs — the full search background task already
 fetches that data. This service only synthesizes what we already have.
 
-Called by: background task in requirements.add_requirements, on-demand API endpoint
+Called by: on-demand AI endpoint (app/routers/ai.py, generate_verified_description)
 Depends on: claude_client, models (Sighting, MaterialCard)
 """
 
@@ -29,7 +29,11 @@ def _collect_db_descriptions(mpn: str, manufacturer: str) -> list[dict[str, Any]
     """
     results: list[dict[str, Any]] = []
     seen_descriptions: set[str] = set()
-    norm_mpn = mpn.upper().strip()
+    # normalized_mpn columns hold the canonical key form (lowercase, non-alnum
+    # stripped) — an uppercased probe can never match them.
+    from app.utils.normalization import normalize_mpn_key
+
+    norm_mpn = normalize_mpn_key(mpn) or mpn.strip().lower()
 
     db = SessionLocal()
     try:

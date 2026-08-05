@@ -71,11 +71,16 @@ def test_create_requisition_with_parts_links_material_card(client, db_session, t
     assert "stm32f407vg" in card.normalized_mpn
 
 
-# ── Path 2: Quick-add from text ───────────────────────────────────────
+# ── Path 2: Quick-add from text — route deleted in W3 ─────────────────
 
 
-def test_quick_add_text_links_material_card(client, db_session, test_user):
-    """POST /v2/partials/requisitions/create with parts_text creates MaterialCards."""
+def test_quick_add_text_route_deleted(client, db_session, test_user):
+    """POST /v2/partials/requisitions/create is gone (W3, spec §9).
+
+    The bare "MPN qty" text door bypassed the requirement pipeline (no normalization,
+    dup detection, or task auto-gen). Card linking through the surviving doors is
+    covered by Path 1 (import-save) and Path 3 (add-requirement).
+    """
     resp = client.post(
         "/v2/partials/requisitions/create",
         data={
@@ -84,14 +89,9 @@ def test_quick_add_text_links_material_card(client, db_session, test_user):
             "parts_text": "AD7124-8BCPZ 50\nLTC2983HLX 25",
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code in (404, 405)
 
-    parts = db_session.query(Requirement).join(Requisition).filter(Requisition.name == "REQ-QUICK").all()
-    assert len(parts) == 2
-
-    for part in parts:
-        assert part.material_card_id is not None, f"No material_card_id for {part.primary_mpn}"
-        assert part.normalized_mpn is not None, f"No normalized_mpn for {part.primary_mpn}"
+    assert db_session.query(Requisition).filter(Requisition.name == "REQ-QUICK").first() is None
 
 
 # ── Path 3: Add single requirement ───────────────────────────────────

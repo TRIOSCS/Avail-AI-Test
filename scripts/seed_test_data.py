@@ -159,61 +159,51 @@ VENDOR_CARDS_DATA = [
 
 MATERIAL_CARDS_DATA = [
     {
-        "normalized_mpn": "STM32F407VGT6",
         "display_mpn": "STM32F407VGT6",
         "manufacturer": "STMicroelectronics",
         "description": "ARM Cortex-M4 MCU, 1MB Flash, 168MHz",
     },
     {
-        "normalized_mpn": "LM7805CT",
         "display_mpn": "LM7805CT",
         "manufacturer": "Texas Instruments",
         "description": "5V Linear Voltage Regulator, TO-220",
     },
     {
-        "normalized_mpn": "MAX232CPE",
         "display_mpn": "MAX232CPE+",
         "manufacturer": "Maxim Integrated",
         "description": "Dual RS-232 Driver/Receiver",
     },
     {
-        "normalized_mpn": "ADS1115IDGST",
         "display_mpn": "ADS1115IDGST",
         "manufacturer": "Texas Instruments",
         "description": "16-Bit ADC, 4-Ch, I2C",
     },
     {
-        "normalized_mpn": "IRFZ44NPBF",
         "display_mpn": "IRFZ44NPBF",
         "manufacturer": "Infineon",
         "description": "N-Channel MOSFET, 55V, 49A",
     },
     {
-        "normalized_mpn": "ESP32WROVER-E",
         "display_mpn": "ESP32-WROVER-E",
         "manufacturer": "Espressif",
         "description": "Wi-Fi+BT MCU Module, 4MB PSRAM",
     },
     {
-        "normalized_mpn": "SN74HC595N",
         "display_mpn": "SN74HC595N",
         "manufacturer": "Texas Instruments",
         "description": "8-Bit Shift Register, DIP-16",
     },
     {
-        "normalized_mpn": "NE555P",
         "display_mpn": "NE555P",
         "manufacturer": "Texas Instruments",
         "description": "Precision Timer, DIP-8",
     },
     {
-        "normalized_mpn": "ATmega328P-PU",
         "display_mpn": "ATmega328P-PU",
         "manufacturer": "Microchip",
         "description": "8-bit AVR MCU, 32KB Flash",
     },
     {
-        "normalized_mpn": "BAT54S",
         "display_mpn": "BAT54S",
         "manufacturer": "Nexperia",
         "description": "Schottky Barrier Diode, SOT-23",
@@ -314,12 +304,15 @@ def seed_material_cards(db):
     """Create material cards, return list."""
     cards = []
     for m in MATERIAL_CARDS_DATA:
-        existing = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == m["normalized_mpn"]).first()
+        # Canonical key form — literal display-form values would recreate the
+        # exact drift migration 206 cleans up.
+        norm = normalize_mpn_key(m["display_mpn"])
+        existing = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm).first()
         if existing:
             cards.append(existing)
             continue
         mc = MaterialCard(
-            normalized_mpn=m["normalized_mpn"],
+            normalized_mpn=norm,
             display_mpn=m["display_mpn"],
             manufacturer=m["manufacturer"],
             description=m["description"],
@@ -379,7 +372,7 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
                 target_qty=25 * (j + 1),
                 target_price=Decimal(str(round(1.5 + i * 0.75, 2))),
                 sourcing_status=ss.value,
-                condition="New",
+                condition="new",  # chk_req_condition vocab
                 notes=f"Test requirement for {mc.display_mpn}",
             )
             db.add(requirement)
@@ -411,7 +404,7 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
                         unit_price=Decimal(str(round(2.25 + k * 0.5, 2))),
                         currency="USD",
                         lead_time=f"{3 + k * 2} weeks",
-                        condition="New",
+                        condition="new",  # chk_req_condition vocab
                         source="manual",
                         status=os_.value,
                         entered_by_id=user.id,
@@ -644,7 +637,7 @@ def seed_excess_lists(db, user, companies, sites):
                 normalized_part_number=normalize_mpn_key(pn) or None,
                 manufacturer=mfg,
                 quantity=qty,
-                condition="New",
+                condition="new",  # chk_req_condition vocab
                 asking_price=price,
                 status=ExcessLineItemStatus.AVAILABLE.value,
             )

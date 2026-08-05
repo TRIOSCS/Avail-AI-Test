@@ -31,7 +31,6 @@ from ...constants import (
     AccessKey,
     OfferCondition,
     RequisitionStatus,
-    SourcingStatus,
     TaskStatus,
     UserRole,
 )
@@ -697,7 +696,7 @@ async def requisition_import_save(
     so ``company_id`` is populated from the chosen site for every create (hotlist or not),
     guarded for the no-site case.
     """
-    from app.utils.normalization import normalize_mpn_key, parse_substitute_mpns
+    from app.utils.normalization import parse_substitute_mpns
 
     form = await request.form()
 
@@ -774,43 +773,13 @@ async def requisition_import_save(
     db.add(req)
     db.flush()
 
-    # Create requirements
-    from ...search_service import resolve_material_card
+    # Create requirements through THE pipeline (services/requirement_service.py, spec §9):
+    # normalization, material cards, tag propagation, task auto-gen, dup detection,
+    # datasheet capture — one implementation for every creation surface.
+    from ...services.requirement_service import create_requirements_ui
 
-    added = len(requirements)
-    created_reqs = []
-    for item in requirements:
-        mpn = item["primary_mpn"]
-        card = resolve_material_card(mpn, db)
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn=mpn,
-            normalized_mpn=normalize_mpn_key(mpn),
-            material_card_id=card.id if card else None,
-            target_qty=item["target_qty"],
-            target_price=item.get("target_price"),
-            brand=item.get("brand"),
-            manufacturer=item.get("manufacturer", ""),
-            condition=item.get("condition", ""),
-            substitutes=item.get("substitutes", []),
-            customer_pn=item.get("customer_pn", ""),
-            date_codes=item.get("date_codes", ""),
-            packaging=item.get("packaging", ""),
-            firmware=item.get("firmware", ""),
-            hardware_codes=item.get("hardware_codes", ""),
-            description=item.get("description"),
-            package_type=item.get("package_type"),
-            revision=item.get("revision"),
-            need_by_date=item.get("need_by_date"),
-            sale_notes=item.get("sale_notes", ""),
-        )
-        db.add(r)
-        created_reqs.append(r)
-        for sub in item.get("substitutes", []):
-            sub_mpn = sub["mpn"] if isinstance(sub, dict) else sub
-            sub_mfr = sub.get("manufacturer", "") if isinstance(sub, dict) else ""
-            resolve_material_card(sub_mpn, db, manufacturer=sub_mfr)
-
+    result = await create_requirements_ui(db, req, requirements, actor_id=user.id)
+    added = len(result.created)
     db.commit()
 
     # Prospect → opportunity handoff (H1/M4): if this modal was launched from a claimed
@@ -830,10 +799,15 @@ async def requisition_import_save(
     # htmx:targetError and nothing refreshed. Both surfaces now listen for
     # `reqListRefresh from:body` (parts/workspace.html #parts-list, list.html hidden hook).
     safe_added = int(added)  # safe: server-computed int
+    toast = f"Requisition created with {safe_added} parts"
+    if result.duplicates:
+        # UI dup detection (spec §9): same part quoted to this customer site in the
+        # last 30 days — informational, the save already happened.
+        toast += f" — {int(len(result.duplicates))} possible duplicate(s) in the last 30 days"
     resp = HTMLResponse(
         "<script>"
         "window.dispatchEvent(new CustomEvent('close-modal'));"
-        f"Alpine.store('toast').message = 'Requisition created with {safe_added} parts';"
+        f"Alpine.store('toast').message = '{toast}';"
         "Alpine.store('toast').type = 'success';"
         "Alpine.store('toast').show = true;"
         "</script>"
@@ -1104,74 +1078,10 @@ async def requisition_detail_partial(
     return template_response("htmx/partials/requisitions/detail.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/create", response_class=HTMLResponse)
-async def requisition_create(
-    request: Request,
-    name: str = Form(...),
-    customer_name: str = Form(""),
-    deadline: str = Form(""),
-    urgency: str = Form("normal"),
-    parts_text: str = Form(""),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Create a new requisition and return the new row for HTMX prepend."""
-    req = Requisition(
-        name=name,
-        customer_name=customer_name or None,
-        deadline=deadline or None,
-        urgency=urgency,
-        status=RequisitionStatus.OPEN,
-        created_by=user.id,
-        claimed_by_id=user.id,
-    )
-    db.add(req)
-    db.flush()
-
-    # Parse parts text (format: "MPN, Qty" per line)
-    from ...search_service import resolve_material_card
-    from ...utils.normalization import normalize_mpn_key
-
-    part_count = 0
-    if parts_text.strip():
-        for line in parts_text.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            parts = [p.strip() for p in line.split(",")]
-            mpn = parts[0] if parts else ""
-            qty = 1
-            if len(parts) > 1:
-                try:
-                    qty = int(parts[1].strip().replace(",", ""))
-                except ValueError:
-                    qty = 1
-            if mpn:
-                card = resolve_material_card(mpn, db)
-                r = Requirement(
-                    requisition_id=req.id,
-                    primary_mpn=mpn,
-                    normalized_mpn=normalize_mpn_key(mpn),
-                    material_card_id=card.id if card else None,
-                    target_qty=qty,
-                    sourcing_status=SourcingStatus.OPEN,
-                )
-                db.add(r)
-                part_count += 1
-
-    db.commit()
-    db.refresh(req)
-    logger.info("Created requisition {} with {} parts from text", req.id, part_count)
-
-    # Attach counts for the row partial
-    req.req_count = part_count
-    req.offer_count = 0
-
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-    response = template_response("htmx/partials/requisitions/req_row.html", ctx)
-    response.headers["HX-Trigger"] = "showToast"
-    return response
+# POST /v2/partials/requisitions/create (requisition_create) was deleted in W3 (spec §9):
+# a UI-orphaned sibling of import-save (no template posted to it — the unified modal's
+# create-form posts to /import-parse → /import-save). Its bare "MPN, Qty" text parsing
+# bypassed the requirement pipeline (no normalization, dup detection, or task auto-gen).
 
 
 @router.post("/v2/partials/requisitions/{req_id}/requirements", response_class=HTMLResponse)
@@ -1198,8 +1108,6 @@ async def add_requirement(
     """Add a requirement to a requisition, return the new row HTML."""
     from datetime import date as date_type
 
-    from ...utils.normalization import parse_substitute_mpns
-
     if not manufacturer.strip():
         raise HTTPException(422, "Manufacturer is required")
 
@@ -1210,35 +1118,36 @@ async def add_requirement(
     sub_mpns = form_data.getlist("sub_mpn")
     sub_mfrs = form_data.getlist("sub_manufacturer")
     subs_raw = [{"mpn": m.strip(), "manufacturer": mfr.strip()} for m, mfr in zip(sub_mpns, sub_mfrs) if m.strip()]
-    sub_list = parse_substitute_mpns(subs_raw, primary_mpn)
 
-    from ...search_service import resolve_material_card
-    from ...utils.normalization import normalize_mpn_key
+    # THE requirement-creation pipeline (services/requirement_service.py, spec §9).
+    from ...services.requirement_service import create_requirements_ui
 
-    card = resolve_material_card(primary_mpn, db)
-    r = Requirement(
-        requisition_id=req_id,
-        primary_mpn=primary_mpn,
-        normalized_mpn=normalize_mpn_key(primary_mpn),
-        material_card_id=card.id if card else None,
-        target_qty=target_qty,
-        brand=brand or None,
-        manufacturer=manufacturer.strip(),
-        substitutes=sub_list,
-        target_price=target_price,
-        condition=condition or None,
-        date_codes=date_codes or None,
-        firmware=firmware or None,
-        hardware_codes=hardware_codes or None,
-        packaging=packaging or None,
-        notes=notes or None,
-        customer_pn=customer_pn or None,
-        need_by_date=_parse_date_safe(need_by_date, date_type),
-        sourcing_status=SourcingStatus.OPEN,
+    result = await create_requirements_ui(
+        db,
+        req,
+        [
+            {
+                "primary_mpn": primary_mpn,
+                "target_qty": target_qty,
+                "brand": brand or None,
+                "manufacturer": manufacturer,
+                "substitutes": subs_raw,
+                "target_price": target_price,
+                "condition": condition or None,
+                "date_codes": date_codes or None,
+                "firmware": firmware or None,
+                "hardware_codes": hardware_codes or None,
+                "packaging": packaging or None,
+                "notes": notes or None,
+                "customer_pn": customer_pn or None,
+                "need_by_date": _parse_date_safe(need_by_date, date_type),
+            }
+        ],
+        actor_id=user.id,
     )
-    db.add(r)
-    for sub in sub_list:
-        resolve_material_card(sub["mpn"], db, manufacturer=sub.get("manufacturer", ""))
+    if not result.created:
+        raise HTTPException(422, "primary_mpn is required")
+    r = result.created[0]
     db.commit()
     db.refresh(r)
 

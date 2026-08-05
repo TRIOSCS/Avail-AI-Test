@@ -19,11 +19,11 @@ from ...models import ChangeLog, Requirement, User
 from ...schemas.requisitions import RequirementUpdate
 from ...search_service import resolve_material_card
 from ...services.activity_service import log_activity
+from ...services.requirement_service import req_packaging
 from ...utils.normalization import (
     normalize_condition,
     normalize_mpn,
     normalize_mpn_key,
-    normalize_packaging,
 )
 
 router = APIRouter(tags=["requisitions"])
@@ -142,10 +142,12 @@ async def update_requirement(
         r.date_codes = data.date_codes.strip()
     if data.hardware_codes is not None:
         r.hardware_codes = data.hardware_codes.strip()
+    # NULL-on-unmapped, matching requirement_service: a raw fallback would trip
+    # chk_req_condition / chk_req_packaging on fresh migration-built DBs.
     if data.packaging is not None:
-        r.packaging = normalize_packaging(data.packaging) or data.packaging.strip()
+        r.packaging = req_packaging(data.packaging)
     if data.condition is not None:
-        r.condition = normalize_condition(data.condition) or data.condition.strip()
+        r.condition = normalize_condition(data.condition)
     if data.notes is not None:
         r.notes = data.notes.strip()
     if data.sale_notes is not None:

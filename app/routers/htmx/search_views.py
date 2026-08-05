@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ...constants import AccessKey, ApiSourceStatus, SourcingStatus
+from ...constants import AccessKey, ApiSourceStatus
 from ...database import get_db
 from ...dependencies import require_access, require_requisition_access, require_user
 from ...models import ApiSource, Requirement, Requisition, Sighting, SourcingLead, User
@@ -539,34 +539,29 @@ async def add_to_requisition(
         )
     require_requisition_access(db, int(requisition_id), user)
 
-    # Find or create Requirement for this MPN
+    # Find or create Requirement for this MPN. Match on the canonical key form
+    # (lowercase, separators stripped) — the pipeline normalizes primary_mpn for
+    # display, so a raw-cased repost must still find the existing row.
+    from ...utils.normalization import normalize_mpn_key
+
     requirement = (
         db.query(Requirement)
-        .filter_by(
-            requisition_id=requisition_id,
-            primary_mpn=mpn,
+        .filter(
+            Requirement.requisition_id == requisition_id,
+            Requirement.normalized_mpn == normalize_mpn_key(mpn),
         )
         .first()
     )
 
     if not requirement:
-        # Mirror update_requirement: store the canonical key-form normalized_mpn
-        # (lowercase, separators stripped) so part-history / material-card joins
-        # line up, and resolve the MaterialCard up front.
-        from ...search_service import resolve_material_card
-        from ...utils.normalization import normalize_mpn_key
+        # THE requirement-creation pipeline (services/requirement_service.py, spec §9):
+        # display+key MPN normalization, MaterialCard resolve, tag propagation, task
+        # auto-gen, dup detection, datasheet capture. target_qty explicitly None — the
+        # picker adds a part without a quantity.
+        from ...services.requirement_service import create_requirements_ui
 
-        card = resolve_material_card(mpn, db)
-        requirement = Requirement(
-            requisition_id=requisition_id,
-            primary_mpn=mpn,
-            normalized_mpn=normalize_mpn_key(mpn),
-            material_card_id=card.id if card else None,
-            target_qty=None,
-            sourcing_status=SourcingStatus.OPEN,
-        )
-        db.add(requirement)
-        db.flush()
+        result = await create_requirements_ui(db, req, [{"primary_mpn": mpn, "target_qty": None}], actor_id=user.id)
+        requirement = result.created[0]
 
     # Create Sighting rows (shared mapping — see services.sighting_ingest)
     created_rows: list[Sighting] = []

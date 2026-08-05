@@ -736,7 +736,7 @@ def test_add_to_requisition_reuses_existing_requirement(client, db_session):
     requirement = Requirement(
         requisition_id=req.id,
         primary_mpn="LM317T",
-        normalized_mpn="LM317T",
+        normalized_mpn="lm317t",  # key form — post-206 shape of pre-existing rows
         sourcing_status="open",
     )
     db_session.add(requirement)

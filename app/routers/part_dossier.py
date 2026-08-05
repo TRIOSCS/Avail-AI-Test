@@ -274,8 +274,8 @@ async def search_recent(
 # user+mpn) + persist the posted market rows as Sightings, then HX-Redirect to the scratch
 # req's full workspace page. They are TWO distinct routes (the dossier has two distinct
 # buttons) that deliberately share one flow and land on the SAME workspace — that is where
-# the part + its captured sightings now live and where both Send RFQ (rfq-compose) and Add
-# Offer are one click away. v1 does not deep-link a specific tab (the req page has no
+# the part + its captured sightings now live and where both Send RFQ (the sightings
+# vendor-modal composer) and Add Offer are one click away. v1 does not deep-link a specific tab (the req page has no
 # tab-by-URL support and partial URLs break on reload); the distinct completion happens in
 # the workspace. Payload shapes: page-level posts {mpn, items=<JSON array>}; a per-row
 # button posts {mpn, vendor_name} (single vendor). The scratch req is created ONLY here (an

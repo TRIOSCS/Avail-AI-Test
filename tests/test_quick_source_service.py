@@ -41,7 +41,9 @@ def test_creates_scratch_requisition(db_session, test_user):
     assert req.name == "Quick-source: LM317T"
     assert requirement.requisition_id == req.id
     assert requirement.primary_mpn == "LM317T"
-    assert requirement.normalized_mpn == "LM317T"
+    # Key form (lowercase, non-alnum stripped) — the pipeline's canonical
+    # normalized_mpn since W3 (migration 206 remaps pre-pipeline rows).
+    assert requirement.normalized_mpn == "lm317t"
 
 
 def test_get_or_create_is_idempotent_per_user_and_mpn(db_session, test_user):
