@@ -351,8 +351,17 @@ test('QP sales section is editable in the workspace pane (pending plan)', async 
 
   const pane = page.locator('#aw-pane #aw-pane-body');
   await expect(pane).toContainText('Quality — sales section', { timeout: 15_000 });
-  await pane.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  // Same race class openModal() guards: an Edit click that lands before Alpine
+  // mounts the swapped pane is a dead @click (qpEdit never flips). Retry once.
+  const editBtn = pane.getByRole('button', { name: 'Edit', exact: true }).first();
+  await settle(300);
+  await editBtn.click();
   const cond = pane.locator("input[name='qp_sales_condition']").first();
+  try {
+    await cond.waitFor({ state: 'visible', timeout: 6_000 });
+  } catch {
+    await editBtn.click();
+  }
   await expect(cond).toBeVisible({ timeout: 10_000 });
   await cond.fill('E2E-KERNEL NEW');
   await pane.locator("form[hx-post*='qp-sales']").getByRole('button', { name: 'Save' }).click();

@@ -51,20 +51,20 @@ Full 38-item decomposition: docs/evidence/w2-checklist-draft.md. Build on
 branch now; first W2 deploy AFTER the W1 quiet window closes (~Tue 23:00 UTC)
 with the deferred wave-start DB refresh + migration rerun at that moment.
 
-- [ ] W2.1 Nav 10→5 + Settings gear outside the bar (§4; Search/Sightings nav-only folds, W4 does the merges)
-- [ ] W2.2 Proactive parks whole — workspace + engine + badge, one unit, existing flag (§4/§5.4/§8)
-- [ ] W2.3 Trader lane + buyer intelligence parked behind existing flags (§5.3; if no flag exists: smallest mechanism = registration/nav removal, deviation-logged, NO new framework)
-- [ ] W2.4 Prospecting → CRM lens (§5.4)
-- [ ] W2.5 Materials → contextual lookup from Deals/CRM (§4)
-- [ ] W2.6 Orphan /api delete batches B0–B13 per docs/evidence/w2-delete-manifest.md (107 routes, with the manifest's two corrections: error-report alias decorators only; e2e/api.spec.ts re-pointed not deleted) (§8)
-- [ ] W2.7 Coverage farm deleted + diff-coverage gate lands same PR (§9 Decision K)
-- [ ] W2.8 Surface deletes: Sourcing Leads, Dashboard/Knowledge, Email-Intelligence dashboard, contact-intelligence, standalone cross-company contact pages (§5.4/§8)
-- [ ] W2.9 Backfill graveyard + startup.py backfills → alembic; write-only Notification table + writers deleted (§8/§5.5)
-- [ ] W2.10 Legacy JSON create endpoint (POST /api/requisitions) deleted (§5.1, spec-named)
-- [ ] W2.11 QP serial/FRU relink from workspace QP pane (§5.2 Decision E)
-- [ ] W2.12 Resell→Sighting mirror dual-write stopped (§5.3; drafted W2, flip to W3 noted)
-- [ ] W2.13 Glossary old→new table + screen-diet cut list FINALIZED for Packet 2 (application SIGN-OFF-GATED)
-- [ ] W2.A Acceptance: exactly 5 tabs + gear; deleted surfaces 404; fresh-DB drift-gate boot green; kernel E2E green → Packet 2
+- [x] W2.1 Nav 10→5 + Settings gear outside the bar (§4; Search/Sightings nav-only folds, W4 does the merges)
+- [x] W2.2 Proactive parks whole — workspace + engine + badge, one unit, existing flag (§4/§5.4/§8)
+- [x] W2.3 Trader lane + buyer intelligence parked behind existing flags (§5.3; if no flag exists: smallest mechanism = registration/nav removal, deviation-logged, NO new framework)
+- [x] W2.4 Prospecting → CRM lens (§5.4)
+- [x] W2.5 Materials → contextual lookup from Deals/CRM (§4)
+- [x] W2.6 Orphan /api delete batches B0–B13 per docs/evidence/w2-delete-manifest.md (107 routes, with the manifest's two corrections: error-report alias decorators only; e2e/api.spec.ts re-pointed not deleted) (§8)
+- [x] W2.7 Coverage farm deleted + diff-coverage gate lands same PR (§9 Decision K)
+- [x] W2.8 Surface deletes: Sourcing Leads, Dashboard/Knowledge, Email-Intelligence dashboard, contact-intelligence, standalone cross-company contact pages (§5.4/§8)
+- [x] W2.9 Backfill graveyard + startup.py backfills → alembic; write-only Notification table + writers deleted (§8/§5.5)
+- [x] W2.10 Legacy JSON create endpoint (POST /api/requisitions) deleted (§5.1, spec-named)
+- [x] W2.11 QP serial/FRU relink from workspace QP pane (§5.2 Decision E)
+- [x] W2.12 Resell→Sighting mirror dual-write stopped (§5.3; drafted W2, flip to W3 noted)
+- [x] W2.13 Glossary old→new table + screen-diet cut list FINALIZED for Packet 2 (application SIGN-OFF-GATED)
+- [x] W2.A Acceptance: exactly 5 tabs + gear; deleted surfaces 404; fresh-DB drift-gate boot green; kernel E2E green → Packet 2
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
@@ -82,7 +82,7 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 | Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 103 (−10 dead, Task 3→2) |
 | Test file count (pytest) | 1,113 | 1,107 |
 | E2E spec files (Playwright) | 12 | 12 |
-| Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | 10 |
+| Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | **5 + gear** |
 
 ## Deviation log (Rule 3.4 — one line each, surfaced in the wave packet)
 
@@ -100,6 +100,8 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 
 - 2026-08-04 W2: wave-start DB refresh deferred to W2's first deploy (post-window, ~Tue) — refreshing mid-window would disturb the W1 quiet evidence and the owner's live test data; build proceeds on branch (rule 3.7 deviation).
 - 2026-08-04: OWNER DIRECTIVE — continuous autonomous execution through Wave 4; packets delivered as reversible reports without waiting; glossary/screen-diet application + cutover remain owner-gated.
+
+- 2026-08-05 W2 SHIPPED+DEPLOYED @31457826 (~01:00 UTC): refresh rehearsal #3 (fresh prod copy → head 205), 5 tabs + gear live-verified, deleted surfaces 404, kept pages routable, scheduler 6, kernel walk 18/2 (one E2E race hardened — Edit-before-Alpine-mount, same class as openModal; app itself fine). Gate: 19,093 passed / 2 root-caused stale toolbar pins ("All contacts" parked §5.4).
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)
