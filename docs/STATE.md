@@ -90,11 +90,29 @@ approval) verified by test.
 - [x] W3.5 RFQ composer deleted (offers/rfq.py + compose/results templates;
   vendor-modal composer is the survivor; deletion pinned by
   test_inventory_cleanup)
-- [ ] W3.6 Offer doors 5→2 (delete 2 AI-paste modals + review-queue page;
-  paste box in Add-offer; flagged-AI filter in Responses tab)
-- [ ] W3.7 QP single lock matrix (workspace); drop the 2 self-stamped
-  review gates (5 ceremonies → 3)
-- [ ] W3.8 Notification single-path
+- [x] W3.6 Offer doors 5→2: both AI-paste modals + the standalone
+  review-queue page deleted (8 URLs pinned gone); the spec-named
+  replacements reuse existing paths (paste box → existing parse/save,
+  flagged-AI filter → existing review route). Kept deliberately:
+  parsed_offer_results.html (the paste box's preview), crm JSON
+  approve/reject (other surfaces reference them), /api/ai/parse-email
+  (JSON API, not a modal — ai_email_parser now single-caller, orphan-sweep
+  candidate for W4).
+- [x] W3.7 QP single lock matrix: QP_SECTION_LOCK_MATRIX in
+  qp_workspace.py, consulted by BOTH the workspace panes and the standalone
+  page; Mark-Reviewed ceremony + can_review_qp_* checks deleted
+  (5 ceremonies → 3); reviewed_* stamps + user grant columns stay
+  vestigial (auto_approved precedent, no DDL).
+- [x] W3.8 Notification single-path: every approval-lifecycle event now
+  delivers exactly ONCE via the existing approval outbox email; Teams
+  channel/DM + in-app duplicates + direct-email paths deleted; prepayment
+  emails rerouted through the outbox (payload to/subject/html — seam
+  extension, no new system, no migration). OWNER FLAGS (Packet 3):
+  (a) submitted-event recipients = the request's eligible approvers, not
+  role-managers; (b) notify_buyplan_email_enabled=False now suppresses the
+  event entirely (email is the only path); (c) prepayment_teams_webhook
+  setting registered but no longer read; (d) notify_rejected kept as no-op
+  seam until the legacy-PENDING fallback dies.
 - [x] W3.9 Single transition() (buyplan_state.py) + auto-approve branch
   deleted + migration 208 (INBOUND retired; BuyPlanStatus = 6). OPEN
   SLICE: legacy pre-engine PENDING fallback in htmx/buy_plans.py stays
@@ -146,6 +164,11 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 
 - 2026-08-05 W2 SHIPPED+DEPLOYED @31457826 (~01:00 UTC): refresh rehearsal #3 (fresh prod copy → head 205), 5 tabs + gear live-verified, deleted surfaces 404, kept pages routable, scheduler 6, kernel walk 18/2 (one E2E race hardened — Edit-before-Alpine-mount, same class as openModal; app itself fine). Gate: 19,093 passed / 2 root-caused stale toolbar pins ("All contacts" parked §5.4).
 
+- 2026-08-05 OWNER DIRECTIVE (mid-W3): "avoid drift — stick to simplifying
+  what I built, not building anything new." Bar: every change traces to a
+  named spec line; additions only where the spec itself names the replacement
+  (outcome-on-close §5.3, Add-offer paste box + flagged-AI filter §5.1);
+  net-new ideas go to the Backlog section, never built.
 - 2026-08-05 W3 session 2: prior session ended mid-W3 with the whole build
   uncommitted and no STATE section — recovered via 12-agent tree audit; gaps
   fixed same-session; committed module-scoped per the W1 rule-3.5 relaxation.

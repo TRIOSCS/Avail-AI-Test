@@ -1128,7 +1128,8 @@ inside `app/services/offer_service.py` (W3 — the ONE offer service) at the off
 entry/save/approval sites (canonical `create_offer`, which every door reaches:
 the sightings modal, manual add-offer, and the save-parsed-offers form loop;
 plus `approve_offer`, which serves pending-review approve everywhere: the JSON
-approve, the htmx review-queue promote, and the requisition
+approve and the requisition Responses-tab flagged-filter review (the standalone
+review-queue promote died in W3) — i.e. the requisition
 offers-tab review approve) after the offer persists (same transaction) —
 `release_trigger='offer_received'`; auto-created offers (inbox monitor, excess
 matching) and clone paths never release. Expired/released records render as
@@ -1902,11 +1903,13 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      _complete_reverted_active_plans — finishing plans migration 176 had reverted to
     |                      active — was DELETED in the W2 simplification sweep; migration 208 re-ran the
     |                      inbound->active remap belt-and-braces and no INBOUND writer remains.)
-    |  QP fold (Ph3):      Quality-Plan sales/purchasing sections are no longer an approval gate: submit_section/
-    |                      QP_SALES/QP_PURCHASING dispatch retired; quality_plan_service.toggle_section_reviewed
-    |                      (mark|unmark) stamps *_section_reviewed_at/_by_id (migration 177 renamed *_approved_at,
-    |                      dropped dead approved_by_id/at), gated on can_review_qp_sales/purchasing_section,
-    |                      writes QP_SECTION_REVIEWED activity. Routes POST /v2/qp/{id}/{sales,purchasing}/review.
+    |  QP fold (Ph3+W3.7): Quality-Plan sales/purchasing sections are no longer an approval gate, and the
+    |                      Mark-Reviewed ceremony that replaced it was itself dropped in W3.7: the
+    |                      review routes/toggle/rights checks are deleted (5 ceremonies -> the 3 real
+    |                      gates), *_section_reviewed_* stamps are historical, and section editability
+    |                      is the ONE lock matrix in qp_workspace.py (QP_SECTION_LOCK_MATRIX —
+    |                      sales: draft=owner/manager, pending=manager; purchasing: active only),
+    |                      consulted by BOTH the workspace panes and the standalone page.
     |  Ops group:          VerificationGroupMember (Settings > Ops Group; seeded from ADMIN_EMAILS) now
     |                      authorizes Halt + was the grandfather basis for can_approve_purchase_orders
     |                      (migration 173). admin/buy_plan_ops.toggle_ops_member guards the toggle: it
@@ -2702,10 +2705,10 @@ it's approved after the watermark has advanced past its `created_at`, it stays
 invisible to every future batch scan too. The hook runs a targeted single-offer
 `find_matches_for_offer(offer.id, db)` in its own commit/rollback (a re-match failure
 never blocks the caller's approval transaction) and is a no-op for offers without a
-`material_card_id`. Wired into all four offer-approval paths: the htmx offers CRUD
-`approve`/`promote` actions (`app/routers/htmx/offers/crud.py`) and both
-`approve_offer` and the T4→T5 review-queue `promote_offer`
-(`app/routers/crm/offers.py`) — see the invariant comment on `OFFER_TRANSITIONS`
+`material_card_id`. Wired into every offer-approval path: the htmx offers CRUD
+`approve` action + the Responses-tab flagged review (`app/routers/htmx/offers/crud.py`)
+and the JSON `approve_offer` (`app/routers/crm/offers.py`; the htmx review-queue
+promote died in W3) — see the invariant comment on `OFFER_TRANSITIONS`
 (`app/services/status_machine.py`): every router moving an offer into a live
 status from a non-live one must call the hook after its commit.
 
@@ -3473,9 +3476,10 @@ Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + le
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
 
 **Read-IDOR closure — offers/ GET partials.** The requisition-scoped GET partial handlers in
-`app/routers/htmx/offers/` (`parse_email_form`, `paste_offer_form`, `add_offer_form` in
-`crud.py`; historically also `rfq_compose`/`rfq_prepare_panel`, both since deleted with the
-composer collapse) resolved the requisition via
+`app/routers/htmx/offers/` (`add_offer_form` in `crud.py`; historically also
+`parse_email_form`/`paste_offer_form` — deleted in the W3 offer-door collapse — and
+`rfq_compose`/`rfq_prepare_panel`, deleted with the composer collapse) resolved the
+requisition via
 `get_requisition_or_404` but skipped
 `require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
 rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
@@ -3496,8 +3500,8 @@ suggested-contacts *poller* returns an empty `286` to stop polling instead). The
 `GET /api/companies/{id}` → 404 via `can_manage_account`; `GET /api/companies` list filters on
 `company_visibility_predicate` for non-managers (and threads `user` into the cached `_fetch` so
 `@cached_endpoint` folds `user.id` into the key — no cross-rep cache bleed); `crm/offers.py`
-`get_changelog`/`list_offer_attachments` require `require_requisition_access`, `list_review_queue`
-is `is_manager_or_admin`-only; `crm/enrichment.py` `enrich_vendor_card`/`get_suggested_contacts`
+`get_changelog`/`list_offer_attachments` require `require_requisition_access`
+(`list_review_queue` died with the review-queue delete); `crm/enrichment.py` `enrich_vendor_card`/`get_suggested_contacts`
 require `require_buyer`. Managers/admins bypass throughout. Regression coverage: seven new
 `tests/test_*_idor.py` / `test_enrichment_authz.py` modules (stranger 404/403/286 + owner 200 with
 content asserts).
@@ -3888,7 +3892,7 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
    `|localdate` so its label matches the local bucket.
 
    NOTE: this is the mechanism + a couple of proof wirings (`|localdate` on the profile
-   "Member since", `|localtime` on the offers review-queue `created_at`, `|localday` on the
+   "Member since", `|localtime` on offer `created_at` renders, `|localday` on the
    Activity-tab day grouping). The app-wide sweep of every `.strftime(...)` timestamp render
    is a deliberate follow-up.
 

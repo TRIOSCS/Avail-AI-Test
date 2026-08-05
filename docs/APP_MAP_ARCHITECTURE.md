@@ -327,8 +327,9 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   cleanup/rephrase — was deleted in W3 as superseded by the sightings vendor-modal composer,
   the ONE RFQ composer per SIMPLIFICATION_SPEC §5.1.) `__init__.py` builds its own `router`
   and `include_router()`s the three sub-routers so `app/main.py` keeps mounting a single
-  `htmx_offers_router` with no change. **Test-patch note:** `template_response`/`requisition_tab`/`maybe_release_on_offer`/
-  `offer_review_queue` are re-exported at package level, but every sub-module call site
+  `htmx_offers_router` with no change. **Test-patch note:** `template_response`/`requisition_tab`/`maybe_release_on_offer`
+  are re-exported at package level (`offer_review_queue` died with the W3 review-queue
+  delete), but every sub-module call site
   re-pulls them via a FUNCTION-LOCAL `from . import X` (never a module-level import) so
   `patch("app.routers.htmx.offers.X")` still intercepts every call site post-split — a
   module-level import would bind the pre-patch object permanently at import time. Imports
@@ -414,10 +415,11 @@ full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace 
 (`GET /v2/partials/parts/workspace`), the vendor stock-list import
 (`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
 (`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). `v2_page` also owns the canonical
-full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2/follow-ups`
-(→ `/v2/partials/follow-ups`) and `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
-`offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
-(`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
+full-page URL for the one buyer queue that has **no bottom-nav tab** — `/v2/follow-ups`
+(→ `/v2/partials/follow-ups`) — surfaced via the **Sightings workspace quick-links** bar
+(the `/v2/offers/review-queue` page died in W3, spec §5.1: flagged AI offers are now a
+filter inside the requisition Responses tab)
+(`sightings/list.html`; `sightings_workspace` computes the follow-up count
 once, off the table-refresh path). The retired Buy Plans hub URLs (`/v2/buy-plans[/{id}]`)
 **308-redirect** to `/v2/approvals?tab=buy-plans` — a detail deep link adds
 `&select={id}` so the workspace preselects that plan's pane (spec §11.1 retirement;
