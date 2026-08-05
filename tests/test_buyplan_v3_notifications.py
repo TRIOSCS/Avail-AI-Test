@@ -1,18 +1,20 @@
 """test_buyplan_v3_notifications.py — Tests for notification functions.
 
-Covers: notify_stock_sale_approved,
-log_buyplan_activity, run_v3_notify_bg.
+Covers: notify_stock_sale_approved (single-path outbox email, W3.8/§5.5),
+log_buyplan_activity (audit trail — kept).
 
 Called by: pytest
-Depends on: conftest.py, app.services.buyplan_notifications
+Depends on: conftest.py, app.services.buyplan_notifications, app.models.approvals
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from app.constants import ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType
 from app.models import ActivityLog, User
+from app.models.approvals import ApprovalOutbox, ApprovalRequest
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -128,14 +130,29 @@ def _add_line(db, plan, buyer_id=None, quantity=100, unit_cost=1.50):
     return line
 
 
+def _make_request(db, plan, status=ApprovalRequestStatus.APPROVED):
+    """Anchor ApprovalRequest for *plan* (the outbox rows FK onto it)."""
+    req = ApprovalRequest(
+        gate_type=ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=plan.id,
+        requested_by_id=plan.submitted_by_id,
+        owner_id=plan.submitted_by_id,
+        status=status,
+    )
+    db.add(req)
+    db.commit()
+    return req
+
+
 # ═══════════════════════════════════════════════════════════════════════
-# notify_stock_sale_approved
+# notify_stock_sale_approved — single delivery: ONE outbox email to the DLs
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestNotifyStockSaleApproved:
     @pytest.mark.asyncio
-    async def test_sends_stock_sale_emails(self, db_session):
+    async def test_enqueues_stock_sale_email(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
@@ -145,76 +162,69 @@ class TestNotifyStockSaleApproved:
 
         plan = _make_plan(db_session, submitter.id, approved_by_id=admin.id)
         _add_line(db_session, plan, quantity=50, unit_cost=3.00)
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock()
+        request = _make_request(db_session, plan)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com", "accounting@trioscs.com"]
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
-                with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-                    with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                        await notify_stock_sale_approved(plan, db_session)
+            await notify_stock_sale_approved(plan, db_session)
 
-        assert mock_gc.post_json.await_count == 2
-        subjects = [call[0][1]["message"]["subject"] for call in mock_gc.post_json.call_args_list]
-        assert all("Stock Sale Approved" in s for s in subjects)
+        rows = db_session.query(ApprovalOutbox).all()
+        assert len(rows) == 1
+        assert rows[0].channel == "email"
+        assert rows[0].request_id == request.id
+        assert rows[0].recipient_user_id == admin.id  # delegated Graph sender
+        assert rows[0].payload["to"] == ["logistics@trioscs.com", "accounting@trioscs.com"]
+        assert "Stock Sale Approved" in rows[0].payload["subject"]
+        assert "LM317T" in rows[0].payload["html"]
 
     @pytest.mark.asyncio
-    async def test_creates_submitter_activity(self, db_session):
+    async def test_no_inapp_row_written(self, db_session):
+        """Single path: the submitter no longer gets an ActivityLog row here (their
+        decision notice is the engine's own outbox email)."""
+        from app.services.buyplan_notifications import notify_stock_sale_approved
+
+        submitter = _make_user(db_session)
+        admin = _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
+        plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan)
+
+        with patch("app.services.buyplan_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com"]
+            await notify_stock_sale_approved(plan, db_session)
+
+        assert db_session.query(ActivityLog).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_no_dls_configured_enqueues_nothing(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
         plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
             mock_settings.admin_emails = []
             mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_stock_sale_approved(plan, db_session)
+            await notify_stock_sale_approved(plan, db_session)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-        assert len(activities) == 1
-        assert "Stock sale" in activities[0].subject
-        assert "no PO required" in activities[0].subject
+        assert db_session.query(ApprovalOutbox).count() == 0
 
     @pytest.mark.asyncio
-    async def test_no_submitter_skips_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_stock_sale_approved
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, submitted_by_id=None)
-
-        with patch("app.services.buyplan_notifications.settings") as mock_settings:
-            mock_settings.admin_emails = []
-            mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_stock_sale_approved(plan, db_session)
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-        assert len(activities) == 0
-
-    @pytest.mark.asyncio
-    async def test_teams_channel_posted(self, db_session):
+    async def test_no_request_enqueues_nothing(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
-        plan = _make_plan(db_session, submitter.id)
+        _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
+        plan = _make_plan(db_session, submitter.id)  # no ApprovalRequest anchor
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
-            mock_settings.admin_emails = []
-            mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-                await notify_stock_sale_approved(plan, db_session)
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com"]
+            await notify_stock_sale_approved(plan, db_session)  # no crash
 
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Stock Sale Approved" in msg
+        assert db_session.query(ApprovalOutbox).count() == 0
 
 
 class TestLogBuyplanActivity:

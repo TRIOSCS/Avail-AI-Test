@@ -1,10 +1,13 @@
 """test_buyplan_notifications.py — Tests for buy plan notification service.
 
-Covers all 10 notify_* functions plus helpers (_plan_context, _lines_html,
-_wrap_email, _send_email, _teams_channel, _teams_dm, run_notify_bg).
+Single-path delivery (W3.8/§5.5): every approval-lifecycle notify_* enqueues exactly
+ONE ApprovalOutbox email per recipient — no direct Graph send, no Teams post, no
+in-app ActivityLog row for the same event. Also covers the helpers (_plan_context,
+_lines_html, _wrap_email, _send_email, _teams_dm, run_notify_bg, log_buyplan_activity)
+and the still-in-app routine notify_completed.
 
 Called by: pytest
-Depends on: conftest.py, app.services.buyplan_notifications
+Depends on: conftest.py, app.services.buyplan_notifications, app.models.approvals
 """
 
 from datetime import UTC, datetime
@@ -12,7 +15,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.constants import (
+    ApprovalGateType,
+    ApprovalRecipientStatus,
+    ApprovalRequestStatus,
+    ApprovalStepRule,
+    ApprovalSubjectType,
+)
 from app.models import ActivityLog, User
+from app.models.approvals import (
+    ApprovalOutbox,
+    ApprovalRequest,
+    ApprovalStep,
+    ApprovalStepRecipient,
+)
 from app.models.buy_plan import (
     BuyPlan,
     BuyPlanLine,
@@ -91,7 +107,7 @@ def _make_plan(db, submitter_id, **overrides):
     return plan
 
 
-def _add_line(db, plan, offer_mock=None, buyer_id=None, quantity=100, unit_cost=1.50, po_number=None):
+def _add_line(db, plan, offer_mock=None, buyer_id=None, quantity=100, unit_cost=1.50, po_number=None, **overrides):
     """Add a BuyPlanLine with an optional mock offer."""
     from app.models import Offer, Requirement
 
@@ -128,11 +144,44 @@ def _add_line(db, plan, offer_mock=None, buyer_id=None, quantity=100, unit_cost=
         unit_cost=unit_cost,
         buyer_id=buyer_id,
         po_number=po_number,
+        **overrides,
     )
     db.add(line)
     db.commit()
     db.refresh(plan)
     return line
+
+
+def _make_request(db, plan, *, status=ApprovalRequestStatus.REQUESTED, recipients=()):
+    """Anchor ApprovalRequest for *plan* (+ one ANY step with PENDING recipients)."""
+    req = ApprovalRequest(
+        gate_type=ApprovalGateType.BUY_PLAN,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=plan.id,
+        requested_by_id=plan.submitted_by_id,
+        owner_id=plan.submitted_by_id,
+        status=status,
+    )
+    db.add(req)
+    db.flush()
+    if recipients:
+        step = ApprovalStep(request_id=req.id, seq=1, rule=ApprovalStepRule.ANY)
+        db.add(step)
+        db.flush()
+        for user in recipients:
+            db.add(
+                ApprovalStepRecipient(
+                    step_id=step.id,
+                    user_id=user.id,
+                    status=ApprovalRecipientStatus.PENDING,
+                )
+            )
+    db.commit()
+    return req
+
+
+def _outbox_rows(db):
+    return db.query(ApprovalOutbox).order_by(ApprovalOutbox.id).all()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -281,7 +330,7 @@ class TestWrapEmail:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# _send_email
+# _send_email (kept for the re-source broadcast)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -325,19 +374,11 @@ class TestSendEmail:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# _teams_channel / _teams_dm
+# _teams_dm (kept for the nudge + re-source seams)
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestTeamsHelpers:
-    @pytest.mark.asyncio
-    async def test_teams_channel(self):
-        from app.services.buyplan_notifications import _teams_channel
-
-        with patch("app.services.teams_notifications.post_teams_channel", new_callable=AsyncMock) as mock:
-            await _teams_channel("Hello teams")
-        mock.assert_awaited_once_with("Hello teams")
-
     @pytest.mark.asyncio
     async def test_teams_dm(self, db_session):
         from app.services.buyplan_notifications import _teams_dm
@@ -405,97 +446,167 @@ class TestRunV3NotifyBg:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_submitted
+# notify_submitted — single delivery: outbox email per pending approver
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3Submitted:
+class TestNotifySubmitted:
     @pytest.mark.asyncio
-    async def test_submitted_emails_managers(self, db_session):
+    async def test_enqueues_one_outbox_email_per_pending_approver(self, db_session):
         from app.services.buyplan_notifications import notify_submitted
 
         user = _make_user(db_session)
         mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
         plan = _make_plan(db_session, user.id)
         _add_line(db_session, plan, quantity=10, unit_cost=5.0)
+        request = _make_request(db_session, plan, recipients=[mgr])
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_submitted(plan, db_session)
+        await notify_submitted(plan, db_session)
 
-        mock_email.assert_awaited_once()
-        args = mock_email.call_args[0]
-        assert args[0].id == mgr.id
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == mgr.id
+        assert rows[0].request_id == request.id
+        assert rows[0].channel == "email"
+        assert "Buy Plan Approval" in rows[0].payload["subject"]
+        assert "Acme Corp" in rows[0].payload["html"]
 
     @pytest.mark.asyncio
-    async def test_submitted_creates_activity(self, db_session):
+    async def test_no_extra_delivery(self, db_session):
+        """Single path: no direct Graph email, no Teams, no in-app ActivityLog row."""
         from app.services.buyplan_notifications import notify_submitted
 
         user = _make_user(db_session)
-        _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
+        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
         plan = _make_plan(db_session, user.id)
+        _make_request(db_session, plan, recipients=[mgr])
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_submitted(plan, db_session)
+        with (
+            patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email,
+            patch("app.services.teams_notifications.post_teams_channel", new_callable=AsyncMock) as mock_teams,
+            patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock_dm,
+        ):
+            await notify_submitted(plan, db_session)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert len(activities) >= 1
+        mock_email.assert_not_awaited()
+        mock_teams.assert_not_awaited()
+        mock_dm.assert_not_awaited()
+        assert db_session.query(ActivityLog).count() == 0
+        assert len(_outbox_rows(db_session)) == 1
 
     @pytest.mark.asyncio
-    async def test_submitted_with_notes(self, db_session):
+    async def test_notes_in_email(self, db_session):
         from app.services.buyplan_notifications import notify_submitted
 
         user = _make_user(db_session)
-        _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
+        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
         plan = _make_plan(db_session, user.id, salesperson_notes="Urgent deal")
+        _make_request(db_session, plan, recipients=[mgr])
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_submitted(plan, db_session)
+        await notify_submitted(plan, db_session)
 
-        # Check that notes appear in the email body
-        email_body = mock_email.call_args[0][2]
-        assert "Urgent deal" in email_body
+        assert "Urgent deal" in _outbox_rows(db_session)[0].payload["html"]
 
     @pytest.mark.asyncio
-    async def test_submitted_fallback_admin_emails(self, db_session):
+    async def test_only_pending_recipients_enqueued(self, db_session):
         from app.services.buyplan_notifications import notify_submitted
 
         user = _make_user(db_session)
-        # No managers — should fall back to admin_emails setting
+        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
+        done = _make_user(db_session, "done@trioscs.com", "Done", "manager")
         plan = _make_plan(db_session, user.id)
+        request = _make_request(db_session, plan, recipients=[mgr, done])
+        # Mark the second recipient already decided — no email for them.
+        recip = (
+            db_session.query(ApprovalStepRecipient)
+            .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+            .filter(ApprovalStep.request_id == request.id, ApprovalStepRecipient.user_id == done.id)
+            .one()
+        )
+        recip.status = ApprovalRecipientStatus.APPROVED
+        db_session.commit()
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_submitted(plan, db_session)
-        # No crash even with no managers
+        await notify_submitted(plan, db_session)
+
+        rows = _outbox_rows(db_session)
+        assert [r.recipient_user_id for r in rows] == [mgr.id]
 
     @pytest.mark.asyncio
-    async def test_submitted_teams_channel(self, db_session):
+    async def test_no_open_request_skips(self, db_session):
         from app.services.buyplan_notifications import notify_submitted
 
         user = _make_user(db_session)
         _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id)
+        plan = _make_plan(db_session, user.id)  # no ApprovalRequest at all
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-                await notify_submitted(plan, db_session)
+        await notify_submitted(plan, db_session)  # no crash
 
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Approval Required" in msg
+        assert _outbox_rows(db_session) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_approved
+# notify_approved — single delivery: outbox email per buyer
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3Approved:
+class TestNotifyApproved:
     @pytest.mark.asyncio
-    async def test_approved_emails_buyers(self, db_session):
+    async def test_enqueues_buyer_email_only(self, db_session):
+        from app.services.buyplan_notifications import notify_approved
+
+        submitter = _make_user(db_session)
+        buyer = _make_user(db_session, "buyer2@trioscs.com", "Buyer2", "buyer")
+        plan = _make_plan(db_session, submitter.id)
+        _add_line(db_session, plan, buyer_id=buyer.id)
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
+
+        await notify_approved(plan, db_session)
+
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == buyer.id
+        assert rows[0].request_id == request.id
+        assert "POs Required" in rows[0].payload["subject"]
+        assert "LM317T" in rows[0].payload["html"]
+        # The submitter's decision notice is decide()'s own outbox email — NOT here.
+        assert all(r.recipient_user_id != submitter.id for r in rows)
+
+    @pytest.mark.asyncio
+    async def test_no_extra_delivery(self, db_session):
+        from app.services.buyplan_notifications import notify_approved
+
+        submitter = _make_user(db_session)
+        buyer = _make_user(db_session, "buyer2@trioscs.com", "Buyer2", "buyer")
+        plan = _make_plan(db_session, submitter.id)
+        _add_line(db_session, plan, buyer_id=buyer.id)
+        _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
+
+        with (
+            patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email,
+            patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock_dm,
+            patch("app.services.teams_notifications.post_teams_channel", new_callable=AsyncMock) as mock_teams,
+        ):
+            await notify_approved(plan, db_session)
+
+        mock_email.assert_not_awaited()
+        mock_dm.assert_not_awaited()
+        mock_teams.assert_not_awaited()
+        assert db_session.query(ActivityLog).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_no_buyers_enqueues_nothing(self, db_session):
+        from app.services.buyplan_notifications import notify_approved
+
+        submitter = _make_user(db_session)
+        plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
+
+        await notify_approved(plan, db_session)
+
+        assert _outbox_rows(db_session) == []
+
+    @pytest.mark.asyncio
+    async def test_no_request_skips(self, db_session):
         from app.services.buyplan_notifications import notify_approved
 
         submitter = _make_user(db_session)
@@ -503,275 +614,149 @@ class TestNotifyV3Approved:
         plan = _make_plan(db_session, submitter.id)
         _add_line(db_session, plan, buyer_id=buyer.id)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                    await notify_approved(plan, db_session)
+        await notify_approved(plan, db_session)  # no crash
 
-        # Should email the buyer
-        assert mock_email.await_count == 1
-        assert mock_email.call_args[0][0].id == buyer.id
+        assert _outbox_rows(db_session) == []
 
     @pytest.mark.asyncio
-    async def test_approved_creates_activities(self, db_session):
+    async def test_opted_out_buyer_not_enqueued(self, db_session):
+        """notify_buyplan_email_enabled=False suppresses the buyer's outbox row."""
         from app.services.buyplan_notifications import notify_approved
 
         submitter = _make_user(db_session)
-        buyer = _make_user(db_session, "buyer2@trioscs.com", "Buyer2", "buyer")
+        buyer = _make_user(db_session, "optout@trioscs.com", "OptOut", "buyer")
+        buyer.notify_buyplan_email_enabled = False
         plan = _make_plan(db_session, submitter.id)
         _add_line(db_session, plan, buyer_id=buyer.id)
+        _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                    await notify_approved(plan, db_session)
+        await notify_approved(plan, db_session)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
-        assert len(activities) >= 2  # one for buyer, one for submitter
-
-    @pytest.mark.asyncio
-    async def test_approved_no_buyers(self, db_session):
-        from app.services.buyplan_notifications import notify_approved
-
-        submitter = _make_user(db_session)
-        plan = _make_plan(db_session, submitter.id)
-        # No lines = no buyers
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                    await notify_approved(plan, db_session)
-
-    @pytest.mark.asyncio
-    async def test_approved_teams_dm(self, db_session):
-        from app.services.buyplan_notifications import notify_approved
-
-        submitter = _make_user(db_session)
-        buyer = _make_user(db_session, "buyer2@trioscs.com", "Buyer2", "buyer")
-        plan = _make_plan(db_session, submitter.id)
-        _add_line(db_session, plan, buyer_id=buyer.id)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock) as mock_dm:
-                    await notify_approved(plan, db_session)
-
-        mock_dm.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_approved_no_submitter(self, db_session):
-        from app.services.buyplan_notifications import notify_approved
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, submitted_by_id=None)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                    await notify_approved(plan, db_session)
-        # No crash when no submitter
+        assert _outbox_rows(db_session) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_rejected
+# notify_rejected — no-op seam (decide() owns the single delivery)
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3Rejected:
+class TestNotifyRejected:
     @pytest.mark.asyncio
-    async def test_rejected_emails_submitter(self, db_session):
+    async def test_rejected_is_noop(self, db_session):
+        """The reject decision email is enqueued by approvals.service.decide —
+        notify_rejected must add NOTHING (no outbox row, no email, no ActivityLog)."""
         from app.services.buyplan_notifications import notify_rejected
 
         user = _make_user(db_session)
         mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
         plan = _make_plan(db_session, user.id, approved_by_id=mgr.id, approval_notes="Too expensive")
+        _make_request(db_session, plan, status=ApprovalRequestStatus.REJECTED)
 
         with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                await notify_rejected(plan, db_session)
+            await notify_rejected(plan, db_session)
 
-        mock_email.assert_awaited_once()
-        body = mock_email.call_args[0][2]
-        assert "Too expensive" in body
-
-    @pytest.mark.asyncio
-    async def test_rejected_creates_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_rejected
-
-        user = _make_user(db_session)
-        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id, approved_by_id=mgr.id)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                await notify_rejected(plan, db_session)
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").all()
-        assert len(activities) == 1
-
-    @pytest.mark.asyncio
-    async def test_rejected_no_submitter(self, db_session):
-        from app.services.buyplan_notifications import notify_rejected
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, submitted_by_id=None)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock) as mock_dm:
-                await notify_rejected(plan, db_session)
-
-        mock_dm.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_rejected_no_approver(self, db_session):
-        from app.services.buyplan_notifications import notify_rejected
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, approved_by_id=None)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                await notify_rejected(plan, db_session)
-
-        body = mock_email.call_args[0][2]
-        assert "Manager" in body
-
-    @pytest.mark.asyncio
-    async def test_rejected_without_notes(self, db_session):
-        from app.services.buyplan_notifications import notify_rejected
-
-        user = _make_user(db_session)
-        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id, approved_by_id=mgr.id)
-        # No approval_notes set
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                await notify_rejected(plan, db_session)
-
-        body = mock_email.call_args[0][2]
-        assert "Reason:" not in body
+        mock_email.assert_not_awaited()
+        assert _outbox_rows(db_session) == []
+        assert db_session.query(ActivityLog).count() == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_so_verified
+# notify_so_rejected — single delivery: outbox email to the salesperson
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3SOVerified:
+class TestNotifySORejected:
     @pytest.mark.asyncio
-    async def test_so_verified_creates_activities(self, db_session):
-        from app.services.buyplan_notifications import notify_so_verified
-
-        submitter = _make_user(db_session)
-        buyer1 = _make_user(db_session, "b1@trioscs.com", "Buyer1", "buyer")
-        buyer2 = _make_user(db_session, "b2@trioscs.com", "Buyer2", "buyer")
-        plan = _make_plan(db_session, submitter.id)
-        _add_line(db_session, plan, buyer_id=buyer1.id)
-        _add_line(db_session, plan, buyer_id=buyer2.id)
-
-        await notify_so_verified(plan, db_session)
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
-        assert len(activities) == 2
-
-    @pytest.mark.asyncio
-    async def test_so_verified_no_buyers(self, db_session):
-        from app.services.buyplan_notifications import notify_so_verified
+    async def test_halt_enqueues_submitter_email(self, db_session):
+        from app.services.buyplan_notifications import notify_so_rejected
 
         user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id)
+        plan = _make_plan(db_session, user.id, so_rejection_note="Deal on hold")
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.CANCELLED)
 
-        await notify_so_verified(plan, db_session)
-        # No crash
+        await notify_so_rejected(plan, db_session, action="halt")
 
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == user.id
+        assert rows[0].request_id == request.id
+        assert "Halted" in rows[0].payload["subject"]
+        assert "halted" in rows[0].payload["html"]
+        assert "Deal on hold" in rows[0].payload["html"]
 
-# ═══════════════════════════════════════════════════════════════════════
-# notify_so_rejected
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNotifyV3SORejected:
     @pytest.mark.asyncio
-    async def test_so_rejected(self, db_session):
+    async def test_reject_label(self, db_session):
         from app.services.buyplan_notifications import notify_so_rejected
 
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id, so_rejection_note="Invalid SO")
+        _make_request(db_session, plan)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            await notify_so_rejected(plan, db_session, action="reject")
+        await notify_so_rejected(plan, db_session, action="reject")
 
-        body = mock_email.call_args[0][2]
-        assert "rejected" in body
-        assert "Invalid SO" in body
+        html = _outbox_rows(db_session)[0].payload["html"]
+        assert "rejected" in html
+        assert "Invalid SO" in html
 
     @pytest.mark.asyncio
-    async def test_so_halted(self, db_session):
+    async def test_no_note_omits_reason(self, db_session):
         from app.services.buyplan_notifications import notify_so_rejected
 
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id)
+        _make_request(db_session, plan)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            await notify_so_rejected(plan, db_session, action="halt")
+        await notify_so_rejected(plan, db_session, action="reject")
 
-        body = mock_email.call_args[0][2]
-        assert "halted" in body
+        assert "Reason:" not in _outbox_rows(db_session)[0].payload["html"]
 
     @pytest.mark.asyncio
-    async def test_so_rejected_no_submitter(self, db_session):
+    async def test_no_submitter_skips(self, db_session):
         from app.services.buyplan_notifications import notify_so_rejected
 
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id, submitted_by_id=None)
+        _make_request(db_session, plan)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            await notify_so_rejected(plan, db_session, action="reject")
+        await notify_so_rejected(plan, db_session, action="reject")
+
+        assert _outbox_rows(db_session) == []
+
+    @pytest.mark.asyncio
+    async def test_no_extra_delivery(self, db_session):
+        from app.services.buyplan_notifications import notify_so_rejected
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id)
+        _make_request(db_session, plan)
+
+        with (
+            patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email,
+            patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock_dm,
+        ):
+            await notify_so_rejected(plan, db_session, action="halt")
 
         mock_email.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_so_rejected_creates_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_so_rejected
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            await notify_so_rejected(plan, db_session, action="reject")
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").all()
-        assert len(activities) == 1
-
-    @pytest.mark.asyncio
-    async def test_so_rejected_no_note(self, db_session):
-        from app.services.buyplan_notifications import notify_so_rejected
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            await notify_so_rejected(plan, db_session, action="reject")
-
-        body = mock_email.call_args[0][2]
-        assert "Reason:" not in body
+        mock_dm.assert_not_awaited()
+        assert db_session.query(ActivityLog).count() == 0
+        assert len(_outbox_rows(db_session)) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_po_confirmed
+# notify_po_confirmed — single delivery: outbox email per active ops member
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3POConfirmed:
+class TestNotifyPOConfirmed:
     @pytest.mark.asyncio
-    async def test_po_confirmed(self, db_session):
+    async def test_enqueues_ops_email(self, db_session):
         from app.services.buyplan_notifications import notify_po_confirmed
 
         user = _make_user(db_session)
         ops_user = _make_user(db_session, "ops@trioscs.com", "Ops", "buyer")
         plan = _make_plan(db_session, user.id)
         line = _add_line(db_session, plan, po_number="PO-001")
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
 
         vgm = VerificationGroupMember(user_id=ops_user.id, is_active=True)
         db_session.add(vgm)
@@ -779,31 +764,35 @@ class TestNotifyV3POConfirmed:
 
         await notify_po_confirmed(plan, db_session, line.id)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert len(activities) == 1
-        assert "PO-001" in activities[0].subject
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == ops_user.id
+        assert rows[0].request_id == request.id
+        assert "PO-001" in rows[0].payload["subject"]
+        assert db_session.query(ActivityLog).count() == 0
 
     @pytest.mark.asyncio
-    async def test_po_confirmed_no_ops_members(self, db_session):
+    async def test_no_ops_members(self, db_session):
         from app.services.buyplan_notifications import notify_po_confirmed
 
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id)
         line = _add_line(db_session, plan)
+        _make_request(db_session, plan)
 
         await notify_po_confirmed(plan, db_session, line.id)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert len(activities) == 0
+        assert _outbox_rows(db_session) == []
 
     @pytest.mark.asyncio
-    async def test_po_confirmed_inactive_member(self, db_session):
+    async def test_inactive_member_skipped(self, db_session):
         from app.services.buyplan_notifications import notify_po_confirmed
 
         user = _make_user(db_session)
         ops_user = _make_user(db_session, "ops@trioscs.com", "Ops", "buyer")
         plan = _make_plan(db_session, user.id)
         line = _add_line(db_session, plan)
+        _make_request(db_session, plan)
 
         vgm = VerificationGroupMember(user_id=ops_user.id, is_active=False)
         db_session.add(vgm)
@@ -811,16 +800,55 @@ class TestNotifyV3POConfirmed:
 
         await notify_po_confirmed(plan, db_session, line.id)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert len(activities) == 0
+        assert _outbox_rows(db_session) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_completed
+# notify_po_rejected — single delivery: outbox email to the line's buyer
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3Completed:
+class TestNotifyPORejected:
+    @pytest.mark.asyncio
+    async def test_enqueues_buyer_email(self, db_session):
+        from app.services.buyplan_notifications import notify_po_rejected
+
+        submitter = _make_user(db_session, "sales@trioscs.com", "Sales", "sales")
+        buyer = _make_user(db_session, "buyer1@trioscs.com", "Buyer One", "buyer")
+        plan = _make_plan(db_session, submitter.id)
+        line = _add_line(db_session, plan, buyer_id=buyer.id, po_rejection_note="PO total mismatch")
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
+
+        await notify_po_rejected(plan, db_session, line_id=line.id)
+
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == buyer.id
+        assert rows[0].request_id == request.id
+        assert "Kicked Back" in rows[0].payload["subject"]
+        assert "PO total mismatch" in rows[0].payload["html"]
+        assert db_session.query(ActivityLog).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_no_buyer_skips(self, db_session):
+        from app.services.buyplan_notifications import notify_po_rejected
+
+        submitter = _make_user(db_session, "sales@trioscs.com", "Sales", "sales")
+        plan = _make_plan(db_session, submitter.id)
+        line = _add_line(db_session, plan, buyer_id=None)
+        _make_request(db_session, plan)
+
+        await notify_po_rejected(plan, db_session, line_id=line.id)
+
+        assert _outbox_rows(db_session) == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# notify_completed — routine, still in-app only (non-approval event)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNotifyCompleted:
     @pytest.mark.asyncio
     async def test_completed_is_routine_no_email(self, db_session):
         """Completion is a routine event — in-app only, no email (Task 10 demotion)."""
@@ -830,10 +858,10 @@ class TestNotifyV3Completed:
         plan = _make_plan(db_session, user.id)
 
         with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_completed(plan, db_session)
+            await notify_completed(plan, db_session)
 
         mock_email.assert_not_awaited()
+        assert _outbox_rows(db_session) == []
 
     @pytest.mark.asyncio
     async def test_completed_creates_activity(self, db_session):
@@ -842,26 +870,10 @@ class TestNotifyV3Completed:
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_completed(plan, db_session)
+        await notify_completed(plan, db_session)
 
         activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
         assert len(activities) == 1
-
-    @pytest.mark.asyncio
-    async def test_completed_is_routine_no_teams(self, db_session):
-        """Completion does NOT post to the Teams channel anymore (Task 10 demotion)."""
-        from app.services.buyplan_notifications import notify_completed
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-                await notify_completed(plan, db_session)
-
-        mock_teams.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_completed_no_submitter(self, db_session):
@@ -870,15 +882,13 @@ class TestNotifyV3Completed:
         user = _make_user(db_session)
         plan = _make_plan(db_session, user.id, submitted_by_id=None)
 
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_completed(plan, db_session)
+        await notify_completed(plan, db_session)
 
-        mock_email.assert_not_awaited()
+        assert db_session.query(ActivityLog).count() == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# log_buyplan_activity
+# log_buyplan_activity (audit trail — kept)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -930,13 +940,13 @@ class TestLogBuyplanActivity:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_stock_sale_approved
+# notify_stock_sale_approved — single delivery: outbox email to the DLs
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestNotifyV3StockSaleApproved:
+class TestNotifyStockSaleApproved:
     @pytest.mark.asyncio
-    async def test_sends_stock_sale_emails(self, db_session):
+    async def test_enqueues_dl_email_with_admin_sender(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
@@ -946,108 +956,80 @@ class TestNotifyV3StockSaleApproved:
 
         plan = _make_plan(db_session, submitter.id, approved_by_id=admin.id)
         _add_line(db_session, plan, quantity=50, unit_cost=3.00)
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock()
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.APPROVED)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com", "accounting@trioscs.com"]
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
-                with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-                    with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                        await notify_stock_sale_approved(plan, db_session)
+            await notify_stock_sale_approved(plan, db_session)
 
-        # Should send to both logistics and accounting
-        assert mock_gc.post_json.await_count == 2
-        subjects = [call[0][1]["message"]["subject"] for call in mock_gc.post_json.call_args_list]
-        assert all("Stock Sale Approved" in s for s in subjects)
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == admin.id  # delegated Graph sender
+        assert rows[0].request_id == request.id
+        assert rows[0].payload["to"] == ["logistics@trioscs.com", "accounting@trioscs.com"]
+        assert "Stock Sale Approved" in rows[0].payload["subject"]
+        assert db_session.query(ActivityLog).count() == 0
 
     @pytest.mark.asyncio
-    async def test_creates_submitter_activity(self, db_session):
+    async def test_no_dl_configured_skips(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
         plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
             mock_settings.admin_emails = []
             mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_stock_sale_approved(plan, db_session)
+            await notify_stock_sale_approved(plan, db_session)
 
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-        assert len(activities) == 1
-        assert "Stock sale" in activities[0].subject
-        assert "no PO required" in activities[0].subject
+        assert _outbox_rows(db_session) == []
 
     @pytest.mark.asyncio
-    async def test_no_submitter(self, db_session):
-        from app.services.buyplan_notifications import notify_stock_sale_approved
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, submitted_by_id=None)
-
-        with patch("app.services.buyplan_notifications.settings") as mock_settings:
-            mock_settings.admin_emails = []
-            mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_stock_sale_approved(plan, db_session)
-
-        # No in-app activity when no submitter
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-        assert len(activities) == 0
-
-    @pytest.mark.asyncio
-    async def test_teams_channel_posted(self, db_session):
+    async def test_no_admin_user_skips(self, db_session):
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
         plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
-            mock_settings.admin_emails = []
-            mock_settings.stock_sale_notify_emails = []
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-                await notify_stock_sale_approved(plan, db_session)
+            mock_settings.admin_emails = ["ghost@trioscs.com"]  # no such user
+            mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com"]
+            await notify_stock_sale_approved(plan, db_session)
 
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Stock Sale Approved" in msg
-        assert "no po required" in msg.lower()
+        assert _outbox_rows(db_session) == []
 
     @pytest.mark.asyncio
-    async def test_no_admin_with_token(self, db_session):
+    async def test_admin_without_token_still_enqueues(self, db_session):
+        """The dispatcher re-checks the token at send time — enqueue must not block."""
         from app.services.buyplan_notifications import notify_stock_sale_approved
 
         submitter = _make_user(db_session)
         admin = _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
-        # admin has no access_token — email sending should be skipped
         plan = _make_plan(db_session, submitter.id)
+        _make_request(db_session, plan)
 
         with patch("app.services.buyplan_notifications.settings") as mock_settings:
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com"]
-            mock_settings.app_url = "https://avail.test"
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_stock_sale_approved(plan, db_session)
+            await notify_stock_sale_approved(plan, db_session)
 
-        # Should still create in-app notification even without email sending
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-        assert len(activities) == 1
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == admin.id
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# notify_cancelled — single delivery: outbox email to the submitter
+# ═══════════════════════════════════════════════════════════════════════
 
 
 class TestNotifyCancelled:
     @pytest.mark.asyncio
-    async def test_notifies_submitter_and_sets_fk(self, db_session, test_user, test_quote, test_requisition):
-        from unittest.mock import AsyncMock, patch
-
-        from app.models import ActivityLog
-        from app.models.buy_plan import BuyPlan, BuyPlanStatus
+    async def test_enqueues_submitter_email(self, db_session, test_user, test_quote, test_requisition):
+        from app.models.buy_plan import BuyPlanStatus
         from app.services.buyplan_notifications import notify_cancelled
 
         plan = BuyPlan(
@@ -1060,12 +1042,28 @@ class TestNotifyCancelled:
         )
         db_session.add(plan)
         db_session.commit()
+        request = _make_request(db_session, plan, status=ApprovalRequestStatus.CANCELLED)
 
-        with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-                await notify_cancelled(plan, db_session)
+        with patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock_dm:
+            await notify_cancelled(plan, db_session)
 
-        log = db_session.query(ActivityLog).filter_by(activity_type="buyplan_cancelled", user_id=test_user.id).first()
-        assert log is not None
-        assert log.buy_plan_id == plan.id  # DEAD-5: FK populated
-        assert "dupe order" in log.subject
+        mock_dm.assert_not_awaited()
+        rows = _outbox_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == test_user.id
+        assert rows[0].request_id == request.id
+        assert "Cancelled" in rows[0].payload["subject"]
+        assert "dupe order" in rows[0].payload["html"]
+        assert db_session.query(ActivityLog).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_no_submitter_skips(self, db_session):
+        from app.services.buyplan_notifications import notify_cancelled
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id, submitted_by_id=None)
+        _make_request(db_session, plan)
+
+        await notify_cancelled(plan, db_session)
+
+        assert _outbox_rows(db_session) == []

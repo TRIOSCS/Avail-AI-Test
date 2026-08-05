@@ -1,39 +1,33 @@
 """prepayment_notifications.py — accounting/AP notifications for prepayment requests.
 
-Purpose: When a buyer requests a prepayment on a cut PO, and when a manager approves it,
-notify the (non-Avail) accounting + AP groups so the wire can be prepared / executed. Two
-best-effort, fire-and-forget channels:
-  - Email to the configured group DLs (``accounting_group_email`` + ``ap_group_email``)
-    sent via a logged-in admin's DELEGATED Microsoft Graph token — there is NO app-token
-    mail path, so we borrow an admin who has a live token (copied from
-    buyplan_notifications.notify_stock_sale_approved).
-  - A Teams Adaptive Card posted to the prepayment channel webhook
-    (``prepayment_teams_webhook``).
+Purpose: When a buyer requests a prepayment on a cut PO, and when a manager approves,
+voids, or confirms it paid, notify the affected parties. Every notice is a SINGLE
+delivery: an email enqueued on the approval outbox (W3.8/§5.5 — the durable path; the
+drain job sends it). The old direct admin-token Graph send, the Teams Adaptive Card,
+and the in-app ActivityLog fan-outs/honesty alerts were the extra delivery systems for
+the same events and were deleted; failure durability now lives on the outbox row
+itself (fail_count/last_error, dead-letter cap).
+
+  - requested / approved / voided → ONE outbox email addressed to the configured group
+    DLs (``accounting_group_email`` + ``ap_group_email``), with an admin user as the
+    delegated Graph SENDER (the DLs are external addresses, not Avail users).
+  - paid → one outbox email per Avail recipient: the buyer, the salesperson, and every
+    active manager.
+
 The REQUESTED notice is headed "PENDING APPROVAL — DO NOT PAY YET"; the APPROVED notice
-"APPROVED — OK TO WIRE" (finding #13). The beneficiary is the vendor's legal name, falling
-back to the payee snapshot then the card display name (finding #14). The amount is rendered
-to 2 decimals honoring ``Prepayment.currency`` (finding #9).
-
-Notification honesty (finding #8): each notify returns
-``{email_sent, teams_sent, recipients}``; if BOTH channels fail/skip while a channel WAS
-configured — a group DL OR the Teams webhook (a real send was expected but nothing got
-out) — a durable in-app ActivityLog alert is written to the requester + admins so nobody
-assumes AP was told. The notify functions never raise — a failed notice must not break the
-request/approval.
-
-The prepay-closure lifecycle adds two more notices: ``notify_prepayment_paid`` fans an
-IN-APP alert (durable ActivityLog rows) out to the buyer, the salesperson, and every
-manager once the wire is confirmed; ``notify_prepayment_voided`` sends a "DO NOT WIRE"
-stand-down to accounting/AP when an approved-but-unwired prepayment is rejected or torn
-down. Both are best-effort and never raise.
+"APPROVED — OK TO WIRE" (finding #13); VOIDED is the "DO NOT WIRE" stand-down. The
+beneficiary is the vendor's legal name, falling back to the payee snapshot then the card
+display name (finding #14). The amount is rendered to 2 decimals honoring
+``Prepayment.currency`` (finding #9). The notify functions never raise — a failed notice
+must not break the request/approval.
 
 Called by: app.routers.prepayments (request create), app.routers.htmx.buy_plans (approve
            → approved, reject → voided), app.services.buyplan_workflow (teardown → voided),
            app.services.prepayment_service (mark paid → paid), via run_prepayment_notify_bg.
 Depends on: app.database (SessionLocal), app.config (settings.admin_emails),
             app.services.admin_service (get_config_values),
-            app.services.teams_notifications (post_teams_channel_card),
-            app.utils.graph_client, app.utils.token_manager, app.utils.async_helpers,
+            app.services.approvals.notifications (outbox enqueue seam),
+            app.utils.async_helpers,
             app.models (Prepayment, ApprovalRequest, ActivityLog, User).
 """
 
@@ -48,21 +42,20 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..constants import (
-    ActivityType,
     ApprovalGateType,
     ApprovalRecipientStatus,
     ApprovalSubjectType,
     UserRole,
 )
-from ..models import ActivityLog, User
+from ..models import User
 from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ..models.quality_plan import Prepayment
 from ..services.admin_service import get_config_values
-from ..services.teams_notifications import post_teams_channel_card
+from ..services.approvals.notifications import enqueue_email, latest_request_id
 from ..utils.async_helpers import hold_bg_task, safe_background_task
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localtime
 
-_CONFIG_KEYS = ["accounting_group_email", "ap_group_email", "prepayment_teams_webhook"]
+_CONFIG_KEYS = ["accounting_group_email", "ap_group_email"]
 
 _HEADINGS = {
     "requested": "PENDING APPROVAL — DO NOT PAY YET",
@@ -177,32 +170,31 @@ def _dispatch_to_main_loop(coro, loop: asyncio.AbstractEventLoop) -> None:
 
 
 async def notify_prepayment_requested(prepayment_id: int, db: Session | None = None) -> dict:
-    """Notify accounting/AP that a prepayment was REQUESTED (DO NOT PAY YET)."""
+    """Enqueue the REQUESTED (DO NOT PAY YET) outbox email to accounting/AP."""
     return await _notify(prepayment_id, "requested", db)
 
 
 async def notify_prepayment_approved(prepayment_id: int, db: Session | None = None) -> dict:
-    """Notify accounting/AP that a prepayment was APPROVED (OK TO WIRE)."""
+    """Enqueue the APPROVED (OK TO WIRE) outbox email to accounting/AP."""
     return await _notify(prepayment_id, "approved", db)
 
 
 async def notify_prepayment_voided(prepayment_id: int, db: Session | None = None, reason: str | None = None) -> dict:
     """Stand-down: tell accounting/AP a previously-authorized prepayment is VOID — DO NOT WIRE.
 
-    Reuses the accounting/AP email DLs + Teams channel card. *reason* overrides the
-    prepayment's persisted ``void_reason`` (the background runner passes none, so the
-    persisted reason wins there). Best-effort, never raises.
+    One outbox email to the accounting/AP DLs. *reason* overrides the prepayment's
+    persisted ``void_reason`` (the background runner passes none, so the persisted
+    reason wins there). Best-effort, never raises.
     """
     return await _notify(prepayment_id, "voided", db, reason=reason)
 
 
 async def notify_prepayment_paid(prepayment_id: int, db: Session | None = None) -> dict:
-    """In-app fan-out: alert the buyer, the salesperson, and all managers the wire went out.
+    """Fan out the PAID notice: one outbox email per Avail recipient.
 
-    Unlike the accounting/AP notices this is an IN-APP alert (durable ``channel="system"``
-    ActivityLog rows) — the recipients are Avail users, so no email/Teams is used. Recipients
-    are deduped: the buyer (``created_by_id``), the salesperson (``buy_plan.submitted_by_id``,
-    falling back to the requisition creator), and every active Manager-role user. Best-effort.
+    Recipients are deduped: the buyer (``created_by_id``), the salesperson
+    (``buy_plan.submitted_by_id``, falling back to the requisition creator), and every
+    active Manager-role user. Best-effort, never raises.
     """
     own_session = db is None
     if own_session:
@@ -217,7 +209,7 @@ async def notify_prepayment_paid(prepayment_id: int, db: Session | None = None) 
 
 
 async def _notify(prepayment_id: int, event: str, db: Session | None, reason: str | None = None) -> dict:
-    """Run both channels for *event*; open + close an own session only if none was
+    """Enqueue the *event* outbox email; open + close an own session only if none was
     passed."""
     own_session = db is None
     if own_session:
@@ -225,14 +217,16 @@ async def _notify(prepayment_id: int, event: str, db: Session | None, reason: st
 
         db = SessionLocal()
     try:
-        return await _notify_inner(db, prepayment_id, event, reason=reason)
+        return _notify_inner(db, prepayment_id, event, reason=reason)
     finally:
         if own_session:
             db.close()
 
 
-async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str | None = None) -> dict:
-    result = {"email_sent": False, "teams_sent": False, "recipients": []}
+def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str | None = None) -> dict:
+    """Enqueue ONE outbox email to the accounting/AP DLs for *event* (single
+    delivery)."""
+    result: dict = {"enqueued": False, "recipients": []}
     prepayment = db.get(Prepayment, prepayment_id)
     if prepayment is None:
         logger.warning("notify_prepayment_{}: prepayment {} not found", event, prepayment_id)
@@ -240,8 +234,20 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str
 
     cfg = get_config_values(db, _CONFIG_KEYS)
     recipients = [a for a in ((cfg.get("accounting_group_email"), cfg.get("ap_group_email"))) if a]
-    webhook = (cfg.get("prepayment_teams_webhook") or "").strip() or None
     result["recipients"] = recipients
+    if not recipients:
+        logger.info("Prepayment {}: no accounting/AP group email configured — nothing to enqueue", prepayment_id)
+        return result
+
+    request_id = latest_request_id(db, ApprovalSubjectType.PREPAYMENT, prepayment_id)
+    if request_id is None:
+        logger.warning("Prepayment {} has no ApprovalRequest — {} email not enqueued", prepayment_id, event)
+        return result
+
+    sender = _admin_sender(db)
+    if sender is None:
+        logger.warning("Prepayment {}: no admin user to send as — {} email not enqueued", prepayment_id, event)
+        return result
 
     # The void reason: an explicit argument wins, else the persisted column.
     effective_reason = reason or prepayment.void_reason
@@ -249,32 +255,36 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str
     if event == "approved":
         approver_name, decided_at = _resolve_approval(db, prepayment_id)
 
-    # ── Email channel (best-effort, isolated) ──
-    if recipients:
-        subject = _subject(prepayment, event, reason=effective_reason)
-        html_body = _email_html(prepayment, event, approver_name, decided_at, reason=effective_reason)
-        try:
-            result["email_sent"] = bool(await _send_group_email(db, recipients, subject, html_body))
-        except Exception as e:
-            logger.error("Prepayment {} email channel failed: {}", prepayment_id, e)
-
-    # ── Teams channel (best-effort, isolated) ──
-    if webhook:
-        card = _card(prepayment, event, approver=approver_name, decided_at=decided_at, reason=effective_reason)
-        try:
-            await post_teams_channel_card(card, webhook)
-            result["teams_sent"] = True
-        except Exception as e:
-            logger.error("Prepayment {} Teams channel failed: {}", prepayment_id, e)
-
-    # ── Notification honesty (finding #8) ──
-    # A real send was expected (a group DL OR the Teams webhook WAS configured) but nothing
-    # got out on EITHER channel → write a durable in-app alert so nobody assumes AP was told.
-    # Keying on the webhook too covers a Teams-only config (no group DLs) whose post fails.
-    if (recipients or webhook) and not result["email_sent"] and not result["teams_sent"]:
-        _write_failure_alert(db, prepayment)
-
+    subject = _subject(prepayment, event, reason=effective_reason)
+    html_body = _email_html(prepayment, event, approver_name, decided_at, reason=effective_reason)
+    try:
+        enqueue_email(
+            db,
+            request_id=request_id,
+            recipient_user_id=sender.id,
+            subject=subject,
+            html=html_body,
+            to=recipients,
+        )
+        db.commit()
+        result["enqueued"] = True
+    except Exception:
+        db.rollback()
+        logger.exception("Prepayment {} — failed to enqueue {} outbox email", prepayment_id, event)
     return result
+
+
+def _admin_sender(db: Session) -> User | None:
+    """The admin user who acts as the delegated Graph sender for the group-DL email.
+
+    Prefers an admin with a live access token (same borrow as the old direct send);
+    falls back to the first configured admin — the outbox dispatcher re-checks the
+    token at send time. None when no ``settings.admin_emails`` user exists.
+    """
+    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    if not admin_users:
+        return None
+    return next((a for a in admin_users if a.access_token), admin_users[0])
 
 
 # ── Approval resolution (approver + timestamp for the APPROVED notice) ──
@@ -408,47 +418,8 @@ def _subject(prepayment: Prepayment, event: str, reason: str | None = None) -> s
     )
 
 
-# Adaptive-Card / email banner treatment per event: green = money OK, red = stand-down,
-# amber = still pending.
-_CARD_COLOR = {"approved": "Good", "paid": "Good", "voided": "Attention"}
+# Email banner treatment per event: green = money OK, red = stand-down, amber = pending.
 _BANNER = {"approved": "#16a34a", "paid": "#16a34a", "voided": "#dc2626"}
-_SUBTITLE = {
-    "approved": "This prepayment is APPROVED — OK to wire the beneficiary below.",
-    "paid": "This prepayment has been marked PAID — the wire is confirmed.",
-    "voided": "This prepayment was VOIDED — do NOT wire it. Claw back if already sent.",
-    "requested": "A prepayment has been requested and is awaiting manager approval. Do NOT pay yet.",
-}
-
-
-def _card(prepayment: Prepayment, event: str, *, approver=None, decided_at=None, reason=None) -> dict:
-    """Adaptive Card: colored heading + subtitle + a FactSet of the wire facts.
-
-    On the APPROVED notice, appends an ``Action.OpenUrl`` "Confirm wire sent" button linking
-    to the public tokenized confirm page so accounting can mark it paid straight from Teams.
-    """
-    facts = [{"title": label, "value": str(value)} for label, value in _facts(prepayment, event, approver, decided_at)]
-    card: dict = {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.4",
-        "body": [
-            {
-                "type": "TextBlock",
-                "text": _heading(event, reason),
-                "weight": "Bolder",
-                "size": "Large",
-                "color": _CARD_COLOR.get(event, "Warning"),
-                "wrap": True,
-            },
-            {"type": "TextBlock", "text": _SUBTITLE.get(event, _SUBTITLE["requested"]), "isSubtle": True, "wrap": True},
-            {"type": "FactSet", "facts": facts},
-        ],
-    }
-    if event == "approved":
-        confirm_url = _confirm_url(prepayment)
-        if confirm_url:
-            card["actions"] = [{"type": "Action.OpenUrl", "title": "Confirm wire sent", "url": confirm_url}]
-    return card
 
 
 def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=None, reason=None) -> str:
@@ -490,108 +461,15 @@ def _email_html(prepayment: Prepayment, event: str, approver=None, decided_at=No
     )
 
 
-# ── Channels ─────────────────────────────────────────────────────────
-
-
-async def _send_group_email(db: Session, to: list[str], subject: str, html: str) -> bool:
-    """Send *html* to each address in *to* using a logged-in admin's delegated Graph
-    token.
-
-    Copies the delegated-admin send from
-    buyplan_notifications.notify_stock_sale_approved: there is NO app-token sendMail
-    path, so we borrow an admin who has a live token. If no admin has one, log + skip
-    and return False (the caller records the honest failure). Returns True if at least
-    one message was accepted.
-    """
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
-
-    recipients = [a for a in to if a]
-    if not recipients:
-        return False
-
-    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    sender = next((a for a in admin_users if a.access_token), None)
-    if sender is None:
-        logger.warning("Prepayment email: no admin with a live Graph token — skipping send to {}", recipients)
-        return False
-    token = await get_valid_token(sender, db)
-    if not token:
-        logger.warning("Prepayment email: admin Graph token unavailable — skipping send to {}", recipients)
-        return False
-
-    gc = GraphClient(token)
-    sent_any = False
-    for addr in recipients:
-        try:
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": subject,
-                        "body": {"contentType": "HTML", "content": html},
-                        "toRecipients": [{"emailAddress": {"address": addr}}],
-                    },
-                    "saveToSentItems": "false",
-                },
-            )
-            sent_any = True
-            logger.info("Prepayment notice emailed to {}", addr)
-        except Exception as e:
-            logger.error("Prepayment notice email to {} failed: {}", addr, e)
-    return sent_any
-
-
-def _write_failure_alert(db: Session, prepayment: Prepayment) -> None:
-    """Write a durable in-app ActivityLog alert when NO channel reached accounting/AP.
-
-    Reuses buyplan_notifications' in-app-alert mechanism (a ``channel="system"``
-    ActivityLog row per recipient). Addressed to the requester + all active admins so a
-    human follows up manually. Best-effort: a failure here must not surface upward.
-    """
-    subject = f"Prepayment #{prepayment.id} notification FAILED — notify accounting/AP manually."
-    user_ids: set[int] = set()
-    if prepayment.created_by_id:
-        user_ids.add(prepayment.created_by_id)
-    admins = db.query(User.id).filter(User.role == UserRole.ADMIN, User.is_active.is_(True)).all()
-    user_ids.update(row.id for row in admins)
-    if not user_ids:
-        logger.warning("Prepayment #{} notice failed but no requester/admin to alert", prepayment.id)
-        return
-    requisition_id = prepayment.buy_plan.requisition_id if prepayment.buy_plan is not None else None
-    try:
-        for uid in user_ids:
-            db.add(
-                ActivityLog(
-                    user_id=uid,
-                    activity_type=ActivityType.NOTE,
-                    channel="system",
-                    requisition_id=requisition_id,
-                    buy_plan_id=prepayment.buy_plan_id,
-                    subject=subject,
-                )
-            )
-        db.commit()
-        logger.warning(
-            "Prepayment #{} notification failed on all channels — wrote {} in-app alert(s)",
-            prepayment.id,
-            len(user_ids),
-        )
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to write prepayment notification-failure alert for #{}", prepayment.id)
-
-
-# ── Paid fan-out (in-app alerts to the buyer, salesperson, and all managers) ──
+# ── Paid fan-out (one outbox email per Avail recipient) ──────────────
 
 
 def _notify_paid_inner(db: Session, prepayment_id: int) -> dict:
-    """Write a durable in-app ``channel="system"`` ActivityLog alert per fan-out
-    recipient.
+    """Enqueue one PAID outbox email per fan-out recipient (single delivery).
 
     Recipients (deduped): the buyer (``created_by_id``), the salesperson
-    (``buy_plan.submitted_by_id``, falling back to the requisition creator), and every active
-    Manager-role user. Best-effort: a failure here is logged, never raised.
+    (``buy_plan.submitted_by_id``, falling back to the requisition creator), and every
+    active Manager-role user. Best-effort: a failure here is logged, never raised.
     """
     result: dict = {"alerted": []}
     prepayment = db.get(Prepayment, prepayment_id)
@@ -614,29 +492,26 @@ def _notify_paid_inner(db: Session, prepayment_id: int) -> dict:
         logger.warning("Prepayment #{} paid but no buyer/salesperson/manager to alert", prepayment_id)
         return result
 
-    amount = prepayment.paid_amount if prepayment.paid_amount is not None else prepayment.total_incl_fees
-    notes = (
-        f"{_beneficiary(prepayment)} {prepayment.currency or 'USD'} {(amount or Decimal('0')):,.2f} "
-        f"wired for PO {_po_number(prepayment)} (plan #{prepayment.buy_plan_id})"
-    )
-    requisition_id = plan.requisition_id if plan is not None else None
+    request_id = latest_request_id(db, ApprovalSubjectType.PREPAYMENT, prepayment_id)
+    if request_id is None:
+        logger.warning("Prepayment {} has no ApprovalRequest — paid email not enqueued", prepayment_id)
+        return result
+
+    subject = _subject(prepayment, "paid")
+    html_body = _email_html(prepayment, "paid")
     try:
-        for uid in user_ids:
-            db.add(
-                ActivityLog(
-                    user_id=uid,
-                    activity_type=ActivityType.NOTE,
-                    channel="system",
-                    requisition_id=requisition_id,
-                    buy_plan_id=prepayment.buy_plan_id,
-                    subject="Prepayment paid",
-                    notes=notes,
-                )
+        for uid in sorted(user_ids):
+            enqueue_email(
+                db,
+                request_id=request_id,
+                recipient_user_id=uid,
+                subject=subject,
+                html=html_body,
             )
         db.commit()
         result["alerted"] = sorted(user_ids)
-        logger.info("Prepayment #{} paid — wrote {} in-app alert(s)", prepayment_id, len(user_ids))
+        logger.info("Prepayment #{} paid — enqueued {} outbox email(s)", prepayment_id, len(user_ids))
     except Exception:
         db.rollback()
-        logger.exception("Failed to write prepayment-paid in-app alerts for #{}", prepayment_id)
+        logger.exception("Failed to enqueue prepayment-paid outbox emails for #{}", prepayment_id)
     return result

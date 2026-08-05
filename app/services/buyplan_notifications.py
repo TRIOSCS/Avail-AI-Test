@@ -1,22 +1,26 @@
 """buyplan_notifications.py — Unified buy plan notification service.
 
-Handles notifications for all buy plan state transitions:
-- Submit  → email + Teams + in-app to managers
-- Approve → email + Teams + in-app to buyers + salesperson
-- Reject  → email + in-app to salesperson
-- SO Verified → in-app to buyers
-- SO Rejected/Halted → email + Teams DM + in-app to salesperson (urgent)
-- PO Confirmed → in-app to ops (routine)
-- PO Rejected → email + Teams DM + in-app to the line's buyer (urgent)
-- Issue Flagged → in-app + Teams to manager
-- Completed → in-app to salesperson (routine)
-- Resubmit → email + in-app to managers
-- Stock Sale Approved → email to logistics/accounting + in-app + Teams
-- Cancelled → in-app + Teams to submitter (lines cascade-cancelled)
-- Nudge (buyer / ops) → reminder when a line sits unconfirmed past its SLA
+Approval-lifecycle events deliver exactly ONCE: an email enqueued on the approval
+outbox (W3.8/§5.5 — the durable single path; the drain job sends it):
+- Submit  → outbox email to the open request's pending approvers
+- Approve → outbox email per buyer ("create POs"); the submitter's decision notice
+  is the approvals engine's own outbox email (approvals.service.decide)
+- Reject  → no delivery here — the engine's decide() outbox email (with the reject
+  comment) is the event's single delivery; notify_rejected is a kept no-op seam
+- Halted (notify_so_rejected) → outbox email to the salesperson
+- PO Confirmed → outbox email to each active ops verification member
+- PO Rejected → outbox email to the line's buyer
+- Stock Sale Approved → outbox email to the logistics/accounting DLs (admin sender)
+- Cancelled → outbox email to the submitter
 
-Called by: routers/htmx_views.py, jobs/inventory_jobs.py, buyplan_workflow/*
-Depends on: models, config, utils/graph_client, teams_notifications
+Non-approval events keep their own (single) channels:
+- Completed → in-app ActivityLog row to salesperson (routine)
+- Re-source broadcast → deliberately multi-channel URGENT claim broadcast
+- Nudge (buyer / ops) → nudge-job seam (in-app + Teams DM)
+
+Called by: routers/htmx/buy_plans.py, jobs/inventory_jobs.py, buyplan_workflow/*
+Depends on: models, config, approvals.notifications (outbox enqueue seam),
+            utils/graph_client, teams_notifications
 """
 
 import asyncio
@@ -192,14 +196,7 @@ async def _send_email(
         logger.error("Failed to send buy plan email to {}: {}", user.email, e)
 
 
-# ── Reuse Teams helpers ──────────────────────────────────────────────
-
-
-async def _teams_channel(message: str):
-    """Post to Teams channel (delegates to shared teams_notifications module)."""
-    from app.services.teams_notifications import post_teams_channel
-
-    await post_teams_channel(message)
+# ── Reuse Teams helpers (re-source broadcast + nudges only) ──────────
 
 
 async def _teams_channel_card(card: dict):
@@ -244,13 +241,106 @@ def log_buyplan_activity(
     )
 
 
+# ── Outbox enqueue (the single delivery path, W3.8/§5.5) ─────────────
+
+
+def _enqueue_email(
+    db: Session,
+    *,
+    request_id: int,
+    recipient: User,
+    subject: str,
+    html: str,
+    to: list[str] | None = None,
+    pref_attr: str | None = "notify_buyplan_email_enabled",
+) -> bool:
+    """Enqueue ONE approval-outbox email row — the event's single delivery.
+
+    Honors the recipient's per-user email opt-out named by *pref_attr* (opted out →
+    no row; the outbox email IS the only delivery for the event). ``to`` carries
+    external addresses (group DLs); the recipient user is then the delegated Graph
+    sender. Does not commit — the notify function owns the transaction.
+    """
+    from .approvals.notifications import enqueue_email
+
+    if pref_attr and not getattr(recipient, pref_attr, True):
+        logger.info("outbox email skipped (opted out: {}) for {}", pref_attr, recipient.email)
+        return False
+    enqueue_email(
+        db,
+        request_id=request_id,
+        recipient_user_id=recipient.id,
+        subject=subject,
+        html=html,
+        to=to,
+    )
+    return True
+
+
+def _plan_request_id(plan: BuyPlan, db: Session, event: str) -> int | None:
+    """The plan's outbox anchor (newest ApprovalRequest id), warning when none
+    exists."""
+    from ..constants import ApprovalSubjectType
+    from .approvals.notifications import latest_request_id
+
+    request_id = latest_request_id(db, ApprovalSubjectType.BUY_PLAN, plan.id)
+    if request_id is None:
+        logger.warning(
+            "Buy plan {} has no ApprovalRequest — {} email not enqueued (pre-engine plan)",
+            plan.id,
+            event,
+        )
+    return request_id
+
+
 # ── Notification Functions ───────────────────────────────────────────
 
 
 async def notify_submitted(plan: BuyPlan, db: Session):
-    """Notify managers that a buy plan needs approval."""
+    """Enqueue the approval-required email to the open request's pending approvers.
+
+    Single delivery (W3.8/§5.5): one outbox email per pending approver on the plan's
+    open BUY_PLAN ApprovalRequest — the exact set routing made eligible (per-user
+    toggles, not roles). No Teams post, no in-app rows.
+    """
+    from sqlalchemy import select
+
+    from ..constants import ApprovalRecipientStatus, ApprovalRequestStatus, ApprovalSubjectType
+    from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+
+    request = (
+        db.execute(
+            select(ApprovalRequest)
+            .where(
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.subject_id == plan.id,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            )
+            .order_by(ApprovalRequest.id.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if request is None:
+        logger.warning("Buy plan {} has no open ApprovalRequest — submit email not enqueued", plan.id)
+        return
+
+    approvers = (
+        db.execute(
+            select(User)
+            .join(ApprovalStepRecipient, ApprovalStepRecipient.user_id == User.id)
+            .join(ApprovalStep, ApprovalStepRecipient.step_id == ApprovalStep.id)
+            .where(
+                ApprovalStep.request_id == request.id,
+                ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     ctx = _plan_context(plan, db)
-    table, total = _lines_table(plan)
+    table, _total = _lines_table(plan)
 
     notes_html = ""
     if plan.salesperson_notes:
@@ -265,49 +355,31 @@ async def notify_submitted(plan: BuyPlan, db: Session):
         f"{table}"
     )
     html_body = _wrap_email("Buy Plan — Approval Required", body)
+    subject = f"[AVAIL] Buy Plan Approval — {ctx['customer_name']}"
 
-    # Email to managers/admins
-    managers = db.query(User).filter(User.role.in_([UserRole.MANAGER, UserRole.ADMIN])).all()
-    if not managers:
-        managers = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-
-    await asyncio.gather(
-        *[_send_email(m, f"[AVAIL] Buy Plan Approval — {ctx['customer_name']}", html_body, db) for m in managers]
-    )
-
-    # In-app
-    for m in managers:
-        db.add(
-            ActivityLog(
-                user_id=m.id,
-                activity_type=ActivityType.BUYPLAN_PENDING,
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"Buy Plan #{plan.id} needs approval — {ctx['submitter_name']}",
-            )
-        )
+    for approver in approvers:
+        _enqueue_email(db, request_id=request.id, recipient=approver, subject=subject, html=html_body)
     db.commit()
-
-    # Teams
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} — Approval Required**\n\n"
-        f"Submitted by: {ctx['submitter_name']}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'}\n"
-        f"Total: ${total:,.2f} | {len(plan.lines or [])} lines"
-    )
 
 
 async def notify_approved(plan: BuyPlan, db: Session):
-    """Notify buyers and salesperson that the plan was approved."""
+    """Enqueue each buyer's "create POs" email on the approval outbox.
+
+    Single delivery (W3.8/§5.5): one outbox email per assigned buyer with their lines.
+    The submitter's decision notice is the approvals engine's own outbox email
+    (approvals.service.decide) — not duplicated here. No Teams post, no in-app rows.
+    """
+    request_id = _plan_request_id(plan, db, "approved")
+    if request_id is None:
+        return
+
     ctx = _plan_context(plan, db)
-    rows, total = _lines_html(plan)
 
     # Collect unique buyers
     buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
-    # Email each buyer with their assigned lines
+    # One outbox email per buyer with their assigned lines
     for buyer in buyers:
         my_lines = [ln for ln in (plan.lines or []) if ln.buyer_id == buyer.id]
         buyer_rows = ""
@@ -333,106 +405,35 @@ async def notify_approved(plan: BuyPlan, db: Session):
             f"</tr></thead><tbody>{buyer_rows}</tbody></table>"
         )
         html_body = _wrap_email("Buy Plan Approved — POs Required", body)
-        await _send_email(buyer, f"[AVAIL] POs Required — {ctx['customer_name']}", html_body, db)
-        db.add(
-            ActivityLog(
-                user_id=buyer.id,
-                activity_type="buyplan_approved",
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"Buy plan #{plan.id} approved — create POs ({len(my_lines)} lines)",
-            )
-        )
-
-    # Notify salesperson
-    if ctx["submitter"]:
-        db.add(
-            ActivityLog(
-                user_id=ctx["submitter"].id,
-                activity_type="buyplan_approved",
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"Your buy plan #{plan.id} was approved",
-            )
+        _enqueue_email(
+            db,
+            request_id=request_id,
+            recipient=buyer,
+            subject=f"[AVAIL] POs Required — {ctx['customer_name']}",
+            html=html_body,
         )
 
     db.commit()
-
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} — Approved**\n\n"
-        f"Customer: {ctx['customer_name']} | ${total:,.2f}\n"
-        f"Buyers notified: {', '.join(b.name or b.email for b in buyers)}"
-    )
-    await asyncio.gather(
-        *[
-            _teams_dm(
-                b,
-                f"Buy Plan #{plan.id} approved — {len([ln for ln in plan.lines if ln.buyer_id == b.id])} POs needed",
-                db,
-            )
-            for b in buyers
-        ]
-    )
 
 
 async def notify_rejected(plan: BuyPlan, db: Session):
-    """Notify salesperson that the plan was rejected."""
-    ctx = _plan_context(plan, db)
-    if not ctx["submitter"]:
-        return
+    """No-op seam: the reject decision email is the approvals engine's own outbox row.
 
-    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
-    approver_name = approver.name or approver.email if approver else "Manager"
-
-    body = (
-        f"<p>Your buy plan #{plan.id} was rejected by <strong>{html_mod.escape(approver_name)}</strong>.</p>"
-        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong></p>"
-    )
-    if plan.approval_notes:
-        body += f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0"><strong>Reason:</strong> {html_mod.escape(str(plan.approval_notes))}</p>'
-
-    html_body = _wrap_email("Buy Plan Rejected", body)
-    await _send_email(ctx["submitter"], f"[AVAIL] Buy Plan Rejected — {ctx['customer_name']}", html_body, db)
-
-    db.add(
-        ActivityLog(
-            user_id=ctx["submitter"].id,
-            activity_type="buyplan_rejected",
-            channel="system",
-            requisition_id=plan.requisition_id,
-            subject=f"Buy plan #{plan.id} rejected — {approver_name}",
-        )
-    )
-    db.commit()
-
-    await _teams_dm(
-        ctx["submitter"], f"Buy Plan #{plan.id} was rejected: {plan.approval_notes or 'No reason given'}", db
-    )
-
-
-async def notify_so_verified(plan: BuyPlan, db: Session):
-    """Notify buyers that SO has been verified — they can proceed."""
-    buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
-    for bid in buyer_ids:
-        db.add(
-            ActivityLog(
-                user_id=bid,
-                activity_type="buyplan_approved",
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"SO# {plan.sales_order_number} verified — proceed with POs (plan #{plan.id})",
-            )
-        )
-    db.commit()
+    The approve/reject router dispatches this on every reject; the engine's decide()
+    already enqueues the "rejected" outbox email (with the reject comment) to the
+    request owner — the event's single delivery (W3.8/§5.5). The old direct email,
+    in-app row, and Teams DM here duplicated it and were deleted.
+    """
+    logger.debug("notify_rejected: single delivery handled by the approvals outbox (plan {})", plan.id)
 
 
 async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
-    """Notify salesperson that SO was rejected or halted."""
+    """Enqueue the halt/reject notice email to the salesperson (single delivery)."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
+        return
+    request_id = _plan_request_id(plan, db, "so_" + action)
+    if request_id is None:
         return
 
     label = "halted" if action == "halt" else "rejected"
@@ -444,30 +445,19 @@ async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
         body += f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0"><strong>Reason:</strong> {html_mod.escape(str(plan.so_rejection_note))}</p>'
 
     html_body = _wrap_email(f"SO Verification {label.title()}", body)
-    await _send_email(ctx["submitter"], f"[AVAIL] SO {label.title()} — Plan #{plan.id}", html_body, db)
-
-    db.add(
-        ActivityLog(
-            user_id=ctx["submitter"].id,
-            activity_type="buyplan_rejected",
-            channel="system",
-            requisition_id=plan.requisition_id,
-            buy_plan_id=plan.id,
-            subject=f"SO# {plan.sales_order_number} {label} — plan #{plan.id}",
-        )
+    _enqueue_email(
+        db,
+        request_id=request_id,
+        recipient=ctx["submitter"],
+        subject=f"[AVAIL] SO {label.title()} — Plan #{plan.id}",
+        html=html_body,
     )
     db.commit()
 
-    # Urgent tier: SO kickback → salesperson also gets a Teams DM.
-    await _teams_dm(
-        ctx["submitter"],
-        f"SO verification for Buy Plan #{plan.id} was {label}: {plan.so_rejection_note or 'No reason given'}",
-        db,
-    )
-
 
 async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
-    """Notify ops verification group that a PO was confirmed and needs verification."""
+    """Enqueue the needs-verification email to each active ops member (single
+    delivery)."""
     from ..models.buy_plan import BuyPlanLine, VerificationGroupMember
 
     line = db.get(BuyPlanLine, line_id)
@@ -475,26 +465,36 @@ async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
     po_num = line.po_number or "—"
 
     ops_members = db.query(VerificationGroupMember).filter(VerificationGroupMember.is_active.is_(True)).all()
+    if not ops_members:
+        return
+    request_id = _plan_request_id(plan, db, "po_confirmed")
+    if request_id is None:
+        return
+
+    ctx = _plan_context(plan, db)
+    body = (
+        f"<p>PO <strong>{html_mod.escape(str(po_num))}</strong> was confirmed and needs verification.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
+        f"MPN: <strong>{html_mod.escape(str(mpn))}</strong> | "
+        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong> | "
+        f"Plan: <strong>#{plan.id}</strong></p>"
+    )
+    html_body = _wrap_email("PO Needs Verification", body)
+    subject = f"[AVAIL] PO {po_num} needs verification — plan #{plan.id}"
+
     for m in ops_members:
-        db.add(
-            ActivityLog(
-                user_id=m.user_id,
-                activity_type=ActivityType.BUYPLAN_PENDING,
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"PO {po_num} needs verification — {mpn} (plan #{plan.id})",
-            )
-        )
+        member = db.get(User, m.user_id)
+        if member:
+            _enqueue_email(db, request_id=request_id, recipient=member, subject=subject, html=html_body)
     db.commit()
 
 
 async def notify_po_rejected(plan: BuyPlan, db: Session, line_id: int):
-    """Notify the line's buyer that ops kicked back their PO (urgent tier).
+    """Enqueue the PO-kickback email to the line's buyer (single delivery).
 
-    Urgent = email + Teams DM + in-app. The line is reset to AWAITING_PO with a
-    ``po_rejection_note`` (set by buyplan_workflow.verify_po reject path); this tells
-    the buyer to re-issue the PO. Skips silently if the line has no assigned buyer.
+    The line is reset to AWAITING_PO with a ``po_rejection_note`` (set by
+    buyplan_workflow.verify_po reject path); this tells the buyer to re-issue the PO.
+    Skips silently if the line has no assigned buyer.
     """
     line = db.get(BuyPlanLine, line_id)
     if not line:
@@ -502,6 +502,9 @@ async def notify_po_rejected(plan: BuyPlan, db: Session, line_id: int):
     buyer = db.get(User, line.buyer_id) if line.buyer_id else None
     if not buyer:
         logger.warning("PO rejected: line {} has no buyer, skipping notify", line_id)
+        return
+    request_id = _plan_request_id(plan, db, "po_rejected")
+    if request_id is None:
         return
 
     ctx = _plan_context(plan, db)
@@ -519,25 +522,14 @@ async def notify_po_rejected(plan: BuyPlan, db: Session, line_id: int):
         f"<strong>Reason:</strong> {html_mod.escape(str(reason))}</p>"
     )
     html_body = _wrap_email("PO Kicked Back — Action Required", body)
-    await _send_email(buyer, f"[AVAIL] PO Kicked Back — {ctx['customer_name']}", html_body, db)
-
-    db.add(
-        ActivityLog(
-            user_id=buyer.id,
-            activity_type="buyplan_rejected",
-            channel="system",
-            requisition_id=plan.requisition_id,
-            buy_plan_id=plan.id,
-            subject=f"PO kicked back — re-issue PO for {mpn} (plan #{plan.id}): {reason}",
-        )
+    _enqueue_email(
+        db,
+        request_id=request_id,
+        recipient=buyer,
+        subject=f"[AVAIL] PO Kicked Back — {ctx['customer_name']}",
+        html=html_body,
     )
     db.commit()
-
-    await _teams_dm(
-        buyer,
-        f"PO for Buy Plan #{plan.id} ({mpn}) was kicked back — re-issue required. Reason: {reason}",
-        db,
-    )
 
 
 async def notify_completed(plan: BuyPlan, db: Session):
@@ -561,16 +553,28 @@ async def notify_completed(plan: BuyPlan, db: Session):
 
 
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
-    """Notify logistics/accounting that a stock sale was approved (no PO required).
+    """Enqueue the stock-sale email to the logistics/accounting DLs (single delivery).
 
-    For stock sales that auto-complete, sends an email to the stock_sale_notify_emails
-    list and creates an in-app notification for the submitter. Also posts to Teams.
+    One outbox email addressed to ``settings.stock_sale_notify_emails`` with an admin
+    user as the delegated Graph sender (the DLs are external addresses, not Avail
+    users). The submitter's decision notice is the approvals engine's own outbox
+    email. No Teams post, no in-app rows.
     """
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
+    to_addresses = list(settings.stock_sale_notify_emails or [])
+    if not to_addresses:
+        logger.info("Stock sale {}: no stock_sale_notify_emails configured — nothing to enqueue", plan.id)
+        return
+    request_id = _plan_request_id(plan, db, "stock_sale_approved")
+    if request_id is None:
+        return
+    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    if not admin_users:
+        logger.warning("Stock sale {}: no admin user to send as — email not enqueued", plan.id)
+        return
+    sender = next((a for a in admin_users if a.access_token), admin_users[0])
 
     ctx = _plan_context(plan, db)
-    table, total = _lines_table(plan)
+    table, _total = _lines_table(plan)
 
     approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
     approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
@@ -586,90 +590,48 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     )
     html_body = _wrap_email("Stock Sale Approved — No PO Required", body)
 
-    # Send to stock_sale_notify_emails using an admin user's token
-    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    sender = next((a for a in admin_users if a.access_token), None)
-    if sender:
-        token = await get_valid_token(sender, db)
-        if token:
-            gc = GraphClient(token)
-
-            async def _send_stock_email(email_addr):
-                try:
-                    await gc.post_json(
-                        "/me/sendMail",
-                        {
-                            "message": {
-                                "subject": f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
-                                "body": {"contentType": "HTML", "content": html_body},
-                                "toRecipients": [{"emailAddress": {"address": email_addr}}],
-                            },
-                            "saveToSentItems": "false",
-                        },
-                    )
-                    logger.info("stock sale email sent to {}", email_addr)
-                except Exception as e:
-                    logger.error("Failed to send stock sale email to {}: {}", email_addr, e)
-
-            await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
-
-    # In-app notification to submitter
-    if ctx["submitter"]:
-        db.add(
-            ActivityLog(
-                user_id=ctx["submitter"].id,
-                activity_type=ActivityType.BUYPLAN_COMPLETED,
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"Stock sale #{plan.id} approved and completed — no PO required",
-            )
-        )
-    db.commit()
-
-    # Teams channel post
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} — Stock Sale Approved**\n\n"
-        f"Approved by: {approver_name}\n"
-        f"Submitted by: {ctx['submitter_name']}\n"
-        f"Total: ${total:,.2f} | Type: Stock Sale (no PO required)"
+    _enqueue_email(
+        db,
+        request_id=request_id,
+        recipient=sender,
+        subject=f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
+        html=html_body,
+        to=to_addresses,
+        pref_attr=None,  # group DLs — no per-user opt-out applies
     )
+    db.commit()
 
 
 async def notify_cancelled(plan: BuyPlan, db: Session):
-    """Notify the submitter (in-app + Teams DM) and the channel that a plan was
-    cancelled."""
+    """Enqueue the cancelled notice email to the submitter (single delivery)."""
     ctx = _plan_context(plan, db)
+    if not ctx["submitter"]:
+        return
+    request_id = _plan_request_id(plan, db, "cancelled")
+    if request_id is None:
+        return
+
     canceller = db.get(User, plan.cancelled_by_id) if plan.cancelled_by_id else None
     canceller_name = (canceller.name or canceller.email) if canceller else "\u2014"
     reason = plan.cancellation_reason or "No reason given"
 
-    if ctx["submitter"]:
-        db.add(
-            ActivityLog(
-                user_id=ctx["submitter"].id,
-                activity_type=ActivityType.BUYPLAN_CANCELLED,
-                channel="system",
-                requisition_id=plan.requisition_id,
-                buy_plan_id=plan.id,
-                subject=f"Buy plan #{plan.id} cancelled by {canceller_name}: {reason}",
-            )
-        )
-    db.commit()
-
-    if ctx["submitter"]:
-        await _teams_dm(
-            ctx["submitter"],
-            f"Buy Plan #{plan.id} was cancelled by {canceller_name}: {reason}",
-            db,
-        )
-    _so_num = plan.sales_order_number or "\u2014"
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} \u2014 Cancelled**\n\n"
-        f"Cancelled by: {canceller_name}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {_so_num}\n"
-        f"Reason: {reason}"
+    body = (
+        f"<p>Buy plan #{plan.id} was <strong>cancelled</strong> by "
+        f"<strong>{html_mod.escape(str(canceller_name))}</strong>.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
+        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '\u2014')}</strong></p>"
+        f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0">'
+        f"<strong>Reason:</strong> {html_mod.escape(str(reason))}</p>"
     )
+    html_body = _wrap_email("Buy Plan Cancelled", body)
+    _enqueue_email(
+        db,
+        request_id=request_id,
+        recipient=ctx["submitter"],
+        subject=f"[AVAIL] Buy Plan #{plan.id} Cancelled \u2014 {ctx['customer_name']}",
+        html=html_body,
+    )
+    db.commit()
 
 
 async def notify_nudge_buyer(plan: BuyPlan, line: BuyPlanLine, db: Session):

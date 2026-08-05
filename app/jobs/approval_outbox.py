@@ -105,7 +105,9 @@ async def dispatch_pending(db: Session) -> int:
         try:
             if row.channel == "email":
                 subject, html = _ns._build_email_html(payload)
-                await _ns.send_email(recipient, subject, html, db)
+                # payload["to"] = external addresses (group DLs); the recipient user is
+                # then the delegated Graph SENDER, not the addressee.
+                await _ns.send_email(recipient, subject, html, db, to_addresses=payload.get("to"))
 
             else:
                 # Unknown channel is a permanent code/data mismatch — fail it (no sent_at)

@@ -5,9 +5,9 @@ Task 9 (settings-refine, Wave 2 Profile): the Profile toggles
 must actually SUPPRESS the firing of the corresponding notification when off:
 
 - Buy-plan emails: ``buyplan_notifications._send_email`` skips the Microsoft Graph
-  send when the recipient has ``notify_buyplan_email_enabled=False``. The in-app
-  ``ActivityLog`` row (written by the calling notify_* function) is unaffected —
-  nothing is lost in-app, only the email is suppressed.
+  send when the recipient has ``notify_buyplan_email_enabled=False``, and the
+  single-path outbox enqueue (W3.8/§5.5) applies the same gate at enqueue time —
+  an opted-out recipient gets no ApprovalOutbox email row.
 - New-offer alert badge: ``OfferConfirmedSource.count_for_user`` /
   ``new_items_for_user`` return 0 / empty for a user with
   ``notify_new_offer_alert_enabled=False``, so the FYI nav badge is suppressed
@@ -26,7 +26,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import OfferStatus, QualificationStatus
-from app.models import ActivityLog, User
+from app.models import User
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
 from app.services.alerts.sources.offers import OfferConfirmedSource
@@ -91,14 +91,17 @@ class TestBuyplanEmailGuard:
         assert mock_gc.post_json.call_args[0][0] == "/me/sendMail"
 
     @pytest.mark.asyncio
-    async def test_activitylog_preserved_when_email_suppressed(self, db_session):
-        """Through notify_rejected: opted-out submitter still gets the in-app
-        ActivityLog row, but no Graph email is sent."""
+    async def test_outbox_enqueue_suppressed_when_disabled(self, db_session):
+        """Through notify_so_rejected (single-path outbox delivery, W3.8/§5.5): the
+        opted-out submitter gets NO outbox email row — the pref gate now applies at
+        enqueue time, since the outbox email is the event's only delivery."""
+        from app.constants import ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType
         from app.models import Company, CustomerSite, Quote
+        from app.models.approvals import ApprovalOutbox, ApprovalRequest
         from app.models.buy_plan import BuyPlan
-        from app.services.buyplan_notifications import notify_rejected
+        from app.services.buyplan_notifications import notify_so_rejected
 
-        # Opted-out submitter (the recipient of the rejection email).
+        # Opted-out submitter (the recipient of the halt/reject email).
         submitter = _make_user(db_session, email="rejsub@trioscs.com", notify_buyplan_email_enabled=False)
         mgr = _make_user(db_session, email="rejmgr@trioscs.com")
 
@@ -129,30 +132,39 @@ class TestBuyplanEmailGuard:
             quote_id=quote.id,
             requisition_id=req.id,
             submitted_by_id=submitter.id,
-            status="pending",
+            status="halted",
             so_status="pending",
             sales_order_number="SO-G",
             approved_by_id=mgr.id,
-            approval_notes="No budget",
+            so_rejection_note="No budget",
         )
         db_session.add(plan)
         db_session.commit()
         db_session.refresh(plan)
+        db_session.add(
+            ApprovalRequest(
+                gate_type=ApprovalGateType.BUY_PLAN,
+                subject_type=ApprovalSubjectType.BUY_PLAN,
+                subject_id=plan.id,
+                requested_by_id=submitter.id,
+                owner_id=submitter.id,
+                status=ApprovalRequestStatus.CANCELLED,
+            )
+        )
+        db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock()
+        await notify_so_rejected(plan, db_session, action="halt")
 
-        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
-            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-                with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
-                    await notify_rejected(plan, db_session)
+        # The outbox email (the only delivery) is suppressed for the opted-out user.
+        assert db_session.query(ApprovalOutbox).count() == 0
 
-        # Email suppressed for the opted-out submitter…
-        mock_gc.post_json.assert_not_awaited()
-        # …but the in-app ActivityLog row is still written.
-        act = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected", user_id=submitter.id).first()
-        assert act is not None
-        assert f"Buy plan #{plan.id} rejected" in act.subject
+        # Control: opting back in enqueues the row.
+        submitter.notify_buyplan_email_enabled = True
+        db_session.commit()
+        await notify_so_rejected(plan, db_session, action="halt")
+        rows = db_session.query(ApprovalOutbox).all()
+        assert len(rows) == 1
+        assert rows[0].recipient_user_id == submitter.id
 
 
 # ═══════════════════════════════════════════════════════════════════════

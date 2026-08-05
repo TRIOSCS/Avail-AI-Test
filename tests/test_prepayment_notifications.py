@@ -1,15 +1,18 @@
-"""test_prepayment_notifications.py — accounting/AP prepayment notifications (Task 5).
+"""test_prepayment_notifications.py — accounting/AP prepayment notifications.
 
-Covers app.services.prepayment_notifications:
-  - notify_prepayment_requested / _approved email BOTH configured group DLs (accounting +
-    AP) and post a Teams Adaptive Card to the prepayment webhook;
-  - an unset config key skips that channel with no raise;
-  - a per-channel send failure is isolated (the other channel still runs);
-  - when BOTH channels fail/skip while a group address WAS configured, a durable in-app
-    ActivityLog alert is written to the requester (notification-honesty, finding #8);
-  - the card renders the amount to 2 decimals honoring currency + the beneficiary legal
-    name (findings #9/#14);
-  - distinct DO-NOT-PAY (requested) vs OK-TO-WIRE (approved) headings (finding #13).
+Single-path delivery (W3.8/§5.5): every prepayment notice is exactly ONE delivery —
+an email enqueued on the approval outbox. Covers:
+  - notify_prepayment_requested / _approved / _voided enqueue ONE outbox email
+    addressed to the configured group DLs (accounting + AP) with an admin user as the
+    delegated Graph sender; no Teams card, no in-app ActivityLog rows;
+  - an unset config key / missing admin sender / missing anchor request skips the
+    enqueue with no raise;
+  - the email renders the amount to 2 decimals honoring currency + the beneficiary
+    legal name (findings #9/#14), with distinct DO-NOT-PAY vs OK-TO-WIRE headings
+    (finding #13) and the DO-NOT-WIRE stand-down reason;
+  - notify_prepayment_paid enqueues one outbox email per Avail recipient (buyer,
+    salesperson, every active manager) — no ActivityLog fan-out;
+  - schedule_prepayment_notify's cross-thread dispatch.
 
 Called by: pytest
 Depends on: app.services.prepayment_notifications, app.services.prepayment_service,
@@ -19,7 +22,6 @@ Depends on: app.services.prepayment_notifications, app.services.prepayment_servi
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -28,9 +30,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import PaymentMethod, PrepaymentStatus
+from app.constants import (
+    ApprovalGateType,
+    ApprovalRequestStatus,
+    ApprovalSubjectType,
+    PaymentMethod,
+    PrepaymentStatus,
+)
 from app.models import ActivityLog, Offer, Requirement, SystemConfig, User
-from app.models.approvals import ApprovalRequest
+from app.models.approvals import ApprovalOutbox, ApprovalRequest
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quality_plan import Prepayment
 from app.models.quotes import Quote
@@ -41,7 +49,7 @@ from app.services.prepayment_service import create_prepayment
 
 ACC = "accounting@trio.test"
 AP = "ap@trio.test"
-HOOK = "https://outlook.office.com/webhook/prepay"
+ADMIN_EMAIL = "admin@trioscs.com"
 
 
 # ── Builders ─────────────────────────────────────────────────────────────
@@ -62,6 +70,22 @@ def _seed_approver(db: Session) -> User:
     )
     db.add(u)
     db.flush()
+    return u
+
+
+def _seed_admin(db: Session, *, access_token: str | None = "tok") -> User:
+    """The admin user the outbox row borrows as its delegated Graph sender."""
+    u = User(
+        email=ADMIN_EMAIL,
+        name="Admin",
+        role="admin",
+        azure_id=f"az-{uuid.uuid4().hex[:8]}",
+        is_active=True,
+        access_token=access_token,
+        created_at=datetime.now(UTC),
+    )
+    db.add(u)
+    db.commit()
     return u
 
 
@@ -164,168 +188,145 @@ def _set_config(db: Session, **kv: str) -> None:
     db.commit()
 
 
-# ── Email + Teams: requested ──────────────────────────────────────────────
+def _patched_settings():
+    """Patch the module-level settings with a live admin_emails list."""
+    mock = patch.object(pn, "settings")
+    return mock
+
+
+def _dl_rows(db: Session) -> list[ApprovalOutbox]:
+    """The outbox rows addressed to external DLs (payload carries 'to')."""
+    return [r for r in db.query(ApprovalOutbox).all() if (r.payload or {}).get("to")]
+
+
+# ── requested: ONE outbox email to the group DLs ──────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_requested_emails_groups_and_posts_card(db_session: Session):
+async def test_requested_enqueues_one_outbox_email(db_session: Session):
     appr = _seed_approver(db_session)
-    pp, _ar = _make_prepayment(db_session, requester=appr)
-    _set_config(
-        db_session,
-        accounting_group_email=ACC,
-        ap_group_email=AP,
-        prepayment_teams_webhook=HOOK,
-    )
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
-    ):
+    admin = _seed_admin(db_session)
+    pp, ar = _make_prepayment(db_session, requester=appr)
+    _set_config(db_session, accounting_group_email=ACC, ap_group_email=AP)
+
+    with _patched_settings() as mock_settings:
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
         result = await pn.notify_prepayment_requested(pp.id, db=db_session)
 
-    to_addrs = email.call_args.kwargs.get("to") or email.call_args.args[1]
-    assert ACC in to_addrs and AP in to_addrs
-    assert card.called
-    assert (card.call_args.args[1:] or (None,))[0] == HOOK or card.call_args.kwargs.get("webhook_url") == HOOK
-    assert result["email_sent"] is True and result["teams_sent"] is True
+    assert result["enqueued"] is True
     assert ACC in result["recipients"] and AP in result["recipients"]
-
-
-# ── Email + Teams: approved (distinct OK-TO-WIRE subject) ─────────────────
+    rows = _dl_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].channel == "email"
+    assert rows[0].request_id == ar.id
+    assert rows[0].recipient_user_id == admin.id  # delegated Graph sender
+    assert rows[0].payload["to"] == [ACC, AP]
+    assert "DO NOT PAY YET" in rows[0].payload["subject"]
 
 
 @pytest.mark.asyncio
-async def test_approved_emails_groups_with_ok_to_wire_subject(db_session: Session):
+async def test_requested_no_teams_no_inapp(db_session: Session):
+    """Single path: no Teams card post and no in-app ActivityLog row for the event."""
+    appr = _seed_approver(db_session)
+    _seed_admin(db_session)
+    pp, _ar = _make_prepayment(db_session, requester=appr)
+    _set_config(db_session, accounting_group_email=ACC)
+
+    # The engine's audit ActivityLog rows (create_request 'submitted') already exist —
+    # the pin is that the NOTIFY adds none.
+    before = db_session.query(ActivityLog).count()
+    with (
+        _patched_settings() as mock_settings,
+        patch("app.services.teams_notifications.post_teams_channel_card", new_callable=AsyncMock) as card,
+    ):
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
+        await pn.notify_prepayment_requested(pp.id, db=db_session)
+
+    card.assert_not_awaited()
+    assert db_session.query(ActivityLog).count() == before
+    assert len(_dl_rows(db_session)) == 1
+
+
+# ── approved: distinct OK-TO-WIRE subject ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_approved_enqueues_ok_to_wire(db_session: Session):
     from app.services.approvals.service import decide
 
     appr = _seed_approver(db_session)
+    admin = _seed_admin(db_session)
     pp, ar = _make_prepayment(db_session, requester=appr)
     decide(db_session, ar.id, appr, "approve", comment="approved")
     db_session.commit()
 
-    _set_config(db_session, accounting_group_email=ACC, ap_group_email=AP, prepayment_teams_webhook=HOOK)
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
-    ):
-        await pn.notify_prepayment_approved(pp.id, db=db_session)
+    _set_config(db_session, accounting_group_email=ACC, ap_group_email=AP)
+    with _patched_settings() as mock_settings:
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
+        result = await pn.notify_prepayment_approved(pp.id, db=db_session)
 
-    assert email.called and card.called
-    subject = email.call_args.kwargs.get("subject") or email.call_args.args[2]
-    assert "OK TO WIRE" in subject
+    assert result["enqueued"] is True
+    rows = _dl_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].recipient_user_id == admin.id
+    assert "OK TO WIRE" in rows[0].payload["subject"]
+    assert "PP Approver" in rows[0].payload["html"]  # approver name resolved
 
 
-# ── Unset config skips both channels, no raise ────────────────────────────
+# ── skip paths: unset config / no admin sender / no anchor request ────────
 
 
 @pytest.mark.asyncio
-async def test_unset_config_skips_channel_no_raise(db_session: Session):
+async def test_unset_config_skips_no_raise(db_session: Session):
     appr = _seed_approver(db_session)
+    _seed_admin(db_session)
     pp, _ar = _make_prepayment(db_session, requester=appr)
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
-    ):
+
+    with _patched_settings() as mock_settings:
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
         result = await pn.notify_prepayment_requested(pp.id, db=db_session)
 
-    assert not card.called
-    assert not email.called
-    assert result["email_sent"] is False and result["teams_sent"] is False
-    # Nothing was expected to go out (no address configured) → no failure alert.
+    assert result["enqueued"] is False and result["recipients"] == []
+    assert _dl_rows(db_session) == []
+    # No honesty fallback anymore — the outbox row itself is the durable record.
     assert db_session.query(ActivityLog).filter(ActivityLog.subject.like("Prepayment%FAILED%")).count() == 0
 
 
-# ── A per-channel failure is isolated ─────────────────────────────────────
-
-
 @pytest.mark.asyncio
-async def test_send_failure_is_isolated(db_session: Session):
-    appr = _seed_approver(db_session)
+async def test_no_admin_sender_skips_no_raise(db_session: Session):
+    appr = _seed_approver(db_session)  # no admin user seeded
     pp, _ar = _make_prepayment(db_session, requester=appr)
-    _set_config(db_session, accounting_group_email=ACC, prepayment_teams_webhook=HOOK)
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(side_effect=RuntimeError("graph down"))) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
-    ):
-        result = await pn.notify_prepayment_requested(pp.id, db=db_session)  # must NOT raise
+    _set_config(db_session, accounting_group_email=ACC)
 
-    assert email.called and card.called  # Teams still posted despite the email exception
-    assert result["email_sent"] is False and result["teams_sent"] is True
-
-
-# ── All channels failed but a group address was set → in-app alert ────────
-
-
-@pytest.mark.asyncio
-async def test_all_channels_failed_writes_inapp_alert(db_session: Session):
-    appr = _seed_approver(db_session)
-    pp, _ar = _make_prepayment(db_session, requester=appr)
-    _set_config(db_session, accounting_group_email=ACC)  # no webhook → Teams skipped
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=False)) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
-    ):
+    with _patched_settings() as mock_settings:
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
         result = await pn.notify_prepayment_requested(pp.id, db=db_session)
 
-    assert email.called and not card.called
-    assert result["email_sent"] is False and result["teams_sent"] is False
-    alert = (
-        db_session.query(ActivityLog)
-        .filter(
-            ActivityLog.user_id == appr.id,
-            ActivityLog.subject.like(f"Prepayment #{pp.id} notification FAILED%"),
-        )
-        .one()
-    )
-    assert "accounting/AP" in alert.subject
-    assert alert.channel == "system"
-
-
-# ── Teams-webhook-only configured + post fails → in-app alert ─────────────
+    assert result["enqueued"] is False
+    assert _dl_rows(db_session) == []
 
 
 @pytest.mark.asyncio
-async def test_teams_only_failure_writes_inapp_alert(db_session: Session):
-    """Only the Teams webhook is configured (no group DLs).
-
-    If the post fails, nobody was told — the honesty alert must still fire (keys on the
-    webhook being set, not just the group recipients). Blind spot: an ops team on Teams-
-    only would otherwise get silence.
-    """
-    appr = _seed_approver(db_session)
-    pp, _ar = _make_prepayment(db_session, requester=appr)
-    _set_config(db_session, prepayment_teams_webhook=HOOK)  # webhook only, no group emails
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
-        patch.object(pn, "post_teams_channel_card", new=AsyncMock(side_effect=RuntimeError("teams down"))) as card,
-    ):
-        result = await pn.notify_prepayment_requested(pp.id, db=db_session)
-
-    assert not email.called  # no group DLs → email channel skipped entirely
-    assert card.called  # Teams was attempted
-    assert result["email_sent"] is False and result["teams_sent"] is False
-    assert result["recipients"] == []  # no group emails configured
-    alert = (
-        db_session.query(ActivityLog)
-        .filter(
-            ActivityLog.user_id == appr.id,
-            ActivityLog.subject.like(f"Prepayment #{pp.id} notification FAILED%"),
-        )
-        .one()
-    )
-    assert "accounting/AP" in alert.subject
-    assert alert.channel == "system"
+async def test_missing_prepayment_skips_no_raise(db_session: Session):
+    result = await pn.notify_prepayment_requested(999999, db=db_session)
+    assert result["enqueued"] is False
+    assert _dl_rows(db_session) == []
 
 
-# ── Card content: currency to 2 decimals + beneficiary legal name ─────────
+# ── Email content: currency to 2 decimals + beneficiary legal name ────────
 
 
-def test_card_shows_currency_2dp_and_beneficiary(db_session: Session):
+def test_email_shows_currency_2dp_and_beneficiary(db_session: Session):
     appr = _seed_approver(db_session)
     pp, _ar = _make_prepayment(
         db_session, requester=appr, vendor_legal="Acme Components LLC", amount=Decimal("20002.38")
     )
-    text = json.dumps(pn._card(pp, "requested"))
+    text = pn._email_html(pp, "requested")
     assert "USD 20,002.38" in text  # 2 decimals + currency (finding #9)
     assert "Acme Components LLC" in text  # beneficiary legal name (finding #14)
 
@@ -333,7 +334,7 @@ def test_card_shows_currency_2dp_and_beneficiary(db_session: Session):
 def test_beneficiary_falls_back_to_vendor_name_without_legal(db_session: Session):
     appr = _seed_approver(db_session)
     pp, _ar = _make_prepayment(db_session, requester=appr, vendor_legal=None, offer_vendor="AcmeVendor")
-    text = json.dumps(pn._card(pp, "requested"))
+    text = pn._email_html(pp, "requested")
     assert "AcmeVendor" in text  # snapshot vendor_name when no legal_name
 
 
@@ -343,14 +344,14 @@ def test_beneficiary_falls_back_to_vendor_name_without_legal(db_session: Session
 def test_distinct_headings(db_session: Session):
     appr = _seed_approver(db_session)
     pp, _ar = _make_prepayment(db_session, requester=appr)
-    req_card = json.dumps(pn._card(pp, "requested"))
-    app_card = json.dumps(pn._card(pp, "approved"))
-    assert "PENDING APPROVAL" in req_card and "DO NOT PAY YET" in req_card
-    assert "OK TO WIRE" in app_card and "APPROVED" in app_card
-    assert "DO NOT PAY" not in app_card
+    req_email = pn._email_html(pp, "requested")
+    app_email = pn._email_html(pp, "approved")
+    assert "PENDING APPROVAL" in req_email and "DO NOT PAY YET" in req_email
+    assert "OK TO WIRE" in app_email and "APPROVED" in app_email
+    assert "DO NOT PAY" not in app_email
 
 
-# ── Paid fan-out + Voided stand-down (prepay closure, Tasks 3/4) ──────────
+# ── Paid fan-out + Voided stand-down (prepay closure) ─────────────────────
 
 
 def _seed_person(db: Session, *, role: str, name: str) -> User:
@@ -372,7 +373,8 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
     """A PAID Prepayment whose buyer (created_by) and salesperson (plan submitter)
     differ.
 
-    Built directly (no approval routing) so the fan-out recipients are unambiguous.
+    Built directly (no approval routing) so the fan-out recipients are unambiguous; an
+    anchor PREPAYMENT ApprovalRequest is added for the outbox FK.
     """
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
@@ -437,6 +439,17 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
         paid_at=datetime.now(UTC),
     )
     db.add(pp)
+    db.flush()
+    db.add(
+        ApprovalRequest(
+            gate_type=ApprovalGateType.PREPAYMENT,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            requested_by_id=buyer.id,
+            owner_id=buyer.id,
+            status=ApprovalRequestStatus.APPROVED,
+        )
+    )
     db.commit()
     return pp
 
@@ -475,52 +488,51 @@ def set_group_config(db_session: Session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_paid_alerts_buyer_salesperson_managers(db_session: Session, paid_prepay: Prepayment, users: dict):
+async def test_paid_enqueues_email_per_recipient(db_session: Session, paid_prepay: Prepayment, users: dict):
     await pn.notify_prepayment_paid(paid_prepay.id, db=db_session)
-    alerts = db_session.query(ActivityLog).filter_by(channel="system").all()
-    recips = {a.user_id for a in alerts}
+
+    rows = db_session.query(ApprovalOutbox).all()
+    recips = {r.recipient_user_id for r in rows}
     assert paid_prepay.created_by_id in recips  # buyer
     assert paid_prepay.buy_plan.submitted_by_id in recips  # salesperson
     assert all(m.id in recips for m in users["managers"])  # every manager
-    # Deduped: one alert per recipient, not one per (recipient × role membership).
-    assert len(alerts) == len(recips)
-    note = alerts[0].notes
-    assert "Acme Components LLC" in note and "USD 20,002.38" in note and "PO-2024" in note
+    # Deduped: one outbox email per recipient.
+    assert len(rows) == len(recips)
+    html = rows[0].payload["html"]
+    assert "Acme Components LLC" in html and "USD 20,002.38" in html and "PO-2024" in html
+    assert "WIRE CONFIRMED" in rows[0].payload["subject"]
+    # No in-app fan-out anymore — the outbox emails are the single delivery.
+    assert db_session.query(ActivityLog).filter(ActivityLog.channel == "system").count() == 0
 
 
 @pytest.mark.asyncio
 async def test_paid_salesperson_falls_back_to_requisition_creator(db_session: Session):
     """When the plan has no submitter, the requisition creator gets the salesperson
-    alert."""
+    email."""
     buyer = _seed_person(db_session, role="buyer", name="Buyer2")
     creator = _seed_person(db_session, role="sales", name="ReqOwner")
     pp = _make_paid_prepay(db_session, buyer, creator)
     pp.buy_plan.submitted_by_id = None  # force the fallback
     db_session.commit()
     await pn.notify_prepayment_paid(pp.id, db=db_session)
-    recips = {a.user_id for a in db_session.query(ActivityLog).filter_by(channel="system").all()}
+    recips = {r.recipient_user_id for r in db_session.query(ApprovalOutbox).all()}
     assert creator.id in recips  # requisition.created_by fallback
 
 
 @pytest.mark.asyncio
-async def test_voided_emails_stand_down(db_session: Session, approved_prepay: Prepayment, set_group_config):
-    with (
-        patch.object(pn, "_send_group_email", new=AsyncMock()) as email,
-        patch("app.services.prepayment_notifications.post_teams_channel_card", new=AsyncMock()),
-    ):
-        await pn.notify_prepayment_voided(approved_prepay.id, db=db_session, reason="plan cancelled")
-    body = email.call_args.kwargs.get("html") or email.call_args.args[-1]
+async def test_voided_enqueues_stand_down(db_session: Session, approved_prepay: Prepayment, set_group_config):
+    _seed_admin(db_session)
+    with _patched_settings() as mock_settings:
+        mock_settings.admin_emails = [ADMIN_EMAIL]
+        mock_settings.app_url = "https://avail.test"
+        result = await pn.notify_prepayment_voided(approved_prepay.id, db=db_session, reason="plan cancelled")
+
+    assert result["enqueued"] is True
+    rows = _dl_rows(db_session)
+    assert len(rows) == 1
+    body = rows[0].payload["html"]
     assert "DO NOT WIRE" in body
     assert "plan cancelled" in body
-
-
-@pytest.mark.asyncio
-async def test_voided_card_says_do_not_wire(db_session: Session, approved_prepay: Prepayment):
-    """The Teams card heading is the DO-NOT-WIRE stand-down with the reason."""
-    approved_prepay.void_reason = "rejected by approver"
-    db_session.commit()
-    text = json.dumps(pn._card(approved_prepay, "voided", reason="rejected by approver"))
-    assert "DO NOT WIRE" in text and "rejected by approver" in text
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

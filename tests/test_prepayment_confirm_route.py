@@ -11,7 +11,8 @@ approval notice embeds:
   - an unknown token → 404;
   - the route is reachable with NO auth dependency (proved via the unauthenticated client)
     and its path is CSRF-exempt;
-  - the approved-notice email body + Teams card embed the /p/confirm/ link.
+  - the approved-notice email body embeds the /p/confirm/ link (the email is the
+    single delivery — W3.8/§5.5).
 
 Called by: pytest
 Depends on: app.routers.prepayment_confirm, app.services.prepayment_notifications,
@@ -21,7 +22,6 @@ Depends on: app.routers.prepayment_confirm, app.services.prepayment_notification
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -210,17 +210,14 @@ def test_confirm_path_is_csrf_exempt():
 # ── The approval notice embeds the /p/confirm/ link ───────────────────────
 
 
-def test_approved_email_and_card_embed_confirm_link(db_session: Session):
+def test_approved_email_embeds_confirm_link(db_session: Session):
+    """The email is the only delivery now (W3.8 — the Teams card was deleted)."""
     pp = _build_prepay(db_session, status=PrepaymentStatus.APPROVED.value, pay_token="tok-email-555")
 
     body = pn._email_html(pp, "approved")
     assert "/p/confirm/" in body
     assert pp.pay_token in body
     assert "Confirm wire sent" in body
-
-    card_text = json.dumps(pn._card(pp, "approved"))
-    assert "/p/confirm/" in card_text
-    assert pp.pay_token in card_text
 
 
 def test_approved_link_absent_without_token(db_session: Session):
@@ -229,4 +226,3 @@ def test_approved_link_absent_without_token(db_session: Session):
     pp = _build_prepay(db_session, status=PrepaymentStatus.APPROVED.value, pay_token=None)
 
     assert "/p/confirm/" not in pn._email_html(pp, "approved")
-    assert "/p/confirm/" not in json.dumps(pn._card(pp, "approved"))

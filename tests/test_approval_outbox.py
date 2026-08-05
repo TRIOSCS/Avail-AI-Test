@@ -11,6 +11,10 @@ Tests:
     dead-letter cap, never marked sent.
   - Per-row isolation: a failing row cannot poison the batch, and a dispatch
     path that commits the session mid-row (token refresh) cannot abort it.
+  - Payload contract (W3.8): pre-rendered subject/html payloads pass through
+    verbatim; payload["to"] sends to external DL addresses with the recipient
+    user as the delegated Graph sender; the legacy "decided" payload appends the
+    decision comment.
 
 Called by: pytest
 Depends on: conftest (db_session), app.jobs.approval_outbox,
@@ -258,7 +262,7 @@ async def test_email_failure_does_not_poison_batch(db_session):
     # Make ONLY the first send raise; the second proceeds normally.
     calls = {"n": 0}
 
-    async def _flaky_send(user_, subject, html_body, db):
+    async def _flaky_send(user_, subject, html_body, db, *, to_addresses=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("boom email")
@@ -327,3 +331,93 @@ async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_se
     assert email_row.sent_at is not None, "the committing email row must be marked sent"
     assert email_row.fail_count == 0
     assert sibling_row.sent_at is not None, "the sibling email row must NOT be aborted"
+
+
+# ── W3.8 payload contract: pre-rendered subject/html + external "to" ───────────
+
+
+@pytest.mark.asyncio
+async def test_prerendered_payload_sent_verbatim(db_session):
+    """A payload carrying subject+html (the single-path enqueue seam) is sent as-is."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "rich@example.com")
+    req = _make_request(db_session, user)
+    row = ApprovalOutbox(
+        request_id=req.id,
+        recipient_user_id=user.id,
+        channel="email",
+        payload={"subject": "[AVAIL] POs Required — Acme", "html": "<p>rich body</p>"},
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    token_patch, client_patch, gc = _graph_success_patches()
+    with token_patch, client_patch:
+        await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is not None
+    message = gc.post_json.call_args[0][1]["message"]
+    assert message["subject"] == "[AVAIL] POs Required — Acme"
+    assert message["body"]["content"] == "<p>rich body</p>"
+    assert message["toRecipients"] == [{"emailAddress": {"address": user.email}}]
+
+
+@pytest.mark.asyncio
+async def test_payload_to_sends_to_external_addresses(db_session):
+    """Payload["to"] = external DLs → sent to those addresses, recipient is the
+    delegated Graph SENDER (their token is used, they are not an addressee)."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    sender = _make_user(db_session, "admin@example.com")
+    req = _make_request(db_session, sender)
+    row = ApprovalOutbox(
+        request_id=req.id,
+        recipient_user_id=sender.id,
+        channel="email",
+        payload={
+            "subject": "[AVAIL] Prepayment OK TO WIRE",
+            "html": "<p>wire it</p>",
+            "to": ["accounting@trio.test", "ap@trio.test"],
+        },
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    token_patch, client_patch, gc = _graph_success_patches()
+    with token_patch, client_patch:
+        await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is not None
+    message = gc.post_json.call_args[0][1]["message"]
+    assert message["toRecipients"] == [
+        {"emailAddress": {"address": "accounting@trio.test"}},
+        {"emailAddress": {"address": "ap@trio.test"}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_decided_payload_includes_comment(db_session):
+    """The legacy decide() payload appends the decision comment (the reject reason)."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "owner@example.com")
+    req = _make_request(db_session, user)
+    row = ApprovalOutbox(
+        request_id=req.id,
+        recipient_user_id=user.id,
+        channel="email",
+        payload={"event_type": "decided", "decision": "rejected", "comment": "Too expensive"},
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    token_patch, client_patch, gc = _graph_success_patches()
+    with token_patch, client_patch:
+        await dispatch_pending(db_session)
+
+    message = gc.post_json.call_args[0][1]["message"]
+    assert "rejected" in message["subject"]
+    assert "Too expensive" in message["body"]["content"]
