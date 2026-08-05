@@ -100,10 +100,12 @@ approval) verified by test.
   SLICE: legacy pre-engine PENDING fallback in htmx/buy_plans.py stays
   until the owner picks backfill-vs-resubmit (4 PENDING plans on the prod
   copy) — Packet 3 decision queue.
-- [~] W3.10 Resell status collapse 34→5 + outcome + migration 207 + bid
-  paths (2 UI doors + solicited inbound). GAP to build: outcome forward
-  writer + AWARDED→CLOSED close path (today only migration 207 backfills
-  outcome; no code path writes it going forward).
+- [x] W3.10 Resell status collapse 34→5 + outcome + migration 207 + bid
+  paths (2 UI doors + solicited inbound). Outcome forward writer built
+  same session: close_awarded_list (AWARDED→CLOSED, owner picks
+  sold/scrapped/withdrawn) + close_list_without_bid stamps no_bids +
+  detail-pane form + POST /api/resell/{id}/close-awarded + kernel-walk
+  outcome step (tests: test_resell_close_outcome.py, 10 green).
 - [ ] W3.A Acceptance: semantics tests green (TTL ✅ / dup ✅ / every-deal
   ✅ already), kernel walk parity on the deployed W3 build → Packet 3.
 

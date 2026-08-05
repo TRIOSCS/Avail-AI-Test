@@ -104,6 +104,27 @@
           Close (no bid)
         </button>
         {% endif %}
+        {# The ladder's last step (award → outcome, spec §5.3): record how the awarded
+           deal actually ended. no_bids is not offered — an awarded list had a bid. #}
+        {% if can_see_customer and el.status == 'awarded' %}
+        <form hx-post="/api/resell/{{ el.id }}/close-awarded"
+              hx-target="closest [data-resell-detail-root]"
+              hx-swap="outerHTML"
+              hx-confirm="Close this awarded list with the selected outcome? It ends for good — no reopen."
+              class="inline-flex items-center gap-2">
+          <select name="outcome" class="input input-sm w-auto" data-testid="close-outcome">
+            <option value="sold" selected>Sold</option>
+            <option value="scrapped">Scrapped</option>
+            <option value="withdrawn">Withdrawn</option>
+          </select>
+          <button type="submit" data-loading-disable class="btn-secondary btn-sm">
+            Close with outcome
+          </button>
+        </form>
+        {% endif %}
+        {% if el.status == 'closed' and el.outcome %}
+        <span class="badge-neutral" data-testid="list-outcome">Outcome: {{ el.outcome|replace('_', ' ') }}</span>
+        {% endif %}
         {% if can_offer %}
         <button @click="$dispatch('open-modal')"
                 hx-get="/v2/partials/resell/{{ el.id }}/offer-form"

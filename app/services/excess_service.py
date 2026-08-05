@@ -22,6 +22,7 @@ from ..constants import (
     PG_INT4_MIN,
     ActivityType,
     ExcessLineItemStatus,
+    ExcessListOutcome,
     ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
@@ -1888,7 +1889,9 @@ def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
 _CLOSEABLE_LIST_STATUSES = (ExcessListStatus.POSTED, ExcessListStatus.BIDDING)
 
 
-def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status: str) -> ExcessList:
+def _end_posting_window(
+    db: Session, list_id: int, owner: User, *, target_status: str, outcome: str | None = None
+) -> ExcessList:
     """Close a posted list into a resolved *target_status* — owner-only — + stamp
     ``close_at``.
 
@@ -1914,6 +1917,8 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
 
     excess_list.status = target_status
     excess_list.close_at = datetime.now(UTC)
+    if outcome is not None:
+        excess_list.outcome = outcome
     db.flush()
 
     _safe_commit(db, entity="excess list close")
@@ -1946,4 +1951,54 @@ def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList
     posted/bidding guards as ``close_list``
     (409 on a draft/resolved list). Commits. Returns the refreshed list.
     """
-    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)
+    return _end_posting_window(
+        db,
+        list_id,
+        owner,
+        target_status=ExcessListStatus.CLOSED,
+        outcome=ExcessListOutcome.NO_BIDS,
+    )
+
+
+# Outcomes an owner may record when closing an awarded list. ``no_bids`` is
+# excluded by construction — an awarded list had a winning bid.
+_AWARDED_CLOSE_OUTCOMES = (
+    ExcessListOutcome.SOLD,
+    ExcessListOutcome.SCRAPPED,
+    ExcessListOutcome.WITHDRAWN,
+)
+
+
+def close_awarded_list(db: Session, list_id: int, owner: User, outcome: str) -> ExcessList:
+    """Close an AWARDED list into terminal ``closed``, recording its outcome.
+
+    The ladder's last step (spec §5.3: award → outcome): the owner records how the
+    awarded deal actually ended — ``sold`` (the normal case), ``scrapped``, or
+    ``withdrawn`` (the customer pulled it). ``no_bids`` is not offered here — an
+    awarded list had a bid. Guards: owner-only (403), AWARDED-only (409 — the
+    pre-award exits are ``close_list`` / ``close_list_without_bid``), outcome must
+    be one of the three (422). Takes the same M9 list+lines lock as award/unaward
+    before the status check. Commits. Returns the refreshed list.
+    """
+    if outcome not in {o.value for o in _AWARDED_CLOSE_OUTCOMES}:
+        allowed = ", ".join(o.value for o in _AWARDED_CLOSE_OUTCOMES)
+        raise HTTPException(422, f"outcome must be one of: {allowed}")
+
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can close it")
+
+    _lock_list_and_lines(db, list_id)
+
+    if excess_list.status != ExcessListStatus.AWARDED:
+        raise HTTPException(409, "Only an awarded list can be closed with an outcome")
+
+    excess_list.status = ExcessListStatus.CLOSED
+    excess_list.outcome = outcome
+    excess_list.close_at = excess_list.close_at or datetime.now(UTC)
+    db.flush()
+
+    _safe_commit(db, entity="excess list close (awarded)")
+    db.refresh(excess_list)
+    logger.info("Closed awarded ExcessList id={} outcome={} by owner={}", list_id, outcome, owner.id)
+    return excess_list

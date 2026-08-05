@@ -936,12 +936,17 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > the list stays BIDDING while the bid-back is out (the old `bid_out` status collapsed into
 > it, migration 207; `CustomerBid.status` carries the sent/accepted sub-state).
 > `close_list_without_bid` shares the same engine/guards and lands on the TERMINAL
-> `closed` (D5 — never reopens). `close_at` drives the "closes in Xd" header chip.
+> `closed` (D5 — never reopens), stamping `outcome='no_bids'`.
+> `excess_service.close_awarded_list` (owner-only, AWARDED-only, W3.10) is the
+> ladder's last step (award → outcome): terminal `closed` + the owner-picked
+> `outcome` (sold/scrapped/withdrawn, 422 otherwise), preserving a pre-existing
+> `close_at` window stamp; POST `/api/resell/{id}/close-awarded` is its door.
+> `close_at` drives the "closes in Xd" header chip.
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
 - Status: draft -> posted -> bidding -> awarded -> closed (the W3 five-state ladder, `ExcessListStatus`; migration 207 remapped every pre-W3 row: open->posted, collecting/bid_out->bidding, expired->closed — the nightly expiry job died in W1, so a separate `expired` terminal was dead vocabulary. `@validates` rejects anything else)
-- outcome (String(20), nullable; migration 207) — terminal outcome recorded when the list closes: sold | scrapped | withdrawn | no_bids (`ExcessListOutcome`, validated on write); NULL until CLOSED. Migration 207 backfilled pre-W3 terminal rows data-driven (accepted bid/won offer -> sold; any offer or awarded line without a win -> withdrawn; nothing -> no_bids); `scrapped` is manual-entry only, never inferred
+- outcome (String(20), nullable; migration 207) — terminal outcome recorded when the list closes: sold | scrapped | withdrawn | no_bids (`ExcessListOutcome`, validated on write); NULL until CLOSED. Forward writers (W3.10): `close_awarded_list` (owner picks sold/scrapped/withdrawn) and `close_list_without_bid` (stamps no_bids). Migration 207 backfilled pre-W3 terminal rows data-driven (accepted bid/won offer -> sold; any offer or awarded line without a win -> withdrawn; nothing -> no_bids); `scrapped` is manual-entry only, never inferred
 - version (int, default 1) — lock-on-post; a revision bumps version
 - open_at (stamped on publish), close_at (phase-5 D1: the optional owner-set "Offers close by" deadline — settable at create/update on a draft; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it, it only fires once a set close_at has passed) — posting window (Chunk E)
 

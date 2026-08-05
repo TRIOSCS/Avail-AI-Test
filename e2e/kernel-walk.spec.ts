@@ -531,5 +531,14 @@ test('resell: award the bid, assemble the bid-back, record the outcome path', as
   expect(pdf.status(), 'bid-back PDF').toBe(200);
   expect(pdf.headers()['content-type'] ?? '').toContain('pdf');
 
-  await test.step('bid send + Mark accepted — SKIPPED keys-off: Send emails the PDF via Graph; accept/reject only unlock on a SENT bid, so the outcome ends at award + assembled draft here', async () => {});
+  await test.step('bid send + Mark accepted — SKIPPED keys-off: Send emails the PDF via Graph; accept/reject only unlock on a SENT bid', async () => {});
+
+  // The ladder's last step (award → outcome, spec §5.3): close the awarded list
+  // with a recorded outcome — the form lives in the always-visible header action
+  // bar of the awarded detail pane. Keys-off legal — no send involved.
+  const outcomeSelect = detail.locator('[data-testid="close-outcome"]');
+  await expect(outcomeSelect).toBeVisible({ timeout: 20_000 });
+  await outcomeSelect.selectOption('sold');
+  await detail.getByRole('button', { name: 'Close with outcome' }).click(); // hx-confirm auto-accepted
+  await expect(detail.locator('[data-testid="list-outcome"]')).toContainText('sold', { timeout: 20_000 });
 });
