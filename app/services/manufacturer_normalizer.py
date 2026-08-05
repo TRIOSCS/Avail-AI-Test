@@ -21,7 +21,7 @@ What: ``normalize_brand_name(db, value)`` canonicalizes a brand/maker name throu
 Called by: app/services/spec_tiers.py (set_brand / set_manufacturer — writers never
       normalize themselves; the garbage gate rejects fragment values at the ladder),
       app/services/source_ingest/clean.py (trailing-token routing + candidate
-      plausibility), app/management/backfill_dual_brand.py (B1/B3 gating),
+      plausibility),
       app/management/normalize_manufacturers.py (one-shot canonicalization backfill).
 Depends on: app.models.Manufacturer (lazy import — avoids a model↔service import
       cycle); the seeds in app/startup.py:_seed_manufacturers.

@@ -21,13 +21,20 @@ async def crm_shell(
     request: Request,
     user: User = Depends(require_access(AccessKey.CRM)),
 ):
-    """Render the CRM shell with Customers/Vendors/Activity tab bar."""
+    """Render the CRM shell with Customers/Vendors/Activity/Prospecting tab bar.
+
+    Prospecting is a CRM lens since W2 (spec §4/§5.4 — its nav tab left the bar); the
+    tab surfaces the existing /v2/partials/prospecting list and is hidden from users
+    without PROSPECTING module access (same gate its nav item used).
+    """
+    from ...dependencies import user_has_access
     from ...template_env import template_response
 
     ctx = {
         "request": request,
         "user": user,
         "default_tab": "customers",
+        "show_prospecting": user_has_access(user, AccessKey.PROSPECTING, None),
     }
     return template_response("htmx/partials/crm/shell.html", ctx)
 

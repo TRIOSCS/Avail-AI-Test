@@ -187,34 +187,3 @@ async def test_generate_description_endpoint_success(client):
     data = resp.json()
     assert data["verified"] is True
     assert data["confidence"] == 0.98
-
-
-# ── Test requirement creation saves description ───────────────────────
-
-
-def test_add_requirement_saves_description(client, db_session):
-    """When creating a requirement with description, it should be persisted."""
-    from app.models import Requirement, Requisition
-
-    req = Requisition(name="Test Req", status="open", created_by=1)
-    db_session.add(req)
-    db_session.commit()
-
-    with patch(
-        "app.routers.requisitions.requirements.resolve_material_card",
-        return_value=None,
-    ):
-        resp = client.post(
-            f"/api/requisitions/{req.id}/requirements",
-            json={
-                "primary_mpn": "STM32F407VGT6",
-                "manufacturer": "STMicroelectronics",
-                "target_qty": 100,
-                "description": "IC MCU 32-BIT ARM CORTEX-M4 168MHZ",
-            },
-        )
-
-    assert resp.status_code == 200
-    r = db_session.query(Requirement).filter_by(requisition_id=req.id).first()
-    assert r is not None
-    assert r.description == "IC MCU 32-BIT ARM CORTEX-M4 168MHZ"

@@ -57,18 +57,34 @@ class TestNavHighlightingReactive:
         "section",
         [
             "requisitions",
-            "sightings",
-            "search",
             "buy-plans",
+            "resell",
             "crm",
-            "proactive",
-            "prospecting",
+            "my-day",
             "settings",
         ],
     )
     def test_nav_has_section(self, section):
-        """Each nav section is present in the bottom nav."""
+        """Each of the 5 W2 tabs (spec §4) plus the gear's settings state is present."""
         assert section in NAV_CONTENT
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            "sightings",
+            "materials",
+            "search",
+            "proactive",
+            "prospecting",
+        ],
+    )
+    def test_removed_tab_not_a_nav_item(self, section):
+        """W2 removed these from the tab bar (spec §4).
+
+        Their URLs may remain in urlToNav (so routable-but-unlinked pages highlight no
+        tab), but no nav_items entry may exist.
+        """
+        assert f"('{section}'," not in NAV_CONTENT
 
     def test_quotes_not_in_nav(self):
         """Quotes was retired as a standalone nav tab (PR quotes-relocation).

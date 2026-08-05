@@ -6,6 +6,11 @@ send/convert routes, scorecard, and do-not-offer. Extracted verbatim from
 htmx_views.py (same `/v2/partials/proactive` + `/v2/proactive` paths, same
 `htmx-views` tag).
 
+PARKED (spec §4/§8 W2): every route 404s unless proactive_matching_enabled is on
+(router-level dependency below). The /v2/proactive full page gets the same gate in
+htmx_views.v2_page. Comeback trigger: Proactive revival / Wave-4 Deals-badge
+decision.
+
 Called by: app/main.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
@@ -20,6 +25,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ...config import settings
 from ...constants import (
     AccessKey,
     ProactiveMatchStatus,
@@ -35,10 +41,23 @@ from ...models import (
     SiteContact,
     User,
 )
+from ...services.admin_service import get_effective_flag
 from ...template_env import template_response
 from ._shared import _base_ctx
 
-router = APIRouter(tags=["htmx-views"])
+
+def _require_proactive_enabled(db: Session = Depends(get_db)) -> None:
+    """Park gate (spec §4/§8): 404 every proactive route while the flag is off.
+
+    Resolves proactive_matching_enabled the standard way (system_config row wins, else
+    the env/config default — now False). Router-level dependency so the whole parked
+    surface gates in one place; flipping the flag brings it all back.
+    """
+    if not get_effective_flag(db, "proactive_matching_enabled", settings.proactive_matching_enabled):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+router = APIRouter(tags=["htmx-views"], dependencies=[Depends(_require_proactive_enabled)])
 
 
 # ── Proactive Part Match ─────────────────────────────────────────────

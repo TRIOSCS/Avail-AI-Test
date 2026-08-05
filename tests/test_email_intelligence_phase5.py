@@ -4,7 +4,6 @@ Covers:
   5A: Response time metrics (compute_vendor_response_metrics)
   5B: Email health score (compute_email_health_score, update_vendor_email_health)
   5C: Contact intelligence integration (avg_response_hours wiring)
-  5D: Dashboard endpoint (GET /api/email-intelligence/dashboard)
 
 Called by: pytest
 Depends on: conftest fixtures
@@ -225,40 +224,6 @@ class TestBatchEmailHealth:
 # ═══════════════════════════════════════════════════════════════════════
 #  5C: Contact Intelligence Integration
 # ═══════════════════════════════════════════════════════════════════════
-
-
-class TestContactIntelligenceIntegration:
-    def test_response_hours_wired_into_scoring(self, db_session, test_vendor_card):
-        """compute_all_contact_scores uses avg_response_hours from VendorCard."""
-        from app.services.contact_intelligence import compute_contact_relationship_score
-
-        # Verify that when avg_response_hours is provided, it affects the score
-        result_with = compute_contact_relationship_score(
-            last_interaction_at=datetime.now(UTC),
-            interactions_30d=5,
-            interactions_60d=10,
-            interactions_90d=15,
-            avg_response_hours=2.0,  # Fast responder
-            wins=3,
-            total_interactions=10,
-            distinct_channels=2,
-        )
-
-        result_without = compute_contact_relationship_score(
-            last_interaction_at=datetime.now(UTC),
-            interactions_30d=5,
-            interactions_60d=10,
-            interactions_90d=15,
-            avg_response_hours=None,  # Unknown
-            wins=3,
-            total_interactions=10,
-            distinct_channels=2,
-        )
-
-        # Fast responder should score higher than unknown
-        assert result_with["responsiveness_score"] == 100.0
-        assert result_without["responsiveness_score"] == 50.0
-        assert result_with["relationship_score"] > result_without["relationship_score"]
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -6,7 +6,6 @@ Covers:
   - Pricing intelligence extraction
   - store_email_intelligence persistence
   - process_email_intelligence pipeline
-  - GET /api/email-intelligence endpoint
 
 Called by: pytest
 Depends on: conftest fixtures, app.services.email_intelligence_service

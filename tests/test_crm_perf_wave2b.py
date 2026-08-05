@@ -23,11 +23,10 @@ wrong optimization) is caught:
 from __future__ import annotations
 
 import re
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import event, or_
 from sqlalchemy import func as sqlfunc
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.constants import Channel, Direction, RequisitionStatus
@@ -41,23 +40,6 @@ from app.routers.htmx.companies.detail import _company_buy_plans_query, _company
 from app.services.crm_service import _latest_contact_notes
 
 # ── shared helpers ──────────────────────────────────────────────────────────────
-
-
-@contextmanager
-def _count_sql(db: Session, needle: str):
-    """Count executed statements whose (lowercased) SQL contains ``needle``."""
-    engine = db.get_bind()
-    hits: list[str] = []
-
-    def _after(conn, cursor, statement, parameters, context, executemany):
-        if needle.lower() in statement.lower():
-            hits.append(statement)
-
-    event.listen(engine, "after_cursor_execute", _after)
-    try:
-        yield hits
-    finally:
-        event.remove(engine, "after_cursor_execute", _after)
 
 
 def _card(db: Session, mpn: str, desc: str, cat: str = "voltage_regulators") -> MaterialCard:
@@ -137,67 +119,6 @@ class TestQuoteToDictCardsMap:
         d = quote_to_dict(q, cards={})
         assert d["line_items"][0]["mpn"] == "TL072"
         assert "description" not in d["line_items"][0]
-
-
-class TestListQuotesBatch:
-    def test_multiple_quotes_identical_card_data_single_query(
-        self, client, db_session, test_requisition, test_customer_site, test_user
-    ):
-        """GET .../quotes enriches every quote's items identically to the per-quote db
-        path, using ONE materials query (was one per card-bearing quote)."""
-        a = _card(db_session, "LM317T", "Adjustable Voltage Regulator, 1.5A")
-        b = _card(db_session, "NE555P", "Precision Timer IC")
-        # rev2 references BOTH cards; rev1 references only A (overlap) + a dead card id.
-        q_rev2 = _quote(
-            db_session,
-            test_requisition,
-            test_customer_site,
-            test_user,
-            "Q-W2B-LIST-R2",
-            2,
-            [
-                {"mpn": "LM317T", "material_card_id": a.id},
-                {"mpn": "NE555P", "material_card_id": b.id},
-            ],
-        )
-        q_rev1 = _quote(
-            db_session,
-            test_requisition,
-            test_customer_site,
-            test_user,
-            "Q-W2B-LIST-R1",
-            1,
-            [
-                {"mpn": "LM317T", "material_card_id": a.id},
-                {"mpn": "GONE", "material_card_id": 999_999},  # nonexistent card -> no enrichment
-            ],
-        )
-
-        # Oracle: the per-quote db path, in the endpoint's revision-desc order.
-        oracle = [quote_to_dict(q, db=db_session)["line_items"] for q in (q_rev2, q_rev1)]
-
-        with _count_sql(db_session, "from material_cards") as hits:
-            resp = client.get(f"/api/requisitions/{test_requisition.id}/quotes")
-        assert resp.status_code == 200
-        got = [row["line_items"] for row in resp.json()]
-
-        assert got == oracle
-        # rev2: both cards enriched
-        assert got[0][0]["description"] == "Adjustable Voltage Regulator, 1.5A"
-        assert got[0][1]["description"] == "Precision Timer IC"
-        # rev1: card A enriched, dead card id left raw
-        assert got[1][0]["description"] == "Adjustable Voltage Regulator, 1.5A"
-        assert "description" not in got[1][1]
-        # N+1 killed: exactly one materials query for the whole list.
-        assert len(hits) == 1
-
-    def test_empty_quotes_no_materials_query(self, client, db_session, test_requisition):
-        """A requisition with no quotes returns [] and issues no materials query."""
-        with _count_sql(db_session, "from material_cards") as hits:
-            resp = client.get(f"/api/requisitions/{test_requisition.id}/quotes")
-        assert resp.status_code == 200
-        assert resp.json() == []
-        assert len(hits) == 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

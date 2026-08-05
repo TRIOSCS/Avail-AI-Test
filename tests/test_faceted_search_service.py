@@ -1211,16 +1211,15 @@ def test_has_crosses_predicate_shared_by_list_and_count(db_session: Session):
 # to the ILIKE branch on SQLite (`is_pg = db.get_bind().dialect.name == "postgresql"`),
 # so the main suite has zero real coverage of it. ``pg_session``'s schema comes from
 # ``Base.metadata.create_all`` only -- it does NOT run startup.py's
-# ``_create_fts_triggers``/``_backfill_fts``, so ``search_vector`` stays NULL on insert;
-# each test populates it with the identical UPDATE `_backfill_fts` runs in production,
-# scoped to just the seeded ids.
+# ``_create_fts_triggers``, so ``search_vector`` stays NULL on insert; each test
+# populates it with the same weighted-field UPDATE the ``trg_mc_fts`` trigger applies
+# in production, scoped to just the seeded ids.
 
 
 def _populate_search_vector(db: Session, *card_ids: int) -> None:
-    """Populate MaterialCard.search_vector for *card_ids*, mirroring startup.py's
-    ``_backfill_fts`` UPDATE (same weighted-field formula the ``trg_mc_fts`` trigger
-    uses on every INSERT/UPDATE in a real boot) so PG-only tests don't need the trigger
-    machinery installed."""
+    """Populate MaterialCard.search_vector for *card_ids* with the same weighted-field
+    formula the ``trg_mc_fts`` trigger applies on every INSERT/UPDATE in a real boot, so
+    PG-only tests don't need the trigger machinery installed."""
     db.execute(
         text("""
             UPDATE material_cards SET search_vector =

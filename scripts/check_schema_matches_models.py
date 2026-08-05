@@ -63,10 +63,15 @@ from app.models import Base
 #     were removed as dead code; 0 rows on staging, no remaining code references). A clean
 #     drop-via-migration is a valid follow-up but is deferred to explicit user approval,
 #     same as enrichment_credit_usage above.
+#   - notifications — the write-only in-app Notification channel was deleted in the
+#     W2.9 simplification sweep (§5.5: rows were written by approvals/buy-plan/nightly
+#     alerting but read by NOTHING). The ORM model + every writer are gone; the table
+#     itself stays per the never-drop-tables rule, so it is intentionally model-less.
 _GRANDFATHERED_REMOVE_TABLES = {
     "_sp1_desc_backup",
     "enrichment_credit_usage",
     "intel_cache",
+    "notifications",
     "sync_logs",
 }
 
@@ -96,6 +101,11 @@ _GRANDFATHERED_REMOVE_INDEXES = {
     #    which we deliberately don't (intel_cache is raw-SQL-only; sync_logs is orphaned).
     "ix_intel_cache_cache_key",
     "ix_sync_source_time",
+    #    notifications indexes — belong to the model-less notifications table
+    #    grandfathered above (W2.9: write-only in-app channel deleted, table stays).
+    "ix_notifications_id",
+    "ix_notifications_ticket_id",
+    "ix_notifications_user_id",
     # 2. PostgreSQL-only expression / complex-partial indexes (intentional raw-DDL).
     "ix_mc_cat_order_live",
     "ix_mc_category_lower",

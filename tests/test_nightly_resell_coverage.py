@@ -286,23 +286,10 @@ def _sales_client(db_session: Session, test_company: Company):
             app.dependency_overrides.pop(dep, None)
 
 
-class TestResellOfferFormErrors:
-    def test_owner_cannot_offer_on_own_list(self, _trader_client, db_session: Session, test_company: Company):
-        """List owner gets 403 when trying to offer on their own list."""
-        client, trader = _trader_client
-        el = _make_list(db_session, trader, test_company)
-        db_session.commit()
-        r = client.get(f"/v2/partials/resell/{el.id}/offer-form")
-        assert r.status_code == 403
-
-    def test_sales_user_cannot_offer(self, _sales_client, db_session: Session, test_company: Company):
-        """Sales role users cannot submit offers (not in _CAN_OFFER_ROLES)."""
-        client, sales = _sales_client
-        trader = _make_trader(db_session)
-        el = _make_list(db_session, trader, test_company)
-        db_session.commit()
-        r = client.get(f"/v2/partials/resell/{el.id}/offer-form")
-        assert r.status_code == 403
+# (TestResellOfferFormErrors deleted with the W2.3 trader-lane park — spec §5.3:
+# the offer-form route is unregistered, so its 403 guards are unreachable at
+# route level; they stay inside the parked resell_offer_form implementation.
+# The parked-off route state is pinned in tests/test_resell_trader_lane_parked.py.)
 
 
 def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):

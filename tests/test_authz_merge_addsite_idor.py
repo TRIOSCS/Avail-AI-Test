@@ -1,7 +1,6 @@
-"""tests/test_authz_merge_addsite_idor.py — Account-ownership guard on the merge + add-
-to-site routes.
+"""tests/test_authz_merge_addsite_idor.py — Account-ownership guard on the merge routes.
 
-Phase 1: four previously-ungated routes now gate on app.dependencies.can_manage_account
+Phase 1: previously-ungated routes now gate on app.dependencies.can_manage_account
 so a logged-in user can only act on accounts they own/manage. The gate fires BEFORE the
 404/400/validation branches, so a non-owner restricted (SALES) rep gets 403 even on an
 otherwise-valid request; the account owner and supervisors (manager/admin) pass.
@@ -10,14 +9,15 @@ Routes covered:
   1. POST /v2/partials/customers/{cid}/merge            (confirmed=true)
   2. GET  /v2/partials/customers/{cid}/merge-preview    (?remove_id=...)
   3. GET  /v2/partials/customers/{cid}/merge-form
-  4. POST /api/suggested-contacts/add-to-site           (gated via the site's company)
+
+(The POST /api/suggested-contacts/add-to-site coverage was removed with the route in
+Wave 2 batch B1 — see docs/evidence/w2-delete-manifest.md.)
 
 Mirrors tests/test_authz_htmx_company_contact_idor.py for the client/fixture pattern.
 
 Called by: pytest
 Depends on: conftest.py fixtures (client, db_session, test_user, sales_user,
-            manager_user, admin_user), app.routers.htmx_views,
-            app.routers.crm.enrichment, app.dependencies.
+            manager_user, admin_user), app.routers.htmx_views, app.dependencies.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
-from app.models.crm import Company, CustomerSite, SiteContact
+from app.models.crm import Company
 
 # ── shared fixtures ──────────────────────────────────────────────────────────
 
@@ -62,22 +62,6 @@ def remove_company(db_session: Session, test_user: User) -> Company:
     db_session.commit()
     db_session.refresh(co)
     return co
-
-
-@pytest.fixture()
-def owned_site(db_session: Session, keep_company: Company) -> CustomerSite:
-    """An HQ site under keep_company — gives add-to-site a real target whose owning
-    company test_user owns."""
-    site = CustomerSite(
-        company_id=keep_company.id,
-        site_name="Owner HQ MAIDOR",
-        site_type="hq",
-        is_active=True,
-    )
-    db_session.add(site)
-    db_session.commit()
-    db_session.refresh(site)
-    return site
 
 
 def _override_user(user: User):
@@ -208,52 +192,6 @@ class TestMergeFormIDOR:
         cleanup = _override_user(manager_user)
         try:
             resp = client.get(f"/v2/partials/customers/{keep_company.id}/merge-form")
-        finally:
-            cleanup()
-        assert resp.status_code == 200
-
-
-# ── 4. add suggested contact to site (POST, gated via the site's company) ─────
-
-
-class TestAddSuggestedToSiteIDOR:
-    def test_non_owner_sales_gets_403(self, client, owned_site, sales_user):
-        cleanup = _override_user(sales_user)
-        try:
-            resp = client.post(
-                "/api/suggested-contacts/add-to-site",
-                json={
-                    "site_id": owned_site.id,
-                    "contact": {"full_name": "Hacked Suggested", "email": "hacked@maidor.com"},
-                },
-            )
-        finally:
-            cleanup()
-        assert resp.status_code == 403
-
-    def test_owner_gets_200(self, client, db_session, owned_site):
-        resp = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": owned_site.id,
-                "contact": {"full_name": "Legit Suggested", "email": "legit@maidor.com"},
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()["added"] == 1
-        sc = db_session.query(SiteContact).filter_by(customer_site_id=owned_site.id, email="legit@maidor.com").first()
-        assert sc is not None
-
-    def test_admin_gets_200(self, client, owned_site, admin_user):
-        cleanup = _override_user(admin_user)
-        try:
-            resp = client.post(
-                "/api/suggested-contacts/add-to-site",
-                json={
-                    "site_id": owned_site.id,
-                    "contact": {"full_name": "Admin Suggested", "email": "admin@maidor.com"},
-                },
-            )
         finally:
             cleanup()
         assert resp.status_code == 200

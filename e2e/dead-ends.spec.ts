@@ -28,7 +28,6 @@ const LIST_PARTIALS = [
   '/v2/partials/excess',
   '/v2/partials/settings',
   '/v2/partials/settings/connectors',
-  '/v2/partials/dashboard',
   '/v2/partials/search',
   '/v2/partials/offers/review-queue',
 ];

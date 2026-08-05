@@ -1372,12 +1372,9 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
     eol3a = _offer_line_for(eo3, "AVSAMPLE-MAX3232")
     _ = eo1  # Pinnacle's matched lines retained for the spread/comparison view.
 
-    # Mirror the list through the managed Phase-5 lifecycle (finding #61): each
-    # customer_excess Sighting carries excess_line_item_id and hangs on the list's own
-    # "Customer Excess (list N)" virtual requisition, so awarding/closing/expiring/
-    # deleting ex1 in the app retires them — never unmanaged ghost supply. (The
-    # no-material-card line is lazily healed by mirror_line via resolve_material_card.)
-    excess_mirror.sync_list_mirror(db, ex1)
+    # The resell→Sighting mirror dual-write is retired (SIMPLIFICATION_SPEC §5.3):
+    # posting ex1 writes NO customer_excess Sightings. Cleanup still tears down any
+    # pre-existing mirror rows via excess_mirror.teardown_list_mirror.
 
     # Clean customer bid-back (internal provenance — never exported).
     cb1, _ = get_or_create(

@@ -142,12 +142,3 @@ test.describe('Settings & Admin', () => {
     expect([200, 401, 403]).toContain(res.status());
   });
 });
-
-test.describe('Dashboard', () => {
-  test('dashboard loads', async ({ request }) => {
-    const res = await request.get('/v2/partials/dashboard', {
-      headers: { 'HX-Request': 'true' },
-    });
-    expect(res.status()).toBeLessThan(500);
-  });
-});

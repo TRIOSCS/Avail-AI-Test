@@ -16,14 +16,9 @@
       <p class="text-secondary mt-0.5">{{ total }} vendor{{ "s" if total != 1 }}</p>
     </div>
     <div class="flex items-center gap-2">
-      {# Contacts link — embed-aware target; URL only pushed standalone (the global
-         contacts list has its own page URL, meaningless inside the CRM shell). #}
-      <a hx-get="/v2/partials/vendor-contacts"
-         hx-target="{{ hx_target|default('#main-content') }}"
-         hx-push-url="{{ '/v2/vendor-contacts' if hx_target|default('#main-content') == '#main-content' else 'false' }}"
-         class="btn btn-secondary btn-sm cursor-pointer">
-        Contacts
-      </a>
+      {# "Contacts" link removed — the standalone cross-company vendor-contact list
+         is PARKED (spec §5.4, comeback = team exists): /v2/vendor-contacts stays
+         routable but unlinked. Per-vendor contacts live on the vendor card. #}
       {# Bulk export moved to the capability-gated (EXPORT_BULK_DATA) Settings ▸
          Data export tab (ISS-028) — no export UI outside Settings. #}
       <button type="button" @click="importOpen = true" class="btn btn-secondary btn-sm">

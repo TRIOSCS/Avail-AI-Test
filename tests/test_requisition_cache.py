@@ -47,16 +47,14 @@ class TestRequisitionListCache:
     @pytest.mark.parametrize(
         "method,path_template,json_body",
         [
-            ("post", "/api/requisitions", {"name": "Test Req"}),
             ("put", "/api/requisitions/{req_id}", {"name": "Updated Name"}),
-            ("post", "/api/requisitions/{req_id}/dismiss-new-offers", None),
         ],
-        ids=["create", "update", "dismiss-new-offers"],
+        ids=["update"],
     )
     def test_mutation_invalidates_cache(
         self, client, db_session, test_requisition, test_user, method, path_template, json_body
     ):
-        """Create/update/dismiss-offers all invalidate the req_list cache."""
+        """Update invalidates the req_list cache."""
         path = path_template.format(req_id=test_requisition.id)
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
             resp = client.request(method.upper(), path, json=json_body)

@@ -5,7 +5,7 @@ is_stale is display-only metadata — never hides offers.
 "Leave no stone unturned."
 
 Called by: pytest tests/test_load_test_fixes.py
-Depends on: app/routers/crm/quotes.py, app/routers/crm/offers.py,
+Depends on: app/routers/crm/offers.py,
             app/routers/crm/companies.py, app/scheduler.py,
             app/routers/dashboard.py
 """
@@ -13,7 +13,7 @@ Depends on: app/routers/crm/quotes.py, app/routers/crm/offers.py,
 import os
 from datetime import UTC, datetime, timedelta
 
-from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
+from app.models import Offer, Requisition, User
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -51,36 +51,6 @@ def _make_offer(db, req, user, status="active", mpn="LM317T", days_ago=0):
     db.add(o)
     db.flush()
     return o
-
-
-def _make_company_and_site(db):
-    co = Company(name="Test Co", is_active=True, created_at=datetime.now(UTC))
-    db.add(co)
-    db.flush()
-    site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(UTC))
-    db.add(site)
-    db.flush()
-    return co, site
-
-
-def _make_quote(db, req, site, user, offer_ids, quote_number="Q-TEST-001"):
-    line_items = [
-        {"offer_id": oid, "mpn": "LM317T", "qty": 100, "cost_price": 1.50, "sell_price": 2.00} for oid in offer_ids
-    ]
-    q = Quote(
-        requisition_id=req.id,
-        customer_site_id=site.id,
-        quote_number=quote_number,
-        line_items=line_items,
-        subtotal=200.0,
-        total_cost=150.0,
-        status="draft",
-        created_by_id=user.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(q)
-    db.flush()
-    return q
 
 
 # ── Fix 1: Migration file exists ────────────────────────────────────────
@@ -123,151 +93,6 @@ class TestPerformanceIndexes:
 # TestCustomerTypeaheadDropdown-style coverage in tests/test_unified_req_form.py and
 # tests/test_htmx_views.py for the equivalent active/site-filtering assertions on the
 # live route). /api/autocomplete/names remains live and untouched.
-
-
-# ── Offer status stays "active" through quoting ─────────────────────────
-
-
-class TestOfferStatusUnchanged:
-    def test_offer_stays_active_after_quote_create(self, client, db_session, test_user):
-        """Offers must NEVER change status when included in a quote.
-
-        Same offer can be in 5 quotes simultaneously.
-        """
-        co, site = _make_company_and_site(db_session)
-        req = _make_req(db_session, test_user)
-        req.customer_site_id = site.id
-        o1 = _make_offer(db_session, req, test_user, mpn="LM317T")
-        o2 = _make_offer(db_session, req, test_user, mpn="LM7805")
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{req.id}/quote",
-            json={"offer_ids": [o1.id, o2.id]},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(o1)
-        db_session.refresh(o2)
-        assert o1.status == "active"
-        assert o2.status == "active"
-
-    def test_offer_stays_active_after_quote_won(self, client, db_session, test_user):
-        """Offer status must not change when quote result is 'won'."""
-        co, site = _make_company_and_site(db_session)
-        req = _make_req(db_session, test_user)
-        req.customer_site_id = site.id
-        o1 = _make_offer(db_session, req, test_user)
-        db_session.commit()
-
-        q = _make_quote(db_session, req, site, test_user, [o1.id], quote_number="Q-WIN-001")
-        q.status = "sent"
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{q.id}/result",
-            json={"result": "won"},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(o1)
-        assert o1.status == "active"
-
-    def test_offer_stays_active_after_quote_lost(self, client, db_session, test_user):
-        """Offer status must not change when quote result is 'lost'."""
-        co, site = _make_company_and_site(db_session)
-        req = _make_req(db_session, test_user)
-        req.customer_site_id = site.id
-        o1 = _make_offer(db_session, req, test_user)
-        db_session.commit()
-
-        q = _make_quote(db_session, req, site, test_user, [o1.id], quote_number="Q-LOSS-001")
-        q.status = "sent"
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{q.id}/result",
-            json={"result": "lost", "reason": "price"},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(o1)
-        assert o1.status == "active"
-
-    def test_same_offer_in_multiple_quotes(self, client, db_session, test_user):
-        """The same offer can appear in multiple quotes — no status change."""
-        co, site = _make_company_and_site(db_session)
-        req = _make_req(db_session, test_user)
-        req.customer_site_id = site.id
-        o1 = _make_offer(db_session, req, test_user)
-        db_session.commit()
-
-        # Create two quotes with the same offer
-        resp1 = client.post(
-            f"/api/requisitions/{req.id}/quote",
-            json={"offer_ids": [o1.id]},
-        )
-        assert resp1.status_code == 200
-
-        resp2 = client.post(
-            f"/api/requisitions/{req.id}/quote",
-            json={"offer_ids": [o1.id]},
-        )
-        assert resp2.status_code == 200
-
-        db_session.refresh(o1)
-        assert o1.status == "active"
-
-
-# ── Mark-sold endpoint ──────────────────────────────────────────────────
-
-
-class TestMarkSold:
-    def test_mark_sold_by_creator(self, client, db_session, test_user):
-        """Buyer who created the offer can mark it sold."""
-        req = _make_req(db_session, test_user)
-        o = _make_offer(db_session, req, test_user)
-        db_session.commit()
-
-        resp = client.patch(f"/api/offers/{o.id}/mark-sold")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["status"] == "sold"
-
-        db_session.refresh(o)
-        assert o.status == "sold"
-
-    def test_mark_sold_not_found(self, client):
-        resp = client.patch("/api/offers/999999/mark-sold")
-        assert resp.status_code == 404
-
-    def test_mark_sold_by_other_user_forbidden(self, client, db_session, test_user):
-        """A restricted (SALES/TRADER) non-owner cannot mark someone else's offer
-        sold."""
-        # require_requisition_access only gates SALES/TRADER; the default buyer role
-        # no-ops. Make the acting user restricted so the deny path is actually exercised.
-        # Scoped to THIS test only — do not mutate the shared fixture for sibling tests.
-        test_user.role = "sales"
-        creator = _make_user(db_session, "Creator")
-        req = _make_req(db_session, creator)
-        o = _make_offer(db_session, req, creator)
-        db_session.commit()
-
-        # test_user is a restricted non-owner (not the req creator, not the offer owner).
-        # The gate raises 404 (not 403) so resource existence isn't leaked.
-        resp = client.patch(f"/api/offers/{o.id}/mark-sold")
-        assert resp.status_code == 404
-
-    def test_mark_sold_idempotent(self, client, db_session, test_user):
-        """Marking an already-sold offer returns ok without error."""
-        req = _make_req(db_session, test_user)
-        o = _make_offer(db_session, req, test_user, status="sold")
-        db_session.commit()
-
-        resp = client.patch(f"/api/offers/{o.id}/mark-sold")
-        assert resp.status_code == 200
-        assert resp.json()["message"] == "Already marked sold"
 
 
 # ── Stale flag ──────────────────────────────────────────────────────────

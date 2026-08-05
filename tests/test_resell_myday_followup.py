@@ -33,7 +33,6 @@ from app.models import Company, User, VendorCard
 from app.models.excess import ExcessLineItem, ExcessList
 from app.models.task import RequisitionTask
 from app.services import task_service
-from app.services.buyer_affinity_service import RankedBuyer
 from app.utils.normalization import normalize_mpn_key
 
 # ---------------------------------------------------------------------------
@@ -282,61 +281,9 @@ class TestFollowupTaskBatch:
 # ---------------------------------------------------------------------------
 # Route layer — GET /v2/partials/resell/{id}/not-yet-strip
 # ---------------------------------------------------------------------------
-
-
-def _stub_strip(monkeypatch, ranked: list[RankedBuyer]) -> None:
-    """Pin the strip ranking to a fixed buyer set (ranking has its own coverage)."""
-    monkeypatch.setattr(
-        "app.services.buyer_affinity_service.not_yet_offered_strip",
-        lambda db, *, excess_list_id, **kw: ranked,
-    )
-
-
-def _ranked(card: VendorCard) -> RankedBuyer:
-    return RankedBuyer(
-        vendor_card_id=card.id,
-        display_name=card.display_name,
-        last_bid=None,
-        win_rate=None,
-        last_offered_at=None,
-        rank_reason="buys_this_commodity",
-    )
-
-
-class TestNotYetStripRoute:
-    def test_route_creates_one_task_per_buyer(
-        self, client, db_session, monkeypatch, test_user, owned_list, buyer_card_a, buyer_card_b
-    ):
-        _stub_strip(monkeypatch, [_ranked(buyer_card_a), _ranked(buyer_card_b)])
-        resp = client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
-        assert resp.status_code == 200
-        tasks = _tasks_for(db_session, test_user.id)
-        assert len(tasks) == 2
-        scoped = {t.vendor_card_id for t in tasks}
-        assert scoped == {buyer_card_a.id, buyer_card_b.id}
-        assert all(t.assigned_to_id == test_user.id for t in tasks)
-
-    def test_route_idempotent_on_reload(
-        self, client, db_session, monkeypatch, test_user, owned_list, buyer_card_a, buyer_card_b
-    ):
-        _stub_strip(monkeypatch, [_ranked(buyer_card_a), _ranked(buyer_card_b)])
-        client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
-        client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
-        assert len(_tasks_for(db_session, test_user.id)) == 2
-
-    def test_route_no_buyers_creates_no_tasks(self, client, db_session, monkeypatch, test_user, owned_list):
-        _stub_strip(monkeypatch, [])
-        resp = client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
-        assert resp.status_code == 200
-        assert _tasks_for(db_session, test_user.id) == []
-
-    def test_chip_carries_preselect_buyer(self, client, db_session, monkeypatch, test_user, owned_list, buyer_card_a):
-        """RS-8: each nudge chip opens the offer panel with its buyer preselected.
-
-        The chip's hx-get must carry preselect_vendor_card_id=<buyer> so the panel lands
-        with that buyer already checked (the one-click promise), not the generic panel.
-        """
-        _stub_strip(monkeypatch, [_ranked(buyer_card_a)])
-        resp = client.get(f"/v2/partials/resell/{owned_list.id}/not-yet-strip")
-        assert resp.status_code == 200
-        assert f"preselect_vendor_card_id={buyer_card_a.id}" in resp.text
+# (TestNotYetStripRoute deleted with the W2.3 buyer-intelligence park — spec
+# §5.3: the not-yet-strip route registration was removed (nudge strip + its
+# auto My-Day task writes park together; comeback = second trader user). The
+# service layer above — auto_create_resell_followup_task(s) creation +
+# idempotency — is the implementation that stays, and stays covered here. The
+# parked-off route state is pinned in tests/test_resell_trader_lane_parked.py.)

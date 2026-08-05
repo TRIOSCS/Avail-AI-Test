@@ -58,17 +58,6 @@ def _make_sales(test_user, db_session):
 # ── Non-owner SALES is blocked (404) on every mutating endpoint ──────────
 
 
-def test_create_quote_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    test_user.role = UserRole.SALES
-    test_requisition.created_by = admin_user.id
-    db_session.commit()
-    resp = client.post(
-        f"/api/requisitions/{test_requisition.id}/quote",
-        json={"offer_ids": [], "line_items": []},
-    )
-    assert resp.status_code == 404
-
-
 def test_update_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
     _make_sales(test_user, db_session)
     resp = client.put(f"/api/quotes/{other_owned_quote.id}", json={"notes": "hacked"})
@@ -90,24 +79,6 @@ def test_send_quote_blocks_non_owner_sales(client, db_session, test_user, other_
 def test_preview_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
     _make_sales(test_user, db_session)
     resp = client.post(f"/api/quotes/{other_owned_quote.id}/preview", json={})
-    assert resp.status_code == 404
-
-
-def test_quote_result_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/quotes/{other_owned_quote.id}/result", json={"result": "won"})
-    assert resp.status_code == 404
-
-
-def test_revise_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/quotes/{other_owned_quote.id}/revise")
-    assert resp.status_code == 404
-
-
-def test_reopen_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/quotes/{other_owned_quote.id}/reopen", json={"revise": False})
     assert resp.status_code == 404
 
 

@@ -1,15 +1,15 @@
 """IDOR regression tests for the Phase-5 account-authz gates.
 
 A logged-in user who does NOT own/manage an account must not be able to attribute
-activity to it (bumping its staleness/cadence clocks) or promote a prospect into it.
+activity to it (bumping its staleness/cadence clocks).
 
 Covers:
   - POST /api/activity/call-initiated          → cross-account link is DROPPED (still logs the
                                                   user's own action, but not attributed)
   - POST /api/activity/outreach-initiated      → cross-account link DROPPED ("company" in dropped_links)
-  - POST /api/companies/{id}/activities/call   → 403
-  - POST /api/companies/{id}/activities/note   → 403
-  - POST /api/ai/prospect-contacts/{id}/promote → 403 for a site-linked prospect (200 for the owner)
+  - GET /api/enrich/company/{id}/status        → 403 for a non-owner (company-scoped read; carries
+                                                  the guarantee formerly probed on the retired
+                                                  /api/companies/{id}/activities/call|note routes)
 
 Called by: pytest
 Depends on: conftest fixtures — client is authenticated as test_user; sales_user is a
@@ -20,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 
 from app.models import ActivityLog
 from app.models.crm import Company, CustomerSite
-from app.models.enrichment import ProspectContact
 
 
 def _foreign_account(db_session, owner_id):
@@ -71,48 +70,16 @@ class TestActivityAuthzIDOR:
         db_session.refresh(co)
         assert _not_recently_bumped(co)
 
-    def test_log_company_call_denied_for_non_owner(self, client, db_session, sales_user):
+    def test_company_scoped_read_denied_for_non_owner(self, client, db_session, sales_user):
+        # Re-pointed from the retired POST /api/companies/{id}/activities/call|note probes:
+        # the account-authz gate on company-scoped endpoints must 403 a non-owner.
         co, _site = _foreign_account(db_session, sales_user.id)
-        resp = client.post(
-            f"/api/companies/{co.id}/activities/call",
-            json={"phone": "+15551234567", "direction": "outbound", "duration_seconds": 30},
-        )
+        resp = client.get(f"/api/enrich/company/{co.id}/status")
         assert resp.status_code == 403
 
-    def test_log_company_note_denied_for_non_owner(self, client, db_session, sales_user):
-        co, _site = _foreign_account(db_session, sales_user.id)
-        resp = client.post(f"/api/companies/{co.id}/activities/note", json={"notes": "snooping"})
-        assert resp.status_code == 403
-
-    def test_promote_site_prospect_denied_for_non_owner(self, client, db_session, sales_user):
-        co, site = _foreign_account(db_session, sales_user.id)
-        pc = ProspectContact(
-            customer_site_id=site.id,
-            full_name="Prospect Person",
-            email="p@other.com",
-            source="web_search",
-            confidence="high",
-        )
-        db_session.add(pc)
-        db_session.commit()
-        resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/promote")
-        assert resp.status_code == 403
-        db_session.refresh(pc)
-        assert pc.promoted_to_type is None  # not promoted
-
-    def test_promote_site_prospect_allowed_for_owner(self, client, db_session, test_user):
-        # Positive control: when the client OWNS the account, promotion succeeds (gate not over-broad).
-        co, site = _foreign_account(db_session, test_user.id)
-        pc = ProspectContact(
-            customer_site_id=site.id,
-            full_name="Owned Prospect",
-            email="owned@acme.com",
-            source="web_search",
-            confidence="high",
-        )
-        db_session.add(pc)
-        db_session.commit()
-        resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/promote")
-        assert resp.status_code == 200
-        db_session.refresh(pc)
-        assert pc.promoted_to_type == "site_contact"
+    def test_company_scoped_read_allowed_for_owner(self, client, db_session, test_user):
+        # Positive control: the owner is not blocked by the gate (no enrich run in
+        # flight → empty 286 stop-polling response, not a 403).
+        co, _site = _foreign_account(db_session, test_user.id)
+        resp = client.get(f"/api/enrich/company/{co.id}/status")
+        assert resp.status_code != 403

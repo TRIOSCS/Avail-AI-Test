@@ -70,7 +70,8 @@ def test_count_lands_in_its_own_span_only(client):
             assert _span_inner(r.text, key) == ""
 
 
-def test_proactive_new_match_renders_emerald_pill(client, db_session, test_user, test_offer):
+def test_proactive_new_match_renders_emerald_pill(client, db_session, test_user, test_offer, proactive_flag_on):
+    """Flag-on comeback path (W2 parks Proactive off by default — spec §4/§8)."""
     db_session.add(ProactiveMatch(offer_id=test_offer.id, mpn="LM317T", salesperson_id=test_user.id, status="new"))
     db_session.commit()
     r = client.get("/v2/partials/nav/badges")
@@ -88,7 +89,8 @@ def test_proactive_flag_off_zeroes_count(client, db_session, test_user, test_off
     assert _span_inner(r.text, "proactive") == ""
 
 
-def test_proactive_access_revoked_zeroes_count(client, db_session, test_user, test_offer):
+def test_proactive_access_revoked_zeroes_count(client, db_session, test_user, test_offer, proactive_flag_on):
+    """Flag ON so this proves the ACCESS gate zeroes the count, not the park flag."""
     db_session.add(ProactiveMatch(offer_id=test_offer.id, mpn="LM317T", salesperson_id=test_user.id, status="new"))
     test_user.access_overrides = {"proactive": False}
     db_session.commit()
@@ -195,6 +197,8 @@ class TestMobileNavSinglePoller:
     def test_static_badge_targets_remain(self):
         nav = self._nav()
         assert 'id="follow-ups-nav-badge"' in nav
-        # proactive + the four alert tabs render {{ id }}-nav-badge via the loop:
+        # The four alert tabs render {{ id }}-nav-badge via the loop (W2 park:
+        # proactive's span left the nav with its tab; the poller response still
+        # carries its OOB span, which htmx drops targetless):
         assert 'id="{{ id }}-nav-badge"' in nav
-        assert "'proactive', 'requisitions', 'buy-plans', 'crm', 'my-day'" in nav
+        assert "'requisitions', 'buy-plans', 'crm', 'my-day'" in nav

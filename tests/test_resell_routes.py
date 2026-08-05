@@ -1,9 +1,10 @@
 """test_resell_routes.py — Route/render tests for the Resell workspace (Chunk F).
 
-Exercises the NEW additive endpoints end-to-end with the TestClient: each returns
-200 + the right partial for a seeded list; an offer submit creates an ExcessOffer;
-and the offerer-facing list view (the "Open to Me" lens) omits the customer name.
-The old excess routes/tests are untouched.
+Exercises the endpoints end-to-end with the TestClient: each returns 200 + the
+right partial for a seeded list, and non-owner reads stay customer-anonymized.
+The trader offer lane ("Open to Me" lens + submit-offer routes) is PARKED (spec
+§5.3, W2.3) — its route-level pins were dropped; the parked-off state is pinned
+in tests/test_resell_trader_lane_parked.py.
 """
 
 from __future__ import annotations
@@ -96,13 +97,17 @@ def single_line_list(db_session: Session, trader_user: User, test_company: Compa
 
 
 def test_workspace_renders(client, trader_user, posted_list):
-    """The split-panel shell renders with the lens pills + stat strip."""
+    """The split-panel shell renders with the owner lens pill + stat strip.
+
+    PARKED (spec §5.3, W2.3): the "Open to Me" offerer pill is parked until a second
+    trader user exists — it must NOT render.
+    """
     # client's overridden user is the buyer fixture; the route still renders.
     resp = client.get("/v2/partials/resell/workspace")
     assert resp.status_code == 200
     body = resp.text
     assert "My Lists" in body
-    assert "Open to Me" in body
+    assert "Open to Me" not in body  # trader lane parked (W2.3)
     assert "split-resell" in body  # splitPanel container
 
 
@@ -160,25 +165,27 @@ def test_lists_mine_shows_customer(client, db_session, trader_user, posted_list)
         app.dependency_overrides.pop(require_user, None)
 
 
-def test_lists_open_lens_hides_customer(client, db_session, trader_user, posted_list):
-    """Open-to-Me lens (offerer view) lists the posting but NEVER the seller name —
-    including via the owner's free-text title (finding H2)."""
-    # The default client user is the buyer fixture (!= owner) → sees it under 'open'.
+def test_lists_lens_open_coerced_to_mine(client, db_session, trader_user, posted_list):
+    """PARKED (spec §5.3, W2.3): ``lens=open`` is coerced to the owner lens.
+
+    A crafted ``lens=open`` URL no longer serves the offerer view — the non-owner
+    buyer client gets THEIR OWN (empty) mine-lens list, never another owner's
+    anonymized postings.
+    """
     resp = client.get("/v2/partials/resell/lists?lens=open")
     assert resp.status_code == 200
     body = resp.text
-    assert posted_list.title not in body  # raw free-text title is anonymized, not leaked
-    assert f"Excess listing #{posted_list.id}" in body  # neutral, id-derived label instead
-    assert "Acme Electronics" not in body  # customer hidden from non-owner
-    assert "Anonymized" in body
+    assert f"Excess listing #{posted_list.id}" not in body  # no anonymized offerer rows
+    assert posted_list.title not in body  # another owner's list never appears
 
 
-def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, trader_user, test_company):
-    """H2: a trader who names a list after the customer must not leak that name to offerers.
+def test_non_owner_detail_never_leaks_customer_via_free_text(client, db_session, trader_user, test_company):
+    """H2: a trader who names a list after the customer must not leak that name to non-owners.
 
-    Non-owners (the open lens + the non-owner detail) get a neutral "Excess listing #N"
-    label; the owner still sees the real free-text title in both the mine lens and detail.
-    Proves the anonymization gate now covers the one field it used to miss — the title.
+    The non-owner detail gets a neutral "Excess listing #N" label; the owner still sees
+    the real free-text title in both the mine lens and detail. (The "Open to Me" lens
+    half of the original test was dropped with the W2.3 trader-lane park — the lens is
+    coerced to mine; the detail anonymization gate stays live and stays pinned here.)
     """
     from app.dependencies import require_user
     from app.main import app
@@ -208,12 +215,7 @@ def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, 
     db_session.refresh(el)
     neutral = f"Excess listing #{el.id}"
 
-    # ── Non-owner (default buyer client): open lens + detail hide the title. ──
-    open_body = client.get("/v2/partials/resell/lists?lens=open").text
-    assert leaky_title not in open_body
-    assert test_company.name not in open_body
-    assert neutral in open_body
-
+    # ── Non-owner (default buyer client): the detail hides the title. ──
     detail_body = client.get(f"/v2/partials/resell/{el.id}").text
     assert leaky_title not in detail_body
     assert test_company.name not in detail_body
@@ -230,53 +232,10 @@ def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, 
         app.dependency_overrides.pop(require_user, None)
 
 
-def test_open_lens_search_matches_part_identity_not_title(client, db_session, trader_user, test_company):
-    """#10: in the OPEN (offerer) lens, ``q`` must search part identity (normalized MPN
-    / manufacturer), NEVER the free-text title.
-
-    Searching the title is a de-anonymization oracle: a non-owner could confirm a hidden
-    customer name by typing it and seeing whether a (still-anonymized) row comes back. So
-    a customer-name query returns NOTHING, while a real MPN / manufacturer query returns
-    the anonymized row.
-    """
-
-    leaky_title = f"{test_company.name} — surplus FPGAs Q3"  # trader named it after the customer
-    el = ExcessList(
-        title=leaky_title,
-        company_id=test_company.id,
-        owner_id=trader_user.id,
-        status=ExcessListStatus.OPEN,
-        total_line_items=1,
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(el)
-    db_session.flush()
-    db_session.add(
-        ExcessLineItem(
-            excess_list_id=el.id,
-            part_number="XCVU9P-2FLGA2104I",
-            normalized_part_number=normalize_mpn_key("XCVU9P-2FLGA2104I"),
-            manufacturer="Xilinx",
-            quantity=50,
-            condition="New",
-        )
-    )
-    db_session.commit()
-    neutral = f"Excess listing #{el.id}"
-
-    # ── Non-owner (default buyer client), open lens ──
-    # Customer-name query → NO row (title is not searchable by non-owners).
-    by_customer = client.get(f"/v2/partials/resell/lists?lens=open&q={test_company.name}").text
-    assert neutral not in by_customer, "title search leaked the row to a non-owner (de-anon oracle)"
-    assert leaky_title not in by_customer
-
-    # Real MPN query (with the trader's dashes) → the anonymized row comes back.
-    by_mpn = client.get("/v2/partials/resell/lists?lens=open&q=XCVU9P-2FLGA2104I").text
-    assert neutral in by_mpn, "MPN search must return the matching anonymized row"
-
-    # Manufacturer query → the anonymized row comes back.
-    by_mfr = client.get("/v2/partials/resell/lists?lens=open&q=Xilinx").text
-    assert neutral in by_mfr, "manufacturer search must return the matching anonymized row"
+# (test_open_lens_search_matches_part_identity_not_title deleted with the W2.3
+# trader-lane park — spec §5.3: lens=open is coerced to mine, so the offerer-lens
+# part-identity search path is unreachable at route level. The implementation in
+# _list_rows_context stays parked in place for the comeback: second trader user.)
 
 
 def test_mine_lens_search_still_matches_title(client, db_session, trader_user, test_company):
@@ -366,61 +325,13 @@ def test_offers_tab_renders(client, trader_user, posted_list):
         app.dependency_overrides.pop(require_user, None)
 
 
-# ── Offer submit (the centerpiece) ───────────────────────────────────
-
-
-def test_submit_offer_creates_excess_offer(client, db_session, trader_user, posted_list, test_user):
-    """A per-line offer submit creates an ExcessOffer (offerer = the buyer client
-    user)."""
-    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    resp = client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={
-            "scope": "per_line",
-            "mpn_raw": line.part_number,
-            "quantity": "40",
-            "unit_price": "142.50",
-            "lead_time_days": "7",
-            "notes": "test offer",
-        },
-    )
-    assert resp.status_code == 200
-    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
-    assert len(offers) == 1
-    assert offers[0].scope == ExcessOfferScope.PER_LINE
-    # Rollup recomputed: the matched line now has a best price.
-    db_session.refresh(line)
-    assert line.offer_count == 1
-    assert line.best_offer_unit_price is not None
-
-
-def test_submit_take_all_offer(client, db_session, trader_user, posted_list):
-    """A take-all offer submit creates a take_all-scoped ExcessOffer (no lines)."""
-    resp = client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={"scope": "take_all", "take_all_total_price": "48500.00", "notes": "whole lot"},
-    )
-    assert resp.status_code == 200
-    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
-    assert offer.scope == ExcessOfferScope.TAKE_ALL
-    assert offer.take_all_total_price == Decimal("48500.00")
-    assert offer.lines == []
-
-
-def test_self_offer_blocked(client, db_session, trader_user, posted_list):
-    """The self-offer guard fires when the list owner tries to offer (403)."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[require_user] = lambda: trader_user  # the owner
-    try:
-        resp = client.post(
-            f"/api/resell/{posted_list.id}/offers",
-            data={"scope": "per_line", "mpn_raw": "XCVU9P-2FLGA2104I", "quantity": "10"},
-        )
-        assert resp.status_code == 403
-    finally:
-        app.dependency_overrides.pop(require_user, None)
+# ── Offer submit ─────────────────────────────────────────────────────
+# (test_submit_offer_creates_excess_offer / test_submit_take_all_offer /
+# test_self_offer_blocked deleted with the W2.3 trader-lane park — spec §5.3:
+# POST /api/resell/{id}/offers is unregistered. The submit_offer SERVICE — per-line,
+# take-all, rollup, and the self-offer guard — stays covered by
+# tests/test_resell_offers.py; the parked-off route state is pinned in
+# tests/test_resell_trader_lane_parked.py.)
 
 
 # ── Create / add-line / publish ──────────────────────────────────────
@@ -468,11 +379,17 @@ def test_add_line_renders_lines(client, db_session, trader_user, draft_list):
 
 def test_offer_compare_renders(client, db_session, trader_user, posted_list, test_user):
     """The per-line comparison renders best-highlight markup after an offer lands."""
+    from app.services.excess_service import submit_offer
+
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    # Submit one offer as the buyer (client default user).
-    client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={"scope": "per_line", "mpn_raw": line.part_number, "quantity": "40", "unit_price": "9.99"},
+    # Land one offer as the buyer via the SERVICE (the trader-lane POST route is
+    # parked — spec §5.3, W2.3; the owner compare view under test is kernel).
+    submit_offer(
+        db_session,
+        list_id=posted_list.id,
+        user=test_user,
+        scope="per_line",
+        lines=[{"mpn_raw": line.part_number, "quantity": 40, "unit_price": Decimal("9.99")}],
     )
     # Owner (trader_user) can access the comparison.
     from app.dependencies import require_user
@@ -821,10 +738,16 @@ def test_owner_offers_tab_full_data(client, db_session, posted_list, trader_user
     from app.main import app
 
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    # Submit an offer as the buyer (non-owner client).
-    client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={"scope": "per_line", "mpn_raw": line.part_number, "quantity": "10", "unit_price": "5.00"},
+    # Land an offer as the buyer via the SERVICE (the trader-lane POST route is
+    # parked — spec §5.3, W2.3; the owner offers tab under test is kernel).
+    from app.services.excess_service import submit_offer
+
+    submit_offer(
+        db_session,
+        list_id=posted_list.id,
+        user=test_user,
+        scope="per_line",
+        lines=[{"mpn_raw": line.part_number, "quantity": 10, "unit_price": Decimal("5.00")}],
     )
 
     # Now view the offers tab AS THE OWNER.
@@ -1151,7 +1074,6 @@ def test_stat_strip_aggregation(db_session, trader_user, test_company):
     """M8: _stat_strip folds the six per-status counts into two grouped queries — the
     numbers it returns are unchanged."""
     from app.constants import ExcessOfferScope, ExcessOfferStatus
-    from app.models.excess import ExcessOffer
     from app.routers.resell import _stat_strip
 
     def _mk(status):
@@ -1188,7 +1110,7 @@ def test_list_cards_batched_coverage_and_offer_count(db_session, trader_user, te
     """M8: _list_cards computes per-list coverage + unactioned offer count in a fixed
     number of grouped queries; the per-card numbers match the old per-list logic."""
     from app.constants import ExcessOfferScope, ExcessOfferStatus
-    from app.models.excess import ExcessOffer, ExcessOfferLine
+    from app.models.excess import ExcessOfferLine
     from app.routers.resell import _list_cards
 
     el = ExcessList(
@@ -1236,7 +1158,6 @@ def test_list_cards_empty_input():
 
 def _add_offer(db_session, el, submitter, scope, status):
     """Attach a single ExcessOffer to a list (helper for the needs-filter tests)."""
-    from app.models.excess import ExcessOffer
 
     offer = ExcessOffer(
         excess_list_id=el.id,

@@ -1,15 +1,13 @@
 """test_sources_comprehensive.py — Comprehensive tests for routers/sources.py.
 
-Covers: _LushaTestConnector, health_summary, system_alerts, toggle_source_active,
-parse attachments edge cases, scan_inbox with contact enrichment creating vendor cards,
-outbound scan with commit error, no connector found, source without env vars,
-and additional connector test methods.
+Covers: _LushaTestConnector, toggle_source_active, no connector found,
+source without env vars, list_sources auto-downgrade, and additional
+connector test methods.
 
 Called by: pytest
 Depends on: app/routers/sources.py, conftest fixtures
 """
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ApiSource, User, VendorCard
+from app.models import ApiSource, User
 from app.rate_limit import limiter
 from app.routers.sources import _get_connector_for_source
 from tests.conftest import engine
@@ -34,7 +32,7 @@ _ = engine
 def sources_client(db_session: Session, test_user: User) -> TestClient:
     """TestClient with auth + settings_access overrides and limiter reset."""
     from app.database import get_db
-    from app.dependencies import require_buyer, require_fresh_token, require_settings_access, require_user
+    from app.dependencies import require_buyer, require_settings_access, require_user
     from app.main import app
 
     def _override_db():
@@ -43,14 +41,10 @@ def sources_client(db_session: Session, test_user: User) -> TestClient:
     def _override_user():
         return test_user
 
-    async def _override_fresh_token():
-        return "mock-token"
-
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_settings_access] = _override_user
-    app.dependency_overrides[require_fresh_token] = _override_fresh_token
 
     # Source test/toggle/credential endpoints are gated on MANAGE_CONNECTORS (SET-06) —
     # no longer an interactive-role default — so grant it to the buyer test_user here to
@@ -67,7 +61,7 @@ def sources_client(db_session: Session, test_user: User) -> TestClient:
         with TestClient(app) as c:
             yield c
     finally:
-        for dep in [get_db, require_user, require_buyer, require_settings_access, require_fresh_token]:
+        for dep in [get_db, require_user, require_buyer, require_settings_access]:
             app.dependency_overrides.pop(dep, None)
 
 
@@ -89,183 +83,6 @@ def _api_source(db_session: Session) -> ApiSource:
     db_session.commit()
     db_session.refresh(src)
     return src
-
-
-@pytest.fixture()
-def _errored_source(db_session: Session) -> ApiSource:
-    src = ApiSource(
-        name="errored_source",
-        display_name="Errored Source",
-        category="market_data",
-        source_type="api",
-        status="error",
-        is_active=True,
-        description="A broken source",
-        env_vars=["ERR_KEY"],
-        last_error="Connection timeout",
-        last_error_at=datetime(2026, 3, 1, tzinfo=UTC),
-    )
-    db_session.add(src)
-    db_session.commit()
-    db_session.refresh(src)
-    return src
-
-
-@pytest.fixture()
-def _degraded_source(db_session: Session) -> ApiSource:
-    src = ApiSource(
-        name="degraded_source",
-        display_name="Degraded Source",
-        category="market_data",
-        source_type="api",
-        status="degraded",
-        is_active=True,
-        description="A degraded source",
-        env_vars=["DEG_KEY"],
-        last_error="Slow response",
-    )
-    db_session.add(src)
-    db_session.commit()
-    db_session.refresh(src)
-    return src
-
-
-@pytest.fixture()
-def _email_mining_source(db_session: Session) -> ApiSource:
-    src = ApiSource(
-        name="email_mining",
-        display_name="Email Mining",
-        category="intelligence",
-        source_type="email",
-        status="live",
-        description="Email inbox intelligence",
-        env_vars=[],
-        total_searches=5,
-        total_results=20,
-        avg_response_ms=0,
-        last_success=datetime(2026, 2, 1, tzinfo=UTC),
-    )
-    db_session.add(src)
-    db_session.commit()
-    db_session.refresh(src)
-    return src
-
-
-def _make_m365_vendor_response(db_session, test_user, *, req_name, message_id):
-    """Connect test_user to m365 and create a Requisition + VendorResponse.
-
-    Shared arrange block for the parse-response-attachments tests; the only per-test
-    variations are the requisition name and the message_id.
-    """
-    from app.models import Requisition, VendorResponse
-
-    test_user.m365_connected = True
-    test_user.access_token = "token"
-    db_session.commit()
-
-    req = Requisition(
-        name=req_name,
-        customer_name="Test",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    vr = VendorResponse(
-        requisition_id=req.id,
-        vendor_name="Test",
-        vendor_email="t@t.com",
-        subject="RE: Test",
-        message_id=message_id,
-        status="new",
-        received_at=datetime.now(UTC),
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(vr)
-    db_session.commit()
-    db_session.refresh(vr)
-    return vr
-
-
-# ---------------------------------------------------------------------------
-# health_summary endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestHealthSummary:
-    def test_no_errors(self, sources_client: TestClient, _api_source: ApiSource):
-        resp = sources_client.get("/api/sources/health-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_errors"] is False
-        assert data["errored_sources"] == []
-
-    def test_with_errored_source(self, sources_client: TestClient, _errored_source: ApiSource):
-        resp = sources_client.get("/api/sources/health-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_errors"] is True
-        assert len(data["errored_sources"]) == 1
-        assert data["errored_sources"][0]["display_name"] == "Errored Source"
-
-    def test_with_degraded_source(self, sources_client: TestClient, _degraded_source: ApiSource):
-        resp = sources_client.get("/api/sources/health-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_errors"] is True
-        assert len(data["errored_sources"]) >= 1
-
-    def test_inactive_errored_not_included(self, sources_client: TestClient, db_session: Session):
-        """Inactive sources with error status are not included."""
-        src = ApiSource(
-            name="inactive_errored",
-            display_name="Inactive Error",
-            category="market_data",
-            source_type="api",
-            status="error",
-            is_active=False,
-            description="Inactive",
-            env_vars=[],
-        )
-        db_session.add(src)
-        db_session.commit()
-
-        resp = sources_client.get("/api/sources/health-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_errors"] is False
-
-
-# ---------------------------------------------------------------------------
-# system_alerts endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestSystemAlerts:
-    def test_no_alerts(self, sources_client: TestClient):
-        resp = sources_client.get("/api/system/alerts")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["count"] == 0
-        assert data["alerts"] == []
-
-    def test_with_problem_sources(self, sources_client: TestClient, _errored_source: ApiSource):
-        resp = sources_client.get("/api/system/alerts")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["count"] == 1
-        assert data["alerts"][0]["source_name"] == "errored_source"
-        assert data["alerts"][0]["status"] == "error"
-        assert data["alerts"][0]["last_error"] == "Connection timeout"
-        assert data["alerts"][0]["since"] is not None
-
-    def test_multiple_alerts(self, sources_client: TestClient, _errored_source: ApiSource, _degraded_source: ApiSource):
-        resp = sources_client.get("/api/system/alerts")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["count"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -292,20 +109,6 @@ class TestToggleSourceActive:
         resp = sources_client.put(f"/api/sources/{_api_source.id}/activate")
         data = resp.json()
         assert data["is_active"] == initial
-
-
-# ---------------------------------------------------------------------------
-# toggle_api_source (status toggle) — not found
-# ---------------------------------------------------------------------------
-
-
-class TestToggleApiSourceNotFound:
-    def test_toggle_not_found(self, sources_client: TestClient):
-        resp = sources_client.put(
-            "/api/sources/99999/toggle",
-            json={"status": "live"},
-        )
-        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -583,209 +386,6 @@ def test_get_connector_lusha_enrichment():
 
 
 # ---------------------------------------------------------------------------
-# Scan inbox — contact enrichment creates vendor cards
-# ---------------------------------------------------------------------------
-
-
-class TestScanInboxEnrichment:
-    def test_creates_vendor_card(
-        self, sources_client: TestClient, _email_mining_source: ApiSource, db_session: Session
-    ):
-        """Scan creates VendorCard when contacts_enriched has new vendor."""
-        mock_miner = MagicMock()
-        mock_miner.scan_inbox = AsyncMock(
-            return_value={
-                "messages_scanned": 10,
-                "vendors_found": 1,
-                "offers_parsed": [],
-                "contacts_enriched": [
-                    {
-                        "vendor_name": "New Vendor Inc",
-                        "emails": ["sales@newvendor.com"],
-                        "phones": ["+1-555-0100"],
-                        "websites": ["newvendor.com"],
-                    }
-                ],
-            }
-        )
-
-        with (
-            patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
-        ):
-            resp = sources_client.post("/api/email-mining/scan")
-
-        assert resp.status_code == 200
-        # Verify vendor card was created
-        card = db_session.query(VendorCard).filter_by(display_name="New Vendor Inc").first()
-        assert card is not None
-        assert card.website == "https://newvendor.com"
-
-    def test_enriches_existing_vendor_card(
-        self, sources_client: TestClient, _email_mining_source: ApiSource, db_session: Session
-    ):
-        """Scan enriches existing VendorCard rather than creating duplicate."""
-        from app.vendor_utils import normalize_vendor_name
-
-        norm = normalize_vendor_name("Existing Vendor")
-        existing = VendorCard(
-            normalized_name=norm,
-            display_name="Existing Vendor",
-            emails=["old@existing.com"],
-            phones=[],
-        )
-        db_session.add(existing)
-        db_session.commit()
-
-        mock_miner = MagicMock()
-        mock_miner.scan_inbox = AsyncMock(
-            return_value={
-                "messages_scanned": 5,
-                "vendors_found": 1,
-                "offers_parsed": [],
-                "contacts_enriched": [
-                    {
-                        "vendor_name": "Existing Vendor",
-                        "emails": ["new@existing.com"],
-                        "phones": [],
-                        "websites": [],
-                    }
-                ],
-            }
-        )
-
-        with (
-            patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
-        ):
-            resp = sources_client.post("/api/email-mining/scan")
-
-        assert resp.status_code == 200
-
-    def test_empty_vendor_name_skipped(self, sources_client: TestClient, _email_mining_source: ApiSource):
-        """Contacts with empty vendor_name are skipped."""
-        mock_miner = MagicMock()
-        mock_miner.scan_inbox = AsyncMock(
-            return_value={
-                "messages_scanned": 5,
-                "vendors_found": 0,
-                "offers_parsed": [],
-                "contacts_enriched": [
-                    {"vendor_name": "", "emails": [], "phones": [], "websites": []},
-                ],
-            }
-        )
-
-        with (
-            patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
-        ):
-            resp = sources_client.post("/api/email-mining/scan")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["contacts_enriched"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Email mining status — no source
-# ---------------------------------------------------------------------------
-
-
-class TestEmailMiningStatusNoSource:
-    def test_no_source_returns_defaults(self, sources_client: TestClient):
-        """When email_mining source doesn't exist, returns defaults."""
-        resp = sources_client.get("/api/email-mining/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["last_scan"] is None
-        assert data["total_scans"] == 0
-        assert data["total_vendors_found"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Parse attachments — no m365
-# ---------------------------------------------------------------------------
-
-
-class TestParseAttachmentsNoM365:
-    def test_no_m365_returns_400(self, sources_client: TestClient, test_user: User, db_session: Session):
-        test_user.m365_connected = False
-        test_user.access_token = None
-        db_session.commit()
-
-        resp = sources_client.post("/api/email-mining/parse-response-attachments/1")
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Parse attachments — no message_id
-# ---------------------------------------------------------------------------
-
-
-class TestParseAttachmentsNoMessageId:
-    def test_no_message_id_returns_400(self, sources_client: TestClient, test_user: User, db_session: Session):
-        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-TEST", message_id=None)
-
-        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Parse attachments — Graph API error
-# ---------------------------------------------------------------------------
-
-
-class TestParseAttachmentsGraphError:
-    def test_graph_api_error_returns_502(self, sources_client: TestClient, test_user: User, db_session: Session):
-        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-GRAPH", message_id="msg-graph-001")
-
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(side_effect=ConnectionError("timeout"))
-
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        ):
-            resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-
-        assert resp.status_code == 502
-
-
-# ---------------------------------------------------------------------------
-# Outbound scan — DB commit error
-# ---------------------------------------------------------------------------
-
-
-class TestOutboundScanCommitError:
-    def test_sqlalchemy_error_handled(self, sources_client: TestClient, test_user: User, db_session: Session):
-        """SQLAlchemyError during commit is caught and rolled back."""
-        test_user.m365_connected = True
-        test_user.access_token = "fake-token"
-        db_session.commit()
-
-        mock_miner = MagicMock()
-        mock_miner.scan_sent_items = AsyncMock(
-            return_value={
-                "messages_scanned": 10,
-                "rfqs_detected": 2,
-                "vendors_contacted": {},
-                "used_delta": False,
-            }
-        )
-
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
-        ):
-            resp = sources_client.post("/api/email-mining/scan-outbound")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["messages_scanned"] == 10
-
-
-# ---------------------------------------------------------------------------
 # list_sources — auto-downgrades to pending when no credentials
 # ---------------------------------------------------------------------------
 
@@ -822,47 +422,3 @@ class TestListSourcesAutoDowngrade:
         s = next((s for s in sources if s["name"] == "disabled_src"), None)
         assert s is not None
         assert s["status"] == "disabled"
-
-
-# ---------------------------------------------------------------------------
-# Parse attachments — file validation fails
-# ---------------------------------------------------------------------------
-
-
-class TestParseAttachmentsValidationFails:
-    def test_invalid_file_skipped(self, sources_client: TestClient, test_user: User, db_session: Session):
-        import base64
-
-        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-VAL", message_id="msg-val-001")
-
-        fake_content = base64.b64encode(b"fake").decode()
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "data.csv", "contentBytes": fake_content}]})
-
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("app.utils.file_validation.validate_file", return_value=(False, "Invalid file")),
-        ):
-            resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["parseable"] == 1
-        assert data["rows_parsed"] == 0
-
-    def test_no_content_bytes_skipped(self, sources_client: TestClient, test_user: User, db_session: Session):
-        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-NOCB", message_id="msg-nocb-001")
-
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "data.csv", "contentBytes": None}]})
-
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        ):
-            resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["rows_parsed"] == 0

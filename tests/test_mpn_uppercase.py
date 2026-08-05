@@ -52,29 +52,6 @@ class TestMPNUppercaseValidator:
 
 
 class TestAPISubstituteFormat:
-    def test_batch_create_stores_dict_subs(self, client, db_session):
-        """POST /api/requisitions/{id}/requirements should store subs as dicts."""
-        req = Requisition(name="API Test", status=RequisitionStatus.OPEN, customer_name="Acme")
-        db_session.add(req)
-        db_session.commit()
-        resp = client.post(
-            f"/api/requisitions/{req.id}/requirements",
-            json={
-                "primary_mpn": "TEST-001",
-                "manufacturer": "TestMfr",
-                "target_qty": 100,
-                "substitutes": ["alt-001", "alt-002"],
-            },
-        )
-        assert resp.status_code == 200
-        r = db_session.query(Requirement).filter_by(requisition_id=req.id).first()
-        assert r is not None
-        assert r.substitutes is not None
-        assert len(r.substitutes) > 0
-        for sub in r.substitutes:
-            assert isinstance(sub, dict), f"Expected dict, got {type(sub)}: {sub}"
-            assert "mpn" in sub
-
     def test_patch_stores_dict_subs(self, client, db_session):
         """PATCH should store subs as dicts."""
         req = Requisition(name="API Test", status=RequisitionStatus.OPEN, customer_name="Acme")

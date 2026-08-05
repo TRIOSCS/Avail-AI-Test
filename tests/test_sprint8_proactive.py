@@ -242,3 +242,9 @@ class TestProactiveConvert:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200, f"Expected 200 for null salesperson, got {resp.status_code}"
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

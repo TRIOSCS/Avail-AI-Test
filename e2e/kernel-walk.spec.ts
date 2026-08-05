@@ -192,7 +192,7 @@ test('requisition created with manual lines (no AI parse)', async () => {
   expect(reqId, 'requisition id parsed from the detail header').not.toBe('');
 });
 
-test('sourcing board: parts board works and the requirement workspace renders', async () => {
+test('sourcing board: parts board works keys-off', async () => {
   // Parts tab (default) shows both requirement rows.
   await expect(page.locator('#tab-content')).toContainText(MPN);
   await expect(page.locator('#tab-content')).toContainText(COMMON_MPN);
@@ -207,13 +207,9 @@ test('sourcing board: parts board works and the requirement workspace renders', 
   expect(resp.status(), 'search-all must not 5xx keys-off').toBeLessThan(500);
   await settle(800);
 
-  // The requirement-level sourcing workspace (split-panel board) renders.
-  const rowId = await page.locator('tr[id^="req-row-"]').first().getAttribute('id');
-  const requirementId = rowId?.replace('req-row-', '') ?? '';
-  expect(requirementId).not.toBe('');
-  const nav = await page.goto(`/v2/sourcing/${requirementId}/workspace`);
-  expect(nav?.status(), 'sourcing workspace page').toBe(200);
-  await expect(page.locator('#main-content')).not.toContainText('Internal Server Error');
+  // The split-panel Sourcing-Leads workspace (/v2/sourcing/{id}/workspace) was
+  // deleted in the Wave 2 sweep (spec §8) — the deal's parts board above IS the
+  // kernel sourcing surface.
 
   // Back to the deal for the rest of the walk.
   await page.goto(`/v2/requisitions/${reqId}`);

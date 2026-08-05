@@ -1,14 +1,17 @@
-"""test_sightings_mirror_exclusion.py — buyer sightings board excludes the resell
-mirror's virtual scratch requisition/requirement (THEME F finding #25).
+"""test_sightings_mirror_exclusion.py — buyer sightings board excludes the retired
+resell mirror's virtual scratch requisition/requirement (THEME F finding #25).
 
-The resell mirror (app/services/excess_mirror.py) hangs every posted ExcessLineItem's
-Sighting off ONE system-owned "Customer Excess (list N)" scratch Requisition +
-Requirement per list (is_scratch=True). That virtual requirement must never appear on
-the buyer sightings board, its dashboard-strip counters, or the CSV export — it's supply
-advertising, not buyer demand a human should source.
+The RETIRED resell mirror (app/services/excess_mirror.py) hung every posted
+ExcessLineItem's Sighting off ONE system-owned "Customer Excess (list N)" scratch
+Requisition + Requirement per list (is_scratch=True). The dual-write is stopped
+(SIMPLIFICATION_SPEC §5.3) but rows written before the stop remain in production DBs, so
+that virtual requirement must STILL never appear on the buyer sightings board, its
+dashboard-strip counters, or the CSV export — it's supply advertising, not buyer demand
+a human should source. Setup here creates the scratch rows directly, simulating the
+pre-existing data.
 
 Called by: pytest
-Depends on: app.routers.sightings.build_board_requirement_query, app.services.excess_mirror,
+Depends on: app.routers.sightings.build_board_requirement_query,
             app.services.excess_service, tests.conftest
 """
 
@@ -23,11 +26,31 @@ from app.models.sourcing import Requirement, Requisition
 from app.routers import sightings as sightings_router
 from app.routers.sightings import build_board_requirement_query
 from app.schemas.sightings import SightingsListParams
-from app.services.excess_mirror import ensure_virtual_requirement
 from app.services.excess_service import create_excess_list, import_line_items
 from tests.conftest import engine
 
 _ = engine  # Ensure test DB tables are created
+
+
+def _make_virtual_requirement(db: Session, el) -> Requirement:
+    """Create the retired mirror's scratch req rows directly (pre-existing data shape).
+
+    Mirrors what the deleted ``ensure_virtual_requirement`` wrote: one is_scratch=True
+    "Customer Excess (list N)" Requisition + one Requirement hanging off it.
+    """
+    req = Requisition(
+        name=f"Customer Excess (list {el.id})",
+        status="open",
+        is_scratch=True,
+        created_by=el.owner_id,
+    )
+    db.add(req)
+    db.flush()
+    requirement = Requirement(requisition_id=req.id, sourcing_status="open")
+    db.add(requirement)
+    db.commit()
+    db.refresh(requirement)
+    return requirement
 
 
 def _make_company(db: Session, name: str = "Excess Seller") -> Company:
@@ -56,7 +79,7 @@ def test_board_query_excludes_mirror_virtual_requirement(db_session: Session, te
     company = _make_company(db_session)
     el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
     import_line_items(db_session, el.id, [{"part_number": "MIRRORPART1", "quantity": "10"}])
-    virtual_requirement = ensure_virtual_requirement(db_session, el)
+    virtual_requirement = _make_virtual_requirement(db_session, el)
     db_session.commit()
 
     real_requirement = _make_real_requirement(db_session, test_user)
@@ -68,23 +91,17 @@ def test_board_query_excludes_mirror_virtual_requirement(db_session: Session, te
 
 
 def test_board_query_excludes_mirror_even_after_publish(db_session: Session, test_user: User):
-    """Publishing the list (status draft -> open) still keeps the virtual requirement
-    off the board — is_scratch, not list status, is the exclusion signal."""
+    """Publishing the list (status draft -> open) still keeps a pre-existing virtual
+    requirement off the board — is_scratch, not list status, is the exclusion signal."""
     from app.services.excess_mirror import publish_list
 
     company = _make_company(db_session)
     el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
     import_line_items(db_session, el.id, [{"part_number": "MIRRORPART2", "quantity": "5"}])
+    virtual_requirement = _make_virtual_requirement(db_session, el)
     publish_list(db_session, el.id, test_user)
     db_session.refresh(el)
     assert el.status == ExcessListStatus.OPEN
-
-    virtual_req = (
-        db_session.query(Requisition)
-        .filter(Requisition.is_scratch.is_(True), Requisition.name == f"Customer Excess (list {el.id})")
-        .one()
-    )
-    virtual_requirement = db_session.query(Requirement).filter_by(requisition_id=virtual_req.id).one()
 
     ids = {r.id for r in build_board_requirement_query(db_session, test_user, SightingsListParams()).all()}
     assert virtual_requirement.id not in ids
@@ -100,7 +117,7 @@ def test_dashboard_counters_exclude_mirror_virtual_requirement(
     company = _make_company(db_session)
     el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
     import_line_items(db_session, el.id, [{"part_number": "MIRRORCOUNTS1", "quantity": "10"}])
-    virtual_requirement = ensure_virtual_requirement(db_session, el)
+    virtual_requirement = _make_virtual_requirement(db_session, el)
     # The mirror's own virtual requirement would (if counted) inflate BOTH the "Urgent"
     # (high priority) and "Unassigned" (no assigned_buyer_id, its natural state) badges.
     virtual_requirement.priority_score = 95
@@ -135,7 +152,7 @@ def test_stat_counts_exclude_mirror_virtual_requirement(client, db_session: Sess
     company = _make_company(db_session)
     el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
     import_line_items(db_session, el.id, [{"part_number": "MIRRORCOUNTS2", "quantity": "10"}])
-    ensure_virtual_requirement(db_session, el)
+    _make_virtual_requirement(db_session, el)
     db_session.commit()
 
     _make_real_requirement(db_session, test_user, mpn="REALCOUNTS2")

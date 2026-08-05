@@ -127,6 +127,25 @@ def test_pane_qp_sales_section_renders_fields(hub_client: TestClient, db_session
     assert "ESD trays only" in body
 
 
+def test_pane_qp_section_links_serial_fru_page(hub_client: TestClient, db_session: Session, test_user: User):
+    """Decision E (spec §5.2): the QP pane links out to the EXISTING serial/FRU page
+    (the QP front door at /v2/qp/for-buy-plan), and that target 200s for a plan with a
+    QP — reachability restored after the Deal view retired."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    db_session.add(QualityPlan(buy_plan_id=bp.id, created_by_id=test_user.id))
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert f'hx-get="/v2/qp/for-buy-plan/{bp.id}"' in body
+    assert "Serial / FRU" in body
+
+    r = hub_client.get(f"/v2/qp/for-buy-plan/{bp.id}", headers={"HX-Request": "true"})
+    assert r.status_code == 200
+    assert "Serial Numbers" in r.text
+    assert "FRU Crosswalk" in r.text
+
+
 def test_pane_without_qp_shows_empty_state(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)

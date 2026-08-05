@@ -328,34 +328,6 @@ def test_add_form_partial_renders(client, db_session: Session):
         assert f'name="{field}"' in resp.text
 
 
-# --- Bulk imports: same pipeline, NO stamp, per-row warnings --------------------
-
-
-def test_bulk_import_runs_passes_warns_and_does_not_stamp(client, db_session: Session):
-    seed_commodity_schemas(db_session)
-    csv = f"mpn\n{DRAM_MPN}\nAB\n".encode()
-    resp = client.post(
-        "/api/materials/import-part-numbers",
-        files={"file": ("parts.csv", csv, "text/csv")},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["created"] == 1
-    assert body["skipped"] == 1
-    # V3 rejection surfaced per-row, never silent. `row` is the 1-based SOURCE-file
-    # row (header = 1, DRAM_MPN = 2, "AB" = 3) — the line the user opens and fixes.
-    (warning,) = body["warnings"]
-    assert warning["row"] == 3
-    assert warning["field"] == "mpn"
-    assert "AB" in warning["reason"]
-
-    card = _get_card(db_session, DRAM_MPN)
-    # Inline deterministic passes ran server-side on the bulk path too.
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    # Bulk imports must NOT monopolize the priority lane.
-    assert card.enrich_requested_at is None
-
-
 def test_stock_import_runs_passes_warns_and_does_not_stamp(client, db_session: Session):
     seed_commodity_schemas(db_session)
     csv = f"part number,qty,price\n{DRAM_MPN},10,42.50\n".encode()

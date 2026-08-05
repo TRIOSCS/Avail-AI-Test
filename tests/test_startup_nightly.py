@@ -1,15 +1,12 @@
 """test_startup_nightly.py — Additional coverage tests for app/startup.py.
 
-Targets uncovered lines:
-- 160-177: _seed_agent_user (happy path, skip-existing, error branch)
-- 473-479: _backfill_normalized_mpn batch-flush path (batch >= _BACKFILL_BATCH_SIZE)
-- 778: raw_items is already a list (not JSON string)
-- 801-803: ValueError/TypeError in price parsing
-- 837-847: _seed_commodity_schemas (happy path and error)
-- 912-917: _backfill_ticket_defaults (tickets with null risk_tier exist)
-- 955-956: seed_api_sources early-return when all sources present
-- 982-985: seed_api_sources removes legacy 'newark' source
-- 1001, 1004-1006: seed_api_sources backfills monthly_quota
+Targets:
+- _seed_agent_user (happy path, skip-existing, error branch)
+- _seed_commodity_schemas (happy path and error)
+- seed_api_sources early-return when all sources present
+- seed_api_sources removes legacy 'newark' source
+- seed_api_sources backfills monthly_quota
+(The deleted one-time startup backfills' tests went with them — W2.9.)
 
 Called by: pytest
 Depends on: app/startup.py, conftest engine/db_session
@@ -101,117 +98,6 @@ class TestSeedAgentUser:
         mock_db.close.assert_called_once()
 
 
-# ── _backfill_normalized_mpn batch flush ─────────────────────────────────────
-
-
-class TestBackfillNormalizedMpnBatchFlush:
-    """Lines 473-479: batch flush when len(batch) >= _BACKFILL_BATCH_SIZE."""
-
-    def test_batch_flush_triggers_on_large_input(self):
-        """Feed enough cards to trigger batch flush inside the inner loop."""
-        from app.startup import _backfill_normalized_mpn
-
-        # We need more cards than _BACKFILL_BATCH_SIZE (which is 500).
-        # Use a mock-based engine so we control fetchall sizes.
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
-        # Build 501 unique null-normalized cards to exceed the batch size
-        cards = [(i, f"PART{i:04d}") for i in range(1, 502)]
-        # requirements: empty to skip first section
-        req_empty = []
-        # material_cards existing norms: none
-        existing_norms = []
-
-        # execute calls in _backfill_normalized_mpn (with real engine patched):
-        # Phase 1 (requirements): returns empty rows so loop exits quickly
-        # Phase 2 (material_cards):
-        #   - cards fetchall → 501 cards
-        #   - existing_norms fetchall → no existing
-        #   - batch UPDATE (mid-loop) → called when batch hits 500
-        #   - batch UPDATE (remainder) → called after loop
-
-        call_count = [0]
-
-        def fake_execute(stmt, *args, **kwargs):
-            result = MagicMock()
-            stmt_str = str(stmt)
-            if "requirements" in stmt_str and "normalized_mpn IS NULL" in stmt_str:
-                result.fetchall.return_value = req_empty
-            elif "display_mpn FROM material_cards WHERE normalized_mpn IS NULL" in stmt_str:
-                result.fetchall.return_value = cards
-            elif "normalized_mpn FROM material_cards" in stmt_str and "GROUP BY" in stmt_str:
-                result.fetchall.return_value = existing_norms
-            else:
-                result.fetchall.return_value = []
-            call_count[0] += 1
-            return result
-
-        mock_conn.execute.side_effect = fake_execute
-        mock_conn.commit = MagicMock()
-        mock_conn.rollback = MagicMock()
-
-        mock_engine = MagicMock()
-        mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
-        mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
-
-        with patch("app.startup.engine", mock_engine):
-            _backfill_normalized_mpn()
-
-        # The mid-loop batch flush + final remainder flush should each call commit
-        assert mock_conn.commit.call_count >= 2
-
-
-# ── _backfill_proactive_offer_qty price-parse error branch ────────────────────
-
-
-class TestBackfillProactiveOfferQtyPriceParse:
-    """Lines 778, 801-803: ValueError/TypeError when parsing sell_price/unit_price, and
-    raw_items already being a list."""
-
-    @pytest.mark.parametrize(
-        "raw_items",
-        [
-            # qty=100 > target(5), and prices are non-numeric strings → ValueError,
-            # fallback to 0.0.
-            pytest.param(
-                json.dumps([{"match_id": 10, "qty": 100, "sell_price": "N/A", "unit_price": "bad"}]),
-                id="bad_price_values_fall_back_to_zero",
-            ),
-            # sell_price and unit_price both None → fallback to 0.0.
-            pytest.param(
-                json.dumps([{"match_id": 10, "qty": 100, "sell_price": None, "unit_price": None}]),
-                id="none_price_falls_back_to_zero",
-            ),
-            # raw_items is already a Python list (simulates SQLite returning parsed JSON)
-            # — used as-is (line 778).
-            pytest.param(
-                [{"match_id": 10, "qty": 100, "sell_price": 2.0, "unit_price": 1.0}],
-                id="raw_items_already_a_list",
-            ),
-        ],
-    )
-    @patch("app.startup.engine")
-    def test_offer_qty_backfill_handles_payload(self, mock_engine, raw_items):
-        """The UPDATE is attempted despite bad/None prices or a pre-parsed list."""
-        from app.startup import _backfill_proactive_offer_qty
-
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
-
-        match_rows = [(10, 5)]  # target_qty=5
-        offers = [(1, raw_items)]
-
-        mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
-
-        _backfill_proactive_offer_qty()
-
-        assert mock_conn.execute.call_count >= 3
-
-
 # ── _seed_commodity_schemas ───────────────────────────────────────────────────
 
 
@@ -249,61 +135,6 @@ class TestSeedCommoditySchemas:
         mock_db.close.assert_called_once()
 
 
-# ── _backfill_ticket_defaults ─────────────────────────────────────────────────
-
-
-class TestBackfillTicketDefaults:
-    """Lines 912-917: _backfill_ticket_defaults with null tickets."""
-
-    @patch("app.startup.SessionLocal")
-    def test_backfills_null_risk_tier_and_category(self, mock_sl):
-        """When tickets with null risk_tier/category exist, they are updated."""
-        from app.startup import _backfill_ticket_defaults
-
-        mock_ticket = MagicMock()
-        mock_ticket.risk_tier = None
-        mock_ticket.category = None
-
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = [mock_ticket]
-        mock_db.commit = MagicMock()
-        mock_db.rollback = MagicMock()
-        mock_db.close = MagicMock()
-        mock_sl.return_value = mock_db
-
-        _backfill_ticket_defaults()
-
-        assert mock_ticket.risk_tier == "low"
-        assert mock_ticket.category == "other"
-        mock_db.commit.assert_called_once()
-
-    @patch("app.startup.SessionLocal")
-    def test_skips_when_no_null_tickets(self, mock_sl, db_session: Session):
-        """When no tickets with null fields, does nothing (no commit)."""
-        from app.startup import _backfill_ticket_defaults
-
-        mock_sl.return_value = db_session
-
-        # No tickets in DB — should do nothing without error
-        _backfill_ticket_defaults()
-
-    @patch("app.startup.SessionLocal")
-    def test_error_rolls_back(self, mock_sl):
-        """Exception is caught and rolled back (does not re-raise)."""
-        from app.startup import _backfill_ticket_defaults
-
-        mock_db = MagicMock()
-        mock_db.query.side_effect = RuntimeError("DB unavailable")
-        mock_db.rollback = MagicMock()
-        mock_db.close = MagicMock()
-        mock_sl.return_value = mock_db
-
-        # Should not raise — errors are swallowed
-        _backfill_ticket_defaults()
-        mock_db.rollback.assert_called_once()
-        mock_db.close.assert_called_once()
-
-
 # ── seed_api_sources ──────────────────────────────────────────────────────────
 
 
@@ -313,7 +144,6 @@ class TestSeedApiSources:
     @patch("app.startup.SessionLocal")
     def test_early_return_when_all_sources_present(self, mock_sl):
         """Lines 955-956: returns early when existing source count matches SOURCES."""
-        import json
         from pathlib import Path
 
         from app.startup import seed_api_sources

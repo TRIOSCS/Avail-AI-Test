@@ -414,9 +414,8 @@ async def prepay_request_decide(
             pp.voided_at = datetime.now(UTC)
             pp.voided_by_id = user.id
             # Note-to-the-fixer (2.2): the (required) reject reason lands on the
-            # prepayment's notes thread tagged with the decision, and the requester
-            # (the fixer) gets an in-app notification.
-            from ...services.approvals.notifications import write_in_app
+            # prepayment's notes thread tagged with the decision. (The write-only
+            # in-app Notification write was deleted, W2.9/§5.5.)
             from ...services.workspace_notes import add_note
 
             note_text = (comment or "").strip()
@@ -429,8 +428,6 @@ async def prepay_request_decide(
                     prepayment_id=pp.id,
                     decision="rejected",
                 )
-            if pp.created_by_id is not None:
-                write_in_app(db, pp.created_by_id, "prepay_rejected", f"Prepayment #{pp.id} rejected", note_text)
             db.commit()
             await run_prepayment_notify_bg(notify_prepayment_voided, pp.id)
 
@@ -644,7 +641,6 @@ async def buy_plan_approve_partial(
 
     from ...constants import ApprovalRequestStatus, ApprovalSubjectType
     from ...models.approvals import ApprovalRequest
-    from ...services.approvals.notifications import write_in_app
     from ...services.approvals.service import decide as svc_decide
     from ...services.buyplan_notifications import (
         notify_approved,
@@ -652,7 +648,6 @@ async def buy_plan_approve_partial(
         run_notify_bg,
     )
     from ...services.buyplan_workflow import approve_buy_plan
-    from ...services.field_audit import edits_since, format_change_summary
     from ...services.workspace_notes import add_note
 
     form = await request.form()
@@ -675,12 +670,6 @@ async def buy_plan_approve_partial(
     decision_tag = None
     if action == "reject":
         decision_tag = "sent_back" if handoff == "send_back" else "rejected"
-
-    # The submitter is the fixer (change-summary recipient / note-to-fixer target);
-    # capture submitted_at BEFORE the decision so the summary window can't move.
-    bp = db.get(BuyPlan, plan_id)
-    fixer_id = bp.submitted_by_id if bp is not None else None
-    submitted_at = bp.submitted_at if bp is not None else None
 
     open_request = (
         db.execute(
@@ -718,24 +707,12 @@ async def buy_plan_approve_partial(
         raise HTTPException(400, str(e)) from e
 
     # Post-decision fan-out (2.2) — after the decision committed, never inside it:
-    #   approve → the submitter gets the change summary (the audit log since
-    #   submission, "was X → now Y"; skipped when nothing changed);
     #   reject / send-back → the note-to-the-fixer lands on the plan's notes thread
-    #   tagged with the decision, and the submitter gets an in-app notification.
-    if action == "approve" and fixer_id is not None:
-        summary = format_change_summary(edits_since(db, buy_plan_id=plan_id, since=submitted_at))
-        if summary:
-            write_in_app(db, fixer_id, "buy_plan_changes", f"Buy plan #{plan_id} approved with changes", summary)
-            db.commit()
-    elif action == "reject" and notes:
+    #   tagged with the decision. (The approve-with-changes summary and the reject
+    #   in-app pings wrote only write-only Notification rows — deleted, W2.9/§5.5;
+    #   the submitter still gets the reject/approve email via run_notify_bg above.)
+    if action == "reject" and notes:
         add_note(db, user=user, body=notes, buy_plan_id=plan_id, decision=decision_tag)
-        if fixer_id is not None:
-            title = (
-                f"Buy plan #{plan_id} sent back for sign-off"
-                if decision_tag == "sent_back"
-                else f"Buy plan #{plan_id} rejected"
-            )
-            write_in_app(db, fixer_id, f"buy_plan_{decision_tag}", title, notes)
         db.commit()
 
     if origin == "approvals_workspace":
@@ -1067,7 +1044,6 @@ async def buy_plan_verify_po_partial(
         # loaded it via db.get(BuyPlan, plan_id) itself) — reading .status off it here
         # is a free identity-map hit, NOT a second completion scan.
         just_completed = line.buy_plan is not None and line.buy_plan.status == BuyPlanStatus.COMPLETED.value
-        buyer_id = line.buyer_id
         db.commit()
         if action == "reject":
             await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
@@ -1076,29 +1052,20 @@ async def buy_plan_verify_po_partial(
         raise HTTPException(400, str(e)) from e
 
     # PO send-back note-to-the-fixer (2.2): the manager's note lands on the LINE's
-    # notes thread tagged sent_back, and the assigned buyer (the fixer) gets an
-    # in-app notification. The note is optional on a send-back (spec §7).
-    if action == "reject":
-        from ...services.approvals.notifications import write_in_app
+    # notes thread tagged sent_back; the buyer is emailed via notify_po_rejected
+    # above. (The write-only in-app Notification write was deleted, W2.9/§5.5.)
+    # The note is optional on a send-back (spec §7).
+    if action == "reject" and rejection_note:
         from ...services.workspace_notes import add_note
 
-        if rejection_note:
-            add_note(
-                db,
-                user=user,
-                body=rejection_note,
-                buy_plan_id=plan_id,
-                buy_plan_line_id=line_id,
-                decision="sent_back",
-            )
-        if buyer_id is not None:
-            write_in_app(
-                db,
-                buyer_id,
-                "po_sent_back",
-                f"PO sent back on plan #{plan_id}",
-                rejection_note,
-            )
+        add_note(
+            db,
+            user=user,
+            body=rejection_note,
+            buy_plan_id=plan_id,
+            buy_plan_line_id=line_id,
+            decision="sent_back",
+        )
         db.commit()
 
     if origin == "approvals_workspace":

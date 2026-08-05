@@ -132,8 +132,9 @@ class MaterialCard(Base):
     # the partial index ix_material_cards_needs_review (WHERE has_validation_conflict).
     has_validation_conflict = Column(Boolean, nullable=False, default=False, server_default="false")
 
-    # Demand telemetry (migration 105 — TRIO's SFDC Weekly Export, one-shot backfill
-    # via app/management/import_demand_telemetry.py; NO recurring refresh — the export
+    # Demand telemetry (migration 105 — TRIO's SFDC Weekly Export, filled by a
+    # completed one-shot backfill (import_demand_telemetry, deleted in W2.9 after it
+    # ran; git restores it); NO recurring refresh — the export
     # is a static snapshot, re-import is an explicit operator step). Prioritization
     # signal ONLY, never a displayed fact: worker select_batch and the spec-pass
     # selection order by (sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS

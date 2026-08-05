@@ -498,25 +498,6 @@ class TestBuildVendorContext:
         assert "Arrow reliable supplier" in ctx
 
 
-class TestBuildPipelineContext:
-    def test_returns_empty_with_no_requisitions(self, db_session: Session):
-        ctx = knowledge_service.build_pipeline_context(db_session)
-        assert ctx == ""
-
-    def test_returns_context_with_active_requisitions(self, db_session: Session, test_user: User):
-        req = Requisition(
-            name="PIPELINE-TEST-REQ",
-            customer_name="Test Co",
-            status="open",
-            created_by=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(req)
-        db_session.commit()
-        ctx = knowledge_service.build_pipeline_context(db_session)
-        assert "active" in ctx.lower()
-
-
 class TestBuildCompanyContext:
     def test_returns_empty_for_unknown_company(self, db_session: Session):
         ctx = knowledge_service.build_company_context(db_session, company_id=99999)
@@ -553,10 +534,6 @@ class TestGetCachedEntityInsights:
         )
         insights = knowledge_service.get_cached_vendor_insights(db_session, test_vendor_card.id)
         assert len(insights) >= 1
-
-    def test_get_cached_pipeline_insights_empty(self, db_session: Session):
-        insights = knowledge_service.get_cached_pipeline_insights(db_session)
-        assert insights == []
 
     def test_get_cached_company_insights_empty(self, db_session: Session, test_company: Company):
         insights = knowledge_service.get_cached_company_insights(db_session, test_company.id)
@@ -625,32 +602,6 @@ class TestGenerateCompanyInsights:
 
         with patch("app.utils.claude_client.claude_structured", new=_mock):
             result = await knowledge_service.generate_company_insights(db_session, test_company.id)
-        assert len(result) == 1
-
-
-class TestGeneratePipelineInsights:
-    async def test_empty_pipeline_returns_empty(self, db_session: Session):
-        result = await knowledge_service.generate_pipeline_insights(db_session)
-        assert result == []
-
-    async def test_success(self, db_session: Session, test_user: User):
-        req = Requisition(
-            name="PIPE-INSIGHT-REQ",
-            customer_name="Test Co",
-            status="open",
-            created_by=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        mock_result = {"insights": [{"content": "Pipeline insight", "confidence": 0.8, "based_on_expired": False}]}
-
-        async def _mock(*a, **kw):
-            return mock_result
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
-            result = await knowledge_service.generate_pipeline_insights(db_session)
         assert len(result) == 1
 
 

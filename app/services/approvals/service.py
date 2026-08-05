@@ -204,18 +204,11 @@ def decide(
     event_type = "approved" if approved else "rejected"
     _record_event(db, request, user, event_type, metadata={"comment": comment} if comment else None)
 
-    # Notify the request owner (fall back to requester, then the decider) on BOTH the
-    # in-app and email channels — Mike's locked decision. recipient_user_id is NOT NULL.
+    # Notify the request owner (fall back to requester, then the decider) via email —
+    # ONE delivery system per event (W2.9/§5.5: the in-app Notification channel was
+    # write-only and deleted). recipient_user_id is NOT NULL.
     notify_user_id = request.owner_id or request.requested_by_id or user.id
     payload = {"event_type": "decided", "decision": event_type, "comment": comment}
-    db.add(
-        ApprovalOutbox(
-            request_id=request.id,
-            recipient_user_id=notify_user_id,
-            channel="in_app",
-            payload=payload,
-        )
-    )
     db.add(
         ApprovalOutbox(
             request_id=request.id,

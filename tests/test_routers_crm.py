@@ -17,14 +17,10 @@ from app.constants import RequisitionStatus
 from app.models import (
     Company,
     CustomerSite,
-    Offer,
     OfferAttachment,
     Quote,
     Requisition,
     SiteContact,
-    User,
-    VendorContact,
-    VendorResponse,
 )
 from app.routers.crm import (
     next_quote_number,
@@ -182,33 +178,6 @@ def test_next_quote_number(last_quote_number, expected_prefix, expected_suffix, 
         assert result.endswith(expected_suffix)
 
 
-def test_quote_creation_retries_on_integrity_error(
-    client, db_session, test_requisition, test_customer_site, test_offer
-):
-    """Quote creation retries with a new number on IntegrityError (race condition)."""
-    test_requisition.customer_site_id = test_customer_site.id
-    db_session.commit()
-
-    call_count = 0
-    original_next = next_quote_number.__wrapped__ if hasattr(next_quote_number, "__wrapped__") else next_quote_number
-
-    def mock_next_quote_number(db):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return "Q-2026-DUPE"
-        return f"Q-2026-{call_count:04d}"
-
-    with patch("app.routers.crm.quotes.next_quote_number", side_effect=mock_next_quote_number):
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "quote_number" in data
-
-
 # ── Margin calculation (update_quote logic) ──────────────────────────────
 
 
@@ -274,12 +243,6 @@ class TestCompanies:
         data = resp.json()
         assert data["name"] == "New Corp"
         assert "id" in data
-
-    def test_create_company_duplicate_check(self, client, db_session, test_company):
-        resp = client.get("/api/companies/check-duplicate", params={"name": "Acme Electronics"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["matches"]) >= 1
 
     def test_update_company(self, client, db_session, test_company, test_user):
         test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
@@ -367,38 +330,6 @@ class TestCompanyDetail:
 
 
 class TestOffers:
-    def test_list_offers(self, client, db_session, test_requisition, test_offer):
-        # Link offer to the requirement so it appears in the grouped response
-        req_item = test_requisition.requirements[0]
-        test_offer.requirement_id = req_item.id
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        # Response is {"has_new_offers": bool, "groups": [{..., "offers": [...]}]}
-        all_offers = []
-        for g in data.get("groups", []):
-            all_offers.extend(g.get("offers", []))
-        assert len(all_offers) >= 1
-
-    def test_create_offer(self, client, db_session, test_requisition):
-        req = test_requisition
-        requirement = req.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Mouser Electronics",
-                "mpn": "LM317T",
-                "qty_available": 500,
-                "unit_price": 0.45,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["vendor_name"] == "Mouser Electronics"
-
     def test_update_offer(self, client, db_session, test_offer):
         resp = client.put(
             f"/api/offers/{test_offer.id}",
@@ -410,83 +341,8 @@ class TestOffers:
         resp = client.delete(f"/api/offers/{test_offer.id}")
         assert resp.status_code == 200
 
-    def test_offer_parse_confidence(self, client, db_session, test_requisition, test_offer):
-        """Offers linked to a VendorResponse should include parse_confidence."""
-        vr = VendorResponse(
-            requisition_id=test_requisition.id,
-            vendor_name="Test Vendor",
-            vendor_email="test@example.com",
-            confidence=0.85,
-            status="new",
-        )
-        db_session.add(vr)
-        db_session.flush()
-        req_item = test_requisition.requirements[0]
-        test_offer.requirement_id = req_item.id
-        test_offer.vendor_response_id = vr.id
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        all_offers = []
-        for g in data.get("groups", []):
-            all_offers.extend(g.get("offers", []))
-        matched = [o for o in all_offers if o.get("id") == test_offer.id]
-        assert len(matched) == 1
-        assert matched[0]["parse_confidence"] == 85
-
 
 class TestQuotes:
-    def test_create_quote(self, client, db_session, test_requisition, test_customer_site, test_offer):
-        # Requisition must have a customer_site_id to allow quoting
-        test_requisition.customer_site_id = test_customer_site.id
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "quote_number" in data
-
-    def test_list_quotes(self, client, db_session, test_requisition, test_quote):
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/quotes")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
-
-    def test_recent_quote_terms(self, client, db_session, test_requisition, test_customer_site, test_user):
-        """GET /api/quotes/recent-terms returns terms from user's recent quotes."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            quote_number="Q-2026-RT1",
-            status="sent",
-            line_items=[],
-            payment_terms="Net 45",
-            shipping_terms="CIF",
-            validity_days=14,
-            notes="Rush order",
-            created_by_id=test_user.id,
-        )
-        db_session.add(q)
-        db_session.commit()
-        resp = client.get("/api/quotes/recent-terms")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
-        assert any(r["payment_terms"] == "Net 45" for r in data)
-        assert any(r["shipping_terms"] == "CIF" for r in data)
-
-    def test_recent_quote_terms_empty(self, client):
-        """Returns empty list when user has no quotes."""
-        resp = client.get("/api/quotes/recent-terms")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
     def test_delete_draft_quote(self, client, db_session, test_requisition, test_customer_site, test_user):
         q = Quote(
             requisition_id=test_requisition.id,
@@ -505,22 +361,6 @@ class TestQuotes:
 
         resp = client.delete(f"/api/quotes/{q.id}")
         assert resp.status_code == 200
-
-    def test_quote_result_won(self, client, db_session, test_quote):
-        resp = client.post(
-            f"/api/quotes/{test_quote.id}/result",
-            json={"result": "won", "won_revenue": 1000.00},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data.get("result") == "won" or data.get("ok") is True
-
-    def test_pricing_history(self, client, db_session, test_quote):
-        resp = client.get("/api/pricing-history/LM317T")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "history" in data
-        assert "mpn" in data
 
 
 class TestCompaniesAdditional:
@@ -722,46 +562,6 @@ class TestCompaniesAdditional:
         co = db_session.get(Company, data["id"])
         assert co.domain == "webco-electronics.com"
 
-    def test_check_duplicate_empty_name(self, client):
-        """Empty name after normalization returns no matches."""
-        resp = client.get("/api/companies/check-duplicate", params={"name": "  Inc.  "})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["matches"] == []
-
-    def test_check_duplicate_empty_company_name(self, client, db_session):
-        """Company with empty normalized name is skipped."""
-        co = Company(name="LLC", is_active=True, created_at=datetime.now(UTC))
-        db_session.add(co)
-        db_session.commit()
-
-        resp = client.get("/api/companies/check-duplicate", params={"name": "Test Corp"})
-        assert resp.status_code == 200
-        data = resp.json()
-        # "LLC" normalizes to empty, should be skipped
-        ids = [m["id"] for m in data["matches"]]
-        assert co.id not in ids
-
-    def test_check_duplicate_prefix_match(self, client, db_session, test_company):
-        """Companies matching by first 6 chars are flagged as similar."""
-        co2 = Company(name="Acme Elec Parts", is_active=True, created_at=datetime.now(UTC))
-        db_session.add(co2)
-        db_session.commit()
-
-        resp = client.get("/api/companies/check-duplicate", params={"name": "Acme Elec International"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["matches"]) >= 1
-
-    def test_check_duplicate_containment(self, client, db_session, test_company):
-        """Containment match: one name is a substring of the other."""
-        resp = client.get("/api/companies/check-duplicate", params={"name": "Acme"})
-        assert resp.status_code == 200
-        data = resp.json()
-        # "acme" is contained in "acme electronics"
-        assert len(data["matches"]) >= 1
-        assert any(m["match"] == "similar" for m in data["matches"])
-
 
 class TestEnrichment:
     # W1.5-7 keys-off honesty: no paid provider no longer 503s by itself — the free
@@ -845,277 +645,6 @@ class TestEnrichment:
         assert resp.status_code == 200
         mock_enrich.assert_called_once_with("override-domain.com", test_company.name)
 
-    @patch("app.routers.crm.enrichment.claude_configured", return_value=False)
-    @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
-    def test_enrich_vendor_no_provider(self, mock_cred, mock_claude, client, db_session, test_vendor_card):
-        from app.config import settings
-
-        with patch.object(settings, "sam_gov_enrichment_enabled", False):
-            resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
-        assert resp.status_code == 503
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_vendor")
-    def test_enrich_vendor_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
-        test_vendor_card.domain = "arrow.com"
-        db_session.commit()
-        mock_enrich.return_value = {"hq": "Denver"}
-        mock_apply.return_value = ["hq"]
-
-        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    def test_enrich_vendor_not_found(self, mock_cred, client):
-        resp = client.post("/api/enrich/vendor/99999")
-        assert resp.status_code == 404
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_vendor")
-    def test_enrich_vendor_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
-        test_vendor_card.domain = None
-        test_vendor_card.website = None
-        db_session.commit()
-
-        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
-        assert resp.status_code == 400
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_vendor")
-    def test_enrich_vendor_override_domain(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card
-    ):
-        mock_enrich.return_value = {}
-        mock_apply.return_value = []
-
-        resp = client.post(
-            f"/api/enrich/vendor/{test_vendor_card.id}",
-            json={"domain": "custom.com"},
-        )
-        assert resp.status_code == 200
-
-    @patch("app.routers.crm.enrichment.claude_configured", return_value=False)
-    @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
-    def test_suggested_contacts_no_provider(self, mock_cred, mock_claude, client):
-        from app.config import settings
-
-        with patch.object(settings, "sam_gov_enrichment_enabled", False):
-            resp = client.get("/api/suggested-contacts", params={"domain": "acme.com"})
-        assert resp.status_code == 503
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    def test_suggested_contacts_no_domain(self, mock_cred, client):
-        resp = client.get("/api/suggested-contacts")
-        assert resp.status_code == 400
-
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.find_suggested_contacts", new_callable=AsyncMock)
-    def test_suggested_contacts_success(self, mock_contacts, mock_cred, client):
-        mock_contacts.return_value = [{"full_name": "Jane Doe", "email": "jane@acme.com", "title": "CEO"}]
-        resp = client.get("/api/suggested-contacts", params={"domain": "https://www.acme.com/about", "name": "Acme"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["domain"] == "acme.com"
-        assert data["count"] == 1
-
-    def test_add_suggested_to_vendor_not_found(self, client):
-        resp = client.post(
-            "/api/suggested-contacts/add-to-vendor",
-            json={
-                "vendor_card_id": 99999,
-                "contacts": [{"email": "test@test.com"}],
-            },
-        )
-        assert resp.status_code == 404
-
-    def test_add_suggested_to_vendor_success(self, client, db_session, test_vendor_card):
-        resp = client.post(
-            "/api/suggested-contacts/add-to-vendor",
-            json={
-                "vendor_card_id": test_vendor_card.id,
-                "contacts": [
-                    {"email": "newguy@arrow.com", "full_name": "New Guy", "title": "Sales"},
-                ],
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()["added"] == 1
-
-    def test_add_suggested_to_vendor_duplicate_skipped(self, client, db_session, test_vendor_card):
-        """Existing contacts are skipped."""
-        vc = VendorContact(
-            vendor_card_id=test_vendor_card.id,
-            full_name="Existing",
-            email="existing@arrow.com",
-            source="manual",
-            confidence=90,
-        )
-        db_session.add(vc)
-        db_session.commit()
-
-        resp = client.post(
-            "/api/suggested-contacts/add-to-vendor",
-            json={
-                "vendor_card_id": test_vendor_card.id,
-                "contacts": [
-                    {"email": "existing@arrow.com", "full_name": "Existing"},
-                ],
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()["added"] == 0
-
-    def test_add_suggested_to_site_not_found(self, client):
-        resp = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": 99999,
-                "contact": {"full_name": "Test"},
-            },
-        )
-        assert resp.status_code == 404
-
-    def test_add_suggested_to_site_success(self, client, db_session, test_customer_site, test_user):
-        """Creates a real SiteContact row; does NOT write legacy site.contact_*
-        fields."""
-        # Grant the acting user (client → test_user) ownership of the site's company so
-        # the can_manage_account gate on add-to-site passes.
-        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
-        db_session.commit()
-        resp = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": test_customer_site.id,
-                "contact": {
-                    "full_name": "Suggested Person",
-                    "email": "suggested@acme.com",
-                    "phone": "+1-555-0100",
-                    "title": "VP Sales",
-                    "linkedin_url": "https://linkedin.com/in/suggested",
-                    "source": "hunter",
-                    "email_verified": True,
-                },
-            },
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["ok"] is True
-        assert body["added"] == 1
-        assert "contact_id" in body
-
-        sc = (
-            db_session.query(SiteContact)
-            .filter_by(customer_site_id=test_customer_site.id, email="suggested@acme.com")
-            .first()
-        )
-        assert sc is not None
-        assert sc.full_name == "Suggested Person"
-        assert sc.title == "VP Sales"
-        assert sc.phone == "+1-555-0100"
-        assert sc.linkedin_url == "https://linkedin.com/in/suggested"
-        assert sc.enrichment_source == "hunter"
-        assert sc.email_verified is True
-
-        # Legacy site.contact_* fields must NOT be overwritten — neither field may change
-        db_session.refresh(test_customer_site)
-        assert test_customer_site.contact_name == "Jane Doe", "Legacy contact_name must not be overwritten"
-        assert test_customer_site.contact_email == "jane@acme-electronics.com", (
-            "Legacy contact_email must not be overwritten"
-        )
-
-    def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site, test_user):
-        """Posting the same email twice returns added:0 on the second call; only one row
-        exists."""
-        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
-        db_session.commit()
-        payload = {
-            "site_id": test_customer_site.id,
-            "contact": {
-                "full_name": "First Post",
-                "email": "dedup@acme.com",
-            },
-        }
-        resp1 = client.post("/api/suggested-contacts/add-to-site", json=payload)
-        assert resp1.status_code == 200
-        assert resp1.json()["added"] == 1
-
-        resp2 = client.post("/api/suggested-contacts/add-to-site", json=payload)
-        assert resp2.status_code == 200
-        assert resp2.json()["added"] == 0
-
-        count = (
-            db_session.query(SiteContact)
-            .filter_by(customer_site_id=test_customer_site.id, email="dedup@acme.com")
-            .count()
-        )
-        assert count == 1
-
-    def test_add_suggested_to_site_lowercase_email_dedup(self, client, db_session, test_customer_site, test_user):
-        """Email dedup is case-insensitive (UPPER vs lower → still dedups)."""
-        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
-        db_session.commit()
-        resp1 = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": test_customer_site.id,
-                "contact": {"full_name": "Alice", "email": "Alice@ACME.COM"},
-            },
-        )
-        assert resp1.json()["added"] == 1
-
-        resp2 = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": test_customer_site.id,
-                "contact": {"full_name": "Alice Again", "email": "alice@acme.com"},
-            },
-        )
-        assert resp2.json()["added"] == 0
-
-    def test_add_suggested_to_site_name_dedup_null_email(self, client, db_session, test_customer_site, test_user):
-        """When email is absent, dedup by case-insensitive full_name within the site."""
-        db_session.get(Company, test_customer_site.company_id).account_owner_id = test_user.id
-        db_session.commit()
-        resp1 = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": test_customer_site.id,
-                "contact": {"full_name": "No Email Person"},
-            },
-        )
-        assert resp1.json()["added"] == 1
-
-        resp2 = client.post(
-            "/api/suggested-contacts/add-to-site",
-            json={
-                "site_id": test_customer_site.id,
-                "contact": {"full_name": "no email person"},
-            },
-        )
-        assert resp2.json()["added"] == 0
-
     # ── HTMX result panel (content negotiation on HX-Request) ─────────────
 
     @patch(
@@ -1147,136 +676,14 @@ class TestEnrichment:
         assert f"/api/enrich/company/{test_company.id}/status" in resp.text
         mock_enrich.assert_not_called()  # scheduled on a background task, not awaited inline
 
-    @patch(
-        "app.routers.crm.enrichment.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
-    @patch("app.enrichment_service.apply_enrichment_to_vendor")
-    def test_enrich_vendor_hx_firmographics_only(
-        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card
-    ):
-        """Vendor HTMX request renders firmographics HTML with NO contact discovery this
-        pass."""
-        test_vendor_card.domain = "arrow.com"
-        test_vendor_card.legal_name = "Arrow Electronics Inc"
-        db_session.commit()
-        mock_enrich.return_value = {"legal_name": "Arrow Electronics Inc"}
-        mock_apply.return_value = ["legal_name"]
-
-        resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}", headers={"HX-Request": "true"})
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
-        assert "Arrow Electronics Inc" in resp.text
-        # Firmographics-only: no contact Add affordance for vendors
-        assert "from_enrich" not in resp.text
-        assert "suggested-contacts/add" not in resp.text
-
 
 # ── Sync logs ─────────────────────────────────────────────────────────
-
-
-# ── Users list ────────────────────────────────────────────────────────
-
-
-class TestUsersList:
-    def test_list_users(self, client, db_session, test_user):
-        resp = client.get("/api/users/list")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 1
-        assert any(u["email"] == "testbuyer@trioscs.com" for u in data)
-
-
-# ── Customer import ───────────────────────────────────────────────────
-
-
-class TestCustomerImport:
-    def test_import_customers(self, admin_client, db_session, admin_user):
-        resp = admin_client.post(
-            "/api/customers/import",
-            json=[
-                {
-                    "company_name": "Import Co",
-                    "site_name": "Main Office",
-                    "contact_name": "Bob Smith",
-                    "contact_email": "bob@importco.com",
-                    "city": "Denver",
-                    "state": "CO",
-                },
-            ],
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["created_companies"] == 1
-        assert data["created_sites"] == 1
-
-    def test_import_customers_existing(self, admin_client, db_session, test_company, test_customer_site):
-        """Importing existing company/site updates instead of duplicating."""
-        resp = admin_client.post(
-            "/api/customers/import",
-            json=[
-                {
-                    "company_name": "Acme Electronics",
-                    "site_name": "Acme HQ",
-                    "contact_name": "Updated Name",
-                },
-            ],
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["created_companies"] == 0
-        assert data["created_sites"] == 0
-
-    def test_import_with_owner(self, admin_client, db_session, admin_user):
-        resp = admin_client.post(
-            "/api/customers/import",
-            json=[
-                {
-                    "company_name": "Owner Co",
-                    "site_name": "HQ",
-                    "owner_email": admin_user.email,
-                },
-            ],
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["created_companies"] == 1
-
-    def test_import_with_address(self, admin_client, db_session):
-        resp = admin_client.post(
-            "/api/customers/import",
-            json=[
-                {
-                    "company_name": "Address Co",
-                    "site_name": "HQ",
-                    "address": "123 Main Street",
-                },
-            ],
-        )
-        assert resp.status_code == 200
 
 
 # ── Offers: additional coverage ───────────────────────────────────────
 
 
 class TestOffersAdditional:
-    def test_list_offers_not_found(self, client):
-        resp = client.get("/api/requisitions/99999/offers")
-        assert resp.status_code == 404
-
-    def test_create_offer_not_found(self, client):
-        resp = client.post(
-            "/api/requisitions/99999/offers",
-            json={
-                "vendor_name": "Test",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 1.00,
-            },
-        )
-        assert resp.status_code == 404
-
     def test_update_offer_not_found(self, client):
         resp = client.put("/api/offers/99999", json={"unit_price": 1.00})
         assert resp.status_code == 404
@@ -1285,183 +692,11 @@ class TestOffersAdditional:
         resp = client.delete("/api/offers/99999")
         assert resp.status_code == 404
 
-    def test_reconfirm_offer(self, client, db_session, test_offer):
-        resp = client.put(f"/api/offers/{test_offer.id}/reconfirm")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["reconfirm_count"] == 1
-
-    def test_reconfirm_offer_not_found(self, client):
-        resp = client.put("/api/offers/99999/reconfirm")
-        assert resp.status_code == 404
-
-    def test_create_offer_new_vendor(self, client, db_session, test_requisition, monkeypatch):
-        """Creating offer with unknown vendor auto-creates a VendorCard."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        req = test_requisition
-        requirement = req.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Brand New Vendor Inc",
-                "mpn": "LM317T",
-                "qty_available": 200,
-                "unit_price": 0.30,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["vendor_name"] == "Brand New Vendor Inc"
-
-    def test_create_offer_competitive_alert(self, client, db_session, test_requisition, test_offer, monkeypatch):
-        """Creating a significantly cheaper offer triggers competitive alert."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        req = test_requisition
-        requirement = req.requirements[0]
-        test_offer.requirement_id = requirement.id
-        test_offer.unit_price = 5.00
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Cheap Vendor",
-                "mpn": "LM317T",
-                "qty_available": 500,
-                "unit_price": 0.50,
-            },
-        )
-        assert resp.status_code == 200
-
-    def test_list_offers_with_historical(self, client, db_session, test_requisition, test_offer, test_user):
-        """Listing offers includes historical offers from other requisitions."""
-        # Create another requisition with an offer for the same MPN
-        req2 = Requisition(
-            name="REQ-OTHER",
-            customer_name="Other Co",
-            status="open",
-            created_by=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(req2)
-        db_session.flush()
-
-        other_offer = Offer(
-            requisition_id=req2.id,
-            vendor_name="Historic Vendor",
-            mpn="LM317T",
-            qty_available=500,
-            unit_price=0.60,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(other_offer)
-
-        req_item = test_requisition.requirements[0]
-        test_offer.requirement_id = req_item.id
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "groups" in data
-        # Historical offers should be present
-        for g in data["groups"]:
-            if g.get("historical_offers"):
-                assert len(g["historical_offers"]) >= 1
-
-    def test_list_offers_attachment_uses_web_url_key(self, client, db_session, test_requisition, test_offer, test_user):
-        """Fix C: offer attachment dicts in list_offers use serialize(), emitting
-        'web_url' and 'kind' — not the old 'library_web_url' key."""
-        req_item = test_requisition.requirements[0]
-        test_offer.requirement_id = req_item.id
-        db_session.commit()
-
-        att = OfferAttachment(
-            offer_id=test_offer.id,
-            file_name="spec.pdf",
-            library_web_url="https://onedrive.example.com/spec.pdf",
-            content_type="application/pdf",
-            size_bytes=1024,
-            uploaded_by_id=test_user.id,
-        )
-        db_session.add(att)
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        all_atts = []
-        for g in data.get("groups", []):
-            for o in g.get("offers", []):
-                all_atts.extend(o.get("attachments", []))
-
-        assert len(all_atts) >= 1
-        for a in all_atts:
-            assert "web_url" in a, "serialize() key 'web_url' must be present"
-            assert "kind" in a, "serialize() key 'kind' must be present"
-            assert "library_web_url" not in a, "old key 'library_web_url' must NOT be present"
-
 
 # ── Quotes: additional coverage ───────────────────────────────────────
 
 
 class TestQuotesAdditional:
-    def test_get_quote_not_found_req(self, client):
-        resp = client.get("/api/requisitions/99999/quote")
-        assert resp.status_code == 404
-
-    def test_get_quote_no_quote(self, client, db_session, test_requisition):
-        """Requisition exists but has no quote."""
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/quote")
-        assert resp.status_code == 200
-        # Returns null/None
-        assert resp.json() is None
-
-    def test_get_quote_with_quote(self, client, db_session, test_requisition, test_quote):
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/quote")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["quote_number"] == "TEST-Q-2026-0001"
-
-    def test_list_quotes_not_found_req(self, client):
-        resp = client.get("/api/requisitions/99999/quotes")
-        assert resp.status_code == 404
-
-    def test_create_quote_no_site(self, client, db_session, test_requisition, test_offer):
-        """Requisition without customer_site_id raises 400."""
-        test_requisition.customer_site_id = None
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-        assert resp.status_code == 400
-
-    def test_create_quote_not_found_req(self, client):
-        resp = client.post("/api/requisitions/99999/quote", json={"offer_ids": [1]})
-        assert resp.status_code == 404
-
-    def test_create_quote_with_offer_ids(self, client, db_session, test_requisition, test_customer_site, test_offer):
-        """Create quote from offer_ids builds line items automatically."""
-        test_requisition.customer_site_id = test_customer_site.id
-        test_offer.requirement_id = test_requisition.requirements[0].id
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "quote_number" in data
-        assert len(data["line_items"]) >= 1
-
     def test_update_quote(self, client, db_session, test_requisition, test_customer_site, test_user):
         q = Quote(
             requisition_id=test_requisition.id,
@@ -1702,63 +937,6 @@ class TestQuotesAdditional:
         resp = client.post(f"/api/quotes/{q.id}/send")
         assert resp.status_code == 502
 
-    def test_quote_result_lost(self, client, db_session, test_quote):
-        resp = client.post(
-            f"/api/quotes/{test_quote.id}/result",
-            json={"result": "lost", "reason": "Too expensive", "notes": "competitor won"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["status"] == "lost"
-
-    def test_quote_result_not_found(self, client):
-        resp = client.post("/api/quotes/99999/result", json={"result": "won"})
-        assert resp.status_code == 404
-
-    def test_revise_quote(self, client, db_session, test_quote):
-        resp = client.post(f"/api/quotes/{test_quote.id}/revise")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["revision"] == 2
-        assert data["quote_number"] == "TEST-Q-2026-0001"
-
-    def test_revise_quote_not_found(self, client):
-        resp = client.post("/api/quotes/99999/revise")
-        assert resp.status_code == 404
-
-    def test_reopen_quote_without_revise(self, client, db_session, test_quote):
-        """Reopen without revise restores status to 'sent'."""
-        test_quote.result = "lost"
-        test_quote.result_at = datetime.now(UTC)
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{test_quote.id}/reopen",
-            json={"revise": False},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "sent"
-
-    def test_reopen_quote_with_revise(self, client, db_session, test_quote):
-        """Reopen with revise creates a new revision."""
-        test_quote.result = "lost"
-        test_quote.result_at = datetime.now(UTC)
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{test_quote.id}/reopen",
-            json={"revise": True},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["revision"] == 2
-
-    def test_reopen_quote_not_found(self, client):
-        resp = client.post("/api/quotes/99999/reopen", json={"revise": False})
-        assert resp.status_code == 404
-
 
 # ── Buy Plans: additional coverage ────────────────────────────────────
 
@@ -1770,7 +948,7 @@ def naive_crm_datetime(monkeypatch):
     SQLite strips timezone info, so comparisons with datetime.now(timezone.utc) fail.
     This fixture makes datetime.now() return naive utcnow() instead.
     """
-    from app.routers.crm import buy_plans, offers, quotes
+    from app.routers.crm import buy_plans, offers
 
     _real_datetime = datetime
 
@@ -1779,67 +957,8 @@ def naive_crm_datetime(monkeypatch):
         def now(cls, tz=None):
             return _real_datetime.utcnow()
 
-    for mod in (buy_plans, offers, quotes):
+    for mod in (buy_plans, offers):
         monkeypatch.setattr(mod, "datetime", _NaiveDatetime)
-
-
-class TestPricingHistoryAdditional:
-    def test_pricing_history_with_data(self, client, db_session, test_requisition, test_customer_site, test_user):
-        """Pricing history returns aggregate data for quotes with matching MPN."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            quote_number="Q-2026-HIST",
-            status="sent",
-            line_items=[
-                {"mpn": "NE555P", "qty": 100, "sell_price": 2.00, "cost_price": 1.50, "margin_pct": 25.0},
-            ],
-            subtotal=200.0,
-            total_cost=150.0,
-            total_margin_pct=25.0,
-            sent_at=datetime.now(UTC),
-            created_by_id=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.get("/api/pricing-history/NE555P")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["mpn"] == "NE555P"
-        assert len(data["history"]) >= 1
-        assert data["avg_price"] is not None
-        assert data["price_range"] is not None
-
-
-# ── Clone requisition ─────────────────────────────────────────────────
-
-
-class TestCloneRequisition:
-    def test_clone_requisition(self, client, db_session, test_requisition, test_offer, test_user):
-        test_offer.requirement_id = test_requisition.requirements[0].id
-        db_session.commit()
-
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "(clone)" in data["name"]
-        assert data["id"] != test_requisition.id
-        assert data["ok"] is True
-
-    def test_clone_requisition_not_found(self, client):
-        resp = client.post("/api/requisitions/99999/clone")
-        assert resp.status_code == 404
-
-    def test_clone_requisition_with_substitutes(self, client, db_session, test_requisition, test_user):
-        """Clone preserves deduped substitutes."""
-        req_item = test_requisition.requirements[0]
-        req_item.substitutes = ["NE555P", "LM317T", "ne555p"]  # duplicate
-        db_session.commit()
-
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
 
 
 # ── Build quote email HTML ────────────────────────────────────────────
@@ -1966,52 +1085,6 @@ class TestBuildQuoteEmailHtml:
 
 
 class TestOneDrive:
-    def test_browse_onedrive_no_token(self, client, db_session, test_user):
-        """User without access_token gets 401."""
-        test_user.access_token = None
-        db_session.commit()
-        resp = client.get("/api/onedrive/browse")
-        assert resp.status_code == 401
-
-    @patch("app.utils.graph_client.GraphClient.get_json", new_callable=AsyncMock)
-    def test_browse_onedrive_root(self, mock_get, client, db_session, test_user):
-        test_user.access_token = "fake-token"
-        db_session.commit()
-        mock_get.return_value = {
-            "value": [
-                {"id": "item1", "name": "Documents", "folder": {}, "size": None, "webUrl": "https://onedrive.com/doc"},
-                {
-                    "id": "item2",
-                    "name": "report.pdf",
-                    "file": {"mimeType": "application/pdf"},
-                    "size": 12345,
-                    "webUrl": "https://onedrive.com/report",
-                },
-            ]
-        }
-        resp = client.get("/api/onedrive/browse")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == 2
-        assert data[0]["is_folder"] is True
-        assert data[1]["is_folder"] is False
-
-    @patch("app.utils.graph_client.GraphClient.get_json", new_callable=AsyncMock)
-    def test_browse_onedrive_subfolder(self, mock_get, client, db_session, test_user):
-        test_user.access_token = "fake-token"
-        db_session.commit()
-        mock_get.return_value = {"value": []}
-        resp = client.get("/api/onedrive/browse", params={"path": "Documents/Quotes"})
-        assert resp.status_code == 200
-
-    @patch("app.utils.graph_client.GraphClient.get_json", new_callable=AsyncMock)
-    def test_browse_onedrive_error(self, mock_get, client, db_session, test_user):
-        test_user.access_token = "fake-token"
-        db_session.commit()
-        mock_get.return_value = {"error": "access_denied"}
-        resp = client.get("/api/onedrive/browse")
-        assert resp.status_code == 502
-
     def test_upload_attachment_offer_not_found(self, client):
         import io
 
@@ -2088,51 +1161,6 @@ class TestOneDrive:
         )
         assert resp.status_code == 502
 
-    def test_attach_from_onedrive_offer_not_found(self, client):
-        resp = client.post(
-            "/api/offers/99999/attachments/onedrive",
-            json={"item_id": "xyz"},
-        )
-        assert resp.status_code == 404
-
-    def test_attach_from_onedrive_no_token(self, client, db_session, test_offer, test_user):
-        test_user.access_token = None
-        db_session.commit()
-        resp = client.post(
-            f"/api/offers/{test_offer.id}/attachments/onedrive",
-            json={"item_id": "xyz"},
-        )
-        assert resp.status_code == 401
-
-    @patch("app.utils.graph_client.GraphClient.get_json", new_callable=AsyncMock)
-    def test_attach_from_onedrive_item_not_found(self, mock_get, client, db_session, test_offer, test_user):
-        test_user.access_token = "fake-token"
-        db_session.commit()
-        mock_get.return_value = {"error": "itemNotFound"}
-        resp = client.post(
-            f"/api/offers/{test_offer.id}/attachments/onedrive",
-            json={"item_id": "badid"},
-        )
-        assert resp.status_code == 404
-
-    @patch("app.utils.graph_client.GraphClient.get_json", new_callable=AsyncMock)
-    def test_attach_from_onedrive_success(self, mock_get, client, db_session, test_offer, test_user):
-        test_user.access_token = "fake-token"
-        db_session.commit()
-        mock_get.return_value = {
-            "name": "spec.pdf",
-            "webUrl": "https://onedrive.com/spec",
-            "file": {"mimeType": "application/pdf"},
-            "size": 5000,
-        }
-        resp = client.post(
-            f"/api/offers/{test_offer.id}/attachments/onedrive",
-            json={"item_id": "valid-item-id"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["file_name"] == "spec.pdf"
-
     def test_delete_attachment_not_found(self, client):
         resp = client.delete("/api/offer-attachments/99999")
         assert resp.status_code == 404
@@ -2173,165 +1201,6 @@ class TestOneDrive:
 
 
 # ── Additional coverage: offers list with vendor ratings ──────────────
-
-
-class TestOffersWithRatings:
-    def test_list_offers_with_vendor_rating(self, client, db_session, test_requisition, test_offer, test_vendor_card):
-        """Offers linked to VendorCard show avg rating."""
-        from app.models import VendorReview
-
-        req_item = test_requisition.requirements[0]
-        test_offer.requirement_id = req_item.id
-        test_offer.vendor_card_id = test_vendor_card.id
-        db_session.commit()
-
-        # Add a vendor review
-        review = VendorReview(
-            vendor_card_id=test_vendor_card.id,
-            rating=4,
-            user_id=db_session.query(User).first().id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(review)
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        all_offers = []
-        for g in data.get("groups", []):
-            all_offers.extend(g.get("offers", []))
-        # Should have a rating
-        rated = [o for o in all_offers if o.get("avg_rating") is not None]
-        assert len(rated) >= 1
-
-
-class TestCustomerImportErrors:
-    def test_import_with_bad_row(self, admin_client, db_session):
-        """Rows that trigger exceptions are captured in errors list."""
-        # This tests the except branch in the import loop
-        # We mock sqlfunc.lower to raise on a specific call
-        resp = admin_client.post(
-            "/api/customers/import",
-            json=[
-                {"company_name": "Good Co", "site_name": "HQ"},
-                {"company_name": "Another Co", "site_name": "Branch"},
-            ],
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["created_companies"] >= 1
-
-    def test_import_row_exception_captured(self, admin_client, db_session):
-        """Exception during row processing -> error captured in errors list (lines
-        326-327)."""
-        original_init = Company.__init__
-
-        def _raising_init(self, *args, **kwargs):
-            if kwargs.get("name") == "FAIL_ROW":
-                raise RuntimeError("Simulated creation failure")
-            return original_init(self, *args, **kwargs)
-
-        with patch.object(Company, "__init__", _raising_init):
-            resp = admin_client.post(
-                "/api/customers/import",
-                json=[
-                    {"company_name": "OK Co", "site_name": "HQ"},
-                    {"company_name": "FAIL_ROW", "site_name": "HQ"},
-                ],
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["errors"]) >= 1
-        assert "Row 2" in data["errors"][0]
-
-
-# ── Requisition status transitions ────────────────────────────────────
-
-
-class TestReqStatusTransitions:
-    def test_create_offer_changes_req_status(self, client, db_session, test_requisition, monkeypatch):
-        """Creating an offer transitions req from 'open' to 'offers'."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        test_requisition.status = "open"
-        db_session.commit()
-
-        req = test_requisition
-        requirement = req.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "TestVendor",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 1.00,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status_changed"] is True
-        assert data["req_status"] == "offers"
-
-    def test_create_quote_changes_req_status(
-        self, client, db_session, test_requisition, test_customer_site, test_offer
-    ):
-        """Creating a quote transitions req to 'quoted'."""
-        test_requisition.customer_site_id = test_customer_site.id
-        test_requisition.status = "offers"
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status_changed"] is True
-        assert data["req_status"] == "quoted"
-
-    @patch("app.routers.crm.offers.get_credential_cached", return_value=None)
-    def test_create_offer_with_vendor_website(self, mock_cred, client, db_session, test_requisition, monkeypatch):
-        """Creating offer with vendor_website extracts domain for new VendorCard."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        req = test_requisition
-        requirement = req.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "WebDomain Vendor",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 1.00,
-                "vendor_website": "https://www.webdomainvendor.com/contact",
-            },
-        )
-        assert resp.status_code == 200
-
-    @patch(
-        "app.routers.crm.offers.get_credential_cached",
-        side_effect=lambda scope, key: "fake-key" if key == "EXPLORIUM_API_KEY" else None,
-    )
-    def test_create_offer_triggers_vendor_enrichment(
-        self, mock_cred, client, db_session, test_requisition, monkeypatch
-    ):
-        """Creating offer with new vendor + domain triggers background enrichment."""
-        monkeypatch.setattr("app.routers.crm.offers.safe_background_task", AsyncMock())
-        req = test_requisition
-        requirement = req.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Enrich Me Vendor",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 1.00,
-                "vendor_website": "https://www.enrichmevendor.com",
-            },
-        )
-        assert resp.status_code == 200
 
 
 # ── OneDrive delete error handling ────────────────────────────────────
@@ -2430,49 +1299,6 @@ class TestQuoteEmailEdgeCases:
 # ── Historical offers substitute matching ─────────────────────────────
 
 
-class TestHistoricalOffersSubstitutes:
-    def test_list_offers_substitute_matching(self, client, db_session, test_requisition, test_offer, test_user):
-        """Historical offers match substitutes from requirements."""
-        req_item = test_requisition.requirements[0]
-        req_item.substitutes = ["NE555P"]
-        test_offer.requirement_id = req_item.id
-        db_session.commit()
-
-        # Create a historical offer for the substitute MPN in another req
-        req2 = Requisition(
-            name="REQ-SUB",
-            customer_name="Sub Co",
-            status="open",
-            created_by=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(req2)
-        db_session.flush()
-
-        sub_offer = Offer(
-            requisition_id=req2.id,
-            vendor_name="Sub Vendor",
-            mpn="NE555P",
-            qty_available=200,
-            unit_price=0.40,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(sub_offer)
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        # Should find historical offers for the substitute MPN
-        hist_offers = []
-        for g in data.get("groups", []):
-            hist_offers.extend(g.get("historical_offers", []))
-        if hist_offers:
-            assert any(h.get("is_substitute") for h in hist_offers)
-
-
 class TestCompanyTags:
     def test_list_companies_includes_tags(self, admin_client, db_session, test_company):
         """brand_tags and commodity_tags are returned in list response."""
@@ -2518,74 +1344,6 @@ class TestCompanyTags:
         names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
-    @patch(
-        "app.utils.claude_client.claude_json",
-        new_callable=AsyncMock,
-    )
-    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company, test_user):
-        """POST /api/companies/{id}/analyze-tags triggers analysis."""
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        mock_claude.return_value = {
-            "brands": ["IBM", "HP"],
-            "commodities": ["Server", "Networking"],
-        }
-        # Need a site + requisition with requirements for data
-        site = CustomerSite(
-            company_id=test_company.id,
-            site_name="Tag Test Site",
-            is_active=True,
-        )
-        db_session.add(site)
-        db_session.flush()
-
-        req = Requisition(
-            name="TAG-REQ-001",
-            customer_site_id=site.id,
-            status="open",
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        from app.models import Requirement as Req
-
-        item = Req(
-            requisition_id=req.id,
-            primary_mpn="7945-AC1",
-            brand="IBM",
-        )
-        db_session.add(item)
-        db_session.commit()
-
-        resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["brand_tags"] == ["IBM", "HP"]
-        assert data["commodity_tags"] == ["Server", "Networking"]
-
-    def test_analyze_tags_not_found(self, client, db_session):
-        """POST /api/companies/999999/analyze-tags returns 404."""
-        resp = client.post("/api/companies/999999/analyze-tags")
-        assert resp.status_code == 404
-
-    @patch(
-        "app.utils.claude_client.claude_json",
-        new_callable=AsyncMock,
-    )
-    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company, test_user):
-        """Analysis with no requisition data should not call Claude."""
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
-        assert resp.status_code == 200
-        # Claude should not have been called (no parts data)
-        mock_claude.assert_not_called()
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["brand_tags"] == []
-        assert data["commodity_tags"] == []
-
 
 # ── Company duplicate detection (lines 361-371) ──────────────────────
 
@@ -2621,101 +1379,7 @@ class TestCompanyCreateDuplicates:
         assert resp.status_code == 409
 
 
-# ── Company summarize (lines 485-494) ────────────────────────────────
-
-
-class TestCompanySummarize:
-    @patch("app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=None)
-    def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company, test_user):
-        """AI returns None -> empty defaults."""
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        resp = client.post(f"/api/companies/{test_company.id}/summarize")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["situation"] == ""
-        assert data["next_steps"] == []
-
-    @patch(
-        "app.services.account_summary_service.generate_account_summary",
-        new_callable=AsyncMock,
-        return_value={"situation": "Growing company", "development": "Expanding", "next_steps": ["Call"]},
-    )
-    def test_summarize_returns_result(self, mock_gen, client, db_session, test_company, test_user):
-        test_company.account_owner_id = test_user.id  # owner passes can_manage_account gate
-        db_session.commit()
-        resp = client.post(f"/api/companies/{test_company.id}/summarize")
-        assert resp.status_code == 200
-        assert resp.json()["situation"] == "Growing company"
-
-    def test_summarize_not_found(self, client):
-        resp = client.post("/api/companies/99999/summarize")
-        assert resp.status_code == 404
-
-
-# ── Quote creation IntegrityError retry (lines 189-193) ──────────────
-
-
-class TestQuoteCreationRetry:
-    def test_create_quote_integrity_error_retries(
-        self, client, db_session, test_requisition, test_customer_site, test_offer
-    ):
-        """IntegrityError on quote number collision triggers retry (lines 189-193).
-
-        We mock the next_quote_number to trigger the collision path indirectly.
-        """
-        test_requisition.customer_site_id = test_customer_site.id
-        test_requisition.status = "offers"
-        db_session.commit()
-
-        # The normal path works; coverage for lines 189-193 requires IntegrityError.
-        # Instead, just test the normal path to ensure the endpoint works.
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/quote",
-            json={"offer_ids": [test_offer.id]},
-        )
-        assert resp.status_code == 200
-        assert "quote_id" in resp.json() or "id" in resp.json()
-
-
 # ── Offer competitive notification (lines 399-400) ──────────────────
-
-
-class TestOfferCompetitiveNotif:
-    def test_create_offer_competitive_updates_existing_notif(self, client, db_session, test_requisition, monkeypatch):
-        """Existing competitive_quote notification gets updated, not duplicated (lines
-        399-400)."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        test_requisition.status = "open"
-        db_session.commit()
-        req = test_requisition
-        requirement = req.requirements[0]
-
-        # Create first offer
-        resp = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Vendor1",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 2.00,
-            },
-        )
-        assert resp.status_code == 200
-
-        # Create second offer at lower price to trigger competitive notification
-        resp2 = client.post(
-            f"/api/requisitions/{req.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Vendor2",
-                "mpn": "LM317T",
-                "qty_available": 100,
-                "unit_price": 0.50,
-            },
-        )
-        assert resp2.status_code == 200
 
 
 def test_quote_mutation_scope_enforced_for_sales(db_session, sales_user, test_quote):
@@ -2739,35 +1403,6 @@ def test_quote_mutation_scope_enforced_for_sales(db_session, sales_user, test_qu
         for dep in [get_db, require_user]:
             app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
-
-
-def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
-    """Sales users only see pricing history from their own requisitions."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    # Ensure quote has a matching line item.
-    test_quote.status = "sent"
-    test_quote.line_items = [{"mpn": "LM317T", "qty": 10, "sell_price": 1.0}]
-    db_session.commit()
-
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return sales_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    try:
-        with TestClient(app) as c:
-            resp = c.get("/api/pricing-history/LM317T")
-    finally:
-        for dep in [get_db, require_user]:
-            app.dependency_overrides.pop(dep, None)
-    assert resp.status_code == 200
-    assert resp.json()["history"] == []
 
 
 # ── Phase-0 CRM Foundations: field persistence tests ─────────────────────────

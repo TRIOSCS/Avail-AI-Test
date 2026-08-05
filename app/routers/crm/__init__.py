@@ -5,7 +5,6 @@ Sub-modules:
   enrichment.py — Enrichment, suggested contacts, sync logs, users, customer import
   offers.py     — Offer CRUD, attachments, OneDrive, changelog
   quotes.py     — Quote CRUD, preview, send, pricing history
-  clone.py      — Requisition clone
   views.py      — CRM shell (unified Customers/Vendors tab bar)
 """
 
@@ -19,7 +18,6 @@ from ._helpers import (
     quote_to_dict,  # noqa: F401
     record_changes,  # noqa: F401
 )
-from .clone import router as clone_router
 from .companies import router as companies_router
 from .enrichment import router as enrichment_router
 from .export import router as export_router
@@ -33,5 +31,4 @@ router.include_router(companies_router)
 router.include_router(enrichment_router)
 router.include_router(offers_router)
 router.include_router(quotes_router)
-router.include_router(clone_router)
 router.include_router(views_router)

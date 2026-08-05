@@ -220,7 +220,7 @@ class TestListErrorReports:
 
 class TestGetErrorReport:
     def test_get_detail(self, client, sample_report):
-        resp = client.get(f"/api/error-reports/{sample_report.id}")
+        resp = client.get(f"/api/trouble-tickets/{sample_report.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["title"] == "Button not working"
@@ -229,7 +229,7 @@ class TestGetErrorReport:
         assert data["current_page"] == "https://app.example.com/rfq"
 
     def test_get_detail_fields(self, client, sample_report):
-        resp = client.get(f"/api/error-reports/{sample_report.id}")
+        resp = client.get(f"/api/trouble-tickets/{sample_report.id}")
         data = resp.json()
         for field in (
             "id",
@@ -244,17 +244,13 @@ class TestGetErrorReport:
         ):
             assert field in data, f"Missing field: {field}"
 
-    def test_get_not_found(self, client):
-        resp = client.get("/api/error-reports/99999")
-        assert resp.status_code == 404
-
     def test_get_via_trouble_tickets_path(self, client, sample_report):
         resp = client.get(f"/api/trouble-tickets/{sample_report.id}")
         assert resp.status_code == 200
         assert resp.json()["title"] == "Button not working"
 
     def test_get_detail_includes_resolution_fields(self, client, sample_report):
-        resp = client.get(f"/api/error-reports/{sample_report.id}")
+        resp = client.get(f"/api/trouble-tickets/{sample_report.id}")
         data = resp.json()
         assert "resolution_notes" in data
         assert "resolved_at" in data
@@ -329,14 +325,6 @@ class TestUpdateTicket:
             json={"status": "resolved"},
         )
         assert resp.status_code == 404
-
-    def test_update_via_error_reports_path(self, client, sample_report):
-        resp = client.patch(
-            f"/api/error-reports/{sample_report.id}",
-            json={"status": "wont_fix"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "wont_fix"
 
 
 # ── HTMX Form / Submit ──────────────────────────────────────────

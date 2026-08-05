@@ -55,12 +55,6 @@ def test_delete_offer_blocks_non_owner_sales(client, db_session, test_user, fore
     assert resp.status_code == 404
 
 
-def test_reconfirm_offer_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
-    _make_sales(test_user, db_session)
-    resp = client.put(f"/api/offers/{foreign_offer.id}/reconfirm")
-    assert resp.status_code == 404
-
-
 def test_approve_offer_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
     _make_sales(test_user, db_session)
     resp = client.put(f"/api/offers/{foreign_offer.id}/approve")
@@ -70,12 +64,6 @@ def test_approve_offer_blocks_non_owner_sales(client, db_session, test_user, for
 def test_reject_offer_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
     _make_sales(test_user, db_session)
     resp = client.put(f"/api/offers/{foreign_offer.id}/reject")
-    assert resp.status_code == 404
-
-
-def test_promote_offer_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/offers/{foreign_offer.id}/promote")
     assert resp.status_code == 404
 
 
@@ -94,12 +82,6 @@ def test_upload_attachment_blocks_non_owner_sales(client, db_session, test_user,
     assert resp.status_code == 404
 
 
-def test_attach_onedrive_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/offers/{foreign_offer.id}/attachments/onedrive", json={"item_id": "abc"})
-    assert resp.status_code == 404
-
-
 def test_delete_offer_attachment_blocks_non_owner_sales(client, db_session, test_user, foreign_offer):
     _make_sales(test_user, db_session)
     att = OfferAttachment(offer_id=foreign_offer.id, file_name="x.pdf")
@@ -108,24 +90,3 @@ def test_delete_offer_attachment_blocks_non_owner_sales(client, db_session, test
     db_session.refresh(att)
     resp = client.delete(f"/api/offer-attachments/{att.id}")
     assert resp.status_code == 404
-
-
-# ── Happy-path sanity: an owning SALES user (created the requisition) is allowed. ──
-
-
-def test_reconfirm_offer_allows_owning_sales(client, db_session, test_user, test_requisition):
-    """When the SALES user OWNS the requisition, the guard is a no-op."""
-    test_user.role = UserRole.SALES
-    test_requisition.created_by = test_user.id
-    o = Offer(
-        requisition_id=test_requisition.id,
-        vendor_name="Arrow",
-        mpn="LM317T",
-        entered_by_id=test_user.id,
-        status="active",
-    )
-    db_session.add(o)
-    db_session.commit()
-    db_session.refresh(o)
-    resp = client.put(f"/api/offers/{o.id}/reconfirm")
-    assert resp.status_code == 200

@@ -149,8 +149,9 @@
       + New account
     </button>
     <div class="flex items-center gap-3 text-xs text-gray-600">
-    <a hx-get="/v2/partials/contacts" hx-target="#main-content" hx-push-url="/v2/contacts"
-       class="hover:text-accent-600 hover:underline cursor-pointer">All contacts</a>
+    {# "All contacts" link removed — the standalone cross-company contact list is
+       PARKED (spec §5.4, comeback = team exists): /v2/contacts stays routable but
+       unlinked. #}
     {# Bulk export moved to the capability-gated (EXPORT_BULK_DATA) Settings ▸ Data
        export tab (ISS-028) — no export UI outside Settings. #}
     <button type="button" @click="importOpen = true"

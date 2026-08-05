@@ -23,8 +23,7 @@ is worse than a missing one": ambiguous / foreign / conflicting descriptions ret
 and the card stays uncategorized. Does not commit — the caller manages the txn.
 
 Called by: app/services/enrichment_worker/worker.py (run_one_batch, second pass, SPEC
-           stage only, gated by settings.desc_parse_enabled);
-           app/management/categorize_from_desc.py (the one-shot CATEGORIZE run).
+           stage only, gated by settings.desc_parse_enabled).
 Depends on: desc_extractor.extract_desc + categorizer.categorize_from_desc (pure),
            spec_tiers.set_category, spec_write_service.record_spec.
 """

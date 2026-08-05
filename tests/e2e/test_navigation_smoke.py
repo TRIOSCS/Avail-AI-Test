@@ -10,26 +10,25 @@ Depends on: tests/e2e/conftest.py (authed_page, base_url fixtures)
 import pytest
 from playwright.sync_api import Page
 
-# 12 bottom nav items (requisitions hardcoded + 11 in loop): (id, push_url, partial_url)
-# Note: trouble-tickets is NOT in the bottom nav — it's accessed via /v2/trouble-tickets directly.
+# The 5 W2 bottom-nav tabs (spec §4): (id, push_url, partial_url).
+# Settings moved behind the gear menu (not a tab); trouble-tickets was never a tab.
 NAV_ITEMS = [
     ("requisitions", "/v2/requisitions", "/v2/partials/parts/workspace"),
-    ("search", "/v2/search", "/v2/partials/search"),
-    ("quotes", "/v2/quotes", "/v2/partials/quotes"),
-    ("customers", "/v2/customers", "/v2/partials/customers"),
-    ("vendors", "/v2/vendors", "/v2/partials/vendors"),
-    ("prospecting", "/v2/prospecting", "/v2/partials/prospecting"),
-    ("materials", "/v2/materials", "/v2/partials/materials/workspace"),
     ("buy-plans", "/v2/approvals", "/v2/partials/approvals"),
-    ("follow-ups", "/v2/follow-ups", "/v2/partials/follow-ups"),
-    ("proactive", "/v2/proactive", "/v2/partials/proactive"),
     ("resell", "/v2/resell", "/v2/partials/resell/workspace"),
-    ("settings", "/v2/settings", "/v2/partials/settings"),
+    ("crm", "/v2/crm", "/v2/partials/crm/shell"),
+    ("my-day", "/v2/my-day", "/v2/partials/my-day"),
 ]
 
-# Pages accessible via direct URL but not in bottom nav
+# Pages accessible via direct URL but not in the bottom nav. Search / sightings /
+# materials / prospecting are the W2 routable-but-unlinked interim (their folds are
+# Wave 4); proactive is EXCLUDED — it 404s while parked (spec §4/§8).
 DIRECT_ACCESS_PAGES = [
     ("trouble-tickets", "/v2/trouble-tickets", "/v2/partials/trouble-tickets/workspace"),
+    ("search", "/v2/search", "/v2/partials/search"),
+    ("sightings", "/v2/sightings", "/v2/partials/sightings/workspace"),
+    ("materials", "/v2/materials", "/v2/partials/materials/workspace"),
+    ("prospecting", "/v2/prospecting", "/v2/partials/prospecting"),
 ]
 
 
@@ -108,22 +107,22 @@ class TestBackButton:
     """Navigate A→B, press back, verify A is restored."""
 
     def test_back_restores_view(self, authed_page: Page, base_url: str):
-        # Go to vendors
-        authed_page.goto(f"{base_url}/v2/vendors", wait_until="networkidle")
+        # Go to CRM
+        authed_page.goto(f"{base_url}/v2/crm", wait_until="networkidle")
         authed_page.wait_for_timeout(500)
 
-        # Click materials
-        authed_page.locator("nav a[href='/v2/materials']").click()
+        # Click Tasks (My Day)
+        authed_page.locator("nav a[href='/v2/my-day']").click()
         _wait_for_nav(authed_page)
-        assert authed_page.url.endswith("/v2/materials")
+        assert authed_page.url.endswith("/v2/my-day")
 
         # Press back
         authed_page.go_back()
         authed_page.wait_for_timeout(500)
 
-        # Should be back at vendors
-        assert "/v2/vendors" in authed_page.url
-        assert _get_current_view(authed_page) == "vendors"
+        # Should be back at CRM
+        assert "/v2/crm" in authed_page.url
+        assert _get_current_view(authed_page) == "crm"
 
 
 class TestDirectUrlAccess:
@@ -143,21 +142,21 @@ class TestErrorRecovery:
     """After a failed nav request, currentView should stay on the previous value."""
 
     def test_failed_request_keeps_previous_view(self, authed_page: Page, base_url: str):
-        # Start at vendors
-        authed_page.goto(f"{base_url}/v2/vendors", wait_until="networkidle")
+        # Start at CRM
+        authed_page.goto(f"{base_url}/v2/crm", wait_until="networkidle")
         authed_page.wait_for_timeout(500)
-        assert _get_current_view(authed_page) == "vendors"
+        assert _get_current_view(authed_page) == "crm"
 
-        # Intercept the materials partial to return 500
-        authed_page.route("**/v2/partials/materials/workspace", lambda route: route.fulfill(status=500, body="error"))
+        # Intercept the My Day partial to return 500
+        authed_page.route("**/v2/partials/my-day", lambda route: route.fulfill(status=500, body="error"))
 
-        # Click materials nav
-        authed_page.locator("nav a[href='/v2/materials']").click()
+        # Click Tasks nav
+        authed_page.locator("nav a[href='/v2/my-day']").click()
         authed_page.wait_for_timeout(1000)
 
-        # currentView should still be "vendors" since the request failed
+        # currentView should still be "crm" since the request failed
         cv = _get_current_view(authed_page)
-        assert cv == "vendors", f"After failed request, currentView is '{cv}' (expected 'vendors')"
+        assert cv == "crm", f"After failed request, currentView is '{cv}' (expected 'crm')"
 
         # Clean up route intercept
-        authed_page.unroute("**/v2/partials/materials/workspace")
+        authed_page.unroute("**/v2/partials/my-day")

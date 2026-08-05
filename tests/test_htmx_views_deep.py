@@ -154,7 +154,6 @@ class TestV2PagePathVariants:
             "/v2/prospecting/1",
             "/v2/resell/1",
             "/v2/prospecting/5",
-            "/v2/sourcing/leads/1",
         ],
     )
     def test_v2_static_paths_ok(self, client: TestClient, test_user: User, path: str):
@@ -183,18 +182,6 @@ class TestV2PagePathVariants:
         q = _quote(db_session, req, test_user)
         db_session.commit()
         assert self._get(client, f"/v2/quotes/{q.id}", test_user) == 200
-
-    def test_v2_sourcing_page(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        r = _requirement(db_session, req)
-        db_session.commit()
-        assert self._get(client, f"/v2/sourcing/{r.id}", test_user) == 200
-
-    def test_v2_sourcing_workspace_page(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        r = _requirement(db_session, req)
-        db_session.commit()
-        assert self._get(client, f"/v2/sourcing/{r.id}/workspace", test_user) == 200
 
     def test_v2_unauthenticated_returns_login(self, unauthenticated_client: TestClient):
         with patch("app.routers.htmx_views.get_user", return_value=None):
@@ -257,45 +244,6 @@ class TestBuyPlansRoutes:
 # ══════════════════════════════════════════════════════════════════════════
 # Sourcing routes (lines 6343+)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestSourcingRoutes:
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/v2/partials/sourcing/99999",
-            "/v2/partials/sourcing/99999/workspace",
-            "/v2/partials/sourcing/99999/workspace-list",
-            "/v2/partials/sourcing/leads/99999/panel",
-        ],
-    )
-    def test_sourcing_get_404(self, client: TestClient, path: str):
-        assert client.get(path).status_code == 404
-
-    def test_sourcing_results_exists(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        r = _requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sourcing/{r.id}")
-        assert resp.status_code == 200
-
-    def test_sourcing_results_with_filters(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        r = _requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sourcing/{r.id}?confidence=high&sort=freshest")
-        assert resp.status_code == 200
-
-    def test_sourcing_workspace_exists(self, client: TestClient, db_session: Session, test_user: User):
-        req = _requisition(db_session, test_user)
-        r = _requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sourcing/{r.id}/workspace")
-        assert resp.status_code == 200
-
-    def test_sourcing_search_post_404(self, client: TestClient):
-        resp = client.post("/v2/partials/sourcing/99999/search", data={})
-        assert resp.status_code == 404
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -576,10 +524,6 @@ class TestProactiveRoutes:
         resp = client.post("/v2/partials/proactive/draft", data={})
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("path", ["/v2/partials/knowledge", "/v2/partials/knowledge?q=resistor"])
-    def test_proactive_knowledge_get_ok(self, client: TestClient, path: str):
-        assert client.get(path).status_code == 200
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Admin merge routes (lines 8088+)
@@ -633,11 +577,6 @@ class TestInsightsRoutes:
         resp = client.get(f"/v2/partials/customers/{co.id}/insights")
         assert resp.status_code == 200
 
-    def test_dashboard_pipeline_insights(self, client: TestClient):
-        with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
-            resp = client.get("/v2/partials/dashboard/pipeline-insights")
-        assert resp.status_code == 200
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Email / thread routes (lines 5556+)
@@ -649,20 +588,10 @@ class TestEmailRoutes:
         resp = client.get("/v2/partials/emails/thread/nonexistent-id")
         assert resp.status_code in (200, 404, 400)
 
-    def test_email_intelligence(self, client: TestClient):
-        resp = client.get("/v2/partials/email-intelligence")
-        assert resp.status_code == 200
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Dashboard route (line 5688)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestDashboardRoutes:
-    def test_dashboard_partial(self, client: TestClient):
-        resp = client.get("/v2/partials/dashboard")
-        assert resp.status_code == 200
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -963,3 +892,9 @@ class TestBulkActions:
     def test_bulk_action_empty(self, client: TestClient, action: str):
         resp = client.post(f"/v2/partials/requisitions/bulk/{action}", data={})
         assert resp.status_code in (200, 400)
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

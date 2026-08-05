@@ -1,8 +1,10 @@
 """test_v13_activity_ownership.py — Activity Log & Ownership Endpoint Tests.
 
-Covers: company/vendor/user activity endpoints, phone call logging,
-activity status, sales ownership (my-accounts, at-risk, open-pool,
-claim, strategic toggle, notifications).
+Covers: the surviving vendor activity timeline endpoint
+(GET /api/vendors/{id}/activities).
+
+(The company/user timeline, POST /api/activities/call, and company
+activity-status routes were removed in the Wave-2 orphan-route cleanup.)
 
 Called by: pytest
 Depends on: conftest.py fixtures, app.routers.v13_features
@@ -36,24 +38,6 @@ def _seed_activity(db, user_id: int, company_id: int, **overrides) -> ActivityLo
     return a
 
 
-def test_get_company_activities_empty(client, test_company):
-    resp = client.get(f"/api/companies/{test_company.id}/activities")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["items"] == []
-    assert data["total"] == 0
-
-
-def test_get_company_activities_returns_records(client, db_session, test_user, test_company):
-    _seed_activity(db_session, test_user.id, test_company.id)
-    _seed_activity(db_session, test_user.id, test_company.id, subject="Follow-up")
-    resp = client.get(f"/api/companies/{test_company.id}/activities")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 2
-    assert all("id" in a and "activity_type" in a for a in data["items"])
-
-
 def test_get_vendor_activities_empty(client, test_vendor_card):
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
@@ -73,38 +57,3 @@ def test_get_vendor_activities_returns_records(client, db_session, test_user, te
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
     assert resp.json()["total"] == 1
-
-
-def test_get_user_activities(client, db_session, test_user, test_company):
-    _seed_activity(db_session, test_user.id, test_company.id)
-    resp = client.get(f"/api/users/{test_user.id}/activities")
-    assert resp.status_code == 200
-    assert resp.json()["total"] >= 1
-
-
-def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any known contact — still logged (unmatched
-    queue)."""
-    resp = client.post(
-        "/api/activities/call",
-        json={
-            "direction": "outbound",
-            "phone": "+1-555-9999",
-            "duration_seconds": 120,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "logged"
-
-
-def test_company_activity_status_no_activity(client, test_company):
-    resp = client.get(f"/api/companies/{test_company.id}/activity-status")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "no_activity"
-    assert data["company_id"] == test_company.id
-
-
-def test_company_activity_status_not_found(client):
-    resp = client.get("/api/companies/99999/activity-status")
-    assert resp.status_code == 404

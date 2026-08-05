@@ -201,25 +201,6 @@ async def list_companies(
     )
 
 
-@router.get("/api/companies/check-duplicate")
-async def check_company_duplicate(
-    name: str,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Check if a company name is a near-duplicate of an existing company.
-
-    Normalizes to lowercase, strips suffixes (Inc, LLC, Ltd, Corp, etc.), and compares
-    for matches.
-    """
-    clean = _normalize_company_name(name)
-    if not clean:
-        return {"matches": []}
-
-    # Pull all company names (cached at 500 limit, same as list_companies)
-    return {"matches": _find_company_duplicates(clean, db)}
-
-
 @router.get("/api/companies/{company_id}")
 async def get_company(
     company_id: int,
@@ -501,50 +482,3 @@ async def update_company(
     invalidate_prefix("company_list")
     invalidate_prefix("company_detail")
     return {"ok": True}
-
-
-@router.post("/api/companies/{company_id}/summarize")
-async def summarize_company(
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Generate an AI-powered strategic account summary."""
-    company = db.get(Company, company_id)
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "You do not have access to this company")
-
-    from ...services.account_summary_service import generate_account_summary
-
-    result = await generate_account_summary(company_id, db)
-    if not result:
-        return {"situation": "", "development": "", "next_steps": []}
-    return result
-
-
-@router.post("/api/companies/{company_id}/analyze-tags")
-async def analyze_company_tags(
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Trigger AI analysis of customer's requisition history to generate brand/commodity
-    tags."""
-    company = db.get(Company, company_id)
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "You do not have access to this company")
-
-    from ...services.customer_analysis_service import analyze_customer_materials
-
-    await analyze_customer_materials(company_id, db_session=db)
-    db.refresh(company)
-    invalidate_prefix("company_detail")
-    return {
-        "ok": True,
-        "brand_tags": company.brand_tags or [],
-        "commodity_tags": company.commodity_tags or [],
-    }

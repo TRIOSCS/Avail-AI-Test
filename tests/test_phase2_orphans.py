@@ -200,10 +200,6 @@ _SUPERSEDING = [
     # sightings: batch-assign supersedes per-requirement assign
     ("/v2/partials/sightings/batch-assign", "POST"),
     ("/v2/partials/sightings/{requirement_id}/advance-status", "PATCH"),
-    # lead feedback: the requirements /api path is the live one
-    ("/api/leads/{lead_id}/feedback", "POST"),
-    # the /api vendor-contact timeline (JSON) stays; only the htmx twin was removed
-    ("/api/vendors/{card_id}/contacts/{contact_id}/summary", "GET"),
     # wired endpoints remain registered (badge counts consolidated — spec §5.5)
     ("/v2/partials/requisitions/{req_id}/responses/{response_id}/status", "PATCH"),
     ("/v2/partials/requisitions/{req_id}/log-phone", "POST"),
@@ -249,7 +245,6 @@ class TestDeletedRoutes:
         for mod in (
             "app.routers.htmx.offers",
             "app.routers.htmx.vendors",
-            "app.routers.htmx.sourcing",
             "app.routers.vendor_contacts",
             "app.routers.sightings",
         ):

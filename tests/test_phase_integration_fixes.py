@@ -518,12 +518,6 @@ class TestInsightsPanels:
         assert resp.status_code == 200
         assert "AI Insights" in resp.text
 
-    def test_pipeline_insights_panel(self, client: TestClient):
-        """Pipeline insights panel renders."""
-        resp = client.get("/v2/partials/dashboard/pipeline-insights")
-        assert resp.status_code == 200
-        assert "AI Insights" in resp.text
-
 
 # ── Phase 7: Admin data ops tab ─────────────────────────────────────
 

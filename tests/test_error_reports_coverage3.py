@@ -195,7 +195,7 @@ class TestUpdateTicketStatusVariants:
         assert resp.json()["status"] == "resolved"
 
     def test_update_trouble_ticket_path_also_works(self, client, db_session, test_user):
-        """PATCH /api/trouble-tickets/{id} mirrors /api/error-reports/{id}."""
+        """PATCH /api/trouble-tickets/{id} accepts resolution_notes-only updates."""
         ticket = _make_ticket(
             db_session,
             test_user,

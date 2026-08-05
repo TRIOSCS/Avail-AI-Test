@@ -2049,7 +2049,8 @@ caller that wants `{SalesOrder#} - {Customer} - {Owner} - {Type}`.
 its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →
 `GET /v2/partials/resell/workspace` (router `app/routers/resell.py`, mounted alongside the
 OLD `excess` router which a later cutover chunk removes). The workspace is a `splitPanel('resell')`
-shell: lens pills (My Lists / Open to Me, buy-plans-hub pattern) + a `stat_card` triage strip
+shell: a My Lists lens pill (the "Open to Me" offerer pill is PARKED — spec §5.3 W2.3,
+solo-operator; comeback = second trader user) + a `stat_card` triage strip
 (Open · Offers to review · Take-all · Bids out · Awarded — each card a one-click stage filter) +
 a lazy left list and a right detail. Logic stays in `excess_service` (offers/import) +
 `excess_mirror` (publish); the router is thin (request → context → partial).
@@ -2059,7 +2060,9 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |
     +-- GET /v2/partials/resell/lists?lens=&stage=&q=   (left list: filter bar + page 1 of rows)
     |        lens=mine  → lists OWNED by user (seller name VISIBLE)
-    |        lens=open  → posted lists owned by OTHERS, customer-ANONYMIZED (pure whitelist)
+    |        lens=open  → PARKED (W2.3): every request is COERCED to mine in the router;
+    |            the offerer branch (posted lists owned by OTHERS, customer-ANONYMIZED)
+    |            stays in _list_rows_context for the comeback (second trader user)
     |        rows are CAPPED at the query level (_LIST_PAGE_SIZE, +1-row has_more probe);
     |        the bar's search input + the "Load more" reveal swap ONLY the rows container via
     |        +-- GET /v2/partials/resell/list-rows?…&offset=  (rows-only partial _list_rows.html
@@ -2074,18 +2077,17 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        |     closes — finding #13)
     |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
     |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
-    |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
-    |        |     [buyer_affinity_service.rank_buyers_for] + advisory overlap flag
-    |        |     [overlap_warning] + no-contact history rows + scope + channel;
-    |        |     ?preselect_vendor_card_id= seeds the checked set so a not-yet chip lands
-    |        |     with its buyer already selected — RS-8)
+    |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel — the kernel outreach
+    |        |     door. Buyer-intelligence DISPLAY is PARKED [W2.3]: the ranked-suggestion +
+    |        |     no-contact sections render EMPTY (the router passes []; _suggestion_rows /
+    |        |     _no_contact_buyers stay in place) — manual add-by-name keeps outreach
+    |        |     working; ?preselect_vendor_card_id= still seeds the checked set — RS-8)
     |        +-- GET .../{id}/outreach           (owner-only Outreach tab: tracker rows +
     |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
-    |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
-    |              also persists each surfaced buyer as an owner-assigned My-Day follow-up via
-    |              task_service.auto_create_resell_followup_tasks — BATCHED: one IN query + one
-    |              commit for the whole strip, idempotent per list+buyer+owner; the single-task
-    |              wrapper delegates to the batch)
+    |        +-- GET .../{id}/not-yet-strip      (PARKED [W2.3]: route registration removed —
+    |              the nudge strip AND its auto My-Day follow-up task writes park together;
+    |              resell_not_yet_strip + the template + the task_service batch stay in place;
+    |              comeback = second trader user)
     +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
     +-- POST /api/resell/{id}/lines                     (add line → excess_service.add_line:
     |     _require_owned_draft guard, blank-part-number 400, MaterialCard resolve, counter bump,
@@ -2120,10 +2122,14 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     [finding #41], re-renders the whole detail like add-line — RS-5, and emits ONE
     |     server-side HX-Trigger toast combining imported + skipped counts [finding #16 —
     |     no client-side success toast])
-    +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror;
+    +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list — status flip
+    |     ONLY, the resell→Sighting mirror dual-write is RETIRED [SIMPLIFICATION_SPEC §5.3, W2.12];
     |     GUARDED to draft [409 otherwise — no re-open of a resolved posting]; PRESERVES a future
     |     close_at, clears only a stale one [Phase 5])
-    +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
+    +-- POST /api/resell/{id}/offers                    (PARKED [W2.3]: route registration
+    |     removed with the trader offer lane — only the parked submit-offer modal posted here;
+    |     the owner's bid doors [outreach log-bid, bids upload] have their own endpoints.
+    |     The resell_submit_offer implementation below stays) (excess_service.submit_offer; scope
     |     per_line|take_all; service enforces can_offer + the self-offer guard + [deep-review #2
     |     finding #47] its OWN posted-status guard [409 draft/terminal — previously router-only]
     |     re-checked AFTER taking the M9 list-row lock [finding #9], so a list closed between the
@@ -2428,6 +2434,17 @@ list's STATUS column rather than the actual `close_at` deadline or offer-arrival
   `submit_offer(buyer_company_id=...)` resolves `offerer_vendor_card_id` via `counterparty_card`,
   so the award win-hook (`recompute_buyer_score_on_win`) now fires for UI-submitted manual offers;
   unattributed offers stay None and still award (no regression).
+
+**W2.12 (2026-08-04): the resell→Sighting mirror dual-write is RETIRED (SIMPLIFICATION_SPEC
+§5.3).** Nothing read the mirror while the trader lane and Proactive matching are parked, so
+posting/awarding/closing/unawarding an excess list no longer writes, updates, or retires
+Sightings — the write path (`sync_list_mirror` / `mirror_line` / `retire_line` /
+`ensure_virtual_requirement`) and the `_backfill_resell_mirrors` startup restore were DELETED
+(git restores them with whichever unparks first). Mirror rows written before the stop STAY in
+the table (tables are never dropped), so the Phase-6 exclusion predicate below and
+`teardown_list_mirror` (list-delete / company-merge cleanup of pre-existing rows) both remain
+live. The historical mirror narrative below (M5 posting-gate, Phase 5/6 findings) describes the
+retired write path.
 
 **Phase 6 (mirror-consumer exclusions, deep-review-2 THEME F).** The mirror's synthetic
 "Customer Excess" rows leaked into surfaces meant for REAL vendor intelligence. ONE

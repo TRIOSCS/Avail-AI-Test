@@ -59,35 +59,3 @@ class TestThreadSummary:
 
 
 # ── Email Intelligence Dashboard ─────────────────────────────────────
-
-
-class TestEmailIntelligence:
-    def test_dashboard_renders(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/email-intelligence",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "AI-classified inbox activity" in resp.text
-
-    def test_dashboard_with_filter(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/email-intelligence?classification=offer",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "AI-classified inbox activity" in resp.text
-
-    def test_dashboard_empty_state(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/email-intelligence?classification=nonexistent",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "No email intelligence records found" in resp.text
-        # Pre-migration spacing (P5.3 empty_state.html dedup): the shared partial's
-        # icon_class default adds "mb-4", but this dashboard's hand-rolled markup
-        # never had that margin — icon_class must be passed explicitly so the
-        # rendered icon stays pixel-identical to pre-dedup.
-        assert 'class="mx-auto h-12 w-12 text-gray-300"' in resp.text
-        assert 'class="mx-auto mb-4 h-12 w-12 text-gray-300"' not in resp.text

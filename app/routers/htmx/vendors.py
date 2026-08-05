@@ -326,11 +326,12 @@ async def vendor_contacts_partial(
             )
         )
 
+    # "score" (relationship_score) sort removed in the Wave 2 sweep — the
+    # contact-intelligence layer that computed it is deleted (spec §5.4).
     sort_col_map = {
         "name": VendorContact.full_name,
         "email": VendorContact.email,
         "vendor": VendorCard.display_name,
-        "score": VendorContact.relationship_score,
     }
     sort_col = sort_col_map.get(sort, VendorContact.full_name)
     order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()

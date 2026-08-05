@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 import pytest
 
@@ -15,38 +15,59 @@ pytestmark = pytest.mark.slow
 
 
 def _create_req(client, **fields) -> int:
-    """POST a requisition and return its id."""
-    resp = client.post("/api/requisitions", json=fields)
-    assert resp.status_code == 200
-    return resp.json()["id"]
+    """Create a requisition via the ORM as the authed test user, return its id.
+
+    The legacy JSON POST /api/requisitions endpoint was removed (W2 B10, spec §5.1) —
+    creation flows through the /v2 unified form now, so tests seed rows directly using
+    the client's overridden db/user dependencies.
+    """
+    from app.constants import RequisitionStatus
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+    from app.models import Requisition
+
+    db = next(app.dependency_overrides[get_db]())
+    user = app.dependency_overrides[require_user]()
+    req = Requisition(
+        name=fields.get("name") or "Untitled",
+        customer_name=fields.get("customer_name"),
+        status=RequisitionStatus.DRAFT,
+        created_by=user.id,
+        created_at=datetime.now(UTC),
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req.id
 
 
-def _add_requirements(client, req_id: int, items) -> dict:
-    """POST requirements to a requisition and return the parsed JSON response."""
-    return client.post(f"/api/requisitions/{req_id}/requirements", json=items).json()
+def _seed_requirement(req_id: int, mpn: str, qty: int = 10) -> int:
+    """Create a Requirement row via the ORM, return its id.
+
+    The legacy JSON POST /api/requisitions/{id}/requirements endpoint was removed (W2
+    B11) — line items are added through the /v2 unified form now, so tests seed rows
+    directly using the client's overridden db dependency.
+    """
+    from app.database import get_db
+    from app.main import app
+    from app.models import Requirement
+    from app.utils.normalization import normalize_mpn_key
+
+    db = next(app.dependency_overrides[get_db]())
+    r = Requirement(
+        requisition_id=req_id,
+        primary_mpn=mpn,
+        normalized_mpn=normalize_mpn_key(mpn),
+        target_qty=qty,
+    )
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r.id
 
 
 # -- Requisition CRUD -----------------------------------------------------
-
-
-def test_create_requisition(client):
-    resp = client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-INT-001",
-            "customer_name": "Test Corp",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["name"] == "REQ-INT-001"
-    assert "id" in data
-
-
-def test_create_requisition_defaults_name(client):
-    resp = client.post("/api/requisitions", json={"customer_name": "X"})
-    assert resp.status_code == 200
-    assert resp.json()["name"] == "Untitled"
 
 
 def test_list_requisitions_empty(client):
@@ -75,88 +96,23 @@ def test_list_requisitions_search_filter(client):
     assert "REQ-ALPHA" in names
 
 
-# -- Requirement CRUD -----------------------------------------------------
+def test_delete_requirement(client, db_session):
+    from app.models import Requirement
 
-
-def test_add_requirement(client):
-    req_id = _create_req(client, name="REQ-ITEMS")
-    # Endpoint expects a list or single dict (not {"items": [...]})
-    resp = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500},
-        ],
-    )
-    assert resp.status_code == 200
-    assert resp.json()["created"][0]["primary_mpn"] == "LM317T"
-
-
-def test_add_multiple_requirements(client):
-    req_id = _create_req(client, name="REQ-MULTI")
-    resp = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 100},
-            {"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 200},
-            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 300},
-        ],
-    )
-    assert resp.status_code == 200
-    assert len(resp.json()["created"]) == 3
-
-
-def test_add_requirement_skips_blank_mpn(client):
-    req_id = _create_req(client, name="REQ-BLANK")
-    resp = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 10},
-            {"primary_mpn": "VALID-MPN", "manufacturer": "TI", "target_qty": 20},
-        ],
-    )
-    assert resp.status_code == 200
-    assert len(resp.json()["created"]) == 1
-    assert resp.json()["created"][0]["primary_mpn"] == "VALID-MPN"
-
-
-def test_list_requirements(client):
-    req_id = _create_req(client, name="REQ-LISTREQ")
-    _add_requirements(
-        client,
-        req_id,
-        [{"primary_mpn": "AD8045", "manufacturer": "ADI", "target_qty": 50}],
-    )
-    resp = client.get(f"/api/requisitions/{req_id}/requirements")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data[0]["primary_mpn"] == "AD8045"
-    assert data[0]["target_qty"] == 50
-
-
-def test_delete_requirement(client):
     req_id = _create_req(client, name="REQ-DEL")
-    items = _add_requirements(
-        client,
-        req_id,
-        [{"primary_mpn": "TMP123", "manufacturer": "TI", "target_qty": 10}],
-    )
-    item_id = items["created"][0]["id"]
+    item_id = _seed_requirement(req_id, "TMP123")
 
     resp = client.delete(f"/api/requirements/{item_id}")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
-    remaining = client.get(f"/api/requisitions/{req_id}/requirements").json()
-    assert len(remaining) == 0
+    assert db_session.query(Requirement).filter_by(requisition_id=req_id).count() == 0
 
 
-def test_update_requirement(client):
+def test_update_requirement(client, db_session):
+    from app.models import Requirement
+
     req_id = _create_req(client, name="REQ-UPD")
-    items = _add_requirements(
-        client,
-        req_id,
-        [{"primary_mpn": "OLD-MPN", "manufacturer": "TI", "target_qty": 10}],
-    )
-    item_id = items["created"][0]["id"]
+    item_id = _seed_requirement(req_id, "OLD-MPN")
 
     resp = client.put(
         f"/api/requirements/{item_id}",
@@ -168,76 +124,8 @@ def test_update_requirement(client):
     )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
-    # Verify via list
-    reqs = client.get(f"/api/requisitions/{req_id}/requirements").json()
-    updated = [r for r in reqs if r["id"] == item_id][0]
-    assert updated["primary_mpn"] == "NEW-MPN"
-    assert updated["target_qty"] == 999
-
-
-# -- Saved Sightings (GET, no re-search) ----------------------------------
-
-
-def test_get_saved_sightings_empty(client):
-    """Req with no sightings returns empty dict."""
-    req_id = _create_req(client, name="REQ-SIGHT-EMPTY", customer_name="Test")
-    resp = client.get(f"/api/requisitions/{req_id}/sightings")
-    assert resp.status_code == 200
-    assert resp.json() == {}
-
-
-def test_get_saved_sightings_returns_data(client, db_session):
-    """Sightings saved in DB are returned grouped by requirement."""
-    from app.models import Sighting
-
-    req_id = _create_req(client, name="REQ-SIGHT-DATA", customer_name="SightCo")
-    _add_requirements(client, req_id, {"primary_mpn": "LM358N", "manufacturer": "TI"})
-    # Get the requirement ID from the list endpoint
-    reqs = client.get(f"/api/requisitions/{req_id}/requirements").json()
-    item_id = reqs[0]["id"]
-
-    # Insert sightings directly in DB
-    from datetime import datetime, timedelta
-
-    now = datetime.now(UTC)
-    s1 = Sighting(
-        requirement_id=item_id,
-        vendor_name="Acme Chips",
-        mpn_matched="LM358N",
-        qty_available=500,
-        unit_price=0.45,
-        source_type="brokerbin",
-        score=82.0,
-        created_at=now - timedelta(hours=1),  # older
-    )
-    s2 = Sighting(
-        requirement_id=item_id,
-        vendor_name="Beta Semi",
-        mpn_matched="LM358N",
-        qty_available=200,
-        unit_price=0.55,
-        source_type="nexar",
-        score=75.0,
-        is_authorized=True,
-        created_at=now,  # newer
-    )
-    db_session.add_all([s1, s2])
-    db_session.commit()
-
-    resp = client.get(f"/api/requisitions/{req_id}/sightings")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert str(item_id) in data
-    group = data[str(item_id)]
-    assert group["label"] == "LM358N"
-    assert len(group["sightings"]) == 2
-    # Sorted by newest first — Beta Semi (created now) before Acme (1h ago)
-    assert group["sightings"][0]["vendor_name"] == "Beta Semi"
-    assert group["sightings"][1]["vendor_name"] == "Acme Chips"
-    assert group["sightings"][1]["score"] == 82.0
-
-
-def test_get_saved_sightings_404_bad_req(client):
-    """Non-existent req returns 404."""
-    resp = client.get("/api/requisitions/99999/sightings")
-    assert resp.status_code == 404
+    # Verify via DB
+    updated = db_session.get(Requirement, item_id)
+    db_session.refresh(updated)
+    assert updated.primary_mpn == "NEW-MPN"
+    assert updated.target_qty == 999

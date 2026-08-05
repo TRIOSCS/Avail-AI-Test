@@ -1,6 +1,10 @@
 {#
   mobile_nav.html — Fixed bottom navigation bar for all screen sizes.
-  8 primary nav items + "More" menu (Settings + Sign out only).
+  5 primary nav items (spec §4: Deals / Approvals / Resell / CRM / Tasks) + a gear
+  menu outside the tab bar (Settings + support entries + Sign out).
+  Wave 2 removed Materials / Search / Sightings / Proactive / Prospecting from the
+  bar; their pages stay routable (W4 folds them) except Proactive, which parks
+  whole behind proactive_matching_enabled.
   Called by: app/templates/base.html, htmx/base.html (via {% include %})
   Depends on: Alpine.js, HTMX, Tailwind
   Context vars: current_view (str), user_name (str), user_email (str)
@@ -22,25 +26,19 @@
      :data-current-view="activeNav"
      aria-label="Main navigation">
   <div class="flex items-stretch justify-center mx-auto max-w-[720px]">
+    {# Exactly 5 tabs (spec §4 / §10-W2 acceptance). Removed tabs' URLs stay in
+       urlToNav above so a direct visit to a routable-but-unlinked page (search,
+       sightings, materials, prospecting — W4 folds them) highlights NO tab
+       instead of a stale one. #}
     {% set nav_items = [
       ('requisitions', 'Sales Hub', '/v2/requisitions', '/v2/partials/parts/workspace',
        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
-      ('sightings', 'Sightings', '/v2/sightings', '/v2/partials/sightings/workspace',
-       'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'),
-      ('materials', 'Materials', '/v2/materials', '/v2/partials/materials/workspace',
-       'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'),
-      ('search', 'Search', '/v2/search', '/v2/partials/search',
-       'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
       ('buy-plans', 'Approvals', '/v2/approvals', '/v2/partials/approvals',
        'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
       ('resell', 'Resell', '/v2/resell', '/v2/partials/resell/workspace',
        'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'),
       ('crm', 'CRM', '/v2/crm', '/v2/partials/crm/shell',
        'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z'),
-      ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',
-       'M13 10V3L4 14h7v7l9-11h-7z'),
-      ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting',
-       'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
       ('my-day', 'Tasks', '/v2/my-day', '/v2/partials/my-day',
        'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
     ] %}
@@ -71,8 +69,10 @@
           <path d="{{ icon_path }}"/>
         </svg>
         {# Badge pills are static targets filled by the nav's SINGLE badge poller below
-           (spec §5.5) via hx-swap-oob spans from /v2/partials/nav/badges. #}
-        {% if id in ('proactive', 'requisitions', 'buy-plans', 'crm', 'my-day') %}
+           (spec §5.5) via hx-swap-oob spans from /v2/partials/nav/badges. The proactive
+           span left with its nav item (W2 park); its OOB span in the poll response is
+           dropped by htmx (no target). #}
+        {% if id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}
         <span id="{{ id }}-nav-badge"
               class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
         {% endif %}
@@ -90,23 +90,27 @@
     {% endif %}
     {% endfor %}
 
-    {# More button — vertical dots #}
+    {# Gear button — Settings lives ONLY behind this gear, outside the 5-tab bar
+       (spec §4). Reuses the former More-menu chrome: the gear opens the same menu
+       (Settings + support entries + Sign out). #}
     <div class="relative flex items-stretch w-[62px] min-w-0">
       <button @click="moreOpen = !moreOpen"
               :class="(activeNav === 'settings' || moreOpen) ? 'text-accent-600' : 'text-gray-500 hover:text-gray-600'"
               class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px]"
-              aria-label="More options">
+              aria-label="Settings">
         <span x-show="activeNav === 'settings'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-accent-500 rounded-b-sm"></span>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-[17px] w-[17px]" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="5" r="2"/>
-          <circle cx="12" cy="12" r="2"/>
-          <circle cx="12" cy="19" r="2"/>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-[19px] w-[19px]" fill="none"
+             viewBox="0 0 24 24" stroke="currentColor"
+             :stroke-width="activeNav === 'settings' ? '2.25' : '1.75'"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
         <span :class="activeNav === 'settings' ? 'text-accent-700 tracking-tight' : 'text-gray-500 tracking-normal'"
-              class="mt-px text-[8px] font-semibold leading-none">More</span>
+              class="mt-px text-[8px] font-semibold leading-none">Settings</span>
       </button>
 
-      {# More menu #}
+      {# Gear menu (former More menu — same chrome) #}
       <div x-show="moreOpen" x-cloak
            x-transition:enter="transition ease-out duration-100"
            x-transition:enter-start="opacity-0 translate-y-1"

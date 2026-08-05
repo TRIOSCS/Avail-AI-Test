@@ -43,18 +43,14 @@ def nav_click(page: Page, href: str):
     page.wait_for_timeout(800)
 
 
-# Navigation map: (href, label text)
+# Navigation map: (href, label text) — the 5 W2 tabs (spec §4). Settings moved
+# behind the gear menu; Materials/Search/Sightings/Proactive/Prospecting left the bar.
 NAV_ITEMS = [
     ("/v2/requisitions", "Sales Hub"),
-    ("/v2/search", "Search"),
     ("/v2/approvals", "Approvals"),
-    ("/v2/vendors", "Vendors"),
-    ("/v2/materials", "Materials"),
-    ("/v2/companies", "Cos"),
-    ("/v2/proactive", "Proact"),
-    ("/v2/quotes", "Quotes"),
-    ("/v2/prospecting", "Prospect"),
-    ("/v2/settings", "Config"),
+    ("/v2/resell", "Resell"),
+    ("/v2/crm", "CRM"),
+    ("/v2/my-day", "Tasks"),
 ]
 
 
@@ -126,7 +122,7 @@ class TestPageLoad:
 
 class TestBottomNavigation:
     def test_all_nav_links_present(self, authed_page, base_url):
-        """All 10 navigation links are present in the bottom nav."""
+        """All 5 navigation links are present in the bottom nav (W2 spec §4)."""
         wait_for_app(authed_page, base_url)
         for href, label in NAV_ITEMS:
             link = authed_page.locator(f"nav a[href='{href}']")
@@ -139,67 +135,49 @@ class TestBottomNavigation:
             link = authed_page.locator(f"nav a[href='{href}']")
             expect(link.first).to_contain_text(label)
 
-    def test_navigate_to_vendors(self, authed_page, base_url):
-        """Clicking Vendors nav loads vendor content."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/vendors")
-        # URL should update to /v2/vendors
-        expect(authed_page).to_have_url(re.compile(r"/v2/vendors"))
-
-    def test_navigate_to_materials(self, authed_page, base_url):
-        """Clicking Materials nav loads materials content."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/materials")
-        expect(authed_page).to_have_url(re.compile(r"/v2/materials"))
-
-    def test_navigate_to_companies(self, authed_page, base_url):
-        """Clicking Cos nav loads companies content."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/companies")
-        expect(authed_page).to_have_url(re.compile(r"/v2/companies"))
-
-    def test_navigate_to_search(self, authed_page, base_url):
-        """Clicking Search nav loads search content."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/search")
-        expect(authed_page).to_have_url(re.compile(r"/v2/search"))
-
-    def test_navigate_to_buy_plans(self, authed_page, base_url):
+    def test_navigate_to_approvals(self, authed_page, base_url):
         """Clicking Approvals nav loads the Approvals Workspace."""
         wait_for_app(authed_page, base_url)
         nav_click(authed_page, "/v2/approvals")
         expect(authed_page).to_have_url(re.compile(r"/v2/approvals"))
 
-    def test_navigate_to_proactive(self, authed_page, base_url):
-        """Clicking Proact nav loads proactive content."""
+    def test_navigate_to_resell(self, authed_page, base_url):
+        """Clicking Resell nav loads the resell workspace."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/proactive")
-        expect(authed_page).to_have_url(re.compile(r"/v2/proactive"))
+        nav_click(authed_page, "/v2/resell")
+        expect(authed_page).to_have_url(re.compile(r"/v2/resell"))
 
-    def test_navigate_to_quotes(self, authed_page, base_url):
-        """Clicking Quotes nav loads quotes content."""
+    def test_navigate_to_crm(self, authed_page, base_url):
+        """Clicking CRM nav loads the CRM shell."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/quotes")
-        expect(authed_page).to_have_url(re.compile(r"/v2/quotes"))
+        nav_click(authed_page, "/v2/crm")
+        expect(authed_page).to_have_url(re.compile(r"/v2/crm"))
 
-    def test_navigate_to_settings(self, authed_page, base_url):
-        """Clicking Config nav loads settings content."""
+    def test_navigate_to_my_day(self, authed_page, base_url):
+        """Clicking Tasks nav loads My Day."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/settings")
-        expect(authed_page).to_have_url(re.compile(r"/v2/settings"))
+        nav_click(authed_page, "/v2/my-day")
+        expect(authed_page).to_have_url(re.compile(r"/v2/my-day"))
+
+    def test_removed_tabs_absent(self, authed_page, base_url):
+        """W2 (spec §4): Materials/Search/Sightings/Proactive/Prospecting left the
+        bar."""
+        wait_for_app(authed_page, base_url)
+        for href in ("/v2/materials", "/v2/search", "/v2/sightings", "/v2/proactive", "/v2/prospecting"):
+            assert authed_page.locator(f"nav a[href='{href}']").count() == 0, f"{href} still in nav"
 
     def test_navigate_back_to_requisitions(self, authed_page, base_url):
         """Navigating away and back to Reqs restores requisitions view."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/vendors")
-        expect(authed_page).to_have_url(re.compile(r"/v2/vendors"))
+        nav_click(authed_page, "/v2/crm")
+        expect(authed_page).to_have_url(re.compile(r"/v2/crm"))
         nav_click(authed_page, "/v2/requisitions")
         expect(authed_page).to_have_url(re.compile(r"/v2/requisitions"))
 
     def test_logo_click_returns_to_requisitions(self, authed_page, base_url):
         """Clicking the logo in the header returns to requisitions."""
         wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "/v2/vendors")
+        nav_click(authed_page, "/v2/crm")
         # Click the logo link in the header
         logo_link = authed_page.locator("header a").first
         logo_link.click()

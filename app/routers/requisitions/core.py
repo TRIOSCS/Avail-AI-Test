@@ -27,7 +27,6 @@ from ...constants import (
     ProactiveMatchStatus,
     QuoteStatus,
     RequisitionStatus,
-    UserRole,
 )
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
@@ -46,9 +45,6 @@ from ...models import (
 )
 from ...schemas.requisitions import (
     BatchAssign,
-    RequisitionCreate,
-    RequisitionOut,
-    RequisitionOutcome,
     RequisitionUpdate,
 )
 from ...schemas.responses import BatchAssignResponse, RequisitionListResponse
@@ -60,27 +56,6 @@ from ...utils.sql_helpers import escape_like
 router = APIRouter(tags=["requisitions"])
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-
-@router.get("/api/requisitions/counts")
-async def requisition_counts(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lightweight counts for dashboard widgets — avoids the heavy list query."""
-    # Restricted roles (sales/trader) see own reqs only; all other roles see everything
-    base_filter = []
-    if user.role in RESTRICTED_ROLES:
-        base_filter.append(Requisition.created_by == user.id)
-
-    total = db.scalar(select(sqlfunc.count(Requisition.id)).where(*base_filter))
-    open_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(
-            *base_filter,
-            Requisition.status.in_(list(RequisitionStatus.OPEN_PIPELINE)),
-        )
-    )
-    return {"total": total or 0, "open": open_cnt or 0}
 
 
 @router.get("/api/requisitions", response_model=RequisitionListResponse, response_model_exclude_none=True)
@@ -500,68 +475,6 @@ async def get_requisition(
     }
 
 
-@router.get("/api/requisitions/{req_id}/sourcing-score")
-async def requisition_sourcing_score(
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get detailed per-requirement sourcing scores for a requisition."""
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    from ...services.sourcing_score import compute_requisition_scores
-
-    return compute_requisition_scores(req_id, db)
-
-
-@router.post("/api/requisitions", response_model=RequisitionOut)
-async def create_requisition(
-    body: RequisitionCreate,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    from . import invalidate_prefix
-
-    safe_name = _HTML_TAG_RE.sub("", body.name).strip() or "Untitled"
-    safe_customer = _HTML_TAG_RE.sub("", body.customer_name).strip() if body.customer_name else body.customer_name
-    req = Requisition(
-        name=safe_name,
-        customer_site_id=body.customer_site_id,
-        customer_name=safe_customer,
-        deadline=body.deadline,
-        created_by=user.id,
-        status=RequisitionStatus.DRAFT,
-    )
-    db.add(req)
-    db.commit()
-    invalidate_prefix("req_list")
-
-    return {"id": req.id, "name": req.name}
-
-
-@router.put("/api/requisitions/{req_id}/outcome")
-async def mark_outcome(
-    req_id: int, body: RequisitionOutcome, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    """Mark a requisition as won or lost (a non-empty reason is required)."""
-    from ...services.requisition_state import OutcomeReasonRequired, transition
-    from . import invalidate_prefix
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    try:
-        transition(req, body.outcome, user, db, reason=body.reason)
-    except OutcomeReasonRequired as e:
-        raise HTTPException(400, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    db.commit()
-    invalidate_prefix("req_list")
-    return {"ok": True, "status": req.status}
-
-
 @router.put("/api/requisitions/batch-assign", response_model=BatchAssignResponse)
 async def batch_assign(
     payload: BatchAssign,
@@ -607,20 +520,6 @@ async def batch_assign(
     )
 
 
-@router.post("/api/requisitions/{req_id}/dismiss-new-offers")
-async def dismiss_new_offers(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Mark offers as viewed so the flash alert stops."""
-    from . import invalidate_prefix
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    req.offers_viewed_at = sqlfunc.now()
-    db.commit()
-    invalidate_prefix("req_list")
-    return {"ok": True}
-
-
 @router.put("/api/requisitions/{req_id}")
 async def update_requisition(
     req_id: int,
@@ -648,59 +547,3 @@ async def update_requisition(
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "name": req.name}
-
-
-# ── Buyer Claim/Unclaim ─────────────────────────────────────────────────
-
-
-@router.post("/api/requisitions/{req_id}/claim")
-async def claim_requisition_endpoint(
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Buyer claims a requisition for sourcing.
-
-    Any unclaimed req is open to any buyer.
-    """
-    if user.role not in (UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
-        raise HTTPException(403, "Only buyers can claim requisitions")
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-
-    from ...services.requirement_status import claim_requisition
-    from . import invalidate_prefix
-
-    try:
-        changed = claim_requisition(req, user, db)
-    except ValueError as e:
-        raise HTTPException(409, str(e)) from e
-    db.commit()
-    invalidate_prefix("req_list")
-    return {"ok": True, "claimed": changed, "claimed_by_id": req.claimed_by_id}
-
-
-@router.delete("/api/requisitions/{req_id}/claim")
-async def unclaim_requisition_endpoint(
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Release buyer's claim on a requisition.
-
-    Only the claimer or admin can unclaim.
-    """
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    if req.claimed_by_id != user.id and user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Only the claiming buyer or admin can unclaim")
-
-    from ...services.requirement_status import unclaim_requisition
-    from . import invalidate_prefix
-
-    changed = unclaim_requisition(req, db, actor=user)
-    db.commit()
-    invalidate_prefix("req_list")
-    return {"ok": True, "unclaimed": changed}

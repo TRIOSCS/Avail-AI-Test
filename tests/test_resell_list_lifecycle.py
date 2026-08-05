@@ -1,11 +1,12 @@
-"""test_resell_list_lifecycle.py — List close lifecycle + mirror retire (M5).
+"""test_resell_list_lifecycle.py — List close lifecycle (M5) + no-mirror pin.
 
 Covers the M5 rework of the ExcessList posting-window lifecycle:
   • ``close_list`` is guarded to ``open``/``collecting`` only (409 for a draft or an
-    already-resolved list) and RETIRES the Sighting mirror on close (a closed posting
-    stops advertising its supply as live);
+    already-resolved list);
   • ``close_list_without_bid`` → the terminal ``closed`` state (D5);
-  • the list-view stage filter offers the ``closed`` / ``expired`` stages.
+  • the list-view stage filter offers the ``closed`` / ``expired`` stages;
+  • the resell→Sighting mirror dual-write is RETIRED (SIMPLIFICATION_SPEC §5.3):
+    publishing/closing writes no customer_excess Sightings (pins below).
 
 (The nightly expiry job + ``expire_overdue_lists`` service and their tests were
 removed in the W1 simplification per docs/W1_JOB_DISPOSITION.md; git restores.)
@@ -60,7 +61,7 @@ def other_user(db_session: Session) -> User:
 
 
 def _make_list(db: Session, owner: User, company: Company, parts=("LM358N",)) -> ExcessList:
-    """A list with card-resolved lines (so the mirror actually creates Sightings)."""
+    """A list with card-resolved lines."""
     el = create_excess_list(db, title="Excess", company_id=company.id, owner_id=owner.id)
     import_line_items(db, el.id, [{"part_number": p, "quantity": "100"} for p in parts])
     return el
@@ -167,18 +168,38 @@ def test_end_posting_window_stale_read_cannot_clobber_concurrent_award(db_sessio
     assert el.status == ExcessListStatus.AWARDED  # the lock refreshed it in place — never clobbered
 
 
-# ── close retires the Sighting mirror ────────────────────────────────
+# ── the mirror dual-write is retired: no Sightings at any lifecycle step ──
 
 
-def test_close_retires_mirror(db_session, owner, company):
-    """Closing a posted list retires its live-supply mirror (M5)."""
+def test_publish_writes_no_sighting_mirror(db_session, owner, company):
+    """Posting a resell line no longer creates a Sighting — the resell→Sighting dual-
+    write is retired while nothing reads it (SIMPLIFICATION_SPEC §5.3).
+
+    It also creates no virtual scratch requisition.
+    """
+    from app.models.sourcing import Requisition
+
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    assert len(_sightings(db_session, company.id)) == 1  # posted → mirrored
+
+    assert _sightings(db_session, company.id) == []
+    scratch = (
+        db_session.query(Requisition)
+        .filter(Requisition.is_scratch.is_(True), Requisition.name == f"Customer Excess (list {el.id})")
+        .count()
+    )
+    assert scratch == 0
+
+
+def test_close_writes_no_sighting_mirror(db_session, owner, company):
+    """Closing a posted list touches no Sightings (nothing was mirrored on publish)."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)
+    assert _sightings(db_session, company.id) == []
 
     excess_service.close_list(db_session, el.id, owner)
 
-    assert _sightings(db_session, company.id) == []  # closed → retired
+    assert _sightings(db_session, company.id) == []
 
 
 # ── close_list_without_bid → CLOSED terminal state (Task 3, D5) ──────
@@ -207,11 +228,11 @@ def test_close_without_bid_on_collecting_flips_to_closed(db_session, owner, comp
     assert closed.status == ExcessListStatus.CLOSED
 
 
-def test_close_without_bid_retires_mirror(db_session, owner, company):
-    """Closing without bidding retires the live-supply Sighting mirror (terminal)."""
+def test_close_without_bid_writes_no_sighting_mirror(db_session, owner, company):
+    """Closing without bidding touches no Sightings (dual-write retired)."""
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    assert len(_sightings(db_session, company.id)) == 1
+    assert _sightings(db_session, company.id) == []
 
     excess_service.close_list_without_bid(db_session, el.id, owner)
 

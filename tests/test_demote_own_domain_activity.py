@@ -99,8 +99,9 @@ def test_null_email_row_excluded_from_scan(db_session: Session):
 
 
 def test_unattributed_row_out_of_scope(db_session: Session):
-    """A row with company_id NULL is reattribute_activity's territory — the candidate
-    query here requires company_id NOT NULL."""
+    """A row with company_id NULL is out of scope (it was the since-deleted
+    reattribute_activity backfill's territory) — the candidate query here requires
+    company_id NOT NULL."""
     row = ActivityLog(
         company_id=None,
         activity_type="email_received",

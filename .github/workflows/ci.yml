@@ -271,8 +271,8 @@ jobs:
         # has to flush; failures still show full detail via --tb=short.
         # --cov-report= (no report here): a partial shard's line coverage is
         # meaningless in isolation (a file fully covered by the OTHER shard's
-        # tests looks "uncovered" here) — --cov-fail-under is enforced once,
-        # post-merge, in the coverage-report job.
+        # tests looks "uncovered" here) — the diff-coverage gate (Decision K)
+        # is enforced once, post-merge, in the coverage-report job.
         run: |
           FILES=$(python scripts/ci_shard.py ${{ matrix.shard }} 2)
           echo "Shard ${{ matrix.shard }} running $(echo "$FILES" | wc -w) file(s)."
@@ -322,9 +322,11 @@ jobs:
 
   coverage-report:
     # P2.3 follow-up: merges the per-shard coverage DATA files (uploaded as
-    # shard-scoped artifacts above, so nothing clobbers) back into ONE report
-    # so --cov-fail-under=85 still evaluates against the WHOLE suite, not
-    # each half in isolation. Runs even if a shard failed its pytest step
+    # shard-scoped artifacts above, so nothing clobbers) back into ONE report.
+    # W2 (spec §9 Decision K): the 85% GLOBAL fail-under died with the
+    # coverage-farm delete — the gate below is now DIFF-scoped: only the
+    # app/ Python files changed vs the PR base (HEAD^ on push) must hold the
+    # coverage bar. Runs even if a shard failed its pytest step
     # (`always()`) so the coverage gate itself still reports accurately, but
     # is a no-op (skipped download -> combine fails loudly) if a shard never
     # produced its data file.
@@ -337,6 +339,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: the diff-coverage gate below needs merge-base vs
+          # the PR base branch (same pattern as the pre-commit step).
+          fetch-depth: 0
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v7
@@ -357,11 +363,41 @@ jobs:
         with:
           name: coverage-data-1
 
-      - name: Combine + enforce coverage gate
+      - name: Combine + enforce diff-coverage gate
+        # Diff coverage (spec §9 Decision K, lands with the coverage-farm
+        # delete): gate ONLY the app/ Python files this change touched — their
+        # aggregate line coverage from the combined suite run must be >=85%
+        # (coverage's --fail-under is aggregate over --include). No new
+        # dependency: diff-cover is not in the lock, so this scopes coverage's
+        # own report via --include (file-level, the closest coverage-only
+        # equivalent of a per-line diff gate). $GITHUB_BASE_REF is the
+        # built-in PR-base env var (empty on push — falls back to HEAD^),
+        # same merge-base pattern as the pre-commit step above.
         run: |
           coverage combine .coverage.0 .coverage.1
           coverage xml -o coverage.xml
-          coverage report --fail-under=85
+          coverage report > coverage-summary.txt || true
+          tail -3 coverage-summary.txt
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            git fetch -q origin "$GITHUB_BASE_REF"
+            base=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)
+          fi
+          changed=$(git diff --name-only --diff-filter=d "$base"..HEAD -- 'app/*.py' 'app/**/*.py' | paste -sd, -)
+          if [ -z "$changed" ]; then
+            echo "No app/ Python changes vs $base — diff-coverage gate passes trivially."
+          elif ! out=$(coverage report --include="$changed" --fail-under=85 2>&1); then
+            echo "$out"
+            if echo "$out" | grep -q "No data to report"; then
+              echo "Changed files have no measurable lines — diff-coverage gate passes trivially."
+            else
+              echo "::error::Diff-coverage gate failed: changed app/ files below 85% (files: $changed)"
+              exit 1
+            fi
+          else
+            echo "$out"
+          fi
 
       - name: Upload merged coverage
         if: always()

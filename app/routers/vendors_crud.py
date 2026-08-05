@@ -20,7 +20,7 @@ from ..models import Company, Offer, User, VendorCard, VendorReview
 from ..models.strategic import StrategicVendor
 from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
-from ..schemas.vendors import VendorBlacklistToggle, VendorCardCreate, VendorCardUpdate, VendorReviewCreate
+from ..schemas.vendors import VendorCardCreate, VendorCardUpdate
 
 # The duplicate-check logic lives in the service (shared with the sightings RFQ
 # composer's POST composer-vendor endpoint). _fuzzy_match_python is re-exported
@@ -427,22 +427,6 @@ async def update_vendor(
     return card_to_dict(card, db)
 
 
-@router.post("/api/vendors/{card_id}/blacklist")
-async def toggle_blacklist(
-    card_id: int,
-    data: VendorBlacklistToggle,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Toggle vendor blacklist status."""
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
-    card.is_blacklisted = data.blacklisted if data.blacklisted is not None else (not card.is_blacklisted)
-    db.commit()
-    return card_to_dict(card, db)
-
-
 @router.delete("/api/vendors/{card_id}")
 async def delete_vendor(card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     card = db.get(VendorCard, card_id)
@@ -454,45 +438,3 @@ async def delete_vendor(card_id: int, user: User = Depends(require_admin), db: S
     db.delete(card)
     db.commit()
     return {"ok": True}
-
-
-# -- Vendor Reviews -----------------------------------------------------------
-
-
-@router.post("/api/vendors/{card_id}/reviews")
-async def add_review(
-    card_id: int,
-    payload: VendorReviewCreate,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
-    review = VendorReview(
-        vendor_card_id=card.id,
-        user_id=user.id,
-        rating=payload.rating,
-        comment=payload.comment,
-    )
-    db.add(review)
-    db.commit()
-    return card_to_dict(card, db)
-
-
-@router.delete("/api/vendors/{card_id}/reviews/{review_id}")
-async def delete_review(
-    card_id: int,
-    review_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    review = db.query(VendorReview).filter_by(id=review_id, vendor_card_id=card_id, user_id=user.id).first()
-    if not review:
-        raise HTTPException(404, "Review not found or not yours")
-    db.delete(review)
-    db.commit()
-    card = db.get(VendorCard, card_id)
-    if not card:
-        return {"ok": True}
-    return card_to_dict(card, db)

@@ -493,8 +493,8 @@ def demote_internal_activity(record: ActivityLog) -> None:
     quality_assessed_at IS NULL, so an unstamped demotion would be AI re-scored
     (possibly back to True) within days, silently undoing the demotion. ONE definition
     shared by log_email_activity (write path), scan_sent_folder's fallback CREATE
-    (app/jobs/email_jobs.py), and the demote_own_domain_activity / reattribute_activity
-    backfills — the four demoting writers can never disagree.
+    (app/jobs/email_jobs.py), and the demote_own_domain_activity backfill — the demoting
+    writers can never disagree.
     """
     record.is_meaningful = False
     record.quality_classification = "internal"

@@ -1,6 +1,6 @@
 """tests/test_data_sources.py — Tests for the Data Sources settings tab.
 
-Covers: source listing, credential CRUD, status toggling, test endpoint,
+Covers: source listing, credential CRUD, test endpoint,
 and planned vs configurable source separation.
 
 Called by: pytest
@@ -170,46 +170,10 @@ def test_list_sources_no_auto_promote_to_live(client, db_session, seed_sources):
     assert mouser_data["status"] == "pending"
 
 
-# ── PUT /api/sources/{id}/toggle ─────────────────────────────────────
-
-
-def test_toggle_disable_source(admin_source_client, db_session, seed_sources):
-    """Disabling a source sets status to disabled."""
-    nexar = db_session.query(ApiSource).filter_by(name="nexar").first()
-    resp = admin_source_client.put(f"/api/sources/{nexar.id}/toggle", json={"status": "disabled"})
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "disabled"
-
-
-def test_toggle_enable_with_creds_goes_live(admin_source_client, db_session, seed_sources):
-    """Enabling a source with credentials set goes to live, not pending."""
-    from app.services.credential_service import encrypt_value
-
-    mouser = db_session.query(ApiSource).filter_by(name="mouser").first()
-    mouser.credentials = {"MOUSER_API_KEY": encrypt_value("test-key")}
-    mouser.status = "disabled"
-    db_session.commit()
-
-    resp = admin_source_client.put(f"/api/sources/{mouser.id}/toggle", json={"status": "live"})
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "live"
-
-
-def test_toggle_enable_without_creds_goes_pending(admin_source_client, db_session, seed_sources):
-    """Enabling a source without credentials set goes to pending."""
-    mouser = db_session.query(ApiSource).filter_by(name="mouser").first()
-    mouser.status = "disabled"
-    db_session.commit()
-
-    resp = admin_source_client.put(f"/api/sources/{mouser.id}/toggle", json={"status": "live"})
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "pending"
-
-
 # ── POST /api/sources/{id}/test ──────────────────────────────────────
 
 
-# The /test + /toggle source endpoints are gated on MANAGE_CONNECTORS (SET-06),
+# The /test source endpoint is gated on MANAGE_CONNECTORS (SET-06),
 # which is no longer an interactive-role default — so these use the admin client
 # (admins qualify for every capability) rather than the plain buyer client.
 def test_source_test_no_connector(admin_source_client, db_session, seed_sources):

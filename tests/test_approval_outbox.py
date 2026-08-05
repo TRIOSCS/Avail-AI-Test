@@ -1,27 +1,28 @@
-"""test_approval_outbox.py — TDD tests for outbox dispatcher (Task 6).
+"""test_approval_outbox.py — outbox dispatcher tests (email-only channel).
 
 Tests:
-  - After dispatch_pending, a pending outbox row has sent_at set and one Notification
-    written (in_app channel).
   - Running dispatch_pending twice does NOT double-send (idempotency: row already
     sent_at is skipped).
   - Email channel: Graph send is attempted; failure increments fail_count + sets
     last_error; sent_at remains NULL.
   - Email channel: Graph send success sets sent_at.
+  - Deleted recipient / unknown channel (including legacy "in_app" rows — that
+    write-only delivery path was deleted, W2.9/§5.5) → failed toward the
+    dead-letter cap, never marked sent.
+  - Per-row isolation: a failing row cannot poison the batch, and a dispatch
+    path that commits the session mid-row (token refresh) cannot abort it.
 
 Called by: pytest
 Depends on: conftest (db_session), app.jobs.approval_outbox,
-            app.models.approvals, app.models.notification, app.models.auth
+            app.models.approvals, app.models.auth
 """
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
 
 from app.models.approvals import ApprovalOutbox
-from app.models.notification import Notification
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ def _make_request(db, owner):
     return req
 
 
-def _pending_outbox(db, request, recipient, channel="in_app"):
+def _pending_outbox(db, request, recipient, channel="email"):
     row = ApprovalOutbox(
         request_id=request.id,
         recipient_user_id=recipient.id,
@@ -64,72 +65,20 @@ def _pending_outbox(db, request, recipient, channel="in_app"):
     return row
 
 
+def _graph_success_patches():
+    """Patch token fetch + GraphClient so the email path succeeds; returns the mock."""
+    gc_instance = MagicMock()
+    gc_instance.post_json = AsyncMock(return_value=None)
+    token_patch = patch(
+        "app.services.approvals.notifications.get_valid_token",
+        new_callable=AsyncMock,
+        return_value="tok",
+    )
+    client_patch = patch("app.services.approvals.notifications.GraphClient", return_value=gc_instance)
+    return token_patch, client_patch, gc_instance
+
+
 # ── Tests ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_dispatch_sets_sent_at_and_writes_notification(db_session):
-    """After dispatch_pending an in_app row has sent_at set and one Notification
-    exists."""
-    from app.jobs.approval_outbox import dispatch_pending
-
-    user = _make_user(db_session)
-    req = _make_request(db_session, user)
-    row = _pending_outbox(db_session, req, user, channel="in_app")
-    db_session.commit()
-
-    await dispatch_pending(db_session)
-
-    db_session.refresh(row)
-    assert row.sent_at is not None, "sent_at should be set after dispatch"
-
-    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
-    assert len(notifs) == 1, "Exactly one Notification should be written"
-    assert "approval" in notifs[0].event_type.lower() or notifs[0].event_type
-
-
-@pytest.mark.asyncio
-async def test_in_app_notification_body_carries_comment(db_session):
-    """The in-app Notification.body == the decision comment from the outbox payload."""
-    from app.jobs.approval_outbox import dispatch_pending
-
-    user = _make_user(db_session, "commenter@example.com")
-    req = _make_request(db_session, user)
-    row = ApprovalOutbox(
-        request_id=req.id,
-        recipient_user_id=user.id,
-        channel="in_app",
-        payload={"event_type": "decided", "decision": "rejected", "comment": "Vendor unverified"},
-    )
-    db_session.add(row)
-    db_session.commit()
-
-    await dispatch_pending(db_session)
-
-    notif = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
-    assert notif.body == "Vendor unverified"
-
-
-@pytest.mark.asyncio
-async def test_in_app_notification_body_none_when_no_comment(db_session):
-    """No comment in the payload → the in-app Notification.body is None."""
-    from app.jobs.approval_outbox import dispatch_pending
-
-    user = _make_user(db_session, "nocomment@example.com")
-    req = _make_request(db_session, user)
-    row = ApprovalOutbox(
-        request_id=req.id,
-        recipient_user_id=user.id,
-        channel="in_app",
-        payload={"event_type": "decided", "decision": "approved", "comment": None},
-    )
-    db_session.add(row)
-    db_session.commit()
-
-    await dispatch_pending(db_session)
-
-    notif = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalar_one()
-    assert notif.body is None
 
 
 @pytest.mark.asyncio
@@ -139,14 +88,17 @@ async def test_dispatch_idempotent_no_double_send(db_session):
 
     user = _make_user(db_session)
     req = _make_request(db_session, user)
-    _pending_outbox(db_session, req, user, channel="in_app")
+    row = _pending_outbox(db_session, req, user, channel="email")
     db_session.commit()
 
-    await dispatch_pending(db_session)
-    await dispatch_pending(db_session)
+    token_patch, client_patch, gc = _graph_success_patches()
+    with token_patch, client_patch:
+        await dispatch_pending(db_session)
+        await dispatch_pending(db_session)
 
-    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
-    assert len(notifs) == 1, "Second dispatch must NOT write a second Notification"
+    db_session.refresh(row)
+    assert row.sent_at is not None
+    assert gc.post_json.await_count == 1, "Second dispatch must NOT send the email again"
 
 
 @pytest.mark.asyncio
@@ -189,18 +141,8 @@ async def test_email_channel_graph_success_sets_sent_at(db_session):
     row = _pending_outbox(db_session, req, user, channel="email")
     db_session.commit()
 
-    with (
-        patch(
-            "app.services.approvals.notifications.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ),
-        patch("app.services.approvals.notifications.GraphClient") as MockGC,
-    ):
-        gc_instance = MagicMock()
-        gc_instance.post_json = AsyncMock(return_value=None)
-        MockGC.return_value = gc_instance
-
+    token_patch, client_patch, _gc = _graph_success_patches()
+    with token_patch, client_patch:
         await dispatch_pending(db_session)
 
     db_session.refresh(row)
@@ -217,13 +159,11 @@ async def test_deleted_recipient_increments_fail_count_not_sent(db_session):
     the FK is ON DELETE SET NULL / the row outlives the user); patching the lookup is
     the deterministic way to exercise the branch without fighting the test DB's cascade.
     """
-    from unittest.mock import patch
-
     from app.jobs.approval_outbox import dispatch_pending
 
     user = _make_user(db_session, "ghost@example.com")
     req = _make_request(db_session, user)
-    row = _pending_outbox(db_session, req, user, channel="in_app")
+    row = _pending_outbox(db_session, req, user, channel="email")
     db_session.commit()
 
     # Simulate the recipient being gone: db.get(User, ...) → None for this drain.
@@ -250,7 +190,7 @@ async def test_dead_letter_cap_stops_fetching_row(db_session):
 
     user = _make_user(db_session, "capped@example.com")
     req = _make_request(db_session, user)
-    row = _pending_outbox(db_session, req, user, channel="in_app")
+    row = _pending_outbox(db_session, req, user, channel="email")
     row.fail_count = MAX_OUTBOX_FAIL_COUNT  # already at the cap
     db_session.commit()
 
@@ -281,50 +221,57 @@ async def test_unknown_channel_is_failed_not_marked_sent(db_session):
     assert row.fail_count == 1
     assert "carrier_pigeon" in (row.last_error or "")
 
-    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
-    assert notifs == [], "unknown channel must not write a Notification"
+
+@pytest.mark.asyncio
+async def test_legacy_in_app_channel_is_failed_to_dead_letter(db_session):
+    """A legacy "in_app" row (the write-only delivery path deleted in W2.9/§5.5) is
+    treated like any unknown channel: failed toward the dead-letter cap, never sent."""
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "legacy@example.com")
+    req = _make_request(db_session, user)
+    row = _pending_outbox(db_session, req, user, channel="in_app")
+    db_session.commit()
+
+    await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is None, "legacy in_app row must NOT be marked sent"
+    assert row.fail_count == 1
+    assert "in_app" in (row.last_error or "")
 
 
 @pytest.mark.asyncio
-async def test_in_app_failure_does_not_poison_batch(db_session):
-    """If the in_app write raises, that row is rolled back and failed (fail_count/
-    last_error recorded, no dirty Notification persisted), and a healthy later row in
-    the same batch still dispatches (batch not poisoned by per-row isolation)."""
+async def test_email_failure_does_not_poison_batch(db_session):
+    """If one email send raises, that row is rolled back and failed (fail_count/
+    last_error recorded), and a healthy later row in the same batch still dispatches
+    (batch not poisoned — per-row isolation)."""
     from app.jobs import approval_outbox
     from app.jobs.approval_outbox import dispatch_pending
 
     user = _make_user(db_session, "mixed@example.com")
     req = _make_request(db_session, user)
-    bad = _pending_outbox(db_session, req, user, channel="in_app")
-    good = _pending_outbox(db_session, req, user, channel="in_app")
+    bad = _pending_outbox(db_session, req, user, channel="email")
+    good = _pending_outbox(db_session, req, user, channel="email")
     db_session.commit()
 
-    # Make ONLY the first in_app write raise; the second proceeds normally.
+    # Make ONLY the first send raise; the second proceeds normally.
     calls = {"n": 0}
-    real_write = approval_outbox._ns.write_in_app
 
-    def _flaky_write(db, user_id, event_type, title, body=None):
+    async def _flaky_send(user_, subject, html_body, db):
         calls["n"] += 1
         if calls["n"] == 1:
-            db.add(  # dirty object that must NOT survive the failed row
-                Notification(user_id=user_id, event_type=event_type, title=title, body=body, is_read=False)
-            )
-            raise RuntimeError("boom in_app")
-        return real_write(db, user_id, event_type, title, body)
+            raise RuntimeError("boom email")
 
-    with patch.object(approval_outbox._ns, "write_in_app", side_effect=_flaky_write):
+    with patch.object(approval_outbox._ns, "send_email", side_effect=_flaky_send):
         dispatched = await dispatch_pending(db_session)
 
     assert dispatched == 1, "the healthy row must still dispatch despite the bad row"
 
     db_session.refresh(bad)
     db_session.refresh(good)
-    assert bad.sent_at is None and bad.fail_count == 1 and "boom in_app" in (bad.last_error or "")
+    assert bad.sent_at is None and bad.fail_count == 1 and "boom email" in (bad.last_error or "")
     assert good.sent_at is not None, "the good row must be marked sent"
-
-    # Exactly one Notification — the bad row's dirty Notification was rolled back.
-    notifs = db_session.execute(select(Notification).where(Notification.user_id == user.id)).scalars().all()
-    assert len(notifs) == 1, "the failed row's Notification must have been rolled back"
 
 
 @pytest.mark.asyncio
@@ -337,19 +284,19 @@ async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_se
     blew up at ``savepoint.commit()`` with ``sqlalchemy.exc.ResourceClosedError: This
     transaction is closed`` — and the failing ``except savepoint.rollback()`` propagated,
     aborting the whole 60s batch and leaving the email row stuck (sent_at NULL,
-    fail_count 0) while the sibling in_app row had already been delivered.
+    fail_count 0).
 
     The drain MUST tolerate a dispatch path that commits/closes the transaction mid-row:
-    no ResourceClosedError, the committing email row is delivered, and a sibling in_app
+    no ResourceClosedError, the committing email row is delivered, and a sibling email
     row in the same batch still delivers.
     """
     from app.jobs.approval_outbox import dispatch_pending
 
     sender = _make_user(db_session, "refresher@example.com")
-    other = _make_user(db_session, "inapp-sibling@example.com")
+    other = _make_user(db_session, "sibling@example.com")
     req = _make_request(db_session, sender)
     email_row = _pending_outbox(db_session, req, sender, channel="email")
-    inapp_row = _pending_outbox(db_session, req, other, channel="in_app")
+    sibling_row = _pending_outbox(db_session, req, other, channel="email")
     db_session.commit()
 
     # Faithfully simulate get_valid_token's token-refresh write: mutate the user and
@@ -373,13 +320,10 @@ async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_se
         # Must NOT raise ResourceClosedError.
         dispatched = await dispatch_pending(db_session)
 
-    assert dispatched == 2, "both the committing email row and the in_app sibling dispatch"
+    assert dispatched == 2, "both the committing email row and the sibling dispatch"
 
     db_session.refresh(email_row)
-    db_session.refresh(inapp_row)
+    db_session.refresh(sibling_row)
     assert email_row.sent_at is not None, "the committing email row must be marked sent"
     assert email_row.fail_count == 0
-    assert inapp_row.sent_at is not None, "the sibling in_app row must NOT be aborted"
-
-    notifs = db_session.execute(select(Notification).where(Notification.user_id == other.id)).scalars().all()
-    assert len(notifs) == 1, "the in_app sibling's Notification must be written"
+    assert sibling_row.sent_at is not None, "the sibling email row must NOT be aborted"

@@ -1,10 +1,10 @@
 """test_resell_draft_offer_privacy.py — Draft-privacy regression for the offer funnel.
 
-Guards the resell offer entry points (the submit-offer modal and the offer POST) against
-leaking or accepting offers on an UNPUBLISHED (draft) list. A non-owner with ``can_offer``
-must get a 404 (existence not revealed) on a draft list — only the owner sees a draft, and
-nobody may bid on it until it is posted. A posted (collecting) list still works for the
-same non-owner.
+Guards the resell offer surfaces against leaking a private draft or another broker's
+bid to a non-owner. The trader-lane entry routes (submit-offer modal + offer POST)
+are PARKED (spec §5.3, W2.3) — their route-level pins were dropped; what remains
+here covers the still-registered read routes (detail, offers tab, lists) and the
+service-backed own-offers view.
 
 Called by: pytest. Depends on: conftest fixtures (client auths as test_user, a buyer),
 app.routers.resell, app.services.excess_service.
@@ -78,41 +78,12 @@ def posted_list(db_session: Session, owner_user: User, test_company: Company) ->
     return _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
 
 
-def test_non_owner_offer_form_on_draft_404(client, draft_list, owner_user, test_user):
-    """Non-owner GET on a draft list's offer-form modal → 404 (existence not
-    revealed)."""
-    assert test_user.id != owner_user.id
-    resp = client.get(f"/v2/partials/resell/{draft_list.id}/offer-form")
-    assert resp.status_code == 404
-
-
-def test_non_owner_submit_offer_on_draft_404(client, db_session, draft_list, owner_user, test_user):
-    """Non-owner POST of an offer on a draft list → 404 and NO offer persisted."""
-    assert test_user.id != owner_user.id
-    resp = client.post(
-        f"/api/resell/{draft_list.id}/offers",
-        data={"scope": "per_line", "mpn_raw": "XCVU9P-2FLGA2104I", "quantity": "10", "unit_price": "5.00"},
-    )
-    assert resp.status_code == 404
-    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=draft_list.id).all()
-    assert offers == []
-
-
-def test_non_owner_offer_form_on_posted_200(client, posted_list, owner_user, test_user):
-    """The same non-owner CAN open the offer-form on a posted (collecting) list."""
-    resp = client.get(f"/v2/partials/resell/{posted_list.id}/offer-form")
-    assert resp.status_code == 200
-
-
-def test_non_owner_submit_offer_on_posted_200(client, db_session, posted_list, owner_user, test_user):
-    """The same non-owner CAN submit an offer on a posted list (offer persisted)."""
-    resp = client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={"scope": "per_line", "mpn_raw": "XCVU9P-2FLGA2104I", "quantity": "10", "unit_price": "5.00"},
-    )
-    assert resp.status_code == 200
-    offers = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).all()
-    assert len(offers) == 1
+# (The four offer-form / offer-POST route tests were deleted with the W2.3
+# trader-lane park — spec §5.3: both routes are unregistered, so every request
+# 404s regardless of draft state; the parked-off route state is pinned in
+# tests/test_resell_trader_lane_parked.py. The draft-privacy rule itself stays
+# covered at the service level — see test_resell_offers.py
+# test_submit_offer_rejects_non_posted_list_service_level[draft].)
 
 
 # ── Task 1 (finding #13): the broker own-offers view + Withdraw ──────────────
@@ -218,17 +189,9 @@ def test_non_submitter_still_404_on_expired_list(client, db_session, owner_user,
     assert resp.status_code == 404
 
 
-def test_post_submit_offer_shows_own_offer_not_empty_state(client, db_session, posted_list, owner_user, test_user):
-    """Post-submit re-render shows the submitter their own offer (not the empty
-    state)."""
-    resp = client.post(
-        f"/api/resell/{posted_list.id}/offers",
-        data={"scope": "per_line", "mpn_raw": "XCVU9P-2FLGA2104I", "quantity": "10", "unit_price": "5.00"},
-    )
-    assert resp.status_code == 200
-    offer = db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).one()
-    assert f"/offers/{offer.id}/withdraw" in resp.text
-    assert "XCVU9P-2FLGA2104I" in resp.text
+# (test_post_submit_offer_shows_own_offer_not_empty_state deleted with the W2.3
+# trader-lane park — the POST route is unregistered; the own-offers re-render it
+# asserted stays covered by test_non_owner_offers_tab_shows_own_offer_with_withdraw.)
 
 
 def test_owner_offers_view_unchanged_by_broker_view(client, db_session, posted_list, owner_user, test_user):
@@ -377,62 +340,12 @@ def test_owner_detail_shows_awarded_chip(client, db_session, owner_user, test_co
     assert "1/1 awarded" in body, "owner must still see the awarded-progress chip"
 
 
-def test_open_lens_hides_coverage_meter_and_offer_badge(client, db_session, owner_user, test_company, test_user):
-    """D2: the open (offerer) lens must not show the per-list coverage meter or the amber
-    offer-count badge — they reveal how many lines already have offers and how many bids
-    are in. Owner (mine lens) still sees them."""
-    assert test_user.id != owner_user.id
-    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
-    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
-    line.offer_count = 3  # line reads as "covered" → coverage meter would show 1/1
-    db_session.add(
-        ExcessOffer(
-            excess_list_id=el.id,
-            submitted_by=owner_user.id,
-            scope=ExcessOfferScope.PER_LINE,
-            status=ExcessOfferStatus.OPEN,
-        )
-    )
-    db_session.commit()
-
-    # Non-owner, open lens: the coverage meter (+ its amber-badge sibling, same gate) is gone.
-    open_body = client.get("/v2/partials/resell/lists?lens=open").text
-    assert "Offer coverage:" not in open_body, "coverage meter leaked to a non-owner (open lens)"
-
-    # Owner, mine lens: the meter is present.
-    from app.dependencies import require_user
-
-    client.app.dependency_overrides[require_user] = lambda: owner_user
-    try:
-        mine_body = client.get("/v2/partials/resell/lists?lens=mine").text
-    finally:
-        client.app.dependency_overrides.pop(require_user, None)
-    assert "Offer coverage:" in mine_body, "owner must still see the coverage meter"
-
-
-def test_open_lens_needs_filter_is_not_an_offer_existence_oracle(
-    client, db_session, owner_user, test_company, test_user
-):
-    """D2 (offer-EXISTENCE oracle): the offer-based ``needs`` triage is the OWNER's
-    board only.
-
-    A non-owner on the open lens must NOT be able to narrow the anonymized listing set
-    to only postings that already carry a live bid — diffing ``lens=open&needs=offers``
-    against plain ``lens=open`` would reveal which competitors' listings have drawn interest
-    (the same signal the coverage meter / amber badge / offer-count chip hide). The ``needs``
-    filter must be a no-op for a non-owner, so the no-offer listing is STILL returned.
-    """
-    assert test_user.id != owner_user.id
-    with_offer = _posted_list_with_offers(db_session, owner_user, test_company, n_offers=1)
-    without_offer = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
-
-    body = client.get("/v2/partials/resell/lists?lens=open&needs=offers").text
-    # The no-offer listing is still present — ``needs`` did not filter it out for the non-owner.
-    assert f"Excess listing #{without_offer.id}" in body, "needs=offers acted as an offer-existence oracle (open lens)"
-    assert f"Excess listing #{with_offer.id}" in body
-    # take_all is the same oracle dimension — also a no-op for the non-owner.
-    ta_body = client.get("/v2/partials/resell/lists?lens=open&needs=take_all").text
-    assert f"Excess listing #{without_offer.id}" in ta_body, "needs=take_all acted as an oracle (open lens)"
+# (test_open_lens_hides_coverage_meter_and_offer_badge and
+# test_open_lens_needs_filter_is_not_an_offer_existence_oracle deleted with the
+# W2.3 trader-lane park — spec §5.3: lens=open is coerced to mine, so the open
+# lens and its D2 offer-existence gates are unreachable at route level. The gate
+# implementation stays parked in _list_rows_context for the comeback: second
+# trader user.)
 
 
 def test_mine_lens_needs_filter_still_narrows_to_lists_with_offers(client, db_session, owner_user, test_company):

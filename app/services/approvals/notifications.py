@@ -1,24 +1,17 @@
 """notifications.py — NotificationService helpers for the approval engine.
 
 Purpose: Low-level send primitives invoked by the outbox dispatcher.
-         Sends email via the Graph API (same pattern as buyplan_notifications)
-         and writes in-app Notification rows (via the shared
-         app.services.in_app_notifications seam, re-exported here).
+         Sends email via the Graph API (same pattern as buyplan_notifications).
+         The in-app Notification write seam that used to be re-exported here was
+         deleted with the write-only notifications channel (W2.9/§5.5).
 
 Called by: app/jobs/approval_outbox.dispatch_pending
-Depends on: app.services.in_app_notifications, app.models.auth (User),
-            app.utils.graph_client, app.utils.token_manager
+Depends on: app.models.auth (User), app.utils.graph_client,
+            app.utils.token_manager
 """
 
 from loguru import logger
 from sqlalchemy.orm import Session
-
-# write_in_app moved to the shared app.services.in_app_notifications seam
-# (nightly-status alerting needed it outside the approvals engine). Re-exported
-# here so existing imports keep working: routers/htmx/buy_plans.py imports it
-# from this module and jobs/approval_outbox.py (and its tests) patch it as an
-# attribute of this module (_ns.write_in_app).
-from app.services.in_app_notifications import write_in_app  # noqa: F401
 
 # ── Lazy imports (Graph client) are done inside functions to match the pattern
 # used by buyplan_notifications and avoid import-time side effects.
@@ -71,13 +64,3 @@ def _build_email_html(payload: dict) -> tuple[str, str]:
         f'<p style="color:#6b7280;font-size:12px">This is an automated alert from AVAIL.</p>'
     )
     return subject, html
-
-
-def _build_in_app(payload: dict) -> tuple[str, str, str | None]:
-    """Return (event_type, title, body) for a Notification row from an outbox
-    payload."""
-    decision = payload.get("decision", "decided")
-    event_type = f"approval_{decision}"
-    title = f"Approval {decision}"
-    body = payload.get("comment") or None
-    return event_type, title, body

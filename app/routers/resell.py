@@ -395,14 +395,11 @@ def _detail_context(
         "take_all_count": take_all_count,
         "can_see_customer": can_see_customer,
         "can_post": excess_service.can_post(user),
-        # Posted-status term (finding #50): a broker who reaches a closed/expired list
-        # (allowed while they hold an offer, to withdraw it) must not see a Submit-offer
-        # button that dead-ends in the offer-form route's 404.
-        "can_offer": (
-            excess_service.can_offer(user)
-            and el.owner_id != user.id
-            and el.status in {s.value for s in _POSTED_STATUSES}
-        ),
+        # PARKED (spec §5.3, W2.3 — trader offer lane): always False so the
+        # Submit-offer button never renders (its routes are unregistered). The
+        # original predicate — can_offer(user) AND non-owner AND posted status
+        # (finding #50) — returns with the lane when a second trader user exists.
+        "can_offer": False,
         "shape": "single" if len(items) == 1 else "table",
         "hours_until": _hours_until(getattr(el, "close_at", None)),
         # Chip gate (finding #8): countdown only while live; a resolved list shows a muted
@@ -427,7 +424,10 @@ async def resell_workspace(
     db: Session = Depends(get_db),
 ):
     """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
-    lens = lens if lens in ("mine", "open") else "mine"
+    # PARKED (spec §5.3, W2.3 — solo-operator): the "Open to Me" offerer lens is
+    # parked until a second trader user exists; every request renders the owner
+    # ("mine") lens. The open-lens implementation in _list_rows_context stays.
+    lens = "mine"
     needs = needs if needs in ("offers", "take_all") else ""
     # The active triage token drives the single-highlight ring. The offer-based cards
     # (offers/take_all) live in the ``needs`` dimension; the status cards in ``stage`` —
@@ -485,7 +485,9 @@ def _list_rows_context(
     Rows are paged at the query level (``_LIST_PAGE_SIZE`` per page, ``offset`` from the
     "Load more" reveal); ``has_more``/``next_offset`` drive the Load-more row.
     """
-    lens = lens if lens in ("mine", "open") else "mine"
+    # PARKED (spec §5.3, W2.3): the offerer-facing ``lens=open`` branch below is parked
+    # until a second trader user exists — every request is coerced to the owner lens.
+    lens = "mine"
     needs = needs if needs in ("offers", "take_all") else ""
     # Eager-load company so the per-card seller-name render (mine lens) doesn't lazy-load
     # one company per list (M8: kill the N+1s in the left list).
@@ -1314,14 +1316,21 @@ async def resell_bids_upload_form(
     )
 
 
-@router.get("/v2/partials/resell/{list_id}/offer-form", response_class=HTMLResponse)
+# PARKED (spec §5.3, W2.3 — trader offer lane): route registration removed (no
+# existing flag covers the lane; same mechanism as the W1 job parks in
+# app/jobs/resell_jobs.py). Re-add the decorator
+# ``@router.get("/v2/partials/resell/{list_id}/offer-form", response_class=HTMLResponse)``
+# when a second trader user exists.
 async def resell_offer_form(
     request: Request,
     list_id: int,
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Render the submit-offer modal (per-line / take-all scope toggle)."""
+    """Render the submit-offer modal (per-line / take-all scope toggle).
+
+    PARKED — unrouted.
+    """
     # Load-and-authorize: non-owners 404 on a draft (existence not revealed).
     el, is_owner = _get_list_for_user(db, list_id, user)
     if not excess_service.can_offer(user):
@@ -1750,7 +1759,8 @@ async def resell_publish(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Publish a list: flip to open + live-mirror every line, then re-render detail.
+    """Publish a list: flip to open, then re-render detail (no Sighting mirror —
+    the resell→Sighting dual-write is retired, SIMPLIFICATION_SPEC §5.3).
 
     A foreign private DRAFT 404-masks before any 403 (finding #48).
     """
@@ -1790,7 +1800,11 @@ async def resell_close_without_bid(
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
-@router.post("/api/resell/{list_id}/offers", response_class=HTMLResponse)
+# PARKED (spec §5.3, W2.3 — trader offer lane): route registration removed (no
+# existing flag covers the lane). Only the parked submit-offer modal posted here;
+# the owner's bid doors (outreach log-bid, bids upload) use their own endpoints.
+# Re-add the decorator ``@router.post("/api/resell/{list_id}/offers",
+# response_class=HTMLResponse)`` when a second trader user exists.
 async def resell_submit_offer(
     request: Request,
     list_id: int,
@@ -2082,8 +2096,15 @@ def _buyer_panel_context(
         if bad:
             raise HTTPException(422, f"Line item(s) {bad} are not on list {el.id}")
         line_ids = [li.id for li in scope_lines]
-    suggestions = _suggestion_rows(db, el, owner, line_ids)
-    suggested_ids = {row["buyer"].vendor_card_id for row in suggestions}
+    # PARKED (spec §5.3, W2.3 — buyer-intelligence display): ranked suggestions and
+    # the no-contact history rows are parked until a second trader user exists —
+    # the panel renders its existing "No ranked buyers yet — search to add one
+    # below" empty state and the manual-add path keeps outreach working.
+    # ``_suggestion_rows`` / ``_no_contact_buyers`` stay in place; restore
+    # ``suggestions = _suggestion_rows(db, el, owner, line_ids)`` and
+    # ``_no_contact_buyers(db, el, {row["buyer"].vendor_card_id for row in
+    # suggestions})`` on comeback.
+    suggestions: list[dict] = []
     # Line count for the neutral outreach subject prefill (#11) — the campaign's scope:
     # the selected lines, or the whole list. NEVER the title (which names the customer).
     line_count = (
@@ -2096,7 +2117,7 @@ def _buyer_panel_context(
         "user": owner,
         "list": el,
         "suggestions": suggestions,
-        "no_contact_buyers": _no_contact_buyers(db, el, suggested_ids),
+        "no_contact_buyers": [],
         "channels": [c.value for c in ExcessOutreachChannel],
         "line_ids": line_ids or [],
         "scope_lines": scope_lines,
@@ -2280,7 +2301,12 @@ async def resell_outreach_export(
     return stream_csv(f"resell_outreach_list_{el.id}.csv", header, _rows())
 
 
-@router.get("/v2/partials/resell/{list_id}/not-yet-strip", response_class=HTMLResponse)
+# PARKED (spec §5.3, W2.3 — buyer-intelligence display): route registration removed
+# (no existing flag covers the layer). This nudge strip + its auto My-Day follow-up
+# task writes park together; detail.html's lazy embed was removed with it. Re-add the
+# decorator ``@router.get("/v2/partials/resell/{list_id}/not-yet-strip",
+# response_class=HTMLResponse)`` (and the detail.html embed) when a second trader
+# user exists.
 async def resell_not_yet_strip(
     request: Request,
     list_id: int,

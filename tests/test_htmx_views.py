@@ -2180,31 +2180,6 @@ class TestInsights:
             mock_gen.assert_awaited_once()
         assert "Company insight body" in resp.text
 
-    def test_dashboard_partial_pipeline_loader_targets_self(self, client: TestClient):
-        """Pipeline lazy-load must set hx-target so it does not inherit <main hx-
-        target="this">."""
-        resp = client.get("/v2/partials/dashboard")
-        assert resp.status_code == 200
-        assert "Loading pipeline insights..." in resp.text
-        _assert_lazy_load_targets_self(resp.text, "/v2/partials/dashboard/pipeline-insights")
-
-    def test_pipeline_insights(self, client: TestClient):
-        with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
-            resp = client.get("/v2/partials/dashboard/pipeline-insights")
-            assert resp.status_code == 200
-            assert "No insights yet." in resp.text
-            assert 'hx-post="/v2/partials/dashboard/pipeline-insights/refresh"' in resp.text
-
-    def test_pipeline_insights_refresh(self, client: TestClient):
-        entry = SimpleNamespace(confidence=0.9, content="Pipeline insight body", expires_at=None)
-        with patch(
-            "app.services.knowledge_service.generate_pipeline_insights", new_callable=AsyncMock, return_value=[entry]
-        ) as mock_gen:
-            resp = client.post("/v2/partials/dashboard/pipeline-insights/refresh")
-            assert resp.status_code == 200
-            mock_gen.assert_awaited_once()
-        assert "Pipeline insight body" in resp.text
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Parts List (split-panel)
@@ -2462,41 +2437,6 @@ class TestPartArchive:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class TestKnowledge:
-    """Test knowledge list and create."""
-
-    def test_list(self, client: TestClient, db_session: Session, test_user: User):
-        from app.models.knowledge import KnowledgeEntry
-
-        db_session.add(
-            KnowledgeEntry(
-                entry_type="note", content="Existing knowledge item", source="manual", created_by=test_user.id
-            )
-        )
-        db_session.commit()
-        resp = client.get("/v2/partials/knowledge")
-        assert resp.status_code == 200
-        assert "Knowledge Base" in resp.text
-        assert "Existing knowledge item" in resp.text
-
-    def test_create(self, client: TestClient, db_session: Session, test_user: User):
-        from app.models.knowledge import KnowledgeEntry
-
-        resp = client.post(
-            "/v2/partials/knowledge",
-            data={
-                "content": "Some knowledge content",
-                "entry_type": "note",
-            },
-        )
-        assert resp.status_code == 200
-        assert "Some knowledge content" in resp.text  # refreshed list shows the entry
-        entry = db_session.query(KnowledgeEntry).one()
-        assert entry.content == "Some knowledge content"
-        assert entry.entry_type == "note"
-        assert entry.created_by == test_user.id
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # Admin Endpoints
 # ══════════════════════════════════════════════════════════════════════════
@@ -2729,3 +2669,9 @@ class TestOfferReviewQueue:
         assert '<span class="font-medium text-amber-600">1</span> offer' in resp.text
         assert "LM317T" in resp.text
         assert "NE555P" not in resp.text
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

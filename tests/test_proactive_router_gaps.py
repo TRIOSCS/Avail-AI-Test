@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -984,3 +985,9 @@ class TestDoNotOffer:
         assert resp.status_code == 200
         dno = db_session.query(ProactiveDoNotOffer).filter_by(mpn="NE555").first()
         assert dno is not None
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

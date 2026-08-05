@@ -105,37 +105,12 @@ def _as_user(client, user):
 
 
 class TestOpenLensCollectingOracle:
-    def test_open_lens_stage_collecting_equals_stage_open(self, client, db_session, owner, broker, test_company):
-        """A non-owner diffing stage=collecting against stage=open must learn nothing:
-
-        both map to the live set.
-        """
-        el_open = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, title="Open one")
-        el_coll = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Coll one")
-        restore = _as_user(client, broker)
-        try:
-            by_open = client.get("/v2/partials/resell/lists?lens=open&stage=open").text
-            by_coll = client.get("/v2/partials/resell/lists?lens=open&stage=collecting").text
-            by_live = client.get("/v2/partials/resell/lists?lens=open&stage=live").text
-        finally:
-            restore()
-        for body in (by_open, by_coll, by_live):
-            assert f"Excess listing #{el_open.id}" in body
-            assert f"Excess listing #{el_coll.id}" in body
-
-    def test_open_lens_clicked_pill_keeps_active_state(self, client, db_session, owner, broker, test_company):
-        """The non-owner merge must hit only the FILTER, not the echoed token: the pill
-        the broker clicked keeps its active styling (a pure echo of the request — no
-        server state — so no oracle), while the rows are still the merged live set."""
-        _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Coll pill")
-        restore = _as_user(client, broker)
-        try:
-            body = client.get("/v2/partials/resell/lists?lens=open&stage=collecting").text
-        finally:
-            restore()
-        active = [chunk for chunk in body.split("<button") if "bg-accent-500" in chunk]
-        assert len(active) == 1, "exactly one filter pill must carry the active styling"
-        assert "stage=collecting" in active[0], "the active pill must be the one the broker clicked"
+    # (The three lens=open route tests — stage-token merge, clicked-pill echo, and
+    # the open-lens card badge — were deleted with the W2.3 trader-lane park:
+    # spec §5.3 coerces lens=open to mine, so the open lens is unreachable at
+    # route level. The #13 merge implementation stays parked in
+    # _list_rows_context; the non-owner DETAIL badge gate below is still live
+    # and stays pinned.)
 
     def test_owner_mine_lens_stage_collecting_stays_strict(self, client, db_session, owner, test_company):
         el_open = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, title="Mine open")
@@ -148,16 +123,6 @@ class TestOpenLensCollectingOracle:
         assert "Mine coll" in body
         assert "Mine open" not in body
         assert el_open is not None and el_coll is not None
-
-    def test_open_lens_card_never_renders_collecting_badge(self, client, db_session, owner, broker, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Coll badge")
-        restore = _as_user(client, broker)
-        try:
-            body = client.get("/v2/partials/resell/list-rows?lens=open").text
-        finally:
-            restore()
-        assert f"Excess listing #{el.id}" in body  # the card renders…
-        assert "collecting" not in body.lower()  # …but never the collecting badge
 
     def test_non_owner_detail_header_never_renders_collecting_badge(
         self, client, db_session, owner, broker, test_company
@@ -508,31 +473,39 @@ class TestCanOfferPostedGate:
         el = _make_list(db_session, owner, test_company, status=ExcessListStatus.EXPIRED)
         assert self._detail_ctx(db_session, el, broker)["can_offer"] is False
 
-    def test_broker_on_open_list_can_offer(self, db_session, owner, broker, test_company):
+    def test_broker_on_open_list_cannot_offer_while_lane_parked(self, db_session, owner, broker, test_company):
+        """PARKED (spec §5.3, W2.3): can_offer is hard-False in the detail context —
+        even the previously-eligible broker-on-posted-list case renders no Submit-offer
+        button until a second trader user exists."""
         el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
-        assert self._detail_ctx(db_session, el, broker)["can_offer"] is True
+        assert self._detail_ctx(db_session, el, broker)["can_offer"] is False
 
 
 # ── #51: empty-state branch order ────────────────────────────────────
 
 
 class TestEmptyStateBranchOrder:
-    def test_open_lens_with_filter_shows_filter_copy(self, client, db_session, broker):
+    # (Rewritten onto the mine lens with the W2.3 trader-lane park — spec §5.3:
+    # lens=open is coerced to mine, so the open-lens empty copy is unreachable.
+    # Finding #51's branch ORDER — filter copy before the board-is-empty claim —
+    # is what these pin, and it is lens-independent.)
+
+    def test_filtered_empty_shows_filter_copy(self, client, db_session, broker):
         restore = _as_user(client, broker)
         try:
-            body = client.get("/v2/partials/resell/lists?lens=open&q=zzz-no-match").text
+            body = client.get("/v2/partials/resell/lists?q=zzz-no-match").text
         finally:
             restore()
         assert "No lists match this filter." in body
-        assert "No postings are open to you" not in body
+        assert "haven't posted any excess lists" not in body
 
-    def test_open_lens_unfiltered_empty_shows_open_copy(self, client, db_session, broker):
+    def test_unfiltered_empty_shows_board_copy(self, client, db_session, broker):
         restore = _as_user(client, broker)
         try:
-            body = client.get("/v2/partials/resell/lists?lens=open").text
+            body = client.get("/v2/partials/resell/lists").text
         finally:
             restore()
-        assert "No postings are open to you" in body
+        assert "haven't posted any excess lists" in body
 
 
 # ── #33/42: excess_service.add_line ──────────────────────────────────

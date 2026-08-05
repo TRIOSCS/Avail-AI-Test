@@ -1,163 +1,29 @@
-"""routers/vendor_contacts.py — Vendor contact lookup, CRUD, and email metrics.
+"""routers/vendor_contacts.py — Structured vendor contact CRUD.
 
-Handles the 3-tier vendor contact waterfall (cache -> scrape -> AI),
-structured VendorContact CRUD, email metrics, and the quick add-email
-endpoint.
+Handles the structured VendorContact CRUD endpoints (bulk list, per-vendor
+list, add, update, delete, log-call).
 
 Called by: main.py (router mount)
-Depends on: models, dependencies, vendor_helpers, cache, credential_service
+Depends on: models, dependencies, vendor_helpers
 """
 
 import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from loguru import logger
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..cache.decorators import cached_endpoint
-from ..constants import ActivityType, Channel, ContactStatus, Direction, EventType
+from ..constants import ActivityType, Channel, Direction, EventType
 from ..database import get_db
 from ..dependencies import require_buyer, require_user
-from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
-from ..schemas.responses import VendorEmailMetricsResponse
-from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorContactUpdate, VendorEmailAdd
-from ..services.credential_service import get_credential_cached
+from ..models import User, VendorCard, VendorContact
+from ..schemas.vendors import VendorContactCreate, VendorContactUpdate
 from ..template_env import template_response
-from ..utils.async_helpers import safe_background_task
 from ..utils.column_limits import ensure_fits_column
 from ..utils.phone_utils import format_phone_e164
-from ..utils.vendor_helpers import (
-    _background_enrich_vendor,
-    clean_emails,
-    clean_phones,
-    find_vendor_card_by_name,
-    get_or_create_card,
-    merge_contact_into_card,
-    scrape_website_contacts,
-    sync_card_emails_on_contact_change,
-)
-from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
-from ..vendor_utils import normalize_vendor_name
+from ..utils.vendor_helpers import sync_card_emails_on_contact_change
 
 router = APIRouter(tags=["vendors"])
-
-
-def _lookup_response(card, vendor_name, source, tier, **extra):
-    """Build the standard vendor-contact lookup payload from a card."""
-    return {
-        "vendor_name": vendor_name,
-        "emails": card.emails or [],
-        "phones": card.phones or [],
-        "website": card.website,
-        "card_id": card.id,
-        "source": source,
-        "tier": tier,
-        **extra,
-    }
-
-
-def _coalesce_contact_list(values, single):
-    """Normalize an AI-returned list field, prepending an optional single value."""
-    if isinstance(values, str):
-        values = [values]
-    else:
-        values = list(values or [])
-    if single and single not in values:
-        values.insert(0, single)
-    return values
-
-
-# -- 3-Tier Vendor Contact Lookup ---------------------------------------------
-
-
-@router.post("/api/vendor-contact")
-async def lookup_vendor_contact(
-    payload: VendorContactLookup,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """3-tier waterfall: cache -> website scrape -> AI web search."""
-    vendor_name = payload.vendor_name
-
-    norm = normalize_vendor_name(vendor_name)
-    card = find_vendor_card_by_name(vendor_name, db)
-    if not card:
-        card = VendorCard(normalized_name=norm, display_name=vendor_name, emails=[], phones=[])
-        db.add(card)
-        try:
-            db.flush()
-        except IntegrityError:
-            db.rollback()
-            card = find_vendor_card_by_name(vendor_name, db)
-
-    # TIER 1: Cache check (free, instant)
-    if card.emails:
-        return _lookup_response(card, card.display_name, "cached", 1)
-
-    # TIER 2: Website scrape (free, ~1-2 sec)
-    if card.website:
-        logger.info(f"Tier 2: Scraping {card.website} for {vendor_name}")
-        try:
-            scraped = await scrape_website_contacts(card.website)
-            if scraped["emails"] or scraped["phones"]:
-                merge_contact_into_card(card, scraped["emails"], scraped["phones"], source="website_scrape")
-                db.commit()
-                if card.emails:
-                    return _lookup_response(card, card.display_name, "website_scrape", 2)
-        except Exception as e:
-            logger.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
-
-    # TIER 3: AI lookup (expensive, last resort)
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return _lookup_response(card, vendor_name, None, 0, error="No API key configured")
-
-    logger.info(f"Tier 3: AI lookup for {vendor_name}")
-    try:
-        website_hint = f" Their website may be {card.website}." if card.website else ""
-
-        from ..utils.claude_client import claude_json
-
-        info = await claude_json(
-            prompt=(
-                f"Find ALL contact information for '{vendor_name}', an electronic "
-                f"component distributor/broker.{website_hint}\n\n"
-                f"Search these sources:\n"
-                f"1. Their company website -- look for contact, about, sales pages\n"
-                f"2. LinkedIn company page -- phone numbers, website\n"
-                f"3. Industry directories (FindChips, IC Source, TrustedParts)\n"
-                f"4. Google Maps / business listings\n\n"
-                f"I need EVERY email you can find:\n"
-                f"- General: info@, contact@, support@\n"
-                f"- Sales: sales@, rfq@, quotes@, purchasing@\n"
-                f"- Individual salespeople: firstname@, firstname.lastname@\n\n"
-                f"And ALL phone numbers -- main line, sales direct, fax.\n\n"
-                f"Return ONLY a JSON object:\n"
-                f'{{"emails": [...], "phones": [...], "website": "..."}}\n'
-                f"No explanation, no markdown, just the JSON."
-            ),
-            model_tier="fast",
-            max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
-            timeout=60,
-        )
-
-        if not info or not isinstance(info, dict):
-            info = {}
-
-        ai_emails = clean_emails(_coalesce_contact_list(info.get("emails"), info.get("email")))
-        ai_phones = clean_phones(_coalesce_contact_list(info.get("phones"), info.get("phone")))
-        website = info.get("website")
-
-        merge_contact_into_card(card, ai_emails, ai_phones, website, source="ai_lookup")
-        db.commit()
-
-        return _lookup_response(card, card.display_name, "ai_lookup", 3)
-
-    except Exception as e:
-        logger.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
-        return _lookup_response(card, vendor_name, None, 0, error=str(e)[:200])
 
 
 # -- Structured Vendor Contact CRUD -------------------------------------------
@@ -248,60 +114,6 @@ async def list_vendor_contacts(card_id: int, user: User = Depends(require_user),
         }
         for c in contacts
     ]
-
-
-@router.get("/api/vendors/{card_id}/contacts/{contact_id}/timeline")
-async def get_contact_timeline(
-    card_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Activity timeline for a specific vendor contact."""
-    from ..models import ActivityLog
-
-    vc = db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
-    if not vc:
-        raise HTTPException(404, "Contact not found")
-
-    activities = (
-        db.query(ActivityLog)
-        .filter(ActivityLog.vendor_contact_id == contact_id)
-        .order_by(ActivityLog.occurred_at.desc())
-        .limit(50)
-        .all()
-    )
-    return [
-        {
-            "id": a.id,
-            "activity_type": a.activity_type,
-            "channel": a.channel,
-            "subject": a.subject,
-            "notes": a.notes,
-            "duration_seconds": a.duration_seconds,
-            "auto_logged": a.auto_logged,
-            "occurred_at": a.occurred_at.isoformat()
-            if a.occurred_at
-            else (a.created_at.isoformat() if a.created_at else None),
-            "requisition_id": a.requisition_id,
-            "quote_id": a.quote_id,
-        }
-        for a in activities
-    ]
-
-
-@router.get("/api/vendors/{card_id}/contacts/{contact_id}/summary")
-async def get_contact_summary(
-    card_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """AI-generated relationship summary for a contact."""
-    from ..services.contact_intelligence import generate_contact_summary
-
-    summary = generate_contact_summary(db, card_id, contact_id)
-    return {"summary": summary}
 
 
 @router.post("/api/vendors/{card_id}/contacts/{contact_id}/log-call")
@@ -487,137 +299,3 @@ async def delete_vendor_contact(
     db.delete(vc)
     db.commit()
     return {"ok": True}
-
-
-# -- Vendor Email Metrics -----------------------------------------------------
-
-
-@router.get(
-    "/api/vendors/{card_id}/email-metrics", response_model=VendorEmailMetricsResponse, response_model_exclude_none=True
-)
-async def vendor_email_metrics(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Compute vendor email performance metrics from contact/response data."""
-    card = db.query(VendorCard).filter_by(id=card_id).first()
-    if not card:
-        raise HTTPException(404, "Vendor card not found")
-
-    @cached_endpoint(prefix="vendor_email_metrics", ttl_hours=2, key_params=["card_id"])
-    def _fetch(card_id, db, display_name):
-        contacts = (
-            db.query(Contact)
-            .filter(
-                Contact.vendor_name == display_name,
-                Contact.contact_type == "email",
-            )
-            .all()
-        )
-
-        responses = (
-            db.query(VendorResponse)
-            .filter(
-                VendorResponse.vendor_name == display_name,
-            )
-            .all()
-        )
-
-        total_sent = len(contacts)
-        total_replied = len(
-            [c for c in contacts if c.status in (ContactStatus.RESPONDED, ContactStatus.QUOTED, ContactStatus.DECLINED)]
-        )
-        total_quoted = len([c for c in contacts if c.status == ContactStatus.QUOTED])
-
-        contact_by_id = {c.id: c for c in contacts}
-        response_hours: list[float] = []
-        for vr in responses:
-            if vr.contact_id and vr.received_at:
-                matching_contact = contact_by_id.get(vr.contact_id)
-                if matching_contact and matching_contact.created_at:
-                    delta = vr.received_at - matching_contact.created_at
-                    response_hours.append(delta.total_seconds() / 3600)
-
-        avg_response_hours = round(sum(response_hours) / len(response_hours), 1) if response_hours else None
-        last_contacted = max((c.created_at for c in contacts), default=None)
-        last_reply = max((vr.received_at for vr in responses if vr.received_at), default=None)
-
-        return {
-            "vendor_name": display_name,
-            "total_rfqs_sent": total_sent,
-            "total_replies": total_replied,
-            "total_quotes": total_quoted,
-            "response_rate": round(total_replied / total_sent * 100) if total_sent else None,
-            "quote_rate": round(total_quoted / total_sent * 100) if total_sent else None,
-            "avg_response_hours": avg_response_hours,
-            "last_contacted": last_contacted.isoformat() if last_contacted else None,
-            "last_reply": last_reply.isoformat() if last_reply else None,
-            "active_rfqs": len([c for c in contacts if c.status in ("sent", "opened")]),
-        }
-
-    return _fetch(card_id=card_id, db=db, display_name=card.display_name)
-
-
-# -- Add Email to Vendor Card -------------------------------------------------
-
-
-@router.post("/api/vendor-card/add-email")
-async def add_email_to_card(
-    payload: VendorEmailAdd,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Quick-add an email to a vendor card.
-
-    Also creates a VendorContact record, extracts domain for the card, and triggers
-    background enrichment if a business domain is found.
-    """
-    card = get_or_create_card(payload.vendor_name, db)
-
-    # 1. Add to legacy emails[] JSON array (existing behavior)
-    emails = [e for e in (card.emails or []) if isinstance(e, str) and e.lower() != payload.email]
-    emails.insert(0, payload.email)  # Manual entries go to the top
-    card.emails = emails
-
-    # 2. Create VendorContact if not already present
-    contact_created = False
-    existing_contact = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=payload.email).first()
-    if not existing_contact:
-        vc = VendorContact(
-            vendor_card_id=card.id,
-            email=payload.email,
-            contact_type="company",
-            source="rfq_manual",
-            confidence=80,
-            is_verified=False,
-        )
-        db.add(vc)
-        contact_created = True
-
-    # 3. Extract domain and set on card (skip generic email providers)
-    domain_extracted = None
-    domain_part = payload.email.split("@")[1] if "@" in payload.email else None
-    if domain_part and domain_part not in _GENERIC_EMAIL_DOMAINS:
-        domain_extracted = domain_part
-        if not card.domain:
-            card.domain = domain_extracted
-
-    db.commit()
-
-    # 4. Fire background enrichment if we have a usable domain and card not yet enriched
-    enrich_triggered = False
-    if domain_extracted and not card.last_enriched_at:
-        if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
-            "anthropic_ai", "ANTHROPIC_API_KEY"
-        ):
-            await safe_background_task(
-                _background_enrich_vendor(card.id, domain_extracted, card.display_name),
-                task_name="enrich_vendor_from_contact",
-            )
-            enrich_triggered = True
-
-    return {
-        "ok": True,
-        "card_id": card.id,
-        "emails": card.emails,
-        "contact_created": contact_created,
-        "domain": card.domain,
-        "enrich_triggered": enrich_triggered,
-    }

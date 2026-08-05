@@ -193,19 +193,18 @@ async def lifespan(app):
         scheduler.start()
         logger.info("APScheduler started")
 
-        # P2.7: launch the SLOW, idempotent startup backfills + ANALYZE as a
-        # post-yield background task instead of running them inline before /health
+        # P2.7: launch the SLOW deferred startup phase (deploy-gated ANALYZE +
+        # category observability; the one-time backfills were deleted in W2.9) as a
+        # post-yield background task instead of running it inline before /health
         # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
         # above already ran the FAST, order-critical ops synchronously.
         from .services.prepayment_notifications import set_main_event_loop
         from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
         from .utils.async_helpers import safe_background_task
 
-        # run_deferred_startup_backfills executes on an asyncio.to_thread worker
-        # thread with no running loop of its own; register the main loop so
-        # schedule_prepayment_notify can still deliver a DO-NOT-WIRE stand-down
-        # notification if that sweep auto-completes a buy plan with a pending
-        # prepayment (see prepayment_notifications.py's cross-thread fallback).
+        # Register the main loop so schedule_prepayment_notify's cross-thread
+        # fallback works for SYNC callers with no running loop (threadpool routes /
+        # sync services — see prepayment_notifications.py).
         set_main_event_loop(asyncio.get_running_loop())
         mark_deferred_backfills_pending()
         await safe_background_task(
@@ -799,12 +798,12 @@ async def health(
 @app.get("/health/ready")
 @limiter.exempt
 async def health_ready() -> JSONResponse:
-    """Readiness probe for the P2.7 deferred startup-backfill phase.
+    """Readiness probe for the P2.7 deferred startup phase.
 
-    /health (liveness) answers as soon as the app can serve traffic — it no longer
-    waits on the slow, idempotent backfills/ANALYZE that used to run inline before
-    the lifespan yielded. This endpoint reports whether that background phase has
-    finished. It is DELIBERATELY not wired into docker-compose's healthcheck or
+    /health (liveness) answers as soon as the app can serve traffic — it does not
+    wait on the deferred background phase (deploy-gated ANALYZE + observability;
+    the one-time backfills were deleted in W2.9). This endpoint reports whether
+    that background phase has finished. It is DELIBERATELY not wired into docker-compose's healthcheck or
     deploy.sh's wait loop — those gate on liveness only (see docker-compose.yml /
     deploy.sh comments) so a slow deferred phase can never false-fail a deploy;
     deploy.sh instead curls this endpoint once, after liveness passes, purely to

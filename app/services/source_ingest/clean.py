@@ -229,8 +229,8 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     if category is None and description:
         # The source carried no mappable Commodity_Code__c (blank / 'Other' / polluted-CPU
         # blanked above) but the description may unambiguously name a commodity. Fall back
-        # to the SHARED lead-token grammar (categorize_from_desc — the same one the one-shot
-        # categorize CLI and the worker's categorize stage use) so future imports categorize
+        # to the SHARED lead-token grammar (categorize_from_desc — the same one the
+        # worker's categorize stage uses) so future imports categorize
         # real-desc rows at ingest. Conservative by construction (ambiguous → None), and the
         # returned key is canonical so it survives the consolidate ladder downstream.
         category = categorize_from_desc(description)

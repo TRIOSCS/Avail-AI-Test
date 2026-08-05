@@ -22,7 +22,7 @@ Cross-module embedding evidence for each EXCLUDED prefix (why it is shared):
              shared/_macros.html embed /v2/partials/sightings/...
 - materials: search/{dossier_hero,lead_detail,history_panel}.html embed
              /v2/partials/materials/{id}
-- search:    dashboard.html, shared/topbar.html and shared/search_results.html
+- search:    shared/topbar.html and shared/search_results.html
              embed /v2/partials/search (and /search/global, /search/results)
 - buy-plans: customers/tabs/buy_plans_tab.html and requisitions/tabs/buy_plans.html
              embed /v2/partials/buy-plans/{id}

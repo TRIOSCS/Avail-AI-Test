@@ -1,14 +1,15 @@
 """test_resell_outreach_routes.py — Route/render tests for the Resell Outreach UI (Chunk
 D).
 
-Exercises the NEW additive outreach endpoints with the TestClient:
-  - the buyer panel renders ranked suggestions + the advisory overlap flag + the
-    "no contact on file" state;
+Exercises the outreach endpoints with the TestClient:
   - submit creates ExcessOutreach via BOTH the manual-log and the email path (the
     email send is mocked at the source — send_batch_rfq / _find_sent_message);
   - the tracker renders rows + status + the "offered N · M responded · K bid" summary;
-  - the "usually-offered, not yet" strip renders;
   - owner-gating (a non-owner gets 403).
+
+The buyer-intelligence DISPLAY layer (ranked suggestions, no-contact rows, the
+not-yet nudge strip) is PARKED (spec §5.3, W2.3) — its pins were dropped; the
+parked-off state is pinned in tests/test_resell_trader_lane_parked.py.
 
 All outreach endpoints are owner-gated (offering out is the list owner's action), so
 the owner-path tests override require_user to the trader who owns the seeded list.
@@ -23,7 +24,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import ExcessListStatus, ExcessOfferStatus, ExcessOutreachStatus, OfferLineMatchStatus
+from app.constants import ExcessListStatus, ExcessOutreachStatus
 from app.models import Company, User, VendorCard
 from app.models.excess import (
     ExcessLineItem,
@@ -153,92 +154,12 @@ def _own(db_session, monkeypatch_app, user):
 # ── Buyer panel (offer-to-buyers form) ───────────────────────────────
 
 
-def test_buyer_panel_renders_ranked_suggestions(client, db_session, trader_user, posted_list):
-    """The buyer panel renders ranked suggestions for an offerable buyer."""
-    _reachable_buyer(db_session, "Cap Buyer", engagement=50.0, commodity=_CAP)
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form")
-        assert resp.status_code == 200
-        body = resp.text
-        assert "Offer to buyers" in body
-        assert "Cap Buyer" in body  # ranked suggestion surfaced
-        # Channel selector present (email default) + scope toggle.
-        assert "Channel" in body and "email" in body
-        assert "whole list" in body.lower()
-    finally:
-        restore()
-
-
-def test_buyer_panel_overlap_flag(client, db_session, trader_user, teammate_user, posted_list):
-    """A recent teammate touch surfaces the advisory overlap flag on the suggestion."""
-    buyer = _reachable_buyer(db_session, "Overlap Buyer", engagement=50.0, commodity=_CAP)
-    db_session.add(
-        ExcessOutreach(
-            excess_list_id=posted_list.id,
-            target_vendor_card_id=buyer.id,
-            submitted_by=teammate_user.id,  # a TEAMMATE, not the owner
-            channel="phone",
-            status=ExcessOutreachStatus.SENT,
-            sent_at=datetime.now(UTC),
-        )
-    )
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form")
-        assert resp.status_code == 200
-        body = resp.text
-        # The advisory flag names the teammate (never blocks — advisory only).
-        assert "Dee Mate" in body
-        assert "already" in body.lower()
-    finally:
-        restore()
-
-
-def test_buyer_panel_no_contact_state(client, db_session, trader_user, posted_list):
-    """A buyer reachable only via no resolvable email surfaces the 'no contact' state.
-
-    A card with offer history but NO VendorContact email is unreachable by the send
-    path; the panel must still list it for a manual-log touch with a clear no-contact
-    badge (mirrors the RFQ modal's no-email treatment).
-    """
-    # A buyer with WON offer history on this list's line but NO contact email.
-    no_contact = VendorCard(normalized_name="no email buyer", display_name="No Email Buyer", emails=[])
-    no_contact.commodity_tags = [_CAP]
-    db_session.add(no_contact)
-    db_session.flush()
-    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    offer = ExcessOffer(
-        excess_list_id=posted_list.id,
-        submitted_by=trader_user.id,
-        offerer_vendor_card_id=no_contact.id,
-        scope="per_line",
-        status=ExcessOfferStatus.WON,
-    )
-    db_session.add(offer)
-    db_session.flush()
-    db_session.add(
-        ExcessOfferLine(
-            offer_id=offer.id,
-            excess_line_item_id=line.id,
-            mpn_raw=line.part_number,
-            quantity=10,
-            unit_price=Decimal("0.90"),
-            match_status=OfferLineMatchStatus.MATCHED,
-        )
-    )
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form")
-        assert resp.status_code == 200
-        body = resp.text
-        assert "No Email Buyer" in body
-        assert "no contact on file" in body.lower()
-    finally:
-        restore()
+# (test_buyer_panel_renders_ranked_suggestions / test_buyer_panel_overlap_flag /
+# test_buyer_panel_no_contact_state deleted with the W2.3 buyer-intelligence park —
+# spec §5.3: the panel's ranked-suggestion + no-contact rows are parked (empty)
+# until a second trader user exists; the ranking/overlap SERVICE stays covered by
+# tests/test_buyer_affinity_service.py, and the parked panel render is pinned in
+# tests/test_resell_trader_lane_parked.py.)
 
 
 def test_buyer_panel_owner_gated(client, db_session, posted_list):
@@ -473,60 +394,11 @@ def test_tracker_empty_state(client, db_session, trader_user, posted_list):
 # ── Not-yet-offered nudge strip ──────────────────────────────────────
 
 
-def test_not_yet_strip_renders(client, db_session, trader_user, posted_list):
-    """A historical commodity buyer not yet offered this list surfaces in the nudge."""
-    # A buyer with WON history in this commodity (on a PRIOR list) → historical signal.
-    historical = _reachable_buyer(db_session, "Usually Buyer", engagement=60.0, commodity=_CAP)
-    prior = ExcessList(
-        title="Prior", company_id=posted_list.company_id, owner_id=trader_user.id, status=ExcessListStatus.AWARDED
-    )
-    db_session.add(prior)
-    db_session.flush()
-    prior_mc = MaterialCard(normalized_mpn="grm21b", display_mpn="GRM21B", category=_CAP)
-    db_session.add(prior_mc)
-    db_session.flush()
-    prior_line = ExcessLineItem(
-        excess_list_id=prior.id,
-        part_number="GRM21B",
-        quantity=10,
-        material_card_id=prior_mc.id,
-        asking_price=Decimal("1.0"),
-    )
-    db_session.add(prior_line)
-    db_session.flush()
-    offer = ExcessOffer(
-        excess_list_id=prior.id,
-        submitted_by=trader_user.id,
-        offerer_vendor_card_id=historical.id,
-        scope="per_line",
-        status=ExcessOfferStatus.WON,
-    )
-    db_session.add(offer)
-    db_session.flush()
-    db_session.add(
-        ExcessOfferLine(
-            offer_id=offer.id,
-            excess_line_item_id=prior_line.id,
-            mpn_raw="GRM21B",
-            quantity=10,
-            unit_price=Decimal("0.9"),
-            match_status=OfferLineMatchStatus.MATCHED,
-        )
-    )
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        resp = client.get(f"/v2/partials/resell/{posted_list.id}/not-yet-strip")
-        assert resp.status_code == 200
-        assert "Usually Buyer" in resp.text
-    finally:
-        restore()
-
-
-def test_not_yet_strip_owner_gated(client, db_session, posted_list):
-    """The nudge is owner-only → a non-owner gets 403."""
-    resp = client.get(f"/v2/partials/resell/{posted_list.id}/not-yet-strip")
-    assert resp.status_code == 403
+# (test_not_yet_strip_renders / test_not_yet_strip_owner_gated deleted with the
+# W2.3 buyer-intelligence park — spec §5.3: the not-yet-strip route registration
+# was removed (nudge + auto My-Day task writes park together). The strip-ranking
+# service stays covered by tests/test_buyer_affinity_service.py; the parked-off
+# route state is pinned in tests/test_resell_trader_lane_parked.py.)
 
 
 def test_detail_has_outreach_tab(client, db_session, trader_user, posted_list):
@@ -927,87 +799,13 @@ def test_tracker_shows_log_actions_for_manual_sent_row(client, db_session, trade
     assert f"/outreach/{row.id}/log-bid-form" in body
 
 
-def test_no_contact_checkbox_enabled_for_manual_channel(client, db_session, trader_user, posted_list):
-    """The no-contact buyer checkbox is disabled ONLY for the email channel — manual
-    channels (phone/teams/marketplace) can log a touch without an email on file."""
-    no_contact = VendorCard(normalized_name="no email log buyer", display_name="No Email Log Buyer", emails=[])
-    no_contact.commodity_tags = [_CAP]
-    db_session.add(no_contact)
-    db_session.flush()
-    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    offer = ExcessOffer(
-        excess_list_id=posted_list.id,
-        submitted_by=trader_user.id,
-        offerer_vendor_card_id=no_contact.id,
-        scope="per_line",
-        status=ExcessOfferStatus.WON,
-    )
-    db_session.add(offer)
-    db_session.flush()
-    db_session.add(
-        ExcessOfferLine(
-            offer_id=offer.id,
-            excess_line_item_id=line.id,
-            mpn_raw=line.part_number,
-            quantity=10,
-            unit_price=Decimal("0.90"),
-            match_status=OfferLineMatchStatus.MATCHED,
-        )
-    )
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        body = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form").text
-    finally:
-        restore()
-    # The checkbox is now Alpine-gated on the channel rather than hard-disabled.
-    assert ":disabled=\"channel === 'email'\"" in body
-
-
-def test_no_contact_selection_purged_on_switch_back_to_email(client, db_session, trader_user, posted_list):
-    """Switching channel back to email PURGES any no-contact buyer already ticked on a
-    manual channel, so they are not silently emailed as a spurious failed outreach
-    (finding #6).
-
-    The channel buttons must route through a ``setChannel`` handler that drops the
-    no-contact card ids from ``selected`` (seeded as ``noContactIds``); a bare
-    ``channel = '...'`` assignment leaves the id in the hidden ``vendor_card_ids``.
-    """
-    no_contact = VendorCard(normalized_name="purge me buyer", display_name="Purge Me Buyer", emails=[])
-    no_contact.commodity_tags = [_CAP]
-    db_session.add(no_contact)
-    db_session.flush()
-    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
-    offer = ExcessOffer(
-        excess_list_id=posted_list.id,
-        submitted_by=trader_user.id,
-        offerer_vendor_card_id=no_contact.id,
-        scope="per_line",
-        status=ExcessOfferStatus.WON,
-    )
-    db_session.add(offer)
-    db_session.flush()
-    db_session.add(
-        ExcessOfferLine(
-            offer_id=offer.id,
-            excess_line_item_id=line.id,
-            mpn_raw=line.part_number,
-            quantity=10,
-            unit_price=Decimal("0.90"),
-            match_status=OfferLineMatchStatus.MATCHED,
-        )
-    )
-    db_session.commit()
-    restore = _own(db_session, None, trader_user)
-    try:
-        body = client.get(f"/v2/partials/resell/{posted_list.id}/offer-buyers-form").text
-    finally:
-        restore()
-    # The no-contact id is seeded for the purge, and channel switches route through it.
-    assert f"noContactIds: [{no_contact.id}]" in body or f"noContactIds: [{no_contact.id}," in body
-    assert "setChannel(" in body
-    # The bare assignment that skipped the purge is gone.
-    assert "@click=\"channel = '" not in body
+# (test_no_contact_checkbox_enabled_for_manual_channel and
+# test_no_contact_selection_purged_on_switch_back_to_email deleted with the W2.3
+# buyer-intelligence park — spec §5.3: the no-contact rows no longer render (the
+# panel's suggestion context is empty), so their channel-gating markup is
+# unreachable. The finding-#6 setChannel purge wiring stays in the template and
+# stays pinned by the parked panel render in
+# tests/test_resell_trader_lane_parked.py.)
 
 
 # ── W1.17 — keys-off outreach: manual log needs no M365 token ────────────────

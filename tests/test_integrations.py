@@ -26,9 +26,3 @@ class TestACSService:
         """POST /api/webhooks/acs returns 200 or 400 (not 404)."""
         resp = client.post("/api/webhooks/acs", json={})
         assert resp.status_code != 404
-
-    def test_call_initiate_endpoint_exists(self, client: TestClient):
-        """POST /api/calls/initiate returns 200 or 422 (not 404)."""
-        resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
-        # Will fail with config error since ACS not configured, but route exists
-        assert resp.status_code != 404

@@ -48,19 +48,6 @@ def test_run_email_reverification_rejects_legacy_kwarg():
 # ── BUG 2: dashboard "Refresh insights" 404 ─────────────────────────────────
 
 
-def test_dashboard_pipeline_insights_refresh_route_registered():
-    assert "/v2/partials/dashboard/pipeline-insights/refresh" in _paths("POST")
-    # The buggy URL the panel used to emit is NOT a registered route.
-    assert "/v2/partials/dashboard/0/insights/refresh" not in _paths("POST")
-
-
-def test_dashboard_insights_panel_posts_registered_refresh_route(client):
-    resp = client.get("/v2/partials/dashboard/pipeline-insights")
-    assert resp.status_code == 200
-    assert "/v2/partials/dashboard/pipeline-insights/refresh" in resp.text
-    assert "/v2/partials/dashboard/0/insights/refresh" not in resp.text
-
-
 def test_requisition_insights_panel_still_posts_pattern_route(client, test_requisition):
     """Non-dashboard callers of insights_panel.html keep the {entity}/{id} pattern
     URL."""

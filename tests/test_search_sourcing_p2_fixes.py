@@ -5,26 +5,18 @@ Covers:
   - MAT-TABS-CLICK-ONCE     — material detail tabs must re-fetch on every click
                               (no `hx-trigger="click once"`), so re-visiting a tab
                               reloads its content instead of showing the last tab.
-  - SOURCING-WS-ALPINE-INIT — the `sourcingWorkspace` Alpine component must be
-                              registered statically in htmx_app.js (an in-partial
-                              `alpine:init` listener never re-fires after Alpine.start,
-                              so x-data would throw and keyboard nav would be dead).
-  - SOURCING-LEGACY-HREF-404 — grid/workspace/lead toggle links must push the
-                              registered `/v2/sourcing/...` full-page routes, not the
-                              never-registered legacy `/sourcing/...` paths (F5 / new-tab
-                              404).
   - DOSSIER-ADDREQ-EMPTY-400 — "Add to Requisition" with nothing shortlisted must add
                               the PART (create the Requirement) rather than dead-ending
                               on a 400.
 
 What calls it: pytest.
-Depends on: app.routers.htmx.sourcing (results/workspace partials),
-            app.routers.htmx.materials (detail partial),
+Depends on: app.routers.htmx.materials (detail partial),
             app.routers.htmx_views.add_to_requisition, conftest fixtures.
+(The SOURCING-WS-ALPINE-INIT / SOURCING-LEGACY-HREF-404 tests were deleted with the
+Sourcing Leads workspace in the Wave 2 simplification sweep, spec §8.)
 """
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -82,50 +74,6 @@ def test_material_tabs_refetch_on_every_click(client: TestClient, db_session: Se
     # Vendors tab auto-loads then re-fetches on click; others fetch on click.
     assert 'hx-trigger="load, click"' in html
     assert 'hx-trigger="click"' in html
-
-
-# ── SOURCING-WS-ALPINE-INIT ─────────────────────────────────────────────────
-def test_sourcing_workspace_alpine_registered_statically(client: TestClient, db_session: Session, test_user: User):
-    """The workspace partial must invoke sourcingWorkspace(...) with args and carry no
-    in-partial `alpine:init` registration; the component lives in htmx_app.js."""
-    req = _requisition(db_session, test_user)
-    item = _requirement(db_session, req)
-    resp = client.get(f"/v2/partials/sourcing/{item.id}/workspace")
-    assert resp.status_code == 200
-    html = resp.text
-    # x-data now passes the initial selection + lead ids as args (static factory pattern).
-    assert "sourcingWorkspace(" in html
-    # The stranded pattern is gone: no partial-scoped alpine:init registration.
-    assert "alpine:init" not in html
-
-    # The component is registered statically (like splitPanel) so it exists before
-    # Alpine processes the HTMX-swapped x-data.
-    js = Path("app/static/htmx_app.js").read_text()
-    assert "Alpine.data('sourcingWorkspace'" in js
-
-
-# ── SOURCING-LEGACY-HREF-404 ────────────────────────────────────────────────
-def test_sourcing_workspace_grid_link_uses_v2(client: TestClient, db_session: Session, test_user: User):
-    """The workspace's Grid-view toggle must push the registered /v2/sourcing/{id}."""
-    req = _requisition(db_session, test_user)
-    item = _requirement(db_session, req)
-    html = client.get(f"/v2/partials/sourcing/{item.id}/workspace").text
-    assert f'hx-push-url="/v2/sourcing/{item.id}"' in html
-    assert f'href="/v2/sourcing/{item.id}"' in html
-    # No legacy, unregistered /sourcing/{id} (404 on reload/new-tab).
-    assert 'hx-push-url="/sourcing/' not in html
-    assert 'href="/sourcing/' not in html
-
-
-def test_sourcing_results_workspace_link_uses_v2(client: TestClient, db_session: Session, test_user: User):
-    """The results view's Workspace-view toggle must push
-    /v2/sourcing/{id}/workspace."""
-    req = _requisition(db_session, test_user)
-    item = _requirement(db_session, req)
-    html = client.get(f"/v2/partials/sourcing/{item.id}").text
-    assert f'hx-push-url="/v2/sourcing/{item.id}/workspace"' in html
-    assert 'hx-push-url="/sourcing/' not in html
-    assert 'href="/sourcing/' not in html
 
 
 # ── DOSSIER-ADDREQ-EMPTY-400 ────────────────────────────────────────────────

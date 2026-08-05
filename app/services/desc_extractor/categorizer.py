@@ -26,7 +26,7 @@ What: ``categorize_from_desc`` reads a strict commodity *lead/body grammar* out 
       buried inside another commodity's row never routes here.
 
 Called by: app/services/desc_extractor/writer.py (categorize_and_record — the CATEGORIZE
-      stage), app/management/categorize_from_desc.py (the one-shot CLI),
+      stage),
       app/services/source_ingest/clean.py (ingest-time fallback when the source carries
       no mappable category — single source of truth for the grammar).
 Depends on: desc_extractor.extract_desc (the spec-commodity router) only. Pure — no DB,

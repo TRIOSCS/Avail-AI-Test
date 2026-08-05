@@ -542,8 +542,15 @@ def trigger_rematch_on_offer_approval(db: Session, offer: Offer) -> int:
 
     Uses its own commit so a re-match failure never blocks the caller's approval
     transaction — the offer status change should succeed even if matching fails. No-op
-    for offers without a material_card_id (find_matches_for_offer requires one).
+    for offers without a material_card_id (find_matches_for_offer requires one), and
+    while Proactive is PARKED (spec §4/§8 W2): the flag gates the matching engine too,
+    so offer approvals stop feeding a workspace nobody can open. Same comeback trigger
+    as the workspace (Proactive revival / Wave-4 Deals-badge decision).
     """
+    from .admin_service import get_effective_flag
+
+    if not get_effective_flag(db, "proactive_matching_enabled", settings.proactive_matching_enabled):
+        return 0
     if not offer.material_card_id:
         return 0
     try:

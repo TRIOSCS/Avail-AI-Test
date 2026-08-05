@@ -1,8 +1,8 @@
 """approval_outbox.py — Drains pending ApprovalOutbox rows.
 
 Purpose: Polls approval_outbox for rows where sent_at IS NULL and fail_count is
-         below MAX_OUTBOX_FAIL_COUNT, dispatching each one: email via Graph API
-         and/or writes an in-app Notification, depending on the row's channel.  On
+         below MAX_OUTBOX_FAIL_COUNT, dispatching each one as email via Graph API
+         (the write-only in-app Notification channel was deleted, W2.9/§5.5).  On
          success sets sent_at (idempotent — a row already sent is skipped).  On any
          failure (send error, deleted recipient, unknown channel) it increments
          fail_count and records last_error WITHOUT marking sent; once fail_count
@@ -50,14 +50,14 @@ async def dispatch_pending(db: Session) -> int:
     Processes rows where sent_at IS NULL and fail_count < MAX_OUTBOX_FAIL_COUNT in
     ascending id order. For each row:
       - channel == "email": sends via Graph API using the recipient's token.
-      - channel == "in_app": writes a Notification row.
-      - recipient deleted / unknown channel: treated as a failure — fail_count is
-        incremented and last_error recorded (NOT marked sent), so the dead-letter cap
-        retires the row instead of it retrying forever.
+      - recipient deleted / unknown channel (including legacy "in_app" rows — that
+        write-only delivery path was deleted, W2.9/§5.5): treated as a failure —
+        fail_count is incremented and last_error recorded (NOT marked sent), so the
+        dead-letter cap retires the row instead of it retrying forever.
 
     Each row is committed in its OWN transaction: on success
     ``row.sent_at = now; db.commit()``; on any failure ``db.rollback()`` discards the
-    row's partial state (e.g. a dirty Notification) and ``_mark_failed`` records
+    row's partial state and ``_mark_failed`` records
     fail_count/last_error in a fresh transaction that commits independently. This per-row
     isolation — not a SAVEPOINT — is what keeps a failing row from poisoning the batch.
 
@@ -107,10 +107,6 @@ async def dispatch_pending(db: Session) -> int:
                 subject, html = _ns._build_email_html(payload)
                 await _ns.send_email(recipient, subject, html, db)
 
-            elif row.channel == "in_app":
-                event_type, title, body = _ns._build_in_app(payload)
-                _ns.write_in_app(db, recipient.id, event_type, title, body)
-
             else:
                 # Unknown channel is a permanent code/data mismatch — fail it (no sent_at)
                 # so the dead-letter cap retires it, rather than silently marking it sent.
@@ -121,7 +117,7 @@ async def dispatch_pending(db: Session) -> int:
             dispatched += 1
 
         except Exception as exc:
-            # Discard this row's partial state (e.g. a dirty Notification, or a session
+            # Discard this row's partial state (e.g. a session
             # already committed/closed by the dispatch path) and record the failure in a
             # fresh transaction so it survives independently of the rest of the batch.
             db.rollback()

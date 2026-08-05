@@ -17,15 +17,14 @@ Depends on: tests/e2e/conftest.py (authed_page, base_url, seed_e2e_data,
 from playwright.sync_api import Page, expect
 
 # Core bottom-nav items — always part of the app shell, never data-dependent.
+# W2 (spec §4): exactly 5 tabs; Settings lives behind the gear menu (its link is
+# still in the shell DOM, inside the menu).
 CORE_NAV_HREFS = [
     "/v2/requisitions",
-    "/v2/search",
-    "/v2/quotes",
-    "/v2/customers",
-    "/v2/vendors",
-    "/v2/materials",
     "/v2/approvals",
-    "/v2/proactive",
+    "/v2/resell",
+    "/v2/crm",
+    "/v2/my-day",
     "/v2/settings",
 ]
 

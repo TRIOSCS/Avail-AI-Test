@@ -129,18 +129,6 @@ class TestGetMaterial:
 # ── Get Material by MPN ─────────────────────────────────────────────────
 
 
-class TestGetMaterialByMPN:
-    def test_found(self, client: TestClient, test_material_card: MaterialCard):
-        resp = client.get("/api/materials/by-mpn/LM317T")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["display_mpn"] == "LM317T"
-
-    def test_not_found(self, client: TestClient):
-        resp = client.get("/api/materials/by-mpn/NONEXISTENT999")
-        assert resp.status_code == 404
-
-
 # ── Update Material ─────────────────────────────────────────────────────
 
 
@@ -199,50 +187,6 @@ class TestUpdateMaterial:
 # ── Enrich Material ─────────────────────────────────────────────────────
 
 
-class TestEnrichMaterial:
-    def test_enrich(self, client: TestClient, test_material_card: MaterialCard):
-        resp = client.post(
-            f"/api/materials/{test_material_card.id}/enrich",
-            json={
-                "lifecycle_status": "active",
-                "package_type": "TO-220",
-                "manufacturer": "Texas Instruments",
-                "source": "claude_agent",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert "lifecycle_status" in data["updated_fields"]
-        # manufacturer routes through the F1 ladder: "claude_agent" is unregistered →
-        # ai_guess (40), which loses to the card's existing valued-but-unprovenanced
-        # maker (legacy floor, 50) — updated_fields honestly omits the rejected write.
-        assert "manufacturer" not in data["updated_fields"]
-
-    def test_enrich_not_found(self, client: TestClient):
-        resp = client.post("/api/materials/99999/enrich", json={"lifecycle_status": "eol"})
-        assert resp.status_code == 404
-
-    def test_enrich_no_fields(self, client: TestClient, test_material_card: MaterialCard):
-        resp = client.post(
-            f"/api/materials/{test_material_card.id}/enrich",
-            json={"non_enrichment_field": "value"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["updated_fields"] == []
-
-    def test_enrich_sets_timestamp(self, client: TestClient, db_session: Session, test_material_card: MaterialCard):
-        resp = client.post(
-            f"/api/materials/{test_material_card.id}/enrich",
-            json={"category": "IC"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(test_material_card)
-        assert test_material_card.enriched_at is not None
-        assert test_material_card.enrichment_source == "claude_agent"
-
-
 # ── Delete Material ─────────────────────────────────────────────────────
 
 
@@ -271,67 +215,7 @@ class TestDeleteMaterial:
 # ── Restore Material ────────────────────────────────────────────────────
 
 
-class TestRestoreMaterial:
-    @patch("app.services.audit_service.log_audit")
-    def test_restore(self, mock_audit, client: TestClient, db_session: Session):
-        card = _make_deleted_card(db_session, "restme", "RESTME")
-        resp = client.post(f"/api/materials/{card.id}/restore")
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-        db_session.refresh(card)
-        assert card.deleted_at is None
-
-    def test_restore_not_found(self, client: TestClient):
-        resp = client.post("/api/materials/99999/restore")
-        assert resp.status_code == 404
-
-    @patch("app.services.audit_service.log_audit")
-    def test_restore_not_deleted(self, mock_audit, client: TestClient, test_material_card: MaterialCard):
-        resp = client.post(f"/api/materials/{test_material_card.id}/restore")
-        assert resp.status_code == 400
-
-
 # ── Merge Material Cards ────────────────────────────────────────────────
-
-
-class TestMergeMaterialCards:
-    def test_merge_missing_ids(self, client: TestClient):
-        resp = client.post("/api/materials/merge", json={})
-        assert resp.status_code == 400
-
-    @patch("app.routers.materials._merge_material_cards_service")
-    def test_merge_success(self, mock_merge, client: TestClient, db_session: Session):
-        card1 = MaterialCard(normalized_mpn="src001", display_mpn="SRC001")
-        card2 = MaterialCard(normalized_mpn="tgt001", display_mpn="TGT001")
-        db_session.add_all([card1, card2])
-        db_session.commit()
-        mock_merge.return_value = {"ok": True, "moved_records": 5}
-        resp = client.post(
-            "/api/materials/merge",
-            json={"source_card_id": card1.id, "target_card_id": card2.id},
-        )
-        assert resp.status_code == 200
-
-    @patch(
-        "app.routers.materials._merge_material_cards_service", side_effect=ValueError("Cannot merge card into itself")
-    )
-    def test_merge_self_error(self, mock_merge, client: TestClient):
-        resp = client.post(
-            "/api/materials/merge",
-            json={"source_card_id": 1, "target_card_id": 1},
-        )
-        assert resp.status_code == 400
-
-    @patch(
-        "app.routers.materials._merge_material_cards_service",
-        side_effect=ValueError("Source card not found"),
-    )
-    def test_merge_not_found(self, mock_merge, client: TestClient):
-        resp = client.post(
-            "/api/materials/merge",
-            json={"source_card_id": 999, "target_card_id": 1000},
-        )
-        assert resp.status_code == 404
 
 
 # ── Backfill Manufacturers ──────────────────────────────────────────────

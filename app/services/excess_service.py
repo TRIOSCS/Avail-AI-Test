@@ -63,7 +63,7 @@ def _resolve_line_material_card(db: Session, item: ExcessLineItem) -> None:
     """Resolve (find-or-create) the MaterialCard for *item* and set material_card_id.
 
     Mirrors what Requirements/Offers/Sightings do (integrity_service heals the same
-    way) — the Sighting live-mirror needs the card link (spec §Data-model). Reuses the
+    way) — the card link keys part-identity matching (spec §Data-model). Reuses the
     canonical resolver; leaves material_card_id null if the MPN won't resolve. Additive
     and safe: never raises on an unresolvable part, never overwrites an existing link.
     """
@@ -1496,7 +1496,7 @@ def _lock_list_for_award(db: Session, offer: ExcessOffer, excess_list_id: int) -
 
     Award reads each line's status, checks "already awarded", then writes — with no lock,
     two concurrent awards touching an overlapping line can both pass the guard before
-    either commits and double-award it (double-firing the buyer-score / mirror hooks).
+    either commits and double-award it (double-firing the buyer-score hooks).
     Mirroring ``claim_prospect``'s ``with_for_update`` pattern, this locks the list row
     and every one of its line items up front (via :func:`_lock_list_and_lines`): a second
     concurrent award BLOCKS here until the first commits, then sees the awarded line
@@ -1504,8 +1504,8 @@ def _lock_list_for_award(db: Session, offer: ExcessOffer, excess_list_id: int) -
     racing it. ``populate_existing`` refreshes any identity-mapped ExcessList AND line so
     the guard reads freshly-committed state (finding #8 — the ExcessList query used to be
     missing ``populate_existing``, so a concurrent close/expiry committed while this call
-    blocked on the row lock was invisible to the terminal-status guard and
-    ``sync_list_mirror`` right after), and ``db.refresh`` does the same for the offer (so a
+    blocked on the row lock was invisible to the terminal-status guard), and
+    ``db.refresh`` does the same for the offer (so a
     concurrent flip of THIS offer is seen as idempotent). ``with_for_update`` is a no-op on
     SQLite (tests) and enforced on PostgreSQL (prod).
     """
@@ -1524,9 +1524,8 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     lines are already sold to a different offer (409, ``unaward first``), flips the offer
     to ``won`` and its lines to ``awarded``, recomputes each touched line's best-price
     rollup, recomputes the winning buyer's ``BuyerScore`` (``recompute_buyer_score_on_win``),
-    retires the sold lines from the Sighting mirror (``sync_list_mirror`` — a sold line
-    must stop advertising as live supply), and derives the list's own ``awarded`` status
-    when every line is decided. All in one transaction, committed here.
+    and derives the list's own ``awarded`` status when every line is decided. All in one
+    transaction, committed here.
     """
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
@@ -1580,11 +1579,6 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     # transaction (the hook returns None / no-ops for an offer with no canonical buyer).
     recompute_buyer_score_on_win(db, offer)
 
-    # Retire the sold lines from the Sighting live-mirror — a lazy import breaks the
-    # excess_mirror ↔ excess_service cycle (excess_mirror imports get_excess_list).
-    from . import excess_mirror
-
-    excess_mirror.sync_list_mirror(db, excess_list)
     _apply_award_list_status(excess_list)
 
     _safe_commit(db, entity="excess offer award")
@@ -1630,9 +1624,9 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     :func:`_revived_offer_status` — findings #37/#46, never a blanket ``open`` that erases
     a late-arrival provenance) and its awarded lines back to ``available``, recomputes each
     line's rollup, recomputes the buyer's ``BuyerScore`` (a full-history recompute
-    self-heals the win count back down), re-mirrors the now-live lines
-    (``sync_list_mirror``), and steps the list's own status back off ``awarded`` — to
-    ``bid_out`` when the posting window has closed, else ``collecting``. One transaction.
+    self-heals the win count back down), and steps the list's own status back off
+    ``awarded`` — to ``bid_out`` when the posting window has closed, else ``collecting``.
+    One transaction.
     """
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
@@ -1669,21 +1663,16 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     recompute_buyer_score_on_win(db, offer)
 
-    # Step the list status back off ``awarded`` BEFORE re-mirroring so the mirror re-sync
-    # sees the reverted posting status (M5): a list whose window is still open steps back to
-    # ``collecting`` and re-advertises its now-live lines, while one whose window has already
-    # closed (its ``close_at`` deadline has passed) steps to ``bid_out`` and stays retired —
-    # a closed posting never re-advertises. The window-closed test is time-based, NOT a bare
-    # ``close_at`` truthiness check: Phase 5 preserves a FUTURE create-set deadline through
-    # publish, so a truthy ``close_at`` no longer implies the window closed (findings #1/#3).
+    # Step the list status back off ``awarded`` (M5): a list whose window is still open
+    # steps back to ``collecting``, while one whose window has already closed (its
+    # ``close_at`` deadline has passed) steps to ``bid_out``. The window-closed test is
+    # time-based, NOT a bare ``close_at`` truthiness check: Phase 5 preserves a FUTURE
+    # create-set deadline through publish, so a truthy ``close_at`` no longer implies the
+    # window closed (findings #1/#3).
     if excess_list.status == ExcessListStatus.AWARDED:
         excess_list.status = (
             ExcessListStatus.BID_OUT if _posting_window_closed(excess_list) else ExcessListStatus.COLLECTING
         )
-
-    from . import excess_mirror
-
-    excess_mirror.sync_list_mirror(db, excess_list)
 
     _safe_commit(db, entity="excess offer unaward")
     db.refresh(offer)
@@ -1829,8 +1818,8 @@ def update_line(
     line.date_code = date_code or None
     line.asking_price = asking_price
     if identity_changed:
-        # Re-resolve the material-card link off the new MPN/manufacturer (the mirror needs
-        # a correct card at post time). Drop the stale link first so the resolver runs.
+        # Re-resolve the material-card link off the new MPN/manufacturer so the line
+        # carries a correct card. Drop the stale link first so the resolver runs.
         line.material_card_id = None
         _resolve_line_material_card(db, line)
     _safe_commit(db, entity="excess line update")
@@ -1911,9 +1900,7 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
     withdraw/assign use (:func:`_lock_list_and_lines`) BEFORE evaluating the closeable
     guard (finding #11): without it, a close racing a concurrent award can read the list as
     still ``collecting``, block on the award's row lock, then unconditionally overwrite the
-    just-awarded status once it wakes. RETIRES the Sighting mirror (``sync_list_mirror`` on
-    a now-closed posting drops every line's live-supply row — both ``bid_out`` and ``closed``
-    are in the mirror's posting-closed set). Commits. Returns the refreshed list.
+    just-awarded status once it wakes. Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
     if excess_list.owner_id != owner.id:
@@ -1928,15 +1915,9 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
     excess_list.close_at = datetime.now(UTC)
     db.flush()
 
-    # Retire the live-mirror: a closed posting window must stop advertising its supply
-    # (lazy import breaks the excess_mirror ↔ excess_service cycle).
-    from . import excess_mirror
-
-    excess_mirror.sync_list_mirror(db, excess_list)
-
     _safe_commit(db, entity="excess list close")
     db.refresh(excess_list)
-    logger.info("Closed ExcessList id={} (status={}, mirror retired) by owner={}", list_id, target_status, owner.id)
+    logger.info("Closed ExcessList id={} (status={}) by owner={}", list_id, target_status, owner.id)
     return excess_list
 
 
@@ -1947,7 +1928,7 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
     The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
     ``open_at``): once the trader has assembled and sent the bid back, closing the list
     flips it to ``bid_out`` and records ``close_at`` (Chunk E). See ``_end_posting_window``
-    for the guards and mirror-retire behaviour.
+    for the guards.
     """
     return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.BID_OUT)
 
@@ -1958,8 +1939,8 @@ def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList
 
     The deliberate "nothing came of this — end it" exit, distinct from the ``bid_out``
     (bids went out) path: an owner ends a posting that drew no usable bid instead of leaving
-    it advertising forever. ``closed`` is TERMINAL — there is no reopen; it retires the
-    mirror like any closed window. Same owner + open/collecting guards as ``close_list``
+    it advertising forever. ``closed`` is TERMINAL — there is no reopen. Same owner +
+    open/collecting guards as ``close_list``
     (409 on a draft/resolved list). Commits. Returns the refreshed list.
     """
     return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)

@@ -11,6 +11,27 @@ import re
 
 import pytest
 
+from app.models import TroubleTicket
+
+
+@pytest.fixture()
+def trouble_ticket(db_session):
+    """A seeded ticket so JSON-API probes hit a real 200 (W2 re-point, manifest §E.1:
+
+    the old probe GET /api/requisitions is KEEP-AMBIGUOUS; GET /api/trouble-tickets/{id}
+    is a surviving dual-registered route kept live by tickets/detail.html).
+    """
+    ticket = TroubleTicket(
+        ticket_number="TT-SEC-0001",
+        ticket_type="bug",
+        title="Security-header probe ticket",
+        description="Seeded by tests/test_security_headers.py for JSON-API probes.",
+    )
+    db_session.add(ticket)
+    db_session.commit()
+    db_session.refresh(ticket)
+    return ticket
+
 
 def test_x_request_id_header(client):
     """Every response includes X-Request-ID."""
@@ -35,9 +56,14 @@ def test_static_security_header(client, header, expected):
     assert resp.headers.get(header) == expected
 
 
-def test_security_headers_on_api_endpoint(client, test_requisition):
-    """Security headers are present on API responses, not just health."""
-    resp = client.get("/api/requisitions")
+def test_security_headers_on_api_endpoint(client, trouble_ticket):
+    """Security headers are present on API responses, not just health.
+
+    Probes GET /api/trouble-tickets/{id} — surviving JSON route (W2 re-point; manifest
+    §E.1 — the old probe GET /api/requisitions is KEEP-AMBIGUOUS §F #23).
+    """
+    resp = client.get(f"/api/trouble-tickets/{trouble_ticket.id}")
+    assert resp.status_code == 200
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
     assert resp.headers.get("X-Frame-Options") == "DENY"
     assert resp.headers.get("X-XSS-Protection") == "1; mode=block"
@@ -77,8 +103,12 @@ def test_global_exception_handler_format(client):
 
 
 def test_error_response_format(client):
-    """HTTP errors return structured JSON with error, status_code, and request_id."""
-    resp = client.get("/api/requisitions/999999/requirements")
+    """HTTP errors return structured JSON with error, status_code, and request_id.
+
+    Probes GET /api/requisitions/{id}/pdf — a surviving API route (W2 re-point; the old
+    /requirements probe target was deleted with its orphan route).
+    """
+    resp = client.get("/api/requisitions/999999/pdf")
     assert resp.status_code == 404
     data = resp.json()
     assert "error" in data
@@ -128,9 +158,14 @@ def test_full_page_html_response_is_no_store(client):
     assert resp.headers.get("Pragma") == "no-cache"
 
 
-def test_json_response_is_not_no_store(client, test_requisition):
-    """JSON API responses are NOT touched by the HTML no-store branch."""
-    resp = client.get("/api/requisitions")
+def test_json_response_is_not_no_store(client, trouble_ticket):
+    """JSON API responses are NOT touched by the HTML no-store branch.
+
+    Probes GET /api/trouble-tickets/{id} — surviving JSON route (W2 re-point; manifest
+    §E.1 — the old probe GET /api/requisitions is KEEP-AMBIGUOUS §F #23).
+    """
+    resp = client.get(f"/api/trouble-tickets/{trouble_ticket.id}")
+    assert resp.status_code == 200
     assert "application/json" in resp.headers.get("content-type", "")
     # The HTML branch must not have run: no no-store Cache-Control, no Pragma.
     assert "no-store" not in resp.headers.get("Cache-Control", "")

@@ -24,23 +24,6 @@ def _activity_rows(db, requisition_id, activity_type):
     )
 
 
-def test_create_offer_route_logs_offer_created(client, db_session, test_requisition, test_vendor_card):
-    """POST to the offer-create API writes an offer_created activity row."""
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED))
-    resp = client.post(
-        f"/api/requisitions/{test_requisition.id}/offers",
-        json={
-            "requirement_id": None,
-            "vendor_card_id": test_vendor_card.id,
-            "mpn": "LM317T",
-            "vendor_name": test_vendor_card.display_name,
-        },
-    )
-    assert resp.status_code in (200, 201), resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
-    assert len(rows) == before + 1
-
-
 def test_email_parsed_offer_logs_offer_created(db_session, test_requisition):
     """An offer auto-created from a parsed vendor email writes offer_created."""
     from app.email_service import _auto_create_offers_from_parse
@@ -163,7 +146,6 @@ def test_add_offer_htmx_logs_offer_created(client, db_session, test_requisition)
     ("method", "url", "data", "initial_status"),
     [
         pytest.param("put", "/api/offers/{offer}/reject", None, "pending_review", id="api_reject"),
-        pytest.param("patch", "/api/offers/{offer}/mark-sold", None, "active", id="api_mark_sold"),
         pytest.param("post", "/api/offers/{offer}/reject", None, "pending_review", id="api_reject_t4_review"),
         pytest.param(
             "post",
@@ -200,20 +182,6 @@ def test_status_change_route_logs_status_changed(
     assert len(rows) == before + 1
 
 
-def test_promote_offer_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """POST /api/offers/{id}/promote writes one offer_status_changed row with a real
-    status change."""
-    test_offer.status = "pending_review"
-    test_offer.evidence_tier = "T4"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(f"/api/offers/{test_offer.id}/promote")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-    assert rows[0].details["old_status"] != rows[0].details["new_status"]
-
-
 def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
     """Approving an offer through the HTMX review handler logs offer_status_changed."""
     test_offer.status = "pending_review"
@@ -225,56 +193,3 @@ def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisit
     assert resp.status_code == 200, resp.text
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  _upsert_inapp_notice — dedup helper (create + refresh branches)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-def test_upsert_inapp_notice_creates_then_refreshes(db_session, test_requisition, test_user):
-    """First call inserts a system-channel ActivityLog; second refreshes in place."""
-    from app.routers.crm.offers import _upsert_inapp_notice
-
-    def _rows():
-        return (
-            db_session.query(ActivityLog)
-            .filter(
-                ActivityLog.user_id == test_user.id,
-                ActivityLog.activity_type == "new_offer",
-                ActivityLog.requisition_id == test_requisition.id,
-                ActivityLog.dismissed_at.is_(None),
-            )
-            .all()
-        )
-
-    _upsert_inapp_notice(
-        db_session,
-        user_id=test_user.id,
-        activity_type="new_offer",
-        requisition_id=test_requisition.id,
-        contact_name="Acme Vendor",
-        subject="New offer: Acme Vendor — LM317T",
-    )
-    db_session.commit()
-    rows = _rows()
-    assert len(rows) == 1
-    row = rows[0]
-    assert row.channel == "system"
-    assert row.contact_name == "Acme Vendor"
-    assert row.subject == "New offer: Acme Vendor — LM317T"
-
-    # Second call with the same key updates subject in place (no new row)
-    _upsert_inapp_notice(
-        db_session,
-        user_id=test_user.id,
-        activity_type="new_offer",
-        requisition_id=test_requisition.id,
-        contact_name="Acme Vendor",
-        subject="New offer: Acme Vendor — LM317T · 3 total offers",
-    )
-    db_session.commit()
-    rows = _rows()
-    assert len(rows) == 1
-    assert rows[0].id == row.id
-    assert rows[0].subject == "New offer: Acme Vendor — LM317T · 3 total offers"

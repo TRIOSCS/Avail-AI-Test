@@ -18,7 +18,9 @@
   {# ── Header: lens switch + new-list ─────────────────────────────── #}
   <div class="flex items-center justify-between gap-3 mb-4 flex-shrink-0">
     <div class="flex items-center gap-2">
-      {% for l, label in [('mine', 'My Lists'), ('open', 'Open to Me')] %}
+      {# PARKED (spec §5.3, W2.3): the ('open', 'Open to Me') offerer lens pill is
+         parked until a second trader user exists — restore it to this loop then. #}
+      {% for l, label in [('mine', 'My Lists')] %}
       {# Alpine-reactive highlight so the active pill flips before the server swap
          returns, then stays correct after the re-rendered shell re-inits x-data. #}
       <button hx-get="/v2/partials/resell/lists?lens={{ l }}"

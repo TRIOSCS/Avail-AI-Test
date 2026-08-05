@@ -1765,99 +1765,6 @@ class TestAsyncWriterReapplication:
         assert row.is_unavailable is True
 
 
-class TestEmailAttachmentReapplication:
-    """app/routers/sources.py email-attachment import — the HUMAN_DIRECT/O3 path:
-
-    a buyer-routed attachment row with qty>0 RELEASES the record instead of stamping the
-    row.
-    """
-
-    def test_routed_attachment_qty_releases_record_row_unstamped(self, db_session: Session, test_user: User):
-        from app.models import VendorResponse
-        from app.routers.sources import _create_sightings_from_attachment
-
-        requirement = _make_requirement(db_session, primary_mpn="LM358N")
-        rec = _make_record(
-            db_session,
-            vendor_norm="acme components",
-            key="lm358n",
-            reason=UnavailabilityReason.SOLD_ELSEWHERE,
-            qty_at_mark=50,
-            requirement_id=requirement.id,
-        )
-        vr = VendorResponse(
-            requisition_id=requirement.requisition_id,
-            vendor_name="Acme Components",
-            vendor_email="sales@acme.example",
-        )
-        db_session.add(vr)
-        db_session.commit()
-
-        created = _create_sightings_from_attachment(
-            db_session,
-            vr,
-            [{"mpn": "LM358N", "qty": 100, "unit_price": 0.50}],
-        )
-        db_session.commit()
-
-        assert created == 1
-        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="email_attachment").one()
-        assert bool(row.is_unavailable) is False  # O3 surfaces, never stamps
-        db_session.refresh(rec)
-        assert rec.released_at is not None
-        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
-        assert not is_active(rec)
-
-    def test_resent_attachment_dedup_updates_row_and_releases(self, db_session: Session, test_user: User):
-        """A RE-SENT vendor stock list hits the dedup key — the existing row's qty/price
-        refresh from the new parse and the row joins the apply batch, so the documented
-        O3 release still fires (a bare ``continue`` silently defeated it)."""
-        from app.models import VendorResponse
-        from app.routers.sources import _create_sightings_from_attachment
-
-        requirement = _make_requirement(db_session, primary_mpn="LM358N")
-        rec = _make_record(
-            db_session,
-            vendor_norm="acme components",
-            key="lm358n",
-            reason=UnavailabilityReason.SOLD_ELSEWHERE,
-            requirement_id=requirement.id,
-        )
-        vr = VendorResponse(
-            requisition_id=requirement.requisition_id,
-            vendor_name="Acme Components",
-            vendor_email="sales@acme.example",
-        )
-        db_session.add(vr)
-        # The previously imported (stamped) attachment row — the dedup hit.
-        existing = Sighting(
-            requirement_id=requirement.id,
-            vendor_name="Acme Components",
-            vendor_name_normalized="acme components",
-            mpn_matched="LM358N",
-            qty_available=0,
-            source_type="email_attachment",
-            is_unavailable=True,
-        )
-        db_session.add(existing)
-        db_session.commit()
-
-        created = _create_sightings_from_attachment(
-            db_session,
-            vr,
-            [{"mpn": "LM358N", "qty": 100, "unit_price": 0.50}],
-        )
-        db_session.commit()
-
-        assert created == 0  # dedup hit — no duplicate row
-        db_session.refresh(existing)
-        assert existing.qty_available == 100
-        assert float(existing.unit_price) == 0.50
-        db_session.refresh(rec)
-        assert rec.released_at is not None
-        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
-
-
 class TestPickerReapplication:
     """app/routers/htmx_views.py add-to-requisition picker — a manually added sighting
     for a known-dead vendor+part is surfaced flagged (user can Mark available to
@@ -1932,53 +1839,6 @@ class TestInventoryJobReapplication:
 
         row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="email_auto_import").one()
         assert row.is_unavailable is True
-
-
-class TestStockListImportReapplication:
-    """app/routers/requisitions/requirements.py import_stock_list — manually imported
-    vendor stock lists group created rows per requirement and re-stamp before the commit
-    (the inventory_jobs pattern); without it the rows are never gated and render a false
-    'Possible restock' chip."""
-
-    async def test_manual_stock_import_rows_stamped(self, db_session: Session, test_user: User, test_requisition):
-        from unittest.mock import AsyncMock, MagicMock, patch
-
-        from app.routers.requisitions.requirements import import_stock_list
-
-        requirement = test_requisition.requirements[0]
-        _make_record(db_session, vendor_norm="arrow", key="lm317t", requirement_id=requirement.id)
-        db_session.commit()
-
-        mock_file = MagicMock()
-        mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,500,0.45\n")
-        mock_file.filename = "stock.csv"
-        mock_request = MagicMock()
-
-        async def _form():
-            form_mock = MagicMock()
-            form_mock.get = lambda key, default=None: (
-                mock_file if key == "file" else "Arrow" if key == "vendor_name" else default
-            )
-            return form_mock
-
-        mock_request.form = _form
-
-        row = {"mpn": "LM317T", "qty": 500, "price": 0.45}
-        with (
-            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
-            patch("app.file_utils.parse_tabular_file", return_value=[row]),
-            patch("app.file_utils.normalize_stock_row", return_value=row),
-        ):
-            result = await import_stock_list(
-                req_id=test_requisition.id,
-                request=mock_request,
-                user=test_user,
-                db=db_session,
-            )
-
-        assert result["matched_sightings"] == 1
-        sighting = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="stock_list").one()
-        assert sighting.is_unavailable is True
 
 
 class TestQueueDedupReapplication:
@@ -2094,37 +1954,6 @@ class TestOfferHookReleasingSites:
     """The five user-initiated creation/approval sites release via the shared
     maybe_release_on_offer gate."""
 
-    def test_crm_create_offer_api_releases(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics")
-        requirement = test_requisition.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Arrow Electronics",
-                "mpn": "LM317T",
-                "qty_available": 500,
-                "unit_price": 0.45,
-            },
-        )
-        assert resp.status_code == 200
-        _assert_released(db_session, rec)
-
-    def test_crm_create_offer_api_never_releases_different_part(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics", reason=UnavailabilityReason.DIFFERENT_PART)
-        requirement = test_requisition.requirements[0]
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/offers",
-            json={
-                "requirement_id": requirement.id,
-                "vendor_name": "Arrow Electronics",
-                "mpn": "LM317T",
-                "unit_price": 0.45,
-            },
-        )
-        assert resp.status_code == 200
-        _assert_not_released(db_session, rec)
-
     def test_manual_add_offer_releases(self, client, db_session: Session, test_requisition):
         rec = _hook_record(db_session, "Arrow Electronics")
         requirement = test_requisition.requirements[0]
@@ -2224,20 +2053,6 @@ class TestApprovalTwinReleasingSites:
         assert resp.status_code == 200
         _assert_not_released(db_session, rec)
 
-    def test_api_promote_t4_releases(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics")
-        offer = self._pending_offer(db_session, test_requisition, tier="T4")
-        resp = client.post(f"/api/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-        _assert_released(db_session, rec)
-
-    def test_api_promote_t4_never_releases_different_part(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics", reason=UnavailabilityReason.DIFFERENT_PART)
-        offer = self._pending_offer(db_session, test_requisition, tier="T4")
-        resp = client.post(f"/api/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-        _assert_not_released(db_session, rec)
-
     def test_review_approve_releases(self, client, db_session: Session, test_requisition):
         rec = _hook_record(db_session, "Arrow Electronics")
         offer = self._pending_offer(db_session, test_requisition)
@@ -2302,20 +2117,6 @@ class TestOfferHookExcludedPaths:
         offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).one()
         assert offer.status == "active"  # would have released if this path were hooked
         assert offer.requirement_id == test_requisition.requirements[0].id
-        _assert_not_released(db_session, rec)
-
-    def test_clone_does_not_release(self, client, db_session: Session, test_requisition, test_offer):
-        from app.models import Offer
-
-        test_offer.requirement_id = test_requisition.requirements[0].id
-        db_session.commit()
-        rec = _hook_record(db_session, "Arrow Electronics")
-
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
-        new_id = resp.json()["id"]
-        cloned = db_session.query(Offer).filter_by(requisition_id=new_id).all()
-        assert len(cloned) == 1 and cloned[0].requirement_id is not None
         _assert_not_released(db_session, rec)
 
 
@@ -2864,32 +2665,6 @@ class TestOfferConditionForwardingCoverage:
     assert the kwarg is passed correctly, complementing the integration tests in
     TestOfferHookReleasingSites (which verify the full release end-to-end).
     """
-
-    def test_crm_create_offer_forwards_condition(self, client, db_session: Session, test_requisition):
-        """app/routers/crm/offers.py::create_offer forwards offer.condition as
-        offer_condition to maybe_release_on_offer."""
-        from unittest.mock import patch
-
-        requirement = test_requisition.requirements[0]
-        with patch("app.routers.crm.offers.maybe_release_on_offer") as mock_release:
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/offers",
-                json={
-                    "requirement_id": requirement.id,
-                    "vendor_name": "Arrow Electronics",
-                    "mpn": "LM317T",
-                    "qty_available": 500,
-                    "unit_price": 0.45,
-                    "condition": "refurb",
-                },
-            )
-        assert resp.status_code == 200
-        assert mock_release.called, "maybe_release_on_offer was not called at all"
-        _args, kwargs = mock_release.call_args
-        forwarded = kwargs.get("offer_condition", _args[4] if len(_args) > 4 else "NOT_PASSED")
-        assert forwarded == "refurb", (
-            f"create_offer must forward offer.condition='refurb' as offer_condition; got {forwarded!r}"
-        )
 
     def test_htmx_add_offer_forwards_condition(self, client, db_session: Session, test_requisition):
         """app/routers/htmx/offers.py::add_offer forwards offer.condition as

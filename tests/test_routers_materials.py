@@ -276,20 +276,6 @@ def test_get_material_by_id_not_found(client):
     assert resp.status_code == 404
 
 
-def test_get_material_by_mpn(client, db_session, test_material_card):
-    """GET /api/materials/by-mpn/LM317T returns material detail."""
-    resp = client.get("/api/materials/by-mpn/LM317T")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["display_mpn"] == "LM317T"
-
-
-def test_get_material_by_mpn_not_found(client):
-    """GET /api/materials/by-mpn/NONEXISTENT returns 404."""
-    resp = client.get("/api/materials/by-mpn/NONEXISTENT-MPN")
-    assert resp.status_code == 404
-
-
 def test_update_material(client, db_session, test_material_card):
     """PUT /api/materials/{id} with manufacturer updates it."""
     resp = client.put(
@@ -470,53 +456,6 @@ def test_update_material_sets_manual_enrichment_source(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert data["enrichment_source"] == "manual"
-
-
-def test_enrich_material(client, db_session, test_material_card):
-    """POST /api/materials/{id}/enrich applies enrichment data.
-
-    manufacturer routes through the F1 ladder: "claude_agent" is unregistered →
-    ai_guess (40), which loses to the fixture card's existing valued-but-unprovenanced
-    maker (legacy floor, 50) — updated_fields honestly omits the rejected write.
-    """
-    resp = client.post(
-        f"/api/materials/{test_material_card.id}/enrich",
-        json={
-            "lifecycle_status": "active",
-            "package_type": "TO-220",
-            "manufacturer": "STMicroelectronics",
-            "source": "claude_agent",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert "lifecycle_status" in data["updated_fields"]
-    assert "package_type" in data["updated_fields"]
-    assert "manufacturer" not in data["updated_fields"]  # ladder kept the existing maker
-    db_session.refresh(test_material_card)
-    assert test_material_card.manufacturer == "Texas Instruments"
-
-
-def test_enrich_material_no_fields(client, db_session, test_material_card):
-    """POST /api/materials/{id}/enrich with no matching fields."""
-    resp = client.post(
-        f"/api/materials/{test_material_card.id}/enrich",
-        json={"unrelated_field": "value"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["updated_fields"] == []
-
-
-def test_enrich_material_not_found(client):
-    """POST /api/materials/99999/enrich returns 404."""
-    resp = client.post(
-        "/api/materials/99999/enrich",
-        json={"lifecycle_status": "active"},
-    )
-    assert resp.status_code == 404
 
 
 # ── Import stock ─────────────────────────────────────────────────────────
@@ -700,28 +639,6 @@ def test_import_stock_skips_bad_rows(client, db_session, monkeypatch):
 
 
 # ── Material card merge ──────────────────────────────────────────────────
-
-
-class TestMaterialCardMerge:
-    def test_merge_material_cards(self, admin_client, db_session, test_material_card):
-        """Merge source card into target (lines 1786-1825)."""
-        source = MaterialCard(
-            normalized_mpn="lm317t-alt",
-            display_mpn="LM317T-ALT",
-            manufacturer="TI",
-            description="Alt version",
-            search_count=5,
-        )
-        db_session.add(source)
-        db_session.commit()
-
-        resp = admin_client.post(
-            "/api/materials/merge",
-            json={"source_card_id": source.id, "target_card_id": test_material_card.id},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
 
 
 # ── Minimum query length validation tests ────────────────────────────────

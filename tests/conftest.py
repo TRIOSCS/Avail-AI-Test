@@ -1063,3 +1063,17 @@ def test_proactive_offer(
     db_session.commit()
     db_session.refresh(po)
     return po
+
+
+@pytest.fixture()
+def proactive_flag_on(monkeypatch):
+    """Enable the PARKED Proactive module for tests of its flag-on behavior.
+
+    W2 parked Proactive whole (spec §4/§8): config default False, routes 404, engine no-
+    op. Tests that exercise the parked surface opt in through this fixture (usually via
+    a module-level autouse shim) so the comeback path stays green without changing the
+    shipped default.
+    """
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "proactive_matching_enabled", True)

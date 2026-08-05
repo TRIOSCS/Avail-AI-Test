@@ -193,7 +193,8 @@ def select_batch(db: Session, config: EnrichmentWorkerConfig) -> list:
       by the daily ``not_found`` re-check churn — at a raised daily cap the 22h
       re-check pool alone could otherwise consume most of a day's slots). Then TRIO's
       own demand telemetry wins: ``sourced_qty_90d`` (real 90-day sourcing volume from
-      the SFDC export, one-shot import via app/management/import_demand_telemetry.py)
+      the SFDC export, imported by the completed import_demand_telemetry one-shot,
+      deleted in W2.9)
       then ``last_sourced_at`` recency, NULLS LAST so unmatched cards drain after
       every demanded card; ``id`` makes the order total/deterministic.
     """

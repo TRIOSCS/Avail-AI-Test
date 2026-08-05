@@ -252,7 +252,11 @@ class Settings(BaseSettings):
     vendor_protection_warn_days: int = 60
 
     # --- Proactive offers ---
-    proactive_matching_enabled: bool = True
+    # PARKED (spec §4/§8 W2): the whole Proactive unit — workspace routes, matching
+    # engine, nav badge — gates on this flag. Default off so wave DB refreshes don't
+    # resurrect it; flip via env or the admin system_config toggle on comeback
+    # (trigger: Proactive revival / Wave-4 Deals-badge decision).
+    proactive_matching_enabled: bool = False
     proactive_throttle_days: int = 21
     proactive_scan_interval_hours: int = 4
     proactive_min_margin_pct: float = 10.0

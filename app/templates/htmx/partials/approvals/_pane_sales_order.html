@@ -3,7 +3,8 @@
   Spec §8, top to bottom: header (customer · SO# copy chip · order-type badge · status)
   → APPROVAL BLOCK ("Awaiting your approval" + Approve/Reject when pending & decidable;
   the "Approved by X · date" stamp after) → Quality — sales section (collapsible once
-  reviewed) → lines → PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
+  reviewed; links out to the QP serial/FRU page — spec §5.2 Decision E) → lines →
+  PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
   Approve is reachable from BOTH the Sales Orders and Buy Plans tabs — same object,
   same single approval. Decide posts the EXISTING approve route with
   origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
@@ -149,11 +150,20 @@
       </span>
     </button>
     <div x-show="qpOpen" x-collapse class="border-t border-line-subtle px-3 py-2">
-      {% if can_edit_qp_sales %}
-      <div class="flex justify-end mb-1" x-show="!qpEdit">
+      {# Serial/FRU relink (spec §5.2 Decision E): the serial + FRU sections stay on the
+         EXISTING QP page (the get-or-create front door, /v2/qp/for-buy-plan) — this one
+         link restores their reachability from the workspace after the Deal view retired.
+         Absorbing them into the pane is post-launch (trigger: first live TSO with serial
+         tracking). Wired like "Open full plan": full-pane HTMX nav + pushed url. #}
+      <div class="flex items-center justify-end gap-3 mb-1" {% if can_edit_qp_sales %}x-show="!qpEdit"{% endif %}>
+        <a hx-get="/v2/qp/for-buy-plan/{{ bp.id }}" hx-target="#main-content" hx-push-url="true"
+           class="text-xs font-medium text-accent-600 cursor-pointer">Serial / FRU &rarr;</a>
+        {% if can_edit_qp_sales %}
         <button type="button" @click="qpEdit = true; qpOpen = true"
                 class="text-xs font-medium text-accent-600 cursor-pointer">Edit</button>
+        {% endif %}
       </div>
+      {% if can_edit_qp_sales %}
       <form x-show="qpEdit" x-cloak @keydown.escape.prevent="qpEdit = false"
             hx-post="/v2/partials/approvals/plan/{{ bp.id }}/qp-sales"
             hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-2">

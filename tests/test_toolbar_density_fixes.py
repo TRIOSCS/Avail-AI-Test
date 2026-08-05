@@ -108,7 +108,9 @@ class TestAccountsUtilityRow:
         html = manager_client.get("/v2/partials/customers", headers=_HX).text
         # Saved views + new + non-export utilities all survive the fold.
         assert "+ Save view" in html
-        assert "All contacts" in html
+        # W2.8: "All contacts" (cross-company contact list) parked per spec §5.4
+        # (comeback = team exists) — no longer a toolbar utility.
+        assert "All contacts" not in html
         assert "Import CSV" in html
         # Filter controls untouched.
         assert 'id="cdm-search"' in html
@@ -128,4 +130,5 @@ class TestAccountsUtilityRow:
             assert "Export CSV" not in html
             assert "Export contacts" not in html
             assert "Import CSV" in html
-            assert "All contacts" in html
+            # W2.8: cross-company contact list parked (spec §5.4).
+            assert "All contacts" not in html

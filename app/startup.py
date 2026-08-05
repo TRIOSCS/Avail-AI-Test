@@ -2,7 +2,10 @@
 
 Schema DDL (columns, indexes, constraints, extensions) lives in Alembic migrations.
 This file handles PostgreSQL-specific runtime operations that must run every boot:
-triggers, seeds, backfills, and ANALYZE.
+triggers, seeds, and ANALYZE. The one-time data backfills that used to run in the
+deferred phase were all verified complete against live data and deleted in the W2.9
+simplification sweep (git restores them; no-op alembic markers were deliberately
+NOT written).
 
 Called by: main.py lifespan
 Depends on: database.py (engine), models.py (Base)
@@ -17,7 +20,6 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from .constants import DeferredBackfillState
 from .database import SessionLocal, engine
-from .utils.normalization import normalize_mpn_key as _norm_key
 
 
 def ensure_screenshot_storage() -> None:
@@ -75,14 +77,14 @@ def run_startup_migrations() -> None:
     """Execute the FAST, order-critical startup operations (pre-yield, main.py
     lifespan).
 
-    P2.7 (docs/CODE_AUDIT_AND_HARDENING_PLAN.md) split the ~20 ops that used to run here
+    P2.7 (docs/CODE_AUDIT_AND_HARDENING_PLAN.md) split the ops that used to run here
     sequentially into FAST (kept here, blocking /health) and SLOW (moved to
     ``run_deferred_startup_backfills``, launched as a post-yield background task so a
     prod-sized DB can no longer make /health miss the compose healthcheck / deploy.sh
-    wait-loop budget). Classification below is by measured/reasoned cost, not just
-    order-criticality — every FAST op is either a fixed-size seed/reconcile or a
-    single-row check; every SLOW op is a full-table-shaped scan, chunked backfill, or
-    ANALYZE.
+    wait-loop budget). Every FAST op is either a fixed-size seed/reconcile or a
+    single-row check. W2.9 deleted the deferred one-time backfills (each verified
+    complete/no-op against the live data first), so the SLOW phase now holds only
+    the deploy-gated ANALYZE and a read-only observability scan.
 
     | Operation                                    | Class | Why                                                        |
     |-----------------------------------------------|-------|-------------------------------------------------------------|
@@ -99,21 +101,7 @@ def run_startup_migrations() -> None:
     | _seed_agent_user                              | FAST  | single-row query/update                                      |
     | _seed_verification_group_from_admin_emails     | FAST  | bounded by len(ADMIN_EMAILS)                                 |
     | _seed_commodity_schemas                        | FAST  | bounded by the schema registry, not live-data size            |
-    | _backfill_fts                                  | SLOW → deferred | full-table UPDATE on vendor_cards/material_cards       |
-    | _seed_site_contacts                            | SLOW → deferred | one-time INSERT SELECT across customer_sites           |
-    | _backfill_company_counts                       | SLOW → deferred | full-table correlated-subquery UPDATE                  |
-    | legacy site_type / trouble_tickets UPDATEs     | SLOW → deferred | unindexed full-table predicate scans                   |
-    | _analyze_hot_tables (via _maybe_analyze_hot_tables) | SLOW → deferred | ANALYZE on 3 hot tables; also since-last-deploy gated (item 3) |
-    | _backfill_normalized_mpn                        | SLOW → deferred | chunked full-table backfill (requirements + material_cards) |
-    | _backfill_sighting_offer_normalized_mpn         | SLOW → deferred | chunked full-table backfill (sightings + offers)        |
-    | _backfill_sighting_vendor_normalized             | SLOW → deferred | chunked full-table backfill (sightings)                 |
-    | _backfill_offer_vendor_normalized                | SLOW → deferred | chunked full-table backfill (offers)                    |
-    | _backfill_proactive_offer_qty                    | SLOW → deferred | scans proactive_matches/requirements/proactive_offers   |
-    | _backfill_ticket_defaults                        | SLOW → deferred | unbatched per-row ORM update over trouble_tickets       |
-    | _backfill_material_cards                         | SLOW → deferred | per-row resolve_material_card() call over unlinked requirements |
-    | _backfill_sweep_cooldown                         | SLOW → deferred | unbounded ORM query over prospect_accounts              |
-    | _backfill_resell_mirrors                         | SLOW → deferred | per-list mirror rebuild over open/collecting excess lists |
-    | _complete_reverted_active_plans                  | SLOW → deferred | per-candidate check_completion() business logic         |
+    | _analyze_hot_tables (via _maybe_analyze_hot_tables) | SLOW → deferred | ANALYZE on 3 hot tables; since-last-deploy gated (item 3) |
     | _warn_non_canonical_categories                    | SLOW → deferred | full-table GROUP BY scan; pure observability            |
 
     Safe to call on every app boot.
@@ -205,21 +193,24 @@ def get_deferred_backfills_state() -> str:
 
 
 def run_deferred_startup_backfills() -> None:
-    """Execute the SLOW, idempotent startup backfills + ANALYZE off the request path.
+    """Execute the SLOW deferred startup phase (ANALYZE + observability) off the request
+    path.
 
     Runs inside a background asyncio task launched right after main.py's lifespan
     yields (via ``asyncio.to_thread`` + ``safe_background_task``), so /health can
-    answer immediately while a prod-sized DB is still being backfilled. See the
-    classification table in ``run_startup_migrations``'s docstring for why each op
-    below is here rather than in the fast pre-yield path.
+    answer immediately. The one-time data backfills that used to run here were all
+    verified complete/no-op against live data and deleted (W2.9); what remains is
+    the deploy-gated ANALYZE and a read-only category-observability scan. The name
+    and the /health/ready tri-state contract are kept unchanged so deploy.sh's
+    informational readiness curl keeps working.
 
     TESTING short-circuits identically to run_startup_migrations (main.py never
     schedules this function under TESTING=1 anyway; the guard here is defense-in-
     depth for tests that call it directly).
 
     Called by: main.py lifespan (background task, real boots only), tests (directly)
-    Depends on: database.py (engine), the _backfill_*/_seed_site_contacts/
-        _maybe_analyze_hot_tables helpers below
+    Depends on: database.py (engine), _maybe_analyze_hot_tables,
+        _warn_non_canonical_categories
     """
     global deferred_backfills_state
     if os.environ.get("TESTING"):
@@ -228,36 +219,16 @@ def run_deferred_startup_backfills() -> None:
 
     try:
         with engine.connect() as conn:
-            _backfill_fts(conn)
-            _seed_site_contacts(conn)
-            _backfill_company_counts(conn)
-            # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
-            _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
-            _exec(
-                conn,
-                "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
-                "WHERE status = 'resolved' AND resolved_at IS NULL",
-            )
             _maybe_analyze_hot_tables(conn)
 
-        _backfill_normalized_mpn()
-        _backfill_sighting_offer_normalized_mpn()
-        _backfill_sighting_vendor_normalized()
-        _backfill_offer_vendor_normalized()
-        _backfill_proactive_offer_qty()
-        _backfill_ticket_defaults()
-        _backfill_material_cards()
-        _backfill_sweep_cooldown()
-        _backfill_resell_mirrors()
-        _complete_reverted_active_plans()
         _warn_non_canonical_categories()
     except Exception:
         deferred_backfills_state = DeferredBackfillState.FAILED
-        logger.exception("Deferred startup backfills failed")
+        logger.exception("Deferred startup phase failed")
         raise
     else:
         deferred_backfills_state = DeferredBackfillState.COMPLETED
-        logger.info("Deferred startup backfills complete")
+        logger.info("Deferred startup phase complete (ANALYZE + category observability)")
 
 
 def _seed_verification_group_from_admin_emails() -> None:
@@ -524,34 +495,6 @@ def _create_fts_triggers(conn) -> None:
 # ── One-time FTS backfill ────────────────────────────────────────────
 
 
-def _backfill_fts(conn) -> None:
-    """Backfill search_vector on existing rows where NULL."""
-    _exec(
-        conn,
-        """
-        UPDATE vendor_cards SET search_vector =
-            setweight(to_tsvector('english', COALESCE(display_name, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(normalized_name, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(domain, '')), 'B') ||
-            setweight(to_tsvector('english', COALESCE(industry, '')), 'C')
-        WHERE search_vector IS NULL
-    """,
-    )
-
-    _exec(
-        conn,
-        """
-        UPDATE material_cards SET search_vector =
-            setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
-            setweight(to_tsvector('english', COALESCE(description, '')), 'C') ||
-            setweight(to_tsvector('english', COALESCE(category, '')), 'C')
-        WHERE search_vector IS NULL
-    """,
-    )
-
-
 # ── Seed data ────────────────────────────────────────────────────────
 
 
@@ -560,7 +503,7 @@ def _seed_system_config(conn) -> None:
     seeds = [
         ("inbox_scan_interval_min", "30", "Minutes between inbox scan cycles"),
         ("email_mining_enabled", "false", "Enable email mining background job"),
-        ("proactive_matching_enabled", "true", "Enable proactive offer matching"),
+        ("proactive_matching_enabled", "false", "Enable proactive offer matching"),
         ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
         # Prepayment-notification recipients — empty by default (channel skipped until set).
         ("accounting_group_email", "", "Accounting group email for prepayment notifications"),
@@ -737,33 +680,6 @@ def _seed_tag_threshold_config(conn) -> None:
         )
 
 
-def _seed_site_contacts(conn) -> None:
-    """One-time: copy contact_name/email/phone/title from customer_sites into site_contacts."""
-    try:
-        row = conn.execute(sqltext("SELECT COUNT(*) FROM site_contacts")).scalar()
-        if row and row > 0:
-            return  # already seeded
-        conn.execute(
-            sqltext("""
-            INSERT INTO site_contacts (customer_site_id, full_name, title, email, phone, is_primary)
-            SELECT id, contact_name, contact_title, contact_email, contact_phone, TRUE
-            FROM customer_sites
-            WHERE contact_name IS NOT NULL AND contact_name != ''
-        """)
-        )
-        conn.commit()
-        logger.info("Seeded site_contacts from existing customer_sites data")
-    except (SQLAlchemyError, DBAPIError) as e:
-        logger.warning("Seed site_contacts failed: {}", e)
-        conn.rollback()
-
-
-# ── One-time backfills ───────────────────────────────────────────────
-
-
-_BACKFILL_BATCH_SIZE = 500
-
-
 def _verify_encryption_canary() -> None:
     """Fail loudly at boot if the live ENCRYPTION_SALT/SECRET_KEY can't decrypt stored
     data.
@@ -780,272 +696,6 @@ def _verify_encryption_canary() -> None:
         verify_encryption_canary(db)
     finally:
         db.close()
-
-
-def _backfill_normalized_mpn() -> None:
-    """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
-    with engine.connect() as conn:
-        # 1. Backfill requirements.normalized_mpn where NULL — chunked batch writes
-        try:
-            offset = 0
-            total_reqs = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, primary_mpn FROM requirements"
-                        " WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_reqs += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_reqs:
-                logger.info("Backfilled normalized_mpn on {} requirements", total_reqs)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill requirements.normalized_mpn failed: {}", e)
-            conn.rollback()
-
-        # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
-        # Compute all candidates in Python, find collisions via one GROUP BY query, then batch update.
-        try:
-            cards = conn.execute(
-                sqltext(
-                    "SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL"
-                )
-            ).fetchall()
-            # Build candidate map: normalized_mpn -> list of (id, norm)
-            candidates: dict = {}
-            for c in cards:
-                new_norm = _norm_key(c[1])
-                if new_norm:
-                    candidates.setdefault(new_norm, []).append(c[0])
-            # Find normalized_mpn values already in the table
-            existing_norms = set()
-            if candidates:
-                existing_rows = conn.execute(
-                    sqltext(
-                        "SELECT normalized_mpn FROM material_cards"
-                        " WHERE normalized_mpn IS NOT NULL"
-                        " GROUP BY normalized_mpn"
-                    )
-                ).fetchall()
-                existing_norms = {r[0] for r in existing_rows}
-            batch = []
-            total_updated = 0
-            for norm, ids in candidates.items():
-                if norm in existing_norms:
-                    continue  # collision with existing row
-                # Only take the first id if multiple NULL cards map to the same norm
-                batch.append({"n": norm, "id": ids[0]})
-                existing_norms.add(norm)
-                if len(batch) >= _BACKFILL_BATCH_SIZE:
-                    conn.execute(
-                        sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_updated += len(batch)
-                    batch = []
-            if batch:
-                conn.execute(
-                    sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
-                    batch,
-                )
-                conn.commit()
-                total_updated += len(batch)
-            if total_updated:
-                logger.info("Backfilled normalized_mpn on {} material_cards", total_updated)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill material_cards.normalized_mpn failed: {}", e)
-            conn.rollback()
-
-
-def _backfill_sighting_offer_normalized_mpn() -> None:
-    """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
-    with engine.connect() as conn:
-        # Sightings: compute from mpn_matched — chunked batch writes
-        try:
-            offset = 0
-            total_sightings = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, mpn_matched FROM sightings"
-                        " WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_sightings += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_sightings:
-                logger.info("Backfilled normalized_mpn on {} sightings", total_sightings)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill sightings.normalized_mpn failed: {}", e)
-            conn.rollback()
-
-        # Offers: compute from mpn — chunked batch writes
-        try:
-            offset = 0
-            total_offers = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, mpn FROM offers"
-                        " WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_offers += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_offers:
-                logger.info("Backfilled normalized_mpn on {} offers", total_offers)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill offers.normalized_mpn failed: {}", e)
-            conn.rollback()
-
-
-def _backfill_sighting_vendor_normalized() -> None:
-    """Backfill sightings.vendor_name_normalized from vendor_name until none remain."""
-    from .vendor_utils import normalize_vendor_name
-
-    with engine.connect() as conn:
-        # Check column exists first
-        try:
-            conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings LIMIT 0"))
-        except (SQLAlchemyError, DBAPIError):
-            conn.rollback()
-            return  # Column not yet created
-
-        total = 0
-        last_id = 0
-        while True:
-            try:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, vendor_name FROM sightings "
-                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "AND id > :last_id ORDER BY id LIMIT :lim"
-                    ),
-                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
-                ).fetchall()
-                if not rows:
-                    break
-                # Advance the cursor past every row we examined. Rows whose vendor_name
-                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
-                # only on "IS NULL" would re-select them forever and hang startup; the
-                # id cursor skips them instead of looping on them.
-                last_id = rows[-1][0]
-                batch = []
-                for r in rows:
-                    nv = normalize_vendor_name(r[1])
-                    if nv:
-                        batch.append({"nv": nv, "id": r[0]})
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                total += len(batch)
-            except Exception as e:
-                logger.warning("Backfill sightings.vendor_name_normalized failed: {}", e)
-                conn.rollback()
-                break
-        if total:
-            logger.info("Backfilled vendor_name_normalized on {} sightings", total)
-
-
-def _backfill_offer_vendor_normalized() -> None:
-    """Backfill offers.vendor_name_normalized from vendor_name until none remain.
-
-    The vendor detail offers tab filters Offer.vendor_name_normalized == normalized_name
-    (aligned with sightings/leads). Every offer write-path already populates the column,
-    but a legacy row created before that was universal would be NULL and silently hidden
-    by the tab; this idempotent backfill closes that gap.
-    """
-    from .vendor_utils import normalize_vendor_name
-
-    with engine.connect() as conn:
-        # Check column exists first
-        try:
-            conn.execute(sqltext("SELECT vendor_name_normalized FROM offers LIMIT 0"))
-        except (SQLAlchemyError, DBAPIError):
-            conn.rollback()
-            return  # Column not yet created
-
-        total = 0
-        last_id = 0
-        while True:
-            try:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, vendor_name FROM offers "
-                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "AND id > :last_id ORDER BY id LIMIT :lim"
-                    ),
-                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
-                ).fetchall()
-                if not rows:
-                    break
-                # Advance the cursor past every row we examined. Rows whose vendor_name
-                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
-                # only on "IS NULL" would re-select them forever and hang startup; the
-                # id cursor skips them instead of looping on them.
-                last_id = rows[-1][0]
-                batch = []
-                for r in rows:
-                    nv = normalize_vendor_name(r[1])
-                    if nv:
-                        batch.append({"nv": nv, "id": r[0]})
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE offers SET vendor_name_normalized = :nv WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                total += len(batch)
-            except Exception as e:
-                logger.warning("Backfill offers.vendor_name_normalized failed: {}", e)
-                conn.rollback()
-                break
-        if total:
-            logger.info("Backfilled vendor_name_normalized on {} offers", total)
 
 
 # ── Denormalized company count triggers ──────────────────────────────
@@ -1143,40 +793,6 @@ def _create_count_triggers(conn) -> None:
     )
 
 
-def _backfill_company_counts(conn) -> None:
-    """Idempotent backfill of site_count and open_req_count on companies."""
-    _exec(
-        conn,
-        """
-        UPDATE companies c SET site_count = (
-            SELECT COUNT(*) FROM customer_sites cs
-            WHERE cs.company_id = c.id AND cs.is_active = TRUE
-        )
-        WHERE c.site_count != (
-            SELECT COUNT(*) FROM customer_sites cs
-            WHERE cs.company_id = c.id AND cs.is_active = TRUE
-        )
-    """,
-    )
-    _exec(
-        conn,
-        """
-        UPDATE companies c SET open_req_count = (
-            SELECT COUNT(*) FROM requisitions r
-            JOIN customer_sites cs ON r.customer_site_id = cs.id
-            WHERE cs.company_id = c.id
-              AND r.status NOT IN ('won', 'lost', 'cancelled')
-        )
-        WHERE c.open_req_count != (
-            SELECT COUNT(*) FROM requisitions r
-            JOIN customer_sites cs ON r.customer_site_id = cs.id
-            WHERE cs.company_id = c.id
-              AND r.status NOT IN ('won', 'lost', 'cancelled')
-        )
-    """,
-    )
-
-
 def _analyze_hot_tables(conn) -> None:
     """Run ANALYZE on hot tables to keep pg_stat estimates fresh."""
     for tbl in ("companies", "customer_sites", "requisitions"):
@@ -1220,95 +836,6 @@ def _maybe_analyze_hot_tables(conn) -> None:
         ON CONFLICT (key) DO UPDATE SET value = :v""",
         {"k": _ANALYZE_MARKER_KEY, "v": current_build},
     )
-
-
-def _backfill_proactive_offer_qty() -> None:
-    """Fix proactive offer totals: use customer target_qty instead of vendor qty_available.
-
-    Bug: send_proactive_offer() was using offer.qty_available (vendor's entire stock)
-    to calculate total_sell/total_cost. The correct qty is min(qty_available, target_qty).
-    This backfill recalculates totals and fixes line_items[].qty for all affected offers.
-
-    Called by: run_startup_migrations
-    Depends on: proactive_offers, proactive_matches, requirements tables
-    """
-    import json
-    from decimal import Decimal
-
-    with engine.connect() as conn:
-        try:
-            # Pre-load match_id -> target_qty map
-            match_rows = conn.execute(
-                sqltext("""
-                    SELECT pm.id, r.target_qty
-                    FROM proactive_matches pm
-                    JOIN requirements r ON r.id = pm.requirement_id
-                    WHERE r.target_qty IS NOT NULL AND r.target_qty > 0
-                """)
-            ).fetchall()
-            target_map = {r[0]: r[1] for r in match_rows}
-
-            if not target_map:
-                return
-
-            offers = conn.execute(
-                sqltext("SELECT id, line_items FROM proactive_offers WHERE line_items IS NOT NULL")
-            ).fetchall()
-
-            fixed = 0
-            for offer_id, raw_items in offers:
-                if not raw_items:
-                    continue
-                items = raw_items if isinstance(raw_items, list) else json.loads(raw_items)
-
-                new_items = []
-                total_sell = Decimal("0")
-                total_cost = Decimal("0")
-                changed = False
-
-                for item in items:
-                    match_id = item.get("match_id")
-                    old_qty = item.get("qty", 0)
-                    target_qty = target_map.get(match_id)
-
-                    new_qty = min(old_qty, target_qty) if target_qty else old_qty
-                    if new_qty != old_qty:
-                        changed = True
-
-                    item["qty"] = new_qty
-                    new_items.append(item)
-
-                    try:
-                        sell_price = float(item.get("sell_price") or item.get("unit_price", 0))
-                        cost_price = float(item.get("unit_price", 0))
-                    except (ValueError, TypeError):
-                        sell_price = 0.0
-                        cost_price = 0.0
-                    total_sell += Decimal(str(sell_price)) * new_qty
-                    total_cost += Decimal(str(cost_price)) * new_qty
-
-                if changed:
-                    conn.execute(
-                        sqltext(
-                            "UPDATE proactive_offers "
-                            "SET line_items = :items, total_sell = :sell, total_cost = :cost "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "items": json.dumps(new_items),
-                            "sell": float(total_sell),
-                            "cost": float(total_cost),
-                            "id": offer_id,
-                        },
-                    )
-                    fixed += 1
-
-            if fixed:
-                conn.commit()
-                logger.info("Fixed proactive offer quantities on {} offers", fixed)
-        except Exception as e:
-            logger.warning("Backfill proactive offer qty failed: {}", e)
-            conn.rollback()
 
 
 def _seed_commodity_schemas() -> None:
@@ -1376,251 +903,6 @@ def _warn_non_canonical_categories(db=None) -> None:
             len(residue),
             top,
         )
-
-
-def _backfill_material_cards() -> None:
-    """Ensure every requirement MPN (primary + substitutes) has a material card.
-
-    Idempotent: resolve_material_card finds existing or creates new.
-    Also links requirements to their primary card if not yet linked.
-
-    Called by: run_startup_migrations
-    Depends on: Requirement model, resolve_material_card, SessionLocal
-    """
-    from .models.sourcing import Requirement
-    from .search_service import resolve_material_card
-
-    db = SessionLocal()
-    try:
-        reqs = (
-            db.query(Requirement)
-            .filter(Requirement.primary_mpn.isnot(None), Requirement.material_card_id.is_(None))
-            .all()
-        )
-        if not reqs:
-            return
-        linked = 0
-        for r in reqs:
-            card = resolve_material_card(r.primary_mpn, db, manufacturer=r.manufacturer or "")
-            if card:
-                r.material_card_id = card.id
-                linked += 1
-            for sub in r.substitutes or []:  # type: ignore[union-attr]  # JSON column is a list at instance level
-                sub_mpn = sub.get("mpn") if isinstance(sub, dict) else sub
-                if sub_mpn:
-                    resolve_material_card(sub_mpn, db)
-        db.commit()
-        if linked:
-            logger.info("Backfilled {} requirement→material_card links", linked)
-    except Exception:
-        logger.exception("Failed backfilling material cards")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def _backfill_ticket_defaults() -> None:
-    """Backfill tickets with null risk_tier/category (report_button source).
-
-    Sets default values so they appear in stats breakdowns.
-    Idempotent: only updates rows where both fields are NULL.
-
-    Called by: run_startup_migrations
-    Depends on: TroubleTicket model, SessionLocal
-    """
-    from .models.trouble_ticket import TroubleTicket
-
-    db = SessionLocal()
-    try:
-        null_tickets = (
-            db.query(TroubleTicket)
-            .filter(
-                TroubleTicket.risk_tier.is_(None),
-                TroubleTicket.category.is_(None),
-            )
-            .all()
-        )
-        if null_tickets:
-            for t in null_tickets:
-                t.risk_tier = "low"
-                t.category = "other"
-            db.commit()
-            logger.info("Backfilled {} tickets with default risk_tier/category", len(null_tickets))
-    except Exception:
-        logger.exception("Failed backfilling null ticket fields")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def _backfill_sweep_cooldown() -> None:
-    """Backfill reclaim_blocked_until for swept rows that are missing it.
-
-    Closes the two-commit crash window introduced in Phase 4: send_company_to_prospecting
-    commits first, then the sweep sets reclaim_blocked_until in a second commit. A crash
-    between them leaves swept rows with NULL cooldown, letting the former owner reclaim
-    immediately via claim (bypassing the 30-day block).
-
-    Idempotent: only touches rows where swept_at IS NOT NULL AND reclaim_blocked_until IS
-    NULL AND status != 'dismissed'. Computes the deadline in Python (swept_at + 30 days)
-    so it works on both PostgreSQL and the SQLite test path.
-
-    Called by: run_startup_migrations
-    Depends on: ProspectAccount model, RECLAIM_COOLDOWN_DAYS constant, SessionLocal
-    """
-    from datetime import timedelta
-
-    from .models.prospect_account import ProspectAccount
-    from .services.prospect_reclamation import RECLAIM_COOLDOWN_DAYS
-
-    db = SessionLocal()
-    try:
-        rows = (
-            db.query(ProspectAccount)
-            .filter(
-                ProspectAccount.swept_at.is_not(None),
-                ProspectAccount.reclaim_blocked_until.is_(None),
-                ProspectAccount.status != "dismissed",
-            )
-            .all()
-        )
-        if not rows:
-            return
-        for pa in rows:
-            pa.reclaim_blocked_until = pa.swept_at + timedelta(days=RECLAIM_COOLDOWN_DAYS)
-        db.commit()
-        logger.info(
-            "Backfilled reclaim_blocked_until on {} swept ProspectAccount(s) missing cooldown",
-            len(rows),
-        )
-    except Exception:
-        logger.exception("Failed backfilling sweep cooldown on ProspectAccounts")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def _backfill_resell_mirrors() -> None:
-    """Rebuild the customer_excess Sighting mirror for live excess lists that lost it.
-
-    Migration 199 swept EVERY customer_excess Sighting (rebuilding line-keyed rows only
-    for lists touched afterwards), so a list that was already open/collecting at deploy
-    time advertises no supply to the matcher and has no in-app rebuild path (deep-review-2
-    finding #19). Idempotent detector: an open/collecting list with ZERO mirror sightings
-    keyed to its line items gets ``excess_mirror.sync_list_mirror`` (itself idempotent —
-    it re-mirrors active lines and retires inactive ones); healthy lists are skipped
-    without writing. Runtime backfill only — no DDL.
-
-    Called by: run_deferred_startup_backfills
-    Depends on: excess models, sourcing.Sighting, services.excess_mirror, SessionLocal
-    """
-    from .constants import ExcessListStatus
-    from .models.excess import ExcessLineItem, ExcessList
-    from .models.sourcing import Sighting
-    from .services import excess_mirror
-
-    db = SessionLocal()
-    try:
-        live = (ExcessListStatus.OPEN.value, ExcessListStatus.COLLECTING.value)
-        lists = db.query(ExcessList).filter(ExcessList.status.in_(live)).all()
-        restored = 0
-        for el in lists:
-            has_mirror = (
-                db.query(Sighting.id)
-                .join(ExcessLineItem, Sighting.excess_line_item_id == ExcessLineItem.id)
-                .filter(
-                    ExcessLineItem.excess_list_id == el.id,
-                    Sighting.source_type == excess_mirror.MIRROR_SOURCE_TYPE,
-                )
-                .first()
-            )
-            if has_mirror is not None:
-                continue
-            result = excess_mirror.sync_list_mirror(db, el)
-            db.commit()
-            if result["mirrored"]:
-                restored += 1
-                logger.info(
-                    "Restored the customer_excess mirror for live ExcessList id={} ({} lines mirrored)",
-                    el.id,
-                    result["mirrored"],
-                )
-        if restored:
-            logger.info("Resell mirror backfill restored {} stranded live list(s)", restored)
-    except Exception:
-        logger.exception("Failed backfilling resell list mirrors")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def _complete_reverted_active_plans() -> None:
-    """Complete ACTIVE buy plans whose every line is already terminal.
-
-    Phase-3 migration 176 reverts every plan parked in the retired ``INBOUND``
-    holding state back to ``ACTIVE``. A plan whose lines were ALL already
-    verified/cancelled (and whose SO is approved) should then actually complete,
-    but generating a correct ``case_report`` needs the real
-    ``check_completion``/``_complete_plan`` Python — not raw SQL in the migration.
-    This runtime sweep closes that gap by feeding each such plan through the
-    canonical completion path.
-
-    Idempotent: ``check_completion`` re-validates and no-ops unless the plan is
-    ACTIVE with all lines terminal and ``so_status == approved``; a plan already
-    completed on a prior boot is no longer ACTIVE, so it is not re-selected. The
-    candidate query pre-filters to keep the sweep O(reverted plans), not O(all
-    ACTIVE plans).
-
-    Called by: run_startup_migrations (after migration 176 lands its data change)
-    Depends on: BuyPlan/BuyPlanLine models, check_completion, SessionLocal
-    """
-    from .constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
-    from .models.buy_plan import BuyPlan, BuyPlanLine
-    from .services.buyplan_workflow import check_completion
-
-    terminal = {BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.CANCELLED.value}
-
-    db = SessionLocal()
-    try:
-        # ACTIVE, SO approved, has at least one line, and no line outside the
-        # terminal set — the exact precondition check_completion acts on.
-        non_terminal_exists = (
-            db.query(BuyPlanLine.id)
-            .filter(
-                BuyPlanLine.buy_plan_id == BuyPlan.id,
-                BuyPlanLine.status.notin_(terminal),
-            )
-            .exists()
-        )
-        has_a_line = db.query(BuyPlanLine.id).filter(BuyPlanLine.buy_plan_id == BuyPlan.id).exists()
-        candidates = (
-            db.query(BuyPlan.id)
-            .filter(
-                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
-                BuyPlan.so_status == SOVerificationStatus.APPROVED.value,
-                has_a_line,
-                ~non_terminal_exists,
-            )
-            .all()
-        )
-        if not candidates:
-            return
-        completed = 0
-        for (plan_id,) in candidates:
-            plan = check_completion(plan_id, db)
-            if plan and plan.status == BuyPlanStatus.COMPLETED.value:
-                completed += 1
-        db.commit()
-        if completed:
-            logger.info(
-                "Startup sweep completed {} reverted-ACTIVE buy plan(s) with all-terminal lines",
-                completed,
-            )
-    except Exception:
-        logger.exception("Failed startup completion sweep for reverted-ACTIVE buy plans")
-        db.rollback()
-    finally:
-        db.close()
 
 
 def seed_api_sources() -> None:

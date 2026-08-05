@@ -739,7 +739,6 @@ class TestCapabilityGating:
         [
             "/v2/partials/offers/1/promote",  # review-queue HTMX promote
             "/v2/partials/offers/1/reject",  # review-queue HTMX reject
-            "/api/offers/1/promote",  # review-queue JSON promote (T4→T5)
             "/api/offers/1/reject",  # review-queue JSON reject
         ],
     )

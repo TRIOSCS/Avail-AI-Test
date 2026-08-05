@@ -1,5 +1,7 @@
-{# shell.html — CRM shell: Customers/Vendors/Activity tab bar + lazy tab content.
-   Receives: user (User), default_tab (str).
+{# shell.html — CRM shell: Customers/Vendors/Activity/Prospecting tab bar + lazy
+   tab content. Prospecting is the W2 CRM lens (spec §4/§5.4): the former nav tab's
+   list partial surfaced through this existing tab mechanism, gated per-user.
+   Receives: user (User), default_tab (str), show_prospecting (bool).
    Called by: crm/views.py crm_shell route.
    Depends on: Alpine.js, HTMX, accent palette (post-PR0), _shell_macros.html.
 #}
@@ -16,6 +18,12 @@
     {{ tab_button('vendors', '/v2/partials/vendors?hx_target=%23crm-tab-content&push_url_base=/v2/crm', 'Vendors', 'load, click' if default_tab == 'vendors' else 'click') }}
     {# Activity Scorecard — per-user leaderboard, visible to ALL users (loads on click). #}
     {{ tab_button('scorecard', '/v2/partials/crm/scorecard', 'Activity', 'load, click' if default_tab == 'scorecard' else 'click') }}
+    {# Prospecting lens (W2, spec §4/§5.4) — the existing prospecting list partial,
+       keeping its owner-vocabulary name. Hidden when the user lacks PROSPECTING
+       module access (the gate its nav item used). #}
+    {% if show_prospecting | default(true) %}
+    {{ tab_button('prospecting', '/v2/partials/prospecting', 'Prospecting', 'load, click' if default_tab == 'prospecting' else 'click') }}
+    {% endif %}
   </div>
 
   {# Tab content — lazy-loaded by HTMX.

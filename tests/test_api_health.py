@@ -1,7 +1,7 @@
 """Tests for API health monitoring — models, service, endpoints.
 
 Covers: ApiUsageLog model, health_monitor service (ping/deep/run),
-credential-based status fix, system alerts endpoint, dashboard endpoint.
+credential-based status fix, dashboard endpoint.
 
 Depends on: conftest.py (db_session)
 """
@@ -573,78 +573,6 @@ def test_scheduler_has_no_health_jobs():
     assert "cleanup_usage_log" not in job_ids
     assert "reset_monthly_usage" not in job_ids
     scheduler.remove_all_jobs()
-
-
-# ── System Alerts Endpoint Tests ─────────────────────────────────────
-
-
-def test_system_alerts_returns_errors(admin_client, db_session):
-    """GET /api/system/alerts returns sources in error/degraded state."""
-    ok_src = ApiSource(
-        name="ok_api",
-        display_name="OK API",
-        category="api",
-        source_type="test",
-        status="live",
-        is_active=True,
-    )
-    bad_src = ApiSource(
-        name="bad_api",
-        display_name="Bad API",
-        category="api",
-        source_type="test",
-        status="error",
-        is_active=True,
-        last_error="401 Unauthorized",
-    )
-    db_session.add_all([ok_src, bad_src])
-    db_session.commit()
-
-    resp = admin_client.get("/api/system/alerts")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["count"] == 1
-    assert data["alerts"][0]["source_name"] == "bad_api"
-    assert "401" in data["alerts"][0]["last_error"]
-
-
-def test_system_alerts_includes_degraded(admin_client, db_session):
-    """Degraded sources also appear in alerts."""
-    src = ApiSource(
-        name="degraded_api",
-        display_name="Degraded API",
-        category="api",
-        source_type="test",
-        status="degraded",
-        is_active=True,
-        last_error="Timeout",
-    )
-    db_session.add(src)
-    db_session.commit()
-
-    resp = admin_client.get("/api/system/alerts")
-    data = resp.json()
-    assert data["count"] == 1
-    assert data["alerts"][0]["status"] == "degraded"
-
-
-def test_system_alerts_empty_when_healthy(admin_client, db_session):
-    """No alerts when all sources are live."""
-    src = ApiSource(
-        name="healthy",
-        display_name="Healthy",
-        category="api",
-        source_type="test",
-        status="live",
-        is_active=True,
-    )
-    db_session.add(src)
-    db_session.commit()
-
-    resp = admin_client.get("/api/system/alerts")
-    data = resp.json()
-    assert data["count"] == 0
-    assert data["alerts"] == []
 
 
 # ── Dashboard Endpoint Tests ─────────────────────────────────────────

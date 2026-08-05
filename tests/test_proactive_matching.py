@@ -700,9 +700,11 @@ def test_run_proactive_scan_commit_failure(db_session):
 
 
 # ── trigger_rematch_on_offer_approval ──────────────────────────────────────
+# (flag-on fixture: the W2 park gates the engine — these tests cover the
+#  comeback/flag-on path; the parked no-op is covered in test_proactive_park.py)
 
 
-def test_trigger_rematch_on_offer_approval_finds_matches_past_watermark(db_session):
+def test_trigger_rematch_on_offer_approval_finds_matches_past_watermark(db_session, proactive_flag_on):
     """Regression for the proactive_matching.py watermark gap: an offer created as
     pending_review (invisible to run_proactive_scan's live-status filter) that is
     approved AFTER the watermark has advanced is still matched via the targeted hook."""
@@ -738,7 +740,7 @@ def test_trigger_rematch_on_offer_approval_finds_matches_past_watermark(db_sessi
     assert matches[0].company_id == data["company"].id
 
 
-def test_trigger_rematch_on_offer_approval_no_material_card_is_noop(db_session):
+def test_trigger_rematch_on_offer_approval_no_material_card_is_noop(db_session, proactive_flag_on):
     data = _setup_scenario(db_session)
     offer = _make_offer(db_session, data, material_card_id=None)
 
@@ -747,7 +749,7 @@ def test_trigger_rematch_on_offer_approval_no_material_card_is_noop(db_session):
     assert match_count == 0
 
 
-def test_trigger_rematch_on_offer_approval_handles_commit_failure(db_session):
+def test_trigger_rematch_on_offer_approval_handles_commit_failure(db_session, proactive_flag_on):
     data = _setup_scenario(db_session)
     offer = _make_offer(db_session, data)
 

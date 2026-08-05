@@ -841,19 +841,7 @@ class TestHealthReadyEndpoint:
 
                 with (
                     patch("app.startup.engine"),
-                    patch("app.startup._backfill_fts"),
-                    patch("app.startup._seed_site_contacts"),
-                    patch("app.startup._backfill_company_counts"),
                     patch("app.startup._maybe_analyze_hot_tables"),
-                    patch("app.startup._backfill_normalized_mpn"),
-                    patch("app.startup._backfill_sighting_offer_normalized_mpn"),
-                    patch("app.startup._backfill_sighting_vendor_normalized"),
-                    patch("app.startup._backfill_offer_vendor_normalized"),
-                    patch("app.startup._backfill_proactive_offer_qty"),
-                    patch("app.startup._backfill_ticket_defaults"),
-                    patch("app.startup._backfill_material_cards"),
-                    patch("app.startup._backfill_sweep_cooldown"),
-                    patch("app.startup._complete_reverted_active_plans"),
                     patch("app.startup._warn_non_canonical_categories"),
                 ):
                     run_deferred_startup_backfills()  # simulates the background task finishing
@@ -877,7 +865,7 @@ class TestHealthReadyEndpoint:
 
                 with (
                     patch("app.startup.engine"),
-                    patch("app.startup._backfill_fts", side_effect=RuntimeError("boom")),
+                    patch("app.startup._maybe_analyze_hot_tables", side_effect=RuntimeError("boom")),
                 ):
                     with pytest.raises(RuntimeError, match="boom"):
                         run_deferred_startup_backfills()

@@ -510,17 +510,6 @@ Focus on:
 Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
 Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
 
-PIPELINE_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
-Given a summary of the active requisition pipeline, generate 3-5 actionable insights.
-
-Focus on:
-- Stalling deals (requisitions with no recent activity)
-- Coverage gaps (MPNs with few or no offers)
-- Win/loss trends (status distribution over time)
-- Pipeline health (bottlenecks, overloaded buyers, deadlines at risk)
-
-Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
-
 COMPANY_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
 Given knowledge entries about a specific customer company, generate 3-5 actionable insights.
 
@@ -599,77 +588,6 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
                 )
             )
         sections.append("## Recent offers\n" + "\n".join(lines))
-
-    return "\n\n".join(sections)
-
-
-def build_pipeline_context(db: Session) -> str:
-    """Gather pipeline-level context for AI analysis."""
-    from app.models.sourcing import Requisition
-
-    now = datetime.now(UTC)
-    sections = []
-
-    # 1. Status breakdown
-    all_reqs = db.query(Requisition).order_by(Requisition.created_at.desc()).limit(200).all()
-    if not all_reqs:
-        return ""
-
-    status_counts: dict[str, int] = {}
-    for r in all_reqs:
-        status_counts[r.status or "unknown"] = status_counts.get(r.status or "unknown", 0) + 1
-    lines = [f"- {s}: {c}" for s, c in sorted(status_counts.items(), key=lambda x: -x[1])]
-    sections.append("## Pipeline status breakdown (last 200 reqs)\n" + "\n".join(lines))
-
-    # 2. Active reqs summary
-    active = [
-        r
-        for r in all_reqs
-        if r.status
-        in (
-            RequisitionStatus.OPEN,
-            RequisitionStatus.RFQS_SENT,
-            RequisitionStatus.QUOTED,
-        )
-    ]
-    if active:
-        lines = []
-        for r in active[:30]:
-            age_days = (
-                (now - r.created_at.replace(tzinfo=UTC) if r.created_at.tzinfo is None else now - r.created_at).days
-                if r.created_at
-                else 0
-            )
-            lines.append(
-                "- Req #{} '{}' — {} days old, deadline: {}".format(
-                    r.id,
-                    r.name,
-                    age_days,
-                    r.deadline or "none",
-                )
-            )
-        sections.append("## Active requisitions\n" + "\n".join(lines))
-
-    # 3. Stale deals (active but no update in 14+ days)
-    stale_threshold = now - timedelta(days=14)
-    stale = []
-    for r in active:
-        if not r.updated_at:
-            continue
-        ts = r.updated_at if r.updated_at.tzinfo else r.updated_at.replace(tzinfo=UTC)
-        if ts < stale_threshold:
-            stale.append(r)
-    if stale:
-        lines = []
-        for r in stale[:20]:
-            lines.append(
-                "- Req #{} '{}' — last updated {}".format(
-                    r.id,
-                    r.name,
-                    r.updated_at.strftime("%Y-%m-%d") if r.updated_at else "never",
-                )
-            )
-        sections.append("## Stale deals (no update in 14+ days)\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
 
@@ -785,33 +703,6 @@ async def generate_vendor_insights(
     )
 
 
-async def generate_pipeline_insights(db: Session, *, interactive: bool = False) -> list[KnowledgeEntry]:
-    """Generate AI insights for the overall pipeline health.
-
-    ``interactive=True`` (the HTMX refresh endpoint) tightens the Claude call
-    budget — see ``_regenerate_insights``. Defaults to False (background job).
-    """
-    context = build_pipeline_context(db)
-    return await _regenerate_insights(
-        db,
-        context=context,
-        # Pipeline insights are stored under the sentinel mpn='__pipeline__'.
-        delete_filters=(
-            KnowledgeEntry.mpn == "__pipeline__",
-            KnowledgeEntry.entry_type == "ai_insight",
-        ),
-        prompt=f"Analyze this pipeline summary and generate insights:\n\n{context}",
-        system=PIPELINE_INSIGHT_PROMPT,
-        entry_kwargs={"mpn": "__pipeline__"},
-        no_context_log="No context for pipeline — skipping insight generation",
-        unavailable_log="Claude not configured — skipping pipeline insight generation",
-        failed_log="Claude AI failed for pipeline insight generation: {}",
-        no_results_log="AI insight generation returned no results for pipeline",
-        generated_log="Generated {} pipeline insights",
-        interactive=interactive,
-    )
-
-
 async def generate_company_insights(db: Session, company_id: int, *, interactive: bool = False) -> list[KnowledgeEntry]:
     """Generate AI insights for a company using the context engine.
 
@@ -850,19 +741,6 @@ def get_cached_vendor_insights(db: Session, vendor_card_id: int) -> list[Knowled
         db.query(KnowledgeEntry)
         .filter(
             KnowledgeEntry.vendor_card_id == vendor_card_id,
-            KnowledgeEntry.entry_type == "ai_insight",
-        )
-        .order_by(KnowledgeEntry.created_at.desc())
-        .all()
-    )
-
-
-def get_cached_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
-    """Return pre-computed AI insights for the pipeline."""
-    return (
-        db.query(KnowledgeEntry)
-        .filter(
-            KnowledgeEntry.mpn == "__pipeline__",
             KnowledgeEntry.entry_type == "ai_insight",
         )
         .order_by(KnowledgeEntry.created_at.desc())

@@ -1,9 +1,10 @@
 """routers/htmx/email_views.py — Email thread viewing + reply partials (HTMX).
 
-Sprint 7 email integration: thread viewer, AI summary, reply send, and the email
-intelligence dashboard partial. Extracted verbatim from htmx_views.py (same
-`/v2/partials/emails/...` + `/v2/partials/email-intelligence` paths, same
-`htmx-views` tag).
+Sprint 7 email integration: thread viewer, AI summary, and reply send. Extracted
+verbatim from htmx_views.py (same `/v2/partials/emails/...` paths, same
+`htmx-views` tag). The write-only email-intelligence dashboard partial was
+deleted in the Wave 2 simplification sweep (spec §5.4 — linked nowhere; the
+Data Capture Initiative rebuilds proper surfaces post-launch).
 
 Called by: app/routers/htmx_views.py (aggregated into the single exported router).
 Depends on: app.models.crm (SiteContact), app.email_service, app.utils.graph_client
@@ -146,24 +147,4 @@ async def email_thread_summary(
     return template_response(
         "htmx/partials/emails/thread_summary.html",
         {"request": request, "summary": summary, "error": error},
-    )
-
-
-@router.get("/v2/partials/email-intelligence", response_class=HTMLResponse)
-async def email_intelligence_partial(
-    request: Request,
-    classification: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return email intelligence dashboard as HTML partial."""
-    from ...services.email_intelligence_service import get_recent_intelligence
-    from ...services.response_analytics import get_email_intelligence_dashboard
-
-    items = get_recent_intelligence(db, user.id, limit=50, classification=classification or None)
-    dashboard = get_email_intelligence_dashboard(db, user.id, days=7)
-
-    return template_response(
-        "htmx/partials/emails/intelligence_dashboard.html",
-        {"request": request, "items": items, "dashboard": dashboard, "classification": classification},
     )

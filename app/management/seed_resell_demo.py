@@ -19,14 +19,14 @@ Creates (all find-or-create by a stable key — safe to re-run; never duplicates
           broker, buyer-attributed, with real rollups/line statuses).
 
 Offers land via the real ``excess_service.submit_offer`` (so rollups + the unmatched
-queue behave exactly as in production); per-line lists are mirrored via
-``excess_mirror.sync_list_mirror`` so the Sighting live-mirror is exercised too.
+queue behave exactly as in production). The retired resell→Sighting mirror is never
+written (SIMPLIFICATION_SPEC §5.3); reset still tears down any pre-existing mirror rows.
 
 Idempotency model: a fixed title per list + a fixed offerer/owner email. A re-run
 finds the existing rows and (for offers) skips creation when the list already has
 offers — so re-seeding does not stack duplicate offers. A re-run also re-arms the
 collecting demo when the nightly expiry has decayed it (expired / lapsed close_at):
-status back to ``collecting``, ``close_at`` pushed forward, mirror re-synced.
+status back to ``collecting``, ``close_at`` pushed forward.
 
 Called by: an operator (manually, post-deploy). NOT cron — it's a demo fixture.
 Depends on: app.database.SessionLocal, models, excess_service, excess_mirror.
@@ -215,7 +215,6 @@ def _refresh_demo_window(db: Session, el: ExcessList, *, close_in_days: int) -> 
     el.close_at = now + timedelta(days=close_in_days)  # type: ignore[assignment]  # legacy Column-model ORM noise
     el.updated_at = now  # type: ignore[assignment]  # legacy Column-model ORM noise
     db.flush()
-    excess_mirror.sync_list_mirror(db, el)
     db.commit()
     logger.info("seed-resell: refreshed decayed demo window on {!r} (collecting, +{}d)", el.title, close_in_days)
 
@@ -236,9 +235,6 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
         for mpn, mfr in _BULK_MPNS:
             _add_line(db, el, mpn=mpn, mfr=mfr, qty=50 + (hash(mpn) % 950))
         el.total_line_items = len(_BULK_MPNS)  # type: ignore[assignment]  # legacy Column-model ORM noise
-        db.commit()
-        # Mirror so the Sighting live-mirror is exercised (and matchers see supply).
-        excess_mirror.sync_list_mirror(db, el)
         db.commit()
     else:
         # The nightly expiry decays this demo after close_in_days nights; a re-seed
@@ -316,8 +312,6 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
         _add_line(db, el, mpn="DELL-412-AAVE", mfr="Dell", qty=24, condition="Refurbished")
         el.total_line_items = 1  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
-        excess_mirror.sync_list_mirror(db, el)
-        db.commit()
 
     if _list_has_offers(db, el):
         return
@@ -378,8 +372,6 @@ def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> 
             _add_line(db, el, mpn=mpn, mfr=mfr, qty=200)
         el.total_line_items = 6  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
-        excess_mirror.sync_list_mirror(db, el)
-        db.commit()
 
     if _list_has_offers(db, el):
         logger.info("seed-resell: ensured awarded list {!r}", el.title)
@@ -405,7 +397,6 @@ def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> 
             ln.status = ExcessLineItemStatus.AVAILABLE  # type: ignore[assignment]  # legacy Column-model ORM noise
             ln.best_offer_id = None  # hand-stamped legacy rollup, no offer behind it
         db.flush()
-        excess_mirror.sync_list_mirror(db, el)
         db.commit()
         logger.info("seed-resell: healed legacy hand-stamped awarded demo {!r} (reset to open, re-deriving)", el.title)
 

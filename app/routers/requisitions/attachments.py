@@ -65,52 +65,6 @@ async def upload_requisition_attachment(
     return attachment_service.serialize(att)
 
 
-@router.post("/api/requisitions/{req_id}/attachments/onedrive")
-async def attach_requisition_from_onedrive(
-    req_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Attach an existing OneDrive file to a requisition by item ID."""
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    body = await request.json()
-    item_id = body.get("item_id")
-    if not item_id:
-        raise HTTPException(400, "item_id is required")
-    from ...scheduler import get_valid_token
-
-    token = await get_valid_token(user, db)
-    if not token:
-        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-    from ...utils.graph_client import GraphClient
-
-    gc = GraphClient(token)
-    item = await gc.get_json(f"/me/drive/items/{item_id}")
-    if "error" in item:
-        error_code = item.get("error", {}).get("code", "") if isinstance(item.get("error"), dict) else ""
-        if error_code in ("InvalidAuthenticationToken", "TokenExpired"):
-            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-        if error_code in ("accessDenied", "AccessDenied"):
-            raise HTTPException(403, "Access denied to OneDrive item")
-        raise HTTPException(404, "OneDrive item not found")
-    att = RequisitionAttachment(
-        requisition_id=req_id,
-        file_name=item.get("name", "file"),
-        library_item_id=item_id,
-        library_web_url=item.get("webUrl"),
-        content_type=item.get("file", {}).get("mimeType"),
-        size_bytes=item.get("size"),
-        uploaded_by_id=user.id,
-    )
-    db.add(att)
-    db.commit()
-    db.refresh(att)
-    return attachment_service.serialize(att)
-
-
 @router.delete("/api/requisition-attachments/{att_id}")
 async def delete_requisition_attachment(
     att_id: int,

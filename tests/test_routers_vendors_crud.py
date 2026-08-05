@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import User, VendorCard, VendorReview
+from app.models import VendorCard, VendorReview
 from app.utils.vendor_helpers import (
     _background_enrich_vendor,
     card_to_dict,
@@ -947,29 +947,6 @@ def test_update_vendor_display_name(client, db_session, test_vendor_card):
     assert data["display_name"] == "Arrow Electronics Inc."
 
 
-def test_toggle_blacklist(client, db_session, test_vendor_card):
-    """POST /api/vendors/{id}/blacklist flips is_blacklisted."""
-    assert test_vendor_card.is_blacklisted is False or test_vendor_card.is_blacklisted is None
-    resp = client.post(
-        f"/api/vendors/{test_vendor_card.id}/blacklist",
-        json={},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_blacklisted"] is True
-
-
-def test_toggle_blacklist_explicit(client, db_session, test_vendor_card):
-    """POST /api/vendors/{id}/blacklist with explicit blacklisted=true."""
-    resp = client.post(
-        f"/api/vendors/{test_vendor_card.id}/blacklist",
-        json={"blacklisted": True},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_blacklisted"] is True
-
-
 def test_delete_vendor_admin(admin_client, db_session, admin_user):
     """DELETE /api/vendors/{id} with admin client succeeds."""
     vc = VendorCard(
@@ -1074,27 +1051,6 @@ def test_update_vendor_blacklist_via_update(client, db_session, test_vendor_card
     assert resp.status_code == 200
     data = resp.json()
     assert data["is_blacklisted"] is True
-
-
-def test_toggle_blacklist_not_found(client):
-    """POST /api/vendors/99999/blacklist returns 404."""
-    resp = client.post("/api/vendors/99999/blacklist", json={})
-    assert resp.status_code == 404
-
-
-def test_toggle_blacklist_with_explicit_false(client, db_session, test_vendor_card):
-    """POST /api/vendors/{id}/blacklist with blacklisted=false sets it to false."""
-    # First set to true
-    test_vendor_card.is_blacklisted = True
-    db_session.commit()
-
-    resp = client.post(
-        f"/api/vendors/{test_vendor_card.id}/blacklist",
-        json={"blacklisted": False},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["is_blacklisted"] is False
 
 
 def test_delete_vendor_not_found(admin_client):
@@ -1297,69 +1253,6 @@ def test_list_vendors_fts_mock():
 # ── Reviews ──────────────────────────────────────────────────────────────
 
 
-def test_add_review(client, db_session, test_vendor_card):
-    """POST /api/vendors/{id}/reviews creates a review."""
-    resp = client.post(
-        f"/api/vendors/{test_vendor_card.id}/reviews",
-        json={"rating": 4, "comment": "Good"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["review_count"] >= 1
-    assert data["avg_rating"] is not None
-
-
-def test_add_review_vendor_not_found(client):
-    """POST /api/vendors/99999/reviews returns 404."""
-    resp = client.post(
-        "/api/vendors/99999/reviews",
-        json={"rating": 4, "comment": "Good"},
-    )
-    assert resp.status_code == 404
-
-
-def test_delete_own_review(client, db_session, test_vendor_card, test_user):
-    """DELETE /api/vendors/{card_id}/reviews/{review_id} for own review succeeds."""
-    review = VendorReview(
-        vendor_card_id=test_vendor_card.id,
-        user_id=test_user.id,
-        rating=5,
-        comment="Great",
-    )
-    db_session.add(review)
-    db_session.commit()
-    rid = review.id
-
-    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/reviews/{rid}")
-    assert resp.status_code == 200
-
-
-def test_delete_others_review_forbidden(client, db_session, test_vendor_card):
-    """DELETE another user's review returns 404 (filtered by user_id)."""
-    other_user = User(
-        email="other@trioscs.com",
-        name="Other User",
-        role="buyer",
-        azure_id="test-azure-id-other",
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(other_user)
-    db_session.commit()
-
-    review = VendorReview(
-        vendor_card_id=test_vendor_card.id,
-        user_id=other_user.id,
-        rating=2,
-        comment="Bad",
-    )
-    db_session.add(review)
-    db_session.commit()
-    rid = review.id
-
-    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/reviews/{rid}")
-    assert resp.status_code == 404
-
-
 def test_avg_rating_calculation(db_session, test_vendor_card, test_user):
     """Adding 2 reviews (3 and 5) yields avg_rating=4.0 via card_to_dict."""
     r1 = VendorReview(
@@ -1387,60 +1280,6 @@ def test_avg_rating_calculation(db_session, test_vendor_card, test_user):
     result = card_to_dict(card, mock_db)
     assert result["avg_rating"] == 4.0
     assert result["review_count"] == 2
-
-
-def test_delete_review_card_gone(client, db_session, test_user):
-    """DELETE review when vendor card was deleted in parallel returns ok."""
-    vc = VendorCard(
-        normalized_name="ephemeral vendor",
-        display_name="Ephemeral Vendor",
-        sighting_count=0,
-    )
-    db_session.add(vc)
-    db_session.commit()
-
-    review = VendorReview(
-        vendor_card_id=vc.id,
-        user_id=test_user.id,
-        rating=3,
-        comment="Temporary",
-    )
-    db_session.add(review)
-    db_session.commit()
-
-    resp = client.delete(f"/api/vendors/{vc.id}/reviews/{review.id}")
-    assert resp.status_code == 200
-
-
-def test_delete_review_card_deleted_after_review_delete(db_session, test_user):
-    """delete_review returns ok:True when card is gone after review deletion."""
-    mock_db = MagicMock()
-    mock_review = MagicMock()
-    mock_review.id = 1
-    mock_review.vendor_card_id = 99
-    mock_review.user_id = test_user.id
-
-    mock_db.query.return_value.filter_by.return_value.first.return_value = mock_review
-    mock_db.get.return_value = None
-
-    vc = VendorCard(
-        normalized_name="ephemeral vendor 2",
-        display_name="Ephemeral Vendor 2",
-        sighting_count=0,
-    )
-    db_session.add(vc)
-    db_session.commit()
-    card_id = vc.id
-
-    review = VendorReview(
-        vendor_card_id=card_id,
-        user_id=test_user.id,
-        rating=3,
-        comment="Temp",
-    )
-    db_session.add(review)
-    db_session.commit()
-    review_id = review.id
 
 
 # ── Check duplicate ──────────────────────────────────────────────────────
@@ -1739,35 +1578,6 @@ class TestVendorTierFilterBugFix:
         names = [v["display_name"] for v in vendors]
         assert "All Vendor1" in names
         assert "All Vendor2" in names
-
-
-class TestVendorScoreConsistencyBugFix:
-    """TT-20260306-014: Detail and engagement endpoints must return same score."""
-
-    def test_detail_and_engagement_scores_match(self, client, db_session, test_vendor_card):
-        """GET /api/vendors/{id} vendor_score == GET /api/vendors/{id}/engagement
-        vendor_score."""
-        test_vendor_card.vendor_score = 65.0
-        test_vendor_card.advancement_score = 65.0
-        test_vendor_card.is_new_vendor = False
-        db_session.commit()
-
-        detail_resp = client.get(f"/api/vendors/{test_vendor_card.id}")
-        engagement_resp = client.get(f"/api/vendors/{test_vendor_card.id}/engagement")
-        assert detail_resp.status_code == 200
-        assert engagement_resp.status_code == 200
-
-        detail_score = detail_resp.json()["vendor_score"]
-        engagement_score = engagement_resp.json()["vendor_score"]
-        assert detail_score == engagement_score, (
-            f"Detail shows vendor_score={detail_score} but engagement shows {engagement_score}"
-        )
-
-        detail_is_new = detail_resp.json()["is_new_vendor"]
-        engagement_is_new = engagement_resp.json()["is_new_vendor"]
-        assert detail_is_new == engagement_is_new, (
-            f"Detail shows is_new_vendor={detail_is_new} but engagement shows {engagement_is_new}"
-        )
 
 
 class TestVendorDomainDedupBugFix:

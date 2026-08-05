@@ -4,13 +4,14 @@
 Covers:
   - _change_summary.html: the audit-log-since-submission rendered "was X → now Y"
     in the approval block, with the empty state;
-  - handoff=proceed → the existing approve path + a change-summary in-app
-    notification to the submitter (skipped when nothing changed);
+  - handoff=proceed → the existing approve path;
   - handoff=send_back → the existing reject→draft transition; a blank manager note
     auto-fills the default (the engine requires a non-blank comment); the manager's
-    edits persist; the note lands as a decision-tagged NOTE row + fixer notification;
+    edits persist; the note lands as a decision-tagged NOTE row;
   - PO send-back (verify-po reject) and prepayment reject notes-to-fixer: decision-
-    tagged NOTE rows on the line / prepayment + in-app notification to the fixer.
+    tagged NOTE rows on the line / prepayment.
+  (The write-only in-app Notification writes these flows used to make were deleted
+  in W2.9/§5.5 — email via run_notify_bg is the delivery channel.)
 
 Called by: pytest
 Depends on: conftest (db_session, test_user), tests.test_approvals_hub_tabs builders,
@@ -29,7 +30,6 @@ from app.constants import ActivityType, BuyPlanLineStatus, BuyPlanStatus, Prepay
 from app.database import get_db
 from app.dependencies import require_buyplan_approver, require_buyplan_po_approver, require_user
 from app.models import ActivityLog, User
-from app.models.notification import Notification
 from app.services.field_audit import FieldEdit, log_field_edits
 from tests.test_approvals_hub_tabs import (
     _line,
@@ -139,7 +139,7 @@ def test_workspace_block_offers_both_handoffs(hub_client, db_session, test_user)
 # ── handoff=proceed ──────────────────────────────────────────────────────
 
 
-def test_proceed_approves_and_notifies_submitter_with_summary(hub_client, db_session, test_user):
+def test_proceed_approves(hub_client, db_session, test_user):
     _req, _rq, bp = _pending_plan(db_session, test_user, with_edit=True)
 
     with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
@@ -150,23 +150,6 @@ def test_proceed_approves_and_notifies_submitter_with_summary(hub_client, db_ses
     assert r.status_code == 200
     db_session.expire_all()
     assert bp.status == BuyPlanStatus.ACTIVE.value
-    notif = db_session.query(Notification).filter(Notification.event_type == "buy_plan_changes").one()
-    assert notif.user_id == test_user.id  # the submitter (fixer) gets the summary
-    assert "unit_sell: was 2.0 → now 3.5" in notif.body
-
-
-def test_proceed_with_no_changes_skips_summary_notification(hub_client, db_session, test_user):
-    _req, _rq, bp = _pending_plan(db_session, test_user, with_edit=False)
-
-    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
-        r = hub_client.post(
-            f"/v2/partials/buy-plans/{bp.id}/approve",
-            data={"handoff": "proceed", "origin": "approvals_workspace"},
-        )
-    assert r.status_code == 200
-    db_session.expire_all()
-    assert bp.status == BuyPlanStatus.ACTIVE.value
-    assert db_session.query(Notification).filter(Notification.event_type == "buy_plan_changes").count() == 0
 
 
 # ── handoff=send_back ────────────────────────────────────────────────────
@@ -187,8 +170,6 @@ def test_send_back_blank_note_autofills_and_returns_draft(hub_client, db_session
     (note,) = _notes(db_session)
     assert note.details == {"decision": "sent_back"}
     assert note.buy_plan_id == bp.id
-    notif = db_session.query(Notification).filter(Notification.event_type == "buy_plan_sent_back").one()
-    assert notif.user_id == test_user.id
 
 
 def test_send_back_manager_note_lands_on_thread(hub_client, db_session, test_user):
@@ -241,14 +222,12 @@ def test_plain_reject_note_tagged_rejected(hub_client, db_session, test_user):
     (note,) = _notes(db_session)
     assert note.details == {"decision": "rejected"}
     assert note.notes == "margin too thin"
-    notif = db_session.query(Notification).filter(Notification.event_type == "buy_plan_rejected").one()
-    assert "margin too thin" in notif.body
 
 
 # ── PO send-back note-to-fixer ───────────────────────────────────────────
 
 
-def test_po_send_back_note_and_buyer_notification(hub_client, db_session, test_user):
+def test_po_send_back_note_lands_on_line_thread(hub_client, db_session, test_user):
     from datetime import UTC, datetime
 
     req, q, rq = _req_quote(db_session, test_user)
@@ -276,11 +255,9 @@ def test_po_send_back_note_and_buyer_notification(hub_client, db_session, test_u
     assert note.buy_plan_line_id == line.id
     assert note.details == {"decision": "sent_back"}
     assert note.notes == "wrong ship date"
-    notif = db_session.query(Notification).filter(Notification.event_type == "po_sent_back").one()
-    assert notif.user_id == line.buyer_id
 
 
-def test_po_send_back_without_note_still_notifies_buyer(hub_client, db_session, test_user):
+def test_po_send_back_without_note_still_succeeds(hub_client, db_session, test_user):
     from datetime import UTC, datetime
 
     req, q, rq = _req_quote(db_session, test_user)
@@ -303,13 +280,14 @@ def test_po_send_back_without_note_still_notifies_buyer(hub_client, db_session, 
         )
     assert r.status_code == 200
     assert _notes(db_session) == []  # no note text → no thread row (note optional on send-back)
-    assert db_session.query(Notification).filter(Notification.event_type == "po_sent_back").count() == 1
+    db_session.expire_all()
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value  # the send-back itself still landed
 
 
 # ── Prepayment reject note-to-fixer ──────────────────────────────────────
 
 
-def test_prepay_reject_note_and_requester_notification(hub_client, db_session, test_user):
+def test_prepay_reject_note_lands_on_thread(hub_client, db_session, test_user):
     from tests.test_prepayment_workspace import _prepay_on_line as build
 
     _bp, _line_, pp, ar = build(db_session, test_user)
@@ -326,6 +304,3 @@ def test_prepay_reject_note_and_requester_notification(hub_client, db_session, t
     assert note.prepayment_id == pp.id
     assert note.details == {"decision": "rejected"}
     assert note.notes == "terms changed"
-    notif = db_session.query(Notification).filter(Notification.event_type == "prepay_rejected").one()
-    assert notif.user_id == pp.created_by_id
-    assert "terms changed" in notif.body

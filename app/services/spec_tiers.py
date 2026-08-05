@@ -20,8 +20,7 @@ Called by: app/services/spec_write_service.record_spec (spec conflict resolution
       app/services/mpn_decoder/writer.py (decode category + maker writes) +
       app/services/fru_crosswalk_enrich.py (decode category writes),
       app/services/source_ingest/ingest.py (TRIO part-master ingest: category at
-      trio_source/trio_source_ai; brand/manufacturer at trio_source),
-      app/management/backfill_dual_brand.py (B1-B3 dual-brand backfill), the
+      trio_source/trio_source_ai; brand/manufacturer at trio_source), the
       enrichment category writers (enrichment.py, authoritative_enrichment_service.py —
       whose apply_* writers route BOTH category and manufacturer through the ladder at
       {connector}_api/90, oem_official/80 and web_search/70 —
@@ -76,7 +75,8 @@ SOURCE_TIER: dict[str, int] = {
     "manual": 100,
     "cpu_pollution_fix": 96,  # deterministic re-classification of the polluted `cpu` catch-all:
     # beats the trio_source 'cpu' DEFAULT (95, an un-coded SFDC dump), below manual (100).
-    # Only ever written by app/management/fix_cpu_pollution.py on category='cpu' cards.
+    # Written by the completed fix_cpu_pollution one-shot (deleted in W2.9 after it ran;
+    # existing rows keep this provenance, so the rank entry stays).
     "trio_source": 95,
     "digikey_api": 90,
     "mouser_api": 90,

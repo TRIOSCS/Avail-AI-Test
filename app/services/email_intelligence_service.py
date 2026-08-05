@@ -276,39 +276,6 @@ async def process_email_intelligence(
         return None
 
 
-def get_recent_intelligence(
-    db: Session, user_id: int, limit: int = 50, classification: str | None = None
-) -> list[dict]:
-    """Fetch recent email intelligence records for dashboard display."""
-    from app.models import EmailIntelligence
-
-    query = db.query(EmailIntelligence).filter(EmailIntelligence.user_id == user_id)
-    if classification:
-        query = query.filter(EmailIntelligence.classification == classification)
-
-    records = query.order_by(EmailIntelligence.created_at.desc()).limit(limit).all()
-
-    return [
-        {
-            "id": r.id,
-            "message_id": r.message_id,
-            "sender_email": r.sender_email,
-            "sender_domain": r.sender_domain,
-            "classification": r.classification,
-            "confidence": r.confidence,
-            "has_pricing": r.has_pricing,
-            "parts_detected": r.parts_detected or [],
-            "brands_detected": r.brands_detected or [],
-            "subject": r.subject,
-            "received_at": r.received_at.isoformat() if r.received_at else None,
-            "auto_applied": r.auto_applied,
-            "needs_review": r.needs_review,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in records
-    ]
-
-
 # ═══════════════════════════════════════════════════════════════════════
 #  Phase 4: AI Brand/Commodity Detection + Thread Summarization
 # ═══════════════════════════════════════════════════════════════════════

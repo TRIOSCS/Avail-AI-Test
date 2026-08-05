@@ -58,11 +58,66 @@ class TestMobileNavTemplate:
 
         Anchored on the exact ``{% if id in (...) %}`` membership tuple so this
         verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
-        (W1.8: spans are static OOB targets for the single nav-badge poller now,
-        so the block is an ``if``, and 'proactive' joined the tuple.)
+        (W1.8: spans are static OOB targets for the single nav-badge poller.
+        W2 park: 'proactive' left the tuple with its nav item — spec §4/§8.)
         """
         src = _TEMPLATE.read_text()
-        assert "{% if id in ('proactive', 'requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
+        assert "{% if id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in src
+
+
+class TestFiveTabsPlusGear:
+    """W2 nav diet (spec §4/§10): exactly 5 tabs + the Settings gear.
+
+    Renders the real template with an all-access context (``access`` absent →
+    default-show) so this is the §10 literal-count acceptance, not a source grep.
+    """
+
+    _REMOVED = ("sightings", "materials", "search", "proactive", "prospecting")
+
+    def _render(self) -> str:
+        from app.template_env import templates
+
+        return templates.get_template("htmx/partials/shared/mobile_nav.html").render(
+            current_view="requisitions",
+            user_name="Admin",
+            user_email="admin@example.com",
+        )
+
+    def test_renders_exactly_five_nav_items(self):
+        html = self._render()
+        # One per nav_items <a>: the tab click handler. The gear-menu Settings link
+        # uses a different handler ("moreOpen = false; activeNav = ...") so it does
+        # not match this prefix.
+        assert html.count("@click=\"activeNav = '") == 5
+
+    def test_the_five_are_the_spec_set(self):
+        src = _TEMPLATE.read_text()
+        for nav_id in ("requisitions", "buy-plans", "resell", "crm", "my-day"):
+            assert f"('{nav_id}'," in src, f"{nav_id} tab missing from nav_items"
+
+    def test_removed_tabs_left_nav_items(self):
+        src = _TEMPLATE.read_text()
+        for nav_id in self._REMOVED:
+            assert f"('{nav_id}'," not in src, f"{nav_id} must stay out of nav_items (W2 §4)"
+
+    def test_gear_button_present(self):
+        """Settings is reachable only via the gear (spec §4): gear-labeled trigger + the
+        Settings link inside its menu."""
+        html = self._render()
+        assert 'aria-label="Settings"' in html
+        assert 'href="/v2/settings"' in html
+
+    def test_removed_urls_still_mapped_to_no_tab(self):
+        """UrlToNav keeps the removed pages' URLs so a routable-but-unlinked visit
+        (interim state until the W4 folds) highlights no tab instead of a stale one."""
+        src = _TEMPLATE.read_text()
+        for url, nav_id in (
+            ("/v2/sightings", "sightings"),
+            ("/v2/materials", "materials"),
+            ("/v2/search", "search"),
+            ("/v2/prospecting", "prospecting"),
+        ):
+            assert f"'{url}':'{nav_id}'" in src
 
 
 class TestNavIdAlias:

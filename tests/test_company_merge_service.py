@@ -9,7 +9,7 @@ import pytest
 from app.models import Company, CustomerSite, User
 from app.models.sourcing import Requisition, Sighting
 from app.services.company_merge_service import delete_companies, merge_companies
-from app.services.excess_mirror import _virtual_req_name, publish_list
+from app.services.excess_mirror import _virtual_req_name
 from app.services.excess_service import create_excess_list, import_line_items
 
 
@@ -172,9 +172,13 @@ def test_merge_reassign_failure_aborts_and_preserves_remove(db_session):
 
 
 def test_delete_companies_tears_down_excess_mirror(db_session):
-    """Deleting a company whose excess list was published/mirrored must DELETE its
+    """Deleting a company whose excess list carries PRE-EXISTING mirror rows (written
+    before the dual-write was retired, SIMPLIFICATION_SPEC §5.3) must DELETE its
     customer_excess Sightings AND the virtual scratch Requisition/Requirement — not
     leave them advertising live supply with a NULLed company (P2 strand fix)."""
+    from app.models.excess import ExcessLineItem
+    from app.models.sourcing import Requirement
+
     owner = User(email="del-owner@trioscs.com", name="Del Owner", role="trader", azure_id="del-owner-1")
     db_session.add(owner)
     keep, remove = _make_pair(db_session, {"name": "Strand Corp"}, {"name": "Strand Corp Dup"})
@@ -182,8 +186,29 @@ def test_delete_companies_tears_down_excess_mirror(db_session):
 
     el = create_excess_list(db_session, title="Excess", company_id=keep.id, owner_id=owner.id)
     import_line_items(db_session, el.id, [{"part_number": "LM358N", "quantity": "100"}])
-    publish_list(db_session, el.id, owner)
     virtual_name = _virtual_req_name(el)
+
+    # Seed the retired mirror's rows directly — the shape the deleted write path left in
+    # production DBs: scratch req + requirement + one customer_excess Sighting per line.
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
+    scratch = Requisition(name=virtual_name, status="open", is_scratch=True, created_by=owner.id)
+    db_session.add(scratch)
+    db_session.flush()
+    requirement = Requirement(requisition_id=scratch.id, sourcing_status="open")
+    db_session.add(requirement)
+    db_session.flush()
+    db_session.add(
+        Sighting(
+            requirement_id=requirement.id,
+            vendor_name="Customer Excess",
+            mpn_matched="LM358N",
+            source_type="customer_excess",
+            source_company_id=keep.id,
+            excess_line_item_id=line.id,
+            qty_available=100,
+        )
+    )
+    db_session.commit()
 
     def _mirror_rows():
         return (

@@ -6,7 +6,7 @@ All routes live under /v2 to coexist with the original SPA frontend.
 
 Core module: the full-page shell dispatcher (v2_page), the parts workspace
 entry point, and the vendor stock-list upload. The rest of the surface
-(My Day, email views, AI insights/knowledge/dashboard, search, requisition
+(My Day, email views, AI insights, search, requisition
 bulk+inline edit) lives in per-domain modules under app/routers/htmx/ and is
 aggregated into THIS module's `router` via `include_router()` below, so
 app/main.py keeps mounting a single `htmx_views_router` unchanged. Names that
@@ -193,6 +193,15 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     # a page shell whose inner (admin-gated) partial would 403 on load.
     if current_view == "trouble-tickets" and user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin access required")
+
+    # Proactive is PARKED (spec §4/§8 W2): the full page 404s while the flag is off,
+    # matching the router-level gate on every /v2/partials/proactive* route.
+    if current_view == "proactive":
+        from ..config import settings as app_settings
+        from ..services.admin_service import get_effective_flag
+
+        if not get_effective_flag(db, "proactive_matching_enabled", app_settings.proactive_matching_enabled):
+            raise HTTPException(404, "Not found")
 
     # Module access gate (Phase 4b). If the requested view maps to a module the user may
     # not see, redirect to their first allowed module (admins always pass user_has_access

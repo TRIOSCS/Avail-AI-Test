@@ -169,13 +169,14 @@
       {% endif %}
     </div>
 
-    {# Outreach — owner-only trader→buyer board, lazy-loaded. The "usually offered, not
-       yet" nudge strip sits ABOVE the tracker (the existing nudge surface — NOT a new
-       My-Day) and lazy-loads on its own so an empty strip costs nothing.
+    {# Outreach — owner-only trader→buyer board, lazy-loaded.
+       PARKED (spec §5.3, W2.3 — buyer-intelligence display): the "usually offered,
+       not yet" nudge strip that sat above the tracker is parked until a second
+       trader user exists — restore its lazy_body('tab-not-yet-…', '…/not-yet-strip')
+       call here (and the route registration in routers/resell.py) on comeback.
        lazy_body macro structurally enforces the explicit hx-target guard. #}
     {% if can_see_customer %}
     <div x-show="tab === 'outreach'" x-cloak class="space-y-4" role="tabpanel">
-      {% call lazy_body('tab-not-yet-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/not-yet-strip', trigger='intersect once') %}{% endcall %}
       {% call lazy_body('tab-outreach-' ~ el.id, '/v2/partials/resell/' ~ el.id ~ '/outreach', trigger='intersect once') %}
         <div class="p-6 text-center text-gray-400 text-sm">Loading outreach…</div>
       {% endcall %}

@@ -1,152 +1,22 @@
-"""tests/test_management_backfills.py — Coverage for small management backfill scripts.
+"""tests/test_management_backfills.py — Coverage for the enrichment_spend CLI.
 
 Targets:
-- app/management/backfill_quote_source.py   (0% → 100%)
-- app/management/backfill_buyplan_cph.py    (0% → 100%)
-- app/management/enrichment_spend.py        (0% → 100%)
+- app/management/enrichment_spend.py
+
+(The backfill_quote_source / backfill_buyplan_cph one-shots were verified complete
+and deleted in W2.9 — their tests went with them.)
 
 Called by: pytest
-Depends on: app/models (Quote, ProactiveOffer, BuyPlan), tests/conftest.py (db_session)
+Depends on: tests/conftest.py
 """
 
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 os.environ["TESTING"] = "1"
-
-
-# ── backfill_quote_source ─────────────────────────────────────────────────────
-
-
-class TestBackfillQuoteSource:
-    def _mock_db(self, quotes_to_update):
-        """Return a mock session where query().filter().all() yields
-        quotes_to_update."""
-
-        db = MagicMock()
-        mock_query = MagicMock()
-        db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.scalar_subquery.return_value = MagicMock()
-        mock_query.all.return_value = quotes_to_update
-        return db
-
-    def test_backfill_sets_proactive_source_and_returns_count(self):
-        from app.management.backfill_quote_source import backfill
-
-        quote = MagicMock()
-        quote.source = None
-        db = self._mock_db([quote])
-
-        count = backfill(db)
-
-        assert count == 1
-        assert quote.source == "proactive"
-        db.commit.assert_called_once()
-
-    def test_backfill_returns_zero_when_no_matching_quotes(self):
-        from app.management.backfill_quote_source import backfill
-
-        db = self._mock_db([])
-
-        count = backfill(db)
-
-        assert count == 0
-        db.commit.assert_called_once()
-
-    def test_backfill_updates_multiple_quotes(self):
-        from app.management.backfill_quote_source import backfill
-
-        quotes = [MagicMock(source=None), MagicMock(source=None), MagicMock(source=None)]
-        db = self._mock_db(quotes)
-
-        count = backfill(db)
-
-        assert count == 3
-        for q in quotes:
-            assert q.source == "proactive"
-
-    def test_main_block_calls_backfill_and_closes_db(self):
-        import runpy
-
-        mock_db = MagicMock()
-        # query chain returns empty list so backfill() is a no-op
-        mock_db.query.return_value.filter.return_value.scalar_subquery.return_value = MagicMock()
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        with patch("app.database.SessionLocal", MagicMock(return_value=mock_db)):
-            sys.modules.pop("app.management.backfill_quote_source", None)
-            runpy.run_module("app.management.backfill_quote_source", run_name="__main__")
-
-        mock_db.close.assert_called_once()
-
-
-# ── backfill_buyplan_cph ──────────────────────────────────────────────────────
-
-
-class TestBackfillBuyplanCph:
-    def _mock_db(self, plans):
-        db = MagicMock()
-        mock_query = MagicMock()
-        db.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.all.return_value = plans
-        return db
-
-    def test_backfill_processes_completed_plan_and_returns_count(self):
-        from app.management.backfill_buyplan_cph import backfill
-
-        plan = MagicMock()
-        db = self._mock_db([plan])
-
-        with patch("app.management.backfill_buyplan_cph.record_buyplan_purchase_history") as mock_record:
-            count = backfill(db)
-
-        assert count == 1
-        mock_record.assert_called_once_with(db, plan, refresh=False)
-        assert db.commit.call_count == 1
-
-    def test_backfill_returns_zero_when_no_plans(self):
-        from app.management.backfill_buyplan_cph import backfill
-
-        db = self._mock_db([])
-
-        with patch("app.management.backfill_buyplan_cph.record_buyplan_purchase_history") as mock_record:
-            count = backfill(db)
-
-        assert count == 0
-        mock_record.assert_not_called()
-
-    def test_backfill_commits_once_per_plan(self):
-        from app.management.backfill_buyplan_cph import backfill
-
-        plans = [MagicMock(), MagicMock()]
-        db = self._mock_db(plans)
-
-        with patch("app.management.backfill_buyplan_cph.record_buyplan_purchase_history"):
-            count = backfill(db)
-
-        assert count == 2
-        assert db.commit.call_count == 2
-
-    def test_main_block_calls_backfill_and_closes_db(self):
-        import runpy
-
-        mock_db = MagicMock()
-        # query chain returns empty list so backfill() is a no-op
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-
-        with patch("app.database.SessionLocal", MagicMock(return_value=mock_db)):
-            sys.modules.pop("app.management.backfill_buyplan_cph", None)
-            runpy.run_module("app.management.backfill_buyplan_cph", run_name="__main__")
-
-        mock_db.close.assert_called_once()
-
-
-# ── enrichment_spend ──────────────────────────────────────────────────────────
 
 
 class TestEnrichmentSpendTierCost:

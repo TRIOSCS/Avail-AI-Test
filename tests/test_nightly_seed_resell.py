@@ -287,7 +287,6 @@ class TestBuildCollecting:
     def test_creates_collecting_list(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -301,7 +300,6 @@ class TestBuildCollecting:
     def test_idempotent_no_duplicate_lists(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -323,7 +321,6 @@ class TestCollectingRefresh:
     def _seed_collecting(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -341,7 +338,6 @@ class TestCollectingRefresh:
         db_session.commit()
 
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -355,7 +351,6 @@ class TestCollectingRefresh:
         if close_at.tzinfo is None:
             close_at = close_at.replace(tzinfo=UTC)
         assert close_at > _now(), "refresh must push the posting window forward"
-        assert sync_mock.called, "refresh must re-mirror the restored demo lines"
 
     def test_reseed_rearms_lapsed_window_before_nightly_flip(self, db_session: Session):
         trader, broker, company = self._seed_collecting(db_session)
@@ -365,7 +360,6 @@ class TestCollectingRefresh:
         db_session.commit()
 
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -379,15 +373,14 @@ class TestCollectingRefresh:
         if close_at.tzinfo is None:
             close_at = close_at.replace(tzinfo=UTC)
         assert close_at > _now()
-        assert sync_mock.called
 
     def test_reseed_leaves_live_demo_untouched(self, db_session: Session):
         trader, broker, company = self._seed_collecting(db_session)
         el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
         assert el.status == ExcessListStatus.COLLECTING
+        close_at_before = el.close_at
 
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror") as sync_mock,
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -397,7 +390,7 @@ class TestCollectingRefresh:
 
         db_session.refresh(el)
         assert el.status == ExcessListStatus.COLLECTING
-        assert not sync_mock.called, "a live window needs no refresh/re-mirror"
+        assert el.close_at == close_at_before, "a live window needs no refresh"
 
     def test_reseed_never_tramples_an_awarded_demo(self, db_session: Session):
         trader, broker, company = self._seed_collecting(db_session)
@@ -408,7 +401,6 @@ class TestCollectingRefresh:
         db_session.commit()
 
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -424,7 +416,6 @@ class TestBuildOneoff:
     def test_creates_oneoff_list(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -439,7 +430,6 @@ class TestBuildOneoff:
 class TestSeed:
     def test_seed_creates_all_three_lists(self, db_session: Session):
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -454,7 +444,6 @@ class TestSeed:
 
     def test_seed_idempotent(self, db_session: Session):
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),
@@ -475,7 +464,6 @@ class TestSeed:
 class TestReset:
     def test_reset_removes_demo_data(self, db_session: Session):
         with (
-            patch("app.management.seed_resell_demo.excess_mirror.sync_list_mirror"),
             patch("app.management.seed_resell_demo.excess_service.submit_offer"),
             patch("app.management.seed_resell_demo.excess_service.award_offer"),
             patch("app.management.seed_resell_demo.excess_service._resolve_line_material_card"),

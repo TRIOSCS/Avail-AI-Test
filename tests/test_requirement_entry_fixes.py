@@ -8,15 +8,13 @@ Called by: pytest
 Depends on: routers/requisitions, conftest fixtures
 """
 
-from datetime import UTC, datetime
-
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_admin, require_buyer, require_user
 from app.main import app
-from app.models import Requisition, User
+from app.models import User
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -83,62 +81,6 @@ def test_update_requirement_none_mpn_allowed(client, test_requisition):
     assert resp.status_code == 200
 
 
-# ── B1: Validation errors reported, not silently swallowed ───────────
-
-
-def test_add_requirement_skipped_items_reported(client, test_requisition):
-    """POST /api/requisitions/{id}/requirements reports skipped items."""
-    resp = client.post(
-        f"/api/requisitions/{test_requisition.id}/requirements",
-        json=[
-            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 100},
-            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 1},  # blank MPN — should be skipped
-        ],
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["created"]) == 1
-    assert "skipped" in data
-    assert len(data["skipped"]) == 1
-    assert data["skipped"][0]["index"] == 1
-
-
-def test_add_requirement_negative_qty_skipped(client, test_requisition):
-    """POST skips items with target_qty < 1."""
-    resp = client.post(
-        f"/api/requisitions/{test_requisition.id}/requirements",
-        json=[{"primary_mpn": "LM7805", "target_qty": -5}],
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["created"]) == 0
-    assert len(data.get("skipped", [])) == 1
-
-
-# ── B9: Sourcing score uses access control ───────────────────────────
-
-
-def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_user):
-    """Sales user cannot view sourcing score for another user's requisition."""
-    # Create a requisition owned by test_user (buyer)
-    req = Requisition(
-        name="Other User Req",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(req)
-    db_session.commit()
-    db_session.refresh(req)
-
-    sales_c = _make_sales_client(db_session, sales_user)
-    try:
-        resp = sales_c.get(f"/api/requisitions/{req.id}/sourcing-score")
-        assert resp.status_code == 404
-    finally:
-        _clear_overrides()
-
-
 # ── B11: Batch assign requires admin ─────────────────────────────────
 
 
@@ -167,17 +109,3 @@ def test_batch_assign_admin_allowed(db_session, admin_user, test_requisition, te
         assert resp.json()["assigned_count"] == 1
     finally:
         _clear_overrides()
-
-
-# ── B16: Condition/packaging normalized on create ────────────────────
-
-
-def test_add_requirement_normalizes_condition(client, test_requisition):
-    """Condition is normalized on create (e.g. 'NEW' -> lowercase)."""
-    resp = client.post(
-        f"/api/requisitions/{test_requisition.id}/requirements",
-        json=[{"primary_mpn": "LM7805", "manufacturer": "TI", "condition": "NEW"}],
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["created"]) == 1

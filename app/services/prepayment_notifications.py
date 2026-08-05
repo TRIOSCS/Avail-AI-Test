@@ -106,13 +106,11 @@ async def run_prepayment_notify_bg(coro_fn, prepayment_id: int) -> None:
 
 
 # The main FastAPI event loop, registered via set_main_event_loop() during the
-# lifespan. Needed because the P2.7 deferred-startup-backfill sweep
-# (run_deferred_startup_backfills, see app/startup.py) runs the entire
-# _complete_reverted_active_plans -> check_completion -> _complete_plan ->
-# _cancel_open_prepayment_requests_for_plan call chain inside asyncio.to_thread — a
-# worker thread with NO running loop of its own — so schedule_prepayment_notify's
-# get_running_loop() check would otherwise always miss and silently drop the
-# DO-NOT-WIRE stand-down notification for plans auto-completed at startup.
+# lifespan. Needed because sync callers (threadpool-run routes / sync services
+# driving check_completion -> _complete_plan ->
+# _cancel_open_prepayment_requests_for_plan) have NO running loop of their own,
+# so schedule_prepayment_notify's get_running_loop() check would otherwise miss
+# and silently drop the DO-NOT-WIRE stand-down notification.
 _main_event_loop: asyncio.AbstractEventLoop | None = None
 
 
@@ -132,9 +130,8 @@ def schedule_prepayment_notify(coro) -> None:
 
     ``run_prepayment_notify_bg(...)`` returns a coroutine; a sync service (mark-paid,
     teardown void) cannot ``await`` it. If an event loop is running (the async request that
-    drove the transition) schedule it as a fire-and-forget task on it. Otherwise — most
-    notably the P2.7 deferred-startup-backfill sweep, which runs on a plain
-    ``asyncio.to_thread`` worker thread with no loop of its own — fall back to the
+    drove the transition) schedule it as a fire-and-forget task on it. Otherwise — a
+    sync caller on a threadpool/worker thread with no loop of its own — fall back to the
     registered main event loop (see ``set_main_event_loop``) via
     ``asyncio.run_coroutine_threadsafe``, so the notification still runs as a task on the
     main loop instead of being silently dropped. If neither a running loop nor a

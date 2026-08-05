@@ -7,8 +7,7 @@
 #   `.venv/bin/python -m app.management.<module> [args...]`. The DB password stays
 #   inside .env and never appears on the command line.
 # Usage: scripts/mgmt.sh <module-short-name> [args...]
-#   e.g. scripts/mgmt.sh import_demand_telemetry --apply
-#        scripts/mgmt.sh ingest_source_data --files '/root/source_ingest/LSC1__*.csv' --apply
+#   e.g. scripts/mgmt.sh ingest_source_data --files '/root/source_ingest/LSC1__*.csv' --apply
 # Called by: an operator (or Claude Code via the Bash(scripts/mgmt.sh:*) allow-rule).
 # Depends on: .env (DATABASE_URL), .venv (host venv kept in sync by deploy.sh),
 #   the app.management package.

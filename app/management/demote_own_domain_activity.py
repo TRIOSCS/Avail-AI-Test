@@ -4,9 +4,9 @@ ActivityLog rows (ISS-030 follow-up).
 ISS-030 (PR #782) added a WRITE-TIME own-domain filter so internal (own-org) emails are
 no longer marked is_meaningful on the company Activity tab — but historical rows written
 before it still surface (e.g. the org's own company record carries thousands of
-own-domain rows still is_meaningful=True). The reattribute_activity backfill structurally
-cannot fix them: its candidate query requires company_id IS NULL, and these rows already
-have company_id set.
+own-domain rows still is_meaningful=True). The (since-deleted) reattribute_activity
+backfill structurally could not fix them: its candidate query required company_id IS
+NULL, and these rows already have company_id set.
 
 This command scans attributed rows (company_id NOT NULL, contact_email NOT NULL,
 is_meaningful TRUE OR NULL — the Activity tab's exact visibility predicate,

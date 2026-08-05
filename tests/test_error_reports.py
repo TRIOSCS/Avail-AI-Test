@@ -48,24 +48,6 @@ def test_list_with_status_filter(client):
     assert resp.json()["total"] >= 0
 
 
-def test_get_single_report(client):
-    """GET /api/error-reports/{id} returns ticket detail."""
-    create_resp = client.post("/api/error-reports", json={"message": "Detail test ticket"})
-    ticket_id = create_resp.json()["id"]
-    resp = client.get(f"/api/error-reports/{ticket_id}")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["id"] == ticket_id
-    assert data["title"] == "Detail test ticket"
-    assert data["status"] == "submitted"
-
-
-def test_get_nonexistent_report(client):
-    """GET /api/error-reports/99999 returns 404."""
-    resp = client.get("/api/error-reports/99999")
-    assert resp.status_code == 404
-
-
 def test_trouble_tickets_alias(client):
     """POST /api/trouble-tickets works as alias."""
     resp = client.post("/api/trouble-tickets", json={"message": "Via alias"})

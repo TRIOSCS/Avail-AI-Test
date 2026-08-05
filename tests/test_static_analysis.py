@@ -616,8 +616,6 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/buy_plans/detail.html",
     # The SO origination surface self-hosts in #main-content post-hub-retirement.
     "app/templates/htmx/partials/approvals/_sales_order_new.html",
-    "app/templates/htmx/partials/dashboard.html",
-    "app/templates/htmx/partials/emails/intelligence_dashboard.html",
     "app/templates/htmx/partials/follow_ups/list.html",
     "app/templates/htmx/partials/materials/detail.html",
     "app/templates/htmx/partials/proactive/list.html",
@@ -636,11 +634,9 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/customers/detail.html",
 )
 _PAGE_READABLE_SHELLS = (
-    "app/templates/htmx/partials/knowledge/list.html",
     "app/templates/htmx/partials/proactive/prepare.html",
     "app/templates/htmx/partials/prospecting/detail.html",
     "app/templates/htmx/partials/search/dossier_shell.html",
-    "app/templates/htmx/partials/sourcing/lead_detail.html",
     "app/templates/htmx/partials/tickets/detail.html",
 )
 

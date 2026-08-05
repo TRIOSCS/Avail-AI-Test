@@ -370,29 +370,10 @@ def test_submit_offer_without_buyer_company_leaves_card_none(db_session: Session
     assert offer.offerer_vendor_card_id is None
 
 
-def test_offer_form_renders_buyer_select(client, db_session: Session):
-    """The submit-offer form renders the optional buyer <select> with company options
-    (mirrors the create-modal company select; headless assert)."""
-    from app.dependencies import require_user
-    from app.main import app
-
-    company = _make_company(db_session, name="Form Seller")
-    owner = _make_user(db_session, email="form-owner@test.com", role="sales")
-    viewer = _make_user(db_session, email="form-viewer@test.com", role="trader")  # non-owner offerer
-    el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.status = ExcessListStatus.OPEN
-    _make_company(db_session, name="Form Buyer Co")
-    db_session.commit()
-
-    app.dependency_overrides[require_user] = lambda: viewer
-    try:
-        resp = client.get(f"/v2/partials/resell/{el.id}/offer-form")
-    finally:
-        app.dependency_overrides.pop(require_user, None)
-
-    assert resp.status_code == 200
-    assert 'name="buyer_company_id"' in resp.text
-    assert "Form Buyer Co" in resp.text
+# (test_offer_form_renders_buyer_select deleted with the W2.3 trader-lane park —
+# spec §5.3: the submit-offer modal route is unregistered; the template and the
+# resell_offer_form implementation stay parked in place. The parked-off route
+# state is pinned in tests/test_resell_trader_lane_parked.py.)
 
 
 # ---------------------------------------------------------------------------

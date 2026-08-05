@@ -8,19 +8,18 @@ get_buyplan_for_user / is_manager_or_admin) — these tests lock in the boundary
   - a cross-account / restricted-role actor is DENIED (403 for account gates, 404 for
     requisition-ownership gates so existence isn't leaked), with NO mutation, and
   - a legitimate owner / manager / admin is ALLOWED,
-  - and for proactive / follow-ups / quote we additionally assert the OTHER owner's data
+  - and for proactive / follow-ups we additionally assert the OTHER owner's data
     is untouched.
 
 The shared `client` fixture overrides require_user to return `test_user`; we mutate that
 same object's role / re-own resources to admin_user to simulate a restricted non-owner.
 
 Called by: pytest
-Depends on: app.routers.{ai,proactive,sources,htmx_views,quality_plans,crm.quotes},
+Depends on: app.routers.{ai,proactive,htmx_views,quality_plans},
             app.services.prepayment_service, conftest fixtures.
 """
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
@@ -29,7 +28,6 @@ from app.constants import UserRole
 from app.models import (
     Company,
     CustomerSite,
-    Offer,
     ProactiveDoNotOffer,
     ProspectContact,
     Requirement,
@@ -37,7 +35,6 @@ from app.models import (
 )
 from app.models.buy_plan import BuyPlan
 from app.models.offers import Contact as RfqContact
-from app.models.offers import VendorResponse
 from app.models.quality_plan import QualityPlan
 from app.models.quotes import Quote
 
@@ -171,132 +168,6 @@ def test_g1_manager_can_reassign(client, db_session, test_user, admin_user):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# FIX GROUP 2 — ai.py site-linked prospect records need can_manage_account
-# Routes: DELETE /api/ai/prospect-contacts/{id}  (2a)
-#         POST   /api/ai/prospect-contacts/{id}/save  (2b)
-# Helper: can_manage_account
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def _site_linked_pc(db_session, site):
-    pc = ProspectContact(
-        customer_site_id=site.id,
-        full_name="Jane Doe",
-        email="jane@x.com",
-        source="web_search",
-        confidence="high",
-    )
-    db_session.add(pc)
-    db_session.commit()
-    db_session.refresh(pc)
-    return pc
-
-
-def test_g2a_delete_site_prospect_blocks_non_owner(client, db_session, test_user, admin_user):
-    co = _foreign_company(db_session, admin_user)
-    site = _site(db_session, co)  # no site owner → test_user (buyer, not manager) cannot manage
-    pc = _site_linked_pc(db_session, site)
-    resp = client.delete(f"/api/ai/prospect-contacts/{pc.id}")
-    assert resp.status_code == 403
-    assert db_session.get(ProspectContact, pc.id) is not None  # NOT deleted
-
-
-def test_g2b_save_site_prospect_blocks_non_owner(client, db_session, test_user, admin_user):
-    co = _foreign_company(db_session, admin_user)
-    site = _site(db_session, co)
-    pc = _site_linked_pc(db_session, site)
-    resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/save")
-    assert resp.status_code == 403
-    db_session.refresh(pc)
-    assert pc.is_saved is False  # NOT mutated
-
-
-def test_g2_site_prospect_allows_account_owner(client, db_session, test_user):
-    co = _owned_company(db_session, test_user)  # test_user is account owner
-    site = _site(db_session, co)
-    pc = _site_linked_pc(db_session, site)
-    resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/save")
-    assert resp.status_code == 200
-    db_session.refresh(pc)
-    assert pc.is_saved is True
-
-
-def test_g2_vendor_linked_prospect_stays_global(client, db_session, test_user, test_vendor_card):
-    """Vendor-linked prospects have no account owner — the gate is a no-op (200)."""
-    pc = ProspectContact(
-        vendor_card_id=test_vendor_card.id,
-        full_name="Vendor Rep",
-        email="rep@vendor.com",
-        source="web_search",
-        confidence="high",
-    )
-    db_session.add(pc)
-    db_session.commit()
-    db_session.refresh(pc)
-    resp = client.post(f"/api/ai/prospect-contacts/{pc.id}/save")
-    assert resp.status_code == 200
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# FIX GROUP 4 — email-mining parse-response-attachments needs req ownership
-# Route: POST /api/email-mining/parse-response-attachments/{response_id}
-# Helper: require_requisition_access
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def _vendor_response(db_session, owner_id, *, message_id="msg-x"):
-    req = _requisition(db_session, owner_id, name="REQ-VR")
-    vr = VendorResponse(
-        requisition_id=req.id,
-        vendor_name="ACME",
-        vendor_email="s@acme.com",
-        subject="re",
-        message_id=message_id,
-        status="new",
-        received_at=_now(),
-        created_at=_now(),
-    )
-    db_session.add(vr)
-    db_session.commit()
-    db_session.refresh(vr)
-    return vr
-
-
-def _connect_m365(test_user, db_session):
-    """The parse route gates on M365 connection BEFORE the ownership check; satisfy it
-    so the ownership boundary is the thing under test."""
-    test_user.m365_connected = True
-    test_user.access_token = "test-token"
-    db_session.commit()
-
-
-def test_g4_parse_attachments_blocks_non_owner_sales(client, db_session, test_user, admin_user):
-    vr = _vendor_response(db_session, admin_user.id)  # foreign requisition
-    _connect_m365(test_user, db_session)
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-    assert resp.status_code == 404
-
-
-def test_g4_parse_attachments_blocks_non_owner_trader(client, db_session, test_user, admin_user):
-    vr = _vendor_response(db_session, admin_user.id)
-    _connect_m365(test_user, db_session)
-    _make_trader(test_user, db_session)
-    resp = client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-    assert resp.status_code == 404
-
-
-def test_g4_parse_attachments_owner_passes_ownership_gate(client, db_session, test_user):
-    """Owner is past the ownership gate; later logic 400s (no message_id) — NOT a
-    404."""
-    vr = _vendor_response(db_session, test_user.id, message_id=None)
-    _connect_m365(test_user, db_session)
-    _make_sales(test_user, db_session)  # restricted but OWNS the requisition
-    resp = client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
-    assert resp.status_code != 404  # passed the ownership gate (400 from missing message_id)
-
-
-# ══════════════════════════════════════════════════════════════════════════
 # FIX GROUP 5 — prepayment creation needs buy-plan ownership (service layer)
 # Route: POST /v2/prepayments  (prepayments.post_prepayment → create_prepayment)
 # Helper: get_buyplan_for_user
@@ -349,19 +220,10 @@ def test_g5_prepayment_allows_buyer_owner(client, db_session, test_user):
 
 # ══════════════════════════════════════════════════════════════════════════
 # FIX GROUP 6 — htmx requisition-scoped mutations need require_requisition_access
-# Routes: 6a POST /v2/partials/sourcing/{requirement_id}/search
 #         6b POST /v2/partials/follow-ups/send-batch (+ follow_up_badge scope)
 #         6c POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
 # Helpers: require_requisition_access / RESTRICTED_ROLES scope
 # ══════════════════════════════════════════════════════════════════════════
-
-
-def test_g6a_sourcing_search_blocks_non_owner_sales(client, db_session, test_user, admin_user):
-    req = _requisition(db_session, admin_user.id, name="REQ-SRC")
-    item = db_session.query(Requirement).filter_by(requisition_id=req.id).first()
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/v2/partials/sourcing/{item.id}/search")
-    assert resp.status_code == 404
 
 
 def test_g6c_ai_rephrase_email_blocks_non_owner_sales(client, db_session, test_user, admin_user):
@@ -396,73 +258,6 @@ def test_g6b_send_batch_leaves_other_owners_stale_contacts_untouched(client, db_
     db_session.refresh(other_contact)
     # The other owner's stale contact was NOT acted on by this user's batch
     assert other_contact.status == "sent"
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# FIX GROUP 7 — create_quote must scope offer_ids to the target requisition
-# Route: POST /api/requisitions/{req_id}/quote  (crm.quotes.create_quote)
-# Helper: Offer.requisition_id == req_id filter (+ on_quote_built scope)
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def test_g7_create_quote_rejects_foreign_offer_and_leaves_req_b_untouched(client, db_session, test_user, admin_user):
-    """Owner of req A cannot pull a foreign offer (req B) into the quote → 400; req B's
-    requirement status unchanged."""
-    site = _site(db_session, _owned_company(db_session, test_user))
-    req_a = _requisition(db_session, test_user.id, name="REQ-A", site_id=site.id)
-    req_b = _requisition(db_session, admin_user.id, name="REQ-B")
-    item_b = db_session.query(Requirement).filter_by(requisition_id=req_b.id).first()
-    status_before = item_b.sourcing_status
-
-    foreign_offer = Offer(
-        requisition_id=req_b.id,
-        requirement_id=item_b.id,
-        vendor_name="V",
-        mpn="LM317T",
-        unit_price=Decimal("1.00"),
-        qty_available=10,
-        entered_by_id=admin_user.id,
-        status="active",
-        created_at=_now(),
-    )
-    db_session.add(foreign_offer)
-    db_session.commit()
-
-    resp = client.post(
-        f"/api/requisitions/{req_a.id}/quote",
-        json={"offer_ids": [foreign_offer.id], "line_items": []},
-    )
-    assert resp.status_code == 400  # offer does not belong to this requisition
-    # No quote created for req A
-    assert db_session.query(Quote).filter_by(requisition_id=req_a.id).count() == 0
-    # Req B's requirement was NOT advanced to 'quoted'
-    db_session.refresh(item_b)
-    assert item_b.sourcing_status == status_before
-
-
-def test_g7_create_quote_allows_own_offer(client, db_session, test_user):
-    site = _site(db_session, _owned_company(db_session, test_user))
-    req = _requisition(db_session, test_user.id, name="REQ-OWN", site_id=site.id)
-    item = db_session.query(Requirement).filter_by(requisition_id=req.id).first()
-    own_offer = Offer(
-        requisition_id=req.id,
-        requirement_id=item.id,
-        vendor_name="V",
-        mpn="LM317T",
-        unit_price=Decimal("1.00"),
-        qty_available=10,
-        entered_by_id=test_user.id,
-        status="active",
-        created_at=_now(),
-    )
-    db_session.add(own_offer)
-    db_session.commit()
-
-    resp = client.post(
-        f"/api/requisitions/{req.id}/quote",
-        json={"offer_ids": [own_offer.id], "line_items": []},
-    )
-    assert resp.status_code == 200
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -586,6 +381,20 @@ def test_g9_manager_can_assign_active_user(client, db_session, test_user, admin_
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _site_linked_pc(db_session, site):
+    pc = ProspectContact(
+        customer_site_id=site.id,
+        full_name="Jane Doe",
+        email="jane@x.com",
+        source="web_search",
+        confidence="high",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+    return pc
+
+
 def test_siblingA_htmx_vendor_prospect_save_blocks_non_owner(
     client, db_session, test_user, admin_user, test_vendor_card
 ):
@@ -694,3 +503,9 @@ def _ai_features_on(monkeypatch):
     reached."""
     monkeypatch.setattr(settings, "ai_features_enabled", "all")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

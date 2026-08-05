@@ -204,22 +204,9 @@ class TestL2QuantityBound:
         assert resp.status_code == 200
         assert db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count() == 1
 
-    def test_submit_offer_non_positive_quantity_400(self, client, db_session, buyer, posted_list):
-        """A per-line offer with quantity 0 returns 400 (not the ExcessOfferLine
-        500)."""
-        from app.dependencies import require_user
-        from app.main import app
-
-        app.dependency_overrides[require_user] = lambda: buyer
-        try:
-            resp = client.post(
-                f"/api/resell/{posted_list.id}/offers",
-                data={"scope": "per_line", "mpn_raw": "LM358N", "quantity": "0", "unit_price": "1.25"},
-            )
-        finally:
-            app.dependency_overrides.pop(require_user, None)
-        assert resp.status_code == 400
-        assert db_session.query(ExcessOffer).filter_by(excess_list_id=posted_list.id).count() == 0
+    # (test_submit_offer_non_positive_quantity_400 deleted with the W2.3
+    # trader-lane park — spec §5.3: POST /api/resell/{id}/offers is unregistered;
+    # the L2 guard stays inside the parked resell_submit_offer implementation.)
 
 
 # ═══════════════════════════════════════════════════════════════════════

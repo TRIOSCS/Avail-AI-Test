@@ -1,7 +1,7 @@
-"""routers/materials.py — Material Card CRUD, enrichment, merge, and stock import.
+"""routers/materials.py — Material Card CRUD and stock import.
 
-Handles material card listing, detail, update, enrichment, soft-delete/restore,
-merge operations, and standalone stock list import.
+Handles material card listing, detail, add, update, soft-delete,
+and standalone stock list import.
 
 Called by: main.py (router mount)
 Depends on: models, dependencies, stock_list_ingest, cache, normalization, audit_service
@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
@@ -32,9 +31,6 @@ from ..services.material_card_service import (
 )
 from ..services.material_card_service import (
     infer_manufacturer as _infer_manufacturer_from_prefix,
-)
-from ..services.material_card_service import (
-    merge_material_cards as _merge_material_cards_service,
 )
 from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
@@ -78,8 +74,8 @@ def _actor_email(user: User) -> str:
 def _backfill_manufacturer(card: MaterialCard, db: Session) -> None:
     """Fill a card's missing manufacturer from its MPN prefix, committing on a hit.
 
-    Shared by the two single-card read endpoints (by-id and by-mpn) so a card surfaced
-    without a manufacturer gets one inferred lazily on first view.
+    Used by the single-card read endpoint (by-id) so a card surfaced without a
+    manufacturer gets one inferred lazily on first view.
     """
     if card.manufacturer:
         return
@@ -381,17 +377,6 @@ async def quick_search(
     return result
 
 
-@router.get("/api/materials/by-mpn/{mpn}")
-async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Look up a material card by MPN."""
-    norm = normalize_mpn_key(mpn)
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
-    if not card:
-        raise HTTPException(404, "No material card found for this MPN")
-    _backfill_manufacturer(card, db)
-    return material_card_to_dict(card, db)
-
-
 @router.put("/api/materials/{card_id}")
 async def update_material(
     card_id: int,
@@ -468,103 +453,6 @@ async def update_material(
     return material_card_to_dict(card, db)
 
 
-@router.post("/api/materials/{card_id}/enrich")
-async def enrich_material(
-    card_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Apply AI-generated enrichment data to a material card.
-
-    ``category``/``manufacturer`` are PROVENANCED columns and go through the F1 ladder
-    (never raw setattr): the body's ``source`` is honored only when it is a registered
-    SOURCE_TIER key BELOW the ground-truth band (< trio_source/95). ``manual`` (100) is
-    a human assertion and ``trio_source`` (95) is TRIO's own part master — a pusher
-    claiming either could overwrite a genuine human edit, permanently lock the column
-    against every future enrichment correction, and corrupt the validation-conflict
-    contract (``record_validation_conflict`` treats ``manual`` as a human value).
-    Anything unregistered (the default ``claude_agent``) or ground-truth-tier is
-    DEMOTED to ``ai_guess`` (tier 40) — logged at WARNING, and reported as
-    ``ladder_source`` in the response — so un-vouched external AI data fills empty
-    columns but never displaces decode / vendor / trio / manual provenance. Off-vocab
-    categories are rejected, never persisted. ``updated_fields`` reports only writes
-    that actually landed; a category/manufacturer write the ladder (or the category
-    normalizer) refused is listed in ``rejected_fields``.
-    """
-    from ..services.spec_tiers import SOURCE_TIER, set_category, set_manufacturer
-
-    card = db.get(MaterialCard, card_id)
-    if not card:
-        raise HTTPException(404, "Material not found")
-    body = await request.json()
-    source = body.get("source", "claude_agent")
-    if source in SOURCE_TIER and SOURCE_TIER[source] < SOURCE_TIER["trio_source"]:
-        ladder_source = source
-    else:
-        ladder_source = "ai_guess"
-        if source != "claude_agent":
-            # Loud demotion: ai_guess IS registered, so tier_for's unknown-source
-            # WARNING never fires for it — without this line a pusher sending
-            # "digikey" instead of "digikey_api" (or claiming "manual") would lose
-            # silently forever with nothing to find in the logs.
-            logger.warning(
-                "enrich_material: card={} body source {!r} demoted to ai_guess/40 ({})",
-                card_id,
-                source,
-                "not a registered SOURCE_TIER key"
-                if source not in SOURCE_TIER
-                else "ground-truth tiers are not honored from pushers",
-            )
-    raw_confidence = body.get("confidence")
-    if raw_confidence is None:
-        confidence = 0.5
-    else:
-        try:
-            confidence = min(max(float(raw_confidence), 0.0), 1.0)
-        except (TypeError, ValueError) as e:
-            raise HTTPException(422, f'"confidence" must be a number between 0 and 1, got {raw_confidence!r}.') from e
-    enrichment_fields = (
-        "lifecycle_status",
-        "package_type",
-        "rohs_status",
-        "pin_count",
-        "datasheet_url",
-        "cross_references",
-        "specs_summary",
-        "description",
-    )
-    updated = []
-    rejected = []
-    for field in enrichment_fields:
-        val = body.get(field)
-        if val is not None:
-            setattr(card, field, val)
-            updated.append(field)
-    if body.get("category") is not None:
-        if set_category(card, body["category"], ladder_source, confidence):
-            updated.append("category")
-        else:
-            rejected.append("category")
-    if body.get("manufacturer") is not None:
-        if set_manufacturer(card, body["manufacturer"], ladder_source, confidence):
-            updated.append("manufacturer")
-        else:
-            rejected.append("manufacturer")
-    if updated:
-        card.enrichment_source = source
-        card.enriched_at = datetime.now(UTC)
-    db.commit()
-    invalidate_prefix("material_list")
-    return {
-        "ok": True,
-        "updated_fields": updated,
-        "rejected_fields": rejected,
-        "ladder_source": ladder_source,
-        "card_id": card_id,
-    }
-
-
 @router.delete("/api/materials/{card_id}")
 async def delete_material(card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Soft-delete a material card.
@@ -591,53 +479,6 @@ async def delete_material(card_id: int, user: User = Depends(require_admin), db:
     return {"ok": True, "deleted_at": card.deleted_at.isoformat()}
 
 
-@router.post("/api/materials/{card_id}/restore")
-async def restore_material(card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Restore a soft-deleted material card."""
-    from ..services.audit_service import log_audit
-
-    card = db.get(MaterialCard, card_id)
-    if not card:
-        raise HTTPException(404, "Material not found")
-    if card.deleted_at is None:
-        raise HTTPException(400, "Card is not deleted")
-    card.deleted_at = None
-    log_audit(
-        db,
-        material_card_id=card.id,
-        action="restored",
-        normalized_mpn=card.normalized_mpn,
-        created_by=_actor_email(user),
-    )
-    db.commit()
-    invalidate_prefix("material_list")
-    return {"ok": True}
-
-
-# -- Material Card Merge -------------------------------------------------------
-@router.post("/api/materials/merge")
-async def merge_material_cards(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Merge two material cards: move all linked records from source to target, then delete source."""
-    body = await request.json()
-    source_id = body.get("source_card_id")
-    target_id = body.get("target_card_id")
-    if not source_id or not target_id:
-        raise HTTPException(400, "source_card_id and target_card_id are required")
-
-    try:
-        result = _merge_material_cards_service(db, source_id, target_id, _actor_email(user))
-    except ValueError as e:
-        raise HTTPException(400 if "itself" in str(e) else 404, str(e)) from e
-
-    db.commit()
-    invalidate_prefix("material_list")
-    return result
-
-
 # -- Admin: Backfill Missing Manufacturers ------------------------------------
 
 
@@ -649,80 +490,6 @@ async def backfill_manufacturers(user: User = Depends(require_admin), db: Sessio
     db.commit()
     invalidate_prefix("material_list")
     return {"enriched_records": count}
-
-
-# -- Part Number Import -------------------------------------------------------
-
-
-@router.post("/api/materials/import-part-numbers")
-async def import_part_numbers(request: Request, user: User = Depends(require_buyer), db: Session = Depends(get_db)):
-    """Import a bare list of part numbers (one MPN per row) as MaterialCards.
-
-    Accepts CSV/XLSX/TSV and HTML-table-as-.xls. Creates bare cards
-    (enrichment_status='unenriched'); enrichment runs separately.
-    """
-    import os as _os
-
-    from ..file_utils import ParseError, extract_mpns_with_rows, parse_tabular_file
-    from ..search_service import resolve_material_card, run_deterministic_passes
-    from ..utils.normalization import normalize_mpn
-
-    form = await request.form()
-    file = form.get("file")
-    if not file:
-        raise HTTPException(400, "No file uploaded")
-    ext = _os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".csv", ".xlsx", ".xls", ".tsv"}:
-        raise HTTPException(400, f"Invalid file type '{ext}'")
-    content = await file.read()
-    if len(content) > 10_000_000:
-        raise HTTPException(413, "File too large -- 10MB maximum")
-
-    # A corrupt/unreadable file raises ParseError (distinct from an empty one) so we tell the
-    # user the file couldn't be read rather than the misleading "No part numbers found".
-    try:
-        rows = parse_tabular_file(content, file.filename or "")
-    except ParseError as exc:
-        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
-    mpn_rows = extract_mpns_with_rows(rows)
-    if not mpn_rows:
-        raise HTTPException(400, "No part numbers found in file")
-
-    created = existing = skipped = 0
-    card_ids: list[int] = []
-    warnings: list[dict] = []
-    # row numbers are 1-based SOURCE-file rows (header = row 1) so a warning's `row`
-    # points at the spreadsheet line the user can actually open and fix.
-    for row_no, mpn in mpn_rows:
-        # V3 normalization gate — never silent: surface the row + reason. normalize_mpn
-        # (not the dedup key) owns the >=3-chars rule.
-        if not normalize_mpn(mpn):
-            skipped += 1
-            warnings.append({"row": row_no, "field": "mpn", "reason": f"invalid MPN {mpn!r} (min 3 chars)"})
-            continue
-        card = resolve_material_card(mpn, db)
-        if card is None:
-            skipped += 1
-            warnings.append({"row": row_no, "field": "mpn", "reason": f"could not create card for {mpn!r}"})
-            continue
-        card_ids.append(card.id)
-        # resolve_material_card logs created vs resolved; detect new by enrichment_status default
-        if card.enrichment_status == "unenriched" and card.enriched_at is None and card.search_count == 0:
-            created += 1
-        else:
-            existing += 1
-    # Inline deterministic passes over every touched card — same session, committed
-    # together. NO enrich_requested_at stamp: bulk imports ride the created_at fast
-    # lane (a 1,800-row import must not monopolize the worker's priority lane).
-    run_deterministic_passes(db, card_ids)
-    db.commit()
-    return {
-        "created": created,
-        "existing": existing,
-        "skipped": skipped,
-        "total_rows": len(mpn_rows),
-        "warnings": warnings,
-    }
 
 
 # -- Standalone Stock Import ---------------------------------------------------

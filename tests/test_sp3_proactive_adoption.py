@@ -18,6 +18,7 @@ Depends on: app/routers/htmx_views.py, app/templates/htmx/partials/shared/mobile
 
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -61,10 +62,19 @@ class TestMobileNavBadgeMarkup:
             return f.read()
 
     def test_badge_container_present(self):
-        """mobile_nav's badge-target loop covers the proactive nav item."""
+        """mobile_nav's badge-target loop renders the alert-tab badge spans."""
         html = self._read_mobile_nav()
         assert 'id="{{ id }}-nav-badge"' in html, "Badge target span must be in mobile_nav.html"
-        assert "'proactive'" in html, "The badge-target branch must include the proactive nav item"
+
+    def test_proactive_left_nav_and_badge_branch(self):
+        """W2 park (spec §4/§8): the proactive nav item and its badge span left the nav;
+        the consolidated poller keeps the key server-side (NAV_BADGE_KEYS) and htmx
+        drops the targetless OOB span."""
+        html = self._read_mobile_nav()
+        assert "('proactive'," not in html, "proactive nav item must stay out of nav_items (W2 park)"
+        assert "{% if id in ('requisitions', 'buy-plans', 'crm', 'my-day') %}" in html, (
+            "badge-target branch must cover exactly the four alert tabs"
+        )
 
     def test_badge_poller_polls_every_60s(self):
         """The single badge poller includes an 'every 60s' poll so pills live-update."""
@@ -208,3 +218,9 @@ class TestProactiveRefreshRoute:
         assert resp.status_code == 200
         # Match is in the db — list should show it
         assert "SP3TEST" in resp.text
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

@@ -850,3 +850,9 @@ def test_afterswap_reinits_alpine_on_proactive_contact_list():
     assert "rfq-affinity-section" in allowlist
     assert "settings-content" in allowlist
     assert "lead-drawer-content" in allowlist
+
+
+@pytest.fixture(autouse=True)
+def _proactive_on(proactive_flag_on):
+    """Proactive routes 404 while parked (W2 park, spec §4/§8); this module exercises
+    the flag-on behavior so the comeback path stays green."""

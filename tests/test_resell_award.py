@@ -185,7 +185,7 @@ def _line(
     with_card: bool = True,
     qty: int = 100,
 ) -> ExcessLineItem:
-    """Add one AVAILABLE ExcessLineItem (optionally card-linked for mirror tests)."""
+    """Add one AVAILABLE ExcessLineItem (optionally card-linked)."""
     card_id = None
     if with_card:
         mc = MaterialCard(normalized_mpn=part_number.lower(), display_mpn=part_number, category="capacitors")
@@ -205,7 +205,8 @@ def _line(
 
 
 def _customer_excess_sightings(db: Session, company_id: int) -> list[Sighting]:
-    """The list's live Sighting mirror rows (source_type='customer_excess')."""
+    """Any customer_excess Sighting rows for the list's company — always expected EMPTY
+    now that the resell→Sighting dual-write is retired (SIMPLIFICATION_SPEC §5.3)."""
     return (
         db.query(Sighting)
         .filter(Sighting.source_type == "customer_excess", Sighting.source_company_id == company_id)
@@ -509,13 +510,15 @@ class TestAwardOfferService:
         db_session.refresh(second)
         assert second.status == ExcessOfferStatus.OPEN  # the failed award left it untouched
 
-    def test_award_retires_sighting_mirror(
+    def test_publish_and_award_write_no_sighting_mirror(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
-        """FIX #3: a sold line must stop advertising as live supply — awarding retires
-        its Sighting mirror row."""
+        """The resell→Sighting dual-write is retired (SIMPLIFICATION_SPEC §5.3):
+
+        publishing writes NO customer_excess Sighting, and awarding has none to retire.
+        """
         publish_list(db_session, excess_list.id, owner)
-        assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1
+        assert _customer_excess_sightings(db_session, excess_list.company_id) == []
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
@@ -617,34 +620,33 @@ class TestUnawardOfferService:
         db_session.refresh(excess_list)
         assert excess_list.status == ExcessListStatus.BID_OUT
 
-    def test_unaward_re_mirrors_line(
+    def test_unaward_writes_no_sighting_mirror(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
-        """Reversing an award re-mirrors the line so it advertises as live supply
-        again."""
+        """Reversing an award writes NO customer_excess Sighting — the dual-write is
+        retired (SIMPLIFICATION_SPEC §5.3), so unaward no longer re-mirrors."""
         publish_list(db_session, excess_list.id, owner)
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
         db_session.commit()
         excess_service.award_offer(db_session, offer.id, owner)
-        assert _customer_excess_sightings(db_session, excess_list.company_id) == []  # retired
+        assert _customer_excess_sightings(db_session, excess_list.company_id) == []
 
         excess_service.unaward_offer(db_session, offer.id, owner)
 
-        assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1
+        assert _customer_excess_sightings(db_session, excess_list.company_id) == []
 
-    def test_unaward_future_deadline_list_steps_to_collecting_and_re_mirrors(
+    def test_unaward_future_deadline_list_steps_to_collecting(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
         """A D1 list published with a FUTURE 'Offers close by' deadline, awarded then
-        unawarded, steps back to COLLECTING and re-advertises its supply — NOT bid_out.
+        unawarded, steps back to COLLECTING — NOT bid_out.
 
         Findings #1/#3: once Phase 5 preserves a create-set future ``close_at`` through
         publish, a truthy ``close_at`` is no longer proof the posting window was closed.
         The window here never closed (its deadline is still in the future), so reversing
-        the award must re-open the list to ``collecting`` and re-mirror its live supply —
-        not strand it in ``bid_out`` with its mirror retired.
+        the award must re-open the list to ``collecting`` — not strand it in ``bid_out``.
         """
         from datetime import datetime, timedelta
 
@@ -661,13 +663,11 @@ class TestUnawardOfferService:
         excess_service.award_offer(db_session, offer.id, owner)
         db_session.refresh(excess_list)
         assert excess_list.status == ExcessListStatus.AWARDED  # precondition
-        assert _customer_excess_sightings(db_session, excess_list.company_id) == []  # retired on award
 
         excess_service.unaward_offer(db_session, offer.id, owner)
 
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.COLLECTING  # window still open → re-advertise
-        assert len(_customer_excess_sightings(db_session, excess_list.company_id)) == 1  # re-mirrored
+        assert excess_list.status == ExcessListStatus.COLLECTING  # window still open
 
     def test_unaward_by_non_owner_forbidden(
         self,

@@ -2,7 +2,7 @@
 handling.
 
 Verifies that:
-- Delete and OneDrive-link endpoints use get_valid_token (not user.access_token)
+- Delete endpoints use get_valid_token (not user.access_token)
 - Expired tokens (get_valid_token returns None) yield 401
 - Graph API 401/403 responses are properly surfaced to the caller
 
@@ -201,71 +201,3 @@ class TestDeleteRequirementAttachment:
             data = resp.json()
             assert data["ok"] is True
             assert "warning" in data
-
-
-# ── OneDrive Link Endpoint ───────────────────────────────────────────
-
-
-class TestAttachFromOneDrive:
-    """POST /api/requisitions/{req_id}/attachments/onedrive."""
-
-    def test_uses_refreshed_token(self, client, test_requisition, db_session):
-        """OneDrive link endpoint must use get_valid_token, not user.access_token."""
-        mock_item = {
-            "id": "od-123",
-            "name": "linked.pdf",
-            "webUrl": "https://od.example.com/linked.pdf",
-            "file": {"mimeType": "application/pdf"},
-            "size": 4096,
-        }
-        with (
-            _patch_valid_token("refreshed-link-token") as mock_gvt,
-            patch(
-                "app.utils.graph_client.GraphClient",
-            ) as MockGC,
-        ):
-            gc_instance = MockGC.return_value
-            gc_instance.get_json = AsyncMock(return_value=mock_item)
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-123"},
-            )
-            assert resp.status_code == 200
-            assert resp.json()["file_name"] == "linked.pdf"
-            mock_gvt.assert_awaited_once()
-            # GraphClient should have been constructed with the refreshed token
-            MockGC.assert_called_once_with("refreshed-link-token")
-
-    def test_expired_token_returns_401(self, client, test_requisition):
-        """When get_valid_token returns None, endpoint must return 401."""
-        with _patch_valid_token(None):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-123"},
-            )
-            assert resp.status_code == 401
-            assert "token expired" in resp.json()["error"].lower()
-
-    @pytest.mark.parametrize(
-        "error_code,expected_status",
-        [
-            pytest.param("InvalidAuthenticationToken", 401, id="auth_error"),
-            pytest.param("accessDenied", 403, id="access_denied"),
-        ],
-    )
-    def test_graph_error_surfaced(self, client, test_requisition, error_code, expected_status):
-        """Graph error codes (auth/access-denied) must map to the right HTTP status."""
-        error_response = {"error": {"code": error_code, "message": "denied"}}
-        with (
-            _patch_valid_token("some-token"),
-            patch(
-                "app.utils.graph_client.GraphClient",
-            ) as MockGC,
-        ):
-            gc_instance = MockGC.return_value
-            gc_instance.get_json = AsyncMock(return_value=error_response)
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-123"},
-            )
-            assert resp.status_code == expected_status

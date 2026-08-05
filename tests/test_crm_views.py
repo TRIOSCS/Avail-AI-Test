@@ -82,16 +82,28 @@ class TestCRMShell:
             pytest.param("Vendors", id="vendors_tab"),
             pytest.param("Activity", id="activity_tab"),
             pytest.param("/v2/partials/crm/scorecard", id="activity_tab_route"),
+            pytest.param("Prospecting", id="prospecting_lens_tab"),
+            pytest.param("/v2/partials/prospecting", id="prospecting_lens_route"),
             pytest.param('id="crm-tab-content"', id="tab_content_container"),
         ],
     )
     def test_crm_shell_renders_element(self, client: TestClient, snippet: str):
         """Shell renders the tab buttons (incl.
 
-        the Activity scorecard tab) and the #crm-tab-content container.
+        the Activity scorecard tab and the W2 Prospecting lens — spec §4/§5.4) and the
+        #crm-tab-content container.
         """
         resp = client.get("/v2/partials/crm/shell")
         assert snippet in resp.text
+
+    def test_prospecting_lens_hidden_without_access(self, client: TestClient, db_session: Session, test_user: User):
+        """A user with PROSPECTING revoked gets no Prospecting tab (same gate the
+        removed nav item used)."""
+        test_user.access_overrides = {"prospecting": False}
+        db_session.commit()
+        resp = client.get("/v2/partials/crm/shell")
+        assert resp.status_code == 200
+        assert "Prospecting" not in resp.text
 
 
 class TestCRMFullPage:

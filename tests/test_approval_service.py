@@ -208,13 +208,14 @@ def test_decide_records_recipient_decision(db_session, prepayment_request_with_t
 
 
 def test_decide_enqueues_outbox_and_event(db_session, prepayment_request_with_two_recipients, mike):
-    """Two 'decided' outbox rows (in_app + email) and an audit event on resolution."""
+    """One 'decided' email outbox row and an audit event on resolution (the write-only
+    in_app channel was deleted, W2.9/§5.5)."""
     req = prepayment_request_with_two_recipients
     decide(db_session, req.id, mike, "approve")
 
     outbox = db_session.execute(select(ApprovalOutbox).where(ApprovalOutbox.request_id == req.id)).scalars().all()
-    assert len(outbox) == 2
-    assert {o.channel for o in outbox} == {"in_app", "email"}
+    assert len(outbox) == 1
+    assert {o.channel for o in outbox} == {"email"}
     assert all((o.payload or {}).get("event_type") == "decided" for o in outbox)
 
     events = db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == req.id)).scalars().all()

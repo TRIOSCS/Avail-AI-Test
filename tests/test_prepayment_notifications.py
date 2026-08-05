@@ -524,11 +524,10 @@ async def test_voided_card_says_do_not_wire(db_session: Session, approved_prepay
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# schedule_prepayment_notify — cross-thread fallback (the P2.7 deferred-sweep bug)
+# schedule_prepayment_notify — cross-thread fallback
 #
-# run_deferred_startup_backfills (app/startup.py) runs the whole
-# _complete_reverted_active_plans -> check_completion -> _complete_plan ->
-# _cancel_open_prepayment_requests_for_plan chain inside asyncio.to_thread — a worker
+# Sync callers (threadpool-run routes / sync services driving check_completion ->
+# _complete_plan -> _cancel_open_prepayment_requests_for_plan) run on a worker
 # thread with no running loop of its own. Before the fix, schedule_prepayment_notify's
 # get_running_loop() always missed there and coro.close()'d the DO-NOT-WIRE stand-down.
 # ═══════════════════════════════════════════════════════════════════════════════

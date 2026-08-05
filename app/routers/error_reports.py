@@ -440,7 +440,6 @@ async def list_error_reports(
     }
 
 
-@router.get("/api/error-reports/{report_id}")
 @router.get("/api/trouble-tickets/{report_id}")
 async def get_error_report(
     report_id: int,
@@ -588,7 +587,6 @@ async def analyze_tickets(
     )
 
 
-@router.patch("/api/error-reports/{report_id}")
 @router.patch("/api/trouble-tickets/{report_id}")
 async def update_ticket(
     report_id: int,
