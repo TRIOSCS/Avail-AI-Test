@@ -458,14 +458,6 @@ templates.env.globals["can_verify_po_line"] = can_verify_po_line
 # non-owner or a line without a live PO gets no button instead of a 404/400 on submit).
 templates.env.globals["can_request_prepayment"] = can_request_prepayment
 
-# QP section review rights (Phase 3 decision C): the QP Sales/Purchasing "Mark Reviewed"
-# controls hide using the SAME per-user predicates toggle_section_reviewed enforces on the
-# POST (reusing the can_approve_qp_sales / can_approve_qp_purchasing columns).
-from .dependencies import can_review_qp_purchasing_section, can_review_qp_sales_section  # noqa: E402
-
-templates.env.globals["can_review_qp_sales_section"] = can_review_qp_sales_section
-templates.env.globals["can_review_qp_purchasing_section"] = can_review_qp_purchasing_section
-
 # Stale-edit guard (Approvals Workspace D5): edit forms embed the SAME token
 # ensure_not_stale checks on the POST — {{ stale_token(obj) }} in a hidden
 # expected_updated_at input, single source of truth in services/stale_guard.py.

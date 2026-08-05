@@ -108,9 +108,10 @@ class QualityPlan(Base):
     purchasing_sn_previously_received = Column(Boolean, nullable=True)  # serials previously received?
     purchasing_serial_numbers = Column(Text, nullable=True)  # serial numbers on this PO
 
-    # ── Section reviewed-at/by stamps (set by the buyer's Mark-Reviewed toggle — a
-    # lightweight per-section fold via toggle_section_reviewed, NOT an approver gate;
-    # decision C). reviewed_by_id records who last marked the section reviewed.
+    # ── Section reviewed-at/by stamps — HISTORICAL (W3.7 dropped the Mark-Reviewed
+    # ceremony; section locking now rides qp_workspace.can_edit_qp_section). Nothing
+    # writes or gates on these anymore; the columns stay for existing stamped rows
+    # (vestigial, like BuyPlan.auto_approved).
     sales_section_reviewed_at = Column(UTCDateTime, nullable=True)
     sales_section_reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     purchasing_section_reviewed_at = Column(UTCDateTime, nullable=True)

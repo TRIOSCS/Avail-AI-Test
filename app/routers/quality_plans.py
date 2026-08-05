@@ -2,17 +2,18 @@
 
 Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-create the QP
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
-         partial), the QP section-review toggles POST /v2/qp/{id}/sales/review +
-         /purchasing/review (mark|unmark a section reviewed — decision C's lightweight
-         fold), and the QP Phase C2b native-section editors: PATCH /v2/qp/{id}/sales +
+         partial), and the QP Phase C2b native-section editors: PATCH /v2/qp/{id}/sales +
          /purchasing (inline field edit → refreshed section partial), serial CRUD
          (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]), and FRU pin/unpin (POST/DELETE
-         /v2/qp/{id}/fru[/{lookup_id}]). All return the refreshed partial. Thin router:
-         all business logic lives in app.services.quality_plan_service.
+         /v2/qp/{id}/fru[/{lookup_id}]). All return the refreshed partial. Section
+         editability rides the ONE lock matrix (qp_workspace.can_edit_qp_section) —
+         the Mark-Reviewed toggles and their reviewed-stamp lock were dropped in W3.7.
+         Thin router: business logic lives in app.services.quality_plan_service.
 
 Called by: app.main (router registration).
 Depends on: app.services.quality_plan_service (validate_complete, validate_section,
-            toggle_section_reviewed, create_qp, IncompleteQPError),
+            create_qp),
+            app.services.qp_workspace (can_edit_qp_section — the lock matrix),
             app.models.quality_plan (QualityPlan, QpSerialEntry, QpFruLookup),
             app.models.buy_plan (BuyPlan, BuyPlanLine),
             app.models.approvals (ApprovalRequest), app.models.fru_link (FruLink),
@@ -38,10 +39,9 @@ from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
 from ..models.quality_plan import QpFruLookup, QpSerialEntry, QualityPlan
 from ..models.quotes import Quote
+from ..services.qp_workspace import can_edit_qp_section
 from ..services.quality_plan_service import (
-    IncompleteQPError,
     create_qp,
-    toggle_section_reviewed,
     validate_complete,
     validate_section,
 )
@@ -154,10 +154,9 @@ def _qp_detail_response(
     """Build and render the QP detail partial.
 
     Loads the linked BuyPlan with its lines (eager), computes completeness errors for
-    inline display, and renders qp/detail.html. The Sales/Purchasing sections carry
-    their own Mark-Reviewed toggle (decision C — no approval gate); the Buy-Plan and
-    Prepayment approval-request context is still resolved for their read-only status
-    chips.
+    inline display, and renders qp/detail.html. Sales/Purchasing editability comes from
+    the ONE lock matrix (can_edit_qp_section — W3.7); the Buy-Plan and Prepayment
+    approval-request context is still resolved for their read-only status chips.
     """
     bp = (
         db.get(
@@ -189,6 +188,9 @@ def _qp_detail_response(
         "fru_rows": _fru_rows(db, qp),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
+        # ONE lock matrix (W3.7): the same predicates the PATCH routes enforce.
+        "can_edit_qp_sales": can_edit_qp_section(user, bp, "sales"),
+        "can_edit_qp_purchasing": can_edit_qp_section(user, bp, "purchasing"),
     }
     return template_response("htmx/partials/qp/detail.html", ctx)
 
@@ -306,76 +308,11 @@ def qp_detail(
     return _qp_detail_response(request, user, db, qp)
 
 
-def _review_section_response(
-    request: Request, qp_id: int, gate_type: str, action: str, db: Session, user
-) -> HTMLResponse:
-    """Mark|unmark a QP section reviewed and refresh the QP detail.
-
-    On IncompleteQPError (a required section field is blank on a mark) nothing is
-    stamped: re-render so the inline section_errors grid shows the missing fields and
-    keeps the Mark-Reviewed button disabled. PermissionError → 403 (no review right); a
-    concurrent delete / bad action (ValueError) → 404. Shared by the sales and purchasing
-    review endpoints.
-    """
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise HTTPException(status_code=404, detail="Quality plan not found")
-    _require_qp_access(db, user, qp)
-
-    try:
-        toggle_section_reviewed(db, qp_id, gate_type, action, user)
-        db.commit()
-    except IncompleteQPError:
-        # Section incomplete — nothing stamped. Re-render; the server-driven
-        # section_errors grid shows the missing fields and keeps the button disabled.
-        db.rollback()
-    except PermissionError as exc:
-        db.rollback()
-        raise HTTPException(status_code=403, detail="Section review right required") from exc
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=404, detail="Quality plan not found") from exc
-
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise HTTPException(status_code=404, detail="Quality plan not found")
-
-    return _qp_detail_response(request, user, db, qp)
-
-
-@router.post("/v2/qp/{qp_id}/sales/review", response_class=HTMLResponse)
-def qp_review_sales(
-    request: Request,
-    qp_id: int,
-    action: str = Form(...),
-    db: Session = Depends(get_db),
-    user=Depends(require_user),
-) -> HTMLResponse:
-    """Mark|unmark the QP Sales section reviewed (decision C lightweight fold).
-
-    Refreshes the detail partial. No review right → 403; incomplete section → re-render
-    with inline errors, never a 500.
-    """
-    return _review_section_response(request, qp_id, ApprovalGateType.QP_SALES, action, db, user)
-
-
-@router.post("/v2/qp/{qp_id}/purchasing/review", response_class=HTMLResponse)
-def qp_review_purchasing(
-    request: Request,
-    qp_id: int,
-    action: str = Form(...),
-    db: Session = Depends(get_db),
-    user=Depends(require_user),
-) -> HTMLResponse:
-    """Mark|unmark the QP Purchasing section reviewed (decision C lightweight fold).
-
-    Refreshes the detail partial. No review right → 403; incomplete section → re-render
-    with inline errors, never a 500.
-    """
-    return _review_section_response(request, qp_id, ApprovalGateType.QP_PURCHASING, action, db, user)
-
-
 # ── C2b: native-section editors ──────────────────────────────────────────────────
+# W3.7 dropped the Mark-Reviewed toggles (POST /v2/qp/{id}/sales/review +
+# /purchasing/review) and their reviewed-stamp lock: section editability now rides
+# the ONE lock matrix (qp_workspace.can_edit_qp_section). The reviewed_* stamp
+# columns stay on the model as historical data; nothing writes or gates on them.
 
 
 def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
@@ -400,13 +337,6 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
     return qp
 
 
-def _section_approved(qp: QualityPlan, gate_type: str) -> bool:
-    """True when the given section already carries a reviewed-at stamp (read-only)."""
-    if str(gate_type) == "qp_sales":
-        return qp.sales_section_reviewed_at is not None
-    return qp.purchasing_section_reviewed_at is not None
-
-
 def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
     """Render the refreshed Sales section partial."""
     return template_response(
@@ -416,6 +346,7 @@ def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) 
             "user": user,
             "qp": qp,
             "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
+            "can_edit_qp_sales": can_edit_qp_section(user, qp.buy_plan, "sales"),
         },
     )
 
@@ -429,6 +360,7 @@ def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, u
             "user": user,
             "qp": qp,
             "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
+            "can_edit_qp_purchasing": can_edit_qp_section(user, qp.buy_plan, "purchasing"),
         },
     )
 
@@ -459,16 +391,19 @@ async def qp_patch_sales(
 ) -> HTMLResponse:
     """Inline-edit the Sales section fields → refreshed Sales section partial.
 
-    A no-op once the Sales section is approved (read-only). Only the whitelisted
-    _SALES_FIELDS are written, so a stray form key can never set an arbitrary column.
+    403 when the lock matrix says the section is not editable at the plan's current
+    stage (can_edit_qp_section — the SAME predicate the workspace pane enforces). Only
+    the whitelisted _SALES_FIELDS are written, so a stray form key can never set an
+    arbitrary column.
     """
     qp = _load_qp_for_edit(db, qp_id, user)
-    if not _section_approved(qp, ApprovalGateType.QP_SALES):
-        form = await request.form()
-        for field, kind in _SALES_FIELDS.items():
-            if field in form:
-                setattr(qp, field, _coerce(kind, form.get(field)))
-        db.commit()
+    if not can_edit_qp_section(user, qp.buy_plan, "sales"):
+        raise HTTPException(status_code=403, detail="Quality sales section is locked at this stage")
+    form = await request.form()
+    for field, kind in _SALES_FIELDS.items():
+        if field in form:
+            setattr(qp, field, _coerce(kind, form.get(field)))
+    db.commit()
     qp = _load_qp_for_edit(db, qp_id, user)
     return _render_sales_section(request, db, qp, user)
 
@@ -482,16 +417,18 @@ async def qp_patch_purchasing(
 ) -> HTMLResponse:
     """Inline-edit the Purchasing section fields → refreshed Purchasing section partial.
 
-    A no-op once the Purchasing section is approved (read-only). Only the whitelisted
-    _PURCHASING_FIELDS are written.
+    403 when the lock matrix says the section is not editable at the plan's current
+    stage (can_edit_qp_section — editable only in the plan's ACTIVE / confirm-PO
+    window). Only the whitelisted _PURCHASING_FIELDS are written.
     """
     qp = _load_qp_for_edit(db, qp_id, user)
-    if not _section_approved(qp, ApprovalGateType.QP_PURCHASING):
-        form = await request.form()
-        for field, kind in _PURCHASING_FIELDS.items():
-            if field in form:
-                setattr(qp, field, _coerce(kind, form.get(field)))
-        db.commit()
+    if not can_edit_qp_section(user, qp.buy_plan, "purchasing"):
+        raise HTTPException(status_code=403, detail="Quality purchasing section is locked at this stage")
+    form = await request.form()
+    for field, kind in _PURCHASING_FIELDS.items():
+        if field in form:
+            setattr(qp, field, _coerce(kind, form.get(field)))
+    db.commit()
     qp = _load_qp_for_edit(db, qp_id, user)
     return _render_purchasing_section(request, db, qp, user)
 

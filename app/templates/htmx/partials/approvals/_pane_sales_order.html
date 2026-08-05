@@ -2,8 +2,9 @@
   approvals/_pane_sales_order.html — the SO/BP detail pane (both lenses, one anatomy).
   Spec §8, top to bottom: header (customer · SO# copy chip · order-type badge · status)
   → APPROVAL BLOCK ("Awaiting your approval" + Approve/Reject when pending & decidable;
-  the "Approved by X · date" stamp after) → Quality — sales section (collapsible once
-  reviewed; links out to the QP serial/FRU page — spec §5.2 Decision E) → lines →
+  the "Approved by X · date" stamp after) → Quality — sales section (collapsible;
+  starts collapsed once the lock matrix closes editing — W3.7 can_edit_qp_sales;
+  links out to the QP serial/FRU page — spec §5.2 Decision E) → lines →
   PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
   Approve is reachable from BOTH the Sales Orders and Buy Plans tabs — same object,
   same single approval. Decide posts the EXISTING approve route with
@@ -120,9 +121,10 @@
   {% endif %}
 
   {# ── Quality — sales section (spec §4: the QP SALES answers live on the SO; always
-       present, collapsible once reviewed). Inline editing (2.1): the display grid is
-       the "cell display"; Edit swaps in the form (the parts cell_display→cell_edit
-       shape, one section-sized cell) — Save posts qp-sales, stale-guarded + audited. #}
+       present, starts collapsed once the lock matrix closes editing — W3.7).
+       Inline editing (2.1): the display grid is the "cell display"; Edit swaps in the
+       form (the parts cell_display→cell_edit shape, one section-sized cell) — Save
+       posts qp-sales, stale-guarded + audited. #}
   {% macro qps_text(name, label, value) %}
   <label class="block min-w-0">
     <span class="text-[11px] uppercase tracking-wide text-gray-400">{{ label }}</span>
@@ -140,12 +142,11 @@
   </label>
   {% endmacro %}
   <div class="rounded-lg border border-line-base bg-white"
-       x-data="{ qpOpen: {{ 'false' if qp and qp.sales_section_reviewed_at else 'true' }}, qpEdit: false }">
+       x-data="{ qpOpen: {{ 'true' if can_edit_qp_sales else 'false' }}, qpEdit: false }">
     <button type="button" @click="qpOpen = !qpOpen"
             class="w-full flex items-center justify-between px-3 py-2 text-left">
       <span class="text-sm font-semibold text-gray-800">Quality — sales section</span>
       <span class="flex items-center gap-2">
-        {% if qp and qp.sales_section_reviewed_at %}<span class="text-[11px] text-emerald-600 font-medium">Reviewed</span>{% endif %}
         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="qpOpen && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </span>
     </button>

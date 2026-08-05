@@ -859,7 +859,8 @@ class ActivityType(StrEnum):
     # Per-PO (buy-plan line) sign-off decisions — written by verify_po (Phase 3).
     PO_LINE_VERIFIED = "po_line_verified"  # 16 chars — fits String(20)
     PO_LINE_REJECTED = "po_line_rejected"  # 16 chars — fits String(20)
-    # QP section review mark/unmark — written by toggle_section_reviewed (Phase 3 QP fold).
+    # QP section review mark/unmark — HISTORICAL (W3.7 dropped the Mark-Reviewed
+    # ceremony; nothing writes this anymore — kept so old activity rows still label).
     QP_SECTION_REVIEWED = "qp_section_reviewed"  # 19 chars — fits String(20)
     # Offer / quote lifecycle
     OFFER_PENDING_REVIEW = "offer_pending_review"  # exactly 20 chars

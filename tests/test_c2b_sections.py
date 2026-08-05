@@ -1,10 +1,12 @@
 """test_c2b_sections.py — QP Phase C2b: native Sales/Purchasing sections + children.
 
-Covers the C2b contract (the engine + section gates are already proven in C2a):
+Covers the C2b contract:
   - _validate_sales_section / _validate_purchasing_section flag a blank SO#/PO# (and the
     other QC-required fields); a complete section validates clean.
-  - toggle_section_reviewed blocks a mark on an incomplete section (IncompleteQPError,
-    nothing stamped) and stamps reviewed_at/by once complete; unmark clears the stamp.
+  - the PATCH section editors write whitelisted fields under the ONE lock matrix
+    (W3.7: sales edits on a DRAFT plan, purchasing edits only on an ACTIVE plan;
+    a locked stage → 403 and no write). The matrix itself is pinned in
+    tests/test_qp_lock_matrix.py.
   - serial-entry create/delete via the router endpoints (and the CASCADE child relation).
   - FRU pin resolves fru_norm + the (qp_id, fru_norm) unique constraint makes a re-pin a
     no-op; unpin removes it. The FRU section live-joins FruLink by fru_norm.
@@ -32,25 +34,21 @@ from app.models.quality_plan import QpFruLookup, QpSerialEntry, QualityPlan
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.services.quality_plan_service import (
-    IncompleteQPError,
     _validate_purchasing_section,
     _validate_sales_section,
-    toggle_section_reviewed,
     validate_section,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
-def _make_user(db: Session, *, can_approve_qp_sales: bool = False, can_approve_qp_purchasing: bool = False) -> User:
+def _make_user(db: Session) -> User:
     u = User(
         email=f"c2b-{uuid.uuid4().hex[:8]}@test.com",
         name="C2b User",
         role="admin",
         azure_id=f"azure-c2b-{uuid.uuid4().hex[:8]}",
         is_active=True,
-        can_approve_qp_sales=can_approve_qp_sales,
-        can_approve_qp_purchasing=can_approve_qp_purchasing,
         created_at=datetime.now(UTC),
     )
     db.add(u)
@@ -130,52 +128,6 @@ def test_complete_sections_validate_clean(db_session: Session) -> None:
     assert validate_section(qp, ApprovalGateType.QP_PURCHASING) == []
 
 
-# ── toggle_section_reviewed: completeness gate + stamps ───────────────────
-
-
-def test_mark_incomplete_sales_raises_and_stamps_nothing(db_session: Session) -> None:
-    """A mark on an incomplete Sales section raises IncompleteQPError, stamps
-    nothing."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer)  # not filled
-    with pytest.raises(IncompleteQPError):
-        toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None
-
-
-def test_mark_complete_sales_stamps_reviewed(db_session: Session) -> None:
-    """A complete Sales section marks reviewed (reviewed_at + reviewed_by set)."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer, fill_sales=True)
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is not None
-    assert qp.sales_section_reviewed_by_id == reviewer.id
-    assert qp.purchasing_section_reviewed_at is None  # unaffected
-
-
-def test_mark_purchasing_stamps_reviewed(db_session: Session) -> None:
-    """Marking the Purchasing section sets purchasing_section_reviewed_at."""
-    reviewer = _make_user(db_session, can_approve_qp_purchasing=True)
-    qp = _make_qp(db_session, reviewer, fill_purchasing=True)
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_PURCHASING, "mark", reviewer)
-    db_session.refresh(qp)
-    assert qp.purchasing_section_reviewed_at is not None
-    assert qp.purchasing_section_reviewed_by_id == reviewer.id
-
-
-def test_unmark_clears_reviewed_stamp(db_session: Session) -> None:
-    """Unmark clears the section stamp so the form re-opens for editing."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer, fill_sales=True)
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "unmark", reviewer)
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None
-    assert qp.sales_section_reviewed_by_id is None
-
-
 # ── Router client fixture ─────────────────────────────────────────────────
 
 
@@ -186,7 +138,7 @@ def qp_client(db_session: Session):
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_qp_sales=True, can_approve_qp_purchasing=True)
+    owner = _make_user(db_session)
     qp = _make_qp(db_session, owner, fill_sales=True, fill_purchasing=True)
     db_session.commit()
 
@@ -202,11 +154,14 @@ def qp_client(db_session: Session):
             app.dependency_overrides.pop(dep, None)
 
 
-# ── PATCH section editors ─────────────────────────────────────────────────
+# ── PATCH section editors (under the W3.7 lock matrix) ───────────────────
 
 
 def test_patch_sales_updates_field(qp_client, db_session: Session) -> None:
-    """PATCH /v2/qp/{id}/sales writes the whitelisted field and returns the partial."""
+    """PATCH /v2/qp/{id}/sales writes the whitelisted field and returns the partial.
+
+    The fixture plan is DRAFT and the owner is an admin — sales is open per the matrix.
+    """
     client, _owner, qp = qp_client
     r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "Refurbished"})
     assert r.status_code == 200
@@ -214,13 +169,39 @@ def test_patch_sales_updates_field(qp_client, db_session: Session) -> None:
     assert qp.sales_condition == "Refurbished"
 
 
-def test_patch_purchasing_updates_field(qp_client, db_session: Session) -> None:
-    """PATCH /v2/qp/{id}/purchasing writes the field and returns the partial."""
+def test_patch_purchasing_updates_field_on_active_plan(qp_client, db_session: Session) -> None:
+    """PATCH /v2/qp/{id}/purchasing writes the field once the plan is ACTIVE.
+
+    Purchasing only opens in the plan's ACTIVE (confirm-PO) window per the matrix.
+    """
     client, _owner, qp = qp_client
+    qp.buy_plan.status = BuyPlanStatus.ACTIVE.value
+    db_session.commit()
     r = client.patch(f"/v2/qp/{qp.id}/purchasing", data={"purchasing_packaging": "ESD bag"})
     assert r.status_code == 200
     db_session.refresh(qp)
     assert qp.purchasing_packaging == "ESD bag"
+
+
+def test_patch_sales_locked_on_active_plan_403(qp_client, db_session: Session) -> None:
+    """PATCH sales on an ACTIVE plan → 403 (matrix locks sales past pending), no
+    write."""
+    client, _owner, qp = qp_client
+    qp.buy_plan.status = BuyPlanStatus.ACTIVE.value
+    db_session.commit()
+    r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "Refurbished"})
+    assert r.status_code == 403
+    db_session.refresh(qp)
+    assert qp.sales_condition == "New"  # untouched
+
+
+def test_patch_purchasing_locked_on_draft_plan_403(qp_client, db_session: Session) -> None:
+    """PATCH purchasing on a DRAFT plan → 403 (purchasing opens only when ACTIVE)."""
+    client, _owner, qp = qp_client  # fixture plan is DRAFT
+    r = client.patch(f"/v2/qp/{qp.id}/purchasing", data={"purchasing_packaging": "ESD bag"})
+    assert r.status_code == 403
+    db_session.refresh(qp)
+    assert qp.purchasing_packaging is None  # untouched
 
 
 # ── Serial CRUD ───────────────────────────────────────────────────────────
@@ -325,13 +306,13 @@ def test_detail_renders_all_section_partials(qp_client) -> None:
         assert marker in r.text
 
 
-def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> None:
-    """The Sales submit button is disabled while required fields are missing."""
+def test_incomplete_section_errors_render_inline(db_session: Session) -> None:
+    """The detail view lists the still-missing required Sales fields inline."""
     from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
 
-    owner = _make_user(db_session, can_approve_qp_sales=True)
+    owner = _make_user(db_session)
     qp = _make_qp(db_session, owner)  # incomplete
     db_session.commit()
 
@@ -349,44 +330,3 @@ def test_submit_button_disabled_when_section_incomplete(db_session: Session) -> 
 
     assert r.status_code == 200
     assert "Sales Order # is required" in r.text
-
-
-# ── Mark-Reviewed toggle via the router endpoints ─────────────────────────────
-
-
-def test_mark_reviewed_endpoint_locks_section(qp_client, db_session: Session) -> None:
-    """POST /v2/qp/{id}/sales/review action=mark stamps the section reviewed and the
-    refreshed detail renders it read-only with an Unmark control."""
-    client, _owner, qp = qp_client
-    r = client.post(f"/v2/qp/{qp.id}/sales/review", data={"action": "mark"})
-    assert r.status_code == 200
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is not None
-    assert "Unmark Reviewed" in r.text
-
-
-def test_review_endpoint_requires_right_returns_403(db_session: Session) -> None:
-    """A user WITHOUT the Sales review right posting a mark gets 403 (not a 500)."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    owner = _make_user(db_session)  # no review right
-    qp = _make_qp(db_session, owner, fill_sales=True)
-    db_session.commit()
-
-    def _db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = _db
-    app.dependency_overrides[require_user] = lambda: owner
-    try:
-        client = TestClient(app, raise_server_exceptions=True)
-        r = client.post(f"/v2/qp/{qp.id}/sales/review", data={"action": "mark"})
-    finally:
-        for dep in (get_db, require_user):
-            app.dependency_overrides.pop(dep, None)
-
-    assert r.status_code == 403
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None

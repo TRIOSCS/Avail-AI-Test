@@ -1,23 +1,20 @@
-"""test_c2a_gates.py — QP section gate routing + admin grants + Mark-Reviewed fold.
+"""test_c2a_gates.py — QP section gate routing + admin grants.
 
 Covers:
   - route_request for the QP_SALES gate routes to can_approve_qp_sales holders; for the
     QP_PURCHASING gate to can_approve_qp_purchasing holders (step rule=ANY, recipients
     PENDING), with no amount check. No eligible approver raises NoEligibleApproverError.
-    (These gates still exist on the engine for any future routed use; the QP UI no longer
-    submits to them — decision C folded section sign-off into an instant Mark-Reviewed
-    toggle.)
+    (These gates still exist on the engine for any future routed use; the QP UI no
+    longer submits to them — W3.7 dropped the Mark-Reviewed ceremony outright, and
+    section locking now rides qp_workspace.can_edit_qp_section, pinned in
+    tests/test_qp_lock_matrix.py.)
   - the deal-level PURCHASE_ORDER gate routes to can_approve_purchase_orders holders,
     filtered by their optional dollar limit.
   - the admin toggle endpoints flip the respective can_approve_* column + write an audit.
-  - toggle_section_reviewed (decision C): mark stamps reviewed_at/by + logs an activity,
-    unmark clears both, an incomplete section blocks the mark, and the section review
-    right is required.
 
 Called by: pytest
 Depends on: conftest (db_session), app.services.approvals.routing,
-            app.services.quality_plan_service, app.models.{approvals,auth,quality_plan,
-            buy_plan,quotes,sourcing}, app.constants.
+            app.models.{approvals,auth}, app.constants.
 """
 
 import uuid
@@ -25,26 +22,18 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants import (
-    ActivityType,
     ApprovalGateType,
     ApprovalRecipientStatus,
     ApprovalStepRule,
-    BuyPlanStatus,
     UserAuditAction,
 )
-from app.models import ActivityLog, UserAdminAudit
+from app.models import UserAdminAudit
 from app.models.approvals import ApprovalRequest
 from app.models.auth import User
-from app.models.buy_plan import BuyPlan
-from app.models.quality_plan import QualityPlan
-from app.models.quotes import Quote
-from app.models.sourcing import Requisition
 from app.services.approvals.routing import NoEligibleApproverError, route_request
-from app.services.quality_plan_service import IncompleteQPError, toggle_section_reviewed
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -72,64 +61,6 @@ def _make_user(
     db.add(u)
     db.flush()
     return u
-
-
-def _make_qp(db: Session, owner: User) -> QualityPlan:
-    """A QP linked to a draft buy plan (so buy_plan_id is set for activity logging).
-
-    Both the Sales and Purchasing sections are filled to their completeness gate so the
-    Mark-Reviewed path validates clean; individual tests blank a field to exercise the
-    incomplete path.
-    """
-    req = Requisition(
-        name=f"REQ-C2A-{uuid.uuid4().hex[:6]}",
-        customer_name="C2ACo",
-        status="active",
-        created_by=owner.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(req)
-    db.flush()
-
-    quote = Quote(
-        requisition_id=req.id,
-        quote_number=f"QC2A-{uuid.uuid4().hex[:8]}",
-        line_items=[],
-        status="sent",
-        created_by_id=owner.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(quote)
-    db.flush()
-
-    bp = BuyPlan(
-        requisition_id=req.id,
-        quote_id=quote.id,
-        status=BuyPlanStatus.DRAFT.value,
-        so_status="pending",
-        total_cost=1000.0,
-        sales_order_number="TSO0190738",  # canonical SO# lives on the buy plan (SP-2)
-    )
-    db.add(bp)
-    db.flush()
-
-    qp = QualityPlan(
-        buy_plan_id=bp.id,
-        created_by_id=owner.id,
-        order_type="new",
-        status="draft",
-        sales_condition="New",
-        sales_quantity=10,
-        sales_product_commodity="HDD",
-        sales_testing_required=True,
-        purchasing_po_number="PO-12345",
-        purchasing_condition="New",
-        purchasing_product_commodity="HDD",
-        purchasing_testing_required=True,
-    )
-    db.add(qp)
-    db.flush()
-    return qp
 
 
 def _make_request(db: Session, gate: ApprovalGateType) -> ApprovalRequest:
@@ -228,72 +159,6 @@ def test_route_purchase_order_no_approver_raises(db_session: Session) -> None:
     _make_user(db_session, can_approve_purchase_orders=False)
     with pytest.raises(NoEligibleApproverError):
         route_request(db_session, _make_request(db_session, ApprovalGateType.PURCHASE_ORDER))
-
-
-# ── toggle_section_reviewed: the decision-C lightweight fold ──────────────
-
-
-def test_mark_reviewed_stamps_reviewed_by_and_at(db_session: Session) -> None:
-    """Mark stamps reviewed_at + reviewed_by_id and logs one QP_SECTION_REVIEWED row."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer)
-
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is not None
-    assert qp.sales_section_reviewed_by_id == reviewer.id
-    assert qp.purchasing_section_reviewed_at is None  # unaffected
-    logs = (
-        db_session.execute(
-            select(ActivityLog).where(
-                ActivityLog.activity_type == ActivityType.QP_SECTION_REVIEWED,
-                ActivityLog.buy_plan_id == qp.buy_plan_id,
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert any("marked reviewed" in (lg.notes or "") for lg in logs)
-
-
-def test_unmark_reviewed_clears_stamp_and_reopens_form(db_session: Session) -> None:
-    """Unmark clears both reviewed stamps (re-opening the section for editing)."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer)
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-
-    toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "unmark", reviewer)
-
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None
-    assert qp.sales_section_reviewed_by_id is None
-
-
-def test_mark_reviewed_blocked_by_incomplete_section(db_session: Session) -> None:
-    """An incomplete section raises IncompleteQPError and stamps nothing."""
-    reviewer = _make_user(db_session, can_approve_qp_sales=True)
-    qp = _make_qp(db_session, reviewer)
-    qp.sales_condition = None  # blank a required Sales field
-    db_session.flush()
-
-    with pytest.raises(IncompleteQPError):
-        toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", reviewer)
-
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None
-
-
-def test_mark_reviewed_requires_review_right(db_session: Session) -> None:
-    """A user without the section review right → PermissionError, nothing stamped."""
-    no_right = _make_user(db_session, can_approve_qp_sales=False)
-    qp = _make_qp(db_session, no_right)
-
-    with pytest.raises(PermissionError):
-        toggle_section_reviewed(db_session, qp.id, ApprovalGateType.QP_SALES, "mark", no_right)
-
-    db_session.refresh(qp)
-    assert qp.sales_section_reviewed_at is None
 
 
 # ── Admin toggle endpoints flip the column ───────────────────────────────

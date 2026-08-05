@@ -1,4 +1,4 @@
-"""qp_workspace.py — Quality-plan writes for the Approvals Workspace panes.
+"""qp_workspace.py — Quality-plan writes + section locks for the Approvals Workspace.
 
 Purpose: apply_qp_purchasing folds the PO pane's QP-purchasing answers (incl. the
          AS9120B counterfeit-avoidance fields from migration 196) onto the plan's
@@ -8,19 +8,26 @@ Purpose: apply_qp_purchasing folds the PO pane's QP-purchasing answers (incl. th
          as explicit yes/no strings ('' = unanswered → untouched). Returns the QP
          plus the FieldEdit diff so the calling route can audit the save
          (field_audit.log_field_edits) without re-diffing.
+         Also home of the ONE QP section lock matrix (W3.7):
+         QP_SECTION_LOCK_MATRIX / can_edit_qp_section answer "may section X be
+         edited right now?" for BOTH the workspace panes and the standalone QP page.
 
-Called by: routers/htmx/buy_plans.py (confirm-po route), Phase 2 QP-sales route.
+Called by: routers/htmx/buy_plans.py (confirm-po route), routers/htmx/approvals_hub.py
+           (plan pane + qp-sales route), routers/quality_plans.py (standalone QP page).
 Depends on: app.models.quality_plan (QualityPlan), app.models.buy_plan,
+            app.constants (BuyPlanStatus, UserRole),
             app.services.field_audit (diff_fields).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..constants import BuyPlanStatus, UserRole
 from ..models.auth import User
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.quality_plan import QualityPlan
@@ -187,23 +194,68 @@ def apply_qp_purchasing(
     return qp, edits
 
 
-def can_edit_qp_sales(user: User, plan: BuyPlan) -> bool:
-    """Whether *user* may edit the plan's QP-sales answers NOW (spec §7 matrix).
+# ── THE one QP section lock matrix (W3.7) ────────────────────────────────────────
+# Single source of truth for "may section X be edited right now?" — consulted by the
+# workspace panes (routers/htmx/approvals_hub.py), the standalone QP page
+# (routers/quality_plans.py), and their templates. Replaces the second, parallel lock
+# the standalone page used to run off the reviewed-at stamps (Mark-Reviewed ceremony,
+# dropped in W3.7). Stage semantics, consolidated from the pre-existing workspace
+# behavior — can_edit_qp_sales + the confirm-PO stage gate — not invented:
+#   draft   → sales: owning salesperson or manager/admin; purchasing: locked
+#   pending → sales: manager/admin only (sales keeps notes, not fields); purch: locked
+#   active  → sales: locked (header frozen; line changes go through the PO stage);
+#             purchasing: open — the confirm-PO window (the same stage
+#             buyplan_workflow.confirm_po enforces line-by-line)
+#   halted / completed / cancelled / no linked plan → both locked.
+# Ownership scoping (restricted roles → own requisitions only) stays the caller's
+# 404 gate; the matrix only answers stage-level editability.
 
-    draft → the owning salesperson OR a manager/admin; pending → MANAGER/ADMIN ONLY
-    (sales keeps notes while pending, not fields); everything else → locked (active+
-    header is locked; line changes go through the PO stage). Enforced server-side by the
-    qp-sales route — the pane hides the editor with the SAME predicate.
+
+def _is_manager(user: User, plan: BuyPlan) -> bool:
+    """Manager/admin actor test shared by the matrix rules."""
+    return user.role in (UserRole.MANAGER, UserRole.ADMIN)
+
+
+def _is_owner_or_manager(user: User, plan: BuyPlan) -> bool:
+    """The plan's owning salesperson (requisition creator) or a manager/admin."""
+    req = plan.requisition
+    return _is_manager(user, plan) or bool(req and req.created_by == user.id)
+
+
+def _anyone(user: User, plan: BuyPlan) -> bool:
+    """Any authenticated user who passed the caller's ownership scope."""
+    return True
+
+
+QP_SECTION_LOCK_MATRIX: dict[str, dict[str, Callable[[User, BuyPlan], bool]]] = {
+    BuyPlanStatus.DRAFT.value: {"sales": _is_owner_or_manager},
+    BuyPlanStatus.PENDING.value: {"sales": _is_manager},
+    BuyPlanStatus.ACTIVE.value: {"purchasing": _anyone},
+}
+
+
+def can_edit_qp_section(user: User, plan: BuyPlan | None, section: str) -> bool:
+    """Whether *user* may edit the QP *section* ("sales"|"purchasing") right now.
+
+    THE lock predicate (W3.7): looks up QP_SECTION_LOCK_MATRIX by the plan's stage; a
+    stage/section pair absent from the table is locked, as is a QP with no linked plan.
+    Enforced server-side by every section write route — the templates hide the editors
+    with the SAME predicate.
     """
-    from ..constants import BuyPlanStatus, UserRole
+    if plan is None:
+        return False
+    rule = QP_SECTION_LOCK_MATRIX.get(plan.status, {}).get(section)
+    return rule is not None and rule(user, plan)
 
-    is_manager = user.role in (UserRole.MANAGER, UserRole.ADMIN)
-    if plan.status == BuyPlanStatus.DRAFT.value:
-        req = plan.requisition
-        return is_manager or bool(req and req.created_by == user.id)
-    if plan.status == BuyPlanStatus.PENDING.value:
-        return is_manager
-    return False
+
+def can_edit_qp_sales(user: User, plan: BuyPlan | None) -> bool:
+    """Matrix shorthand for the SALES section (kept for the existing call sites)."""
+    return can_edit_qp_section(user, plan, "sales")
+
+
+def can_edit_qp_purchasing(user: User, plan: BuyPlan | None) -> bool:
+    """Matrix shorthand for the PURCHASING section."""
+    return can_edit_qp_section(user, plan, "purchasing")
 
 
 def qp_sales_row(db: Session, plan: BuyPlan) -> QualityPlan | None:

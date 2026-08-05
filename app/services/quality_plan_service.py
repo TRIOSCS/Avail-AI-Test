@@ -1,4 +1,4 @@
-"""quality_plan_service.py — Business logic for creating and reviewing QualityPlan
+"""quality_plan_service.py — Business logic for creating and validating QualityPlan
 records.
 
 Purpose:
@@ -6,50 +6,23 @@ Purpose:
   - validate_complete: Return a list of human-readable error strings for any
     Phase-1 required fields that are blank/null. Empty list == ready to submit.
   - validate_section / _validate_sales_section / _validate_purchasing_section: the
-    per-section completeness gate reused by the Mark-Reviewed toggle and the router's
-    inline section-error display.
-  - toggle_section_reviewed: the decision-C lightweight per-section fold — a buyer
-    holding the section review right stamps a section reviewed (locking its form) or
-    clears the stamp (re-opening it). No second approver, instant. Replaced the retired
-    submit-for-approval gate (submit_section / _on_section_approved).
+    per-section completeness check backing the router's inline section-error display.
+
+W3.7 dropped the Mark-Reviewed ceremony (toggle_section_reviewed and its review-right
+checks): section locking now lives in the ONE matrix, qp_workspace.can_edit_qp_section.
 
 Phase-1 required fields: created_by_id (owner), order_type, buy_plan_id.
 
 Called by: app.routers.quality_plans.
 Depends on: app.models.quality_plan (QualityPlan),
-            app.services.activity_service (log_activity),
-            app.dependencies (can_review_qp_sales_section / can_review_qp_purchasing_section),
-            app.constants (QualityPlanStatus, QPOrderType, ActivityType, ApprovalGateType).
+            app.constants (QualityPlanStatus, ApprovalGateType).
 """
-
-from datetime import UTC, datetime
-from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, QualityPlanStatus
-from ..dependencies import can_review_qp_purchasing_section, can_review_qp_sales_section
+from ..constants import QualityPlanStatus
 from ..models.quality_plan import QualityPlan
-from ..services.activity_service import log_activity
-
-# Human-readable section name per gate_type, used in activity descriptions / banners.
-_SECTION_LABEL: dict[str, str] = {
-    "qp_sales": "Sales",
-    "qp_purchasing": "Purchasing",
-}
-
-
-class IncompleteQPError(Exception):
-    """Raised by submit() when validate_complete() returns a non-empty list.
-
-    Attributes:
-        missing_fields: Human-readable list of field-level error messages.
-    """
-
-    def __init__(self, missing_fields: list[str]) -> None:
-        self.missing_fields = missing_fields
-        super().__init__(f"Quality plan is incomplete: {missing_fields}")
 
 
 def create_qp(
@@ -173,95 +146,3 @@ def validate_section(qp: QualityPlan, gate_type: str) -> list[str]:
     if str(gate_type) == "qp_purchasing":
         return _validate_purchasing_section(qp)
     return []
-
-
-def _can_review_section(gate_type: str, user: Any) -> bool:
-    """True if *user* holds the review right for the given QP section gate."""
-    if gate_type == "qp_sales":
-        return can_review_qp_sales_section(user)
-    if gate_type == "qp_purchasing":
-        return can_review_qp_purchasing_section(user)
-    return False
-
-
-def toggle_section_reviewed(db: Session, qp_id: int, gate_type: str, action: str, user: Any) -> QualityPlan:
-    """Mark or unmark a QP section (Sales / Purchasing) as reviewed.
-
-    The decision-C lightweight per-section fold that replaced the retired
-    submit-for-approval gate: a buyer holding the section review right stamps the section
-    reviewed — locking its edit form — or clears the stamp, re-opening it. No second
-    approver, instant.
-
-    action="mark": validate the section is complete (IncompleteQPError otherwise — the
-        SAME completeness gate the old submit enforced), require the matching review
-        right (PermissionError otherwise), then stamp {section}_section_reviewed_at=now()
-        and {section}_section_reviewed_by_id=user.id.
-    action="unmark": require the same review right, then clear both stamps (re-opens the
-        section form).
-
-    Both branches write one ActivityLog (QP_SECTION_REVIEWED) with a mark/unmark verb —
-    replacing _on_section_approved's audit write.
-
-    Args:
-        db: SQLAlchemy session (sync, 2.0 style).
-        qp_id: PK of the QualityPlan.
-        gate_type: ApprovalGateType.QP_SALES or .QP_PURCHASING (discriminates the section).
-        action: "mark" or "unmark".
-        user: The authenticated User performing the toggle.
-
-    Returns:
-        The updated QualityPlan (flushed, not committed).
-
-    Raises:
-        ValueError: QP not found, or an unknown action / non-section gate_type.
-        IncompleteQPError: (mark only) the section is missing a required field — carries
-            the field-level error list so the router re-renders with inline errors.
-        PermissionError: *user* lacks the section's review right.
-    """
-    if action not in ("mark", "unmark"):
-        raise ValueError(f"action must be 'mark' or 'unmark', got {action!r}")
-
-    gate = str(gate_type)
-    section = _SECTION_LABEL.get(gate)
-    if section is None:
-        raise ValueError(f"gate_type must be a QP section gate, got {gate_type!r}")
-
-    qp = db.get(QualityPlan, qp_id)
-    if qp is None:
-        raise ValueError(f"QualityPlan {qp_id} not found")
-
-    # Both mark and unmark require the section's review right.
-    if not _can_review_section(gate, user):
-        raise PermissionError(f"User {getattr(user, 'id', None)} lacks the {section} section review right")
-
-    if action == "mark":
-        errors = validate_section(qp, gate_type)
-        if errors:
-            raise IncompleteQPError(errors)
-        stamp = datetime.now(UTC)
-        if gate == "qp_sales":
-            qp.sales_section_reviewed_at = stamp
-            qp.sales_section_reviewed_by_id = user.id
-        else:
-            qp.purchasing_section_reviewed_at = stamp
-            qp.purchasing_section_reviewed_by_id = user.id
-        verb = "marked reviewed"
-    else:
-        if gate == "qp_sales":
-            qp.sales_section_reviewed_at = None
-            qp.sales_section_reviewed_by_id = None
-        else:
-            qp.purchasing_section_reviewed_at = None
-            qp.purchasing_section_reviewed_by_id = None
-        verb = "unmarked reviewed"
-
-    log_activity(
-        db,
-        activity_type=ActivityType.QP_SECTION_REVIEWED,
-        user_id=user.id if user is not None else None,
-        buy_plan_id=qp.buy_plan_id,
-        description=f"Quality plan #{qp.id} {section} section {verb}",
-    )
-    db.flush()
-    logger.info("QualityPlan id={} {} section {} by user={}", qp.id, section, verb, getattr(user, "id", None))
-    return qp

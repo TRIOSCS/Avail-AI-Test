@@ -148,29 +148,6 @@ def test_qp_detail_404(client):
     assert resp.status_code == 404
 
 
-def test_qp_review_concurrent_delete_returns_404(client, db_session: Session, test_user, test_customer_site):
-    """POST review when the QP is concurrently deleted → 404, not 500.
-
-    toggle_section_reviewed raises ValueError if the QP vanished between the router's
-    existence check and the service load. The router must translate that to a 404.
-    """
-    from unittest.mock import patch
-
-    req = _make_requisition(db_session, test_user.id)
-    q = _make_quote(db_session, req.id, test_customer_site.id)
-    bp = _make_buy_plan(db_session, req.id, q.id, test_user.id)
-    qp = _make_qp(db_session, bp.id, test_user.id)
-    db_session.commit()
-
-    with patch(
-        "app.routers.quality_plans.toggle_section_reviewed",
-        side_effect=ValueError(f"QualityPlan {qp.id} not found"),
-    ):
-        resp = client.post(f"/v2/qp/{qp.id}/sales/review", data={"action": "mark"})
-
-    assert resp.status_code == 404
-
-
 def test_qp_detail_unauthenticated(unauthenticated_client):
     """GET /v2/qp/1 without auth returns 401."""
     resp = unauthenticated_client.get("/v2/qp/1")
