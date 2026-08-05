@@ -91,12 +91,23 @@ else
     log "=== RED ==="
     # W1.11b: page the admin through the same seam the prod nightly uses
     # (scripts/nightly_tests.sh → app.management.notify_nightly_status, which
-    # takes one status-line argument). The SIMPLIFICATION tag in the line tells
-    # the admin which instance failed. Guarded: a failing pager never masks the
-    # RED exit — the LAST_STATUS line above is the fallback record.
+    # takes one status-line argument). Delivery MUST run inside the PROD app
+    # container (docker compose exec, mirroring nightly_tests.sh): on the host
+    # the compose hostname "db" never resolves, and the simp container has its
+    # outbound creds deliberately blanked so it cannot deliver a Teams card.
+    # The SIMPLIFICATION tag in the line tells the admin which instance failed.
+    # Guarded: a failing pager never masks the RED exit — the LAST_STATUS line
+    # above is the fallback record.
     STATUS_LINE="$(date +%F): RED (SIMPLIFICATION nightly — see $LOG)"
-    if ! (cd "$WT" && PYTHONPATH="$WT" "$PYTHON" -m app.management.notify_nightly_status "$STATUS_LINE") >> "$LOG" 2>&1; then
-        log "ALERT DELIVERY FAILED (notify_nightly_status non-zero — see above)"
+    PROD_REPO="/root/availai"
+    APP_RUNNING="$(docker compose --project-directory "$PROD_REPO" ps -q --status running app 2>/dev/null || true)"
+    if [ -n "$APP_RUNNING" ]; then
+        docker compose --project-directory "$PROD_REPO" exec -T app \
+            python -m app.management.notify_nightly_status "$STATUS_LINE" \
+            >> "$LOG" 2>&1 \
+            || log "ALERT DELIVERY FAILED (notify_nightly_status non-zero — see above)"
+    else
+        log "ALERT NOT DELIVERED: prod app container not running (docker down?)"
     fi
 fi
 ls -t "$LOG_DIR"/nightly_*.log 2>/dev/null | tail -n +15 | xargs -r rm --

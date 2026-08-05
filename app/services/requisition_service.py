@@ -16,13 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import ActivityType, RequisitionStatus
-from ..models import Offer, Requirement, Requisition
-from ..utils.normalization import (
-    normalize_condition,
-    normalize_mpn,
-    normalize_mpn_key,
-    normalize_packaging,
-)
+from ..models import Offer, Requisition
 from .activity_service import log_activity
 
 # ---------------------------------------------------------------------------
@@ -129,36 +123,36 @@ def clone_requisition(
     db.add(new_req)
     db.flush()
 
-    # Clone requirements with MPN normalization + substitute dedup.
-    # Keep a deterministic old->new ID map to avoid collisions on duplicate MPNs.
-    req_map: dict[int, int] = {}
-    for r in source_req.requirements:
-        cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
-        seen_keys = {normalize_mpn_key(cloned_mpn)}
-        deduped_subs: list[str] = []
-        for s in r.substitutes or []:
-            ns = normalize_mpn(s) or s
-            key = normalize_mpn_key(ns)
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                deduped_subs.append(ns)
-        new_r = Requirement(
-            requisition_id=new_req.id,
-            primary_mpn=cloned_mpn,
-            normalized_mpn=normalize_mpn_key(cloned_mpn),
-            oem_pn=r.oem_pn,
-            brand=r.brand,
-            sku=r.sku,
-            target_qty=r.target_qty,
-            target_price=r.target_price,
-            substitutes=deduped_subs[:20],
-            condition=normalize_condition(r.condition) or r.condition,
-            packaging=normalize_packaging(r.packaging) or r.packaging,
-            notes=r.notes,
-        )
-        db.add(new_r)
-        db.flush()
-        req_map[r.id] = new_r.id
+    # Clone requirements through THE creation pipeline (requirement_service, spec §9):
+    # MPN display+key normalization, substitute dedup, condition/packaging vocabulary,
+    # MaterialCard resolve, tag propagation, task auto-gen, dup detection.
+    # Keep a deterministic old->new ID map to avoid collisions on duplicate MPNs
+    # (every source row has a primary_mpn, so created aligns 1:1 with the input).
+    from .requirement_service import create_requirements
+
+    source_rows = list(source_req.requirements)
+    result = create_requirements(
+        db,
+        new_req,
+        [
+            {
+                "primary_mpn": r.primary_mpn,
+                "oem_pn": r.oem_pn,
+                "brand": r.brand,
+                "sku": r.sku,
+                "target_qty": r.target_qty,
+                "target_price": r.target_price,
+                "substitutes": r.substitutes or [],
+                "condition": r.condition,
+                "packaging": r.packaging,
+                "notes": r.notes,
+            }
+            for r in source_rows
+        ],
+    )
+    skipped_idx = {s["index"] for s in result.skipped}
+    kept_rows = [r for i, r in enumerate(source_rows) if i not in skipped_idx]
+    req_map: dict[int, int] = {old.id: new.id for old, new in zip(kept_rows, result.created)}
 
     for o in source_req.offers:
         if o.status in ("active", "selected"):

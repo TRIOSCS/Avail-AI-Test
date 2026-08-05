@@ -66,6 +66,47 @@ with the deferred wave-start DB refresh + migration rerun at that moment.
 - [x] W2.13 Glossary old→new table + screen-diet cut list FINALIZED for Packet 2 (application SIGN-OFF-GATED)
 - [x] W2.A Acceptance: exactly 5 tabs + gear; deleted surfaces 404; fresh-DB drift-gate boot green; kernel E2E green → Packet 2
 
+## Wave 3 — one implementation per behavior (spec §10; build started 2026-08-05)
+
+Prior session built W3.1/2/4/5/9/10 but ended without commit or close-out;
+this session ran a 12-agent audit of the uncommitted tree, fixed the found
+gaps, and committed. Acceptance: behavior parity on the kernel walk; the
+named canonical semantics (reconfirm TTL, UI dup detection, every-deal
+approval) verified by test.
+
+- [x] W3.1 offer_service — ONE offer lifecycle (create/update/reconfirm-TTL/
+  approve/reject/mark-sold/delete + system email auto-create); all five
+  drifted doors delegate or died. Two clone-only constructors remain by
+  design (parked Proactive convert-to-win; requisition revision reference-
+  copy) — neither is an interactive door.
+- [x] W3.2 Requirement pipeline — ONE creation pipeline
+  (requirement_service) + migration 206 (condition case-fold,
+  normalized_mpn key form, packaging vocab clamp); PUT edit path aligned
+  NULL-on-unmapped; description_service key-form lookup fix; seed drift
+  fixed; dedicated unit tests incl. dup detection.
+- [ ] W3.3 Derived requisition status (replaces the stored 9-state ladder)
+- [x] W3.4 Quote builder — one implementation (combined.html; modal +
+  macros deleted)
+- [x] W3.5 RFQ composer deleted (offers/rfq.py + compose/results templates;
+  vendor-modal composer is the survivor; deletion pinned by
+  test_inventory_cleanup)
+- [ ] W3.6 Offer doors 5→2 (delete 2 AI-paste modals + review-queue page;
+  paste box in Add-offer; flagged-AI filter in Responses tab)
+- [ ] W3.7 QP single lock matrix (workspace); drop the 2 self-stamped
+  review gates (5 ceremonies → 3)
+- [ ] W3.8 Notification single-path
+- [x] W3.9 Single transition() (buyplan_state.py) + auto-approve branch
+  deleted + migration 208 (INBOUND retired; BuyPlanStatus = 6). OPEN
+  SLICE: legacy pre-engine PENDING fallback in htmx/buy_plans.py stays
+  until the owner picks backfill-vs-resubmit (4 PENDING plans on the prod
+  copy) — Packet 3 decision queue.
+- [~] W3.10 Resell status collapse 34→5 + outcome + migration 207 + bid
+  paths (2 UI doors + solicited inbound). GAP to build: outcome forward
+  writer + AWARDED→CLOSED close path (today only migration 207 backfills
+  outcome; no code path writes it going forward).
+- [ ] W3.A Acceptance: semantics tests green (TTL ✅ / dup ✅ / every-deal
+  ✅ already), kernel walk parity on the deployed W3 build → Packet 3.
+
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
 All numbers independently re-derived by a second pass before recording.
@@ -102,6 +143,37 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 - 2026-08-04: OWNER DIRECTIVE — continuous autonomous execution through Wave 4; packets delivered as reversible reports without waiting; glossary/screen-diet application + cutover remain owner-gated.
 
 - 2026-08-05 W2 SHIPPED+DEPLOYED @31457826 (~01:00 UTC): refresh rehearsal #3 (fresh prod copy → head 205), 5 tabs + gear live-verified, deleted surfaces 404, kept pages routable, scheduler 6, kernel walk 18/2 (one E2E race hardened — Edit-before-Alpine-mount, same class as openModal; app itself fine). Gate: 19,093 passed / 2 root-caused stale toolbar pins ("All contacts" parked §5.4).
+
+- 2026-08-05 W3 session 2: prior session ended mid-W3 with the whole build
+  uncommitted and no STATE section — recovered via 12-agent tree audit; gaps
+  fixed same-session; committed module-scoped per the W1 rule-3.5 relaxation.
+- 2026-08-05: Aug-5 simp nightly RED root-caused 3-way: (a) branch-suite fail
+  = W2 leftover (api.spec.ts merge probe missed by the B0 re-point; now
+  asserts the deletion), (b) kernel-walk fail = W3 spec vs W2-deployed
+  instance skew (expected mid-wave; clears at the W3 deploy), (c) W1.11b
+  pager path NEVER worked from the host (compose hostname "db" unresolvable)
+  — simp-nightly.sh now execs notify_nightly_status inside the PROD app
+  container exactly like nightly_tests.sh; the missed RED alert was
+  hand-delivered 16:37Z (3 admins, in-app + Teams).
+- 2026-08-05: availai-simp-enrichment-worker crash-loop (918 restarts since
+  the W2 deploy): its image predated migration 205 while the DB was at head —
+  the W2 deploy rebuilt only the app image (known stale-container class).
+  Fixed by retagging the app image for the worker + recreate (clean boot,
+  alembic no-op). RULE for every simp deploy: rebuild BOTH images.
+- 2026-08-05 W3: migration 206 EXTENDED with a packaging pass + the pipeline
+  clamps packaging to the 5-value chk_req_packaging vocabulary —
+  normalize_packaging's wide map also emits sightings/offers-only values
+  ('bag','box','each'), which would 500 on any fresh-built DB (real bug, not
+  test drift); live copy carries 'tape & reel'→'reel' and 'yes'→NULL.
+  Re-round-tripped 205↔head on a throwaway PG 16; frozen map verified
+  case-by-case against the app-side clamp.
+- 2026-08-05 W3: ORM gotcha — Column(default=1) fires even for an
+  EXPLICITLY-set None, so the search-picker "no quantity → NULL" design
+  silently stored 1; the pipeline re-asserts explicit NULLs post-flush
+  (defaults are INSERT-only), pinned by test.
+- 2026-08-05 W3: 5 stale test pins fixed (display-form normalized_mpn ×2,
+  display-form packaging ×2, deleted create-route 200 ×1) +
+  seed_test_data.py display-form/`condition="New"` drift; suite green after.
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)

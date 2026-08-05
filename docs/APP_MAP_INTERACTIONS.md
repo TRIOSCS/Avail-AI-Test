@@ -915,8 +915,9 @@ sightings_detail (router)
 Pending-review offers render here (Approve/Reject) — moved out of the Vendors
 panel so offers have a single home.
 
-Offer actions (all on the prefix-less sightings router) call the canonical
-crm.offers functions directly (no logic duplication) and re-render the panel:
+Offer actions (all on the prefix-less sightings router) call the ONE
+`app/services/offer_service.py` (W3 consolidation — the routes only adapt form
+input, gate essentials, and re-render the panel):
   GET  .../offer-form            modal, blank (Enter) or prefilled (Convert)
   POST .../offers                -> create_offer(...)        [Convert / Enter]
   GET  .../offers/{id}/edit-form modal prefilled from the offer
@@ -978,7 +979,8 @@ optional vendor requests.
 - `app/routers/htmx_views.py` (add/edit offer): calls `validate_essentials`; on errors,
   returns HTTP 400 with the form re-rendered.
 
-The **canonical builders** (`crm.offers.create_offer` / `update_offer`) only call
+The **canonical builders** (`offer_service.create_offer` / `update_offer` — the ONE
+offer service since W3) only call
 `apply_qualification()` to compose the note+status — they **never block**. This means
 API/AI offer ingestion (inbox monitor, email-parsed, proactive) is unaffected: those
 paths may produce `qualification_status='incomplete'` but are never rejected.
@@ -1121,11 +1123,12 @@ mutation (stateless, self-healing). O2/O3 — and the offer hook — are disable
 for different_part. **Offer-release hook (condition-aware):** an offer/email
 proof of condition X releases the matching X record AND the NULL catch-all (the
 all-conditions record is also resolved); an unknown-condition proof releases all
-active non-different_part records for the (vendor, key). The hook is invoked at
-the offer entry/save/approval sites (canonical `create_offer` incl. the sightings
-route that delegates to it, manual add-offer, the save-parsed-offers route,
-`save_freeform_offers`, pending-review approve, plus its three approval twins:
-the htmx review-queue promote, the T4→T5 API promote, and the requisition
+active non-different_part records for the (vendor, key). The hook is invoked
+inside `app/services/offer_service.py` (W3 — the ONE offer service) at the offer
+entry/save/approval sites (canonical `create_offer`, which every door reaches:
+the sightings modal, manual add-offer, and the save-parsed-offers form loop;
+plus `approve_offer`, which serves pending-review approve everywhere: the JSON
+approve, the htmx review-queue promote, and the requisition
 offers-tab review approve) after the offer persists (same transaction) —
 `release_trigger='offer_received'`; auto-created offers (inbox monitor, excess
 matching) and clone paths never release. Expired/released records render as
@@ -1203,9 +1206,11 @@ or manual clear.
 Browser POST (send RFQ)
     |
     v
-Two callers, ONE canonical send path:
-  - htmx_views.rfq_send            (requisition page; legacy scalar requisition_id)
-  - sightings.sightings_send_inquiry (bulk composer; requisition_parts_map)
+Two callers, ONE canonical send path (W3: the requisition-page rfq_send composer
+was deleted — the deal header's Send-RFQ button now opens the vendor modal):
+  - sightings.sightings_send_inquiry       (THE composer; requisition_parts_map)
+  - sightings.sightings_offer_request_send (single-vendor offer-request door;
+                                            legacy scalar requisition_id)
     |
     v
 email_service.send_batch_rfq
@@ -1243,8 +1248,9 @@ multiplicity moves to `Contact` rows — one per (requisition, vendor) pair, eac
 `parts_included` holding only that requisition's parts, all sharing the email's
 graph ids. No schema change (Contact keeps its singular `requisition_id`).
 A **legacy shim** keeps the scalar-`requisition_id` call shape byte-identical
-(one Contact per vendor, parts from the vendor group) — `htmx_views.rfq_send`
-was not touched.
+(one Contact per vendor, parts from the vendor group) — its surviving caller is
+`sightings_offer_request_send` (fold into the map shape when the offer doors
+collapse, then the shim can go).
 
 **Preview/send lockstep.** `sightings_preview_inquiry` renders the exact
 multi-token subject the send will produce — one `[ref:{id}]` per involved
@@ -1504,9 +1510,9 @@ ai_email_parser.py
     +---> DB: UPDATE vendor_responses (parsed_data, classification)
     |
     v
-ai_offer_service.py (if confidence >= 0.8)
+offer_service.create_offers_from_parsed_response (>=0.5; ACTIVE at >=0.8, else pending_review)
     |
-    +---> DB: INSERT offers (source='email_parsed')
+    +---> DB: INSERT offers (source='email_parse')
     +---> material_card_service.py --> DB: UPSERT material_cards
     +---> vendor_card update: total_responses++, avg_response_hours
     +---> activity_service.py --> DB: INSERT activity_log (inbound email)
@@ -1637,11 +1643,13 @@ Build-Quote tab (no schema change):
   `quote_report.html` from this context, so the customer PDF cannot leak a
   vendor name.
 
-**Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
-quote-builder modal is reshaped into a **Build Quote** tab on the requisition
-detail (`requisitions/detail.html` tab strip, sibling to the Quotes list tab),
-mirroring the resell **Build Bid** tab. The tab is lazy (`hx-trigger="click"`,
-explicit `hx-target="#tab-content"`) and owner/buyer-gated.
+**Build-Quote tab (the ONE quote builder — Wave 3).** The old two-panel sales
+quote-builder modal is DELETED (its shell/data/save JSON endpoints, `modal.html`,
+the `quoteBuilder` Alpine component, and the Excel export all went with it); the
+**Build Quote** tab on the requisition detail (`requisitions/detail.html` tab
+strip, sibling to the Quotes list tab) is the single flow, mirroring the resell
+**Build Bid** tab. The tab is lazy (`hx-trigger="click"`, explicit
+`hx-target="#tab-content"`) and owner/buyer-gated.
 
 ```
 Browser (Build Quote tab) ──click──> GET /v2/partials/requisitions/{id}/build-quote
@@ -1668,17 +1676,21 @@ selected requisition's lines (not one quote per req). The list bulk-bar's 2+ bra
 `htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=...', {target:'#modal-content'})`
 then `$dispatch('open-modal', {wide:true})` — into the always-present global modal. The
 `/multi*` routes are declared BEFORE `/{req_id}` in `routers/quote_builder.py` (FastAPI
-matches in order, so "multi" must win before the int path param captures it).
+matches in order, so "multi" must win before the int path param captures it). Since the
+Wave 3 consolidation the multi entry renders the SAME Build-Quote body (merged lines)
+inside a thin modal shell (`quote_builder/combined.html` → include of
+`requisitions/tabs/build_quote.html` with `is_multi`), and assembles through
+`/multi/assemble` — the old `/multi/data` + `/multi/save` JSON pair is gone.
 
 ```
 List (2+ selected) ──GET──> /v2/partials/quote-builder/multi?requisition_ids=a,b
     |   (loop get_req_for_user per id = ownership; validate_same_customer)
     |     mismatch/no-site -> quote_builder/multi_error.html (HTTP 200 honest breakdown)
-    v     ok -> quote_builder/modal.html (quoteBuilder Alpine, multiReqIds set)
-Alpine loadData() ──GET──> /multi/data (merges get_builder_data across all reqs)
-    |
-    saveQuote() ──POST──> /multi/save?requisition_ids=a,b
-        |   (looped require_requisition_access + get_req_for_user; then service core)
+    v     ok -> quote_builder/combined.html (#combined-quote-body wraps the tab body;
+    |           lines = build_quote_tab_data merged across all reqs; quoteBuilderTab Alpine)
+    "Assemble" ──POST──> /multi/assemble?requisition_ids=a,b   (selections_json form)
+        |   (looped require_requisition_access + get_req_for_user; then service core;
+        |    re-renders the merged body into #combined-quote-body — modal stays open)
         v
 save_quote_from_builder_multi -> _save_quote_from_builder_core(db, req_ids, payload, user):
     validate_same_customer (400 on mismatch) · primary = req_ids[0] (Quote.requisition_id)
@@ -1728,11 +1740,12 @@ marked sent. `QuoteSendError` (no/invalid recipient → 400; Graph error → 502
 `QuoteSendDNCBlocked` (→ 409 JSON / rose partial on htmx) are the typed failures. This fixes
 the prior S1 bug where the htmx Send button set status=SENT WITHOUT emailing.
 
-`quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
-modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
-two-panel decision flow). The list-toolbar "Build Quote" action re-points a SINGLE
-selected requisition to this tab via `?tab=build_quote` (the detail partial deep-links
-+ auto-opens it); 2+ selections keep the cross-req bulk modal (`/quote-builder/multi`).
+`quoteBuilderTab` (in `htmx_app.js`) is the ONE builder component — `(sell-cost)/sell`
+margin math + blended rollup as a single inline form (the modal's two-panel
+`quoteBuilder` component is deleted). The list-toolbar "Build Quote" action re-points a
+SINGLE selected requisition to this tab via `?tab=build_quote` (the detail partial
+deep-links + auto-opens it); 2+ selections open the combined builder in the modal
+(`/quote-builder/multi`), which reuses this same component.
 
 **Per-line offer selection (Chunk B2).** Each line with 2+ ACTIVE offers shows a
 compact per-line `<select>` (progressive disclosure; default = best/cheapest) so the
@@ -1788,7 +1801,14 @@ buyplan_builder.py
     v
 buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/approve/reject/
                     halt/resume/reset/cancel + completion; buyplan_lines.py owns the per-line
-                    claim/flag/resolve/resource ops; buyplan_po.py owns PO confirm/verify)
+                    claim/flag/resolve/resource ops; buyplan_po.py owns PO confirm/verify;
+                    buyplan_state.py [W3] is the SINGLE enforced transition table + writer for
+                    BuyPlan.status — every status write routes through transition() against
+                    ALLOWED_TRANSITIONS, mirroring requisition_state.py [writers keep their own
+                    intent-specific pre-checks + audit rows; if a writer's guard and the table
+                    ever drift, the table wins]. W3 also deleted BuyPlanStatus.INBOUND
+                    [migration 208 remapped straggler rows inbound->active], landing
+                    BuyPlanStatus at 6 members: draft/pending/active/halted/completed/cancelled)
     |
     |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
     |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
@@ -1878,8 +1898,10 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      was_completed=True (computed pre-reopen) which is threaded to
     |                      notify_resource_requested(was_completed=True): email + Teams DM go to ALL recipients
     |                      IGNORING notify_resource_alert_enabled, subject "URGENT - BACKORDER". Normal in-flight
-    |                      cancels keep the opt-in preference gate. Startup sweep _complete_reverted_active_plans
-    |                      finishes any plan migration 176 reverts to active whose lines are already all-terminal.
+    |                      cancels keep the opt-in preference gate. (The old startup sweep
+    |                      _complete_reverted_active_plans — finishing plans migration 176 had reverted to
+    |                      active — was DELETED in the W2 simplification sweep; migration 208 re-ran the
+    |                      inbound->active remap belt-and-braces and no INBOUND writer remains.)
     |  QP fold (Ph3):      Quality-Plan sales/purchasing sections are no longer an approval gate: submit_section/
     |                      QP_SALES/QP_PURCHASING dispatch retired; quality_plan_service.toggle_section_reviewed
     |                      (mark|unmark) stamps *_section_reviewed_at/_by_id (migration 177 renamed *_approved_at,
@@ -1902,7 +1924,7 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
 **Line editing (epic I — add/edit/remove, `buyplan_lines.py`).** Role×status gate
 (`can_edit_buy_plan_lines`, enforced server-side by `_ensure_can_edit_lines` in every
 mutating call, NOT just the template): draft/pending → plan owner (via `Requisition
-.created_by`) or a manager; active/inbound/halted → manager-only (sales locked out
+.created_by`) or a manager; active/halted → manager-only (sales locked out
 post-approval); completed/cancelled → locked for everyone. `add_buy_plan_line` (POST
 `.../lines/add`) requires the requirement to belong to the plan's requisition, the offer
 to belong to the SAME requisition (`_ensure_offer_on_requisition` — mirrors the detail-
@@ -2051,7 +2073,8 @@ its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` 
 OLD `excess` router which a later cutover chunk removes). The workspace is a `splitPanel('resell')`
 shell: a My Lists lens pill (the "Open to Me" offerer pill is PARKED — spec §5.3 W2.3,
 solo-operator; comeback = second trader user) + a `stat_card` triage strip
-(Open · Offers to review · Take-all · Bids out · Awarded — each card a one-click stage filter) +
+(Live · Offers to review · Take-all · Awarded — each card a one-click stage filter; the old
+"Bids out" card died with the `bid_out` status, W3/migration 207) +
 a lazy left list and a right detail. Logic stays in `excess_service` (offers/import) +
 `excess_mirror` (publish); the router is thin (request → context → partial).
 
@@ -2076,7 +2099,7 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        |     data (Phase-3 anonymization); a submitter reaches it even after the window
     |        |     closes — finding #13)
     |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
-    |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
+    |        |     price-spread bar, cloned from the since-deleted quote-builder modal, NO auto-select)
     |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel — the kernel outreach
     |        |     door. Buyer-intelligence DISPLAY is PARKED [W2.3]: the ranked-suggestion +
     |        |     no-contact sections render EMPTY (the router passes []; _suggestion_rows /
@@ -2133,12 +2156,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     per_line|take_all; service enforces can_offer + the self-offer guard + [deep-review #2
     |     finding #47] its OWN posted-status guard [409 draft/terminal — previously router-only]
     |     re-checked AFTER taking the M9 list-row lock [finding #9], so a list closed between the
-    |     caller's stale read and the lock can never be resurrected by the open→collecting flip;
+    |     caller's stale read and the lock can never be resurrected by the posted→bidding flip;
     |     the new-offer status is offer_status_for_list(excess_list) — late when the list's status
-    |     already reads closed OR its close_at deadline has genuinely passed even though the
-    |     nightly sweep hasn't run yet [finding #10])
+    |     already reads closed [awarded/closed] OR its close_at deadline has genuinely passed
+    |     [a lapsed owner-set deadline nothing flipped — the nightly expiry job was deleted in W1;
+    |     finding #10])
     +-- GET  /v2/partials/resell/{id}/bid-sheet          (owner-only; blank bid-sheet CSV —
-    |     one row per ACTIVE [available/bidding] line + empty Bidder/Offer Qty/Unit Price/
+    |     one row per AVAILABLE line + empty Bidder/Offer Qty/Unit Price/
     |     Lead Time/Notes columns so several bidders' filled-in copies concatenate into one
     |     compiled sheet for /bids/upload-preview. Same owner gate as offers/export)
     +-- GET  /v2/partials/resell/{id}/bids/upload-form   (owner-only; renders the Upload Bids
@@ -2182,7 +2206,7 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     ExcessOffer[scope=PER_LINE, notes="Uploaded bid sheet"] + one ExcessOfferLine per
     |     row per bidder [unmatched/ambiguous rows KEPT, never dropped], recomputes the
     |     best-price rollup for BOTH the superseded offer's matched lines and the
-    |     replacement's, and flips open→collecting on a first ingest [mirrors submit_offer].
+    |     replacement's, and flips posted→bidding on a first ingest [mirrors submit_offer].
     |     400 on empty/all-rejected rows.
     |     RESPONSE is the same _award_response.html OOB compose as award [PRIMARY = Offers
     |     tab #tab-offers-<id>; OOB = #tab-lines-<id> rollup badges + #resell-chips-<id>
@@ -2195,13 +2219,14 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     across lists]; excess_service.award_offer:
     |     the single offer→won chokepoint; take_all awards ALL non-withdrawn lines, per_line
     |     awards its matched lines; idempotent for an already-won offer; 409 on a TERMINAL list
-    |     [closed/expired — awarding would reopen the dead list, finding #4]; 409 unless the offer
+    |     [closed — awarding would reopen the dead list, finding #4]; 409 unless the offer
     |     is open/late [a lost/withdrawn offer is not awardable — guard runs BEFORE line scope];
-    |     409 if a line is already awarded to another offer; recomputes rollups + buyer-score win-hook;
-    |     retires the sold lines from the Sighting mirror (sync_list_mirror); derives the
+    |     409 if a line is already awarded to another offer; closes the competing open/late
+    |     offers that can no longer win a line → lost [_close_competing_offers, M1]; recomputes
+    |     rollups + buyer-score win-hook; derives the
     |     list→awarded status once every line is decided. Takes the M9 list+lines row lock
     |     (_lock_list_for_award, populate_existing on BOTH the list and its lines — deep-review
-    |     #2 finding #8) BEFORE the terminal-list guard/mirror-sync so a concurrent close/expiry
+    |     #2 finding #8) BEFORE the terminal-list guard so a concurrent close
     |     is never read stale. RESPONSE is an OOB compose
     |     (_award_response.html): PRIMARY = Offers tab (hx-target #tab-offers-<id>), OOB =
     |     #tab-lines-<id> (Awarded/Withdrawn pills) + #resell-chips-<id> (N/M-awarded chip +
@@ -2209,24 +2234,24 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/offers/{offer_id}/unaward (owner-only; 404 on a cross-list offer id
     |     [same finding #32 guard as award]; excess_service.unaward_offer:
     |     the EXPLICIT inverse — never a silent auto-swap to a new winner. 409 if the offer
-    |     is not won; 409 on a TERMINAL list [closed/expired — mirrors award's guard, deep-review
-    |     #2 finding #4; bid_out stays reversible]; reverts offer→_revived_offer_status(list, offer)
+    |     is not won; 409 on a TERMINAL list [closed — mirrors award's guard, deep-review
+    |     #2 finding #4; bidding stays reversible]; reverts offer→_revived_offer_status(list, offer)
     |     [late when the offer's created_at landed after close_at, else open — deep-review #2
     |     finding #37, never a blanket "open" that erases late-arrival provenance] + lines→
     |     available, recomputes rollups + buyer score (full-history recompute self-heals wins) +
     |     revives the offers _close_competing_offers had closed via the SAME _revived_offer_status
-    |     recomputation [finding #46], steps the list back off awarded → bid_out
-    |     (posting window CLOSED — close_at in the PAST, via _posting_window_closed; NOT bare
-    |     close_at truthiness, since Phase 5 preserves a FUTURE deadline through publish) else
-    |     collecting FIRST, THEN re-mirrors (so a reverted-to-bid_out closed posting stays retired,
-    |     while a still-open future-deadline list re-advertises — M5, findings #1/#3). Same _award_response OOB)
+    |     recomputation [finding #46], and steps the list back off awarded → bidding — the W3
+    |     ladder's ONE pre-award live state; whether the window is still open is a TIME fact
+    |     [close_at via _posting_window_closed — NOT bare close_at truthiness, since Phase 5
+    |     preserves a FUTURE deadline through publish]; the old collecting-vs-bid_out step-back
+    |     fork collapsed into BIDDING in migration 207. Same _award_response OOB)
     +-- POST /api/resell/{id}/offer-lines/{offer_line_id}/assign (owner-only; finding #15;
     |     excess_service.assign_offer_line: manual resolution of the unmatched queue — point a
     |     parked ExcessOfferLine at a posted line [404 target/offer-line off this list], flips
     |     match_status→matched + recomputes the target [+ old line on a re-assign] rollup so the
     |     salvaged bid is awardable. Takes the M9 lock BEFORE any status guard (deep-review #2
-    |     finding #12). GUARDED: 409 on a resolved/terminal list [awarded/closed/
-    |     expired] and 409 unless the parent offer is open/late [finding #2 + the finding #4
+    |     finding #12). GUARDED: 409 on a resolved/terminal list [awarded/
+    |     closed] and 409 unless the parent offer is open/late [finding #2 + the finding #4
     |     "second vector"]; 409 when the TARGET line is already awarded/withdrawn [deep-review #2
     |     finding #12 — an unmatched bid can no longer displace a decided line's winner]. Same
     |     _award_response OOB compose as award)
@@ -2260,12 +2285,13 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     +-- POST /api/resell/{id}/close                      (owner-only; excess_service.close_list:
     |     takes the M9 list+lines lock BEFORE the closeable guard [deep-review #2 finding #11 —
     |     a close racing a concurrent award now serializes instead of clobbering the just-awarded
-    |     status]; GUARDED to open/collecting [409 otherwise] → bid_out + close_at + RETIRES the
-    |     Sighting mirror [sync_list_mirror on a now-closed posting] — M5)
+    |     status]; GUARDED to posted/bidding [409 otherwise] → stamps close_at with the status
+    |     staying/landing on bidding — the list stays BIDDING while the bid-back is out [the old
+    |     bid_out status collapsed into it, migration 207; CustomerBid.status carries the
+    |     sent/accepted sub-state] — M5)
     +-- POST /api/resell/{id}/close-without-bid          (owner-only; D5; excess_service.
-    |     close_list_without_bid → the TERMINAL closed state [distinct from bid_out]: same
-    |     M9 lock + open/collecting guard + close_at + mirror retire, but CLOSED is never swept by
-    |     the nightly expiry [only open/collecting are] and never reopens. close_list and
+    |     close_list_without_bid → the TERMINAL closed state ["nothing came of this — end it"]:
+    |     same M9 lock + posted/bidding guard + close_at; CLOSED never reopens. close_list and
     |     close_list_without_bid share _end_posting_window(target_status))
     +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
     |     resell_outreach_service.submit_outreach_email [RFQ send engine], else
@@ -2293,12 +2319,12 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
                 an idempotent no-op — no duplicate offer [finding #5/#9/#10])
 ```
 
-**Triage filters (finding #16).** The left-list `stage` filter takes the usual status values
-(`open`/`collecting`/`bid_out`/`awarded`/`closed`/`expired`, each an exact `status=`) PLUS a
-synthetic `stage=live` token that widens to `[open, collecting]`. The workspace "Open" glance
-card counts open+collecting (a list flips open→collecting on its first offer but is still
-live), so it links to `stage=live` to match its count; the strict `open` pill in `_lists.html`
-keeps meaning EXACTLY `status=open`.
+**Triage filters (finding #16).** The left-list `stage` filter takes the W3 ladder statuses
+(`posted`/`bidding`/`awarded`/`closed`, each an exact `status=`) PLUS a
+synthetic `stage=live` token that widens to `[posted, bidding]`. The workspace "Live" glance
+card counts posted+bidding (a list flips posted→bidding on its first offer but is still
+live), so it links to `stage=live` to match its count; the strict `posted` pill in `_lists.html`
+keeps meaning EXACTLY `status=posted`.
 
 **RS-4 reply tracking (inbound half).** The send path already stamps
 `ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the
@@ -2331,11 +2357,11 @@ the seller is not a User). Migration **183** adds `customer_bids.sent_at` / `res
 
 **Bid-back guards (deep-review-2 THEME E, findings #21/#22/#55).** `build_bid_back` and
 `send_bid_back` both 409 unless `excess_list.status` is in `excess_service._POSTED_LIST_STATUSES`
-(open/collecting/bid_out/awarded) — a bid back can never be assembled or sent off a never-posted
+(posted/bidding/awarded) — a bid back can never be assembled or sent off a never-posted
 `draft` (no finalized offers to price against — every line would export blank) or a terminal
-`closed`/`expired` list; `send_bid_back` re-checks because the list can decay to terminal between
-assemble and send (finding #21); the legacy pre-Resell `ACTIVE`/`BIDDING` statuses deliberately
-409 too, consistent with the shipped `submit_offer`/`upload_bids` guards. `send_bid_back` also
+`closed` list; `send_bid_back` re-checks because the list can decay to terminal between
+assemble and send (finding #21), consistent with the shipped `submit_offer`/`upload_bids`
+guards. `send_bid_back` also
 renders the emailed PDF with a presentation-only `status_override=CustomerBidStatus.SENT`
 (threaded `_bid_pdf_attachment` → `generate_bid_report_pdf` → `bid_back_export_context`), so the
 customer never receives a document stamped "draft" (finding #22) — WITHOUT mutating the bid row:
@@ -2347,20 +2373,17 @@ and shows the real status). `build_bid_back` also
 rejects a negative `customer_unit_price` override with 400 at the assemble boundary (finding #55,
 mirrors the quantity>0 discipline) — zero/positive overrides are unchanged.
 
-**List close/expire lifecycle + posting-closed mirror gate (M5).** `close_list` is guarded
-to `open`/`collecting` (409 for a draft or an already-resolved list). The Sighting live-mirror
-is now POSTING-aware: `sync_list_mirror` retires a line when it is individually inactive OR
-when the LIST's status is posting-closed (`bid_out`/`awarded`/`closed`/`expired`) — so closing
-(or expiring, or awarding a late offer on) a list retires its WHOLE mirror; publishing +
-collecting are unchanged (draft/open/collecting fall through to the per-line active check).
-The nightly `app/jobs/resell_jobs.py::_job_expire_resell_lists` (02:15) →
-`excess_service.expire_overdue_lists` flips past-`close_at` unresolved (open/collecting) lists
-to `expired` and retires their mirror; a PARTIALLY-AWARDED list (any `awarded` line / `won`
-offer — a partial award deliberately stays `collecting`) instead steps to the non-terminal
-`bid_out`, because terminal `expired` would 409 every later `award_offer` and strand the
-still-live bids on its remaining lines (deep-review #2 finding #1; mirror retired identically —
-both are posting-closed). The left-list stage filter now offers the `closed` /
-`expired` stages (the status badges already rendered them).
+**List close lifecycle (M5; W1/W3-trimmed).** `close_list` / `close_list_without_bid` share
+`_end_posting_window` and are guarded to `posted`/`bidding` (409 for a draft or an
+already-resolved list). `close_list` stamps `close_at` with the status staying/landing on
+`bidding` (bids went out — the old `bid_out` status collapsed into BIDDING in migration 207);
+`close_list_without_bid` lands on the TERMINAL `closed`, which never reopens. The nightly
+expiry backstop (`resell_jobs._job_expire_resell_lists` →
+`excess_service.expire_overdue_lists`) was DELETED in the W1 simplification
+(`app/jobs/resell_jobs.py` keeps the tombstone note): closing is a manual one-click act, so
+the `expired` terminal became dead vocabulary — migration 207 remapped its rows to `closed`.
+(The POSTING-aware mirror gate this paragraph once described — `sync_list_mirror` retiring a
+whole posting-closed list's mirror — went with the W2.12 mirror-write retirement below.)
 
 **Deep-review #2 Theme A (lifecycle & concurrency correctness, findings #4/#8/#9/#10/#11/
 #12/#32/#37/#46/#47).** Extends the existing M9 award/unaward row-lock family to every
@@ -2371,23 +2394,23 @@ list's STATUS column rather than the actual `close_at` deadline or offer-arrival
   `with_for_update().populate_existing()`) and `_lock_list_and_lines` (list + every line
   item) are the shared M9 primitives; `_lock_list_for_award` (award/unaward/withdraw/
   assign) now composes them + `db.refresh(offer)`. The ExcessList lock query previously
-  lacked `populate_existing()` (finding #8) — a concurrent close/expiry committed while
+  lacked `populate_existing()` (finding #8) — a concurrent close committed while
   `award_offer`/`unaward_offer` blocked on the row lock was invisible to the terminal-list
-  guard and `sync_list_mirror` right after; both now read post-lock, freshly-committed
+  guard right after; it now reads post-lock, freshly-committed
   state. `submit_offer` and `resell_outreach_service._link_inbound_offer` take
   `_lock_list_row` before reading `excess_list.status` (finding #9) so a list closed
-  between the caller's stale pre-lock read and the open→collecting flip can never be
+  between the caller's stale pre-lock read and the posted→bidding flip can never be
   resurrected. `_end_posting_window` (close / close-without-bid) and `assign_offer_line`
   now take the full list+lines lock BEFORE evaluating their status guards (finding #11),
   serializing a close/assign against a concurrent award instead of racing it.
 - *Late-stamping is close_at-aware, not status-aware (finding #10).* `offer_status_for_list`
   now takes the `ExcessList` object (not a bare status string) and returns `late` when
   EITHER the list's status already reads closed OR `_posting_window_closed(excess_list)`
-  is true (the deadline has passed even though the nightly sweep hasn't caught up) —
+  is true (a lapsed owner-set deadline nothing flipped — the nightly expiry job is deleted, W1) —
   shared by `submit_offer`, `upload_bids`, and `_link_inbound_offer` so every offer-
   creation path stamps the same honest lateness.
 - *Terminal-list guard parity + cross-list guard (finding #4/#32).* `unaward_offer` now
-  409s on a TERMINAL list (`closed`/`expired` — `bid_out` stays reversible) exactly like
+  409s on a TERMINAL list (`closed` — `bidding` stays reversible) exactly like
   `award_offer`'s existing guard. The award/unaward ROUTES 404 up front when the URL's
   `{list_id}` disagrees with the offer's real `excess_list_id` (mirrors the withdraw
   route's existing guard) — existence is never revealed/mutated across lists.
@@ -2410,9 +2433,10 @@ list's STATUS column rather than the actual `close_at` deadline or offer-arrival
 - *Posting-deadline entry point + chip fix (finding #8, D1).* `create_excess_list` /
   `update_excess_list` accept an optional future+tz-aware `close_at` (400 on naive/past via
   `_validate_draft_close_at`); the create modal exposes it as an optional "Offers close by"
-  `datetime-local`. `publish_list` now PRESERVES a future `close_at` (was: nulled it), so the
-  nightly expiry backstop finally has real windows. The resell chip context exposes `is_live`
-  (open/collecting only) + `close_at_display`; `_header_chips.html`/`_lists.html` render the
+  `datetime-local`. `publish_list` now PRESERVES a future `close_at` (was: nulled it) — the
+  W1-deleted nightly expiry backstop once consumed those windows; `_posting_window_closed`
+  lateness-stamping still reads them. The resell chip context exposes `is_live`
+  (posted/bidding with a still-open window) + `close_at_display`; `_header_chips.html`/`_lists.html` render the
   countdown ONLY while live and a muted "closed {date}" once resolved — never a red "Overdue"
   on a resolved list (the shared `time_text` macro is gated at the resell-template level, never
   edited). `_close_at_display` returns the label ONLY for a PAST `close_at`: a non-live list
@@ -2424,11 +2448,13 @@ list's STATUS column rather than the actual `close_at` deadline or offer-arrival
 - *Mirror teardown on delete (P2).* `excess_mirror.teardown_list_mirror` deletes a list's whole
   mirror + its virtual scratch requisition; wired into `delete_companies`,
   `seed_resell_demo._reset`, and `delete_excess_list` so deletion never strands mirror rows.
-  NOT called on close/expire (a closed list can reopen via unaward and re-mirror).
+  NOT called on close — teardown is DELETE-path cleanup of pre-existing rows only (and since
+  W2.12 nothing writes new mirror rows at all).
 - *Nightly BuyerScore backstop + UI-submit attribution (finding #17).*
-  `_job_recompute_buyer_scores` (02:35) → `buyer_affinity_service.recompute_all_buyer_scores`
-  reconciles every buyer's scorecard so a missed on-win/on-send hook can't leave a row stale
-  (the three nightly resell jobs run at 02:15/02:25/02:35 to avoid collision). The `response_rate`
+  `_job_recompute_buyer_scores` → `buyer_affinity_service.recompute_all_buyer_scores`
+  reconciles every buyer's scorecard so a missed on-win/on-send hook can't leave a row stale —
+  PARKED since W1 (registration removed with the other nightly resell jobs,
+  `app/jobs/resell_jobs.py`; the implementation stays, comeback = second trader user). The `response_rate`
   denominator KEEPS counting a manual-log SENT touch (`sent_at=None`); only SENDING/FAILED/
   INTERRUPTED are excluded. The submit-offer form gains an optional buyer `<select>` →
   `submit_offer(buyer_company_id=...)` resolves `offerer_vendor_card_id` via `counterparty_card`,
@@ -2520,18 +2546,19 @@ convention.
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
 `shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
 any take-all offer pins as a violet banner above the lines. Status pills reuse existing
-`status_badge` keys — no new colors (open→sky, collecting→sourcing/amber, bid_out→quoted/violet,
+`status_badge` keys — no new colors (posted→sky, bidding→amber,
 awarded→won/emerald, draft→muted). Customer hiding is view discipline (single-tenant): the
 offerer-facing list + non-owner detail project ONLY MPN/qty/condition, never the seller company.
 Demo seed: `ALLOW_SAMPLE_DATA_SEED=true python -m app.management.seed_resell_demo` (idempotent;
-`--reset` to clear) creates three deal shapes (40-line collecting w/ per-line + unmatched +
-take-all offers, a single-line one-off w/ 2 offers, and an awarded list DERIVED through the real
-`award_offer` chokepoint — a genuine buyer-attributed WON offer with real rollups/line statuses).
-A re-run also re-arms the collecting demo if the nightly expiry has decayed it (status back to
-collecting, close_at pushed forward, mirror re-synced); awarded/bid_out/closed states a user
-drove are never trampled. A re-run also heals the legacy hand-stamped awarded demo (list/lines
-stamped AWARDED with zero offers by the pre-rework seeder): it resets to open/available,
-re-syncs the mirror, then re-derives the award through the real chain.
+`--reset` to clear) creates three deal shapes (40-line `bidding` w/ per-line + unmatched +
+take-all offers, a single-line `posted` one-off w/ 2 offers, and an awarded list DERIVED through
+the real `award_offer` chokepoint — a genuine buyer-attributed WON offer with real rollups/line
+statuses). A re-run also re-arms the bidding demo when its posting window has decayed (a lapsed
+`close_at` — the W1-deleted nightly expiry used to flip such lists to the since-removed
+`expired` terminal): status back to `bidding`, close_at pushed forward; awarded/closed states a
+user drove are never trampled. A re-run also heals the legacy hand-stamped awarded demo
+(list/lines stamped AWARDED with zero offers by the pre-rework seeder): it resets to
+posted/available, then re-derives the award through the real chain.
 
 **Anonymization policy (Phase 3, decision D2 — one predicate everywhere).** Customer-identity
 hiding is enforced through the SINGLE ownership predicate `can_see_customer` (== `is_owner` ==
@@ -2558,9 +2585,9 @@ carrying a live/whole-list bid) is the OWNER's board only — gated on `can_see_
 (`resell.py _list_rows_context`), so a non-owner cannot craft `lens=open&needs=offers` and diff it
 against the plain open lens to learn which anonymized `Excess listing #N` postings have already
 drawn a bid (the offer-EXISTENCE sibling of the offer-count chip it hides). (4) The list STATUS
-itself: `open → collecting` flips on the first inbound bid, so for non-owners the open-lens
-stage tokens `open`/`collecting`/`live` all merge onto the same `_LIVE_STATUSES` filter and the
-card/header badge collapses `collecting` to a neutral `open` (finding #13 — the same predicate
+itself: `posted → bidding` flips on the first inbound bid, so for non-owners the open-lens
+stage tokens `posted`/`bidding`/`live` all merge onto the same `_LIVE_STATUSES` filter and the
+card/header badge collapses `bidding` to a neutral `posted` (finding #13 — the same predicate
 gates both).
 
 Same gate on every OTHER cross-trader writer that names the list, since each lands on a surface
@@ -2709,18 +2736,17 @@ new surface. So a HOTLIST req turns "an offer arrived for the part you're watchi
 into a one-click outbound, even for a customer with zero purchase history. (Auto-send
 on a hotlist hit is intentionally out of scope — the salesperson confirms the send.)
 
-### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
+### Unified AI Email Drafting (vendor reply · follow-up)
 
 ```
 app/services/email_drafting.py :: draft_email(kind, context)
     kind="rfq_rephrase" --> ai_service.rephrase_rfq (Haiku) ; fallback = original body
+                            (NO live surface since W3 — the ai-rephrase-email route
+                            died with the composer-A delete; kind kept in the service)
     kind="follow_up"    --> claude_text (Haiku)            ; fallback = template string
     kind="vendor_reply" --> claude_json (Haiku)            ; fallback = None (blank box)
 
 Surfaces (all human-edit-before-send; nothing auto-sends):
-  RFQ compose  "AI Rephrase" button
-    POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
-      --> draft_email("rfq_rephrase") --> <script> sets #rfq-body-textarea
   Vendor response card  "AI Draft Reply" button
     POST /v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply
       --> draft_email("vendor_reply") --> reply_compose.html into #reply-area-{id}
@@ -2789,9 +2815,8 @@ every attempt scanned the Sent window cleanly) | lookup-failed (raises
 lookup-failed to the UNKNOWN case → the row is left `interrupted` and nothing is resent (never
 assume not-sent); ONLY the positive not-found authorizes a resend; the
 resend refreshes `created_at` so the stale sweeper can't flip an in-flight retry. An inbound
-reply carrying a bid flips an `OPEN` list to `COLLECTING`
-(mirroring `submit_offer`), and `expire_overdue_lists` isolates each list's flip+mirror+commit so
-one bad list can't abort the nightly sweep.
+reply carrying a bid flips a `POSTED` list to `BIDDING`
+(mirroring `submit_offer`).
 
 Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
 Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
@@ -3247,7 +3272,7 @@ membership is curated, never "follow role"). Enforced at four points:
 | **Module full-page route** | `v2_page` maps the resolved `current_view` to its module `AccessKey` (`_VIEW_ACCESS`; CRM sub-views all gate on CRM); a denied view 302-redirects to the user's FIRST allowed module (`_MODULE_ENTRY_URLS` order) — target is always allowed, so no loop. No-access-at-all → 403 with logout link. Un-gated views: settings/quotes/follow-ups/tickets. |
 | **Module partial entry route** | `require_access(<module>)` dependency on each of the 10 nav-module partial routes (parts/sightings/materials/search/buy-plans/resell/crm/proactive/prospecting/my-day workspaces). |
 | **Module SUB-partial chokepoint** | `ModuleAccessMiddleware` (`app/main.py`, inner of `SessionMiddleware`) closes the gap where a revoked user could still READ a module's *sub*-partials by direct URL (those carry only `require_user`). It resolves the request path through the pure `app.access_paths.module_key_for_path` and, if a guarded prefix matches and the session user lacks the key, returns a plain 403. **Only EMPIRICALLY module-exclusive prefixes are guarded: `crm`, `resell`, `proactive`, `prospecting`, `my-day`.** The other five entry-prefixes (`parts`, `sightings`, `materials`, `search`, `buy-plans`) are SHARED cross-module (embedded by other modules' templates) and DELIBERATELY un-gated, as are all CRM *data* partials (customers/contacts/vendors/vendor-contacts) and capability/global/global-search partials — gating them would over-block. Admins and logged-out requests pass through; a DB session opens only when a guarded prefix matches. |
-| **Capability action** | `require_access(<capability>)` on: RFQ-send (`htmx_views.rfq_send`, `sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); quote-builder Excel/PDF exports (`quote_builder.py`, `EXPORT_DATA` — open to sales, single-deal customer documents); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
+| **Capability action** | `require_access(<capability>)` on: RFQ-send (`sightings.sightings_send_inquiry`); offer approve/reject/reconfirm (`crm/offers.py` + the Sightings `review_offer`/`reconfirm_offer` wrappers); the quote-builder PDF export (`quote_builder.py`, `EXPORT_DATA` — open to sales, single-deal customer documents; the Excel export died with the modal in Wave 3); the whole Connectors surface — `MANAGE_CONNECTORS` on `sources.test_api_source` / `toggle_api_source` / `toggle_source_active` / `update_source_credentials` and the `settings.py` connectors tab + `connector_card_partial` + `connectors_test_all` (SET-06). |
 | **Bulk dataset export (ISS-028, supersedes ISS-022)** | `require_access(AccessKey.EXPORT_BULK_DATA)` — **admin-only by default** — on the five bulk CSV export routes: companies + contacts (`crm/export.py`), vendors (`htmx/vendors.py:vendors_export`), requisitions (`htmx/requisitions.py:requisitions_export`), sightings (`sightings.py:sightings_export`). No interactive role (`ROLE_ACCESS_DEFAULTS`) holds this key by default — `EXPORT_BULK_DATA` was removed from `MANAGER`'s defaults (ISS-022 had granted it there); only `ADMIN` holds it via `frozenset(AccessKey)`. A manager (or any non-admin) may still be granted it individually via `access_overrides` (admin users panel), mirroring the `manage_connectors` per-user-override pattern. No list toolbar renders export controls anymore — vendors/requisitions/sightings/customers accounts AND the cross-company customer-contacts workspace (`customers/contacts_list.html`, an ISS-028 leftover removed later) — the ONLY export UI in the app is the capability-gated Settings **"Data export"** tab (`GET /v2/partials/settings/data-export`, `app/routers/htmx/settings.py:settings_data_export_tab`, template `htmx/partials/settings/data_export.html`), which links the five routes as plain full-dataset (default-params) downloads. The tab endpoint is gated on the SAME `require_access(AccessKey.EXPORT_BULK_DATA)` dependency as the five export routes (NOT a strict admin-role check), and the Settings nav renders the "Data export" tab button from the matching `can_export_bulk` context flag (`settings_partial` computes it via `can_export_bulk_data(user)`, outside the `is_admin` template block — SET-06 Connectors pattern) — so a manager granted the capability override gets a real UI path to the exports, never a dead 403. The `can_export_bulk_data(user)` predicate (`app/dependencies.py`, also a Jinja global; mirrors `has_buyer_role`/`can_approve_buy_plans`) is the single source of truth — same predicate as the route gate. |
 
 `require_access(key)` is a factory returning a dependency that depends on `require_user`
@@ -3430,7 +3455,7 @@ REUSING the helpers above (no new ad-hoc checks):
 - `prepayment_service.create_prepayment` — `get_buyplan_for_user(db, created_by, buy_plan_id)` (the
   ownership check lives in the service so the router stays thin), so a Prepayment + routed
   ApprovalRequest cannot be attached to a buy plan the actor can't access.
-- `htmx_views`: `sourcing_search_trigger` (connector spend) + `ai_rephrase_email` gated on
+- `htmx_views`: `sourcing_search_trigger` (connector spend) gated on
   `require_requisition_access`; `send_batch_follow_up` and `follow_up_badge` scope the stale-
   `RfqContact` query for `RESTRICTED_ROLES` (join `Requisition`, filter `created_by == user.id`)
   so the badge matches what the batch acts on. `send_batch_follow_up` re-renders the shared
@@ -3447,10 +3472,10 @@ REUSING the helpers above (no new ad-hoc checks):
 Regression coverage: `tests/test_authz_hardening.py` (cross-account 403/404 + legitimate owner/
 manager/admin allowed + per-owner data-isolation asserts for proactive / follow-ups / quote).
 
-**Read-IDOR closure — offers/ GET partials.** Five requisition-scoped GET partial handlers in
+**Read-IDOR closure — offers/ GET partials.** The requisition-scoped GET partial handlers in
 `app/routers/htmx/offers/` (`parse_email_form`, `paste_offer_form`, `add_offer_form` in
-`crud.py`; `rfq_compose`, `rfq_prepare_panel` in `rfq.py` — the parse-email/paste-offer/
-add-offer forms and the rfq-compose/rfq-prepare panels) resolved the requisition via
+`crud.py`; historically also `rfq_compose`/`rfq_prepare_panel`, both since deleted with the
+composer collapse) resolved the requisition via
 `get_requisition_or_404` but skipped
 `require_requisition_access`, so a `RESTRICTED_ROLES` (SALES/TRADER) non-owner could read another
 rep's requisition name/customer/MPNs/vendor contacts by crafting a direct GET. Each now calls
@@ -7113,7 +7138,8 @@ untouched), and `resource_line` (cancel → fall-down/re-source). The old deal-l
 `receive_buy_plan`/"Mark Received") is **retired**: `_maybe_open_po_gate`,
 `_run_po_approve_side_effects`, `receive_buy_plan`, the `/receive` route, the INBOUND
 lifecycle step, and the `po_auto_approve_threshold` setting are gone (the
-`BuyPlanStatus.INBOUND` enum member remains for historical rows). `verify_po` now enforces
+`BuyPlanStatus.INBOUND` enum member itself was deleted in W3 — migration 208 remapped any
+straggler rows inbound->active). `verify_po` now enforces
 the approver's `purchase_order_approval_limit` against **this line's** amount
 (`_line_amount = unit_cost × quantity`; NULL = unlimited) and writes a durable
 `PO_LINE_VERIFIED`/`PO_LINE_REJECTED` `ActivityLog` row via `_log_po_line_activity`.

@@ -320,7 +320,7 @@ Migration 162 also adds the new status value **`resourcing`** to `buy_plan_lines
 | requisition_id | FK -> requisitions (CASCADE) | |
 | sales_order_number | String 100 | |
 | customer_po_number | String 100 | |
-| status | String 30 | `BuyPlanStatus`: draft -> pending -> active -> completed (also halted / cancelled). The `inbound` enum member remains for historical rows only — Phase 3 retired the deal-level PO gate and its receiving step (no code path writes or reads `inbound` any more). |
+| status | String 30 | `BuyPlanStatus` (6 members): draft -> pending -> active -> completed (also halted / cancelled). The `inbound` enum member was DELETED in W3 — migration 176 had already remapped every row inbound->active when Phase 3 retired the deal-level PO gate, and migration 208 re-ran the remap belt-and-braces before removing the member. Transition legality lives in the single engine `services/buyplan_workflow/buyplan_state.py` (`ALLOWED_TRANSITIONS` + `transition()`, the only status writer). |
 | so_status | String 30 | pending -> approved / rejected (ops SO-verify track) |
 | total_cost / total_revenue / total_margin_pct | Numeric | |
 | purchase_history_recorded_at | UTCDateTime, nullable | Idempotency stamp set by `record_buyplan_purchase_history` when CPH rows have been written for this plan (migration `bp_cph_recorded_at`). NULL = not yet recorded; non-NULL = safe to skip on retry/backfill. |
@@ -449,7 +449,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 |--------|------|-------|
 | id | Integer PK | |
 | gate_type | String 50 NOT NULL | `ApprovalGateType` |
-| status | String 50 NOT NULL | `ApprovalRequestStatus`: `requested`\|`approved`\|`rejected`\|`cancelled`\|`expired` |
+| status | String 50 NOT NULL | `ApprovalRequestStatus`: `requested`\|`approved`\|`rejected`\|`cancelled` (`expired` was removed in the W1.9 dead-status sweep — no expiry job was ever built) |
 | amount | Numeric 12,2, nullable | Spend amount for gate decisions |
 | currency | String 10, nullable | |
 | requested_by_id | FK -> users (SET NULL) | |
@@ -853,12 +853,12 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > concept is fully replaced by `excess_offers`/`customer_bids` and is GONE (models, constants
 > `Bid*`, schemas, the `app/routers/excess.py` router + `partials/excess/*` templates, the
 > `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
-> `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
-> Resell lifecycle members (open/collecting/bid_out/awarded); the pre-Resell active/bidding
-> members remain DEFINED for back-compat, but **migration 193 remapped every legacy ROW**
-> (`active`->`open` + stamp `open_at`, `bidding`->`collecting` + stamp `open_at`; `closed`
-> stays CLOSED, distinct from `bid_out` — decision D5), so no live row carries a legacy
-> status and the publish guard can rely on `draft` being the only pre-post state.
+> `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` is now
+> the W3 five-state ladder `draft -> posted -> bidding -> awarded -> closed` (**migration
+> 207 remapped every pre-W3 ROW**: `open`->`posted`, `collecting`/`bid_out`->`bidding`,
+> `expired`->`closed`; migration 193 had already folded the pre-Resell `active`/`bidding`
+> members into the old vocabulary), so no live row carries a legacy status and the publish
+> guard can rely on `draft` being the only pre-post state.
 >
 > Service logic lives in `app/services/excess_service.py`:
 > `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
@@ -873,19 +873,20 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > runs BEFORE the line-scope check); 409 if a
 > line is already awarded to a different offer; marks lines `awarded`, recomputes rollups,
 > fires the buyer-score win-hook `buyer_affinity_service.recompute_buyer_score_on_win`
-> BEFORE the commit — no-ops for an offer with no canonical buyer; RETIRES the sold lines
-> from the Sighting mirror via `excess_mirror.sync_list_mirror`; and DERIVES the list's own
+> BEFORE the commit — no-ops for an offer with no canonical buyer; and DERIVES the list's own
 > `awarded` status once every line is decided (awarded/withdrawn) with ≥1 awarded — nothing
 > else flips `excess_lists.status`->`awarded`. Routed as `POST /api/resell/{id}/offers/{offer_id}/award`),
 > `unaward_offer` (the explicit inverse — never a silent auto-swap to a new winner: 409 if
-> not won, reverts offer->`open` + lines->`available`, recomputes rollups + buyer score
-> (full-history recompute self-heals `wins` back down), re-mirrors the lines, and steps the
-> list off `awarded` -> `bid_out` (posting window CLOSED — `close_at` in the past) else `collecting`
-> (a bare truthy `close_at` is NOT closed: Phase 5 preserves a FUTURE deadline through publish, so the
-> step-back is time-based via `_posting_window_closed`); `POST /api/resell/{id}/offers/{offer_id}/unaward`).
-> Award never auto-marks the losing offers `lost` (`ExcessOfferStatus.LOST` stays
-> defined-but-unassigned) — "not selected" is a pure render decision (line awarded + this
-> row's offer != won). `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> not won, 409 on a terminal `closed` list, reverts offer->`open`/`late` (recomputed via
+> `_revived_offer_status`) + lines->`available`, recomputes rollups + buyer score
+> (full-history recompute self-heals `wins` back down), and steps the
+> list off `awarded` -> `bidding` — the W3 ladder's ONE pre-award live state; whether the
+> posting window is still open is a TIME fact (`close_at` via `_posting_window_closed`), not a
+> status — the old `collecting`-vs-`bid_out` step-back fork collapsed into BIDDING in
+> migration 207; `POST /api/resell/{id}/offers/{offer_id}/unaward`).
+> Award marks the competing open/late offers that can no longer win a line `lost`
+> (`_close_competing_offers`, M1); unaward revives them via the same `_revived_offer_status`
+> recomputation. `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
 > `material_card_id` resolution on the import path. The thin router is `app/routers/resell.py`
 > (templates under `app/templates/htmx/partials/resell/*`).
 >
@@ -910,6 +911,9 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > DELETION (wired into `delete_companies`, `seed_resell_demo._reset`, `delete_excess_list`), keyed
 > on the virtual `requirement_id` so it is robust to NULL card/company links. Lines whose MPN
 > won't resolve to a MaterialCard are skipped, never raised.
+> **RETIRED (W2.12, simplification):** the dual-write into `sightings` is stopped — publish
+> no longer mirrors lines; `retire_line`/`teardown_list_mirror` remain only to clean up
+> pre-existing mirror rows and the virtual requisitions that anchor them.
 >
 > Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
 > `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
@@ -927,12 +931,17 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 > cloned from `quote_report.html`, WeasyPrint) renders only that context. Migration 127
 > (ADDITIVE) adds the two `customer_bids*` tables and the `open_at`/`close_at` posting
 > window on `excess_lists`; `excess_mirror.publish_list` now stamps `open_at` and
-> `excess_service.close_list` (owner-only) flips to `bid_out` + stamps `close_at` (which
-> drives the "closes in Xd" header chip).
+> `excess_service.close_list` (owner-only, guarded to `posted`/`bidding` via
+> `_end_posting_window`) stamps `close_at` with the status staying/landing on `bidding` —
+> the list stays BIDDING while the bid-back is out (the old `bid_out` status collapsed into
+> it, migration 207; `CustomerBid.status` carries the sent/accepted sub-state).
+> `close_list_without_bid` shares the same engine/guards and lands on the TERMINAL
+> `closed` (D5 — never reopens). `close_at` drives the "closes in Xd" header chip.
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy active/bidding enum members remain defined but migration 193 remapped all legacy rows -> open/collecting; closed kept distinct from bid_out)
+- Status: draft -> posted -> bidding -> awarded -> closed (the W3 five-state ladder, `ExcessListStatus`; migration 207 remapped every pre-W3 row: open->posted, collecting/bid_out->bidding, expired->closed — the nightly expiry job died in W1, so a separate `expired` terminal was dead vocabulary. `@validates` rejects anything else)
+- outcome (String(20), nullable; migration 207) — terminal outcome recorded when the list closes: sold | scrapped | withdrawn | no_bids (`ExcessListOutcome`, validated on write); NULL until CLOSED. Migration 207 backfilled pre-W3 terminal rows data-driven (accepted bid/won offer -> sold; any offer or awarded line without a win -> withdrawn; nothing -> no_bids); `scrapped` is manual-entry only, never inferred
 - version (int, default 1) — lock-on-post; a revision bumps version
 - open_at (stamped on publish), close_at (phase-5 D1: the optional owner-set "Offers close by" deadline — settable at create/update on a draft; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it, it only fires once a set close_at has passed) — posting window (Chunk E)
 
@@ -968,7 +977,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - excess_list_id -> excess_lists (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL — per buyer×line)
 - target_vendor_card_id -> vendor_cards (SET NULL, the canonical buyer), submitted_by -> users
 - channel: email | phone | teams | marketplace | other (ExcessOutreachChannel)
-- status: sending -> sent -> opened -> responded -> bid | declined; no_response = GENUINE buyer silence past a real sent (ExcessOutreachStatus). Send-outcome states (send never reached the buyer, NOT silence): failed (skipped/DNC/send error/outage — reason in send_error) + interrupted (a 'sending' row the sweeper found orphaned). Both retryable. (migration 194 added failed/interrupted + send_error)
+- status: sending -> sent -> responded -> bid | declined (ExcessOutreachStatus); a genuinely-silent buyer's row simply stays `sent` — `no_response` was removed in the W3 status collapse (migration 207 remapped its rows to `sent`: no writer ever advanced a row to it, and the aging job reserved for it is not on the kernel job list), and `opened` was removed in the W1.9 dead-status sweep (no open-tracking ever existed). Send-outcome states (send never reached the buyer, NOT silence): failed (skipped/DNC/send error/outage — reason in send_error) + interrupted (a 'sending' row the sweeper found orphaned). Both retryable. (migration 194 added failed/interrupted + send_error)
 - send_error (Text, nullable; migration 194) — persisted send-failure reason on failed/interrupted rows (or a "reply-matching degraded" note on a delivered row whose Graph-id lookup came back empty); NULL on a clean send. Surfaced in the tracker cell + the CSV export "Note" column so a failed/interrupted (or delivered-but-degraded) row is never silent
 - send_subject / send_body (Text, nullable; migration 195) — the EXACT subject/body an email campaign was sent with, so a one-click Retry matches an already-delivered CUSTOMIZED-subject message in the double-send guard (email_service._find_sent_message is an exact-subject match) and a legitimate resend reuses the original wording; NULL on manual-log + legacy email rows
 - recipient_email (Text, nullable; migration 203) — the address ACTUALLY used at send/enqueue time (deep-review #2 finding B5): stamped once by resell_outreach_service.enqueue_outreach_email, never overwritten by a later card-email change. retry_outreach_send + the Sent-folder reconcile use this PERSISTED address (falling back to the card's current email only for a legacy NULL row, and backfilling it once resolved), so a card-email edit between send and retry can never reconcile/resend against the wrong mailbox
