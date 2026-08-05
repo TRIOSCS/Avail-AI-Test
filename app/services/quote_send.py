@@ -12,7 +12,8 @@ quote + requisition status, and writes an OUTBOUND email ActivityLog. In TESTING
 real Graph POST and Sent-Items lookup are skipped but the quote is still marked sent.
 
 Depends on: app.utils.graph_client.GraphClient, app.email_service._find_sent_message,
-app.services.status_machine.require_valid_transition, app.services.activity_service.
+app.services.status_machine.require_valid_transition (quote), app.services.
+requisition_state.transition (requisition advance), app.services.activity_service.
 log_email_activity, app.models (Quote, Requisition, CustomerSite, SiteContact).
 """
 
@@ -157,6 +158,7 @@ async def send_quote_email(
 
     from .activity_service import log_email_activity
     from .quote_requisitions import requisition_ids_for_quote
+    from .requisition_state import transition as req_transition
 
     primary_req = db.get(Requisition, quote.requisition_id)
     primary_old_status = primary_req.status if primary_req else None
@@ -166,10 +168,22 @@ async def send_quote_email(
     # and each requisition's timeline records the send. `or [quote.requisition_id]` keeps
     # the primary covered even for a (pathological) quote with no join row. The response's
     # req_status/status_changed still reflect the PRIMARY only (unchanged shape).
+    # W3: the advance routes through requisition_state.transition (legality + STATUS_CHANGED
+    # audit row) instead of the old raw `r.status = ...` write. An illegal edge (e.g. a
+    # draft/cancelled req on a combined quote) must not fail the send — the email already
+    # went out — so it logs and leaves that requisition's status untouched.
     for rid in requisition_ids_for_quote(db, quote.id) or [quote.requisition_id]:
         r = db.get(Requisition, rid)
         if r and r.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
-            r.status = RequisitionStatus.QUOTED
+            try:
+                req_transition(r, RequisitionStatus.QUOTED, user, db)
+            except ValueError:
+                logger.warning(
+                    "Quote {} send: requisition {} not advanced to quoted (illegal from '{}')",
+                    quote.quote_number,
+                    rid,
+                    r.status,
+                )
         # log_email_activity dedupes by external_id, so passing the SAME graph_message_id
         # for every contributing req would silently drop all but the first (a combined
         # quote's send would log activity on the primary req only). Keep the PRIMARY on the

@@ -1,5 +1,10 @@
 # tests/test_quote_builder.py
-"""tests/test_quote_builder.py — Quote Builder service, schemas, and endpoint tests.
+"""tests/test_quote_builder.py — Quote-builder service + schema tests.
+
+Covers the QuoteBuilderLine/SaveRequest schemas, apply_smart_defaults (still used
+by the buy-plan seeding path), and save_quote_from_builder (create / revise /
+source inheritance). The modal-era endpoint tests left with their routes in the
+Wave 3 consolidation (see test_quote_builder_router.py for the deleted-route sweep).
 
 Called by: pytest
 Depends on: app.schemas.quote_builder, app.services.quote_builder_service, conftest.py
@@ -136,67 +141,6 @@ def test_smart_defaults_auto_pick_sets_sell_price():
     apply_smart_defaults(lines)
     assert lines[0]["sell_price"] == lines[0]["offers"][0]["unit_price"]
     assert lines[0]["sell_price_manual"] is False
-
-
-from app.services.quote_builder_service import build_excel_export
-
-
-def test_excel_export_produces_valid_xlsx():
-    line_items = [
-        {
-            "mpn": "LM358DR",
-            "manufacturer": "TI",
-            "qty": 500,
-            "sell_price": 0.31,
-            "lead_time": "2 weeks",
-            "date_code": "2024+",
-            "condition": "new",
-            "packaging": "Tape & Reel",
-            "moq": 100,
-            "vendor_name": "DigiKey",
-        }
-    ]
-    xlsx_bytes = build_excel_export(
-        line_items=line_items,
-        quote_number="Q-2026-0042",
-        customer_name="Acme Electronics",
-    )
-    assert isinstance(xlsx_bytes, bytes)
-    assert len(xlsx_bytes) > 100
-    assert xlsx_bytes[:2] == b"PK"
-
-
-def test_excel_export_has_correct_columns():
-    from io import BytesIO
-
-    import openpyxl
-
-    line_items = [
-        {
-            "mpn": "LM358DR",
-            "manufacturer": "TI",
-            "qty": 500,
-            "sell_price": 0.31,
-            "lead_time": "2 weeks",
-            "date_code": "2024+",
-            "condition": "new",
-            "packaging": "T&R",
-            "moq": 100,
-            "vendor_name": "DigiKey",
-        }
-    ]
-    xlsx_bytes = build_excel_export(line_items, "Q-2026-0042", "Acme")
-    wb = openpyxl.load_workbook(BytesIO(xlsx_bytes))
-    ws = wb.active
-    headers = [cell.value for cell in ws[1]]
-    assert "MPN" in headers
-    assert "Manufacturer" in headers
-    assert "Qty" in headers
-    assert "Unit Price" in headers
-    assert "Extended Price" in headers
-    assert "Lead Time" in headers
-    assert "Vendor" in headers
-    assert ws.cell(row=2, column=1).value == "LM358DR"
 
 
 from app.models import Company, CustomerSite, Quote, Requirement, Requisition
@@ -342,64 +286,6 @@ def test_save_quote_revision_inherits_source(db_session, test_user):
     revision = db_session.get(Quote, result2["quote_id"])
     assert revision.id != parent.id
     assert revision.source == "proactive"  # attribution propagates through the revision
-
-
-def test_builder_modal_endpoint_404_bad_req(client):
-    resp = client.get("/v2/partials/quote-builder/99999")
-    assert resp.status_code == 404
-
-
-def test_builder_modal_opens_successfully(client, db_session, test_user):
-    """Verify the modal endpoint returns 200 with valid data."""
-    company = Company(name="Test Co")
-    db_session.add(company)
-    db_session.flush()
-    site = CustomerSite(company_id=company.id, site_name="HQ")
-    db_session.add(site)
-    db_session.flush()
-    req = Requisition(name="Test Req", customer_site_id=site.id, created_by=test_user.id, status="open")
-    db_session.add(req)
-    db_session.commit()
-    resp = client.get(f"/v2/partials/quote-builder/{req.id}")
-    assert resp.status_code == 200
-    assert "Quote Builder" in resp.text
-
-
-def test_builder_data_endpoint_returns_json(client, db_session, test_user):
-    """Verify the data endpoint returns lines as JSON."""
-    company = Company(name="Data Co")
-    db_session.add(company)
-    db_session.flush()
-    site = CustomerSite(company_id=company.id, site_name="HQ")
-    db_session.add(site)
-    db_session.flush()
-    req = Requisition(name="Data Req", customer_site_id=site.id, created_by=test_user.id, status="open")
-    db_session.add(req)
-    db_session.flush()
-    r1 = Requirement(requisition_id=req.id, primary_mpn="LM358DR", manufacturer="TI", target_qty=100)
-    db_session.add(r1)
-    db_session.commit()
-    resp = client.get(f"/v2/partials/quote-builder/{req.id}/data")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "lines" in data
-    assert len(data["lines"]) == 1
-    assert data["lines"][0]["mpn"] == "LM358DR"
-
-
-def test_builder_data_endpoint_404_bad_req(client):
-    resp = client.get("/v2/partials/quote-builder/99999/data")
-    assert resp.status_code == 404
-
-
-def test_builder_save_endpoint_rejects_empty_lines(client):
-    resp = client.post("/v2/partials/quote-builder/1/save", json={"lines": []})
-    assert resp.status_code == 422
-
-
-def test_builder_excel_export_404_bad_quote(client):
-    resp = client.get("/v2/partials/quote-builder/1/export/excel?quote_id=99999")
-    assert resp.status_code == 404
 
 
 def test_builder_pdf_export_404_bad_quote(client):

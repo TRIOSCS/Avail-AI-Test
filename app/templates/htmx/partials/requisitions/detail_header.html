@@ -61,11 +61,13 @@
         </svg>
         Search Sources
       </button>
-      <button hx-get="/v2/partials/requisitions/{{ req.id }}/rfq-compose"
-              hx-target="#tab-content" hx-swap="innerHTML"
-              data-loading-disable
+      {# Send RFQ — opens the ONE surviving composer (the sightings vendor-modal:
+         coverage-ranked vendors, unavailability/DNC exclusion, [ref:id] tracking,
+         attachments) with every line of this deal in the basket. W3 §5.1: the
+         requisition-scoped rfq-compose surface was deleted as superseded. #}
+      <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirements|map(attribute='id')|join(',') }}'})"
+              data-req-id="{{ req.id }}"
               class="btn-primary btn-sm">
-        <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
         Send RFQ
       </button>
       <a href="/api/requisitions/{{ req.id }}/pdf" target="_blank" rel="noopener noreferrer"

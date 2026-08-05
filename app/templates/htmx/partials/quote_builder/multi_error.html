@@ -2,7 +2,7 @@
    quote builder (OQ-02). Rendered (HTTP 200, NOT an exception) into #modal-content by
    quote_builder_modal_multi when the selected requisitions don't share one customer, so
    the salesperson sees an honest per-requisition breakdown instead of a bare toast.
-   Deliberately carries NO x-data — the quoteBuilder Alpine component must never init
+   Deliberately carries NO x-data — the quoteBuilderTab Alpine component must never init
    against this fragment. The base modal supplies the ✕ / backdrop / Escape.
    Receives: message (str, the CustomerMismatchError.detail naming each req + customer).
    Called by: GET /v2/partials/quote-builder/multi (mismatch branch).

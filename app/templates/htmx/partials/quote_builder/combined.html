@@ -1,0 +1,20 @@
+{# quote_builder/combined.html — Combined cross-req quote builder (modal shell, OQ-02).
+   Thin wrapper around the ONE Build-Quote body (requisitions/tabs/build_quote.html):
+   a heading naming the shared customer + anchor, then #combined-quote-body, which the
+   /multi/assemble re-render targets so the modal stays open through assemble → summary
+   → Download PDF / Send. The base modal supplies the ✕ / backdrop / Escape.
+   Receives: the full _build_quote_tab_context (is_multi=True) + customer_name (str).
+   Called by: GET /v2/partials/quote-builder/multi (same-customer selections only —
+              a mismatch renders multi_error.html instead).
+#}
+<div class="p-6">
+  <div class="mb-4">
+    <h3 id="modal-title" class="h2">Combined quote — {{ customer_name or req.name }}</h3>
+    <p class="text-sm text-gray-500 mt-0.5">
+      One quote across {{ req_count }} requisitions · {{ req.name or ('#' ~ req.id) }} (#{{ req.id }}) is the anchor.
+    </p>
+  </div>
+  <div id="combined-quote-body">
+    {% include "htmx/partials/requisitions/tabs/build_quote.html" %}
+  </div>
+</div>

@@ -1,10 +1,11 @@
 """tests/test_build_quote_multi_req.py — Bulk cross-req → ONE combined quote
-(OQ-02/REQ-04).
+(OQ-02/REQ-04, Wave 3 single-builder flow).
 
 Covers the combined-quote feature end to end:
-  - saving spans every selected requisition into ONE quote (join rows, both/all QUOTED);
-  - the customer-consistency gate blocks a modal-open (honest 200 fragment) AND a save
-    (400 naming each offending req) — never a silent partial write;
+  - the multi entry renders the SAME Build-Quote body (merged lines) in the modal;
+  - assembling spans every selected requisition into ONE quote (join rows, all QUOTED);
+  - the customer-consistency gate blocks a builder-open (honest 200 fragment) AND an
+    assemble (400 naming each offending req) — never a silent partial write;
   - the single-req path is 100% preserved (1 quote, 1 self join-row id == req id);
   - a SECONDARY requisition surfaces the combined quote on its Quotes tab, Build-Quote
     tab, and the list Quotes column;
@@ -17,6 +18,7 @@ Depends on: conftest fixtures (client, db_session, test_user, test_company,
             test_customer_site).
 """
 
+import json
 import os
 
 os.environ["TESTING"] = "1"
@@ -131,27 +133,51 @@ def _line(requirement, offer, mpn: str, sell: float, cost: float) -> dict:
     }
 
 
-def _multi_save(client: TestClient, req_ids: list[int], lines: list[dict], quote_id=None):
+def _multi_assemble(client: TestClient, req_ids: list[int], lines: list[dict], quote_id=None):
+    """POST the combined assemble (form-encoded, same shape as the tab's Assemble)."""
     ids = ",".join(str(i) for i in req_ids)
+    data = {"selections_json": json.dumps(lines)}
+    if quote_id is not None:
+        data["quote_id"] = str(quote_id)
     return client.post(
-        f"/v2/partials/quote-builder/multi/save?requisition_ids={ids}",
-        json={"lines": lines, "quote_id": quote_id},
+        f"/v2/partials/quote-builder/multi/assemble?requisition_ids={ids}",
+        data=data,
     )
 
 
-# ── Save: one combined quote ────────────────────────────────────────────────────
+# ── Open: the multi entry renders the ONE builder body ──────────────────────────
+
+
+class TestMultiOpen:
+    def test_multi_open_renders_merged_builder(self, client, db_session, combo):
+        r1, _, _ = combo["r1"]
+        r2, _, _ = combo["r2"]
+        resp = client.get(f"/v2/partials/quote-builder/multi?requisition_ids={r1.id},{r2.id}")
+        assert resp.status_code == 200, resp.text
+        # The combined shell wraps the SAME Build-Quote body (quoteBuilderTab Alpine).
+        assert "Combined quote" in resp.text
+        assert 'id="combined-quote-body"' in resp.text
+        assert "quoteBuilderTab(" in resp.text
+        # Lines merged across BOTH selected requisitions.
+        assert "LM317T" in resp.text and "NE555P" in resp.text
+        # The assemble form posts to the multi endpoint, re-rendering inside the modal.
+        assert f"/v2/partials/quote-builder/multi/assemble?requisition_ids={r1.id},{r2.id}" in resp.text
+        assert "#combined-quote-body" in resp.text
+        # No quote is created just by opening.
+        assert db_session.query(Quote).count() == 0
+
+
+# ── Assemble: one combined quote ────────────────────────────────────────────────
 
 
 class TestMultiSave:
-    def test_multi_save_creates_one_combined_quote(self, client, db_session, combo):
+    def test_multi_assemble_creates_one_combined_quote(self, client, db_session, combo):
         r1, i1, o1 = combo["r1"]
         r2, i2, o2 = combo["r2"]
         lines = [_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]
 
-        resp = _multi_save(client, [r1.id, r2.id], lines)
+        resp = _multi_assemble(client, [r1.id, r2.id], lines)
         assert resp.status_code == 200, resp.text
-        data = resp.json()
-        assert data["ok"] is True
 
         quotes = db_session.query(Quote).all()
         assert len(quotes) == 1
@@ -168,8 +194,10 @@ class TestMultiSave:
         db_session.expire_all()
         assert db_session.get(Requisition, r1.id).status == RequisitionStatus.QUOTED
         assert db_session.get(Requisition, r2.id).status == RequisitionStatus.QUOTED
+        # The re-render shows the assembled-quote summary inline (modal stays open).
+        assert quote.quote_number in resp.text
 
-    def test_multi_save_three_reqs(self, client, db_session, combo):
+    def test_multi_assemble_three_reqs(self, client, db_session, combo):
         r1, i1, o1 = combo["r1"]
         r2, i2, o2 = combo["r2"]
         r3, i3, o3 = combo["r3"]
@@ -178,7 +206,7 @@ class TestMultiSave:
             _line(i2, o2, "NE555P", 0.30, 0.20),
             _line(i3, o3, "LM358DR", 0.45, 0.30),
         ]
-        resp = _multi_save(client, [r1.id, r2.id, r3.id], lines)
+        resp = _multi_assemble(client, [r1.id, r2.id, r3.id], lines)
         assert resp.status_code == 200, resp.text
         quote = db_session.query(Quote).one()
         links = db_session.query(QuoteRequisition).filter(QuoteRequisition.quote_id == quote.id).all()
@@ -188,8 +216,17 @@ class TestMultiSave:
     def test_empty_selection_rejected(self, client, combo):
         r1, i1, o1 = combo["r1"]
         resp = client.post(
-            "/v2/partials/quote-builder/multi/save?requisition_ids=",
-            json={"lines": [_line(i1, o1, "LM317T", 0.60, 0.40)], "quote_id": None},
+            "/v2/partials/quote-builder/multi/assemble?requisition_ids=",
+            data={"selections_json": json.dumps([_line(i1, o1, "LM317T", 0.60, 0.40)])},
+        )
+        assert resp.status_code == 400
+
+    def test_empty_lines_rejected(self, client, combo):
+        r1, _, _ = combo["r1"]
+        r2, _, _ = combo["r2"]
+        resp = client.post(
+            f"/v2/partials/quote-builder/multi/assemble?requisition_ids={r1.id},{r2.id}",
+            data={"selections_json": "[]"},
         )
         assert resp.status_code == 400
 
@@ -207,7 +244,7 @@ class TestCustomerConsistency:
         assert resp.status_code == 200
         assert "different customers" in resp.text
         # The Alpine builder must NOT init against the error fragment.
-        assert "quoteBuilder(" not in resp.text
+        assert "quoteBuilderTab(" not in resp.text
         # No quote is created just by opening.
         assert db_session.query(Quote).count() == 0
 
@@ -216,7 +253,7 @@ class TestCustomerConsistency:
         r2, i2, o2 = _make_req(db_session, test_user, other_site.id, "MM-2", "NE555P", 0.20)
         lines = [_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]
 
-        resp = _multi_save(client, [r1.id, r2.id], lines)
+        resp = _multi_assemble(client, [r1.id, r2.id], lines)
         assert resp.status_code == 400
         detail = resp.json().get("detail", "") or resp.json().get("error", "")
         # Detail names BOTH requisitions so the salesperson can fix the selection.
@@ -250,7 +287,7 @@ class TestCustomerConsistency:
         db_session.commit()
 
         lines = [_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]
-        resp = _multi_save(client, [r1.id, r2.id], lines)
+        resp = _multi_assemble(client, [r1.id, r2.id], lines)
         assert resp.status_code == 400
         detail = resp.json().get("detail", "") or resp.json().get("error", "")
         assert "MS-2" in detail
@@ -280,30 +317,30 @@ class TestSingleReqPreserved:
 
 
 class TestSecondaryReqVisibility:
-    def _build_combined(self, client, combo):
+    def _build_combined(self, client, db_session, combo):
         r1, i1, o1 = combo["r1"]
         r2, i2, o2 = combo["r2"]
         lines = [_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]
-        resp = _multi_save(client, [r1.id, r2.id], lines)
+        resp = _multi_assemble(client, [r1.id, r2.id], lines)
         assert resp.status_code == 200, resp.text
-        return r1, r2, resp.json()["quote_number"]
+        return r1, r2, db_session.query(Quote).one().quote_number
 
-    def test_secondary_req_quotes_tab_shows_combined(self, client, combo):
-        _, r2, quote_number = self._build_combined(client, combo)
+    def test_secondary_req_quotes_tab_shows_combined(self, client, db_session, combo):
+        _, r2, quote_number = self._build_combined(client, db_session, combo)
         resp = client.get(f"/v2/partials/requisitions/{r2.id}/tab/quotes")
         assert resp.status_code == 200
         # The combined quote shows on the SECONDARY req's Quotes tab (join-scoped read).
         assert quote_number in resp.text
 
-    def test_secondary_req_build_quote_tab_shows_existing(self, client, combo):
-        _, r2, quote_number = self._build_combined(client, combo)
+    def test_secondary_req_build_quote_tab_shows_existing(self, client, db_session, combo):
+        _, r2, quote_number = self._build_combined(client, db_session, combo)
         resp = client.get(f"/v2/partials/requisitions/{r2.id}/build-quote")
         assert resp.status_code == 200
         # The secondary req's Build-Quote tab surfaces the existing combined quote summary.
         assert quote_number in resp.text
 
     def test_list_quotes_column_reflects_combined_on_secondary(self, client, db_session, combo):
-        _, r2, _ = self._build_combined(client, combo)
+        _, r2, _ = self._build_combined(client, db_session, combo)
         # After sending, the quote is SENT — the list Quotes column shows it on the secondary.
         quote = db_session.query(Quote).one()
         quote.status = "sent"
@@ -371,7 +408,7 @@ class TestReviseMembership:
         r1, i1, o1 = combo["r1"]
         r2, i2, o2 = combo["r2"]
         lines = [_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]
-        assert _multi_save(client, [r1.id, r2.id], lines).status_code == 200
+        assert _multi_assemble(client, [r1.id, r2.id], lines).status_code == 200
         parent = db_session.query(Quote).one()
 
         resp = client.post(f"/v2/partials/quotes/{parent.id}/revise")

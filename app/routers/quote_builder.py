@@ -1,9 +1,13 @@
-"""routers/quote_builder.py — Quote Builder modal, save, and export endpoints.
+"""routers/quote_builder.py — Build-Quote tab, combined multi-req builder, PDF export.
 
-Serves the full-screen two-panel quote builder modal, handles save (with
-revision support), and streams Excel/PDF exports.
+ONE quote builder (Wave 3): the in-workspace Build-Quote tab is the single flow.
+The old two-panel modal (its /data + /save JSON endpoints and Excel export) is
+deleted; the multi-req entry from the requisitions list renders the SAME tab body
+(merged lines across the selection) inside the global modal and assembles through
+``save_quote_from_builder_multi``.
 
-Called by: Parts tab "Build Quote" button (HTMX), Alpine.js fetch (save)
+Called by: requisition detail Build-Quote tab (HTMX), requisitions list bulk
+           Build-Quote button (2+ selected → /multi)
 Depends on: app.services.quote_builder_service, app.schemas.quote_builder
 """
 
@@ -60,6 +64,9 @@ async def quote_builder_modal_multi(
     plain static error fragment (HTTP 200) into #modal-content — NOT an exception — so the
     modal shows an honest per-requisition breakdown of the clash instead of a bare toast.
     ``requisition_ids[0]`` is the primary/anchor (its customer site + the quote record).
+
+    Renders the SAME Build-Quote tab body as the single-req flow (merged lines across the
+    selection) inside the global modal — the old two-panel modal is deleted (Wave 3).
     """
     from ..dependencies import get_req_for_user
     from ..services.quote_requisitions import CustomerMismatchError, validate_same_customer
@@ -83,61 +90,35 @@ async def quote_builder_modal_multi(
             {"request": request, "message": exc.detail},
         )
 
-    return template_response(
-        "htmx/partials/quote_builder/modal.html",
-        {
-            "request": request,
-            "req": primary_req,
-            "customer_name": _customer_name_for_site(db, primary_req.customer_site_id),
-            "has_customer_site": bool(primary_req.customer_site_id),
-            "requirement_ids": "",
-            "multi_req_ids": requisition_ids,
-        },
-    )
+    context = _build_quote_tab_context(request, db, primary_req, all_req_ids=req_id_list)
+    context["customer_name"] = _customer_name_for_site(db, primary_req.customer_site_id)
+    return template_response("htmx/partials/quote_builder/combined.html", context)
 
 
-@router.get("/v2/partials/quote-builder/multi/data")
-async def quote_builder_data_multi(
+@router.post("/v2/partials/quote-builder/multi/assemble", response_class=Response)
+async def quote_builder_assemble_multi(
+    request: Request,
     requisition_ids: str = "",
+    selections_json: str = Form(...),
+    quote_id: int | None = Form(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return merged line data from every selected requisition for the combined
-    builder."""
-    from ..dependencies import get_req_for_user
-    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
-
-    req_id_list = _parse_req_ids(requisition_ids)
-
-    all_lines = []
-    for rid in req_id_list:
-        req = get_req_for_user(db, user, rid)
-        if req:
-            lines = get_builder_data(rid, db)
-            all_lines.extend(lines)
-
-    apply_smart_defaults(all_lines)
-    return {"lines": all_lines}
-
-
-@router.post("/v2/partials/quote-builder/multi/save")
-async def quote_builder_save_multi(
-    payload: QuoteBuilderSaveRequest,
-    requisition_ids: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Save ONE combined quote spanning every selected requisition's chosen lines.
+    """Assemble ONE combined quote spanning every selected requisition's checked lines.
 
     Ownership-checks each requisition (looped ``require_requisition_access`` +
     ``get_req_for_user`` — an unowned req can't be smuggled into the combine), then
-    delegates to ``save_quote_from_builder_multi``. A customer mismatch surfaces as an
-    honest 400 (the builder's save banner), a missing/unknown req as 404 — never a silent
-    partial write. Returns the SAME dict shape as the single-req save.
+    delegates to ``save_quote_from_builder_multi`` (same revision lifecycle, requisition
+    state transition, and knowledge-ledger capture as the single-req assemble). A customer
+    mismatch surfaces as an honest 400, a missing/unknown req as 404 — never a silent
+    partial write. Re-renders the merged Build-Quote body into the modal.
     """
+    import json
+
     from ..dependencies import get_req_for_user, require_requisition_access
     from ..services.quote_builder_service import save_quote_from_builder_multi
     from ..services.quote_requisitions import CustomerMismatchError
+    from ..template_env import template_response
 
     req_ids = _parse_req_ids(requisition_ids)
 
@@ -145,6 +126,22 @@ async def quote_builder_save_multi(
         require_requisition_access(db, rid, user)
         if not get_req_for_user(db, user, rid):
             raise HTTPException(404, "Requisition not found")
+
+    primary_req = db.get(Requisition, req_ids[0])
+    if not primary_req:
+        raise HTTPException(404, "Requisition not found")
+
+    try:
+        raw = json.loads(selections_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(400, "Invalid quote payload") from exc
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "Select at least one line to assemble a quote")
+
+    try:
+        payload = QuoteBuilderSaveRequest(lines=raw, quote_id=quote_id)
+    except Exception as exc:
+        raise HTTPException(422, "Invalid quote line data") from exc
 
     try:
         result = save_quote_from_builder_multi(db, req_ids=req_ids, payload=payload, user=user)
@@ -154,144 +151,15 @@ async def quote_builder_save_multi(
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     except Exception as e:
-        logger.error("Combined quote save failed for reqs {}: {}", req_ids, e)
-        raise HTTPException(500, "Failed to save quote. Please try again.") from e
+        logger.error("Combined quote assemble failed for reqs {}: {}", req_ids, e)
+        raise HTTPException(500, "Failed to assemble quote. Please try again.") from e
 
-    return result
+    from ..models import Quote
 
-
-@router.get("/v2/partials/quote-builder/{req_id}")
-async def quote_builder_modal(
-    req_id: int,
-    request: Request,
-    requirement_ids: str | None = None,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Open the quote builder modal shell (lightweight HTML, no line data).
-
-    Line data is fetched separately via the /data endpoint by the Alpine component on
-    init, keeping the initial HTML payload small even for requisitions with 200+
-    requirements.
-    """
-    from ..dependencies import get_req_for_user
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-
-    from ..template_env import template_response
-
+    quote = db.get(Quote, result["quote_id"])
     return template_response(
-        "htmx/partials/quote_builder/modal.html",
-        {
-            "request": request,
-            "req": req,
-            "customer_name": _customer_name_for_site(db, req.customer_site_id),
-            "has_customer_site": bool(req.customer_site_id),
-            "requirement_ids": requirement_ids or "",
-        },
-    )
-
-
-@router.get("/v2/partials/quote-builder/{req_id}/data")
-async def quote_builder_data(
-    req_id: int,
-    requirement_ids: str | None = None,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return line data as JSON for the quote builder Alpine component.
-
-    Called by the Alpine component on init via fetch(). Keeps the modal HTML small and
-    allows the browser to parse the JSON efficiently as a separate network request
-    rather than inline in an HTML attribute.
-    """
-    from ..dependencies import get_req_for_user
-    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-
-    req_ids = None
-    if requirement_ids:
-        try:
-            req_ids = [int(x.strip()) for x in requirement_ids.split(",") if x.strip()]
-        except ValueError:
-            req_ids = None
-
-    lines = get_builder_data(req_id, db, requirement_ids=req_ids)
-    apply_smart_defaults(lines)
-
-    return {"lines": lines}
-
-
-@router.post("/v2/partials/quote-builder/{req_id}/save")
-async def quote_builder_save(
-    req_id: int,
-    payload: QuoteBuilderSaveRequest,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Save the quote from the builder modal."""
-    from ..dependencies import get_req_for_user, require_requisition_access
-    from ..services.quote_builder_service import save_quote_from_builder
-
-    # Ownership guard: SALES/TRADER may only save quotes for requisitions they own
-    # (no-op for buyer/manager/admin). 404 to avoid leaking existence.
-    require_requisition_access(db, req_id, user)
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    if not req.customer_site_id:
-        raise HTTPException(400, "Requisition must be linked to a customer site before quoting")
-
-    try:
-        result = save_quote_from_builder(db, req_id=req_id, payload=payload, user=user)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    except Exception as e:
-        logger.error("Quote builder save failed for req {}: {}", req_id, e)
-        raise HTTPException(500, "Failed to save quote. Please try again.") from e
-
-    return result
-
-
-@router.get("/v2/partials/quote-builder/{req_id}/export/excel")
-async def quote_builder_export_excel(
-    req_id: int,
-    quote_id: int,
-    user: User = Depends(require_access(AccessKey.EXPORT_DATA)),
-    db: Session = Depends(get_db),
-):
-    """Stream an Excel export of a saved quote."""
-    quote = get_quote_for_user(db, user, quote_id)
-    if quote.requisition_id != req_id:
-        raise HTTPException(404, "Quote not found")
-
-    from ..services.quote_builder_service import build_excel_export
-
-    customer_name = ""
-    if quote.customer_site and quote.customer_site.company:
-        customer_name = quote.customer_site.company.name or ""
-
-    try:
-        xlsx_bytes = build_excel_export(
-            line_items=quote.line_items or [],
-            quote_number=quote.quote_number,
-            customer_name=customer_name,
-        )
-    except Exception as e:
-        logger.error("Excel export failed for quote {}: {}", quote_id, e)
-        raise HTTPException(500, "Excel export failed. Please try again.") from e
-
-    filename = f"{quote.quote_number}.xlsx"
-    return Response(
-        content=xlsx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        "htmx/partials/requisitions/tabs/build_quote.html",
+        _build_quote_tab_context(request, db, primary_req, quote=quote, all_req_ids=req_ids),
     )
 
 
@@ -333,13 +201,25 @@ async def quote_builder_export_pdf(
 # -> clean inline summary. Owner/buyer-gated via require_requisition_access.
 
 
-def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> dict:
+def _build_quote_tab_context(
+    request: Request,
+    db: Session,
+    req,
+    quote=None,
+    *,
+    all_req_ids: list[int] | None = None,
+) -> dict:
     """Context for the Build-Quote tab body: seeded lines + latest-quote summary.
 
     Each line carries its best-cost reference + ACTIVE offers + a pre-filled sell
     seed (``build_quote_tab_data``). ``quote`` (when an assemble just happened, else the
     requisition's most recent quote) drives the clean inline summary via the
     ``quote_export_context`` whitelist — the same source the customer PDF renders from.
+
+    ``all_req_ids`` (2+ ids, anchor first) switches the SAME body into combined mode:
+    lines merge across every selected requisition and the assemble form posts to the
+    /multi/assemble endpoint, re-rendering inside the modal (#combined-quote-body)
+    instead of the detail-page tab (#tab-content).
     """
     from ..models import Quote
     from ..services.quote_builder_service import (
@@ -351,15 +231,20 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
     from ..services.quote_preflight import quote_preflight
     from ..services.quote_requisitions import quotes_for_requisition
 
+    req_ids = all_req_ids or [req.id]
+    is_multi = len(req_ids) > 1
+
     if quote is None:
         # quotes_for_requisition (join-based) so a SECONDARY requisition of a combined
         # quote surfaces that quote here too — not just the ones it anchors.
         quote = quotes_for_requisition(db, req.id).order_by(Quote.revision.desc().nullslast(), Quote.id.desc()).first()
 
-    lines = build_quote_tab_data(db, req.id)
+    lines = []
+    for rid in req_ids:
+        lines.extend(build_quote_tab_data(db, rid))
     # Compact reactive seed keyed by requirement id — passed to the Alpine component as a
     # single |tojson blob inside a SINGLE-quoted x-data (tojson emits double quotes, safe
-    # only inside single quotes; mirrors quote_builder/modal.html + the resell tab).
+    # only inside single quotes; mirrors the resell build-bid tab).
     tab_data = {
         li["requirement_id"]: {
             "sel": False,
@@ -380,9 +265,21 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
         for li in lines
     }
 
+    if is_multi:
+        ids_str = ",".join(str(rid) for rid in req_ids)
+        assemble_url = f"/v2/partials/quote-builder/multi/assemble?requisition_ids={ids_str}"
+        assemble_target = "#combined-quote-body"
+    else:
+        assemble_url = f"/v2/partials/requisitions/{req.id}/build-quote/assemble"
+        assemble_target = "#tab-content"
+
     return {
         "request": request,
         "req": req,
+        "req_count": len(req_ids),
+        "is_multi": is_multi,
+        "assemble_url": assemble_url,
+        "assemble_target": assemble_target,
         "lines": lines,
         "tab_data": tab_data,
         "markup_pct": DEFAULT_MARKUP_PCT,

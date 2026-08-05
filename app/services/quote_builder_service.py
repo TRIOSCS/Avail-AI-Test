@@ -1,11 +1,11 @@
 # app/services/quote_builder_service.py
-"""services/quote_builder_service.py — Business logic for the Quote Builder.
+"""services/quote_builder_service.py — Business logic for the ONE quote builder.
 
-Loads requirement + offer data for the builder modal, applies smart defaults,
-generates Excel exports. Decoupled from HTTP.
+Loads requirement + offer line data (Build-Quote tab + combined multi-req builder),
+applies smart defaults, and saves/revises quotes. Decoupled from HTTP.
 
-Called by: app.routers.quote_builder
-Depends on: app.models (Requirement, Offer, Quote), openpyxl,
+Called by: app.routers.quote_builder, app.routers.htmx.buy_plans
+Depends on: app.models (Requirement, Offer, Quote),
     app.services.pricing_history (preload_last_quoted_prices)
 """
 
@@ -354,71 +354,6 @@ def apply_smart_defaults(lines: list[dict]) -> None:
         else:
             line["status"] = "no_offers"
             line["selected_offer_id"] = None
-
-
-def build_excel_export(
-    line_items: list[dict],
-    quote_number: str,
-    customer_name: str,
-) -> bytes:
-    """Generate a styled Excel workbook from quote line items.
-
-    Returns raw bytes.
-    """
-    from io import BytesIO
-
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = quote_number or "Quote"
-
-    header_fill = PatternFill(start_color="3D6895", end_color="3D6895", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-
-    columns = [
-        ("MPN", 20),
-        ("Manufacturer", 18),
-        ("Qty", 10),
-        ("Unit Price", 14),
-        ("Extended Price", 16),
-        ("Lead Time", 14),
-        ("Date Codes", 14),
-        ("Condition", 12),
-        ("Packaging", 14),
-        ("MOQ", 10),
-        ("Vendor", 20),
-    ]
-
-    for col_idx, (name, width) in enumerate(columns, 1):
-        cell = ws.cell(row=1, column=col_idx, value=name)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center")
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-    for row_idx, item in enumerate(line_items, 2):
-        qty = item.get("qty") or 0
-        sell = item.get("sell_price") or 0
-        ws.cell(row=row_idx, column=1, value=item.get("mpn", ""))
-        ws.cell(row=row_idx, column=2, value=item.get("manufacturer", ""))
-        ws.cell(row=row_idx, column=3, value=qty)
-        price_cell = ws.cell(row=row_idx, column=4, value=sell)
-        price_cell.number_format = "$#,##0.0000"
-        ext_cell = ws.cell(row=row_idx, column=5, value=round(qty * sell, 2))
-        ext_cell.number_format = "$#,##0.00"
-        ws.cell(row=row_idx, column=6, value=item.get("lead_time", ""))
-        ws.cell(row=row_idx, column=7, value=item.get("date_code", ""))
-        ws.cell(row=row_idx, column=8, value=item.get("condition", ""))
-        ws.cell(row=row_idx, column=9, value=item.get("packaging", ""))
-        ws.cell(row=row_idx, column=10, value=item.get("moq", ""))
-        ws.cell(row=row_idx, column=11, value=item.get("vendor_name", ""))
-
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
 
 
 def save_quote_from_builder(

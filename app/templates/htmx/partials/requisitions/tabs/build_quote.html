@@ -1,32 +1,41 @@
 {#
-  requisitions/tabs/build_quote.html — Build-Quote tab body (single-stage inline assembly).
-  The in-workspace reshape of the quote-builder modal, mirroring resell/_build_bid.html:
-  each line shows its best-cost reference + ACTIVE offers (cheapest highlighted); checking a
-  line seeds the sell-price field (last-quoted -> else best-cost × markup); live margin chip
-  + blended total + guardrail; "Assemble" -> save_quote_from_builder -> clean inline summary
+  requisitions/tabs/build_quote.html — Build-Quote body (single-stage inline assembly).
+  The ONE quote builder (Wave 3), mirroring resell/_build_bid.html: each line shows its
+  best-cost reference + ACTIVE offers (cheapest highlighted); checking a line seeds the
+  sell-price field (last-quoted -> else best-cost × markup); live margin chip + blended
+  total + guardrail; "Assemble" -> save_quote_from_builder(_multi) -> clean inline summary
   + Download PDF / Send. NO vendor names cross into the customer doc (quote_export_context).
-  Receives: req (Requisition), lines (build_quote_tab_data), markup_pct, min_margin_pct,
+  In combined mode (is_multi, via quote_builder/combined.html) the lines merge across the
+  selected requisitions and the form posts to /multi/assemble inside the global modal.
+  Receives: req (anchor Requisition), req_count, is_multi, assemble_url, assemble_target,
+            lines (build_quote_tab_data, merged), markup_pct, min_margin_pct,
             has_customer_site, quote (Quote|None), summary (quote_export_context|None).
-  Called by: quote_builder.build_quote_tab (lazy) + build_quote_assemble (re-render).
+  Called by: quote_builder.build_quote_tab (lazy) + build_quote_assemble (re-render)
+             + quote_builder_modal_multi (include) + quote_builder_assemble_multi.
 #}
 
 {% if not lines %}
 <div class="mx-auto max-w-xs text-center text-sm text-gray-600 py-10">
   <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
   <p>No parts to quote yet.</p>
-  {# Next step: parts are added + sourced on the Parts tab (mirrors the tab-nav switch). #}
+  {% if not is_multi %}
+  {# Next step: parts are added + sourced on the Parts tab (mirrors the tab-nav switch).
+     Tab-flow only: activeTab/#tab-content exist on the detail page, not in the modal. #}
   <button @click="activeTab = 'parts'"
           hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
           hx-target="#tab-content" hx-swap="innerHTML"
           class="btn btn-primary btn-sm mt-3">
     Add parts &rarr;
   </button>
+  {% else %}
+  <p class="text-xs text-gray-400 mt-2">Add parts to the selected requisitions first.</p>
+  {% endif %}
 </div>
 
 {% else %}
 {# The per-line reactive seed is built server-side (tab_data) and passed as ONE |tojson
    blob inside a SINGLE-quoted x-data — tojson emits double quotes, valid only inside single
-   quotes (mirrors quote_builder/modal.html + the CLAUDE.md Alpine-quoting rule). #}
+   quotes (the CLAUDE.md Alpine-quoting rule; mirrors the resell build-bid tab). #}
 <div class="space-y-5"
      x-data='quoteBuilderTab({{ req.id }}, {{ has_customer_site | tojson }}, {{ min_margin_pct }}, {{ (quote is not none) | tojson }}, {{ tab_data | tojson }})'>
 
@@ -55,8 +64,8 @@
   {% endif %}
 
   {# ── Builder table ────────────────────────────────────────────── #}
-  <form hx-post="/v2/partials/requisitions/{{ req.id }}/build-quote/assemble"
-        hx-target="#tab-content"
+  <form hx-post="{{ assemble_url }}"
+        hx-target="{{ assemble_target }}"
         hx-swap="innerHTML"
         data-loading-disable
         @submit="$el.querySelector('input[name=selections_json]').value = payload()">

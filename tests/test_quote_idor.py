@@ -131,8 +131,9 @@ def test_sales_cannot_reach_other_sales_users_quote(db_session, test_customer_si
         resp_delete = c.delete(f"/v2/partials/quotes/{quote_b.id}")
         assert resp_delete.status_code == 404, resp_delete.text
 
-        # quote_builder export — req_id/quote_id both B's
-        resp_export = c.get(f"/v2/partials/quote-builder/{req_b.id}/export/excel?quote_id={quote_b.id}")
+        # quote_builder PDF export — req_id/quote_id both B's (Excel export was
+        # deleted with the modal in the Wave 3 quote-builder consolidation)
+        resp_export = c.get(f"/v2/partials/quote-builder/{req_b.id}/export/pdf?quote_id={quote_b.id}")
         assert resp_export.status_code == 404, resp_export.text
 
     # B's quote must be untouched by A's attempts.

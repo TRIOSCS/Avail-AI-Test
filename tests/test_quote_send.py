@@ -203,6 +203,50 @@ async def test_service_happy_path_sets_status_and_req(db_session, test_requisiti
     assert test_requisition.status == RequisitionStatus.QUOTED
 
 
+async def test_service_send_writes_requisition_status_change_audit(
+    db_session, test_requisition, test_customer_site, test_user
+):
+    """W3: the requisition advance routes through requisition_state.transition, so the
+    send writes a STATUS_CHANGED ActivityLog row (the old raw `r.status = ...` write
+    bypassed the audit)."""
+    from app.constants import ActivityType
+    from app.services.quote_send import send_quote_email
+
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-TRN")
+    await send_quote_email(db_session, quote, test_user, token="t", testing=True)
+
+    rows = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.requisition_id == test_requisition.id,
+            ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
+        )
+        .all()
+    )
+    assert any("quoted" in (r.subject or "") for r in rows)
+
+
+async def test_service_send_leaves_illegal_origin_req_untouched(
+    db_session, test_requisition, test_customer_site, test_user
+):
+    """A requisition with no legal edge to QUOTED (draft) stays put and the send still
+    succeeds — the email already went out, so legality logs a warning instead of
+    500ing."""
+    from app.services.quote_send import send_quote_email
+
+    test_requisition.status = RequisitionStatus.DRAFT
+    db_session.commit()
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-ILL")
+
+    result = await send_quote_email(db_session, quote, test_user, token="t", testing=True)
+
+    assert result.status == "sent"
+    db_session.refresh(quote)
+    assert quote.status == QuoteStatus.SENT
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == RequisitionStatus.DRAFT
+
+
 async def test_service_writes_outbound_activity_log(db_session, test_requisition, test_customer_site, test_user):
     """An OUTBOUND email ActivityLog row is written for the customer recipient."""
     from app.services.quote_send import send_quote_email

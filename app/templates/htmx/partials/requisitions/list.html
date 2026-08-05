@@ -237,8 +237,9 @@
     </div>
     {# Build Quote — one requisition opens the in-workspace Build Quote tab; 2+ open ONE
        combined cross-req quote in the global modal (#modal-content is always present, and
-       open-modal is the real listener). The multi route renders the builder or, on a
-       customer mismatch, an honest error fragment — both 200s into #modal-content. #}
+       open-modal is the real listener). The multi route renders the SAME Build-Quote body
+       (merged lines, tab flow) or, on a customer mismatch, an honest error fragment —
+       both 200s into #modal-content. #}
     <button @click="
               const ids = Array.from(selectedIds);
               const idStr = ids.join(',');

@@ -1,7 +1,8 @@
 """tests/test_quote_builder_service_boost.py — Coverage boost for quote_builder_service.
 
-Covers: apply_smart_defaults, build_excel_export, and save_quote_from_builder
-revision path (existing old quote).
+Covers: apply_smart_defaults, get_builder_data, and the save_quote_from_builder
+revision path (existing old quote). (build_excel_export left with the Excel-export
+route in the Wave 3 quote-builder consolidation.)
 
 Called by: pytest
 Depends on: conftest fixtures, unittest.mock
@@ -21,7 +22,6 @@ from sqlalchemy.orm import Session
 from app.models import Offer, Quote, Requisition, User
 from app.services.quote_builder_service import (
     apply_smart_defaults,
-    build_excel_export,
     get_builder_data,
     save_quote_from_builder,
 )
@@ -144,93 +144,6 @@ class TestApplySmartDefaults:
         apply_smart_defaults(lines)
         assert lines[0]["status"] == "no_offers"
         assert lines[1]["status"] == "decided"
-
-
-# ── build_excel_export ────────────────────────────────────────────────────────
-
-
-class TestBuildExcelExport:
-    @pytest.mark.parametrize(
-        ("items", "quote_number", "customer", "check_nonempty"),
-        [
-            (
-                [
-                    {
-                        "mpn": "LM317T",
-                        "manufacturer": "TI",
-                        "qty": 100,
-                        "sell_price": 0.75,
-                        "lead_time": "4 weeks",
-                        "date_code": "2024",
-                        "condition": "new",
-                        "packaging": "reel",
-                        "moq": 100,
-                        "vendor_name": "Arrow",
-                    }
-                ],
-                "Q-2026-0001",
-                "ACME Corp",
-                True,
-            ),
-            ([], "Q-EMPTY", "Nobody", True),
-            (
-                [
-                    {
-                        "mpn": "ABC123",
-                        "manufacturer": "Mfr1",
-                        "qty": 50,
-                        "sell_price": 1.0,
-                        "lead_time": None,
-                        "date_code": None,
-                        "condition": None,
-                        "packaging": None,
-                        "moq": None,
-                        "vendor_name": "V1",
-                    },
-                    {
-                        "mpn": "XYZ789",
-                        "manufacturer": "Mfr2",
-                        "qty": 0,
-                        "sell_price": 0,
-                        "lead_time": None,
-                        "date_code": None,
-                        "condition": None,
-                        "packaging": None,
-                        "moq": None,
-                        "vendor_name": "V2",
-                    },
-                ],
-                "Q-MULTI",
-                "MultiCo",
-                False,
-            ),
-            (
-                [
-                    {
-                        "mpn": "P1",
-                        "manufacturer": None,
-                        "qty": None,
-                        "sell_price": None,
-                        "lead_time": None,
-                        "date_code": None,
-                        "condition": None,
-                        "packaging": None,
-                        "moq": None,
-                        "vendor_name": None,
-                    }
-                ],
-                "Q-X",
-                "X",
-                False,
-            ),
-        ],
-        ids=["single_line", "empty_line_items", "multiple_line_items", "none_qty_and_price"],
-    )
-    def test_returns_bytes(self, items, quote_number, customer, check_nonempty):
-        result = build_excel_export(items, quote_number, customer)
-        assert isinstance(result, bytes)
-        if check_nonempty:
-            assert len(result) > 0
 
 
 # ── save_quote_from_builder — revision path ───────────────────────────────────
