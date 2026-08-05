@@ -269,8 +269,11 @@ class TestCanExportBulkDataJinjaGlobal:
 
 
 class TestQuoteBuilderExportUnaffected:
-    """Quote-builder Excel/PDF exports stay on EXPORT_DATA (open to sales) — ISS-022
-    only splits off the five BULK dataset exports, not single-deal quote docs."""
+    """The quote-builder PDF export stays on EXPORT_DATA (open to sales) — ISS-022 only
+    splits off the five BULK dataset exports, not single-deal quote docs.
+
+    (The Excel export was deleted with the modal in the Wave 3 consolidation.)
+    """
 
     @pytest.fixture()
     def sales_owned_quote(self, db_session, sales_user, test_customer_site):
@@ -300,20 +303,20 @@ class TestQuoteBuilderExportUnaffected:
         db_session.refresh(quote)
         return quote
 
-    def test_export_excel_200_for_sales(self, db_session, sales_user, sales_owned_quote):
+    def test_export_pdf_200_for_sales(self, db_session, sales_user, sales_owned_quote):
         from unittest.mock import patch
 
         c = _client_as(db_session, sales_user)
         try:
             with patch(
-                "app.services.quote_builder_service.build_excel_export",
-                return_value=b"fake-xlsx-content",
+                "app.services.document_service.generate_quote_report_pdf",
+                return_value=b"%PDF-fake",
             ):
                 r = c.get(
-                    f"/v2/partials/quote-builder/{sales_owned_quote.requisition_id}/export/excel",
+                    f"/v2/partials/quote-builder/{sales_owned_quote.requisition_id}/export/pdf",
                     params={"quote_id": sales_owned_quote.id},
                 )
             assert r.status_code == 200
-            assert "spreadsheetml" in r.headers["content-type"]
+            assert r.headers["content-type"] == "application/pdf"
         finally:
             _drop_overrides(c)

@@ -34,9 +34,11 @@ test.describe('Materials API', () => {
     expect([404, 401, 307, 422]).toContain(res.status());
   });
 
-  test('POST /api/materials/merge rejects empty body', async ({ request }) => {
+  test('POST /api/materials/merge is deleted (W2 orphan sweep B8)', async ({ request }) => {
+    // The B0 re-point missed this probe when the route died — it now asserts
+    // the deletion (405: the path shape still matches sibling routes).
     const res = await request.post('/api/materials/merge', { data: {} });
-    expect([400, 401, 422, 307]).toContain(res.status());
+    expect([404, 405, 401, 307]).toContain(res.status());
   });
 });
 

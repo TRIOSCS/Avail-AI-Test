@@ -297,10 +297,6 @@ hr { border-color: #BFC4CE; }
 .faceted-sidebar::-webkit-scrollbar-track { background: transparent; }
 .faceted-sidebar::-webkit-scrollbar-thumb { background: #D5D8DF; border-radius: 2px; }
 
-.qb-list::-webkit-scrollbar { width: 4px; }
-.qb-list::-webkit-scrollbar-track { background: transparent; }
-.qb-list::-webkit-scrollbar-thumb { background: #D5D8DF; border-radius: 2px; }
-
 /* ── Data tables — unified styling ────────────────────────────────── */
 .responsive-table th,
 .data-table th {
@@ -572,15 +568,6 @@ table {
     position: sticky;
     top: 60px;
   }
-}
-
-/* ── Quote Builder ────────────────────────────────────────────────── */
-@keyframes qbDecisionFlash {
-  0% { background-color: rgba(16, 185, 129, 0.15); }
-  100% { background-color: transparent; }
-}
-.qb-decision-flash {
-  animation: qbDecisionFlash 0.8s ease-out;
 }
 
 /* ── Sightings — loading & transition polish ─────────────────────── */

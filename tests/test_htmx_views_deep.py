@@ -677,20 +677,25 @@ class TestOfferRoutes:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# RFQ compose and action routes (lines 2372-2650)
+# Requisition action routes (rfq-compose tests left with the W3 composer-A
+# delete — the surviving vendor-modal composer is covered in
+# test_sightings_router.py / test_routers_sightings.py)
 # ══════════════════════════════════════════════════════════════════════════
 
 
 class TestRfqRoutes:
-    def test_rfq_compose_404(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/rfq-compose")
-        assert resp.status_code == 404
-
-    def test_rfq_compose_exists(self, client: TestClient, db_session: Session, test_user: User):
+    def test_detail_header_send_rfq_opens_vendor_modal(self, client: TestClient, db_session: Session, test_user: User):
+        """W3 repoint: the deal header's Send-RFQ button opens the surviving
+        sightings vendor-modal composer with every line id in the basket (no
+        hx-get to the deleted rfq-compose route)."""
         req = _requisition(db_session, test_user)
+        r1 = _requirement(db_session, req, mpn="LM317T")
+        r2 = _requirement(db_session, req, mpn="NE555P")
         db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-compose")
+        resp = client.get(f"/v2/partials/requisitions/{req.id}")
         assert resp.status_code == 200
+        assert f"/v2/partials/sightings/vendor-modal?requirement_ids={r1.id},{r2.id}" in resp.text
+        assert "rfq-compose" not in resp.text
 
     def test_log_activity_404(self, client: TestClient):
         resp = client.post(

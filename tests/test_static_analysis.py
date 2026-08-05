@@ -114,10 +114,7 @@ _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
 # no double quote, so the attribute cannot be broken. Anything else (a string or list of
 # strings) MUST use a single-quoted attribute (or a JS Alpine.data factory). Keyed (file, line
 # of the attribute's opening). Do NOT add a string/array site here — fix the call site instead.
-_TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST: set[tuple[str, int]] = {
-    ("app/templates/htmx/partials/quote_builder/modal.html", 10),  # has_customer_site|tojson -> true/false
-    ("app/templates/htmx/partials/requisitions/rfq_compose.html", 44),  # vendors|map(id)|list|tojson -> [1,2,3]
-}
+_TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST: set[tuple[str, int]] = set()
 
 # Alpine directive attributes: x-data, x-init, x-bind:x / :x, x-on:x / @x.
 _ALPINE_ATTR_TOJSON = re.compile(r'(?:x-data|x-init|x-bind:[\w.:-]+|x-on:[\w.:-]+|@[\w.:-]+|:[\w.-]+)\s*=\s*"([^"]*)"')

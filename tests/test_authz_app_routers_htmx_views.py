@@ -52,15 +52,9 @@ def _make_offer(db_session, req: Requisition, *, status="active") -> Offer:
 
 
 # ── HIGH severity ──────────────────────────────────────────────────────
-
-
-def test_rfq_send_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    _make_sales(db_session, test_user)
-    resp = client.post(
-        f"/v2/partials/requisitions/{foreign_req.id}/rfq-send",
-        data={"vendor_names": "Acme", "vendor_emails": "a@b.com", "subject": "x", "body": "y"},
-    )
-    assert resp.status_code == 404
+# (rfq-send's non-owner test left with the deleted composer-A route in W3; the
+# surviving vendor-modal send path's bulk IDOR guard is covered by
+# tests/test_requisition_access_bulk.py.)
 
 
 def test_create_quote_blocks_non_owner_sales(client, db_session, foreign_req, test_user):

@@ -90,7 +90,8 @@ test.describe('Dead-End Detector — Form Endpoints Accept POST', () => {
   // These POST endpoints should return non-500 even with minimal/empty data
   // (they should return validation errors or auth errors, not crashes)
   const POST_ENDPOINTS = [
-    '/v2/partials/requisitions/create',
+    // /v2/partials/requisitions/create was deleted in W3 (orphaned sibling of
+    // import-save — the unified modal is the one create door).
     '/v2/partials/companies/create',
   ];
 

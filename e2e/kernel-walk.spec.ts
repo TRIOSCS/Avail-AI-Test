@@ -183,12 +183,14 @@ test('requisition created with manual lines (no AI parse)', async () => {
   // import-save closes the modal, toasts, and refreshes the list.
   await expect(page.locator('#main-content')).toContainText(REQ_NAME, { timeout: 20_000 });
 
-  // Open the deal and capture its id from the Send-RFQ button URL.
+  // Open the deal and capture its id from the Send-RFQ button. (W3: the button
+  // now opens the ONE surviving composer — the sightings vendor-modal — via an
+  // open-modal dispatch instead of an hx-get to the deleted rfq-compose route,
+  // so the id comes from its data-req-id attribute.)
   await page.locator('#main-content a', { hasText: REQ_NAME }).first().click();
-  const rfqBtn = page.locator('button[hx-get$="/rfq-compose"]');
+  const rfqBtn = page.getByRole('button', { name: 'Send RFQ' });
   await expect(rfqBtn).toBeVisible({ timeout: 20_000 });
-  const hx = (await rfqBtn.getAttribute('hx-get')) ?? '';
-  reqId = hx.match(/requisitions\/(\d+)\/rfq-compose/)?.[1] ?? '';
+  reqId = (await rfqBtn.getAttribute('data-req-id')) ?? '';
   expect(reqId, 'requisition id parsed from the detail header').not.toBe('');
 });
 
@@ -213,18 +215,28 @@ test('sourcing board: parts board works keys-off', async () => {
 
   // Back to the deal for the rest of the walk.
   await page.goto(`/v2/requisitions/${reqId}`);
-  await expect(page.locator('button[hx-get$="/rfq-compose"]')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Send RFQ' })).toBeVisible({ timeout: 20_000 });
 });
 
 test('RFQ composer opens (send is not exercised)', async () => {
-  await page.locator('button[hx-get$="/rfq-compose"]').click();
-  const tab = page.locator('#tab-content');
-  await expect(tab).toContainText(`Send RFQ — ${REQ_NAME}`, { timeout: 20_000 });
-  // Compose surface: the vendor-selection block renders — either real vendor rows
-  // (sightings carried vendor names) or the honest empty state.
-  const vendors = tab.getByText('Select Vendors', { exact: false });
-  const emptyState = tab.getByText('No vendors found with sightings', { exact: false });
-  await expect(vendors.or(emptyState).first()).toBeVisible({ timeout: 10_000 });
+  // W3 §5.1: the deal's Send-RFQ button now opens the ONE composer — the
+  // sightings vendor-modal (coverage-ranked vendors, [ref:id] tracking) — in the
+  // global modal, with every line of the deal in the basket. The old
+  // requisition-scoped rfq-compose tab surface was deleted.
+  const rfqBtn = page.getByRole('button', { name: 'Send RFQ' });
+  await settle(300);
+  await rfqBtn.click();
+  const modal = page.locator('#modal-content');
+  try {
+    await modal.getByText('Send Inquiry').waitFor({ state: 'visible', timeout: 6_000 });
+  } catch {
+    await rfqBtn.click(); // one retry — the first click raced the Alpine init
+  }
+  await expect(modal.getByText('Send Inquiry')).toBeVisible({ timeout: 15_000 });
+  // Compose surface: the vendor-selection block renders — "(N suggested)" may be
+  // 0 keys-off (no sightings carried vendor contacts), which is the honest state.
+  await expect(modal.getByText('Select Vendors', { exact: false })).toBeVisible({ timeout: 10_000 });
+  await page.keyboard.press('Escape'); // close the modal so the walk continues on the deal page
   await test.step('RFQ send — SKIPPED keys-off: Graph creds are blanked on this instance; compose surface asserted, nothing sent', async () => {});
 });
 

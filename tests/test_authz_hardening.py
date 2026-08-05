@@ -221,19 +221,9 @@ def test_g5_prepayment_allows_buyer_owner(client, db_session, test_user):
 # ══════════════════════════════════════════════════════════════════════════
 # FIX GROUP 6 — htmx requisition-scoped mutations need require_requisition_access
 #         6b POST /v2/partials/follow-ups/send-batch (+ follow_up_badge scope)
-#         6c POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
+#         (6c ai-rephrase-email left with the composer-A delete in W3)
 # Helpers: require_requisition_access / RESTRICTED_ROLES scope
 # ══════════════════════════════════════════════════════════════════════════
-
-
-def test_g6c_ai_rephrase_email_blocks_non_owner_sales(client, db_session, test_user, admin_user):
-    req = _requisition(db_session, admin_user.id, name="REQ-REPH")
-    _make_sales(test_user, db_session)
-    resp = client.post(
-        f"/v2/partials/requisitions/{req.id}/ai-rephrase-email",
-        data={"body": "hello"},
-    )
-    assert resp.status_code == 404
 
 
 def test_g6b_send_batch_leaves_other_owners_stale_contacts_untouched(client, db_session, test_user, admin_user):

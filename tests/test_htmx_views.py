@@ -728,49 +728,10 @@ class TestRequisitionCreateForm:
         assert 'hx-post="/v2/partials/requisitions/import-save"' in resp.text
 
 
-class TestRequisitionCreate:
-    """Test creating a requisition via POST."""
-
-    def test_create_basic(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={"name": "Test Req", "customer_name": "Acme", "urgency": "normal", "parts_text": ""},
-        )
-        assert resp.status_code == 200
-        assert "Test Req" in resp.text
-        created = db_session.query(Requisition).filter_by(name="Test Req").one()
-        assert created.customer_name == "Acme"
-        assert created.created_by == test_user.id
-        assert created.status == RequisitionStatus.OPEN
-
-    def test_create_with_parts(self, client: TestClient, db_session: Session):
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={
-                "name": "Test Req Parts",
-                "customer_name": "Acme",
-                "urgency": "normal",
-                "parts_text": "LM317T, 1000\nNE555P, 500",
-            },
-        )
-        assert resp.status_code == 200
-        assert "Test Req Parts" in resp.text
-        created = db_session.query(Requisition).filter_by(name="Test Req Parts").one()
-        by_mpn = {r.primary_mpn: r.target_qty for r in created.requirements}
-        assert by_mpn == {"LM317T": 1000, "NE555P": 500}
-
-    def test_create_with_invalid_qty(self, client: TestClient, db_session: Session):
-        """An unparseable qty degrades to 1 — the part is still created."""
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={
-                "name": "Test Req Bad Qty",
-                "parts_text": "LM317T, notanumber",
-            },
-        )
-        assert resp.status_code == 200
-        created = db_session.query(Requisition).filter_by(name="Test Req Bad Qty").one()
-        assert [(r.primary_mpn, r.target_qty) for r in created.requirements] == [("LM317T", 1)]
+# TestRequisitionCreate was deleted in W3 with its route (POST
+# /v2/partials/requisitions/create — UI-orphaned; the unified modal posts to
+# /import-parse → /import-save, covered by TestRequisitionImport below). Spec §9:
+# every deleted route takes its tests with it.
 
 
 class TestRequisitionDetail:
@@ -1969,7 +1930,9 @@ class TestOfferEndpoints:
         assert resp.status_code == 200
         db_session.expire_all()
         approved = db_session.get(Offer, offer.id)
-        assert approved.status == OfferStatus.APPROVED
+        # W3 one offer_service: approve lands on the ONE canonical status (ACTIVE);
+        # the old htmx-only APPROVED landing state is retired.
+        assert approved.status == OfferStatus.ACTIVE
         assert approved.approved_by_id == test_user.id
         assert approved.approved_at is not None
 

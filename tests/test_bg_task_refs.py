@@ -3,12 +3,13 @@ must be held in a strong reference until completion, otherwise the event loop ca
 garbage-collect them mid-flight and silently drop the work.
 
 Targets:
-  - app/email_service.py::_auto_create_offers_from_parse (SSE "sighting-updated" publish)
+  - app/services/offer_service.py::create_offers_from_parsed_response (SSE
+    "sighting-updated" publish — moved from email_service in W3)
   - app/services/prepayment_notifications.py::schedule_prepayment_notify
   - app/utils/async_helpers.py::hold_bg_task (the shared canonical retention set)
 
 Called by: pytest autodiscovery
-Depends on: app.email_service, app.services.prepayment_notifications,
+Depends on: app.services.offer_service, app.services.prepayment_notifications,
     app.utils.async_helpers, tests.conftest
 
 Note: never assert an exact size on the shared `async_helpers._bg_tasks` set — other
@@ -28,9 +29,9 @@ os.environ["TESTING"] = "1"
 from sqlalchemy.orm import Session
 
 from app.constants import VendorResponseStatus
-from app.email_service import _auto_create_offers_from_parse
 from app.models import Requisition, User, VendorResponse
 from app.services import prepayment_notifications
+from app.services.offer_service import create_offers_from_parsed_response
 from app.utils import async_helpers
 from tests.conftest import engine  # noqa: F401
 
@@ -72,7 +73,7 @@ class TestEmailServiceSSEPublishTaskRetained:
             patch("app.services.knowledge_service.capture_offer_fact"),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
-            _auto_create_offers_from_parse(vr, parsed, db_session)
+            create_offers_from_parsed_response(vr, parsed, db_session)
             # The task was registered for retention before we let the loop run.
             new_tasks = async_helpers._bg_tasks - before
             assert len(new_tasks) == 1

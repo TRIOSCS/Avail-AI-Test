@@ -72,9 +72,19 @@ def test_rfq_prepare_panel_route_removed():
     assert "/v2/partials/requisitions/{req_id}/rfq-prepare" not in _paths()
 
 
+def test_rfq_compose_routes_removed():
+    """W3 §5.1: composer A (requisition-scoped compose/send + AI polish) is gone — the
+    sightings vendor-modal is the ONE RFQ composer."""
+    all_paths = _paths()
+    assert "/v2/partials/requisitions/{req_id}/rfq-compose" not in all_paths
+    assert "/v2/partials/requisitions/{req_id}/rfq-send" not in all_paths
+    assert "/v2/partials/requisitions/{req_id}/ai-cleanup-email" not in all_paths
+    assert "/v2/partials/requisitions/{req_id}/ai-rephrase-email" not in all_paths
+
+
 def test_superseding_routes_still_present():
     """The kept twins that supersede the deleted routes must remain registered."""
     all_paths = _paths()
     assert "/v2/proactive/send" in all_paths
     assert "/v2/partials/settings/data-ops" in all_paths
-    assert "/v2/partials/requisitions/{req_id}/rfq-compose" in all_paths
+    assert "/v2/partials/sightings/vendor-modal" in all_paths
