@@ -43,6 +43,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from ..constants import (
     CustomerBidStatus,
     ExcessLineItemStatus,
+    ExcessListOutcome,
     ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
@@ -64,6 +65,9 @@ class ExcessList(Base):
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     title = Column(String(255), nullable=False)
     status = Column(String(20), default=ExcessListStatus.DRAFT)  # see constants.ExcessListStatus
+    # Terminal outcome recorded on close (W3, migration 207): sold / scrapped /
+    # withdrawn / no_bids — NULL until the list reaches CLOSED.
+    outcome = Column(String(20), nullable=True)  # see constants.ExcessListOutcome
     # Lock-on-post: revising a posted list bumps version (spec §Resolved-for-v1 #2).
     version = Column(Integer, nullable=False, default=1, server_default="1")
     source_filename = Column(String(255), nullable=True)
@@ -93,6 +97,13 @@ class ExcessList(Base):
         valid = {e.value for e in ExcessListStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessList status: {value!r}")
+        return value
+
+    @validates("outcome")
+    def _validate_outcome(self, _key, value):
+        valid = {e.value for e in ExcessListOutcome}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ExcessList outcome: {value!r}")
         return value
 
     __table_args__ = (

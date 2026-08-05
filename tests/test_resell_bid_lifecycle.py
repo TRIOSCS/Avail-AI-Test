@@ -73,7 +73,7 @@ def priced_list(db_session: Session, owner: User, seller_company: Company) -> Ex
         title="Initech excess",
         company_id=seller_company.id,
         owner_id=owner.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=2,
         created_at=datetime.now(UTC),
     )
@@ -235,7 +235,7 @@ def test_resolve_seller_contact_from_list_site(db_session, owner, seller_company
     """The list's own customer_site contact email wins."""
     site = _seed_site_email(db_session, seller_company, "site@initech.com")
     el = ExcessList(
-        title="x", company_id=seller_company.id, owner_id=owner.id, customer_site_id=site.id, status="collecting"
+        title="x", company_id=seller_company.id, owner_id=owner.id, customer_site_id=site.id, status="bidding"
     )
     db_session.add(el)
     db_session.commit()

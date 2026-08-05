@@ -83,7 +83,7 @@
           Offer to buyers
         </button>
         {% endif %}
-        {% if can_see_customer and el.status in ['open', 'collecting'] %}
+        {% if can_see_customer and el.status in ['posted', 'bidding'] %}
         <button hx-post="/api/resell/{{ el.id }}/close"
                 hx-target="closest [data-resell-detail-root]"
                 hx-swap="outerHTML"
@@ -93,7 +93,8 @@
           Close
         </button>
         {# D5: end a posting that drew no usable bid → the terminal CLOSED state (distinct
-           from the bid_out "bids went out" path above; no reopen). #}
+           from the "bids went out" close above, which keeps the list on `bidding`;
+           no reopen). #}
         <button hx-post="/api/resell/{{ el.id }}/close-without-bid"
                 hx-target="closest [data-resell-detail-root]"
                 hx-swap="outerHTML"

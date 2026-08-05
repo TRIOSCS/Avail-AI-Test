@@ -21,7 +21,7 @@ Depends on: app.services.bid_back_service, app.services.excess_service,
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -81,7 +81,7 @@ def priced_list(db_session: Session, owner: User, seller_company: Company) -> Ex
         title="Globex excess Q3",
         company_id=seller_company.id,
         owner_id=owner.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=2,
         created_at=datetime.now(UTC),
     )
@@ -182,19 +182,6 @@ def test_build_bid_back_rejects_draft_list(db_session, owner, seller_company):
     assert db_session.query(CustomerBid).filter_by(excess_list_id=el.id).count() == 0
 
 
-def test_build_bid_back_rejects_expired_list(db_session, owner, priced_list):
-    """A terminal EXPIRED list is dead — no bid back can be assembled off it."""
-    priced_list.status = ExcessListStatus.EXPIRED
-    db_session.commit()
-    items = _lines(db_session, priced_list)
-
-    with pytest.raises(HTTPException) as exc:
-        bid_back_service.build_bid_back(
-            db_session, list_id=priced_list.id, owner=owner, selections=[{"excess_line_item_id": items[0].id}]
-        )
-    assert exc.value.status_code == 409
-
-
 def test_build_bid_back_rejects_closed_list(db_session, owner, priced_list):
     """A terminal CLOSED list is also dead."""
     priced_list.status = ExcessListStatus.CLOSED
@@ -208,10 +195,11 @@ def test_build_bid_back_rejects_closed_list(db_session, owner, priced_list):
     assert exc.value.status_code == 409
 
 
-def test_build_bid_back_works_on_bid_out_list(db_session, owner, priced_list):
-    """bid_out (offers already collected, out-for-decision) still supports a bid
-    back."""
-    priced_list.status = ExcessListStatus.BID_OUT
+def test_build_bid_back_works_on_window_closed_bidding_list(db_session, owner, priced_list):
+    """A window-closed bidding list (offers collected, out-for-decision — the old
+    bid_out shape) still supports a bid back."""
+    priced_list.status = ExcessListStatus.BIDDING
+    priced_list.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
     items = _lines(db_session, priced_list)
 
@@ -233,14 +221,18 @@ def test_build_bid_back_works_on_awarded_list(db_session, owner, priced_list):
     assert bid.status == CustomerBidStatus.DRAFT
 
 
-@pytest.mark.parametrize("legacy_status", ["active", "bidding"])
+@pytest.mark.parametrize("legacy_status", ["active"])
 def test_build_bid_back_rejects_legacy_status_list(db_session, owner, priced_list, legacy_status):
-    """DOCUMENTED POLICY (finding #21 scope note): the pre-Resell backward-compat
-    statuses ``active``/``bidding`` (enum members removed in the W1.9 dead-status sweep;
-    raw strings here stand in for a stray legacy row) are NOT in
-    ``_POSTED_LIST_STATUSES``, so a list still carrying one 409s on bid-back build (and
-    send re-checks the same set) — consistent with the already-shipped
-    ``submit_offer``/``upload_bids`` guards."""
+    """DOCUMENTED POLICY (finding #21 scope note): the pre-Resell backward-compat status
+    ``active`` (enum member removed in the W1.9 dead-status sweep; the raw string here
+    stands in for a stray legacy row) is NOT in ``_POSTED_LIST_STATUSES``, so a list
+    still carrying it 409s on bid-back build (and send re-checks the same set) —
+    consistent with the already-shipped ``submit_offer``/``upload_bids`` guards.
+
+    (The old second case, raw ``bidding``,
+    became CANONICAL vocabulary in W3 — migration 207 — so it now legitimately
+    builds.)
+    """
     # Bypass the ORM @validates guard (which now rejects the retired vocabulary) the
     # way a legacy DB row would: write the column directly.
     db_session.query(type(priced_list)).filter_by(id=priced_list.id).update({"status": legacy_status})
@@ -542,7 +534,7 @@ def test_publish_sets_open_at(db_session, owner, seller_company):
     assert el.open_at is None
     excess_mirror.publish_list(db_session, el.id, owner)
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
     assert el.open_at is not None
 
 
@@ -557,4 +549,5 @@ def test_close_list_sets_close_at_owner_only(db_session, owner, other_user, pric
 
     closed = excess_service.close_list(db_session, priced_list.id, owner)
     assert closed.close_at is not None
-    assert closed.status == ExcessListStatus.BID_OUT
+    # W3: the "bids went out" close keeps the list on bidding; close_at is the fact.
+    assert closed.status == ExcessListStatus.BIDDING

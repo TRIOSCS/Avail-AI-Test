@@ -32,18 +32,16 @@
       <p class="text-secondary truncate mt-0.5 italic">Anonymized posting</p>
       {% endif %}
     </div>
-    {# Finding #13: the open↔collecting split is an offer-existence signal (a list flips
-       to collecting on its first inbound bid), so a non-owner sees a neutral 'open'
-       badge for a collecting list — same D2 predicate as the coverage/offer gates. #}
-    {% set badge_status = 'open' if (not can_see_customer and el.status == 'collecting') else el.status %}
+    {# Finding #13: the posted↔bidding split is an offer-existence signal (a list flips
+       to bidding on its first inbound bid), so a non-owner sees a neutral 'posted'
+       badge for a bidding list — same D2 predicate as the coverage/offer gates. #}
+    {% set badge_status = 'posted' if (not can_see_customer and el.status == 'bidding') else el.status %}
     {{ status_badge(badge_status, status_map={
       'draft': 'bg-slate-50 text-slate-500 border-slate-200',
-      'open': 'bg-sky-50 text-sky-600 border-sky-200',
-      'collecting': 'bg-amber-50 text-amber-600 border-amber-200',
-      'bid_out': 'bg-violet-50 text-violet-600 border-violet-200',
+      'posted': 'bg-sky-50 text-sky-600 border-sky-200',
+      'bidding': 'bg-amber-50 text-amber-600 border-amber-200',
       'awarded': 'bg-emerald-50 text-emerald-700 border-emerald-300',
-      'closed': 'bg-gray-50 text-gray-400 border-gray-200',
-      'expired': 'bg-gray-50 text-gray-400 border-gray-200'
+      'closed': 'bg-gray-50 text-gray-400 border-gray-200'
     }) }}
   </div>
   <div class="mt-1.5 flex items-center gap-3 text-secondary">
@@ -63,8 +61,9 @@
     </span>
     {% endif %}
     {% endif %}
-    {# Countdown ONLY while live (open/collecting); a resolved list shows a muted
-       "closed {date}" and NEVER a red "Overdue" (finding #8). #}
+    {# Countdown ONLY while live (posted/bidding with the window still open); a resolved
+       or deliberately-closed list shows a muted "closed {date}" and NEVER a red
+       "Overdue" (finding #8). #}
     {% if c.is_live and c.hours_until is not none %}
     <span class="ml-auto">{{ time_text(c.hours_until) }}</span>
     {% elif not c.is_live and c.close_at_display %}

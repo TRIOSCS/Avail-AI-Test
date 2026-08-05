@@ -99,7 +99,7 @@ class TestDeleteLine:
 
     def test_posted_list_409(self, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
-        el.status = ExcessListStatus.COLLECTING
+        el.status = ExcessListStatus.BIDDING
         db_session.commit()
         line = _lines(db_session, el)[0]
         with pytest.raises(HTTPException) as exc:
@@ -183,7 +183,7 @@ class TestUpdateLine:
 
     def test_posted_list_409(self, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
-        el.status = ExcessListStatus.COLLECTING
+        el.status = ExcessListStatus.BIDDING
         db_session.commit()
         line = _lines(db_session, el)[0]
         with pytest.raises(HTTPException) as exc:
@@ -236,7 +236,7 @@ class TestUpdateExcessList:
 
     def test_posted_list_409(self, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
-        el.status = ExcessListStatus.COLLECTING
+        el.status = ExcessListStatus.BIDDING
         db_session.commit()
         with pytest.raises(HTTPException) as exc:
             excess_service.update_excess_list(db_session, el.id, owner, title="X", notes=None, company_id=company.id)
@@ -267,7 +267,7 @@ class TestDeleteExcessList:
 
     def test_posted_list_409(self, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
-        el.status = ExcessListStatus.COLLECTING
+        el.status = ExcessListStatus.BIDDING
         db_session.commit()
         with pytest.raises(HTTPException) as exc:
             excess_service.delete_excess_list(db_session, el.id, owner)
@@ -419,7 +419,7 @@ class TestHonest409Copy:
         """The false "revise as a new version" copy is replaced with actionable
         guidance."""
         el = _draft_with_lines(db_session, owner, company)
-        el.status = ExcessListStatus.COLLECTING
+        el.status = ExcessListStatus.BIDDING
         db_session.commit()
         restore = _as_owner(client, owner)
         try:

@@ -145,6 +145,50 @@ def test_cancel_buy_plan_voids_pending_prepayment(db_session: Session) -> None:
     assert req.resolution_note == "buy plan cancelled — prepayment voided"
 
 
+def test_sweep_records_engine_cancel_event(db_session: Session) -> None:
+    """W3: the sweep routes through events.cancel — a 'cancelled' ApprovalEvent lands on
+    the audit trail (the old raw status write left none)."""
+    from app.models.approvals import ApprovalEvent
+
+    u = _prepay_approver(db_session)
+    plan = _make_plan(db_session, u, status=BuyPlanStatus.ACTIVE.value)
+    line = _make_line(db_session, plan)
+    db_session.commit()
+    _pp, req = _prepay(db_session, u, plan, line)
+
+    _cancel_open_prepayment_requests_for_plan(plan.id, db_session, "swept for audit test")
+
+    db_session.refresh(req)
+    assert req.status == ApprovalRequestStatus.CANCELLED
+    assert req.resolution_note == "swept for audit test"
+    events = (
+        db_session.query(ApprovalEvent)
+        .filter(ApprovalEvent.request_id == req.id, ApprovalEvent.event_type == "cancelled")
+        .all()
+    )
+    assert len(events) == 1
+
+
+def test_sweep_falls_back_when_requester_and_owner_gone(db_session: Session) -> None:
+    """Requester AND owner deleted (SET NULL): the engine cancel would refuse on authz,
+    so the sweep cancels directly — the money-safety teardown must never fail."""
+    u = _prepay_approver(db_session)
+    plan = _make_plan(db_session, u, status=BuyPlanStatus.ACTIVE.value)
+    line = _make_line(db_session, plan)
+    db_session.commit()
+    _pp, req = _prepay(db_session, u, plan, line)
+    req.requested_by_id = None
+    req.owner_id = None
+    db_session.commit()
+
+    count = _cancel_open_prepayment_requests_for_plan(plan.id, db_session, "orphan sweep")
+
+    assert count == 1
+    db_session.refresh(req)
+    assert req.status == ApprovalRequestStatus.CANCELLED
+    assert req.resolution_note == "orphan sweep"
+
+
 def test_halt_plan_voids_pending_prepayment(db_session: Session) -> None:
     u = _prepay_approver(db_session)  # role=admin → may halt
     plan = _make_plan(db_session, u, status=BuyPlanStatus.ACTIVE.value)

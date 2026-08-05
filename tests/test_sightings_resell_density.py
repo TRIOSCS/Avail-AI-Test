@@ -88,11 +88,12 @@ def test_resell_triage_tiles_keep_filter_links(client, db_session, test_user):
     # Offer-based tiles keep their needs= filters ...
     assert "needs=offers" in body
     assert "needs=take_all" in body
-    # ... and the status tiles keep their stage= filters. The "Open" tile links to the
-    # synthetic stage=live token ([open, collecting]) so its filter matches its
-    # open+collecting count (finding #16), not the strict stage=open it mismatched before.
+    # ... and the status tiles keep their stage= filters. The "Live" tile links to the
+    # synthetic stage=live token ([posted, bidding]) so its filter matches its
+    # posted+bidding count (finding #16). (W3: the "Bids out" tile died with the
+    # bid_out status — migration 207.)
     assert "stage=live" in body
-    assert "stage=bid_out" in body
+    assert "stage=bid_out" not in body
     assert "stage=awarded" in body
     # No tile regressed to an empty stage value (the old dead-control bug).
     assert '&stage="' not in body
@@ -103,7 +104,7 @@ def test_resell_triage_tiles_active_ring_bindings_intact(client, db_session, tes
     working after the tiles shrank."""
     body = client.get("/v2/partials/resell/workspace").text
 
-    for token in ("open", "offers", "take_all", "bid_out", "awarded"):
+    for token in ("live", "offers", "take_all", "awarded"):
         assert f"filter === '{token}'" in body
     assert "ring-2 ring-accent-400" in body
 

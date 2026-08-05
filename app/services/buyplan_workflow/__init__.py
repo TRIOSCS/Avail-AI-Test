@@ -8,6 +8,8 @@ package along its audited seams:
   - `buyplan_approval` — submit/approve/reject, halt/resume, reset/cancel/resubmit,
     and auto-completion (one module: every transition shares the same engine-
     request/prepayment teardown helpers).
+  - `buyplan_state` — the enforced BuyPlan status transition table + transition()
+    (W3: the single status writer; mirrors services/requisition_state.py).
   - `buyplan_po` — buyer PO confirmation + approver PO verification (sync scan).
   - `buyplan_lines` — claim/flag/resolve, re-source, and the add/edit/remove/bulk-
     save/SO# line-editing API.

@@ -99,7 +99,7 @@
     Awaiting manager approval.
     {% include "htmx/partials/approvals/_change_summary.html" %}
   </div>
-  {% elif bp.approved_at and bp.status in ('active', 'inbound', 'completed') %}
+  {% elif bp.approved_at and bp.status in ('active', 'completed') %}
   <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
     Approved by {{ (bp.approved_by.name if bp.approved_by else none) or '—' }} · {{ bp.approved_at | fmtdate('%b %d, %Y') }}
   </div>
@@ -267,7 +267,7 @@
   </div>
 
   {# ── PO kanban (3.3, spec §6) — sourcing orders only; the centerpiece once the
-       plan is active/inbound (render_plan_pane builds `kanban` exactly then). #}
+       plan is active (render_plan_pane builds `kanban` exactly then). #}
   {% if kanban is not none %}
   {% include "htmx/partials/approvals/_pane_kanban.html" %}
   {% endif %}

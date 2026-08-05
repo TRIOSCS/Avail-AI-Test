@@ -114,13 +114,13 @@ class TestTradingConstants:
     def test_match_status_members(self):
         assert {e.value for e in OfferLineMatchStatus} == {"matched", "unmatched", "ambiguous"}
 
-    def test_excess_list_status_extended_additively(self):
+    def test_excess_list_status_is_the_w3_ladder(self):
         values = {e.value for e in ExcessListStatus}
-        # Lifecycle members the Trading spec uses.
-        assert {"draft", "open", "collecting", "bid_out", "awarded", "closed", "expired"} <= values
-        # W1.9: legacy pre-Resell vocab ('active'/'bidding') removed — zero rows
-        # (migration 193 remapped them) and zero writers. Guard the removal.
-        assert {"active", "bidding"} & values == set()
+        # W3 five-state ladder (spec §5.3; migration 207 remapped the old vocabulary).
+        assert values == {"draft", "posted", "bidding", "awarded", "closed"}
+        # Retired vocabulary stays gone: W1.9 removed active; W3 removed
+        # open/collecting/bid_out/expired.
+        assert {"active", "open", "collecting", "bid_out", "expired"} & values == set()
 
 
 # ── ExcessOffer (header) ─────────────────────────────────────────────

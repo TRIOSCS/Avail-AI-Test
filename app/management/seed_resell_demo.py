@@ -11,9 +11,9 @@ Creates (all find-or-create by a stable key — safe to re-run; never duplicates
     self-offer guard since broker_id != owner_id),
   • a customer COMPANY,
   • three demo lists owned by the trader:
-      (a) "Demo · Q1 surplus (collecting)"  — ~40 lines, status ``collecting``, with
+      (a) "Demo · Q1 surplus (collecting)"  — ~40 lines, status ``bidding``, with
           several per-line offers, one UNMATCHED queue row, and one TAKE-ALL offer,
-      (b) "Demo · One-off RU heatsink"       — single line, status ``open``, 2 offers,
+      (b) "Demo · One-off RU heatsink"       — single line, status ``posted``, 2 offers,
       (c) "Demo · Awarded FPGA lot"          — ``awarded`` DERIVED through the real
           ``excess_service.award_offer`` chokepoint (a genuine WON offer from the demo
           broker, buyer-attributed, with real rollups/line statuses).
@@ -25,8 +25,8 @@ written (SIMPLIFICATION_SPEC §5.3); reset still tears down any pre-existing mir
 Idempotency model: a fixed title per list + a fixed offerer/owner email. A re-run
 finds the existing rows and (for offers) skips creation when the list already has
 offers — so re-seeding does not stack duplicate offers. A re-run also re-arms the
-collecting demo when the nightly expiry has decayed it (expired / lapsed close_at):
-status back to ``collecting``, ``close_at`` pushed forward.
+bidding demo when its window has decayed (lapsed close_at):
+status back to ``bidding``, ``close_at`` pushed forward.
 
 Called by: an operator (manually, post-deploy). NOT cron — it's a demo fixture.
 Depends on: app.database.SessionLocal, models, excess_service, excess_mirror.
@@ -194,29 +194,28 @@ def _refresh_demo_window(db: Session, el: ExcessList, *, close_in_days: int) -> 
     nights after seeding, and find-by-title used to return early without restoring it;
     a pre-W1 database may still hold such decayed rows. On a found (not created) list,
     when the demo has
-    decayed — status ``expired``, or a still-unresolved (open/collecting) window whose
+    decayed — a still-unresolved (posted/bidding) window whose
     ``close_at`` has lapsed — re-stamp what a fresh seed would set: status back to
-    ``COLLECTING``, ``close_at`` pushed ``close_in_days`` forward, ``updated_at`` now, and
+    ``BIDDING``, ``close_at`` pushed ``close_in_days`` forward, ``updated_at`` now, and
     the mirror re-synced so the lines advertise as live supply again. Deliberately does
-    NOT touch awarded/bid_out/closed lists: those record a user's own actions on the demo
+    NOT touch awarded/closed lists: those record a user's own actions on the demo
     (an award, a sent bid) and a re-seed must never undo them. Commits.
     """
     now = _now()
     close_at = el.close_at
     if close_at is not None and close_at.tzinfo is None:  # SQLite strips tzinfo
         close_at = close_at.replace(tzinfo=UTC)
-    expired = el.status == ExcessListStatus.EXPIRED
     lapsed = (
-        el.status in (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING) and close_at is not None and close_at <= now
+        el.status in (ExcessListStatus.POSTED, ExcessListStatus.BIDDING) and close_at is not None and close_at <= now
     )
-    if not (expired or lapsed):
+    if not lapsed:
         return
-    el.status = ExcessListStatus.COLLECTING  # type: ignore[assignment]  # legacy Column-model ORM noise
+    el.status = ExcessListStatus.BIDDING  # type: ignore[assignment]  # legacy Column-model ORM noise
     el.close_at = now + timedelta(days=close_in_days)  # type: ignore[assignment]  # legacy Column-model ORM noise
     el.updated_at = now  # type: ignore[assignment]  # legacy Column-model ORM noise
     db.flush()
     db.commit()
-    logger.info("seed-resell: refreshed decayed demo window on {!r} (collecting, +{}d)", el.title, close_in_days)
+    logger.info("seed-resell: refreshed decayed demo window on {!r} (bidding, +{}d)", el.title, close_in_days)
 
 
 # ── per-list builders ────────────────────────────────────────────────
@@ -228,7 +227,7 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
         title=_LIST_COLLECTING,
         company=company,
         owner=owner,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         close_in_days=3,
     )
     if created:
@@ -305,7 +304,7 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
         title=_LIST_ONEOFF,
         company=company,
         owner=owner,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         close_in_days=10,
     )
     if created:
@@ -364,7 +363,7 @@ def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> 
         title=_LIST_AWARDED,
         company=company,
         owner=owner,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         close_in_days=None,
     )
     if created:
@@ -391,7 +390,7 @@ def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> 
     if not created and (
         el.status == ExcessListStatus.AWARDED or any(ln.status == ExcessLineItemStatus.AWARDED for ln in lines)
     ):
-        el.status = ExcessListStatus.OPEN  # type: ignore[assignment]  # legacy Column-model ORM noise
+        el.status = ExcessListStatus.POSTED  # type: ignore[assignment]  # legacy Column-model ORM noise
         el.updated_at = _now()  # type: ignore[assignment]  # legacy Column-model ORM noise
         for ln in lines:
             ln.status = ExcessLineItemStatus.AVAILABLE  # type: ignore[assignment]  # legacy Column-model ORM noise

@@ -46,13 +46,13 @@ def trader_user(db_session: Session) -> User:
 
 @pytest.fixture()
 def posted_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
-    """A posted list with a mix of line statuses
-    (available/bidding/awarded/withdrawn)."""
+    """A posted list with a mix of line statuses (available/awarded/withdrawn — line
+    BIDDING was removed in W3, migration 207)."""
     el = ExcessList(
         title="Bid sheet surplus",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=4,
         created_at=datetime.now(UTC),
     )
@@ -60,7 +60,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
     db_session.flush()
     specs = [
         ("LM358N", ExcessLineItemStatus.AVAILABLE),
-        ("NE555P", ExcessLineItemStatus.BIDDING),
+        ("NE555P", ExcessLineItemStatus.AVAILABLE),
         ("MAX232CPE", ExcessLineItemStatus.AWARDED),
         ("DS1307Z", ExcessLineItemStatus.WITHDRAWN),
     ]
@@ -92,8 +92,7 @@ def _own(user: User):
 
 
 def test_bid_sheet_owner_200_with_active_rows_only(client, db_session, trader_user, posted_list):
-    """Owner gets 200 CSV; one row per available/bidding line, awarded/withdrawn
-    excluded."""
+    """Owner gets 200 CSV; one row per available line, awarded/withdrawn excluded."""
     restore = _own(trader_user)
     try:
         resp = client.get(f"/v2/partials/resell/{posted_list.id}/bid-sheet")
@@ -115,7 +114,7 @@ def test_bid_sheet_owner_200_with_active_rows_only(client, db_session, trader_us
         assert header[7:] == ["Bidder", "Offer Qty", "Unit Price", "Lead Time (Days)", "Notes"]
 
         data_rows = rows[1:]
-        assert len(data_rows) == 2  # AVAILABLE + BIDDING only
+        assert len(data_rows) == 2  # the two AVAILABLE lines only
         body_mpns = {r[1] for r in data_rows}
         assert body_mpns == {"LM358N", "NE555P"}
         # Bidder-fill columns are blank.
@@ -158,7 +157,7 @@ def test_bid_sheet_formula_injection_safe(client, db_session, trader_user, test_
         title="Injection test",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )

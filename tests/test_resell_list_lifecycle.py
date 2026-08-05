@@ -91,24 +91,25 @@ def test_close_list_rejects_draft(db_session, owner, company):
 
 
 def test_close_list_rejects_already_resolved(db_session, owner, company):
-    """An already bid_out list cannot be re-closed — 409."""
+    """An already-resolved (awarded) list cannot be re-closed — 409."""
     el = _make_list(db_session, owner, company)
-    el.status = ExcessListStatus.BID_OUT
+    el.status = ExcessListStatus.AWARDED
     db_session.commit()
     with pytest.raises(HTTPException) as exc:
         excess_service.close_list(db_session, el.id, owner)
     assert exc.value.status_code == 409
 
 
-def test_close_list_allows_collecting(db_session, owner, company):
-    """A collecting list closes → bid_out + close_at stamped."""
+def test_close_list_allows_bidding(db_session, owner, company):
+    """A bidding list closes → close_at stamped; status stays bidding (W3: the old
+    bid_out fold — the ended window is a time fact, not a status)."""
     el = _make_list(db_session, owner, company)
-    publish_list(db_session, el.id, owner)  # → open
-    el.status = ExcessListStatus.COLLECTING
+    publish_list(db_session, el.id, owner)  # → posted
+    el.status = ExcessListStatus.BIDDING
     db_session.commit()
 
     closed = excess_service.close_list(db_session, el.id, owner)
-    assert closed.status == ExcessListStatus.BID_OUT
+    assert closed.status == ExcessListStatus.BIDDING
     assert closed.close_at is not None
 
 
@@ -124,7 +125,7 @@ def test_end_posting_window_locks_list_before_guard(db_session, owner, company, 
     """
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    el.status = ExcessListStatus.COLLECTING
+    el.status = ExcessListStatus.BIDDING
     db_session.commit()
 
     calls: list[int] = []
@@ -155,12 +156,12 @@ def test_end_posting_window_stale_read_cannot_clobber_concurrent_award(db_sessio
 
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    el.status = ExcessListStatus.COLLECTING
+    el.status = ExcessListStatus.BIDDING
     db_session.commit()
-    assert el.status == ExcessListStatus.COLLECTING
+    assert el.status == ExcessListStatus.BIDDING
 
     db_session.execute(sa_text("UPDATE excess_lists SET status = 'awarded' WHERE id = :id").bindparams(id=el.id))
-    assert el.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+    assert el.status == ExcessListStatus.BIDDING  # still stale, pre-call
 
     with pytest.raises(HTTPException) as exc:
         excess_service.close_list(db_session, el.id, owner)
@@ -209,7 +210,7 @@ def test_close_without_bid_on_open_flips_to_closed(db_session, owner, company):
     """Closing an OPEN list without bidding flips it to CLOSED + stamps close_at."""
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)  # → open
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
 
     closed = excess_service.close_list_without_bid(db_session, el.id, owner)
     assert closed.status == ExcessListStatus.CLOSED
@@ -221,7 +222,7 @@ def test_close_without_bid_on_collecting_flips_to_closed(db_session, owner, comp
     path)."""
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    el.status = ExcessListStatus.COLLECTING
+    el.status = ExcessListStatus.BIDDING
     db_session.commit()
 
     closed = excess_service.close_list_without_bid(db_session, el.id, owner)
@@ -252,7 +253,7 @@ def test_close_without_bid_rejects_draft(db_session, owner, company):
 
 @pytest.mark.parametrize(
     "terminal_status",
-    [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED],
+    [ExcessListStatus.AWARDED, ExcessListStatus.CLOSED],
 )
 def test_close_without_bid_rejects_terminal(db_session, owner, company, terminal_status):
     """An already-resolved (incl.
@@ -283,7 +284,7 @@ def test_close_without_bid_route_200_and_forbidden(client, db_session, owner, co
 
     el = _make_list(db_session, owner, company)
     publish_list(db_session, el.id, owner)
-    el.status = ExcessListStatus.COLLECTING
+    el.status = ExcessListStatus.BIDDING
     db_session.commit()
     el_id = el.id
 
@@ -316,8 +317,9 @@ def test_workspace_bid_out_subtitle_is_accurate(client, db_session, owner):
 # ── List views/filters consume the terminal states ──────────────────
 
 
-def test_stage_filter_offers_closed_and_expired(client, db_session, owner):
-    """The list-view stage filter now offers the Closed / Expired stages (M5)."""
+def test_stage_filter_offers_closed_not_expired(client, db_session, owner):
+    """The list-view stage filter offers Closed; the Expired stage died with the W3
+    ladder (migration 207 folded expired into closed)."""
     from app.dependencies import require_user
     from app.main import app
 
@@ -325,7 +327,22 @@ def test_stage_filter_offers_closed_and_expired(client, db_session, owner):
     try:
         resp = client.get("/v2/partials/resell/lists?lens=mine")
         assert resp.status_code == 200
-        assert "Expired" in resp.text
         assert "Closed" in resp.text
+        assert "Expired" not in resp.text
+        assert "Bid out" not in resp.text
     finally:
         app.dependency_overrides.pop(require_user, None)
+
+
+def test_close_without_bid_allows_window_closed_bidding(db_session, owner, company):
+    """W3 merge gain (inherited from the COLLECTING path): a window-closed bidding list
+    (the old bid_out shape, which previously had NO terminal exit) may now be ended into
+    the terminal CLOSED state."""
+    el = _make_list(db_session, owner, company)
+    publish_list(db_session, el.id, owner)  # → posted
+    el.status = ExcessListStatus.BIDDING
+    db_session.commit()
+    excess_service.close_list(db_session, el.id, owner)  # stamps close_at, stays bidding
+
+    ended = excess_service.close_list_without_bid(db_session, el.id, owner)
+    assert ended.status == ExcessListStatus.CLOSED

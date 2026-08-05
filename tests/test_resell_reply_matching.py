@@ -50,7 +50,7 @@ def excess_list(db_session: Session, owner: User) -> ExcessList:
     co = Company(name="Seller Co")
     db_session.add(co)
     db_session.flush()
-    el = ExcessList(company_id=co.id, owner_id=owner.id, title="RS4 Excess", status="open")
+    el = ExcessList(company_id=co.id, owner_id=owner.id, title="RS4 Excess", status="posted")
     db_session.add(el)
     db_session.commit()
     db_session.refresh(el)

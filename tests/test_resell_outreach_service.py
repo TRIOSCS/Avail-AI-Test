@@ -95,7 +95,7 @@ def buyer_company(db_session: Session) -> Company:
 def excess_list(db_session: Session, seller_company: Company, trader: User) -> ExcessList:
     """A POSTED (open) list — ``_guard_owner`` rejects a DRAFT list (finding #47), and
     outreach is only ever offered out on a posted posting."""
-    el = ExcessList(company_id=seller_company.id, owner_id=trader.id, title="Q1 Excess", status=ExcessListStatus.OPEN)
+    el = ExcessList(company_id=seller_company.id, owner_id=trader.id, title="Q1 Excess", status=ExcessListStatus.POSTED)
     db_session.add(el)
     db_session.commit()
     db_session.refresh(el)
@@ -515,7 +515,7 @@ class TestRecordResponse:
         """An inbound reply carrying a bid on an OPEN list signals active collection —
         the list flips OPEN -> COLLECTING, mirroring the User-driven submit_offer
         path."""
-        excess_list.status = ExcessListStatus.OPEN
+        excess_list.status = ExcessListStatus.POSTED
         db_session.commit()
         self._make_outreach(db_session, excess_list, buyer_card, trader)
 
@@ -527,7 +527,7 @@ class TestRecordResponse:
         )
 
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.COLLECTING
+        assert excess_list.status == ExcessListStatus.BIDDING
 
     def test_reply_with_offer_past_close_at_stamps_late(
         self,
@@ -544,7 +544,7 @@ class TestRecordResponse:
 
         excess_list.close_at = datetime.now(UTC) - timedelta(hours=2)
         db_session.commit()
-        assert excess_list.status == ExcessListStatus.OPEN  # the nightly sweep hasn't run
+        assert excess_list.status == ExcessListStatus.POSTED  # the nightly sweep hasn't run
         self._make_outreach(db_session, excess_list, buyer_card, trader)
 
         svc.record_response(
@@ -571,7 +571,7 @@ class TestRecordResponse:
         ``excess_list.status`` — spy the hook to prove it's wired."""
         from app.services import excess_service
 
-        excess_list.status = ExcessListStatus.OPEN
+        excess_list.status = ExcessListStatus.POSTED
         db_session.commit()
         self._make_outreach(db_session, excess_list, buyer_card, trader)
 
@@ -612,14 +612,14 @@ class TestRecordResponse:
         """
         from sqlalchemy import text as sa_text
 
-        excess_list.status = ExcessListStatus.OPEN
+        excess_list.status = ExcessListStatus.POSTED
         db_session.commit()
         self._make_outreach(db_session, excess_list, buyer_card, trader)
 
         db_session.execute(
             sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=excess_list.id)
         )
-        assert excess_list.status == ExcessListStatus.OPEN  # still stale, pre-call
+        assert excess_list.status == ExcessListStatus.POSTED  # still stale, pre-call
 
         updated = svc.record_response(
             db_session,

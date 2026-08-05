@@ -56,7 +56,7 @@ def posted_list(db_session: Session, owner_trader: User, test_company: Company) 
         title="Parked-lane surplus",
         company_id=test_company.id,
         owner_id=owner_trader.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )

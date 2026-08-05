@@ -79,7 +79,7 @@ def _make_list_with_lines(db: Session, owner: User, company: Company, parts: lis
     el = create_excess_list(db, title="Excess", company_id=company.id, owner_id=owner.id)
     rows = [{"part_number": p, "quantity": "100"} for p in parts]
     import_line_items(db, el.id, rows)
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     db.commit()
     db.refresh(el)
     return el
@@ -296,15 +296,15 @@ def test_open_list_flips_to_collecting_on_first_offer(db_session: Session):
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
 
     # Manually flip to OPEN to simulate a published list (DRAFT → OPEN via publish endpoint).
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     db_session.commit()
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
 
     submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
 
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.COLLECTING
+    assert el.status == ExcessListStatus.BIDDING
 
 
 def test_collecting_list_stays_collecting_on_subsequent_offer(db_session: Session):
@@ -317,17 +317,17 @@ def test_collecting_list_stays_collecting_on_subsequent_offer(db_session: Sessio
     offerer2 = _make_user(db_session, email="buyer-coll2b@test.com", role="buyer")
     el = _make_list_with_lines(db_session, owner, company, ["MAX232"])
 
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     db_session.commit()
 
     submit_offer(db_session, list_id=el.id, user=offerer1, scope="take_all")
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.COLLECTING
+    assert el.status == ExcessListStatus.BIDDING
 
     # Second offer — status stays COLLECTING (not re-flipped to something else).
     submit_offer(db_session, list_id=el.id, user=offerer2, scope="take_all")
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.COLLECTING
+    assert el.status == ExcessListStatus.BIDDING
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +344,7 @@ def test_submit_offer_with_buyer_company_attributes_card(db_session: Session):
     owner = _make_user(db_session, email="attr-owner@test.com", role="sales")
     offerer = _make_user(db_session, email="attr-buyer@test.com", role="buyer")
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     buyer_company = _make_company(db_session, name="Attr Buyer Co")
     db_session.commit()
 
@@ -362,7 +362,7 @@ def test_submit_offer_without_buyer_company_leaves_card_none(db_session: Session
     owner = _make_user(db_session, email="noattr-owner@test.com", role="sales")
     offerer = _make_user(db_session, email="noattr-buyer@test.com", role="buyer")
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     db_session.commit()
 
     offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
@@ -381,15 +381,20 @@ def test_submit_offer_without_buyer_company_leaves_card_none(db_session: Session
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("closed_status", [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED])
-def test_offer_on_closed_list_is_flagged_late(db_session: Session, closed_status):
-    """An inbound offer on a bid_out/awarded list is accepted but flagged ``late``
-    (queued for review, never dropped) instead of a plain on-time ``open``."""
-    company = _make_company(db_session, name=f"SellerCo-Late-{closed_status}")
-    owner = _make_user(db_session, email=f"owner-late-{closed_status}@test.com", role="sales")
-    offerer = _make_user(db_session, email=f"buyer-late-{closed_status}@test.com", role="buyer")
+@pytest.mark.parametrize("closed_shape", ["window_closed_bidding", "awarded"])
+def test_offer_on_closed_list_is_flagged_late(db_session: Session, closed_shape):
+    """An inbound offer on a window-closed (bidding + past close_at — the old bid_out)
+    or awarded list is accepted but flagged ``late`` (queued for review, never dropped)
+    instead of a plain on-time ``open``."""
+    company = _make_company(db_session, name=f"SellerCo-Late-{closed_shape}")
+    owner = _make_user(db_session, email=f"owner-late-{closed_shape}@test.com", role="sales")
+    offerer = _make_user(db_session, email=f"buyer-late-{closed_shape}@test.com", role="buyer")
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
-    el.status = closed_status
+    if closed_shape == "window_closed_bidding":
+        el.status = ExcessListStatus.BIDDING
+        el.close_at = datetime.now(UTC) - timedelta(hours=1)
+    else:
+        el.status = ExcessListStatus.AWARDED
     db_session.commit()
 
     offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
@@ -397,7 +402,7 @@ def test_offer_on_closed_list_is_flagged_late(db_session: Session, closed_status
     assert offer.status == ExcessOfferStatus.LATE
 
 
-@pytest.mark.parametrize("open_status", [ExcessListStatus.OPEN, ExcessListStatus.COLLECTING])
+@pytest.mark.parametrize("open_status", [ExcessListStatus.POSTED, ExcessListStatus.BIDDING])
 def test_offer_on_open_list_is_on_time(db_session: Session, open_status):
     """An offer while the window is still open (open/collecting) lands ``open``."""
     company = _make_company(db_session, name=f"SellerCo-OnTime-{open_status}")
@@ -580,7 +585,7 @@ def test_tracker_context_no_n_plus_1_across_rows(db_session: Session):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("blocked_status", [ExcessListStatus.DRAFT, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+@pytest.mark.parametrize("blocked_status", [ExcessListStatus.DRAFT, ExcessListStatus.CLOSED])
 def test_submit_offer_rejects_non_posted_list_service_level(db_session: Session, blocked_status):
     """A direct service call (bypassing the router's own 404-camouflage guard) must
     itself reject a draft/terminal list — mirrors ``upload_bids``'s own guard."""
@@ -600,11 +605,10 @@ def test_submit_offer_rejects_non_posted_list_service_level(db_session: Session,
 @pytest.mark.parametrize(
     ("posted_status", "expected_offer_status"),
     [
-        (ExcessListStatus.OPEN, ExcessOfferStatus.OPEN),
-        (ExcessListStatus.COLLECTING, ExcessOfferStatus.OPEN),
+        (ExcessListStatus.POSTED, ExcessOfferStatus.OPEN),
+        (ExcessListStatus.BIDDING, ExcessOfferStatus.OPEN),
         # Resolved-but-awardable lists still ACCEPT the offer, but stamp it late
         # (offer_status_for_list: the posting already reads as closed).
-        (ExcessListStatus.BID_OUT, ExcessOfferStatus.LATE),
         (ExcessListStatus.AWARDED, ExcessOfferStatus.LATE),
     ],
 )
@@ -677,10 +681,10 @@ def test_submit_offer_stale_read_cannot_resurrect_closed_list(db_session: Sessio
     offerer = _make_user(db_session, email="stale-buyer@test.com", role="buyer")
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
     db_session.commit()
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
 
     db_session.execute(sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=el.id))
-    assert el.status == ExcessListStatus.OPEN  # still stale, pre-call
+    assert el.status == ExcessListStatus.POSTED  # still stale, pre-call
 
     with pytest.raises(HTTPException) as exc:
         submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
@@ -704,7 +708,7 @@ def test_submit_offer_past_close_at_is_late_even_though_status_still_open(db_ses
     el = _make_list_with_lines(db_session, owner, company, ["LM358N"])
     el.close_at = datetime.now(UTC) - timedelta(hours=2)
     db_session.commit()
-    assert el.status == ExcessListStatus.OPEN  # the nightly sweep hasn't run
+    assert el.status == ExcessListStatus.POSTED  # the nightly sweep hasn't run
 
     offer = submit_offer(db_session, list_id=el.id, user=offerer, scope="take_all")
 

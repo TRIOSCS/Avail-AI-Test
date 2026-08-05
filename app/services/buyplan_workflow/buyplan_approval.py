@@ -39,6 +39,7 @@ from ...models.buy_plan import (
 from ..buyplan_scoring import assign_buyer, score_offer
 from .buyplan_po import _line_amount
 from .buyplan_reports import generate_case_report
+from .buyplan_state import transition
 
 # ── Workflow: Submit ─────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ def submit_buy_plan(
     plan.is_stock_sale = _is_stock_sale(plan, db)
 
     # Every plan goes to the one manager approval — no auto-approve (frozen scope).
-    plan.status = BuyPlanStatus.PENDING.value
+    transition(plan, BuyPlanStatus.PENDING)
     logger.info("Buy plan {} submitted for approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
     # Open the engine gate: route a BUY_PLAN ApprovalRequest to can_approve_buy_plans
     # holders (cancels any stale open request first — RISK 2).
@@ -165,7 +166,7 @@ def _run_approve_side_effects(
     now = datetime.now(UTC)
     if line_overrides:
         _apply_line_overrides(plan, line_overrides, db)
-    plan.status = BuyPlanStatus.ACTIVE.value
+    transition(plan, BuyPlanStatus.ACTIVE)
     # Phase D — one approval absorbs SO verification: the single manager approval IS the
     # SO sign-off, so stamp so_status=APPROVED here. ``check_completion``'s
     # ``so_status == APPROVED`` gate then passes for every new approval with no separate
@@ -195,7 +196,7 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     """
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only reject a pending plan (current: {plan.status})")
-    plan.status = BuyPlanStatus.DRAFT.value
+    transition(plan, BuyPlanStatus.DRAFT)
     plan.approved_by_id = user.id
     plan.approved_at = datetime.now(UTC)
     plan.approval_notes = reason
@@ -284,17 +285,20 @@ def _cancel_open_prepayment_requests_for_plan(
          an authorised (about-to-be-wired) prepayment otherwise survives its dead plan. A
          ``paid`` prepayment is NEVER touched — the wire already went out (no auto claw-back).
 
-    Sets each swept request CANCELLED + ``resolved_at`` = now + ``resolution_note`` = *reason*
-    (mirroring ``_cancel_open_engine_requests_for_plan``'s cancel mechanics) and returns the
-    REQUESTED-request count (the void of approved prepayments is a side effect, not counted).
-    No engine ``cancel`` event is used: this is a system-driven consequence of the plan dying
-    (the plan-level audit records who cancelled / halted / completed it), not a user-initiated
-    cancel, and the sweep carries no actor. Lazy imports avoid the circular import with the
-    approvals + notification services.
+    Each swept request is cancelled through the engine's ``events.cancel`` (W3: no more raw
+    ``status = CANCELLED`` write — same row lock, REQUESTED guard, and audit ApprovalEvent
+    as every other cancel), acting on behalf of its own ``requested_by``/``owner`` exactly
+    like ``_cancel_open_engine_requests_for_plan``, then stamped ``resolved_at`` = now +
+    ``resolution_note`` = *reason*. A request whose requester AND owner are both gone
+    (users deleted → SET NULL) falls back to the direct write with a warning so the
+    money-safety teardown can never fail on authz. Returns the REQUESTED-request count
+    (the void of approved prepayments is a side effect, not counted). Lazy imports avoid
+    the circular import with the approvals + notification services.
     """
     from ...constants import ApprovalRequestStatus, ApprovalSubjectType, PrepaymentStatus
     from ...models.approvals import ApprovalRequest
     from ...models.quality_plan import Prepayment
+    from ..approvals.events import cancel as svc_cancel
     from ..prepayment_notifications import (
         notify_prepayment_voided,
         run_prepayment_notify_bg,
@@ -317,7 +321,17 @@ def _cancel_open_prepayment_requests_for_plan(
         stmt = stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
     open_requests = db.execute(stmt).scalars().all()
     for ar in open_requests:
-        ar.status = ApprovalRequestStatus.CANCELLED
+        actor = ar.requested_by or ar.owner
+        if actor is not None:
+            svc_cancel(db, ar.id, actor=actor)
+        else:
+            # Requester and owner both gone (SET NULL) — engine cancel would refuse on
+            # authz; the teardown must still void the wire request.
+            logger.warning(
+                "Prepayment approval request {} has no requester/owner — cancelling directly",
+                ar.id,
+            )
+            ar.status = ApprovalRequestStatus.CANCELLED
         ar.resolved_at = now
         ar.resolution_note = reason
 
@@ -473,7 +487,7 @@ def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = Non
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan halted — prepayment voided")
     plan.so_status = SOVerificationStatus.REJECTED.value
     plan.so_rejection_note = reason
-    plan.status = BuyPlanStatus.HALTED.value
+    transition(plan, BuyPlanStatus.HALTED)
     plan.halted_by_id = user.id
     plan.halted_at = now
     logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, reason)
@@ -545,7 +559,7 @@ def _complete_plan(plan: BuyPlan, db: Session) -> None:
     # stock-sale job route through _complete_plan.
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan completed — pending prepayment voided")
 
-    plan.status = BuyPlanStatus.COMPLETED.value
+    transition(plan, BuyPlanStatus.COMPLETED)
     plan.completed_at = datetime.now(UTC)
     plan.case_report = generate_case_report(plan, db)
 
@@ -600,9 +614,8 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     if plan.status not in RESUBMITTABLE_STATUSES:
         raise ValueError(f"Only halted/cancelled plans can be resubmitted (current: {plan.status})")
 
-    plan.status = BuyPlanStatus.DRAFT.value
+    transition(plan, BuyPlanStatus.DRAFT)
     plan.so_status = SOVerificationStatus.PENDING.value
-    plan.auto_approved = False
     plan.approved_by_id = None
     plan.approved_at = None
     plan.approval_notes = None
@@ -646,7 +659,7 @@ def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None
     # leave a wire an approver could still authorise (finding #2, Task 9 extended).
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan cancelled — prepayment voided")
 
-    plan.status = BuyPlanStatus.CANCELLED.value
+    transition(plan, BuyPlanStatus.CANCELLED)
     plan.cancelled_at = datetime.now(UTC)
     plan.cancelled_by_id = user.id
     plan.cancellation_reason = reason
@@ -695,7 +708,6 @@ def resubmit_buy_plan(
     plan.so_rejection_note = None
 
     # Reset approval
-    plan.auto_approved = False
     plan.approved_by_id = None
     plan.approved_at = None
     plan.approval_notes = None
@@ -708,7 +720,7 @@ def resubmit_buy_plan(
     plan.salesperson_notes = salesperson_notes
 
     # Every plan goes to the one manager approval — no auto-approve (frozen scope).
-    plan.status = BuyPlanStatus.PENDING.value
+    transition(plan, BuyPlanStatus.PENDING)
     # Re-open the engine gate. Cancels the stale request from the prior submission so
     # exactly ONE REQUESTED request exists for this plan (RISK 2).
     _open_engine_request_for_plan(plan, user, db)
@@ -870,6 +882,13 @@ def resume_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
     (``halted_by_id`` / ``halted_at``) is PRESERVED for history — resume is NOT a reset
     (``reset_buy_plan_to_draft`` nulls the audit + returns to DRAFT; do not confuse them).
     Caller commits.
+
+    Restores ``so_status`` to APPROVED (halt_plan wrote REJECTED — the retired SO-track
+    enum's only halt vocabulary). Without the restore a resumed plan could NEVER
+    auto-complete: ``check_completion`` requires ``so_status == APPROVED`` and its only
+    APPROVED writer (``_run_approve_side_effects``) is unreachable from ACTIVE — the
+    halt→resume deadlock. ``so_rejection_note`` is left in place with the halt audit
+    (it carries the halt reason for the case report).
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
@@ -879,7 +898,8 @@ def resume_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
     if plan.status != BuyPlanStatus.HALTED.value:
         raise ValueError(f"Only a halted plan can be resumed (current: {plan.status}).")
 
-    plan.status = BuyPlanStatus.ACTIVE.value
+    transition(plan, BuyPlanStatus.ACTIVE)
+    plan.so_status = SOVerificationStatus.APPROVED.value
     plan.updated_at = datetime.now(UTC)
     # halted_by_id / halted_at are intentionally LEFT in place as the halt→resume audit trail.
     db.flush()

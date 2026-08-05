@@ -433,24 +433,23 @@ _ROLLUP_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON, ExcessO
 
 # List statuses that mean the posting window is over: an inbound offer landing now is
 # accepted but flagged ``late`` and queued for review — never dropped (spec §Resolved-for
-# -v1 #3, constants.ExcessOfferStatus.LATE). On {open, collecting, draft} the offer is
-# on-time (``open``).
+# -v1 #3, constants.ExcessOfferStatus.LATE). On {posted, bidding, draft} the offer is
+# on-time (``open``) unless the window's own ``close_at`` has passed — the deliberate
+# "bids went out" close (:func:`close_list`) always stamps ``close_at``, so the ex-BID_OUT
+# case stays covered by the time check in :func:`offer_status_for_list`.
 _CLOSED_LIST_STATUSES = (
-    ExcessListStatus.BID_OUT,
     ExcessListStatus.AWARDED,
     ExcessListStatus.CLOSED,
-    ExcessListStatus.EXPIRED,
 )
 
 # List statuses that ACCEPT a new inbound offer / owner-ingested bid sheet — a posting
-# window that is currently live or resolved-but-still-awardable (open/collecting/bid_out/
-# awarded). A draft has no finalized lines to bid on yet, and a terminal (closed/expired)
-# list is dead. Shared by :func:`submit_offer` (finding #47 — was enforced ONLY in the
-# router) and :func:`upload_bids`.
+# window that is currently live or resolved-but-still-awardable (posted/bidding/awarded).
+# A draft has no finalized lines to bid on yet, and a terminal (closed) list is dead.
+# Shared by :func:`submit_offer` (finding #47 — was enforced ONLY in the router) and
+# :func:`upload_bids`.
 _POSTED_LIST_STATUSES = (
-    ExcessListStatus.OPEN,
-    ExcessListStatus.COLLECTING,
-    ExcessListStatus.BID_OUT,
+    ExcessListStatus.POSTED,
+    ExcessListStatus.BIDDING,
     ExcessListStatus.AWARDED,
 )
 
@@ -458,10 +457,11 @@ _POSTED_LIST_STATUSES = (
 def offer_status_for_list(excess_list: ExcessList) -> ExcessOfferStatus:
     """The status a NEW inbound offer takes given the list's state at submit time.
 
-    ``late`` when EITHER the list's status already reads as closed (bid_out/awarded/
-    closed/expired) OR the posting window's own ``close_at`` deadline has genuinely
-    passed (:func:`_posting_window_closed`) even though the nightly sweep hasn't caught up
-    to flip the status yet (finding #10) — an offer landing in that gap would otherwise be
+    ``late`` when EITHER the list's status already reads as closed (awarded/closed) OR
+    the posting window's own ``close_at`` deadline has genuinely passed
+    (:func:`_posting_window_closed`) — which covers both a deliberately-closed window
+    (``close_list`` stamps ``close_at``) and a lapsed owner-set deadline nothing flipped
+    (finding #10) — an offer landing in that gap would otherwise be
     indistinguishable from an on-time bid for up to a day. The offer is still accepted and
     queued for review, never dropped — else ``open``. Shared by :func:`submit_offer`,
     :func:`upload_bids`, and the inbound-email/manual-log path
@@ -488,8 +488,8 @@ def notify_owner_of_offer(
     The point of a time-boxed posting window is to act on offers promptly, but the flow
     never told the owner one arrived — they had to reload the workspace. This writes one
     ``channel="system"`` ActivityLog targeting ``excess_list.owner_id`` (the app's shared
-    in-app-notification primitive — same shape as ``crm/offers._upsert_notification`` and
-    ``buyplan_notifications``). Deduplicated per (list, buyer): a stable ``external_id``
+    in-app-notification primitive — same shape as ``buyplan_notifications``).
+    Deduplicated per (list, buyer): a stable ``external_id``
     token encodes the buyer, so a multi-line bid — or a second reply from the same buyer —
     REFRESHES the existing row instead of stacking a new one. A distinct buyer on the same
     list gets its own row. Does NOT commit — the caller owns the transaction boundary.
@@ -633,7 +633,7 @@ def submit_offer(
     ``_POSTED_LIST_STATUSES`` — a direct service call on a draft/terminal list is rejected
     (409). The posted-status re-check happens AFTER taking the M9 list-row lock (finding
     #9): a list closed between the caller's stale read and this call can no longer be
-    resurrected by the open->collecting flip below. Returns the persisted ExcessOffer.
+    resurrected by the posted->bidding flip below. Returns the persisted ExcessOffer.
 
     Row dict keys: ``mpn_raw`` (required), ``quantity`` (required), ``unit_price``,
     ``lead_time_days``, ``terms_text`` (all optional).
@@ -705,9 +705,9 @@ def submit_offer(
     for line_item_id in affected_line_item_ids:
         recompute_line_rollup(db, line_item_id)
 
-    # Any first offer on an OPEN list signals active collection — flip to COLLECTING.
-    if excess_list.status == ExcessListStatus.OPEN:
-        excess_list.status = ExcessListStatus.COLLECTING
+    # Any first offer on a POSTED list signals active collection — flip to BIDDING.
+    if excess_list.status == ExcessListStatus.POSTED:
+        excess_list.status = ExcessListStatus.BIDDING
 
     # M6: notify the owner an inbound offer arrived (deduped per (list, buyer)).
     notify_owner_of_offer(
@@ -1062,8 +1062,8 @@ def upload_bids(
     *rows* — and the accepted subset after re-classification — must not be empty (400).
 
     M9 (deep-review #2 residual R1): takes the same list-row lock ``submit_offer`` does —
-    right after the owner check, BEFORE re-reading ``excess_list.status`` — so a stale-OPEN
-    upload can never flip a concurrently-closed list back to ``collecting``. The lock is
+    right after the owner check, BEFORE re-reading ``excess_list.status`` — so a stale-POSTED
+    upload can never flip a concurrently-closed list back to ``bidding``. The lock is
     held for the WHOLE call (one transaction), so a concurrent ``award_offer`` on this list
     (which takes the same list-row lock) is fully serialized against this upload — including
     the SUPERSEDE step below, which re-checks (post-lock) that an earlier upload it is about
@@ -1183,10 +1183,10 @@ def upload_bids(
     for line_item_id in affected_line_item_ids:
         recompute_line_rollup(db, line_item_id)
 
-    # Any first offer on an OPEN list signals active collection — flip to COLLECTING
+    # Any first offer on a POSTED list signals active collection — flip to BIDDING
     # (mirrors submit_offer).
-    if excess_list.status == ExcessListStatus.OPEN:
-        excess_list.status = ExcessListStatus.COLLECTING
+    if excess_list.status == ExcessListStatus.POSTED:
+        excess_list.status = ExcessListStatus.BIDDING
 
     _safe_commit(db, entity="uploaded bid sheet")
     logger.info(
@@ -1215,17 +1215,18 @@ def upload_bids(
 # direct service call is guarded even when the (defence-in-depth) router guard is bypassed.
 _ACTIONABLE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.LATE)
 
-# List statuses that are TERMINAL — a closed-without-bid (D5) or nightly-expired list is
-# dead and must never be reopened. Awarding/assigning on one would flip it back to
-# ``awarded`` (and a later unaward to ``bid_out``), the exact reopen the D5 contract
-# forbids (finding #4). ``awarded`` is a RESOLVED (not terminal) state that award/unaward
-# legitimately toggle, so it is NOT in this set; assign adds it separately below.
-_TERMINAL_LIST_STATUSES = (ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED)
+# List statuses that are TERMINAL — a closed list (D5; migration 206 folded the old
+# nightly-expired rows folded in via migration 207) is dead and must never be reopened.
+# Awarding/assigning on one would flip it back to ``awarded``, the exact reopen the D5
+# contract forbids (finding #4). ``awarded`` is a RESOLVED (not terminal) state that
+# award/unaward legitimately toggle, so it is NOT in this set; assign adds it separately
+# below.
+_TERMINAL_LIST_STATUSES = (ExcessListStatus.CLOSED,)
 
 # List statuses on which ``assign_offer_line`` (unmatched-queue resolution) is rejected:
-# the two terminal states above PLUS ``awarded`` (a resolved list whose lines are all
-# decided). Assign is only meaningful while offers are still being resolved — open,
-# collecting, or bid_out.
+# the terminal state above PLUS ``awarded`` (a resolved list whose lines are all
+# decided). Assign is only meaningful while offers are still being resolved — posted or
+# bidding.
 _ASSIGN_BLOCKED_LIST_STATUSES = frozenset(s.value for s in (*_TERMINAL_LIST_STATUSES, ExcessListStatus.AWARDED))
 
 
@@ -1276,7 +1277,7 @@ def assign_offer_line(
     then recomputes the target line's best-price rollup (and, on a RE-assign, the line it
     moved off of, so the old line no longer counts the moved bid). Guards: the list exists
     (404) + *owner* owns it (403); the offer line belongs to this list (404); the list is
-    not resolved/terminal — ``awarded``/``closed``/``expired`` reject 409 (finding #2 + the
+    not resolved/terminal — ``awarded``/``closed`` reject 409 (finding #2 + the
     finding #4 "second vector": a salvaged line on a dead list must not become awardable);
     the parent offer is still in play (``open``/``late``) — a won/lost/withdrawn offer's
     line is 409 (re-pointing a won offer's line would strand its award linkage); the target
@@ -1540,9 +1541,9 @@ def award_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     if offer.status == ExcessOfferStatus.WON:
         return offer  # idempotent — a double-award is a no-op, not a second flip
 
-    # A terminal list (closed-without-bid per D5, or nightly-expired) is dead: awarding an
-    # offer on it would reopen it to ``awarded`` (and a later unaward would step it to
-    # ``bid_out``), violating the D5 "terminal, no reopen" contract (finding #4). A late
+    # A terminal (closed) list is dead: awarding an
+    # offer on it would reopen it to ``awarded`` (and a later unaward would step it back
+    # to ``bidding``), violating the D5 "terminal, no reopen" contract (finding #4). A late
     # offer on such a list stays queued/reviewable but can never resurrect the posting.
     if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}:
         raise HTTPException(409, "This list is closed — it can't be reopened by awarding an offer")
@@ -1616,16 +1617,15 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     Owner-only (404 missing, 403 non-owner, same order as award). Raises 409 if the offer
     is not ``won`` (there is nothing to reverse — we never silently re-pick a different
-    winner), and 409 if the list is TERMINAL (``closed``/``expired`` — finding #4): a
-    closed-without-bid (D5) or nightly-expired list is dead, and award_offer permanently
-    409s on it, so reversing a win there would erase a recorded sale with no way to
-    re-award it. ``bid_out`` is NOT terminal (it is the normal step-back target below) and
-    stays reversible. Flips the offer back to ``open``/``late`` (recomputed honestly via
-    :func:`_revived_offer_status` — findings #37/#46, never a blanket ``open`` that erases
-    a late-arrival provenance) and its awarded lines back to ``available``, recomputes each
-    line's rollup, recomputes the buyer's ``BuyerScore`` (a full-history recompute
-    self-heals the win count back down), and steps the list's own status back off
-    ``awarded`` — to ``bid_out`` when the posting window has closed, else ``collecting``.
+    winner), and 409 if the list is TERMINAL (``closed`` — finding #4): a closed list is
+    dead, and award_offer permanently 409s on it, so reversing a win there would erase a
+    recorded sale with no way to re-award it. Flips the offer back to ``open``/``late``
+    (recomputed honestly via :func:`_revived_offer_status` — findings #37/#46, never a
+    blanket ``open`` that erases a late-arrival provenance) and its awarded lines back to
+    ``available``, recomputes each line's rollup, recomputes the buyer's ``BuyerScore``
+    (a full-history recompute self-heals the win count back down), and steps the list's
+    own status back off ``awarded`` to ``bidding`` (the W3 ladder's one pre-award live
+    state — whether the window is still open lives in ``close_at``, not the status).
     One transaction.
     """
     offer = db.get(ExcessOffer, offer_id)
@@ -1641,9 +1641,9 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
     if offer.status != ExcessOfferStatus.WON:
         raise HTTPException(409, "This offer is not awarded — nothing to reverse")
 
-    # D5 / finding #4: a terminal (closed-without-bid or nightly-expired) list is dead —
-    # award_offer permanently 409s on it, so reversing a win here would strand the offer
-    # with no way to ever re-award it. BID_OUT is not terminal and stays reversible.
+    # D5 / finding #4: a terminal (closed) list is dead — award_offer permanently 409s
+    # on it, so reversing a win here would strand the offer with no way to ever re-award
+    # it. BIDDING is not terminal and stays reversible.
     if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}:
         raise HTTPException(409, "This list is closed — the award can no longer be reversed")
 
@@ -1663,16 +1663,12 @@ def unaward_offer(db: Session, offer_id: int, owner: User) -> ExcessOffer:
 
     recompute_buyer_score_on_win(db, offer)
 
-    # Step the list status back off ``awarded`` (M5): a list whose window is still open
-    # steps back to ``collecting``, while one whose window has already closed (its
-    # ``close_at`` deadline has passed) steps to ``bid_out``. The window-closed test is
-    # time-based, NOT a bare ``close_at`` truthiness check: Phase 5 preserves a FUTURE
-    # create-set deadline through publish, so a truthy ``close_at`` no longer implies the
-    # window closed (findings #1/#3).
+    # Step the list status back off ``awarded`` (M5) to ``bidding`` — the W3 ladder's
+    # one pre-award live state. Whether the posting window is still open is a TIME fact
+    # (``close_at`` + :func:`_posting_window_closed`), not a status: the old
+    # collecting-vs-bid_out fork collapsed into BIDDING in migration 207.
     if excess_list.status == ExcessListStatus.AWARDED:
-        excess_list.status = (
-            ExcessListStatus.BID_OUT if _posting_window_closed(excess_list) else ExcessListStatus.COLLECTING
-        )
+        excess_list.status = ExcessListStatus.BIDDING
 
     _safe_commit(db, entity="excess offer unaward")
     db.refresh(offer)
@@ -1883,23 +1879,28 @@ def delete_excess_list(db: Session, list_id: int, owner: User) -> None:
     logger.info("Deleted draft ExcessList id={} by owner={}", list_id, owner.id)
 
 
-# List statuses a manual close may act on: an actively-posted window. A draft was never
-# published (nothing to close), and a bid_out/awarded/closed/expired list is already
-# resolved — re-closing it is a no-op the endpoint should reject (M5).
-_CLOSEABLE_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
+# List statuses a manual close may act on: a live posting (posted/bidding). A draft was
+# never published (nothing to close), and an awarded/closed list is already resolved —
+# re-closing it is a no-op the endpoint should reject (M5). BIDDING inherits closeability
+# from the old COLLECTING path, so an ex-bid_out list (BIDDING with a stamped past
+# ``close_at``) may now also be ended into the terminal ``closed`` state — the merge
+# gives it the exit it previously lacked.
+_CLOSEABLE_LIST_STATUSES = (ExcessListStatus.POSTED, ExcessListStatus.BIDDING)
 
 
 def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status: str) -> ExcessList:
     """Close a posted list into a resolved *target_status* — owner-only — + stamp
     ``close_at``.
 
-    Shared engine for both posting-window exits: ``bid_out`` (bids went out) and ``closed``
-    (closed without bidding — D5). Guards: the list must exist (404), *owner* must own it
-    (403), and it must be actively posted (``open``/``collecting``) — a draft or an
-    already-resolved list is 409 (M5). Takes the SAME M9 list+lines lock award/unaward/
+    Shared engine for both posting-window exits: ``bidding`` (bids went out — the window
+    ends via the ``close_at`` stamp; the status stays on the ladder's one live pre-award
+    state) and ``closed`` (closed without bidding — D5). Guards: the list must exist
+    (404), *owner* must own it (403), and it must be actively posted
+    (``posted``/``bidding``) — a draft or an already-resolved (awarded/closed) list is
+    409 (M5). Takes the SAME M9 list+lines lock award/unaward/
     withdraw/assign use (:func:`_lock_list_and_lines`) BEFORE evaluating the closeable
     guard (finding #11): without it, a close racing a concurrent award can read the list as
-    still ``collecting``, block on the award's row lock, then unconditionally overwrite the
+    still ``bidding``, block on the award's row lock, then unconditionally overwrite the
     just-awarded status once it wakes. Commits. Returns the refreshed list.
     """
     excess_list = get_excess_list(db, list_id)
@@ -1909,7 +1910,7 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
     _lock_list_and_lines(db, list_id)
 
     if excess_list.status not in {s.value for s in _CLOSEABLE_LIST_STATUSES}:
-        raise HTTPException(409, "Only an open or collecting list can be closed")
+        raise HTTPException(409, "Only a posted or bidding list can be closed")
 
     excess_list.status = target_status
     excess_list.close_at = datetime.now(UTC)
@@ -1922,25 +1923,27 @@ def _end_posting_window(db: Session, list_id: int, owner: User, *, target_status
 
 
 def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
-    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
-    ``close_at``.
+    """End the posting window — owner-only — stamp ``close_at``; status stays/lands on
+    ``bidding``.
 
     The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
     ``open_at``): once the trader has assembled and sent the bid back, closing the list
-    flips it to ``bid_out`` and records ``close_at`` (Chunk E). See ``_end_posting_window``
-    for the guards.
+    records ``close_at`` (Chunk E) — new offers landing after it are flagged ``late``
+    (:func:`offer_status_for_list`). Under the W3 ladder the list stays ``bidding`` while
+    the bid-back is out (the old ``bid_out`` status collapsed into it; CustomerBid.status
+    carries the sent/accepted sub-state). See ``_end_posting_window`` for the guards.
     """
-    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.BID_OUT)
+    return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.BIDDING)
 
 
 def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList:
     """Close a posted list WITHOUT bidding → the terminal ``closed`` state (D5, finding
     #14).
 
-    The deliberate "nothing came of this — end it" exit, distinct from the ``bid_out``
+    The deliberate "nothing came of this — end it" exit, distinct from the ``close_list``
     (bids went out) path: an owner ends a posting that drew no usable bid instead of leaving
     it advertising forever. ``closed`` is TERMINAL — there is no reopen. Same owner +
-    open/collecting guards as ``close_list``
+    posted/bidding guards as ``close_list``
     (409 on a draft/resolved list). Commits. Returns the refreshed list.
     """
     return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)

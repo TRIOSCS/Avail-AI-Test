@@ -20,10 +20,9 @@ Three entry points:
     ``run_outreach_email_send`` (the BACKGROUND job the router enqueues — it performs
     the sends + per-buyer sent-message lookups off the request path and advances each
     row to ``sent`` / ``failed``). ``submit_outreach_email`` itself is the inline
-    convenience that runs both phases on one session (direct callers / tests). (Finding
-    B45: ``no_response`` is a RESERVED terminal state for the don't-forget nudge — no
-    production path advances a row to it; a genuine buyer silence is simply a row that
-    stays ``sent``.)
+    convenience that runs both phases on one session (direct callers / tests). (A genuine
+    buyer silence is simply a row that stays ``sent`` — the reserved ``no_response``
+    member was removed in W3, migration 207; finding B45.)
   - ``record_response``        — reply adapter consumed by the inbox poll (or
     Chunk D): match a reply (conversation/message id) → the ExcessOutreach rows,
     advance ``status`` (responded → bid / declined), and link/create the inbound
@@ -271,7 +270,7 @@ def _has_live_recent_outreach(
 
     ``line_id`` NULL matches the whole-list touch (``excess_line_item_id IS NULL``). Uses
     the SENDING/SENT filter (mirroring the finalize idempotency guard) so a failed /
-    interrupted / no_response prior touch never blocks a genuine re-offer.
+    interrupted prior touch never blocks a genuine re-offer.
     """
     conds = [
         ExcessOutreach.excess_list_id == list_id,
@@ -565,10 +564,10 @@ async def _finalize_outreach_send(
     token: str,
     plan: list[dict],
 ) -> list[ExcessOutreach]:
-    """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
-    status. Shared by :func:`submit_outreach_email` (inline) and
-    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup
-    logic lives.
+    """Send emails, stamp graph ids, advance each ``sending`` row to its final status.
+
+    Shared by :func:`submit_outreach_email` (inline) and :func:`run_outreach_email_send`
+    (background) — the ONE place the send + lookup logic lives.
 
     Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
     the live RFQ tracking path is untouched). Graph ids do NOT come back in
@@ -576,8 +575,8 @@ async def _finalize_outreach_send(
     buyer we reuse ``email_service._find_sent_message`` — the SAME source-level lookup —
     to fetch the just-sent message's ids. A skipped recipient (no email / DNC), a
     per-buyer send error, or a total send outage is recorded ``failed`` with the reason
-    persisted in ``send_error`` (NEVER ``no_response`` — that state is genuine buyer
-    silence only) — never silently dropped, never stuck ``sending``. A delivered row whose
+    persisted in ``send_error`` (never a silence state — the buyer was never
+    contacted) — never silently dropped, never stuck ``sending``. A delivered row whose
     Graph-id lookup came back empty stays ``sent`` but carries a degraded note in
     ``send_error``. Idempotent: only rows still in ``sending`` are sent, so re-running the
     plan never double-sends.
@@ -619,8 +618,8 @@ async def _finalize_outreach_send(
     if not pending:
         return []
 
-    # A total send outage flags EVERY pending buyer ``failed`` (not ``no_response`` — the
-    # buyer was never contacted, so it is NOT silence) with this exception text persisted
+    # A total send outage flags EVERY pending buyer ``failed`` (the buyer was never
+    # contacted, so it is NOT silence) with this exception text persisted
     # as the reason; the rows are kept + retryable, never stranded in ``sending``.
     total_error: str | None = None
     try:
@@ -659,7 +658,7 @@ async def _finalize_outreach_send(
         else:
             # The send never reached the buyer → ``failed`` with the persisted reason
             # (the per-buyer skip/error string, or the total-outage text, else a generic
-            # fallback). NEVER ``no_response`` — that state is genuine buyer silence only.
+            # fallback) — a send failure is never recorded as buyer silence.
             send_error = result.get("error") or total_error or "send did not complete (no send result for recipient)"
             for row in rows:
                 row.status = ExcessOutreachStatus.FAILED
@@ -829,9 +828,8 @@ async def submit_outreach_email(
 
     Inline convenience that runs both phases on ONE session:
     :func:`enqueue_outreach_email` (write the ``sending`` rows + build the plan) then
-    :func:`_finalize_outreach_send` (send + stamp + advance to ``sent`` / ``failed`` —
-    ``no_response`` is a reserved don't-forget-nudge state no production path writes;
-    finding B45). Direct callers / tests that want the fully-finalized rows in one call
+    :func:`_finalize_outreach_send` (send + stamp + advance to ``sent`` / ``failed``).
+    Direct callers / tests that want the fully-finalized rows in one call
     use this; the
     ROUTER instead enqueues the finalize as a background job (via
     :func:`run_outreach_email_send`) so the modal returns immediately. Commits. Returns
@@ -923,8 +921,9 @@ async def retry_outreach_send(
     token: str,
     session_factory=None,
 ) -> None:
-    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, only
-    resend if the original never actually went out (the double-send guard).
+    """Retry a ``failed`` / ``interrupted`` outreach row (reconcile-first).
+
+    Only resend if the original never actually went out (the double-send guard).
 
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
@@ -1062,8 +1061,8 @@ def reclassify_stale_sending(
 
     A row optimistically written ``sending`` whose finalize job crashed (or the process
     was killed) mid-flight would otherwise poll forever. This flips such aged rows to
-    ``interrupted`` — the ambiguous "we don't know if it sent" state, NEVER
-    ``no_response`` (that would libel the buyer as contacted-and-silent) and NEVER a resend
+    ``interrupted`` — the ambiguous "we don't know if it sent" state, never a
+    contacted-and-silent claim about the buyer and NEVER a resend
     (whether the send actually landed is unknown here; the manual retry path does the
     Sent-folder lookup before any resend). Idempotent, commits once (only when something
     was flipped), returns the count flipped.
@@ -1391,10 +1390,10 @@ def _link_inbound_offer(
     for line_item_id in affected:
         recompute_line_rollup(db, line_item_id)
 
-    # Any first inbound bid on an OPEN list signals active collection — flip to COLLECTING
+    # Any first inbound bid on a POSTED list signals active collection — flip to BIDDING
     # (mirrors the User-driven submit_offer path in excess_service).
-    if excess_list is not None and excess_list.status == ExcessListStatus.OPEN:
-        excess_list.status = ExcessListStatus.COLLECTING
+    if excess_list is not None and excess_list.status == ExcessListStatus.POSTED:
+        excess_list.status = ExcessListStatus.BIDDING
 
     # M6: notify the list owner a buyer reply carrying a bid landed (deduped per
     # (list, buyer)). The buyer here is the canonical VendorCard, not a User.

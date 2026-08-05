@@ -389,16 +389,15 @@ def can_verify_po_line(user: User | None, line) -> bool:
 
 
 # Buy-plan header statuses at/after which a NEW prepayment request makes no sense: the
-# three terminal states (a dead plan keeps VERIFIED lines) plus INBOUND (goods already
-# inbound, awaiting receipt). Single source of truth shared by create_prepayment (the
-# service guard) and can_request_prepayment (the button-visibility predicate) so the two
-# never drift.
+# three terminal states (a dead plan keeps VERIFIED lines). Single source of truth
+# shared by create_prepayment (the service guard) and can_request_prepayment (the
+# button-visibility predicate) so the two never drift. INBOUND was retired in W3
+# (migration 208; no row can carry it since 176), so it left this set.
 PREPAYMENT_BLOCKED_PLAN_STATUSES = frozenset(
     {
         BuyPlanStatus.COMPLETED.value,
         BuyPlanStatus.CANCELLED.value,
         BuyPlanStatus.HALTED.value,
-        BuyPlanStatus.INBOUND.value,
     }
 )
 

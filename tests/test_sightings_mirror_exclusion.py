@@ -101,7 +101,7 @@ def test_board_query_excludes_mirror_even_after_publish(db_session: Session, tes
     virtual_requirement = _make_virtual_requirement(db_session, el)
     publish_list(db_session, el.id, test_user)
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
 
     ids = {r.id for r in build_board_requirement_query(db_session, test_user, SightingsListParams()).all()}
     assert virtual_requirement.id not in ids

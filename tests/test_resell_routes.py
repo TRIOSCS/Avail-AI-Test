@@ -45,7 +45,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         title="Acme surplus",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=2,
         created_at=datetime.now(UTC),
     )
@@ -74,7 +74,7 @@ def single_line_list(db_session: Session, trader_user: User, test_company: Compa
         title="One-off heatsink",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )
@@ -196,7 +196,7 @@ def test_non_owner_detail_never_leaks_customer_via_free_text(client, db_session,
         title=leaky_title,
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )
@@ -247,7 +247,7 @@ def test_mine_lens_search_still_matches_title(client, db_session, trader_user, t
         title="Titanium widgets clearance",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )
@@ -888,7 +888,8 @@ def test_close_endpoint_owner_only(client, db_session, trader_user, posted_list,
         resp = client.post(f"/api/resell/{posted_list.id}/close")
         assert resp.status_code == 200
         db_session.refresh(posted_list)
-        assert posted_list.status == ExcessListStatus.BID_OUT
+        # W3: the "bids went out" close stamps close_at; the status stays on bidding.
+        assert posted_list.status == ExcessListStatus.BIDDING
         assert posted_list.close_at is not None
     finally:
         app.dependency_overrides.pop(require_user, None)
@@ -1082,9 +1083,8 @@ def test_stat_strip_aggregation(db_session, trader_user, test_company):
         db_session.flush()
         return el
 
-    _mk(ExcessListStatus.OPEN)
-    collecting = _mk(ExcessListStatus.COLLECTING)
-    _mk(ExcessListStatus.BID_OUT)
+    _mk(ExcessListStatus.POSTED)
+    collecting = _mk(ExcessListStatus.BIDDING)
     _mk(ExcessListStatus.AWARDED)
     # Two unactioned offers on an owned list: one take_all, one per_line.
     for scope in (ExcessOfferScope.TAKE_ALL, ExcessOfferScope.PER_LINE):
@@ -1099,8 +1099,7 @@ def test_stat_strip_aggregation(db_session, trader_user, test_company):
     db_session.commit()
 
     stats = _stat_strip(db_session, trader_user)
-    assert stats["open"] == 2  # open + collecting
-    assert stats["bids_out"] == 1
+    assert stats["live"] == 2  # posted + bidding
     assert stats["awarded"] == 1
     assert stats["offers_to_review"] == 2
     assert stats["take_all"] == 1
@@ -1113,9 +1112,7 @@ def test_list_cards_batched_coverage_and_offer_count(db_session, trader_user, te
     from app.models.excess import ExcessOfferLine
     from app.routers.resell import _list_cards
 
-    el = ExcessList(
-        title="Cards", company_id=test_company.id, owner_id=trader_user.id, status=ExcessListStatus.COLLECTING
-    )
+    el = ExcessList(title="Cards", company_id=test_company.id, owner_id=trader_user.id, status=ExcessListStatus.BIDDING)
     db_session.add(el)
     db_session.flush()
     line_a = ExcessLineItem(excess_list_id=el.id, part_number="A1", quantity=10, offer_count=1)
@@ -1178,7 +1175,7 @@ def bare_list(db_session: Session, trader_user: User, test_company: Company) -> 
         title="Quiet surplus",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=0,
         created_at=datetime.now(UTC),
     )
@@ -1280,7 +1277,9 @@ def test_workspace_triage_cards_carry_real_filters_no_double_highlight(client, t
     assert '&stage="' not in body
 
     # Each card's ring keys off a UNIQUE token, so exactly one can be active at a time.
-    for token in ("open", "offers", "take_all", "bid_out", "awarded"):
+    # (W3: the "Bids out" card died with the bid_out status; "Open" became "Live".)
+    for token in ("live", "offers", "take_all", "awarded"):
         assert f"filter === '{token}'" in body
+    assert "filter === 'bid_out'" not in body
     # The Alpine state tracks a single `filter` token (not the old `stage`).
     assert "filter: ''" in body or "filter: '" in body

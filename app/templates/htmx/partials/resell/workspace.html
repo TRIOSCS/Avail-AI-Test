@@ -53,19 +53,19 @@
      (spec §"Aggregate & triage"). Hidden under the offerer lens (those are
      other people's deals — no owner counters).
 
-     Two filter dimensions: the status cards (open/bid_out/awarded) filter on list
+     Two filter dimensions: the status cards (live/awarded) filter on list
      STATUS; the offer-based cards (offers/take_all) filter on the `needs` dimension —
      their counts come from live OFFERS, not a list status, so a `stage` value can't
      express them. Each card carries a UNIQUE `token`, so the active-ring highlights
      exactly one (the old empty `stage=''` on both offer cards double-lit them and reset
-     the list to "All"). #}
+     the list to "All"). The old "Bids out" card died with the bid_out status (W3
+     ladder: the list stays `bidding` while the bid-back is out). #}
   <div x-show="lens === 'mine'" x-cloak
-       class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3 flex-shrink-0">
+       class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 flex-shrink-0">
     {% set glance = [
-      ('open', 'stage=live', 'Open', stats.open, 'Open + collecting offers'),
+      ('live', 'stage=live', 'Live', stats.live, 'Posted + bidding'),
       ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
       ('take_all', 'needs=take_all', 'Take-all', stats.take_all, 'Whole-list offers'),
-      ('bid_out', 'stage=bid_out', 'Bids out', stats.bids_out, 'Collection window closed'),
       ('awarded', 'stage=awarded', 'Awarded', stats.awarded, 'Closed deals')
     ] %}
     {% for token, query, label, value, sub in glance %}

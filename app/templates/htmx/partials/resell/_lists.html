@@ -1,7 +1,7 @@
 {#
   resell/_lists.html — Left list partial: stage filters + search + opportunity rows.
   Each row swaps the detail panel and pushes /v2/resell/{id}. Status pills map
-  onto EXISTING status_badge keys (open→sky, collecting→sourcing, bid_out→quoted,
+  onto EXISTING status_badge colors (posted→sky, bidding→amber,
   awarded→won, draft→muted) — no new colors (spec §"Design consistency").
   The rows live in _list_rows.html inside #resell-list-rows: the debounced search
   swaps ONLY that container (finding #17 — the filter bar, including the input being
@@ -18,7 +18,7 @@
   {# ── Filters + search ─────────────────────────────────────────── #}
   <div class="px-3 py-2.5 border-b border-line-base bg-gray-50 flex-shrink-0 space-y-2">
     <div class="flex flex-wrap gap-1.5">
-      {% set stages = [('', 'All'), ('open', 'Open'), ('collecting', 'Collecting'), ('bid_out', 'Bid out'), ('awarded', 'Awarded'), ('closed', 'Closed'), ('expired', 'Expired')] %}
+      {% set stages = [('', 'All'), ('posted', 'Posted'), ('bidding', 'Bidding'), ('awarded', 'Awarded'), ('closed', 'Closed')] %}
       {% for value, label in stages %}
         {{ filter_pill(label, value, stage, {
           'hx-get': '/v2/partials/resell/lists?lens=' ~ lens ~ '&stage=' ~ value,

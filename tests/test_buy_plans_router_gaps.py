@@ -2,7 +2,7 @@
 
 Targets the missing lines from app/routers/htmx/buy_plans.py:
   306-356 (sales_order_create), 389-390 (prepay_request_decide errors),
-  submit notify path (legacy auto_approved rows) + submit ValueError, 595/607-616 (approve RISK3/errors/queue),
+  submit notify path + submit ValueError, 595/607-616 (approve RISK3/errors/queue),
   644-647/650 (halt errors/queue), 676-677 (receive ValueError),
   708-711/717-718 (confirm_po bad date + ValueError), 746-750 (_resource ValueError),
   786 (resource no reason_code), 881-884/887 (verify_po completion/queue),
@@ -246,18 +246,16 @@ def test_prepay_decide_value_error(db_session, approver_client, test_user):
 # ── buy_plan_submit_partial (lines 534, 537-538) ──────────────────────
 
 
-def test_submit_legacy_auto_approved_row_notifies_submitted(client, buy_plan):
-    """A legacy auto_approved=True row still notifies SUBMITTED on submit, never
-    approved.
+def test_submit_notifies_submitted_never_approved(client, buy_plan):
+    """Submit always notifies SUBMITTED, never approved.
 
-    The sub-$5K auto-approve rule is gone (auto_approved is vestigial); every plan goes
-    to the manager gate, so submit must never fire an approved notification.
+    The sub-$5K auto-approve rule is gone (frozen scope); every plan goes to the manager
+    gate, so submit must never fire an approved notification.
     """
     from app.services.buyplan_notifications import notify_submitted
 
     mock_plan = MagicMock()
     mock_plan.id = buy_plan.id
-    mock_plan.auto_approved = True
 
     mock_bg = AsyncMock()
     with patch("app.services.buyplan_workflow.submit_buy_plan", return_value=mock_plan):

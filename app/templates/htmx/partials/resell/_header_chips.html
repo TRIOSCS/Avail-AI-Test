@@ -18,18 +18,16 @@
   {{ el.company.name }}
 </span>
 {% endif %}
-{# Finding #13: the open↔collecting split is an offer-existence signal (first inbound bid
-   flips the list to collecting), so a non-owner sees a neutral 'open' badge — same D2
+{# Finding #13: the posted↔bidding split is an offer-existence signal (first inbound bid
+   flips the list to bidding), so a non-owner sees a neutral 'posted' badge — same D2
    predicate as the offer-count/awarded gates below. #}
-{% set badge_status = 'open' if (not can_see_customer and el.status == 'collecting') else el.status %}
+{% set badge_status = 'posted' if (not can_see_customer and el.status == 'bidding') else el.status %}
 {{ status_badge(badge_status, status_map={
   'draft': 'bg-slate-50 text-slate-500 border-slate-200',
-  'open': 'bg-sky-50 text-sky-600 border-sky-200',
-  'collecting': 'bg-amber-50 text-amber-600 border-amber-200',
-  'bid_out': 'bg-violet-50 text-violet-600 border-violet-200',
+  'posted': 'bg-sky-50 text-sky-600 border-sky-200',
+  'bidding': 'bg-amber-50 text-amber-600 border-amber-200',
   'awarded': 'bg-emerald-50 text-emerald-700 border-emerald-300',
-  'closed': 'bg-gray-50 text-gray-400 border-gray-200',
-  'expired': 'bg-gray-50 text-gray-400 border-gray-200'
+  'closed': 'bg-gray-50 text-gray-400 border-gray-200'
 }) }}
 <span>{{ line_count }} line{{ 's' if line_count != 1 }}</span>
 {# Offer count is OWNER-PRIVATE (D2): a non-owner offerer must not learn how much
@@ -47,9 +45,9 @@
   {{ awarded_line_count }}/{{ line_count }} awarded
 </span>
 {% endif %}
-{# Posting-window chip — countdown ONLY while live (open/collecting); a resolved list shows
-   a muted "closed {date}" and NEVER a red "Overdue" (finding #8; the shared time_text macro
-   is gated here, never edited). #}
+{# Posting-window chip — countdown ONLY while live (posted/bidding with the window still
+   open); a resolved or deliberately-closed list shows a muted "closed {date}" and NEVER a
+   red "Overdue" (finding #8; the shared time_text macro is gated here, never edited). #}
 {% if is_live and hours_until is not none %}
 <span class="inline-flex items-center gap-1">closes {{ time_text(hours_until) }}</span>
 {% elif not is_live and close_at_display %}

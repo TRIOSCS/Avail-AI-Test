@@ -106,7 +106,9 @@ def test_remap_maps_legacy_active_to_open_and_stamps_open_at(db_session, owner, 
 
     _remap(db_session)
 
-    assert a.status == ExcessListStatus.OPEN
+    # 193 predates the W3 ladder (migration 207: open→posted) — its frozen SQL still
+    # lands on the HISTORICAL intermediate vocabulary, asserted here as raw strings.
+    assert a.status == "open"
     assert a.open_at is not None  # a posted window needs a start
 
 
@@ -116,7 +118,8 @@ def test_remap_maps_legacy_bidding_to_collecting_and_stamps_open_at(db_session, 
 
     _remap(db_session)
 
-    assert b.status == ExcessListStatus.COLLECTING
+    # Historical target vocabulary (W3's 207 later maps collecting→bidding).
+    assert b.status == "collecting"
     assert b.open_at is not None  # a collecting window must carry a posting-window start
 
 
@@ -126,8 +129,8 @@ def test_remap_keeps_closed_distinct_from_bid_out(db_session, owner, company):
 
     _remap(db_session)
 
-    assert c.status == ExcessListStatus.CLOSED
-    assert c.status != ExcessListStatus.BID_OUT
+    assert c.status == "closed"
+    assert c.status != "bid_out"
 
 
 def test_remap_preserves_existing_open_at(db_session, owner, company):
@@ -138,29 +141,31 @@ def test_remap_preserves_existing_open_at(db_session, owner, company):
 
     _remap(db_session)
 
-    assert a.status == ExcessListStatus.OPEN
+    assert a.status == "open"
     assert a.open_at is not None
     assert abs((a.open_at - stamped).total_seconds()) < 1  # unchanged
 
 
-def test_remap_leaves_canonical_statuses_untouched(db_session, owner, company):
-    draft = _make_list(db_session, owner, company, status=ExcessListStatus.DRAFT)
-    collecting = _make_list(db_session, owner, company, status=ExcessListStatus.COLLECTING)
-    bid_out = _make_list(db_session, owner, company, status=ExcessListStatus.BID_OUT)
+def test_remap_leaves_193_canonical_statuses_untouched(db_session, owner, company):
+    # 193-era canonical vocabulary, written raw (draft still exists; open/bid_out are
+    # pre-W3 values a 193-time DB legitimately held — 207 remaps them later).
+    draft = _make_list(db_session, owner, company, status="draft")
+    opened = _make_list(db_session, owner, company, status="open")
+    bid_out = _make_list(db_session, owner, company, status="bid_out")
 
     _remap(db_session)
 
-    assert draft.status == ExcessListStatus.DRAFT
+    assert draft.status == "draft"
     assert draft.open_at is None  # a canonical draft is NOT stamped
-    assert collecting.status == ExcessListStatus.COLLECTING
-    assert bid_out.status == ExcessListStatus.BID_OUT
+    assert opened.status == "open"
+    assert bid_out.status == "bid_out"
 
 
 def test_downgrade_is_documented_noop(db_session, owner, company):
     """The downgrade is an irreversible-remap no-op — it must not raise or mutate."""
-    open_list = _make_list(db_session, owner, company, status=ExcessListStatus.OPEN)
+    open_list = _make_list(db_session, owner, company, status="open")
 
     _mod.downgrade()  # must not raise
     db_session.expire_all()
 
-    assert open_list.status == ExcessListStatus.OPEN
+    assert open_list.status == "open"

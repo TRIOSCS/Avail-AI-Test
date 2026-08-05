@@ -19,7 +19,7 @@ Depends on: app.services.excess_service, app.models.excess, app.models.vendors,
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -54,7 +54,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         title="Upload surplus",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=2,
         created_at=datetime.now(UTC),
     )
@@ -82,7 +82,7 @@ def other_list(db_session: Session, trader_user: User, test_company: Company) ->
         title="Other list",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )
@@ -393,18 +393,20 @@ def test_upload_bids_recomputes_rollup(db_session: Session, trader_user: User, p
 def test_upload_bids_open_list_flips_to_collecting(db_session: Session, trader_user: User, posted_list: ExcessList):
     """The FIRST ingested offer on an OPEN list flips it to COLLECTING (mirrors
     submit_offer)."""
-    posted_list.status = ExcessListStatus.OPEN
+    posted_list.status = ExcessListStatus.POSTED
     db_session.commit()
     rows = [_row(bidder="Broker A", part_number="LM358N")]
     excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
     db_session.refresh(posted_list)
-    assert posted_list.status == ExcessListStatus.COLLECTING
+    assert posted_list.status == ExcessListStatus.BIDDING
 
 
-@pytest.mark.parametrize("status", [ExcessListStatus.BID_OUT, ExcessListStatus.AWARDED])
+@pytest.mark.parametrize("status", [ExcessListStatus.BIDDING, ExcessListStatus.AWARDED])
 def test_upload_bids_late_statuses_untouched(db_session: Session, trader_user: User, posted_list: ExcessList, status):
-    """A late upload on a bid_out/awarded list never rewrites the list status."""
+    """A late upload on a window-closed bidding (the old bid_out shape) or awarded list
+    never rewrites the list status."""
     posted_list.status = status
+    posted_list.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
     rows = [_row(bidder="Broker A", part_number="LM358N")]
     excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
@@ -422,7 +424,7 @@ def test_upload_bids_past_close_at_stamps_late_even_though_status_still_collecti
 
     posted_list.close_at = datetime.now(UTC) - timedelta(hours=3)
     db_session.commit()
-    assert posted_list.status == ExcessListStatus.COLLECTING  # the nightly sweep hasn't run
+    assert posted_list.status == ExcessListStatus.BIDDING  # the nightly sweep hasn't run
 
     rows = [_row(bidder="Broker A", part_number="LM358N")]
     excess_service.upload_bids(db_session, list_id=posted_list.id, user=trader_user, rows=rows)
@@ -545,12 +547,12 @@ def test_upload_bids_stale_read_cannot_resurrect_closed_list(
     """
     from sqlalchemy import text as sa_text
 
-    assert posted_list.status == ExcessListStatus.COLLECTING
+    assert posted_list.status == ExcessListStatus.BIDDING
 
     db_session.execute(
         sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=posted_list.id)
     )
-    assert posted_list.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+    assert posted_list.status == ExcessListStatus.BIDDING  # still stale, pre-call
 
     rows = [_row(bidder="Broker A", part_number="LM358N")]
     with pytest.raises(HTTPException) as exc:
@@ -772,7 +774,7 @@ def test_upload_confirm_oob_refreshes_lines_and_chips(client, db_session, trader
     """The confirm response is the _award_response OOB compose: Offers tab body PLUS
     out-of-band Lines tab and header chips — the ingest recomputes rollups and can flip
     the list status, so an Offers-only swap would leave those stale."""
-    posted_list.status = ExcessListStatus.OPEN
+    posted_list.status = ExcessListStatus.POSTED
     db_session.commit()
     rows = [_row(bidder="Broker A", part_number="LM358N")]
     restore = _own(trader_user)
@@ -787,7 +789,7 @@ def test_upload_confirm_oob_refreshes_lines_and_chips(client, db_session, trader
         assert "hx-swap-oob" in resp.text
         db_session.expire_all()
         refreshed = db_session.get(ExcessList, posted_list.id)
-        assert refreshed.status == ExcessListStatus.COLLECTING  # the flip is now visible in the chips render
+        assert refreshed.status == ExcessListStatus.BIDDING  # the flip is now visible in the chips render
     finally:
         restore()
 

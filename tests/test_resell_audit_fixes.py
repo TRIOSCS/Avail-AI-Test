@@ -94,7 +94,7 @@ def draft_list(db_session: Session, company: Company, owner: User) -> ExcessList
 
 @pytest.fixture()
 def posted_list(db_session: Session, company: Company, owner: User) -> ExcessList:
-    el = ExcessList(company_id=company.id, owner_id=owner.id, title="Audit Posted", status=ExcessListStatus.COLLECTING)
+    el = ExcessList(company_id=company.id, owner_id=owner.id, title="Audit Posted", status=ExcessListStatus.BIDDING)
     db_session.add(el)
     db_session.flush()
     db_session.add(
@@ -366,7 +366,7 @@ class TestM6OwnerNotification:
 class TestM9AwardLocking:
     def test_award_happy_path_still_works_under_lock(self, db_session, company, owner, buyer):
         excess_list = ExcessList(
-            company_id=company.id, owner_id=owner.id, title="Lock OK", status=ExcessListStatus.COLLECTING
+            company_id=company.id, owner_id=owner.id, title="Lock OK", status=ExcessListStatus.BIDDING
         )
         db_session.add(excess_list)
         db_session.flush()
@@ -384,7 +384,7 @@ class TestM9AwardLocking:
         """Two offers on one line: after the first wins, awarding the second 409s under the
         lock path — the line can never be double-awarded."""
         excess_list = ExcessList(
-            company_id=company.id, owner_id=owner.id, title="Lock Race", status=ExcessListStatus.COLLECTING
+            company_id=company.id, owner_id=owner.id, title="Lock Race", status=ExcessListStatus.BIDDING
         )
         db_session.add(excess_list)
         db_session.flush()
@@ -409,7 +409,7 @@ class TestM9AwardLocking:
     def test_unaward_then_reaward_works_under_lock(self, db_session, company, owner, buyer):
         """Unaward is also locked; the award→unaward→award round-trip still succeeds."""
         excess_list = ExcessList(
-            company_id=company.id, owner_id=owner.id, title="Lock Round", status=ExcessListStatus.COLLECTING
+            company_id=company.id, owner_id=owner.id, title="Lock Round", status=ExcessListStatus.BIDDING
         )
         db_session.add(excess_list)
         db_session.flush()

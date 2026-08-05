@@ -49,13 +49,13 @@ class TestSeedExcessLists:
         assert len(lists) == 5
         statuses = {el.status for el in lists}
         # The legacy pre-rework statuses must never be seeded again (finding #63a;
-        # the enum members themselves were removed in the W1.9 dead-status sweep).
-        assert "active" not in statuses
-        assert "bidding" not in statuses
+        # W1.9 removed active/legacy-bidding; W3's migration 207 retired
+        # open/collecting/bid_out/expired for the 5-state ladder).
+        assert {"active", "open", "collecting", "bid_out", "expired"} & statuses == set()
         assert statuses == {
             ExcessListStatus.DRAFT.value,
-            ExcessListStatus.OPEN.value,
-            ExcessListStatus.COLLECTING.value,
+            ExcessListStatus.POSTED.value,
+            ExcessListStatus.BIDDING.value,
             ExcessListStatus.AWARDED.value,
             ExcessListStatus.CLOSED.value,
         }
@@ -72,7 +72,7 @@ class TestSeedExcessLists:
 
     def test_collecting_list_has_real_rollups(self, db_session: Session):
         _seed(db_session)
-        collecting = db_session.query(ExcessList).filter_by(status=ExcessListStatus.COLLECTING.value).one()
+        collecting = db_session.query(ExcessList).filter_by(status=ExcessListStatus.BIDDING.value).one()
         lines = db_session.query(ExcessLineItem).filter_by(excess_list_id=collecting.id).all()
         priced = [ln for ln in lines if ln.best_offer_unit_price is not None]
         assert priced, "submit_offer must produce genuine best-price rollups"

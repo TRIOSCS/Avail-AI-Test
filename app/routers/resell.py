@@ -70,9 +70,8 @@ ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
 # List statuses whose Sighting mirror is live OR completed (deal visible to non-owners).
 # Drafts are excluded — only the owner may see a draft list; 404 for anyone else.
 _POSTED_STATUSES = (
-    ExcessListStatus.OPEN,
-    ExcessListStatus.COLLECTING,
-    ExcessListStatus.BID_OUT,
+    ExcessListStatus.POSTED,
+    ExcessListStatus.BIDDING,
     ExcessListStatus.AWARDED,
 )
 # Offer statuses that count as a live, unactioned offer (triage glance).
@@ -102,10 +101,13 @@ def _file_extension(filename: str) -> str:
     return "." + filename.rsplit(".", 1)[-1].lower()
 
 
-# List statuses whose posting window is still LIVE (counting down). Only these render the
-# ``closes {countdown}`` chip; a resolved list (bid_out/awarded/closed/expired) must never
-# show the red "Overdue" the shared time_text macro emits for a past deadline (finding #8).
-_LIVE_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
+# List statuses whose posting window CAN still be live (counting down). Only these — and
+# only while the window's own ``close_at`` has not passed (:func:`_is_live`) — render the
+# ``closes {countdown}`` chip; a resolved or deliberately-closed list must never
+# show the red "Overdue" the shared time_text macro emits for a past deadline (finding #8;
+# the old bid_out status collapsed into BIDDING in W3, so the "window over" fact now
+# lives in ``close_at``).
+_LIVE_STATUSES = (ExcessListStatus.POSTED, ExcessListStatus.BIDDING)
 
 
 def _hours_until(close_at: datetime | None) -> float | None:
@@ -122,13 +124,15 @@ def _hours_until(close_at: datetime | None) -> float | None:
 
 
 def _is_live(el: ExcessList) -> bool:
-    """True while the list's posting window is live (open/collecting only).
+    """True while the list's posting window is live (posted/bidding AND not past close).
 
     Gates the countdown chip at the resell-template level (the shared ``time_text`` macro is
-    NEVER edited — it's used by requisitions too). A resolved list is not live, so its chip
-    renders a muted ``closed {date}`` instead of a red "Overdue".
+    NEVER edited — it's used by requisitions too). A resolved list — or a bidding list whose
+    window was deliberately ended (``close_list`` stamps ``close_at``; the old ``bid_out``
+    status) — is not live, so its chip renders a muted ``closed {date}`` instead of a red
+    "Overdue".
     """
-    return el.status in {s.value for s in _LIVE_STATUSES}
+    return el.status in {s.value for s in _LIVE_STATUSES} and not excess_service._posting_window_closed(el)
 
 
 def _close_at_display(close_at: datetime | None) -> str | None:
@@ -304,10 +308,9 @@ def _stat_strip(db: Session, user: User) -> dict:
         )
     }
     return {
-        "open": status_counts.get(ExcessListStatus.OPEN, 0) + status_counts.get(ExcessListStatus.COLLECTING, 0),
+        "live": status_counts.get(ExcessListStatus.POSTED, 0) + status_counts.get(ExcessListStatus.BIDDING, 0),
         "offers_to_review": sum(offers_by_scope.values()),
         "take_all": offers_by_scope.get(ExcessOfferScope.TAKE_ALL, 0),
-        "bids_out": status_counts.get(ExcessListStatus.BID_OUT, 0),
         "awarded": status_counts.get(ExcessListStatus.AWARDED, 0),
     }
 
@@ -316,8 +319,8 @@ def _get_list_for_user(db: Session, list_id: int, user: User) -> tuple[ExcessLis
     """Fetch a list and decide whether *user* may see the seller's identity.
 
     The owner always sees the real customer; non-owners may only see the list when it is
-    in a posted status (open/collecting/bid_out/awarded) — drafts are private to the
-    owner (404, not 403, to avoid revealing the list's existence).
+    in a posted status (posted/bidding/awarded) — drafts are private to the owner (404,
+    not 403, to avoid revealing the list's existence).
     """
     el = excess_service.get_excess_list(db, list_id)
     is_owner = el.owner_id == user.id
@@ -476,7 +479,7 @@ def _list_rows_context(
     ``lens=open`` → posted lists owned by OTHERS that this user may offer on
     (customer-anonymized — pure whitelist, never the seller).
 
-    ``stage`` filters on list STATUS (open/collecting/…). ``needs`` is the offer-based
+    ``stage`` filters on list STATUS (posted/bidding/…). ``needs`` is the offer-based
     triage dimension the status filter can't express: ``needs=offers`` → lists with ≥1
     live, unactioned offer; ``needs=take_all`` → lists with a live whole-list offer. These
     back the "Offers to review" / "Take-all" stat cards (their counts come from offers, not
@@ -515,26 +518,26 @@ def _list_rows_context(
     if not can_see_customer:
         needs = ""
 
-    # Finding #13 (the surviving D2 oracle): in the open lens the open/collecting SPLIT is
-    # itself an offer-existence signal (submit_offer flips open→collecting on the first
-    # inbound bid), so a non-owner diffing ``stage=collecting`` against ``stage=open``
+    # Finding #13 (the surviving D2 oracle): in the open lens the posted/bidding SPLIT is
+    # itself an offer-existence signal (submit_offer flips posted→bidding on the first
+    # inbound bid), so a non-owner diffing ``stage=bidding`` against ``stage=posted``
     # learns exactly which anonymized postings have drawn a competing bid. Merge the three
     # live-window tokens onto the SAME _LIVE_STATUSES set for non-owners — every one
-    # answers only "can I still bid on it?". Other tokens (bid_out/awarded) are lifecycle
+    # answers only "can I still bid on it?". The ``awarded`` token is a lifecycle
     # facts, not the protected offer-existence signal, and pass through unchanged. Only the
     # FILTER merges: the context keeps the REQUESTED token, so the clicked pill keeps its
     # active state and the search/Load-more URLs echo it (a pure reflection of the request
     # — no server state — so no oracle; the server re-merges on every round trip).
     stage_filter = stage
-    if not can_see_customer and stage in ("open", "collecting"):
+    if not can_see_customer and stage in ("posted", "bidding"):
         stage_filter = "live"
 
     if stage_filter == "live":
-        # ``live`` = [open, collecting] (finding #16): the "Open" triage card counts BOTH
-        # (a list flips open→collecting on its first offer but is still live), so its filter
-        # must widen to match its count. The strict ``open`` pill keeps meaning EXACTLY
-        # status=open — only this token widens (owner lens; non-owners are merged above).
-        query = query.filter(ExcessList.status.in_([ExcessListStatus.OPEN, ExcessListStatus.COLLECTING]))
+        # ``live`` = [posted, bidding] (finding #16): the "Live" triage card counts BOTH
+        # (a list flips posted→bidding on its first offer but is still live), so its filter
+        # must widen to match its count. The strict ``posted`` pill keeps meaning EXACTLY
+        # status=posted — only this token widens (owner lens; non-owners are merged above).
+        query = query.filter(ExcessList.status.in_([ExcessListStatus.POSTED, ExcessListStatus.BIDDING]))
     elif stage_filter:
         query = query.filter(ExcessList.status == stage_filter)
     if needs:
@@ -935,7 +938,7 @@ async def resell_bid_sheet_export(
         db.query(ExcessLineItem)
         .filter(
             ExcessLineItem.excess_list_id == el.id,
-            ExcessLineItem.status.in_([ExcessLineItemStatus.AVAILABLE, ExcessLineItemStatus.BIDDING]),
+            ExcessLineItem.status == ExcessLineItemStatus.AVAILABLE,
         )
         .order_by(ExcessLineItem.id)
         .all()
@@ -989,8 +992,8 @@ async def resell_line_offer_compare(
     Owner-only: the comparison reveals all competing brokers' prices, so non-owners
     receive 403 (not 404) to make the permission boundary explicit.
 
-    Cloned from the quote-builder modal. NO auto-select — the trader eyeballs terms /
-    lead before picking (spec §Offer-collection).
+    Cloned from the (since-deleted) quote-builder modal. NO auto-select — the trader
+    eyeballs terms / lead before picking (spec §Offer-collection).
     """
     el, is_owner = _get_list_for_user(db, list_id, user)
     if not is_owner:
@@ -1718,7 +1721,7 @@ async def resell_bids_upload_confirm(
     classification — mirrors ``confirm_import``'s L3 discipline). Responds with the
     ``_award_response.html`` OOB compose (primary body = Offers tab, the confirm form's
     hx-target; out-of-band = Lines tab + header chips) — the ingest recomputes per-line
-    rollups and can flip ``open → collecting``, so an Offers-only swap would leave the
+    rollups and can flip ``posted → bidding``, so an Offers-only swap would leave the
     owner's chips and Lines-tab badges stale. An HX-Trigger toast summarizes the counts.
     """
     el, is_owner = _get_list_for_user(db, list_id, user)
@@ -1781,8 +1784,8 @@ async def resell_close(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Close a posted list (owner-only): flip to bid_out + stamp close_at, re-render
-    detail."""
+    """End the posting window (owner-only): stamp close_at (status stays on bidding),
+    re-render detail."""
     el = excess_service.close_list(db, list_id, user)
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
@@ -2372,7 +2375,7 @@ async def resell_submit_outreach(
     enforces the owner + can_post guards.
 
     Only the EMAIL channel actually sends via Graph, so the M365 token is acquired
-    in-branch there (the quotes.py send / offers rfq.py precedent) instead of a
+    in-branch there (the quotes.py send precedent) instead of a
     route-level ``Depends(require_fresh_token)`` — logging a manual/phone outreach must
     work with no M365 token at all. A keys-off email submit gets an honest 409 naming
     the missing M365 connection, not a login-bounce 401 for a user who IS logged in.

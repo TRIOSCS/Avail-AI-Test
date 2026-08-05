@@ -199,11 +199,11 @@ def teardown_list_mirror(db: Session, excess_list: ExcessList) -> dict:
 
 
 def publish_list(db: Session, list_id: int, user) -> ExcessList:
-    """Publish an excess list: flip it to ``open``.
+    """Publish an excess list: flip it to ``posted``.
 
     The testable entry point for posting. Guards that the list is a ``draft`` (409
     otherwise — mirrors ``excess_service.close_list``: re-publishing an already-posted or
-    resolved list would reopen a decided posting). Sets ``status=open``, stamps both
+    resolved list would reopen a decided posting). Sets ``status=posted``, stamps both
     ``open_at`` (the posting-window start, Chunk E) and ``updated_at``, PRESERVES a
     future ``close_at`` (the D1 owner-set posting deadline) and clears only a stale/past
     one (an open posting must not advertise a lapsed close time). Writes NO Sightings —
@@ -216,7 +216,7 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     if excess_list.status != ExcessListStatus.DRAFT:
         raise HTTPException(409, "Only a draft list can be published")
     now = datetime.now(UTC)
-    excess_list.status = ExcessListStatus.OPEN
+    excess_list.status = ExcessListStatus.POSTED
     excess_list.open_at = now
     # Preserve a future create/draft-set deadline so the nightly expiry backstop has a real
     # window; clear only a stale (past/now) one. SQLite strips tzinfo, so stamp UTC before
@@ -232,5 +232,5 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
 
     db.commit()
     db.refresh(excess_list)
-    logger.info("excess-mirror: published list {} (status=open) by user {}", list_id, getattr(user, "id", None))
+    logger.info("excess-mirror: published list {} (status=posted) by user {}", list_id, getattr(user, "id", None))
     return excess_list

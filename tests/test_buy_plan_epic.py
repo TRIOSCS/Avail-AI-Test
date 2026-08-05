@@ -128,9 +128,7 @@ def test_gate_pre_approval_non_owner_non_manager_cannot_edit(db_session, sales_u
     assert can_edit_buy_plan_lines(test_user, plan) is False
 
 
-@pytest.mark.parametrize(
-    "status", [BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value, BuyPlanStatus.HALTED.value]
-)
+@pytest.mark.parametrize("status", [BuyPlanStatus.ACTIVE.value, BuyPlanStatus.HALTED.value])
 def test_gate_post_approval_is_manager_only(db_session, sales_user, manager_user, status):
     from app.services.buyplan_workflow import can_edit_buy_plan_lines
 
@@ -415,6 +413,30 @@ def test_resume_manager_halted_to_active_preserves_audit(db_session, manager_use
     # Halt audit is PRESERVED (resume is not a reset).
     assert plan.halted_by_id == halted_by
     assert plan.halted_at == halted_at
+    # W3 deadlock fix: halt wrote so_status=rejected; resume restores approved so
+    # check_completion's so_status gate can pass again.
+    assert plan.so_status == "approved"
+
+
+def test_halt_resume_plan_can_still_auto_complete(db_session, manager_user, test_requisition):
+    """W3 regression: a halted-then-resumed plan must remain completable.
+
+    Before the fix, halt wrote so_status=rejected and resume never restored it, so
+    check_completion's so_status==approved gate could NEVER pass again — the plan was
+    permanently stuck ACTIVE (the halt→resume deadlock)."""
+    from app.services.buyplan_workflow import check_completion, halt_plan, resume_plan
+
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, so_status="approved")
+    _line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value)
+
+    halt_plan(plan.id, manager_user, db_session, reason="pause")
+    resume_plan(plan.id, manager_user, db_session)
+    db_session.commit()
+
+    result = check_completion(plan.id, db_session)
+    db_session.commit()
+    assert result.status == BuyPlanStatus.COMPLETED.value
+    assert result.completed_at is not None
 
 
 def test_resume_non_manager_forbidden(db_session, sales_user, test_requisition):

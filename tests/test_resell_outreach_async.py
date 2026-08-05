@@ -97,7 +97,7 @@ def posted_list(db_session: Session, seller_company: Company, trader: User) -> E
         company_id=seller_company.id,
         owner_id=trader.id,
         title="Q2 Excess",
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
     )
     db_session.add(el)
     db_session.commit()

@@ -42,7 +42,6 @@ class TestEnums:
                     BuyPlanStatus.DRAFT,
                     BuyPlanStatus.PENDING,
                     BuyPlanStatus.ACTIVE,
-                    BuyPlanStatus.INBOUND,
                     BuyPlanStatus.HALTED,
                     BuyPlanStatus.COMPLETED,
                     BuyPlanStatus.CANCELLED,

@@ -100,6 +100,9 @@ class BuyPlan(Base):
     ai_flags = Column(JSON, default=list)  # list of {type, severity, line_id, message}
 
     # ── Approval
+    # Vestigial (no auto-approve — frozen scope; last writer removed in the W3 sweep;
+    # 0 prod rows ever true). Column stays per the drift-gate rule: never drop columns
+    # the fresh-DB gate grandfathers.
     auto_approved = Column(Boolean, default=False)
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     approved_at = Column(UTCDateTime)

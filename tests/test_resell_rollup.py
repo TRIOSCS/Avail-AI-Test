@@ -11,6 +11,7 @@ Called by: pytest
 Depends on: app.services.excess_service, app.models.excess, tests.conftest
 """
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -64,7 +65,7 @@ def rollup_fixture(db_session: Session) -> tuple[ExcessList, ExcessLineItem, Use
     buyer_b = _make_user(db_session, email="b@roll.com", role="buyer")
     el = create_excess_list(db_session, title="Roll", company_id=company.id, owner_id=owner.id)
     import_line_items(db_session, el.id, [{"part_number": "LM358N", "quantity": "100"}])
-    el.status = ExcessListStatus.OPEN
+    el.status = ExcessListStatus.POSTED
     db_session.commit()
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
     return el, line, buyer_a, buyer_b
@@ -200,8 +201,11 @@ def test_rollup_includes_late_offer(db_session: Session, rollup_fixture):
     marked "Best".
     """
     el, line, buyer_a, _ = rollup_fixture
-    # Close the posting window so the next inbound offer lands LATE (not OPEN).
-    el.status = ExcessListStatus.BID_OUT
+    # Close the posting window so the next inbound offer lands LATE (not OPEN). W3: the
+    # closed window is a TIME fact (close_at in the past) — the list stays ``bidding``
+    # (exactly what close_list writes).
+    el.status = ExcessListStatus.BIDDING
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
 
     late = _offer(db_session, el, buyer_a, Decimal("2.00"))
@@ -224,8 +228,9 @@ def test_rollup_higher_late_beats_lower_open(db_session: Session, rollup_fixture
     el, line, buyer_a, buyer_b = rollup_fixture
     # An on-time (open) lower bid first.
     _offer(db_session, el, buyer_a, Decimal("1.50"))
-    # Close the window, then a higher LATE bid.
-    el.status = ExcessListStatus.BID_OUT
+    # Close the window (W3: past close_at, status stays bidding), then a higher LATE bid.
+    el.status = ExcessListStatus.BIDDING
+    el.close_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
     higher_late = _offer(db_session, el, buyer_b, Decimal("2.75"))
     db_session.refresh(higher_late)

@@ -51,7 +51,7 @@ def posted_list(db_session: Session, owner: User) -> ExcessList:
     co = Company(name="UI Seller Co")
     db_session.add(co)
     db_session.flush()
-    el = ExcessList(company_id=co.id, owner_id=owner.id, title="UI Award List", status=ExcessListStatus.COLLECTING)
+    el = ExcessList(company_id=co.id, owner_id=owner.id, title="UI Award List", status=ExcessListStatus.BIDDING)
     db_session.add(el)
     db_session.commit()
     db_session.refresh(el)

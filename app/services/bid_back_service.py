@@ -89,9 +89,9 @@ def build_bid_back(
 
     Guards (raise HTTPException, never silent): the list must exist (404); *owner* must
     own the list (403 — assembling a bid back is the owner's privilege); the list must be
-    in a state where a bid back makes sense — ``_POSTED_LIST_STATUSES`` (open/collecting/
-    bid_out/awarded), i.e. NOT a draft (no finalized offers to price against yet — every
-    line would export at a null/blank price) and NOT terminal closed/expired (409
+    in a state where a bid back makes sense — ``_POSTED_LIST_STATUSES``
+    (posted/bidding/awarded), i.e. NOT a draft (no finalized offers to price against yet —
+    every line would export at a null/blank price) and NOT terminal closed (409
     otherwise, finding #21, THEME E); and every selected line must belong to *list_id*
     (404 — never price a foreign line). Returns the persisted draft CustomerBid with its
     lines loaded.

@@ -606,10 +606,8 @@ async def buy_plan_submit_partial(
             salesperson_notes=form.get("salesperson_notes") or None,
         )
         db.commit()
-        # Every submit goes to the manager gate — the sub-$5K auto-approve rule is
-        # gone (auto_approved is vestigial; kept only as historical display truth in
-        # buyplan_reports). A legacy auto_approved row must not fire an approved
-        # notification here.
+        # Every submit goes to the manager gate — no auto-approve (frozen scope), so
+        # submit always notifies SUBMITTED, never approved.
         await run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -688,9 +686,13 @@ async def buy_plan_approve_partial(
             # Engine path: decide() resolves the request AND drives the plan side effects.
             svc_decide(db, open_request.id, user, action, comment=notes or None)
         else:
-            # RISK 3 fallback: plan pending pre-C1 with no engine request yet.
+            # RISK 3 fallback: plan pending pre-C1 with no engine request yet. Still
+            # load-bearing for the pre-engine PENDING plans (owner decision pending:
+            # backfill an ApprovalRequest vs reset+resubmit — Packet 3); deletable
+            # only after that decision lands.
             logger.warning(
-                "Buy plan {} approve/reject with no open engine request — falling back to legacy approve_buy_plan",
+                "LEGACY APPROVAL FALLBACK FIRED: buy plan {} is PENDING with no open engine "
+                "ApprovalRequest (pre-engine plan) — deciding via legacy approve_buy_plan",
                 plan_id,
             )
             approve_buy_plan(plan_id, action, user, db, notes=notes)

@@ -129,7 +129,7 @@ def test_publish_preserves_future_close_at(db_session: Session):
     publish_list(db_session, el.id, owner)
 
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
     assert el.close_at is not None
     assert abs((_aware(el.close_at) - close).total_seconds()) < 2
     assert el.open_at is not None
@@ -149,7 +149,7 @@ def test_publish_nulls_stale_close_at(db_session: Session):
     publish_list(db_session, el.id, owner)
 
     db_session.refresh(el)
-    assert el.status == ExcessListStatus.OPEN
+    assert el.status == ExcessListStatus.POSTED
     assert el.close_at is None
     assert el.open_at is not None
 
@@ -214,21 +214,37 @@ def test_update_rejects_past_close_at(db_session: Session):
     ("status", "expected_live"),
     [
         (ExcessListStatus.DRAFT, False),
-        (ExcessListStatus.OPEN, True),
-        (ExcessListStatus.COLLECTING, True),
-        (ExcessListStatus.BID_OUT, False),
+        (ExcessListStatus.POSTED, True),
+        (ExcessListStatus.BIDDING, True),
         (ExcessListStatus.AWARDED, False),
         (ExcessListStatus.CLOSED, False),
-        (ExcessListStatus.EXPIRED, False),
     ],
 )
-def test_is_live_only_open_collecting(db_session: Session, status, expected_live):
+def test_is_live_only_posted_bidding(db_session: Session, status, expected_live):
     company = _make_company(db_session)
     owner = _make_user(db_session)
     el = ExcessList(company_id=company.id, owner_id=owner.id, title="X", status=status)
     db_session.add(el)
     db_session.commit()
     assert _is_live(el) is expected_live
+
+
+def test_is_live_false_once_window_closed(db_session: Session):
+    """W3: a ``bidding`` list whose window ended (past close_at — what close_list
+    stamps; the old ``bid_out``) is NOT live — the chip must go muted, never red
+    'Overdue' (finding #8 carried onto the merged status)."""
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = ExcessList(
+        company_id=company.id,
+        owner_id=owner.id,
+        title="X",
+        status=ExcessListStatus.BIDDING,
+        close_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    db_session.add(el)
+    db_session.commit()
+    assert _is_live(el) is False
 
 
 def test_close_at_display_past_only():
@@ -245,15 +261,16 @@ def test_close_at_display_past_only():
 
 
 def test_resolved_list_card_is_not_live_no_overdue(db_session: Session):
-    """A resolved (bid_out) list with a PAST close_at → is_live False, a muted
-    close_at_display, and NO red 'Overdue' countdown in the card context."""
+    """A deliberately-closed (bidding + past close_at — the old bid_out) list → is_live
+    False, a muted close_at_display, and NO red 'Overdue' countdown in the card
+    context."""
     company = _make_company(db_session)
     owner = _make_user(db_session)
     el = ExcessList(
         company_id=company.id,
         owner_id=owner.id,
         title="X",
-        status=ExcessListStatus.BID_OUT,
+        status=ExcessListStatus.BIDDING,
         close_at=datetime.now(UTC) - timedelta(days=1),
     )
     db_session.add(el)
@@ -306,7 +323,7 @@ def test_live_list_card_is_live(db_session: Session):
         company_id=company.id,
         owner_id=owner.id,
         title="X",
-        status=ExcessListStatus.OPEN,
+        status=ExcessListStatus.POSTED,
         close_at=datetime.now(UTC) + timedelta(days=2),
     )
     db_session.add(el)
@@ -341,8 +358,8 @@ def test_detail_context_exposes_is_live_and_display(db_session: Session):
 
 
 def test_resolved_list_renders_no_overdue(client, db_session: Session):
-    """The left-list partial must NOT render 'Overdue' for a resolved (bid_out) list
-    past its close_at — the finding-#8 regression."""
+    """The left-list partial must NOT render 'Overdue' for a window-closed (bidding +
+    past close_at — the old bid_out) list — the finding-#8 regression."""
     from app.dependencies import require_user
     from app.main import app
 
@@ -352,7 +369,7 @@ def test_resolved_list_renders_no_overdue(client, db_session: Session):
         company_id=company.id,
         owner_id=owner.id,
         title="Resolved Deal",
-        status=ExcessListStatus.BID_OUT,
+        status=ExcessListStatus.BIDDING,
         close_at=datetime.now(UTC) - timedelta(days=2),
     )
     db_session.add(el)

@@ -96,11 +96,11 @@ ORDER_TYPE_LABELS = {
 }
 
 # Plan lifecycle statuses shown in the default (live) list vs behind the Closed filter.
+# INBOUND was retired in W3 (migration 208; no row can carry it since 176).
 _LIVE_PLAN_STATUSES = (
     BuyPlanStatus.DRAFT.value,
     BuyPlanStatus.PENDING.value,
     BuyPlanStatus.ACTIVE.value,
-    BuyPlanStatus.INBOUND.value,
     BuyPlanStatus.HALTED.value,
 )
 _CLOSED_PLAN_STATUSES = (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value)
@@ -356,13 +356,9 @@ def render_plan_pane(
             "qp": qp,
             "can_decide": bp.status == BuyPlanStatus.PENDING.value and _viewer_can_decide_plan(db, user, bp.id),
             "is_sourcing": is_sourcing,
-            # PO kanban (3.3, spec §6) — the centerpiece on ACTIVE/INBOUND sourcing
+            # PO kanban (3.3, spec §6) — the centerpiece on ACTIVE sourcing
             # orders; None hides the board entirely (draft/pending/closed + lite plans).
-            "kanban": (
-                build_kanban(db, bp)
-                if is_sourcing and bp.status in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value)
-                else None
-            ),
+            "kanban": (build_kanban(db, bp) if is_sourcing and bp.status == BuyPlanStatus.ACTIVE.value else None),
             "order_type_label": ORDER_TYPE_LABELS.get(bp.order_type or "", bp.order_type),
             "po_labels": PO_DECISION_LABELS,
             # QP-sales inline editing (2.1): the pane hides the editor with the SAME

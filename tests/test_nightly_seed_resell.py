@@ -106,13 +106,13 @@ class TestGetOrCreateList:
             title="Seed Test List",
             company=co,
             owner=owner,
-            status=ExcessListStatus.COLLECTING,
+            status=ExcessListStatus.BIDDING,
             close_in_days=5,
         )
         db_session.flush()
         assert created is True
         assert el.title == "Seed Test List"
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
 
     def test_returns_existing_list(self, db_session: Session):
         owner = self._make_owner(db_session)
@@ -131,7 +131,7 @@ class TestGetOrCreateList:
             title="Seed Idempotent List",
             company=co,
             owner=owner,
-            status=ExcessListStatus.OPEN,
+            status=ExcessListStatus.POSTED,
             close_in_days=None,
         )
         db_session.flush()
@@ -166,7 +166,7 @@ class TestListHasOffers:
             title="HO Test",
             company_id=co.id,
             owner_id=owner.id,
-            status=ExcessListStatus.COLLECTING,
+            status=ExcessListStatus.BIDDING,
             created_at=_now(),
         )
         db_session.add(el)
@@ -295,7 +295,7 @@ class TestBuildCollecting:
             db_session.commit()
 
         el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
 
     def test_idempotent_no_duplicate_lists(self, db_session: Session):
         trader, broker, company = _make_seed_users(db_session)
@@ -329,11 +329,12 @@ class TestCollectingRefresh:
             db_session.commit()
         return trader, broker, company
 
-    def test_reseed_restores_expired_demo(self, db_session: Session):
+    def test_reseed_restores_decayed_demo(self, db_session: Session):
         trader, broker, company = self._seed_collecting(db_session)
         el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
-        # Decay exactly as the nightly expiry job would: terminal expired + retired mirror.
-        el.status = ExcessListStatus.EXPIRED
+        # Decay shape post-W3: the terminal 'expired' status is gone (migration 207) —
+        # a decayed demo is a bidding list whose close_at lapsed un-actioned.
+        el.status = ExcessListStatus.BIDDING
         el.close_at = _now() - timedelta(days=1)
         db_session.commit()
 
@@ -346,7 +347,7 @@ class TestCollectingRefresh:
             db_session.commit()
 
         db_session.refresh(el)
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
         close_at = el.close_at
         if close_at.tzinfo is None:
             close_at = close_at.replace(tzinfo=UTC)
@@ -368,7 +369,7 @@ class TestCollectingRefresh:
             db_session.commit()
 
         db_session.refresh(el)
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
         close_at = el.close_at
         if close_at.tzinfo is None:
             close_at = close_at.replace(tzinfo=UTC)
@@ -377,7 +378,7 @@ class TestCollectingRefresh:
     def test_reseed_leaves_live_demo_untouched(self, db_session: Session):
         trader, broker, company = self._seed_collecting(db_session)
         el = db_session.query(ExcessList).filter_by(title=_LIST_COLLECTING).one()
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
         close_at_before = el.close_at
 
         with (
@@ -389,7 +390,7 @@ class TestCollectingRefresh:
             db_session.commit()
 
         db_session.refresh(el)
-        assert el.status == ExcessListStatus.COLLECTING
+        assert el.status == ExcessListStatus.BIDDING
         assert el.close_at == close_at_before, "a live window needs no refresh"
 
     def test_reseed_never_tramples_an_awarded_demo(self, db_session: Session):
@@ -424,7 +425,7 @@ class TestBuildOneoff:
             db_session.commit()
 
         el = db_session.query(ExcessList).filter_by(title=_LIST_ONEOFF).one()
-        assert el.status == ExcessListStatus.OPEN
+        assert el.status == ExcessListStatus.POSTED
 
 
 class TestSeed:

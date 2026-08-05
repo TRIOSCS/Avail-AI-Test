@@ -31,6 +31,7 @@ from .buyplan_approval import (
     _recalculate_financials,
     check_completion,
 )
+from .buyplan_state import transition
 
 # ── Workflow: Re-source (PO cancelled → open claim pool) ─────────────
 
@@ -182,7 +183,7 @@ def resource_line(
     # time the notification runs.
     was_completed = plan.status == BuyPlanStatus.COMPLETED.value
     if was_completed:
-        plan.status = BuyPlanStatus.ACTIVE.value
+        transition(plan, BuyPlanStatus.ACTIVE)
         plan.completed_at = None
         plan.case_report = None
 
@@ -331,14 +332,12 @@ def resolve_line_issue(plan_id: int, line_id: int, user: User, db: Session) -> B
 # status AND the actor's role (the manager's post-approval edit authority IS the control —
 # no re-approval is triggered):
 #   • draft / pending   → the owner (sales/trader) OR a manager may edit (pre-approval);
-#   • active / inbound / halted → MANAGER-only (sales is locked out post-approval);
-#   • completed / cancelled     → locked for everyone (terminal).
+#   • active / halted   → MANAGER-only (sales is locked out post-approval);
+#   • completed / cancelled → locked for everyone (terminal).
 # Ownership for the pre-approval branch derives through the parent requisition
 # (BuyPlan.requisition_id is NOT NULL); the router's get_buyplan_for_user has already
 # 404'd a restricted-role non-owner before these run.
-_MANAGER_ONLY_EDIT_STATUSES = frozenset(
-    {BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value, BuyPlanStatus.HALTED.value}
-)
+_MANAGER_ONLY_EDIT_STATUSES = frozenset({BuyPlanStatus.ACTIVE.value, BuyPlanStatus.HALTED.value})
 _LOCKED_EDIT_STATUSES = frozenset({BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value})
 
 

@@ -1,10 +1,9 @@
-"""test_resell_status_caption.py — the shared status_badge caption for bid_out (D5).
+"""test_resell_status_caption.py — the shared status_badge caption is fully generic.
 
-The Resell lifecycle adds ``bid_out`` and ``closed`` as DISTINCT states. The generic
-``value|replace('_',' ')|capitalize`` renders ``bid_out`` as "Bid out", which reads
-awkwardly and blurs it against CLOSED; D5 wants an explicit "Bids out" label, kept
-distinct from CLOSED's "Closed". Statuses with no explicit override still fall back to the
-generic caption.
+W3 (migration 207) removed the ``bid_out`` status — and with it the macro's one
+caption override ({'bid_out': 'Bids out'}). Every status now renders via the generic
+``value|replace('_',' ')|capitalize`` path; this pins that the W3 ladder values and
+an arbitrary unmapped value all caption generically (no override map left behind).
 
 Called by: pytest
 Depends on: app.template_env, htmx/partials/shared/_macros.html
@@ -22,20 +21,21 @@ def _render_badge(value: str) -> str:
     return tpl.render().strip()
 
 
-def test_bid_out_renders_bids_out():
+def test_ladder_statuses_render_generic_captions():
+    assert "Posted" in _render_badge("posted")
+    assert "Bidding" in _render_badge("bidding")
+    assert "Awarded" in _render_badge("awarded")
+    assert "Closed" in _render_badge("closed")
+
+
+def test_no_bid_out_override_left_behind():
+    """The retired status has no special caption — a stray raw value would render via
+    the generic path ("Bid out"), never the deleted "Bids out" override."""
     html = _render_badge("bid_out")
-    assert "Bids out" in html
-    assert "Bid out" not in html  # not the generic replace/capitalize caption
-
-
-def test_closed_stays_closed_distinct_from_bid_out():
-    """CLOSED keeps its own generic 'Closed' caption — D5 keeps the two states
-    distinct."""
-    html = _render_badge("closed")
-    assert "Closed" in html
+    assert "Bid out" in html
     assert "Bids out" not in html
 
 
-def test_unmapped_status_uses_generic_caption():
-    """A status with no explicit label override still renders via replace/capitalize."""
-    assert "Collecting" in _render_badge("collecting")
+def test_underscore_status_uses_generic_caption():
+    """A multi-word status still renders via replace/capitalize."""
+    assert "No bids" in _render_badge("no_bids")

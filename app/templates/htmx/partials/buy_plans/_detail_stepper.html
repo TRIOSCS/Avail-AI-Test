@@ -6,8 +6,9 @@
   No macro imports needed.
 #}
   {# ═══ 2. PROGRESS BAR STEPPER — 4 canonical stages (Phase D) ═══ #}
-  {# Build · Approve · Purchase · Done. INBOUND is a Purchase sub-label (goods inbound).
-     status→stage: draft→Build, pending→Approve, active|inbound→Purchase, completed→Done.
+  {# Build · Approve · Purchase · Done.
+     status→stage: draft→Build, pending→Approve, active→Purchase, completed→Done.
+     (INBOUND retired in W3, migration 208 — no row can carry it since 176.)
      Halted is the off-ramp (rose at the Purchase node); cancelled greys the whole bar. #}
   {% set steps = ['Build', 'Approve', 'Purchase', 'Done'] %}
   {% if bp.status == 'draft' %}
@@ -19,9 +20,6 @@
   {% elif bp.status == 'active' %}
     {% set filled = 3 %}
     {% set step_label = 'Purchase' %}
-  {% elif bp.status == 'inbound' %}
-    {% set filled = 3 %}
-    {% set step_label = 'Purchase · Inbound' %}
   {% elif bp.status == 'completed' %}
     {% set filled = 4 %}
     {% set step_label = 'Done' %}

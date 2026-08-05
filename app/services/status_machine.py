@@ -5,11 +5,11 @@ Purpose: Prevents invalid status transitions on offers, quotes, and requirements
          clear error messages when invalid transitions are attempted.
 
          Requisition transitions are enforced by requisition_state.transition
-         (its ALLOWED_TRANSITIONS table); buy-plan transitions are enforced
-         inline by buyplan_workflow/buyplan_approval.py. Neither routes
+         (its ALLOWED_TRANSITIONS table); buy-plan transitions by
+         buyplan_workflow/buyplan_state.transition (W3). Neither routes
          through this module.
 
-Called by: routers/crm/offers.py, routers/crm/quotes.py, routers/htmx/offers/crud.py,
+Called by: services/offer_service.py (ONE offer transition site since W3),
            routers/htmx/quotes.py, routers/sightings.py, services/quote_send.py,
            services/po_cancellation_service.py, services/sourcing_auto_progress.py,
            services/requirement_status.py
@@ -28,14 +28,15 @@ from ..constants import (
 # ── Offer Status Transitions ────────────────────────────────────────────
 # Valid transitions: from_status → {allowed to_statuses}
 #
-# INVARIANT: every router that transitions an offer INTO a live status
+# INVARIANT: every path that transitions an offer INTO a live status
 # (ACTIVE/APPROVED) from a non-live one (PENDING_REVIEW, EXPIRED) MUST call
 # proactive_matching.trigger_rematch_on_offer_approval(db, offer) AFTER its
 # commit. The batch scan only ever sees an offer once, at Offer.created_at, and
 # excludes non-live statuses — so once the scan watermark passes a pending offer,
-# only the targeted re-match can ever surface it to proactive matching. Current
-# call sites: crm/offers.py approve_offer + promote_offer, htmx/offers/crud.py
-# approve action + promote route.
+# only the targeted re-match can ever surface it to proactive matching. Since the
+# W3 consolidation the ONE call site is services/offer_service.py approve_offer
+# (which serves the JSON approve, the htmx review approve, and both promote
+# doors).
 OFFER_TRANSITIONS: dict[str, set[str]] = {
     OfferStatus.PENDING_REVIEW: {OfferStatus.ACTIVE, OfferStatus.APPROVED, OfferStatus.REJECTED, OfferStatus.SOLD},
     OfferStatus.ACTIVE: {OfferStatus.SOLD, OfferStatus.REJECTED, OfferStatus.WON, OfferStatus.EXPIRED},

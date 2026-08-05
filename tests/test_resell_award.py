@@ -261,7 +261,7 @@ class TestAwardOfferService:
         company resolves offerer_vendor_card_id, and awarding it WRITES a BuyerScore for
         that card — the gap the whole finding is about (previously NULL card → no score
         on manual offers)."""
-        excess_list.status = ExcessListStatus.OPEN
+        excess_list.status = ExcessListStatus.POSTED
         buyer_company = Company(name="UI Buyer Co")
         db_session.add(buyer_company)
         db_session.commit()
@@ -290,7 +290,7 @@ class TestAwardOfferService:
         """A UI-submit offer with NO buyer attribution leaves offerer_vendor_card_id
         None and still awards (no regression) — just no BuyerScore, exactly as
         before."""
-        excess_list.status = ExcessListStatus.OPEN
+        excess_list.status = ExcessListStatus.POSTED
         db_session.commit()
 
         offer = excess_service.submit_offer(
@@ -357,7 +357,7 @@ class TestAwardOfferService:
             excess_service.award_offer(db_session, 999_999, owner)
         assert exc.value.status_code == 404
 
-    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED])
     def test_award_on_terminal_list_409_no_reopen(
         self,
         db_session: Session,
@@ -367,11 +367,11 @@ class TestAwardOfferService:
         broker: User,
         terminal_status,
     ):
-        """A CLOSED (D5 'close without bid') or EXPIRED list is terminal — awarding a
-        still-open offer on it must 409, never flip it to AWARDED (finding #4).
+        """A CLOSED (D5 'close without bid') list is terminal — awarding a still-open
+        offer on it must 409, never flip it to AWARDED (finding #4).
 
         Without the guard, award reopens the dead list to AWARDED and a subsequent
-        unaward steps it to BID_OUT — exactly the reopen the D5 contract forbids.
+        unaward steps it to BIDDING — exactly the reopen the D5 contract forbids.
         """
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
@@ -429,7 +429,7 @@ class TestAwardOfferService:
     ):
         """FIX #1: once every line is decided (awarded), the LIST itself flips to
         awarded so the workspace "Awarded" glance is no longer always-empty."""
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         _line(db_session, excess_list, "LISTFLIP-A")
         _line(db_session, excess_list, "LISTFLIP-B")
         offer = _take_all_offer(db_session, excess_list=excess_list, submitter=broker, buyer=None)
@@ -445,7 +445,7 @@ class TestAwardOfferService:
     ):
         """A per_line award of ONLY some lines must NOT flip the list — offers are still
         being collected on the rest."""
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         a = _line(db_session, excess_list, "PARTIAL-A")
         _line(db_session, excess_list, "PARTIAL-B")  # left open
         offer = _open_offer(
@@ -456,7 +456,7 @@ class TestAwardOfferService:
         excess_service.award_offer(db_session, offer.id, owner)
 
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.COLLECTING
+        assert excess_list.status == ExcessListStatus.BIDDING
 
     def test_award_idempotent_double_award(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
@@ -544,7 +544,7 @@ class TestAwardOfferService:
         ``award_offer`` would read the STALE in-memory 'collecting' status and award a
         dead list; with the fix the terminal-list guard sees 'closed' and 409s.
         """
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
@@ -555,7 +555,7 @@ class TestAwardOfferService:
         db_session.execute(
             sa_text("UPDATE excess_lists SET status = 'closed' WHERE id = :id").bindparams(id=excess_list.id)
         )
-        assert excess_list.status == ExcessListStatus.COLLECTING  # still stale, pre-call
+        assert excess_list.status == ExcessListStatus.BIDDING  # still stale, pre-call
 
         with pytest.raises(HTTPException) as exc:
             excess_service.award_offer(db_session, offer.id, owner)
@@ -598,14 +598,15 @@ class TestUnawardOfferService:
         score = db_session.query(BuyerScore).filter_by(vendor_card_id=buyer.id).one()
         assert score.wins == 0
 
-    def test_unaward_reverts_list_status_to_bid_out(
+    def test_unaward_reverts_list_status_to_bidding(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
-        """A closed (close_at stamped) list that was awarded steps back to bid_out on
-        unaward, not to the pre-close collecting."""
+        """A closed (close_at stamped) list that was awarded steps back to bidding on
+        unaward (W3: the one pre-award live state — the window fact lives in
+        close_at)."""
         from datetime import datetime
 
-        excess_list.status = ExcessListStatus.BID_OUT
+        excess_list.status = ExcessListStatus.BIDDING
         excess_list.close_at = datetime.now(UTC)
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
@@ -618,7 +619,7 @@ class TestUnawardOfferService:
         excess_service.unaward_offer(db_session, offer.id, owner)
 
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.BID_OUT
+        assert excess_list.status == ExcessListStatus.BIDDING
 
     def test_unaward_writes_no_sighting_mirror(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
@@ -667,7 +668,7 @@ class TestUnawardOfferService:
         excess_service.unaward_offer(db_session, offer.id, owner)
 
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.COLLECTING  # window still open
+        assert excess_list.status == ExcessListStatus.BIDDING  # window still open
 
     def test_unaward_by_non_owner_forbidden(
         self,
@@ -708,7 +709,7 @@ class TestUnawardOfferService:
             excess_service.unaward_offer(db_session, 999_999, owner)
         assert exc.value.status_code == 404
 
-    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED])
+    @pytest.mark.parametrize("terminal_status", [ExcessListStatus.CLOSED])
     def test_unaward_on_terminal_list_409_no_reopen(
         self,
         db_session: Session,
@@ -719,7 +720,7 @@ class TestUnawardOfferService:
         terminal_status,
     ):
         """Finding #4: unaward mirrors award's terminal-list guard — a CLOSED (D5) or
-        EXPIRED list is dead, so reversing a win there must 409, never unwind the sale.
+        list is dead, so reversing a win there must 409, never unwind the sale.
 
         Without the guard, the winner flips back to open, its awarded line back to
         available, and any lost competitor revives — all on a list where award_offer
@@ -743,27 +744,27 @@ class TestUnawardOfferService:
         assert cap_line.status == ExcessLineItemStatus.AWARDED
         assert excess_list.status == terminal_status  # stayed terminal — no reopen
 
-    def test_unaward_on_bid_out_list_still_works(
+    def test_unaward_on_window_closed_bidding_list_still_works(
         self, db_session: Session, excess_list: ExcessList, owner: User, broker: User
     ):
-        """BID_OUT is NOT terminal (finding #4 distinguishes it from CLOSED/EXPIRED) —
-        unaward must still succeed on a BID_OUT list.
+        """BIDDING is NOT terminal (finding #4 distinguishes it from CLOSED) — unaward
+        must still succeed on a bidding list (incl. the old bid_out shape).
 
-        A PARTIAL award (one of two lines) leaves the list at BID_OUT (not flipped to
+        A PARTIAL award (one of two lines) leaves the list at BIDDING (not flipped to
         AWARDED, since ``_apply_award_list_status`` only fires when every line is
         decided) — the realistic way a WON offer coexists with a non-AWARDED, non-
         terminal list status.
         """
         a = _line(db_session, excess_list, "PARTIAL-BIDOUT-A")
         _line(db_session, excess_list, "PARTIAL-BIDOUT-B")
-        excess_list.status = ExcessListStatus.BID_OUT
+        excess_list.status = ExcessListStatus.BIDDING
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=a, buyer=None, unit_price=Decimal("0.80")
         )
         db_session.commit()
         excess_service.award_offer(db_session, offer.id, owner)
         db_session.refresh(excess_list)
-        assert excess_list.status == ExcessListStatus.BID_OUT  # precondition — partial award
+        assert excess_list.status == ExcessListStatus.BIDDING  # precondition — partial award
 
         result = excess_service.unaward_offer(db_session, offer.id, owner)
 
@@ -835,7 +836,7 @@ class TestAwardRoute:
         from app.dependencies import require_user
         from app.main import app
 
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer = _open_offer(
             db_session, excess_list=excess_list, submitter=broker, line=cap_line, buyer=None, unit_price=Decimal("0.80")
         )
@@ -1228,7 +1229,7 @@ class TestAwardClosesCompetingOffers:
         """Control: a list that is NOT closed by status (still ``collecting``) with no
         ``close_at`` still revives ``open`` — the R3 fallback only fires when the list
         currently reads resolved."""
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         excess_list.close_at = None
         offer = ExcessOffer(excess_list_id=excess_list.id, submitted_by=broker.id, scope="per_line", status="lost")
 
@@ -1368,7 +1369,7 @@ class TestWithdrawRoute:
         from app.dependencies import require_user
         from app.main import app
 
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer = self._offer(db_session, excess_list, cap_line, broker)
         app.dependency_overrides[require_user] = lambda: owner
         try:
@@ -1386,7 +1387,7 @@ class TestWithdrawRoute:
         from app.dependencies import require_user
         from app.main import app
 
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer = self._offer(db_session, excess_list, cap_line, broker)
         app.dependency_overrides[require_user] = lambda: owner
         try:
@@ -1685,7 +1686,7 @@ class TestAssignOfferLineService:
 
     @pytest.mark.parametrize(
         "blocked_status",
-        [ExcessListStatus.AWARDED, ExcessListStatus.CLOSED, ExcessListStatus.EXPIRED],
+        [ExcessListStatus.AWARDED, ExcessListStatus.CLOSED],
     )
     def test_assign_on_resolved_list_409(
         self,
@@ -1741,15 +1742,15 @@ class TestAssignOfferLineService:
         from the TARGET-LINE guard — never silently displace the winner from
         ``best_offer_id``.
 
-        A second, still-undecided line keeps the award partial, so the list stays BID_OUT
+        A second, still-undecided line keeps the award partial, so the list stays BIDDING
         (not blocked by ``_ASSIGN_BLOCKED_LIST_STATUSES``, which only blocks
-        awarded/closed/expired at the LIST level) and the assign gets past the list-level
+        awarded/closed at the LIST level) and the assign gets past the list-level
         guard to the new ``target.status == AWARDED`` check — the exact non-concurrent
         scenario the finding describes.
         """
         winner_line = _line(db_session, excess_list, "AWARDED-TARGET")
         _line(db_session, excess_list, "STILL-OPEN")  # keeps the award partial
-        excess_list.status = ExcessListStatus.BID_OUT
+        excess_list.status = ExcessListStatus.BIDDING
         winner_offer = _open_offer(
             db_session,
             excess_list=excess_list,
@@ -1766,7 +1767,7 @@ class TestAssignOfferLineService:
         assert winner_line.best_offer_id == winner_offer.id
         # Partial award: list must NOT be AWARDED, or the 409 below would come from the
         # pre-existing list-level guard instead of the target-line guard under test.
-        assert excess_list.status == ExcessListStatus.BID_OUT
+        assert excess_list.status == ExcessListStatus.BIDDING
 
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-HIGHER", unit_price=Decimal("5.00")
@@ -1789,7 +1790,7 @@ class TestAssignOfferLineService:
         """Finding #12, WITHDRAWN branch: a withdrawn line can't accept new offers."""
         withdrawn_line = _line(db_session, excess_list, "PULLED")
         withdrawn_line.status = ExcessLineItemStatus.WITHDRAWN
-        excess_list.status = ExcessListStatus.BID_OUT
+        excess_list.status = ExcessListStatus.BIDDING
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
         )
@@ -1802,12 +1803,12 @@ class TestAssignOfferLineService:
         db_session.refresh(offer_line)
         assert offer_line.match_status == OfferLineMatchStatus.UNMATCHED  # untouched
 
-    def test_assign_onto_available_line_on_bid_out_list_still_works(
+    def test_assign_onto_available_line_on_bidding_list_still_works(
         self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, owner: User, broker: User
     ):
-        """Control: an available (undecided) target line on a BID_OUT list still accepts
+        """Control: an available (undecided) target line on a BIDDING list still accepts
         an assign — the new AWARDED/WITHDRAWN target guard must not over-block."""
-        excess_list.status = ExcessListStatus.BID_OUT
+        excess_list.status = ExcessListStatus.BIDDING
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO", unit_price=Decimal("0.95")
         )
@@ -1827,7 +1828,7 @@ class TestAssignOfferLineRoute:
         from app.dependencies import require_user
         from app.main import app
 
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
         )
@@ -1871,7 +1872,7 @@ class TestAssignOfferLineRoute:
         from app.dependencies import require_user
         from app.main import app
 
-        excess_list.status = ExcessListStatus.COLLECTING
+        excess_list.status = ExcessListStatus.BIDDING
         offer_line = _unmatched_offer_line(
             db_session, excess_list=excess_list, submitter=broker, mpn_raw="TYPO-GRM188", unit_price=Decimal("0.95")
         )
@@ -1932,7 +1933,7 @@ class TestAwardRaceConcurrency:
                 setup.add(co)
                 setup.flush()
                 el = ExcessList(
-                    company_id=co.id, owner_id=owner.id, title="Race Excess", status=ExcessListStatus.COLLECTING
+                    company_id=co.id, owner_id=owner.id, title="Race Excess", status=ExcessListStatus.BIDDING
                 )
                 setup.add(el)
                 setup.flush()

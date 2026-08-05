@@ -113,11 +113,11 @@ class TestOpenLensCollectingOracle:
     # and stays pinned.)
 
     def test_owner_mine_lens_stage_collecting_stays_strict(self, client, db_session, owner, test_company):
-        el_open = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, title="Mine open")
-        el_coll = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Mine coll")
+        el_open = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, title="Mine open")
+        el_coll = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING, title="Mine coll")
         restore = _as_user(client, owner)
         try:
-            body = client.get("/v2/partials/resell/lists?lens=mine&stage=collecting").text
+            body = client.get("/v2/partials/resell/lists?lens=mine&stage=bidding").text
         finally:
             restore()
         assert "Mine coll" in body
@@ -127,7 +127,7 @@ class TestOpenLensCollectingOracle:
     def test_non_owner_detail_header_never_renders_collecting_badge(
         self, client, db_session, owner, broker, test_company
     ):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Coll hdr")
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING, title="Coll hdr")
         restore = _as_user(client, broker)
         try:
             body = client.get(f"/v2/partials/resell/{el.id}").text
@@ -136,13 +136,13 @@ class TestOpenLensCollectingOracle:
         assert "collecting" not in body.lower()
 
     def test_owner_still_sees_collecting_badge(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, title="Own coll")
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING, title="Own coll")
         restore = _as_user(client, owner)
         try:
             body = client.get(f"/v2/partials/resell/{el.id}").text
         finally:
             restore()
-        assert "collecting" in body.lower()
+        assert "bidding" in body.lower()
 
 
 # ── #15: deep-link draft Delete — route answers HX-Redirect ─────────
@@ -236,7 +236,7 @@ class TestImportConfirmShapeGuard:
 
 class TestImportPreviewDraftGuard:
     def test_preview_on_posted_list_409s_before_parsing(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         restore = _as_user(client, owner)
         try:
             resp = client.post(
@@ -379,7 +379,7 @@ class TestListCapLoadMore:
 
 class TestVisibleOfferChipCount:
     def test_withdrawn_offer_drops_out_of_chip_count(self, client, db_session, owner, broker, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING)
         for status in (ExcessOfferStatus.OPEN, ExcessOfferStatus.WITHDRAWN, ExcessOfferStatus.WITHDRAWN):
             db_session.add(
                 ExcessOffer(
@@ -469,15 +469,15 @@ class TestCanOfferPostedGate:
         el = _make_list(db_session, owner, test_company, status=ExcessListStatus.CLOSED)
         assert self._detail_ctx(db_session, el, broker)["can_offer"] is False
 
-    def test_broker_on_expired_list_cannot_offer(self, db_session, owner, broker, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.EXPIRED)
+    def test_broker_on_awarded_list_cannot_offer(self, db_session, owner, broker, test_company):
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.AWARDED)
         assert self._detail_ctx(db_session, el, broker)["can_offer"] is False
 
     def test_broker_on_open_list_cannot_offer_while_lane_parked(self, db_session, owner, broker, test_company):
         """PARKED (spec §5.3, W2.3): can_offer is hard-False in the detail context —
         even the previously-eligible broker-on-posted-list case renders no Submit-offer
         button until a second trader user exists."""
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         assert self._detail_ctx(db_session, el, broker)["can_offer"] is False
 
 
@@ -549,7 +549,7 @@ class TestAddLineService:
         assert exc.value.status_code == 403
 
     def test_posted_list_409(self, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, lines=0)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, lines=0)
         with pytest.raises(HTTPException) as exc:
             excess_service.add_line(db_session, el.id, owner, part_number="LM358N", quantity=5)
         assert exc.value.status_code == 409
@@ -596,7 +596,7 @@ class TestConfirmImportGuards:
         assert exc.value.status_code == 403
 
     def test_posted_list_direct_call_409(self, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, lines=0)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, lines=0)
         with pytest.raises(HTTPException) as exc:
             excess_service.confirm_import(db_session, el.id, owner, [{"part_number": "X1", "quantity": 1}])
         assert exc.value.status_code == 409
@@ -646,7 +646,7 @@ class TestNudgeHeadroom:
         from app.models import VendorCard
         from app.services import buyer_affinity_service as bas
 
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, lines=1)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, lines=1)
         cards = []
         for i in range(25):
             card = VendorCard(normalized_name=f"nudge-buyer-{i}", display_name=f"Nudge Buyer {i}")
@@ -696,7 +696,7 @@ class TestNudgeHeadroom:
 
 class TestBuyerPanelLineScope:
     def test_foreign_line_id_422(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, lines=1)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, lines=1)
         foreign = _make_list(db_session, owner, test_company, status=ExcessListStatus.DRAFT, lines=1, title="Foreign")
         foreign_line = db_session.query(ExcessLineItem).filter_by(excess_list_id=foreign.id).one()
         restore = _as_user(client, owner)
@@ -707,7 +707,7 @@ class TestBuyerPanelLineScope:
         assert resp.status_code == 422
 
     def test_own_line_ids_unchanged(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN, lines=2)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED, lines=2)
         own_line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
         restore = _as_user(client, owner)
         try:
@@ -723,7 +723,7 @@ class TestBuyerPanelLineScope:
 
 class TestOfferCompareDirectQuery:
     def test_compare_filters_scope_and_status(self, client, db_session, owner, broker, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, lines=1)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING, lines=1)
         line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
 
         def _offer(status, scope=ExcessOfferScope.PER_LINE, price="1.00"):
@@ -762,7 +762,7 @@ class TestOfferCompareDirectQuery:
     def test_compare_never_lazy_loads_all_offers(self, client, db_session, owner, broker, test_company):
         """The compare render queries offer-lines for THIS line directly — el.offers
         must not be walked (its lazy loader would drag every offer/line on the list)."""
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.COLLECTING, lines=1)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.BIDDING, lines=1)
         line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
         db_session.commit()
         import re as _re
@@ -796,7 +796,7 @@ class TestDegradedRowLogActions:
         return row
 
     def test_degraded_email_row_shows_log_actions(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         row = self._outreach_row(
             db_session, el, owner, channel=ExcessOutreachChannel.EMAIL, status=ExcessOutreachStatus.SENT
         )
@@ -810,7 +810,7 @@ class TestDegradedRowLogActions:
         assert "View reply" not in body
 
     def test_threaded_email_row_keeps_only_view_reply(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         row = self._outreach_row(
             db_session,
             el,
@@ -829,7 +829,7 @@ class TestDegradedRowLogActions:
         assert f"/outreach/{row.id}/log-response" not in body
 
     def test_manual_channel_row_keeps_log_actions(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         row = self._outreach_row(
             db_session, el, owner, channel=ExcessOutreachChannel.PHONE, status=ExcessOutreachStatus.SENT
         )
@@ -842,7 +842,7 @@ class TestDegradedRowLogActions:
         assert f"/outreach/{row.id}/log-bid-form" in body
 
     def test_terminal_degraded_row_hides_log_actions(self, client, db_session, owner, test_company):
-        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.OPEN)
+        el = _make_list(db_session, owner, test_company, status=ExcessListStatus.POSTED)
         row = self._outreach_row(
             db_session, el, owner, channel=ExcessOutreachChannel.EMAIL, status=ExcessOutreachStatus.BID
         )

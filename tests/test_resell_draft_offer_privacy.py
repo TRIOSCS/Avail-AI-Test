@@ -75,7 +75,7 @@ def draft_list(db_session: Session, owner_user: User, test_company: Company) -> 
 @pytest.fixture()
 def posted_list(db_session: Session, owner_user: User, test_company: Company) -> ExcessList:
     """A posted (collecting) list owned by owner_user — open for offers."""
-    return _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+    return _list_with_line(db_session, owner_user, test_company, ExcessListStatus.BIDDING)
 
 
 # (The four offer-form / offer-POST route tests were deleted with the W2.3
@@ -165,7 +165,7 @@ def test_submitter_reaches_and_withdraws_offer_after_expiry(client, db_session, 
     (expired) — they can still view AND withdraw their own bid (relaxed
     _get_list_for_user)."""
     offer = _broker_offer(db_session, posted_list, test_user)
-    posted_list.status = ExcessListStatus.EXPIRED
+    posted_list.status = ExcessListStatus.CLOSED
     db_session.commit()
 
     # The submitter reaches the (now non-posted) Offers tab instead of a 404.
@@ -184,7 +184,7 @@ def test_non_submitter_still_404_on_expired_list(client, db_session, owner_user,
     """Control: a non-owner with NO offer stays 404 on a non-posted list — the relaxation
     only admits the actual submitter, never a general reader."""
     assert test_user.id != owner_user.id
-    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.EXPIRED)
+    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.CLOSED)
     resp = client.get(f"/v2/partials/resell/{el.id}/offers")
     assert resp.status_code == 404
 
@@ -212,7 +212,7 @@ def test_owner_offers_view_unchanged_by_broker_view(client, db_session, posted_l
 
 def _posted_list_with_best_offer(db_session, owner, company):
     """A posted list whose single line carries a best competing offer price + count."""
-    el = _list_with_line(db_session, owner, company, ExcessListStatus.COLLECTING)
+    el = _list_with_line(db_session, owner, company, ExcessListStatus.BIDDING)
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
     line.best_offer_unit_price = 12.3456
     line.offer_count = 3
@@ -268,7 +268,7 @@ def test_owner_lines_tab_shows_best_offer_price_and_count(monkeypatch, client, d
 
 def _posted_list_with_offers(db_session, owner, company, *, n_offers: int) -> ExcessList:
     """A posted (collecting) list carrying ``n_offers`` live OPEN offers."""
-    el = _list_with_line(db_session, owner, company, ExcessListStatus.COLLECTING)
+    el = _list_with_line(db_session, owner, company, ExcessListStatus.BIDDING)
     for _ in range(n_offers):
         db_session.add(
             ExcessOffer(
@@ -314,7 +314,7 @@ def test_non_owner_detail_hides_awarded_chip(client, db_session, owner_user, tes
     """D2 (one policy everywhere): the "N/M awarded" progress chip is owner-private — a
     non-owner watching deal progress is the same leak class as the offer count."""
     assert test_user.id != owner_user.id
-    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.BIDDING)
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
     line.status = ExcessLineItemStatus.AWARDED
     db_session.commit()
@@ -325,7 +325,7 @@ def test_non_owner_detail_hides_awarded_chip(client, db_session, owner_user, tes
 
 def test_owner_detail_shows_awarded_chip(client, db_session, owner_user, test_company):
     """Control: the OWNER still sees the "N/M awarded" progress chip."""
-    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+    el = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.BIDDING)
     line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
     line.status = ExcessLineItemStatus.AWARDED
     db_session.commit()
@@ -353,7 +353,7 @@ def test_mine_lens_needs_filter_still_narrows_to_lists_with_offers(client, db_se
     to listings that carry a live offer — the gate is owner-scoped, not a blanket disable."""
     with_offer = _posted_list_with_offers(db_session, owner_user, test_company, n_offers=1)
     with_offer.title = "MINE-WITH-OFFER"
-    without_offer = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.COLLECTING)
+    without_offer = _list_with_line(db_session, owner_user, test_company, ExcessListStatus.BIDDING)
     without_offer.title = "MINE-WITHOUT-OFFER"
     db_session.commit()
 

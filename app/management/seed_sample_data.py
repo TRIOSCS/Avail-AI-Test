@@ -1264,7 +1264,7 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
         ExcessList,
         {
             "owner_id": seeder_owner.id,
-            "status": ExcessListStatus.COLLECTING.value,
+            "status": ExcessListStatus.BIDDING.value,
             "source_filename": SAMPLE_TAG,
             "version": 1,
             "open_at": _now() - timedelta(days=3),
@@ -1417,7 +1417,7 @@ def _seed_wf_e(db: Session, counts: _Counts, co: dict, mc: dict, vc: dict, u: di
     out_spec = [
         ("vc_pinnacle", ExcessOutreachChannel.EMAIL, ExcessOutreachStatus.BID, _now() - timedelta(days=3)),
         ("vc_meridian", ExcessOutreachChannel.PHONE, ExcessOutreachStatus.RESPONDED, None),
-        ("vc_newvendor", ExcessOutreachChannel.EMAIL, ExcessOutreachStatus.NO_RESPONSE, _now() - timedelta(days=6)),
+        ("vc_newvendor", ExcessOutreachChannel.EMAIL, ExcessOutreachStatus.SENT, _now() - timedelta(days=6)),
     ]
     for vkey, channel, status, sent in out_spec:
         get_or_create(

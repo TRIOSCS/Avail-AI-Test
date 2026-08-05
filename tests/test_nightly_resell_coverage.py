@@ -135,7 +135,7 @@ def _make_sales_user(db: Session) -> User:
     return u
 
 
-def _make_list(db: Session, owner: User, company: Company, status: str = ExcessListStatus.COLLECTING) -> ExcessList:
+def _make_list(db: Session, owner: User, company: Company, status: str = ExcessListStatus.BIDDING) -> ExcessList:
     el = ExcessList(
         title=f"NR-List-{uuid.uuid4().hex[:6]}",
         company_id=company.id,
@@ -251,7 +251,7 @@ class TestResellLineOfferCompareErrors:
 class TestResellAddLineFormErrors:
     def test_posted_list_returns_409(self, _trader_client, db_session: Session, test_company: Company):
         client, trader = _trader_client
-        el = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
+        el = _make_list(db_session, trader, test_company, ExcessListStatus.BIDDING)
         db_session.commit()
         r = client.get(f"/v2/partials/resell/{el.id}/add-line-form")
         assert r.status_code == 409
@@ -292,7 +292,7 @@ def _sales_client(db_session: Session, test_company: Company):
 # The parked-off route state is pinned in tests/test_resell_trader_lane_parked.py.)
 
 
-def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):
+def _titled_list(db, owner, company, title, status=ExcessListStatus.BIDDING):
     """A list with an EXPLICIT title/status — for inclusion/exclusion filter asserts."""
     el = ExcessList(
         title=title,
@@ -309,49 +309,48 @@ def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):
 
 class TestResellListFiltering:
     def test_lists_stage_filter(self, _trader_client, db_session: Session, test_company: Company):
-        """Stage=collecting returns ONLY collecting lists — an awarded list is
-        excluded."""
+        """Stage=bidding returns ONLY bidding lists — an awarded list is excluded."""
         client, trader = _trader_client
-        _titled_list(db_session, trader, test_company, "Collecting-Widget-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Collecting-Widget-List", ExcessListStatus.BIDDING)
         _titled_list(db_session, trader, test_company, "Awarded-Gizmo-List", ExcessListStatus.AWARDED)
         db_session.commit()
 
-        body = client.get("/v2/partials/resell/lists?stage=collecting&lens=mine").text
+        body = client.get("/v2/partials/resell/lists?stage=bidding&lens=mine").text
         assert "Collecting-Widget-List" in body  # matching stage included
         assert "Awarded-Gizmo-List" not in body  # non-matching stage excluded
 
-    def test_stage_live_includes_open_and_collecting_only(self, _trader_client, db_session: Session, test_company):
-        """Task 6 (finding #16): ``stage=live`` expands to [open, collecting] — matching
-        the "Open" glance card's count — and excludes resolved (bid_out/awarded)
+    def test_stage_live_includes_posted_and_bidding_only(self, _trader_client, db_session: Session, test_company):
+        """Task 6 (finding #16): ``stage=live`` expands to [posted, bidding] — matching
+        the "Live" glance card's count — and excludes resolved (awarded/closed)
         lists."""
         client, trader = _trader_client
-        _titled_list(db_session, trader, test_company, "Live-Open-List", ExcessListStatus.OPEN)
-        _titled_list(db_session, trader, test_company, "Live-Collecting-List", ExcessListStatus.COLLECTING)
-        _titled_list(db_session, trader, test_company, "Live-BidOut-List", ExcessListStatus.BID_OUT)
+        _titled_list(db_session, trader, test_company, "Live-Posted-List", ExcessListStatus.POSTED)
+        _titled_list(db_session, trader, test_company, "Live-Bidding-List", ExcessListStatus.BIDDING)
+        _titled_list(db_session, trader, test_company, "Live-Closed-List", ExcessListStatus.CLOSED)
         _titled_list(db_session, trader, test_company, "Live-Awarded-List", ExcessListStatus.AWARDED)
         db_session.commit()
 
         body = client.get("/v2/partials/resell/lists?stage=live&lens=mine").text
-        assert "Live-Open-List" in body  # open is live
-        assert "Live-Collecting-List" in body  # collecting is live
-        assert "Live-BidOut-List" not in body  # resolved — excluded
+        assert "Live-Posted-List" in body  # posted is live
+        assert "Live-Bidding-List" in body  # bidding is live
+        assert "Live-Closed-List" not in body  # resolved — excluded
         assert "Live-Awarded-List" not in body  # resolved — excluded
 
-    def test_stage_open_stays_strict(self, _trader_client, db_session: Session, test_company: Company):
-        """The strict ``stage=open`` pill still means EXACTLY status=open — collecting
+    def test_stage_posted_stays_strict(self, _trader_client, db_session: Session, test_company: Company):
+        """The strict ``stage=posted`` pill still means EXACTLY status=posted — bidding
         is NOT overloaded into it (only the ``live`` token widens to both)."""
         client, trader = _trader_client
-        _titled_list(db_session, trader, test_company, "Strict-Open-List", ExcessListStatus.OPEN)
-        _titled_list(db_session, trader, test_company, "Strict-Collecting-List", ExcessListStatus.COLLECTING)
+        _titled_list(db_session, trader, test_company, "Strict-Posted-List", ExcessListStatus.POSTED)
+        _titled_list(db_session, trader, test_company, "Strict-Bidding-List", ExcessListStatus.BIDDING)
         db_session.commit()
 
-        body = client.get("/v2/partials/resell/lists?stage=open&lens=mine").text
-        assert "Strict-Open-List" in body
-        assert "Strict-Collecting-List" not in body  # collecting is NOT status=open
+        body = client.get("/v2/partials/resell/lists?stage=posted&lens=mine").text
+        assert "Strict-Posted-List" in body
+        assert "Strict-Bidding-List" not in body  # bidding is NOT status=posted
 
-    def test_workspace_open_card_links_to_stage_live(self, _trader_client, db_session: Session):
-        """The "Open" glance card links to stage=live (matching its open+collecting
-        count), not the strict stage=open it mismatched before."""
+    def test_workspace_live_card_links_to_stage_live(self, _trader_client, db_session: Session):
+        """The "Live" glance card links to stage=live (matching its posted+bidding
+        count), not a strict single-status stage."""
         client, _trader = _trader_client
         body = client.get("/v2/partials/resell/workspace?lens=mine").text
         assert "lens=mine&stage=live" in body
@@ -395,7 +394,7 @@ class TestResellCreateListErrors:
 class TestResellAddLineErrors:
     def test_posted_list_add_line_returns_409(self, _trader_client, db_session: Session, test_company: Company):
         client, trader = _trader_client
-        el = _make_list(db_session, trader, test_company, ExcessListStatus.COLLECTING)
+        el = _make_list(db_session, trader, test_company, ExcessListStatus.BIDDING)
         db_session.commit()
         r = client.post(
             f"/api/resell/{el.id}/lines",

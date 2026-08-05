@@ -94,7 +94,7 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         title="D surplus caps",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )
@@ -204,7 +204,7 @@ def _customer_named_list(db_session, trader_user, test_company) -> ExcessList:
         title=f"{test_company.name} — surplus FPGAs Q3",
         company_id=test_company.id,
         owner_id=trader_user.id,
-        status=ExcessListStatus.COLLECTING,
+        status=ExcessListStatus.BIDDING,
         total_line_items=1,
         created_at=datetime.now(UTC),
     )

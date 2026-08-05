@@ -157,21 +157,39 @@ class SourcingStatus(StrEnum):
 class ExcessListStatus(StrEnum):
     """Status lifecycle for ExcessList records.
 
-    Resell (resell-brokerage) lifecycle: draft -> open -> collecting -> bid_out
-    -> awarded -> closed/expired. The new members are chosen to map onto existing
-    ``status_badge`` keys (open->sky, collecting/sourcing->amber, bid_out/quoted->
-    violet, awarded/won->emerald). The pre-Resell legacy members ACTIVE / BIDDING
-    were retired in the W1.9 dead-status sweep (migration 193 had already remapped
-    every legacy row: active->open, bidding->collecting; no writer remained).
+    W3 five-state ladder (spec §5.3): DRAFT -> POSTED -> BIDDING -> AWARDED ->
+    CLOSED, with ``ExcessList.outcome`` (:class:`ExcessListOutcome`) recorded on
+    close. Migration 207 remapped the pre-W3 vocabulary: open->posted,
+    collecting->bidding, bid_out->bidding (the list stays BIDDING while the
+    bid-back is out — CustomerBidStatus carries the sent/accepted sub-state and
+    ``close_at`` records the ended posting window), expired->closed (the nightly
+    expiry job was deleted in W1; closing is a manual act, so a separate
+    "expired" terminal was dead vocabulary). The pre-Resell legacy members
+    ACTIVE / BIDDING(legacy) were retired earlier in the W1.9 dead-status sweep
+    (migration 193: active->open, bidding->collecting).
     """
 
     DRAFT = "draft"
-    OPEN = "open"
-    COLLECTING = "collecting"
-    BID_OUT = "bid_out"
+    POSTED = "posted"
+    BIDDING = "bidding"
     AWARDED = "awarded"
     CLOSED = "closed"
-    EXPIRED = "expired"
+
+
+class ExcessListOutcome(StrEnum):
+    """Terminal outcome recorded when an ExcessList closes (excess_lists.outcome).
+
+    NULL until the list reaches CLOSED (the kernel walk's "award -> outcome" tail,
+    spec §3/§5.3). Migration 207 backfilled the pre-W3 terminal rows data-driven:
+    accepted customer bid OR won offer -> sold; >=1 inbound offer or awarded line
+    but no win -> withdrawn; zero offers -> no_bids. ``scrapped`` is never
+    inferable — manual-entry only.
+    """
+
+    SOLD = "sold"
+    SCRAPPED = "scrapped"
+    WITHDRAWN = "withdrawn"
+    NO_BIDS = "no_bids"
 
 
 class ExcessOfferStatus(StrEnum):
@@ -209,10 +227,15 @@ class OfferLineMatchStatus(StrEnum):
 
 
 class ExcessLineItemStatus(StrEnum):
-    """Status lifecycle for ExcessLineItem records."""
+    """Status lifecycle for ExcessLineItem records.
+
+    BIDDING was removed in the W3 status collapse (migration 207 remapped its 4
+    legacy rows to ``available``): it had no writer anywhere — the only writes
+    are AWARDED (``_award_scope_items``) and AVAILABLE (the unaward path), and
+    its lone read treated it identically to AVAILABLE.
+    """
 
     AVAILABLE = "available"
-    BIDDING = "bidding"
     AWARDED = "awarded"
     WITHDRAWN = "withdrawn"
 
@@ -265,14 +288,12 @@ class ExcessOutreachStatus(StrEnum):
         mid-flight) that the stale-sending sweeper flipped so it stops polling; also
         retryable.
 
-    ``no_response`` is RESERVED for the terminal GENUINE-buyer-silence state the
-    don't-forget nudge is designed around — it would be reached ONLY after a real
-    ``sent`` that the buyer never answered, never as a catch-all for a send that failed.
-    Deep-review #2 finding B45: as of this writing NO production path advances a row to
-    ``no_response`` — a genuinely-silent buyer's row simply stays ``sent`` forever. The
-    member stays in the enum (rows carry it; a future aging job is the natural writer).
-    OPENED was removed in the W1.9 dead-status sweep (no open-tracking ever existed:
-    zero rows, no writer).
+    A genuinely-silent buyer's row simply stays ``sent``. NO_RESPONSE was removed
+    in the W3 status collapse (migration 207 remapped its 1 row to ``sent``):
+    deep-review #2 finding B45 found no production path ever advanced a row to it,
+    and the "future aging job" W1.9 had reserved it for is not on the kernel job
+    list and will not exist. OPENED was removed in the W1.9 dead-status sweep (no
+    open-tracking ever existed: zero rows, no writer).
     """
 
     SENDING = "sending"
@@ -280,7 +301,6 @@ class ExcessOutreachStatus(StrEnum):
     RESPONDED = "responded"
     BID = "bid"
     DECLINED = "declined"
-    NO_RESPONSE = "no_response"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
 
@@ -361,8 +381,8 @@ class AccessKey(StrEnum):
     # admin only by default (ISS-028; supersedes ISS-022's manager+admin default),
     # surfaced solely via the Settings "Data export" page (gated on this same
     # capability, NOT a strict admin-role check) — no export UI
-    # anywhere else. Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA: single-deal
-    # quote-builder Excel/PDF exports stay open to sales via EXPORT_DATA.
+    # anywhere else. Deliberately NOT in _INTERACTIVE_DEFAULTS/EXPORT_DATA: the
+    # single-deal quote-builder PDF export stays open to sales via EXPORT_DATA.
     #
     # export_bulk_data is INTENTIONALLY excluded from every non-admin role default,
     # mirroring manage_connectors: bulk data extraction is a data-exfiltration control,
@@ -526,14 +546,21 @@ class KanbanLane(StrEnum):
 
 
 class BuyPlanStatus(StrEnum):
-    """Buy plan header statuses."""
+    """Buy plan header statuses.
+
+    W3 (spec §5.2) deleted INBOUND — the SP-3 holding state migration 176 already
+    remapped every row out of (inbound->active), migration 208 re-ran the remap
+    belt-and-braces, and the last guard reference (buyplan_lines' edit-gate set)
+    went with the member. The spec's "7 -> 5" arithmetic double-counted: the
+    EXPIRED half lived in ApprovalRequestStatus and was already removed in W1.9,
+    so BuyPlanStatus lands at 6 (HALTED stays — the live standalone halt/resume
+    safety off-ramp). Transition legality lives in
+    services/buyplan_workflow/buyplan_state.ALLOWED_TRANSITIONS.
+    """
 
     DRAFT = "draft"
     PENDING = "pending"
     ACTIVE = "active"
-    # Deal-level PO approved (SP-3): goods are inbound, awaiting buyer receipt.
-    # Terminal-precursor — the buyer's "mark received" completes the plan from here.
-    INBOUND = "inbound"
     HALTED = "halted"
     COMPLETED = "completed"
     CANCELLED = "cancelled"

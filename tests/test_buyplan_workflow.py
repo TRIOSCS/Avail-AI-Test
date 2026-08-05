@@ -121,7 +121,6 @@ class TestSubmitBuyPlan:
         result = submit_buy_plan(plan.id, "SO-001", test_user, db_session)
 
         assert result.status == BuyPlanStatus.PENDING.value
-        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-001"
         assert result.submitted_by_id == test_user.id
         assert result.submitted_at is not None
@@ -137,7 +136,6 @@ class TestSubmitBuyPlan:
         result = submit_buy_plan(plan.id, "SO-002", test_user, db_session)
 
         assert result.status == BuyPlanStatus.PENDING.value
-        assert result.auto_approved is not True
 
     def test_submit_pending_critical_flags(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -835,7 +833,6 @@ class TestResetAndResubmit:
 
         assert result.status == BuyPlanStatus.DRAFT.value
         assert result.so_status == SOVerificationStatus.PENDING.value
-        assert result.auto_approved is False
         assert result.approved_by_id is None
 
     def test_reset_cancelled_to_draft(
@@ -866,7 +863,6 @@ class TestResetAndResubmit:
         result = resubmit_buy_plan(plan.id, "SO-RESUB", test_user, db_session, customer_po_number="PO-R1")
 
         assert result.status == BuyPlanStatus.PENDING.value
-        assert result.auto_approved is not True
         assert result.sales_order_number == "SO-RESUB"
         assert result.customer_po_number == "PO-R1"
 
@@ -1153,7 +1149,6 @@ class TestCaseReport:
             status=BuyPlanStatus.COMPLETED.value,
             submitted_by_id=test_user.id,
             approved_by_id=test_user.id,
-            auto_approved=True,
             sales_order_number="SO-RPT-001",
             total_cost=500.00,
             total_revenue=1000.00,
@@ -1222,20 +1217,25 @@ class TestCaseReport:
         report = generate_case_report(plan, db_session)
         assert "CASE REPORT" in report
 
-    def test_report_auto_approved_label(
+    def test_report_no_approver_renders_dash(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
+        """No approver → em-dash.
+
+        The dead 'Auto-approved' label was removed in the W3 vestige sweep (0 prod rows
+        ever carried auto_approved=true).
+        """
         plan = _make_plan(
             db_session,
             test_user,
             test_quote,
             test_requisition,
-            auto_approved=True,
             approved_by_id=None,
             created_at=datetime.now(UTC),
         )
         report = generate_case_report(plan, db_session)
-        assert "Auto-approved" in report
+        assert "Auto-approved" not in report
+        assert "Approver: —" in report
 
     def test_report_falls_back_to_requisition_customer_for_so_origin(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition

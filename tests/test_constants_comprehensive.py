@@ -183,17 +183,26 @@ def test_sourcing_status():
 def test_excess_list_status():
     from app.constants import ExcessListStatus
 
+    # W3 five-state ladder (spec §5.3; migration 207 remapped the old vocabulary).
     assert ExcessListStatus.DRAFT == "draft"
-    assert ExcessListStatus.OPEN == "open"
-    assert ExcessListStatus.COLLECTING == "collecting"
-    assert ExcessListStatus.BID_OUT == "bid_out"
+    assert ExcessListStatus.POSTED == "posted"
+    assert ExcessListStatus.BIDDING == "bidding"
     assert ExcessListStatus.AWARDED == "awarded"
     assert ExcessListStatus.CLOSED == "closed"
-    assert ExcessListStatus.EXPIRED == "expired"
-    # Legacy pre-Resell members removed in the W1.9 dead-status sweep
-    # (migration 193 remapped every row; no writer remained).
-    assert "active" not in set(ExcessListStatus)
-    assert "bidding" not in set(ExcessListStatus)
+    assert set(ExcessListStatus) == {"draft", "posted", "bidding", "awarded", "closed"}
+    # Pre-W3 vocabulary is gone: open/collecting renamed, bid_out/expired merged away.
+    for retired in ("open", "collecting", "bid_out", "expired", "active"):
+        assert retired not in set(ExcessListStatus)
+
+
+def test_excess_list_outcome():
+    from app.constants import ExcessListOutcome
+
+    assert ExcessListOutcome.SOLD == "sold"
+    assert ExcessListOutcome.SCRAPPED == "scrapped"
+    assert ExcessListOutcome.WITHDRAWN == "withdrawn"
+    assert ExcessListOutcome.NO_BIDS == "no_bids"
+    assert set(ExcessListOutcome) == {"sold", "scrapped", "withdrawn", "no_bids"}
 
 
 # ---------------------------------------------------------------------------
@@ -245,9 +254,10 @@ def test_excess_line_item_status():
     from app.constants import ExcessLineItemStatus
 
     assert ExcessLineItemStatus.AVAILABLE == "available"
-    assert ExcessLineItemStatus.BIDDING == "bidding"
     assert ExcessLineItemStatus.AWARDED == "awarded"
     assert ExcessLineItemStatus.WITHDRAWN == "withdrawn"
+    # BIDDING removed in W3 (migration 207 remapped its rows; it had no writer).
+    assert "bidding" not in set(ExcessLineItemStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +302,8 @@ def test_excess_outreach_status():
     assert ExcessOutreachStatus.RESPONDED == "responded"
     assert ExcessOutreachStatus.BID == "bid"
     assert ExcessOutreachStatus.DECLINED == "declined"
-    assert ExcessOutreachStatus.NO_RESPONSE == "no_response"
+    # NO_RESPONSE removed in W3 (migration 207; no writer — silence stays ``sent``).
+    assert "no_response" not in set(ExcessOutreachStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +495,9 @@ def test_buy_plan_status():
     assert BuyPlanStatus.DRAFT == "draft"
     assert BuyPlanStatus.PENDING == "pending"
     assert BuyPlanStatus.ACTIVE == "active"
-    assert BuyPlanStatus.INBOUND == "inbound"
+    # INBOUND was DELETED (W3, migration 208 — no row can carry it since 176; the last
+    # guard reference in buyplan_lines went with the member).
+    assert not hasattr(BuyPlanStatus, "INBOUND")
     assert BuyPlanStatus.HALTED == "halted"
     assert BuyPlanStatus.COMPLETED == "completed"
     assert BuyPlanStatus.CANCELLED == "cancelled"

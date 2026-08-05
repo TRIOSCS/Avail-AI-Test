@@ -201,7 +201,7 @@ DEAL OVERVIEW
   Quote: {quote_number}
   SO#: {plan.sales_order_number or "—"}
   Salesperson: {submitter.name if submitter else "—"}
-  Approver: {approver.name if approver else ("Auto-approved" if plan.auto_approved else "—")}
+  Approver: {approver.name if approver else "—"}
 
 FINANCIALS
   Total Cost: ${total_cost:,.2f}
