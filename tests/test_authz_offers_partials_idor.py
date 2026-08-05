@@ -17,12 +17,21 @@ import pytest
 
 from app.constants import UserRole
 
+
+@pytest.fixture(autouse=True)
+def _ai_off(monkeypatch):
+    """Add-offer-form gates its paste box on claude_configured (a DB credential lookup
+    whose own session bypasses the test override) — pin it off so these authz probes
+    stay deterministic; the guards under test fire either way."""
+    monkeypatch.setattr("app.routers.htmx.offers.crud.claude_configured", lambda: False)
+
+
 # GET partials that must enforce require_requisition_access.
 # ("rfq-compose" left this list with the composer-A delete in W3 — the surviving
-# vendor-modal composer's access guards are covered by test_requisition_access_bulk.py.)
+# vendor-modal composer's access guards are covered by test_requisition_access_bulk.py.
+# "parse-email-form" / "paste-offer-form" left with the two-doors collapse, spec §5.1 —
+# the surviving paste door's POST guard is pinned in test_offer_doors.py.)
 PARTIAL_PATHS = [
-    "parse-email-form",
-    "paste-offer-form",
     "add-offer-form",
 ]
 

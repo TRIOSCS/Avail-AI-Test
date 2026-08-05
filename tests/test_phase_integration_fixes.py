@@ -10,6 +10,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -566,9 +567,11 @@ class TestManualOfferCreation:
         db_session.add(requirement)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
+        # Paste-box gating pinned off (DB credential lookup) — see test_offer_doors.py.
+        with patch("app.routers.htmx.offers.crud.claude_configured", return_value=False):
+            resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
         assert resp.status_code == 200
-        assert "Add Manual Offer" in resp.text
+        assert "Add Offer" in resp.text
         assert "TEST123" in resp.text
 
     def test_create_manual_offer(self, client: TestClient, db_session: Session, test_user: User):

@@ -1995,10 +1995,11 @@ class TestOfferHookReleasingSites:
 
 
 class TestApprovalTwinReleasingSites:
-    """The three user-initiated approval twins — htmx review-queue promote, the T4→T5
-    API promote, and the requisition offers-tab review approve — are the same user-
-    approval proof as the wired approve site and release via maybe_release_on_offer;
-    ``different_part`` never releases."""
+    """The user-initiated approval twin — the requisition review approve (the offers tab
+    and the Responses flagged-AI filter share this one route; the htmx review-queue
+    promote died with the queue page, W3 §5.1) — is the same user-approval proof as the
+    wired approve site and releases via maybe_release_on_offer; ``different_part`` never
+    releases."""
 
     def _pending_offer(self, db_session: Session, test_requisition, tier: str | None = None):
         from app.models import Offer
@@ -2015,20 +2016,6 @@ class TestApprovalTwinReleasingSites:
         db_session.add(offer)
         db_session.commit()
         return offer
-
-    def test_htmx_promote_releases(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics")
-        offer = self._pending_offer(db_session, test_requisition)
-        resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-        _assert_released(db_session, rec)
-
-    def test_htmx_promote_never_releases_different_part(self, client, db_session: Session, test_requisition):
-        rec = _hook_record(db_session, "Arrow Electronics", reason=UnavailabilityReason.DIFFERENT_PART)
-        offer = self._pending_offer(db_session, test_requisition)
-        resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-        _assert_not_released(db_session, rec)
 
     def test_review_approve_releases(self, client, db_session: Session, test_requisition):
         rec = _hook_record(db_session, "Arrow Electronics")

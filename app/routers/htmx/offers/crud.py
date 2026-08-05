@@ -1,18 +1,20 @@
-"""routers/htmx/offers/crud.py — Offer parse/CRUD/review/promote partials (HTMX +
-Alpine).
+"""routers/htmx/offers/crud.py — Offer CRUD/review partials (HTMX + Alpine).
 
-Server-rendered HTML partials for the offer lifecycle: AI offer parsing
-(parse-email/paste/parse-offer/save), quote-from-offers, offer CRUD (add/edit/
-reconfirm/delete/mark-sold), and the review-queue promote/reject/changelog flow.
-Split out of the monolithic offers.py (P4.3) along the offer-CRUD seam. All offer
-business logic lives in app/services/offer_service.py (W3 "one offer_service",
-spec §9) — these handlers only adapt form input and re-render partials.
+Server-rendered HTML partials for the offer lifecycle: the ONE Add-offer modal
+(manual fields + optional AI paste box → parse preview → save), quote-from-offers,
+offer CRUD (add/edit/reconfirm/delete/mark-sold), review (approve/reject), and the
+changelog. The two standalone AI paste modals (parse-email / paste-offer) and the
+review-queue page + its promote/reject twins were deleted in W3 (spec §5.1: TWO
+offer doors — Responses tab + Add-offer modal; flagged AI offers are a filter
+inside Responses). All offer business logic lives in
+app/services/offer_service.py (W3 "one offer_service", spec §9) — these handlers
+only adapt form input and re-render partials.
 
 Called by: app/routers/htmx/offers/__init__.py (router mount).
 Depends on: app.models, app.dependencies, app.database, app.services.offer_service,
     .._shared (_safe_int/_safe_float/_parse_date_safe), .._shared_tabs
     (requisition_tab — every offer route re-renders the requisition offers tab),
-    app.routers._lookup_helpers.
+    app.routers._lookup_helpers, app.utils.claude_client (keys-off honesty).
 """
 
 from datetime import date
@@ -25,155 +27,21 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 
 from ....constants import (
-    AccessKey,
     OfferCondition,
-    OfferStatus,
     QuoteStatus,
 )
 from ....database import get_db
-from ....dependencies import require_access, require_requisition_access, require_user
+from ....dependencies import require_requisition_access, require_user
 from ....models import Offer, Quote, QuoteLine, Requirement, User
 from ....models.intelligence import ChangeLog
 from ....schemas.crm import OfferCreate, OfferUpdate
 from ....services import offer_service
 from ....services.ai_offer_service import parse_offer_form_rows, save_form_parsed_offers
+from ....utils.claude_client import claude_configured
 from ..._lookup_helpers import get_requisition_or_404
 from .._shared import _base_ctx, _parse_date_safe, _safe_float, _safe_int
 
 router = APIRouter(tags=["htmx-views"])
-
-
-@router.get("/v2/partials/requisitions/{req_id}/parse-email-form", response_class=HTMLResponse)
-async def parse_email_form(
-    request: Request,
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return the parse-email paste form."""
-    from . import template_response
-
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-    return template_response("htmx/partials/requisitions/tabs/parse_email_form.html", ctx)
-
-
-@router.get("/v2/partials/requisitions/{req_id}/paste-offer-form", response_class=HTMLResponse)
-async def paste_offer_form(
-    request: Request,
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return the paste-offer freeform form."""
-    from . import template_response
-
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-    return template_response("htmx/partials/requisitions/tabs/paste_offer_form.html", ctx)
-
-
-@router.post("/v2/partials/requisitions/{req_id}/parse-email", response_class=HTMLResponse)
-async def parse_email_action(
-    request: Request,
-    req_id: int,
-    email_body: str = Form(""),
-    email_subject: str = Form(""),
-    vendor_name: str = Form(""),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Parse vendor email and return editable offer cards."""
-    from . import template_response
-
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-
-    if not email_body.strip():
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
-            "Please paste the email body to parse.</div>"
-        )
-
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-    ctx["vendor_name"] = vendor_name
-
-    try:
-        from app.services.ai_email_parser import parse_email
-
-        result = await parse_email(
-            email_body=email_body,
-            email_subject=email_subject,
-            vendor_name=vendor_name,
-        )
-
-        if not result:
-            ctx["quotes"] = []
-            ctx["overall_confidence"] = 0
-            ctx["email_type"] = "unclear"
-        else:
-            ctx["quotes"] = result.get("quotes", [])
-            ctx["overall_confidence"] = result.get("overall_confidence", 0)
-            ctx["email_type"] = result.get("email_type", "unclear")
-
-    except Exception as exc:
-        logger.error(f"Parse email error for req {req_id}: {exc}")
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
-            f"Parse failed: {exc}</div>"
-        )
-
-    return template_response("htmx/partials/requisitions/tabs/parsed_email_results.html", ctx)
-
-
-@router.post("/v2/partials/requisitions/{req_id}/parse-offer", response_class=HTMLResponse)
-async def parse_offer_action(
-    request: Request,
-    req_id: int,
-    raw_text: str = Form(""),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Parse freeform vendor text and return editable offer cards."""
-    from . import template_response
-
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-
-    if not raw_text.strip():
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
-            "Please paste vendor text to parse.</div>"
-        )
-
-    # Build RFQ context for better matching
-    reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
-    rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
-
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-
-    try:
-        from app.services.freeform_parser_service import parse_freeform_offer
-
-        result = await parse_freeform_offer(raw_text, rfq_context)
-        if not result:
-            ctx["offers"] = []
-        else:
-            ctx["offers"] = result.get("offers", [])
-    except Exception as exc:
-        logger.error(f"Parse offer error for req {req_id}: {exc}")
-        return HTMLResponse(
-            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
-            f"Parse failed: {exc}</div>"
-        )
-
-    return template_response("htmx/partials/requisitions/tabs/parsed_offer_results.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/save-parsed-offers", response_class=HTMLResponse)
@@ -327,7 +195,9 @@ async def review_offer(
     """Approve or reject a pending_review offer — approve lands on ACTIVE (the ONE
     approve landing status, W3).
 
-    Returns refreshed offers tab.
+    Returns the refreshed tab it was called from: the offers tab by default, or the
+    Responses tab's flagged-AI view when the form carries ``tab=responses`` (the W3
+    flagged-offers filter, spec §5.1).
     """
     from . import requisition_tab
 
@@ -348,7 +218,9 @@ async def review_offer(
         offer_service.reject_offer(db, offer, user)
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
 
-    # Return refreshed offers tab
+    # Return the refreshed tab the action came from
+    if form.get("tab") == "responses":
+        return await requisition_tab(request=request, req_id=req_id, tab="responses", flagged="1", user=user, db=db)
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
@@ -359,7 +231,7 @@ async def add_offer_form(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the manual offer entry form."""
+    """Return the Add-offer form: manual fields plus the optional AI paste box."""
     from . import template_response
 
     req = get_requisition_or_404(db, req_id)
@@ -368,7 +240,64 @@ async def add_offer_form(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     ctx["requirements"] = requirements
+    # Keys-off honesty (spec §7): the paste box renders an "AI is off" note instead
+    # of a textarea when no Anthropic key is configured; manual fields keep working.
+    ctx["ai_enabled"] = claude_configured()
     return template_response("htmx/partials/requisitions/add_offer_form.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/add-offer/parse", response_class=HTMLResponse)
+async def add_offer_parse(
+    request: Request,
+    req_id: int,
+    raw_text: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse the Add-offer modal's paste box into editable offer cards.
+
+    The one surviving AI paste door (spec §5.1): freeform vendor text → editable preview
+    cards → the save-parsed-offers route → offer_service.create_offer. Keys-off honesty
+    (spec §7): with no AI key this returns the shared "AI is off" banner instead of
+    500ing inside claude_client; parse failures return an inline error, never a 500.
+    """
+    from . import template_response
+
+    req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
+
+    if not claude_configured():
+        return template_response(
+            "htmx/partials/shared/_ai_off_banner.html",
+            {"request": request, "message": "AI is off — enter the offer manually below."},
+        )
+
+    if not raw_text.strip():
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "Please paste vendor text to parse.</div>"
+        )
+
+    # Build RFQ context for better matching
+    reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+
+    try:
+        from app.services.freeform_parser_service import parse_freeform_offer
+
+        result = await parse_freeform_offer(raw_text, rfq_context)
+        ctx["offers"] = result.get("offers", []) if result else []
+    except Exception as exc:
+        logger.error(f"Paste-parse error for req {req_id}: {exc}")
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            f"Parse failed: {exc}</div>"
+        )
+
+    return template_response("htmx/partials/requisitions/tabs/parsed_offer_results.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/add-offer", response_class=HTMLResponse)
@@ -613,74 +542,6 @@ async def mark_offer_sold_htmx(
         logger.info("Offer {} marked sold by {}", offer_id, user.email)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
-
-
-@router.get("/v2/partials/offers/review-queue", response_class=HTMLResponse)
-async def offer_review_queue(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Render the offer review queue page — medium-confidence AI-parsed offers."""
-    from . import template_response
-
-    offers = (
-        db.query(Offer)
-        .filter(Offer.status == OfferStatus.PENDING_REVIEW)
-        .order_by(Offer.created_at.desc())
-        .limit(100)
-        .all()
-    )
-    return template_response(
-        "htmx/partials/offers/review_queue.html",
-        {"request": request, "offers": offers, "user": user},
-    )
-
-
-@router.post("/v2/partials/offers/{offer_id}/promote", response_class=HTMLResponse)
-async def promote_offer_htmx(
-    request: Request,
-    offer_id: int,
-    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
-    db: Session = Depends(get_db),
-):
-    """Promote a pending_review offer to active and return refreshed queue.
-
-    Promote IS approve — same pending→ACTIVE transition, one implementation
-    (offer_service.approve_offer).
-    """
-    from . import offer_review_queue as _offer_review_queue
-
-    offer = db.get(Offer, offer_id)
-    if not offer:
-        raise HTTPException(404, "Offer not found")
-    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-
-    offer_service.approve_offer(db, offer, user)
-    logger.info("Offer {} promoted by {}", offer_id, user.email)
-
-    return await _offer_review_queue(request=request, user=user, db=db)
-
-
-@router.post("/v2/partials/offers/{offer_id}/reject", response_class=HTMLResponse)
-async def reject_offer_htmx(
-    request: Request,
-    offer_id: int,
-    user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
-    db: Session = Depends(get_db),
-):
-    """Reject a pending_review offer and return refreshed queue."""
-    from . import offer_review_queue as _offer_review_queue
-
-    offer = db.get(Offer, offer_id)
-    if not offer:
-        raise HTTPException(404, "Offer not found")
-    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-
-    offer_service.reject_offer(db, offer, user)
-    logger.info("Offer {} rejected by {}", offer_id, user.email)
-
-    return await _offer_review_queue(request=request, user=user, db=db)
 
 
 @router.get("/v2/partials/offers/{offer_id}/changelog", response_class=HTMLResponse)

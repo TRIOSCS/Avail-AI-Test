@@ -1,6 +1,8 @@
 {# parsed_offer_results.html — Editable cards for AI-parsed freeform offer text.
+   The preview step of the Add-offer modal's paste box: user reviews/edits the
+   parsed rows, then Save posts them to save-parsed-offers (→ offer_service).
    Receives: req (Requisition), offers (list of dicts from template).
-   Called by: POST /v2/partials/requisitions/{id}/parse-offer.
+   Called by: POST /v2/partials/requisitions/{id}/add-offer/parse.
    Depends on: HTMX, Alpine.js.
 #}
 <div class="space-y-4">

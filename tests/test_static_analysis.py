@@ -625,7 +625,6 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/tickets/workspace.html",
     "app/templates/htmx/partials/vendors/detail.html",
     "app/templates/htmx/partials/vendors/list.html",
-    "app/templates/htmx/partials/offers/review_queue.html",
     # CRM account detail — full-width contacts-forward layout (twin of vendors/detail);
     # renders standalone in #main-content or inside the CDM workspace right panel.
     "app/templates/htmx/partials/customers/detail.html",

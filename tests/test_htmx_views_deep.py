@@ -621,22 +621,8 @@ class TestRequisitionTabs:
         assert resp.status_code == 404
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Parse-email and paste-offer forms (lines 1364+)
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestParseForms:
-    @pytest.mark.parametrize("form", ["parse-email-form", "paste-offer-form"])
-    def test_form_ok(self, client: TestClient, db_session: Session, test_user: User, form: str):
-        req = _requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/{form}")
-        assert resp.status_code == 200
-
-    def test_parse_email_form_404(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/parse-email-form")
-        assert resp.status_code == 404
+# (TestParseForms left with the two-doors collapse, spec §5.1 — the surviving
+# Add-offer paste box is covered in tests/test_offer_doors.py.)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -648,16 +634,14 @@ class TestOfferRoutes:
     def test_add_offer_form(self, client: TestClient, db_session: Session, test_user: User):
         req = _requisition(db_session, test_user)
         db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
+        # Paste-box gating pinned off (DB credential lookup) — see test_offer_doors.py.
+        with patch("app.routers.htmx.offers.crud.claude_configured", return_value=False):
+            resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
         assert resp.status_code == 200
 
     def test_add_offer_form_404(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/99999/add-offer-form")
         assert resp.status_code == 404
-
-    def test_review_queue(self, client: TestClient):
-        resp = client.get("/v2/partials/offers/review-queue")
-        assert resp.status_code == 200
 
     def test_offer_changelog_404(self, client: TestClient):
         resp = client.get("/v2/partials/offers/99999/changelog")

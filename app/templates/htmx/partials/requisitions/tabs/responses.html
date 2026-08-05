@@ -1,10 +1,83 @@
 {# responses.html — Vendor response review tab for requisition detail.
    Shows AI-parsed vendor responses with review actions and poll inbox button.
-   Receives: responses (list of VendorResponse objects), req (Requisition).
+   Includes the flagged-AI-offers filter (spec §5.1): pending_review offers are
+   reviewed (approve/reject) inline here — the standalone review-queue page is gone.
+   Receives: responses (list[VendorResponse]), req (Requisition),
+             flagged_offers (list[Offer] with status pending_review),
+             show_flagged (bool — flagged view active).
    Called by: requisition tab route.
    Depends on: HTMX, brand palette.
 #}
 <div>
+  {# Filter pills: all vendor responses vs flagged AI offers awaiting review #}
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                   {% if not show_flagged %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
+            hx-get="/v2/partials/requisitions/{{ req.id }}/tab/responses"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+      Responses ({{ responses|length }})
+    </button>
+    <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                   {% if show_flagged %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
+            hx-get="/v2/partials/requisitions/{{ req.id }}/tab/responses?flagged=1"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+      Flagged AI offers ({{ flagged_offers|length }})
+    </button>
+  </div>
+
+  {% if show_flagged %}
+  {# ── Flagged AI offers: pending_review, approve/reject inline ── #}
+  {% if flagged_offers %}
+  <div class="space-y-3">
+    {% for o in flagged_offers %}
+    <div id="flagged-offer-{{ o.id }}" class="bg-white rounded-lg border border-amber-200 p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h4 class="font-semibold text-gray-900">{{ o.vendor_name or "Unknown Vendor" }}</h4>
+          <p class="text-sm font-mono text-gray-700 mt-0.5">{{ o.mpn or "—" }}</p>
+          <p class="text-xs text-gray-600 mt-1">
+            Qty {{ "{:,}".format(o.qty_available) if o.qty_available else "—" }}
+            &middot; {{ "${:,.4f}".format(o.unit_price) if o.unit_price else "RFQ" }}
+            &middot; {{ (o.condition or "—")|capitalize }}
+            {% if o.lead_time %}&middot; {{ o.lead_time }}{% endif %}
+            {% if o.parse_confidence is not none %}&middot; {{ "%.0f"|format(o.parse_confidence * 100) }}% conf{% endif %}
+          </p>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="badge bg-amber-50 text-amber-700 border-amber-200">Pending review</span>
+          <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                  hx-vals='{"action": "approve", "tab": "responses"}'
+                  hx-target="#tab-content"
+                  data-loading-disable
+                  class="btn btn-sm text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100">
+            Approve
+          </button>
+          <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                  hx-vals='{"action": "reject", "tab": "responses"}'
+                  hx-target="#tab-content"
+                  data-loading-disable
+                  class="btn btn-sm text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100">
+            Reject
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="p-8 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <p class="text-sm text-gray-600 mt-2">No offers pending review.</p>
+    <p class="text-secondary mt-1">AI-parsed offers that need human verification will appear here.</p>
+  </div>
+  {% endif %}
+
+  {% else %}
+  {# ── Vendor responses ── #}
   {# Action bar #}
   <div class="flex items-center justify-between mb-4">
     <p class="text-sm text-gray-600">
@@ -40,5 +113,6 @@
     <p class="text-sm text-gray-600 mt-2">No vendor responses yet.</p>
     <p class="text-secondary mt-1">Click "Poll Inbox" to check for vendor replies, or responses will appear when vendors reply to RFQs.</p>
   </div>
+  {% endif %}
   {% endif %}
 </div>

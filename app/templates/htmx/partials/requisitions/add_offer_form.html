@@ -1,15 +1,37 @@
-{# add_offer_form.html — Manual offer entry form shown inline in offers tab.
-   Receives: req (Requisition), requirements (list[Requirement]).
-   Called by: htmx_views.py add_offer_form route.
+{# add_offer_form.html — The ONE Add-offer form: manual fields + optional AI paste box.
+   Receives: req (Requisition), requirements (list[Requirement]), ai_enabled (bool).
+   Called by: routers/htmx/offers/crud.py add_offer_form route.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 <div class="card mb-4">
   <div class="flex items-center justify-between mb-3">
-    <h3 class="text-sm font-semibold text-gray-900">Add Manual Offer</h3>
+    <h3 class="text-sm font-semibold text-gray-900">Add Offer</h3>
     <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers"
             hx-target="#tab-content"
             class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
   </div>
+
+  {# ── Optional paste box: freeform vendor text → AI parse → editable preview.
+       Its own form (not nested in the manual form below) posting into #parse-area,
+       which replaces this whole card with the parsed cards. Keys-off honesty
+       (spec §7): with no AI key an honest note renders instead; manual entry below
+       keeps working either way. #}
+  {% if ai_enabled %}
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer/parse"
+        hx-target="#parse-area" hx-swap="innerHTML"
+        data-loading-disable
+        class="mb-4 p-3 bg-brand-50/50 border border-brand-100 rounded-lg space-y-2">
+    <label class="form-label" for="add-offer-paste">Paste vendor text (optional)</label>
+    <textarea id="add-offer-paste" name="raw_text" rows="3"
+              class="input input-sm"
+              placeholder="Paste a vendor email or quote text and AI will pre-fill offer cards..."></textarea>
+    <button type="submit" class="btn btn-sm btn-secondary">Parse with AI</button>
+  </form>
+  {% else %}
+  <div class="mb-4 p-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
+    AI is off — paste parsing is unavailable. Manual entry below still works.
+  </div>
+  {% endif %}
 
   <form x-data='offerQualification({})'
         hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer"

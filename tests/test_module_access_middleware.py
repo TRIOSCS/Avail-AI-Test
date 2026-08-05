@@ -79,7 +79,7 @@ class TestModuleKeyForPathShared:
             "/v2/partials/vendors/7",
             "/v2/partials/vendor-contacts/3",
             # Capability-gated / global — never a module.
-            "/v2/partials/offers/1/promote",
+            "/v2/partials/offers/1/changelog",
             "/v2/partials/quotes/5",
             "/v2/partials/settings",
             "/v2/partials/settings/api-keys",

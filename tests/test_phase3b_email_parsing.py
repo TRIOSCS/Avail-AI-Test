@@ -1,15 +1,15 @@
-"""test_phase3b_email_parsing.py — Tests for Phase 3B: Email & Freeform Parsing in
-offers tab.
+"""test_phase3b_email_parsing.py — Tests for the save-parsed-offers flow.
 
-Verifies: parse form loading, email parsing, freeform offer parsing,
-save-parsed-offers flow, editable cards with confidence badges.
+Verifies: the surviving save-parsed-offers route (the Add-offer paste box's save
+step) creates offers, matches requirements by MPN, and creates vendor cards.
+(The parse-email / paste-offer door tests died with those doors in W3, spec §5.1
+— the paste box's parse flow is covered in tests/test_offer_doors.py.)
 
 Called by: pytest
-Depends on: conftest.py fixtures, app.routers.htmx_views
+Depends on: conftest.py fixtures, app.routers.htmx.offers.crud
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,168 +47,9 @@ def req_with_parts(db_session: Session, test_user: User) -> Requisition:
     return req
 
 
-# ── Form Loading ──────────────────────────────────────────────────────
-
-
-class TestParseFormLoading:
-    """Tests for loading parse forms via GET."""
-
-    def test_parse_email_form_loads(self, client: TestClient, req_with_parts: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{req_with_parts.id}/parse-email-form")
-        assert resp.status_code == 200
-        assert "Parse Vendor Email" in resp.text
-        assert "email_body" in resp.text
-
-    def test_paste_offer_form_loads(self, client: TestClient, req_with_parts: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{req_with_parts.id}/paste-offer-form")
-        assert resp.status_code == 200
-        assert "Paste Vendor Offer" in resp.text
-        assert "raw_text" in resp.text
-
-    def test_parse_email_form_404(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/parse-email-form")
-        assert resp.status_code == 404
-
-    def test_paste_offer_form_404(self, client: TestClient):
-        resp = client.get("/v2/partials/requisitions/99999/paste-offer-form")
-        assert resp.status_code == 404
-
-    def test_offers_tab_has_parse_buttons(self, client: TestClient, req_with_parts: Requisition):
-        """Offers tab should include Parse Email and Paste Offer buttons."""
-        resp = client.get(f"/v2/partials/requisitions/{req_with_parts.id}/tab/offers")
-        assert resp.status_code == 200
-        assert "Parse Email" in resp.text
-        assert "Paste Offer" in resp.text
-
-
-# ── Email Parsing ─────────────────────────────────────────────────────
-
-
-class TestParseEmail:
-    """Tests for the parse-email POST endpoint."""
-
-    def test_empty_body_returns_warning(self, client: TestClient, req_with_parts: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
-            data={"email_body": "", "email_subject": "", "vendor_name": ""},
-        )
-        assert resp.status_code == 200
-        assert "paste the email body" in resp.text.lower()
-
-    @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_parsed_quotes_shown_as_cards(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.return_value = {
-            "quotes": [
-                {
-                    "part_number": "LM317T",
-                    "manufacturer": "TI",
-                    "quantity_available": 5000,
-                    "unit_price": 0.45,
-                    "confidence": 0.85,
-                    "lead_time_text": "2-3 weeks",
-                },
-            ],
-            "overall_confidence": 0.85,
-            "email_type": "quote",
-        }
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
-            data={"email_body": "Here is our quote for LM317T...", "vendor_name": "Arrow"},
-        )
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text
-        assert "85%" in resp.text
-        assert "Save" in resp.text
-
-    @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_confidence_badges_color_coded(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.return_value = {
-            "quotes": [
-                {"part_number": "A", "confidence": 0.9},
-                {"part_number": "B", "confidence": 0.6},
-                {"part_number": "C", "confidence": 0.3},
-            ],
-            "overall_confidence": 0.6,
-            "email_type": "quote",
-        }
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
-            data={"email_body": "Quote details..."},
-        )
-        assert resp.status_code == 200
-        # High confidence = emerald, medium = amber, low = rose
-        assert "bg-emerald-50" in resp.text
-        assert "bg-amber-50" in resp.text
-        assert "bg-rose-50" in resp.text
-
-    @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_parse_error_handled(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.side_effect = RuntimeError("API timeout")
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
-            data={"email_body": "Some email text"},
-        )
-        assert resp.status_code == 200
-        assert "Parse failed" in resp.text
-
-    @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_no_quotes_shows_empty_state(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.return_value = {
-            "quotes": [],
-            "overall_confidence": 0,
-            "email_type": "unclear",
-        }
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
-            data={"email_body": "Thanks for your email"},
-        )
-        assert resp.status_code == 200
-        assert "No offers could be parsed" in resp.text
-
-
-# ── Freeform Offer Parsing ────────────────────────────────────────────
-
-
-class TestParseOffer:
-    """Tests for the parse-offer POST endpoint."""
-
-    def test_empty_text_returns_warning(self, client: TestClient, req_with_parts: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-offer",
-            data={"raw_text": ""},
-        )
-        assert resp.status_code == 200
-        assert "paste vendor text" in resp.text.lower()
-
-    @patch("app.services.freeform_parser_service.parse_freeform_offer", new_callable=AsyncMock)
-    def test_parsed_offers_shown(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.return_value = {
-            "offers": [
-                {
-                    "vendor_name": "Arrow",
-                    "mpn": "LM317T",
-                    "qty_available": 2000,
-                    "unit_price": 0.50,
-                },
-            ],
-        }
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-offer",
-            data={"raw_text": "Arrow has LM317T 2000pcs at $0.50"},
-        )
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text
-        assert "Arrow" in resp.text
-
-    @patch("app.services.freeform_parser_service.parse_freeform_offer", new_callable=AsyncMock)
-    def test_parse_offer_error_handled(self, mock_parse, client: TestClient, req_with_parts: Requisition):
-        mock_parse.side_effect = RuntimeError("Service down")
-        resp = client.post(
-            f"/v2/partials/requisitions/{req_with_parts.id}/parse-offer",
-            data={"raw_text": "Some text"},
-        )
-        assert resp.status_code == 200
-        assert "Parse failed" in resp.text
+# (TestParseFormLoading / TestParseEmail / TestParseOffer left with the two-doors
+# collapse, spec §5.1 — the surviving Add-offer paste box's parse flow is covered
+# in tests/test_offer_doors.py.)
 
 
 # ── Save Parsed Offers ───────────────────────────────────────────────

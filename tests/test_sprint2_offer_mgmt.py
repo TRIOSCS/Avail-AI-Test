@@ -1,7 +1,8 @@
 """test_sprint2_offer_mgmt.py — Tests for Sprint 2 offer management completion.
 
-Verifies: Edit offer, delete offer, mark sold, review queue, promote/reject,
-and changelog view.
+Verifies: Edit offer, delete offer, mark sold, and changelog view. (The review
+queue / promote / reject coverage moved to tests/test_offer_doors.py when the
+standalone queue page died in W3, spec §5.1.)
 
 Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
@@ -50,36 +51,6 @@ def req_with_offer(db_session: Session, test_user: User):
     db_session.commit()
     db_session.refresh(offer)
     db_session.refresh(req)
-    return req, offer
-
-
-@pytest.fixture()
-def pending_review_offer(db_session: Session, test_user: User):
-    """An offer in pending_review status for review queue tests."""
-    req = Requisition(
-        name="Review Queue Req",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    offer = Offer(
-        requisition_id=req.id,
-        vendor_name="Mouser",
-        mpn="STM32F103",
-        unit_price=3.50,
-        qty_available=1000,
-        status="pending_review",
-        evidence_tier="T4",
-        parse_confidence=0.65,
-        entered_by_id=test_user.id,
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(offer)
-    db_session.commit()
-    db_session.refresh(offer)
     return req, offer
 
 
@@ -217,55 +188,9 @@ class TestMarkSold:
         assert resp.status_code == 200
 
 
-# ── Review Queue ──────────────────────────────────────────────────────
-
-
-class TestReviewQueue:
-    def test_queue_renders(self, client: TestClient, pending_review_offer):
-        _, offer = pending_review_offer
-        resp = client.get(
-            "/v2/partials/offers/review-queue",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "pending review" in resp.text
-        assert offer.vendor_name in resp.text
-
-    def test_queue_empty_state(self, client: TestClient):
-        resp = client.get(
-            "/v2/partials/offers/review-queue",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "No offers pending review" in resp.text
-
-    def test_promote_offer(self, client: TestClient, pending_review_offer, db_session: Session):
-        _, offer = pending_review_offer
-        resp = client.post(
-            f"/v2/partials/offers/{offer.id}/promote",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(offer)
-        assert offer.status == "active"
-
-    def test_reject_offer(self, client: TestClient, pending_review_offer, db_session: Session):
-        _, offer = pending_review_offer
-        resp = client.post(
-            f"/v2/partials/offers/{offer.id}/reject",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(offer)
-        assert offer.status == "rejected"
-
-    def test_promote_non_pending_fails(self, client: TestClient, req_with_offer):
-        _, offer = req_with_offer
-        resp = client.post(
-            f"/v2/partials/offers/{offer.id}/promote",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400
+# (TestReviewQueue left with the review-queue page delete, W3 §5.1 — flagged AI
+# offers are now approved/rejected via the Responses-tab filter, pinned in
+# tests/test_offer_doors.py.)
 
 
 # ── Changelog ─────────────────────────────────────────────────────────

@@ -219,7 +219,6 @@ class TestV2FullPages:
             ("/v2/proactive", "/v2/partials/proactive"),
             ("/v2/materials", "/v2/partials/materials"),
             ("/v2/follow-ups", "/v2/partials/follow-ups"),
-            ("/v2/offers/review-queue", "/v2/partials/offers/review-queue"),
             ("/v2/sightings", "/v2/partials/sightings/workspace"),
         ],
     )
@@ -1233,122 +1232,8 @@ class TestRequisitionImport:
         assert (line.primary_mpn, line.target_qty, line.manufacturer) == ("LM317T", 100, "TI")
 
 
-class TestParseEmailOffer:
-    """Test email/offer parsing endpoints."""
-
-    def test_parse_email_form(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/parse-email-form")
-        assert resp.status_code == 200
-        assert "Parse Vendor Email" in resp.text
-        assert f'hx-post="/v2/partials/requisitions/{req.id}/parse-email"' in resp.text
-
-    def test_paste_offer_form(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/paste-offer-form")
-        assert resp.status_code == 200
-        assert "Paste Vendor Offer" in resp.text
-        assert f'hx-post="/v2/partials/requisitions/{req.id}/parse-offer"' in resp.text
-
-    def test_parse_email_empty_body(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/parse-email",
-            data={"email_body": "", "vendor_name": "Arrow"},
-        )
-        assert resp.status_code == 200
-        assert "paste the email" in resp.text.lower()
-
-    def test_parse_email_success(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        mock_result = {
-            "quotes": [{"part_number": "LM317T", "quantity_available": 100, "unit_price": 0.5, "confidence": 0.9}],
-            "overall_confidence": 0.95,
-            "email_type": "quote",
-        }
-        with patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock, return_value=mock_result):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/parse-email",
-                data={"email_body": "We can offer LM317T at $0.50", "vendor_name": "Arrow"},
-            )
-            assert resp.status_code == 200
-            assert "Parsed 1 offer from Quote email" in resp.text
-            assert "95% confidence" in resp.text
-            assert 'value="LM317T"' in resp.text  # editable card prefilled
-
-    def test_parse_email_no_result(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        with patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock, return_value=None):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/parse-email",
-                data={"email_body": "Hello", "vendor_name": "Arrow"},
-            )
-            assert resp.status_code == 200
-            # A None parse renders the zero-offers state, not an error.
-            assert "Parsed 0 offers from Unclear email" in resp.text
-            assert "0% confidence" in resp.text
-
-    def test_parse_email_exception(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        with patch(
-            "app.services.ai_email_parser.parse_email", new_callable=AsyncMock, side_effect=Exception("AI error")
-        ):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/parse-email",
-                data={"email_body": "Hello", "vendor_name": "Arrow"},
-            )
-            assert resp.status_code == 200
-            assert "Parse failed" in resp.text
-
-    def test_parse_offer_empty(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/parse-offer",
-            data={"raw_text": ""},
-        )
-        assert resp.status_code == 200
-        assert "paste vendor text" in resp.text.lower()
-
-    def test_parse_offer_success(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        _make_requirement(db_session, req)
-        db_session.commit()
-        mock_result = {"offers": [{"mpn": "LM317T", "qty_available": 100, "unit_price": 0.5, "vendor_name": "Arrow"}]}
-        with patch(
-            "app.services.freeform_parser_service.parse_freeform_offer",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/parse-offer",
-                data={"raw_text": "LM317T 100pcs $0.50"},
-            )
-            assert resp.status_code == 200
-            assert "Parsed 1 offer from pasted text" in resp.text
-            assert "LM317T" in resp.text
-            assert f'hx-post="/v2/partials/requisitions/{req.id}/save-parsed-offers"' in resp.text
-
-    def test_parse_offer_exception(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        with patch(
-            "app.services.freeform_parser_service.parse_freeform_offer",
-            new_callable=AsyncMock,
-            side_effect=Exception("fail"),
-        ):
-            resp = client.post(
-                f"/v2/partials/requisitions/{req.id}/parse-offer",
-                data={"raw_text": "LM317T 100pcs"},
-            )
-            assert resp.status_code == 200
-            assert "Parse failed" in resp.text
+# (TestParseEmailOffer left with the two-doors collapse, spec §5.1 — the surviving
+# Add-offer paste box's parse flow is covered in tests/test_offer_doors.py.)
 
 
 class TestSaveParsedOffers:
@@ -1853,7 +1738,10 @@ class TestOfferEndpoints:
         req = _make_requisition(db_session, test_user)
         _make_requirement(db_session, req, primary_mpn="LM317T")
         db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
+        # Paste-box gating pinned off (DB credential lookup) — manual fields render
+        # regardless; the paste box itself is covered in test_offer_doors.py.
+        with patch("app.routers.htmx.offers.crud.claude_configured", return_value=False):
+            resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
         assert resp.status_code == 200
         assert f'hx-post="/v2/partials/requisitions/{req.id}/add-offer"' in resp.text
         assert "LM317T" in resp.text  # requirement selectable on the form
@@ -2613,25 +2501,8 @@ class TestSightingsWorkspace:
         assert "'/v2/partials/sightings/' + id + '/detail'" in resp.text
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Offer Review Queue
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestOfferReviewQueue:
-    """Test offer review queue."""
-
-    def test_review_queue(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
-        _make_offer(db_session, req, test_user, mpn="NE555P", status=OfferStatus.ACTIVE)
-        db_session.commit()
-        resp = client.get("/v2/partials/offers/review-queue")
-        assert resp.status_code == 200
-        # Only PENDING_REVIEW offers appear in the queue.
-        assert '<span class="font-medium text-amber-600">1</span> offer' in resp.text
-        assert "LM317T" in resp.text
-        assert "NE555P" not in resp.text
+# (TestOfferReviewQueue left with the review-queue page delete, spec §5.1 — flagged
+# AI offers are now a filter inside the Responses tab, pinned in test_offer_doors.py.)
 
 
 @pytest.fixture(autouse=True)

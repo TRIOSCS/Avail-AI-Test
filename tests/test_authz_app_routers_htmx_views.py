@@ -86,18 +86,8 @@ def test_review_offer_blocks_non_owner_sales(client, db_session, foreign_req, te
     assert resp.status_code == 404
 
 
-def test_promote_offer_queue_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    offer = _make_offer(db_session, foreign_req, status="pending_review")
-    _make_sales(db_session, test_user)
-    resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-    assert resp.status_code == 404
-
-
-def test_reject_offer_queue_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    offer = _make_offer(db_session, foreign_req, status="pending_review")
-    _make_sales(db_session, test_user)
-    resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
-    assert resp.status_code == 404
+# (The promote/reject queue-twin probes left with the review-queue page delete,
+# W3 §5.1 — the surviving review route's guard is test_review_offer_blocks_non_owner_sales.)
 
 
 # ── MED severity ───────────────────────────────────────────────────────

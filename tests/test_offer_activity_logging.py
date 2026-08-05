@@ -121,8 +121,8 @@ def test_add_offer_htmx_logs_offer_created(client, db_session, test_requisition)
             "active",
             id="htmx_mark_sold",
         ),
-        pytest.param("post", "/v2/partials/offers/{offer}/promote", None, "pending_review", id="htmx_promote"),
-        pytest.param("post", "/v2/partials/offers/{offer}/reject", None, "pending_review", id="htmx_reject"),
+        # (htmx promote/reject params left with the review-queue page delete, W3 §5.1 —
+        # the surviving status-change routes are all covered above.)
     ],
 )
 def test_status_change_route_logs_status_changed(

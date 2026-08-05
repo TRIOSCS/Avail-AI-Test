@@ -2,8 +2,8 @@
 
 Package split of the monolithic offers.py (P4.3), along the audited seams:
 
-  crud.py       — AI offer parsing (parse-email/paste/parse-offer/save), offer
-                  CRUD + review/promote/reject/changelog, quote-from-offers.
+  crud.py       — the ONE Add-offer modal (manual + AI paste box parse/save),
+                  offer CRUD + review/changelog, quote-from-offers.
   follow_ups.py — Cross-requisition follow-up queue, single/batch send, AI draft,
                   nav badge.
   replies.py    — Vendor response review/reply, manual activity/phone-call logging.
@@ -21,14 +21,14 @@ continue to do:
 
 without any changes (same `/v2/partials` paths, same `htmx-views` tag).
 
-Test-patch note: `template_response` / `requisition_tab` / `offer_review_queue`
-are re-exported here (from their real sources, or from .crud for
-`offer_review_queue`, which is defined there). Every sub-module call site pulls
-them back via a FUNCTION-LOCAL ``from . import X`` (not a module-level import) so
+Test-patch note: `template_response` / `requisition_tab` are re-exported here
+(from their real sources). Every sub-module call site pulls them back via a
+FUNCTION-LOCAL ``from . import X`` (not a module-level import) so
 `patch("app.routers.htmx.offers.X")` still intercepts every call site post-split —
 a module-level `from . import X` would bind the pre-patch object permanently at
 import time. (`maybe_release_on_offer` left this list in W3: the release hook now
-fires inside app/services/offer_service.py, not in these routes.)
+fires inside app/services/offer_service.py, not in these routes.
+`offer_review_queue` left it with the review-queue page delete, spec §5.1.)
 
 Called by: app/main.py (router mount).
 Depends on: .crud, .follow_ups, .replies sub-modules
@@ -45,12 +45,10 @@ from .._shared_tabs import requisition_tab  # noqa: F401
 # import add_offer`) so callers keep working unchanged.
 from .crud import (  # noqa: F401
     add_offer,
+    add_offer_parse,
     create_quote_from_offers,
     edit_offer,
     offer_changelog,
-    offer_review_queue,
-    promote_offer_htmx,
-    reject_offer_htmx,
     review_offer,
     save_parsed_offers,
 )

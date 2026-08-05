@@ -34,7 +34,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import ActivityType, QuoteStatus
+from ...constants import ActivityType, OfferStatus, QuoteStatus
 from ...database import get_db
 from ...dependencies import require_requisition_access, require_user
 from ...models import (
@@ -60,10 +60,16 @@ async def requisition_tab(
     req_id: int,
     tab: str,
     qual: str | None = None,
+    flagged: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return a specific tab partial for requisition detail."""
+    """Return a specific tab partial for requisition detail.
+
+    ``flagged`` applies to the Responses tab only: ``flagged=1`` switches it to the
+    flagged-AI-offers view (status pending_review) with approve/reject actions — the
+    W3 replacement for the deleted standalone review-queue page (spec §5.1).
+    """
     req = get_requisition_or_404(db, req_id)
     require_requisition_access(db, req_id, user)
 
@@ -147,7 +153,17 @@ async def requisition_tab(
             .order_by(VendorResponse.received_at.desc().nullslast())
             .all()
         )
+        # Flagged-AI filter (spec §5.1): pending_review offers reviewed inline here —
+        # the count always renders on the filter pill; the rows only when flagged=1.
+        flagged_offers = (
+            db.query(Offer)
+            .filter(Offer.requisition_id == req_id, Offer.status == OfferStatus.PENDING_REVIEW)
+            .order_by(Offer.created_at.desc().nullslast())
+            .all()
+        )
         ctx["responses"] = responses
+        ctx["flagged_offers"] = flagged_offers
+        ctx["show_flagged"] = flagged == "1"
         return template_response("htmx/partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
