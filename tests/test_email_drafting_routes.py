@@ -1,10 +1,12 @@
 """Tests for the AI email-drafting HTMX endpoints.
 
-Covers the four endpoints that surface the unified drafting service:
-- RFQ rephrase           POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
+Covers the endpoints that surface the unified drafting service:
 - follow-up draft        POST /v2/partials/follow-ups/{contact_id}/ai-draft
 - vendor reply draft     POST /v2/partials/requisitions/{req_id}/responses/{rid}/ai-draft-reply
 - vendor reply send      POST /v2/partials/requisitions/{req_id}/responses/{rid}/send-reply
+
+(The RFQ-rephrase endpoint left with the composer-A delete in W3 — the surviving
+vendor-modal composer has no AI body-polish surface; see SIMPLIFICATION_SPEC §5.1/§7.)
 
 draft_email is mocked; the send path relies on the TESTING=1 bypass (no real Graph call).
 """
@@ -52,30 +54,6 @@ def _make_response(db: Session, req_id: int) -> VendorResponse:
     db.commit()
     db.refresh(vr)
     return vr
-
-
-# ── RFQ rephrase ────────────────────────────────────────────────────────────
-def test_ai_rephrase_email_fills_textarea(client, db_session, test_requisition):
-    with patch("app.services.email_drafting.draft_email", new_callable=AsyncMock) as m:
-        m.return_value = {"body": "Hello team — kindly quote the parts below."}
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/ai-rephrase-email",
-            data={"body": "pls quote these parts"},
-        )
-    assert resp.status_code == 200
-    assert "Hello team" in resp.text
-    assert "rfq-body-textarea" in resp.text
-    m.assert_awaited_once()
-
-
-def test_ai_rephrase_email_empty_body_does_not_call_ai(client, db_session, test_requisition):
-    with patch("app.services.email_drafting.draft_email", new_callable=AsyncMock) as m:
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/ai-rephrase-email",
-            data={"body": "   "},
-        )
-    assert resp.status_code == 200
-    m.assert_not_awaited()
 
 
 # ── Follow-up draft ─────────────────────────────────────────────────────────

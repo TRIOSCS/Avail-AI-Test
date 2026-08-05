@@ -1,39 +1,35 @@
 """ai_offer_service.py — AI offer and RFQ business logic extracted from routers/ai.py.
 
-Handles: prospect contact promotion, saving AI-parsed offers (JSON API + the HTMX
-form-array sibling), applying freeform RFQ templates, and saving freeform offers. All
-functions take a db Session and return data — they do NOT commit.
+Handles: prospect contact promotion, saving the HTMX form-array of user-edited
+AI-parsed offers (each row through offer_service.create_offer — W3 "one
+offer_service"), and applying freeform RFQ templates. The retired JSON-API pair
+(save_parsed_offers / save_freeform_offers) died with their /api/ai routes in the
+W2 sweep. promote_prospect_contact and apply_freeform_rfq take a db Session and
+do NOT commit; save_form_parsed_offers commits per offer (via the service).
 
-Called by: routers/ai.py (save_parsed_offers, apply_freeform_rfq, save_freeform_offers),
-    routers/htmx/offers.py (save_parsed_offers → parse_offer_form_rows +
-    save_form_parsed_offers, P4.2)
-Depends on: models (Offer, Requirement, Requisition, VendorCard, VendorContact,
-            SiteContact, ProspectContact, CustomerSite, User),
-            vendor_utils, search_service, utils/normalization,
-            vendor_unavailability (offer-hook release on user-saved ACTIVE offers),
-            offer_qualification (apply_qualification — form-parsed path only)
+Called by: routers/htmx/offers/crud.py (save_parsed_offers route →
+    parse_offer_form_rows + save_form_parsed_offers, P4.2)
+Depends on: models (Requirement, Requisition, VendorContact, SiteContact,
+            ProspectContact, CustomerSite, User), schemas/crm (OfferCreate),
+            services/offer_service (canonical create),
+            services/requirement_service (THE requirement-creation pipeline, spec §9)
 """
 
 from loguru import logger
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, OfferCondition, OfferStatus
+from ..constants import OfferCondition
 from ..models import (
     CustomerSite,
-    Offer,
     ProspectContact,
     Requirement,
     Requisition,
     SiteContact,
     User,
-    VendorCard,
     VendorContact,
 )
 from ..utils import safe_float, safe_int
-from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
-from ..vendor_utils import normalize_vendor_name
-from .activity_service import log_activity
-from .vendor_unavailability import maybe_release_on_offer
 
 # -- Prospect Contact Promotion -----------------------------------------------
 
@@ -150,60 +146,6 @@ def _promote_to_site_contact(db: Session, pc: ProspectContact) -> SiteContact:
     )
 
 
-# -- Save AI-Parsed Offers ---------------------------------------------------
-
-
-def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None, offers: list, user_id: int) -> dict:
-    """Save AI-parsed draft offers to the Offers table.
-
-    Does NOT commit — caller must commit. Returns dict with created count and offer_ids.
-    """
-    from ..search_service import resolve_material_card
-
-    reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
-
-    created = []
-    for o in offers:
-        req_id = _match_requirement(o.mpn, reqs) if o.mpn else None
-        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
-
-        offer = Offer(
-            requisition_id=requisition_id,
-            requirement_id=req_id,
-            material_card_id=mat_card.id if mat_card else None,
-            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
-            vendor_name=o.vendor_name,
-            vendor_name_normalized=normalize_vendor_name(o.vendor_name or ""),
-            mpn=o.mpn,
-            manufacturer=o.manufacturer,
-            qty_available=o.qty_available,
-            unit_price=o.unit_price,
-            currency=o.currency,
-            lead_time=o.lead_time,
-            date_code=o.date_code,
-            condition=o.condition,
-            packaging=o.packaging,
-            moq=o.moq,
-            source="ai_parsed",
-            vendor_response_id=response_id,
-            entered_by_id=user_id,
-            notes=o.notes,
-            status=OfferStatus.PENDING_REVIEW,
-        )
-        db.add(offer)
-        db.flush()
-        _log_offer_created(db, offer, user_id)
-        created.append(offer.id)
-
-    logger.info(
-        "Saved {} AI-parsed offers for requisition_id={} response_id={}",
-        len(created),
-        requisition_id,
-        response_id,
-    )
-    return {"created": len(created), "offer_ids": created}
-
-
 # -- Apply Freeform RFQ Template ----------------------------------------------
 
 
@@ -218,11 +160,16 @@ def apply_freeform_rfq(
 ) -> dict:
     """Create requisition + requirements from edited freeform RFQ template.
 
-    Does NOT commit — caller must commit. Returns dict with id, name,
-    requirements_added. Raises ValueError if customer_site not found.
+    Requirements go through THE creation pipeline
+    (services/requirement_service.create_requirements, spec §9): MPN display+key
+    normalization, condition/packaging vocabulary, substitute dedup, MaterialCard
+    resolve, tag propagation, task auto-gen, dup detection. Caller owns the final commit
+    (task auto-gen commits mid-pipeline — see requirement_service docstring). Returns
+    dict with id, name, requirements_added. Raises ValueError if customer_site not
+    found.
     """
     from ..schemas.requisitions import RequirementCreate
-    from ..search_service import resolve_material_card
+    from .requirement_service import create_requirements
 
     site = db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).first()
     if not site:
@@ -241,113 +188,43 @@ def apply_freeform_rfq(
     db.add(req)
     db.flush()
 
-    added = 0
+    items: list[dict] = []
     for item in requirements[:50]:
         try:
             parsed = RequirementCreate.model_validate(item)
         except (ValueError, TypeError) as exc:
             logger.warning("Skipping invalid requirement item: {} — {}", item, exc)
             continue
-        mat_card = resolve_material_card(parsed.primary_mpn, db) if parsed.primary_mpn else None
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn=parsed.primary_mpn,
-            normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
-            material_card_id=mat_card.id if mat_card else None,
-            target_qty=parsed.target_qty,
-            target_price=parsed.target_price,
-            substitutes=parsed.substitutes[:20],
-            condition=parsed.condition or "",
-            date_codes=parsed.date_codes or "",
-            firmware=parsed.firmware or "",
-            hardware_codes=parsed.hardware_codes or "",
-            packaging=parsed.packaging or "",
-            notes=parsed.notes or "",
+        items.append(
+            {
+                "primary_mpn": parsed.primary_mpn,
+                "manufacturer": parsed.manufacturer,
+                "target_qty": parsed.target_qty,
+                "target_price": parsed.target_price,
+                "brand": parsed.brand,
+                "substitutes": parsed.substitutes,
+                "condition": parsed.condition,
+                "date_codes": parsed.date_codes,
+                "firmware": parsed.firmware,
+                "hardware_codes": parsed.hardware_codes,
+                "packaging": parsed.packaging,
+                "description": parsed.description,
+                "package_type": parsed.package_type,
+                "revision": parsed.revision,
+                "customer_pn": parsed.customer_pn,
+                "need_by_date": parsed.need_by_date,
+                "notes": parsed.notes,
+            }
         )
-        db.add(r)
-        added += 1
 
+    result = create_requirements(db, req, items)
+    added = len(result.created)
     logger.info("Created freeform requisition id={} name='{}' with {} requirements", req.id, req.name, added)
     return {"id": req.id, "name": req.name, "requirements_added": added}
 
 
-# -- Save Freeform Offers ----------------------------------------------------
-
-
-def save_freeform_offers(
-    db: Session,
-    requisition_id: int,
-    offers: list,
-    user_id: int,
-) -> dict:
-    """Save freeform-parsed offers to a requisition.
-
-    Does NOT commit — caller must commit. Returns dict with created count and offer_ids.
-    """
-    from ..search_service import resolve_material_card
-
-    reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
-    user = db.get(User, user_id)
-
-    created = []
-    for o in offers:
-        req_id = _match_requirement(o.mpn, reqs) if o.mpn else None
-        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
-
-        norm_name = normalize_vendor_name(o.vendor_name or "")
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
-        if not card:
-            card = VendorCard(
-                normalized_name=norm_name,
-                display_name=o.vendor_name or "Unknown",
-                emails=[],
-                phones=[],
-            )
-            db.add(card)
-            db.flush()
-
-        offer = Offer(
-            requisition_id=requisition_id,
-            requirement_id=req_id,
-            material_card_id=mat_card.id if mat_card else None,
-            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
-            vendor_card_id=card.id,
-            vendor_name=card.display_name,
-            vendor_name_normalized=card.normalized_name,
-            mpn=o.mpn,
-            manufacturer=o.manufacturer,
-            qty_available=o.qty_available,
-            unit_price=o.unit_price,
-            currency=o.currency or "USD",
-            lead_time=o.lead_time,
-            date_code=o.date_code,
-            condition=o.condition or OfferCondition.NEW,
-            packaging=o.packaging,
-            moq=o.moq,
-            source="freeform_parsed",
-            entered_by_id=user_id,
-            notes=o.notes,
-            status=OfferStatus.ACTIVE,
-        )
-        db.add(offer)
-        db.flush()
-        # Offer hook: freeform offers are saved ACTIVE after user review — user-
-        # initiated proof of availability, release matching active records.
-        maybe_release_on_offer(db, req_id, offer.vendor_name, user, offer_condition=offer.condition)
-        _log_offer_created(db, offer, user_id)
-        created.append(offer.id)
-
-    logger.info(
-        "Saved {} freeform offers for requisition_id={}",
-        len(created),
-        requisition_id,
-    )
-    return {"created": len(created), "offer_ids": created}
-
-
 # -- Save HTMX Form-Parsed Offers ---------------------------------------------
-# The user-facing sibling of save_parsed_offers (JSON API, PENDING_REVIEW) above:
-# the HTMX parse-results partial lets a buyer edit the AI-parsed offers in a form
+# The HTMX parse-results partial lets a buyer edit the AI-parsed offers in a form
 # before saving, so these go straight to ACTIVE with qualification scoring applied
 # instead of sitting in PENDING_REVIEW. Split in two so the router can short-circuit
 # on "no rows at all" (parse_offer_form_rows) before doing any DB work.
@@ -402,25 +279,25 @@ def parse_offer_form_rows(form, vendor_name: str) -> list[dict]:
     return offers_data
 
 
-def save_form_parsed_offers(
+async def save_form_parsed_offers(
     db: Session, requisition_id: int, vendor_name: str, offers_data: list[dict], user: User
 ) -> int:
-    """Save user-edited, HTMX-form-parsed offers (from ``parse_offer_form_rows``) to the
-    Offers table as ACTIVE.
+    """Save user-edited, HTMX-form-parsed offers (from ``parse_offer_form_rows``) as
+    ACTIVE — each row through the canonical ``offer_service.create_offer`` (W3).
 
-    Resolves/creates one VendorCard per distinct vendor name (falling back to the
-    form's top-level *vendor_name*, then "Unknown", exactly as ``parse_offer_form_rows``'
-    own default does for a row with no vendor_name field at all — this second fallback
-    additionally covers a row whose vendor_name field is present but blank), matches
-    each offer's mpn to a Requirement by an EXACT (case-insensitive, whitespace-trimmed)
-    ``primary_mpn`` match — fuzzy matching is deliberately NOT used here, unlike
-    ``_match_requirement``, because the user has already reviewed/corrected the MPN in
-    the edit form — applies qualification scoring, and triggers the
-    vendor-unavailability release hook (a user-saved ACTIVE offer is proof of
-    availability). Rows with no ``mpn`` are silently skipped. Does NOT commit — caller
-    must commit. Returns the count of offers saved.
+    Vendor resolution/creation, normalized_mpn, qualification scoring, activity
+    logging, and the vendor-unavailability release hook all live in the service.
+    This loop keeps only the form-specific adaptation: vendor-name fallback to the
+    form's top-level *vendor_name*, then "Unknown"; requirement matching by an
+    EXACT (case-insensitive, whitespace-trimmed) ``primary_mpn`` match — fuzzy
+    matching is deliberately NOT used because the user already reviewed/corrected
+    the MPN in the edit form. Rows with no ``mpn`` are silently skipped; a row that
+    fails payload validation (e.g. negative qty) is skipped with a warning instead
+    of aborting the batch. Commits per offer (via the service). Returns the count
+    of offers saved.
     """
-    from .offer_qualification import apply_qualification
+    from ..schemas.crm import OfferCreate
+    from .offer_service import create_offer
 
     reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
 
@@ -437,65 +314,25 @@ def save_form_parsed_offers(
                 break
 
         vn = o.get("vendor_name") or vendor_name or "Unknown"
-        norm_name = normalize_vendor_name(vn)
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
-        if not card:
-            card = VendorCard(normalized_name=norm_name, display_name=vn, emails=[], phones=[])
-            db.add(card)
-            db.flush()
-
-        offer = Offer(
-            requisition_id=requisition_id,
-            requirement_id=req_match_id,
-            vendor_card_id=card.id,
-            vendor_name=card.display_name,
-            vendor_name_normalized=card.normalized_name,
-            mpn=o["mpn"],
-            # Canonical dedup key (dash-stripped) so the part-centric offers query
-            # matches these AI-parsed offers, mirroring add_offer / create_offer.
-            normalized_mpn=normalize_mpn_key(o["mpn"]),
-            manufacturer=o.get("manufacturer"),
-            qty_available=o.get("qty_available"),
-            unit_price=o.get("unit_price"),
-            lead_time=o.get("lead_time"),
-            date_code=o.get("date_code"),
-            condition=o.get("condition") or OfferCondition.NEW,
-            moq=o.get("moq"),
-            notes=o.get("notes"),
-            source="ai_parsed",
-            entered_by_id=user.id,
-            status=OfferStatus.ACTIVE,
-        )
-        apply_qualification(offer)  # non-raising: composes note + sets qualification_status
-        db.add(offer)
-        # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
-        # proof of availability, release the vendor's matching active records.
-        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user, offer_condition=offer.condition)
+        try:
+            payload = OfferCreate(
+                mpn=o["mpn"],
+                vendor_name=vn,
+                requirement_id=req_match_id,
+                manufacturer=o.get("manufacturer"),
+                qty_available=o.get("qty_available"),
+                unit_price=o.get("unit_price"),
+                lead_time=o.get("lead_time"),
+                date_code=o.get("date_code"),
+                condition=o.get("condition") or OfferCondition.NEW,
+                moq=o.get("moq"),
+                notes=o.get("notes"),
+                source="ai_parsed",
+            )
+        except ValidationError as exc:
+            logger.warning("Skipping invalid parsed offer row (mpn={}): {}", o.get("mpn"), exc)
+            continue
+        await create_offer(db, requisition_id, payload, user)
         saved_count += 1
 
     return saved_count
-
-
-# -- Helpers ------------------------------------------------------------------
-
-
-def _match_requirement(mpn: str, requirements: list[Requirement]) -> int | None:
-    """Find a matching requirement by fuzzy MPN match."""
-    for r in requirements:
-        if fuzzy_mpn_match(mpn, r.primary_mpn):
-            return r.id
-    return None
-
-
-def _log_offer_created(db: Session, offer: Offer, user_id: int) -> None:
-    """Log an OFFER_CREATED activity for a freshly saved offer (must be flushed)."""
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_CREATED,
-        requisition_id=offer.requisition_id,
-        requirement_id=offer.requirement_id,
-        user_id=user_id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-        details={"offer_id": offer.id, "source": offer.source},
-    )

@@ -197,6 +197,9 @@ class OfferCreate(BaseModel):
     manufacturer: str | None = None
     qty_available: int | None = Field(default=None, ge=0)
     unit_price: float | None = Field(default=None, ge=0)
+    # W3 offer_service: persisted by the canonical create (was silently dropped by
+    # the retired JSON builder); None keeps the column default ("USD").
+    currency: str | None = None
     lead_time: str | None = None
     date_code: str | None = None
     condition: str = OfferCondition.NEW
@@ -254,6 +257,9 @@ class OfferCreate(BaseModel):
 class OfferUpdate(BaseModel):
     vendor_name: str | None = None
     mpn: str | None = None
+    # W3 offer_service: the requisition-workspace edit form can (re)link an offer to a
+    # requirement — carried on the schema so the ONE update path applies it.
+    requirement_id: int | None = None
     manufacturer: str | None = None
     qty_available: int | None = None
     unit_price: float | None = None

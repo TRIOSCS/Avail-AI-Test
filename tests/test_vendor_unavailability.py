@@ -293,6 +293,10 @@ def _make_requirement(db_session: Session, primary_mpn: str | None = "ST3300657S
     requirement = Requirement(
         requisition_id=requisition.id,
         primary_mpn=primary_mpn,
+        # Post-migration-206 invariant: every requirement with a primary_mpn carries
+        # the canonical key form (the pipeline writes it; 206 remapped legacy rows).
+        # The add-to-requisition picker matches on it.
+        normalized_mpn=normalize_mpn_key(primary_mpn) if primary_mpn else None,
         manufacturer="TestMfr",
     )
     db_session.add(requirement)
@@ -1984,37 +1988,10 @@ class TestOfferHookReleasingSites:
         assert resp.status_code == 200
         _assert_released(db_session, rec)
 
-    def test_ai_save_parsed_pending_review_does_not_release_until_approved(
-        self, client, db_session: Session, test_requisition, test_user: User
-    ):
-        """save_parsed_offers persists PENDING_REVIEW (not proof yet); the user
-        approving the pending offer is the proof that releases."""
-        from unittest.mock import patch
-
-        from app.services.ai_offer_service import save_parsed_offers as ai_save_parsed
-
-        rec = _hook_record(db_session, "Arrow Electronics")
-        with patch("app.search_service.resolve_material_card", return_value=None):
-            result = ai_save_parsed(db_session, test_requisition.id, None, [_hook_offer_input()], test_user.id)
-        db_session.commit()
-        assert result["created"] == 1
-        _assert_not_released(db_session, rec)
-
-        resp = client.put(f"/api/offers/{result['offer_ids'][0]}/approve")
-        assert resp.status_code == 200
-        _assert_released(db_session, rec)
-
-    def test_save_freeform_offers_releases(self, db_session: Session, test_requisition, test_user: User):
-        from unittest.mock import patch
-
-        from app.services.ai_offer_service import save_freeform_offers
-
-        rec = _hook_record(db_session, "Arrow Electronics")
-        with patch("app.search_service.resolve_material_card", return_value=None):
-            result = save_freeform_offers(db_session, test_requisition.id, [_hook_offer_input()], test_user.id)
-        db_session.commit()
-        assert result["created"] == 1
-        _assert_released(db_session, rec)
+    # The save_parsed_offers (JSON, PENDING_REVIEW) and save_freeform_offers release
+    # tests were deleted in W3 with the functions themselves (their /api/ai routes died
+    # in the W2 sweep). The surviving HTMX form path's release behavior is locked by
+    # test_save_parsed_offers_route_releases above.
 
 
 class TestApprovalTwinReleasingSites:
@@ -2092,8 +2069,8 @@ class TestOfferHookExcludedPaths:
     def test_email_auto_create_does_not_release(self, db_session: Session, test_user: User, test_requisition):
         from unittest.mock import patch
 
-        from app.email_service import _auto_create_offers_from_parse
         from app.models import Offer, VendorResponse
+        from app.services.offer_service import create_offers_from_parsed_response
 
         rec = _hook_record(db_session, "TestVendor Inc")
         vr = VendorResponse(
@@ -2111,7 +2088,7 @@ class TestOfferHookExcludedPaths:
 
         draft = {"mpn": "LM317T", "vendor_name": "TestVendor Inc", "unit_price": 1.5}
         with patch("app.services.response_parser.extract_draft_offers", return_value=[draft]):
-            _auto_create_offers_from_parse(vr, {"confidence": 0.9}, db_session)
+            create_offers_from_parsed_response(vr, {"confidence": 0.9}, db_session)
         db_session.commit()
 
         offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).one()
@@ -2667,12 +2644,13 @@ class TestOfferConditionForwardingCoverage:
     """
 
     def test_htmx_add_offer_forwards_condition(self, client, db_session: Session, test_requisition):
-        """app/routers/htmx/offers.py::add_offer forwards offer.condition as
-        offer_condition to maybe_release_on_offer."""
+        """The add-offer door forwards offer.condition as offer_condition to
+        maybe_release_on_offer — the call site lives in offer_service.create_offer since
+        the W3 consolidation."""
         from unittest.mock import patch
 
         requirement = test_requisition.requirements[0]
-        with patch("app.routers.htmx.offers.maybe_release_on_offer") as mock_release:
+        with patch("app.services.offer_service.maybe_release_on_offer") as mock_release:
             resp = client.post(
                 f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
                 data={

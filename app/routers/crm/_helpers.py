@@ -2,12 +2,15 @@
 
 from datetime import date, datetime, timedelta
 
-from sqlalchemy.orm import Session
-
-from ...models import ChangeLog, Quote
+from ...models import Quote
 
 # Late import — re-exported for backward compatibility
 from ...services.crm_service import next_quote_number  # noqa: F401
+
+# record_changes moved to app/services/offer_service.py (W3 — the offer lifecycle is
+# its only caller). Re-exported here under its original name for crm/__init__.py and
+# any existing imports.
+from ...services.offer_service import record_changes  # noqa: F401
 
 # _PRICED_STATUSES / _quote_date_iso / _preload_last_quoted_prices live in
 # app/services/pricing_history.py now (P4.1 — quote_builder_service.py needed the
@@ -31,26 +34,6 @@ def _iso(dt: datetime | None) -> str | None:
 def _float(v) -> float | None:
     """Return a numeric value as a float, or None if falsy."""
     return float(v) if v else None
-
-
-def record_changes(
-    db: Session, entity_type: str, entity_id: int, user_id: int, old_dict: dict, new_dict: dict, fields: list[str]
-):
-    """Record field-level changes to the change_log table."""
-    for f in fields:
-        old_val = str(old_dict.get(f) or "")
-        new_val = str(new_dict.get(f) or "")
-        if old_val != new_val:
-            db.add(
-                ChangeLog(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    user_id=user_id,
-                    field_name=f,
-                    old_value=old_val,
-                    new_value=new_val,
-                )
-            )
 
 
 def quote_to_dict(q: Quote, db=None, cards: dict | None = None) -> dict:

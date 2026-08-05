@@ -2815,8 +2815,9 @@ async def sightings_send_inquiry(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Offers tab (part-centric) — Convert-to-offer, Enter-offer, and mutations.
-# Creation/mutation logic is reused from app.routers.crm.offers (no duplication);
-# these endpoints just adapt form input and re-render #sightings-offers-panel.
+# Creation/mutation logic lives in app.services.offer_service (W3 "one
+# offer_service"); these endpoints just adapt form input, gate essentials, and
+# re-render #sightings-offers-panel.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -3006,14 +3007,14 @@ async def sightings_create_offer(
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
-    """Create an offer for this part via the canonical create_offer, then re-render the
-    offers panel.
+    """Create an offer for this part via the canonical offer_service.create_offer, then
+    re-render the offers panel.
 
     Reused for both Convert-to-offer and Enter-offer.
     """
-    from ..routers.crm.offers import create_offer
     from ..schemas.crm import OfferCreate
     from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
+    from ..services.offer_service import create_offer
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3113,8 +3114,7 @@ async def sightings_create_offer(
     # The canonical create_offer fires the offer-hook release itself
     # (maybe_release_on_offer) — no route-level call needed here. Essentials were already
     # gated above, so create_offer no longer rejects on qualification grounds.
-    await create_offer(requirement.requisition_id, payload, user=user, db=db)
-    db.commit()
+    await create_offer(db, requirement.requisition_id, payload, user)
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
 
@@ -3129,7 +3129,7 @@ async def sightings_review_offer(
     user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
     """Approve or reject a pending_review offer, then re-render the offers panel."""
-    from ..routers.crm.offers import approve_offer, reject_offer
+    from ..services.offer_service import approve_offer, reject_offer
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3141,9 +3141,9 @@ async def sightings_review_offer(
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     if action == "approve":
-        await approve_offer(offer_id, user=user, db=db)
+        approve_offer(db, offer, user)
     else:
-        await reject_offer(offer_id, user=user, db=db)
+        reject_offer(db, offer, user)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
 
@@ -3156,8 +3156,9 @@ async def sightings_reconfirm_offer(
     db: Session = Depends(get_db),
     user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
 ):
-    """Reconfirm an offer, then re-render the offers panel."""
-    from ..routers.crm.offers import reconfirm_offer
+    """Reconfirm an offer (canonical TTL-resetting semantics), then re-render the offers
+    panel."""
+    from ..services.offer_service import reconfirm_offer
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3167,7 +3168,7 @@ async def sightings_reconfirm_offer(
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
-    await reconfirm_offer(offer_id, user=user, db=db)
+    reconfirm_offer(db, offer, user)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
 
@@ -3181,7 +3182,7 @@ async def sightings_mark_offer_sold(
     user: User = Depends(require_buyer),
 ):
     """Mark an offer sold, then re-render the offers panel."""
-    from ..routers.crm.offers import mark_offer_sold
+    from ..services.offer_service import mark_offer_sold
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3191,7 +3192,7 @@ async def sightings_mark_offer_sold(
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
-    await mark_offer_sold(offer_id, user=user, db=db)
+    mark_offer_sold(db, offer, user)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
 
@@ -3205,7 +3206,7 @@ async def sightings_delete_offer(
     user: User = Depends(require_buyer),
 ):
     """Delete an offer, then re-render the offers panel."""
-    from ..routers.crm.offers import delete_offer
+    from ..services.offer_service import delete_offer
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3215,7 +3216,7 @@ async def sightings_delete_offer(
     offer = db.get(Offer, offer_id)
     if offer is None or offer.requirement_id != requirement_id:
         raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
-    await delete_offer(offer_id, user=user, db=db)
+    delete_offer(db, offer, user)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
 
@@ -3480,10 +3481,11 @@ async def sightings_update_offer(
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
-    """Update an offer via the canonical update_offer, then re-render the panel."""
-    from ..routers.crm.offers import update_offer
+    """Update an offer via the canonical offer_service.update_offer, then re-render the
+    panel."""
     from ..schemas.crm import OfferUpdate
     from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
+    from ..services.offer_service import update_offer
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -3605,7 +3607,7 @@ async def sightings_update_offer(
             }
             return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
-    await update_offer(offer_id, payload, user=user, db=db)
+    update_offer(db, offer, payload, user)
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")
 

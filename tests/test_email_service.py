@@ -1129,8 +1129,8 @@ class TestSendBatchRfqCrossRequisition:
 
     One email per vendor; one Contact per (requisition, vendor) sharing that email's
     graph ids; subject carries one [ref:{id}] token per requisition in ascending
-    requisition-id order. The legacy scalar requisition_id shape (htmx_views.rfq_send)
-    stays byte-identical.
+    requisition-id order. The legacy scalar requisition_id shape (surviving caller:
+    sightings_offer_request_send) stays byte-identical.
     """
 
     @pytest.mark.asyncio
@@ -1312,9 +1312,10 @@ class TestSendBatchRfqCrossRequisition:
 
     @pytest.mark.asyncio
     async def test_legacy_scalar_requisition_id_shape_unchanged(self, db_session, test_user, test_requisition):
-        """Regression: the htmx_views.rfq_send call shape (scalar requisition_id,
-        parts as TEXT) is byte-identical — one Contact, single token, parts passed
-        through untouched, parts_count keeps its historical len() semantics."""
+        """Regression: the scalar-requisition_id call shape (parts as TEXT — the
+        sightings_offer_request_send door) is byte-identical — one Contact, single
+        token, parts passed through untouched, parts_count keeps its historical
+        len() semantics."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
@@ -1323,7 +1324,7 @@ class TestSendBatchRfqCrossRequisition:
             {
                 "vendor_name": "Vendor A",
                 "vendor_email": "a@vendora.com",
-                "parts": "LM317T x100",  # rfq_send passes a parts_summary STRING
+                "parts": "LM317T x100",  # scalar-mode callers pass a parts STRING
                 "subject": "RFQ - Req",
                 "body": "Quote please",
             }

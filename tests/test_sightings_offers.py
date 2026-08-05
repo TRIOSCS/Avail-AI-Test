@@ -255,14 +255,32 @@ def test_part_offers_empty_when_no_match(db_session):
 
 
 def test_reconfirm_offer_via_panel(client, db_session):
+    """Sightings reconfirm uses THE canonical TTL-RESETTING semantics (spec §9 / §10-W3
+    acceptance): expires_at reset to now+14d, staleness cleared, attribution reactivated
+    — not just a reconfirmed_at/count bump (the retired crm JSON copy's drift that left
+    reconfirmed offers stuck stale)."""
     rq, r = _req(db_session, mpn="LM317T")
     o = _offer(db_session, rq, r, "Arrow", "LM317T", "lm317t", status=OfferStatus.ACTIVE)
+    # Simulate a stale, attribution-expired offer so the reset is observable.
+    o.is_stale = True
+    o.attribution_status = "expired"
+    o.expires_at = None
+    db_session.commit()
+    before = datetime.now(UTC)
     resp = client.post(f"/v2/partials/sightings/{r.id}/offers/{o.id}/reconfirm")
     assert resp.status_code == 200
     db_session.expire_all()
     refreshed = db_session.get(Offer, o.id)
     assert refreshed.reconfirm_count == 1
     assert refreshed.reconfirmed_at is not None
+    # TTL reset: expires_at lands ~14 days out from the reconfirm moment.
+    assert refreshed.expires_at is not None
+    expires_at = refreshed.expires_at if refreshed.expires_at.tzinfo else refreshed.expires_at.replace(tzinfo=UTC)
+    assert expires_at >= before + timedelta(days=13)
+    assert expires_at <= datetime.now(UTC) + timedelta(days=15)
+    # Staleness cleared + attribution reactivated.
+    assert refreshed.is_stale is False
+    assert refreshed.attribution_status == "active"
 
 
 def test_mark_sold_via_panel_for_creator(client, db_session):

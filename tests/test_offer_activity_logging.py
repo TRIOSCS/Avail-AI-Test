@@ -26,8 +26,8 @@ def _activity_rows(db, requisition_id, activity_type):
 
 def test_email_parsed_offer_logs_offer_created(db_session, test_requisition):
     """An offer auto-created from a parsed vendor email writes offer_created."""
-    from app.email_service import _auto_create_offers_from_parse
     from app.models.offers import VendorResponse
+    from app.services.offer_service import create_offers_from_parsed_response
 
     vr = VendorResponse(
         requisition_id=test_requisition.id,
@@ -50,57 +50,17 @@ def test_email_parsed_offer_logs_offer_created(db_session, test_requisition):
             }
         ]
     }
-    _auto_create_offers_from_parse(vr, parsed, db_session)
+    create_offers_from_parsed_response(vr, parsed, db_session)
     db_session.commit()
 
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
     assert len(rows) >= 1
 
 
-def _one_parsed_offer():
-    """Return an offers list with one valid DraftOfferItem for the AI offer services."""
-    from app.schemas.ai import DraftOfferItem
-
-    return [
-        DraftOfferItem(
-            vendor_name="Arrow Electronics",
-            mpn="LM317T",
-            manufacturer="Texas Instruments",
-            qty_available=500,
-            unit_price=0.42,
-        )
-    ]
-
-
-def test_save_parsed_offers_logs_offer_created(db_session, test_requisition):
-    """save_parsed_offers writes one offer_created row per saved offer."""
-    from app.services.ai_offer_service import save_parsed_offers
-
-    save_parsed_offers(
-        db=db_session,
-        requisition_id=test_requisition.id,
-        response_id=None,
-        offers=_one_parsed_offer(),
-        user_id=None,
-    )
-    db_session.commit()
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
-    assert len(rows) >= 1
-
-
-def test_save_freeform_offers_logs_offer_created(db_session, test_requisition, test_user):
-    """save_freeform_offers writes one offer_created row per saved offer."""
-    from app.services.ai_offer_service import save_freeform_offers
-
-    save_freeform_offers(
-        db=db_session,
-        requisition_id=test_requisition.id,
-        offers=_one_parsed_offer(),
-        user_id=test_user.id,
-    )
-    db_session.commit()
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
-    assert len(rows) >= 1
+# The save_parsed_offers / save_freeform_offers JSON-pair tests were deleted in W3
+# together with the functions themselves (their /api/ai routes died in the W2 sweep;
+# the surviving HTMX form path is covered by test_save_parsed_offers_normalize_qual.py
+# and test_htmx_views.py).
 
 
 def test_clone_requisition_logs_offer_created(db_session, test_requisition, test_user, test_offer):

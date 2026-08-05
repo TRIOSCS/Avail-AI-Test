@@ -21,11 +21,10 @@ legacy NULL-column fallback — never raw/lower(trim()) comparisons, never bare 
 equality. Functions never commit; callers own the transaction.
 
 Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
-           the user-initiated offer sites via maybe_release_on_offer
-           (app/routers/crm/offers.py create_offer + approve_offer + promote_offer,
-           app/routers/htmx/offers.py add_offer + save_parsed_offers +
-           promote_offer_htmx + review_offer approve,
-           app/services/ai_offer_service.py save_freeform_offers),
+           the user-initiated offer sites via maybe_release_on_offer — all of
+           which live in app/services/offer_service.py since the W3 "one
+           offer_service" consolidation (create_offer for every add/parse door,
+           approve_offer for approve/promote everywhere),
            app/services/sighting_status.py (reader-authority Batch 4),
            sighting-persistence paths via apply_to_fresh_sightings()
            (search_service, ICS/NC sighting writers, sources import,

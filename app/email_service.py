@@ -13,17 +13,13 @@ from sqlalchemy import func as sqla_func
 from sqlalchemy.orm import Session
 
 from .constants import (
-    ActivityType,
     ContactStatus,
-    OfferStatus,
     PendingBatchStatus,
     VendorResponseStatus,
 )
 from .models import (
-    ActivityLog,
     Contact,
     ExcessOutreach,
-    Offer,
     PendingBatch,
     ProcessedMessage,
     Requirement,
@@ -32,12 +28,11 @@ from .models import (
     VendorCard,
     VendorResponse,
 )
-from .services.activity_service import log_activity, log_email_activity
+from .services.activity_service import log_email_activity
 from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
 from .shared_constants import RFQ_SUBJECT_TAG_RE
-from .utils.async_helpers import hold_bg_task
 from .vendor_utils import normalize_vendor_name
 
 
@@ -115,8 +110,10 @@ async def send_batch_rfq(
     order, so preview and send stay deterministic and identical).
 
     Legacy shim: without the map, the scalar ``requisition_id`` behaves exactly
-    as before (one Contact per vendor, parts taken from each vendor group) —
-    callers like htmx_views.rfq_send need no change.
+    as before (one Contact per vendor, parts taken from each vendor group).
+    Surviving caller: app/routers/sightings.py sightings_offer_request_send (the
+    single-vendor offer-request door). Fold it into the map shape when the offer
+    doors collapse — then this shim can go.
 
     ``requisition_id`` and ``requisition_parts_map`` are MUTUALLY EXCLUSIVE modes
     (single- vs cross-requisition). Passing both raises ``ValueError`` — the scalar
@@ -965,8 +962,8 @@ async def poll_inbox(
             # Only enqueue for AI parsing AFTER the savepoint commits. If the
             # savepoint above had failed, the except rolls back vr; enqueuing
             # earlier would let a vanished vendor_response_id reach AI parsing
-            # (billed) and _auto_create_offers_from_parse, poisoning the final
-            # db.commit() and rolling back the entire scan.
+            # (billed) and the offer_service reply-scan auto-create, poisoning the
+            # final db.commit() and rolling back the entire scan.
             # A purely-resell reply (matched the outreach tier, no Contact) carries no RFQ
             # to parse and no contact status to repair, so it never enters AI parsing —
             # don't bill Claude for it. A reply that also matched a Contact still parses.
@@ -1462,11 +1459,13 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session | None = 
     """Apply AI-parsed data to a VendorResponse record.
 
     Pure field assignment \u2014 classifies the response and sets fields on vr.
-    When db is provided, also runs _auto_create_offers_from_parse for
+    When db is provided, also runs the offer_service reply-scan auto-create for
     backward compatibility with existing callers.
 
     Called by: _parse_sequential_fallback, process_batch_results, tests.
-    Depends on: _classify_response, _auto_create_offers_from_parse.
+    Depends on: _classify_response, offer_service.create_offers_from_parsed_response
+        (the system-actor create — moved there in the W3 "one offer_service"
+        consolidation).
     """
     vr.parsed_data = parsed
     vr.confidence = parsed.get("confidence", 0)
@@ -1479,210 +1478,11 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session | None = 
     # Delegate business-logic side effects when db is provided
     if db is not None:
         try:
-            _auto_create_offers_from_parse(vr, parsed, db)
+            from .services.offer_service import create_offers_from_parsed_response
+
+            create_offers_from_parsed_response(vr, parsed, db)
         except Exception as e:
             logger.error("Auto-create offers failed for VR {}: {}", getattr(vr, "id", "?"), e, exc_info=True)
-
-
-def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session) -> None:
-    """Auto-create Offer records and side effects from parsed email data.
-
-    Business logic extracted from _apply_parsed_result:
-    - Creates Offer records (high confidence >= 0.8 active, 0.5-0.8 pending_review)
-    - Generates tasks for email-parsed offers
-    - Captures offer facts into Knowledge Ledger
-    - Propagates tags from material cards to vendor cards
-    - Resets strategic vendor 39-day clock
-    - Creates/updates deduplicated ActivityLog notifications
-
-    Called by: _apply_parsed_result (when db provided).
-    Depends on: extract_draft_offers, resolve_material_card, normalize_mpn_key,
-                tier_for_parsed_offer, task_service, knowledge_service, tagging.
-    """
-    if not (vr.confidence and vr.confidence >= 0.5):
-        return
-
-    try:
-        from .services.response_parser import extract_draft_offers
-
-        draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
-    except Exception as e:
-        logger.warning("Failed to extract draft offers: {}", e)
-        return
-
-    req = db.get(Requisition, vr.requisition_id) if vr.requisition_id else None
-    owner_id = vr.scanned_by_user_id
-    if req and req.created_by:
-        owner_id = req.created_by
-
-    # Build maps for linking: MPN -> requirement_id, MPN -> material_card_id
-    from .search_service import resolve_material_card
-    from .utils.normalization import normalize_mpn_key
-
-    mpn_to_req_id: dict[str, int] = {}
-    mpn_to_card_id: dict[str, int] = {}
-    if req:
-        for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
-            if r.primary_mpn:
-                key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
-                mpn_to_req_id[key] = r.id
-                if r.material_card_id:
-                    mpn_to_card_id[key] = r.material_card_id
-
-    for draft in draft_offers:
-        try:
-            raw_mpn = draft.get("mpn") or ""
-            mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
-            # Dedup: check if offer already exists from this vendor response
-            existing = (
-                db.query(Offer.id)
-                .filter(
-                    Offer.vendor_response_id == vr.id,
-                    Offer.mpn == draft.get("mpn", ""),
-                )
-                .first()
-            )
-            if existing:
-                continue
-
-            # Resolve material card -- use requirement's card or find/create
-            card_id = mpn_to_card_id.get(mpn_key)
-            if not card_id and raw_mpn.strip():
-                card = resolve_material_card(raw_mpn, db)
-                if card:
-                    card_id = card.id
-
-            from .evidence_tiers import tier_for_parsed_offer
-
-            offer = Offer(
-                requisition_id=vr.requisition_id,
-                requirement_id=mpn_to_req_id.get(mpn_key),
-                material_card_id=card_id,
-                vendor_name=draft.get("vendor_name", ""),
-                vendor_name_normalized=normalize_vendor_name(draft.get("vendor_name", "")),
-                mpn=draft.get("mpn", ""),
-                manufacturer=draft.get("manufacturer"),
-                qty_available=draft.get("qty_available"),
-                unit_price=draft.get("unit_price"),
-                currency=draft.get("currency", "USD"),
-                lead_time=draft.get("lead_time"),
-                date_code=draft.get("date_code"),
-                condition=draft.get("condition"),
-                packaging=draft.get("packaging"),
-                moq=draft.get("moq"),
-                notes=draft.get("notes"),
-                source="email_parse",
-                status=OfferStatus.ACTIVE if vr.confidence >= 0.8 else OfferStatus.PENDING_REVIEW,
-                vendor_response_id=vr.id,
-                evidence_tier=tier_for_parsed_offer(vr.confidence),
-                parse_confidence=vr.confidence,
-            )
-            db.add(offer)
-            db.flush()
-
-            log_activity(
-                db,
-                activity_type=ActivityType.OFFER_CREATED,
-                requisition_id=offer.requisition_id,
-                requirement_id=offer.requirement_id,
-                user_id=None,
-                vendor_card_id=offer.vendor_card_id,
-                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-                details={"offer_id": offer.id, "source": offer.source},
-            )
-
-            # Auto-generate task for email-parsed offer
-            try:
-                from app.services.task_service import on_email_offer_parsed
-
-                on_email_offer_parsed(
-                    db,
-                    offer.requisition_id,
-                    offer.vendor_name or "Unknown",
-                    offer.mpn or "?",
-                    offer.id,
-                )
-            except Exception:
-                logger.warning("Task auto-gen for email offer failed", exc_info=True)
-
-            # Auto-capture offer facts into Knowledge Ledger
-            try:
-                from app.services.knowledge_service import capture_offer_fact
-
-                capture_offer_fact(db, offer=offer)
-            except Exception as e:
-                logger.warning("Knowledge auto-capture (email offer) failed: {}", e)
-
-            # Tag propagation: propagate material card tags to vendor
-            try:
-                if offer.material_card_id and offer.vendor_name_normalized:
-                    from .services.tagging import propagate_tags_to_entity
-
-                    vc = db.query(VendorCard).filter_by(normalized_name=offer.vendor_name_normalized).first()
-                    if vc:  # pragma: no cover
-                        propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
-            except Exception:
-                logger.warning("Tag propagation failed for offer {}", offer.id, exc_info=True)
-
-            # Reset strategic vendor 39-day clock
-            if offer.vendor_card_id:
-                try:
-                    from app.services.strategic_vendor_service import record_offer as sv_record
-
-                    sv_record(db, offer.vendor_card_id)
-                except Exception:
-                    logger.warning("Strategic vendor clock reset failed for offer {}", offer.id, exc_info=True)
-
-            # Deduplicated notification -- update existing if unread, else create new
-            if owner_id:
-                notif_q = db.query(ActivityLog).filter(
-                    ActivityLog.user_id == owner_id,
-                    ActivityLog.activity_type == "offer_pending_review",
-                    ActivityLog.requisition_id == vr.requisition_id,
-                    ActivityLog.dismissed_at.is_(None),
-                )
-                # When requisition_id is None the filter above would match ALL
-                # null-req notifications from any vendor — scope to this vendor.
-                if vr.requisition_id is None:
-                    notif_q = notif_q.filter(ActivityLog.contact_name == vr.vendor_name)
-                existing_notif = notif_q.first()
-                if existing_notif:
-                    existing_notif.subject = (
-                        f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}"
-                    )
-                    existing_notif.created_at = datetime.now(UTC)
-                else:
-                    db.add(
-                        ActivityLog(
-                            user_id=owner_id,
-                            activity_type="offer_pending_review",
-                            channel="system",
-                            requisition_id=vr.requisition_id,
-                            contact_name=vr.vendor_name,
-                            subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}",
-                        )
-                    )
-        except Exception as e:
-            logger.error("Failed to create offer for {}: {}", draft.get("mpn", "?"), e, exc_info=True)
-
-    # Publish SSE event so sightings page refreshes for affected requirements
-    if owner_id:
-        try:
-            from .services.sse_broker import broker
-
-            affected_req_ids = set(mpn_to_req_id.values())
-            loop = asyncio.get_event_loop()
-            for rid in affected_req_ids:
-                task = loop.create_task(
-                    broker.publish(
-                        f"user:{owner_id}",
-                        "sighting-updated",
-                        json.dumps({"requirement_id": rid}),
-                    )
-                )
-                hold_bg_task(task)
-        except Exception:
-            logger.debug("SSE publish from auto-create offers skipped (no event loop)")
 
 
 async def process_batch_results(db: Session) -> int:

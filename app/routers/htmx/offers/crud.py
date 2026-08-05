@@ -4,25 +4,29 @@ Alpine).
 Server-rendered HTML partials for the offer lifecycle: AI offer parsing
 (parse-email/paste/parse-offer/save), quote-from-offers, offer CRUD (add/edit/
 reconfirm/delete/mark-sold), and the review-queue promote/reject/changelog flow.
-Split out of the monolithic offers.py (P4.3) along the offer-CRUD seam.
+Split out of the monolithic offers.py (P4.3) along the offer-CRUD seam. All offer
+business logic lives in app/services/offer_service.py (W3 "one offer_service",
+spec §9) — these handlers only adapt form input and re-render partials.
 
 Called by: app/routers/htmx/offers/__init__.py (router mount).
-Depends on: app.models, app.dependencies, app.database, app.services, .._shared
-    (_safe_int/_safe_float/_safe_date), .._shared_tabs (requisition_tab — every
-    offer route re-renders the requisition offers tab), app.routers._lookup_helpers.
+Depends on: app.models, app.dependencies, app.database, app.services.offer_service,
+    .._shared (_safe_int/_safe_float/_parse_date_safe), .._shared_tabs
+    (requisition_tab — every offer route re-renders the requisition offers tab),
+    app.routers._lookup_helpers.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 
 from ....constants import (
     AccessKey,
-    ActivityType,
-    AttributionStatus,
+    OfferCondition,
     OfferStatus,
     QuoteStatus,
 )
@@ -30,12 +34,9 @@ from ....database import get_db
 from ....dependencies import require_access, require_requisition_access, require_user
 from ....models import Offer, Quote, QuoteLine, Requirement, User
 from ....models.intelligence import ChangeLog
-from ....services.activity_service import log_activity as _log_activity
+from ....schemas.crm import OfferCreate, OfferUpdate
+from ....services import offer_service
 from ....services.ai_offer_service import parse_offer_form_rows, save_form_parsed_offers
-from ....services.offer_qualification import apply_qualification, normalize_offer_condition
-from ....services.status_machine import require_valid_transition
-from ....utils.normalization import normalize_mpn_key
-from ....vendor_utils import normalize_vendor_name
 from ..._lookup_helpers import get_requisition_or_404
 from .._shared import _base_ctx, _parse_date_safe, _safe_float, _safe_int
 
@@ -204,8 +205,7 @@ async def save_parsed_offers(
             "No offers to save.</div>"
         )
 
-    saved_count = save_form_parsed_offers(db, req_id, vendor_name, offers_data, user)
-    db.commit()
+    saved_count = await save_form_parsed_offers(db, req_id, vendor_name, offers_data, user)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -324,11 +324,12 @@ async def review_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Approve or reject an offer.
+    """Approve or reject a pending_review offer — approve lands on ACTIVE (the ONE
+    approve landing status, W3).
 
     Returns refreshed offers tab.
     """
-    from . import maybe_release_on_offer, requisition_tab
+    from . import requisition_tab
 
     form = await request.form()
     action = form.get("action", "")
@@ -341,42 +342,11 @@ async def review_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
 
-    old_status = offer.status
-
     if action == "approve":
-        require_valid_transition("offer", offer.status, OfferStatus.APPROVED)
-        offer.status = OfferStatus.APPROVED
-        offer.approved_by_id = user.id
-
-        offer.approved_at = datetime.now(UTC)
-        # Offer hook: user approval of a pending offer is user-initiated proof of
-        # availability — release the vendor's matching active unavailability records.
-        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
+        offer_service.approve_offer(db, offer, user)
     else:
-        require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
-        offer.status = OfferStatus.REJECTED
-
-    _log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
-
-    db.commit()
+        offer_service.reject_offer(db, offer, user)
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
-
-    if action == "approve":
-        from ....services.proactive_matching import trigger_rematch_on_offer_approval
-
-        trigger_rematch_on_offer_approval(db, offer)
 
     # Return refreshed offers tab
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
@@ -408,8 +378,9 @@ async def add_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Create a manual offer and return refreshed offers tab."""
-    from . import maybe_release_on_offer, requisition_tab
+    """Create a manual offer via the canonical offer_service.create_offer pipeline and
+    return refreshed offers tab."""
+    from . import requisition_tab
 
     get_requisition_or_404(db, req_id)  # validates existence
     require_requisition_access(db, req_id, user)
@@ -423,35 +394,6 @@ async def add_offer(
             status_code=400,
         )
 
-    offer = Offer(
-        requisition_id=req_id,
-        vendor_name=vendor_name,
-        vendor_name_normalized=normalize_vendor_name(vendor_name),
-        mpn=mpn,
-        # Canonical dedup key (dash-stripped) so the part-centric offers query
-        # matches consistently with create_offer's normalize_mpn_key.
-        normalized_mpn=normalize_mpn_key(mpn),
-        qty_available=_safe_int(form.get("qty_available")),
-        unit_price=_safe_float(form.get("unit_price")),
-        lead_time=form.get("lead_time") or None,
-        date_code=form.get("date_code") or None,
-        condition=normalize_offer_condition(form.get("condition")) or form.get("condition") or None,
-        moq=_safe_int(form.get("moq")),
-        manufacturer=form.get("manufacturer") or None,
-        spq=_safe_int(form.get("spq")),
-        packaging=form.get("packaging") or None,
-        firmware=form.get("firmware") or None,
-        hardware_code=form.get("hardware_code") or None,
-        warranty=form.get("warranty") or None,
-        country_of_origin=form.get("country_of_origin") or None,
-        valid_until=_parse_date_safe(form.get("valid_until"), date),
-        notes=form.get("notes") or None,
-        requirement_id=_safe_int(form.get("requirement_id")),
-        source="manual",
-        status=OfferStatus.ACTIVE,
-        entered_by_id=user.id,
-        created_at=datetime.now(UTC),
-    )
     _qkeys = (
         "usage",
         "refurbished_by",
@@ -463,28 +405,35 @@ async def add_offer(
         "lead_time_reason",
     )
     qual = {k: (form.get(k) or None) for k in _qkeys}
-    qual["requests"] = []
-    qual["schema"] = 1  # forward-version the qualification blob (spec §3.1)
-    offer.qualification = qual if any(qual[k] for k in _qkeys) else None
-    apply_qualification(offer)  # non-raising: composes note + sets status
-    db.add(offer)
-    db.flush()  # offer.id populated; activity row + offer committed together below
-    # Offer hook: a manually entered offer is user-initiated proof of availability —
-    # release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
-    logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
+    try:
+        payload = OfferCreate(
+            mpn=mpn,
+            vendor_name=vendor_name,
+            requirement_id=_safe_int(form.get("requirement_id")),
+            manufacturer=form.get("manufacturer") or None,
+            qty_available=_safe_int(form.get("qty_available")),
+            unit_price=_safe_float(form.get("unit_price")),
+            lead_time=form.get("lead_time") or None,
+            date_code=form.get("date_code") or None,
+            condition=form.get("condition") or OfferCondition.NEW,
+            packaging=form.get("packaging") or None,
+            firmware=form.get("firmware") or None,
+            hardware_code=form.get("hardware_code") or None,
+            moq=_safe_int(form.get("moq")),
+            spq=_safe_int(form.get("spq")),
+            warranty=form.get("warranty") or None,
+            country_of_origin=form.get("country_of_origin") or None,
+            valid_until=_parse_date_safe(form.get("valid_until"), date),
+            notes=form.get("notes") or None,
+            source="manual",
+            qualification=qual if any(qual.values()) else None,
+        )
+    except ValidationError as e:
+        # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
+        raise RequestValidationError(e.errors()) from e
 
-    _log_activity(
-        db,
-        activity_type=ActivityType.OFFER_CREATED,
-        requisition_id=offer.requisition_id,
-        requirement_id=offer.requirement_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-        details={"offer_id": offer.id, "source": offer.source},
-    )
-    db.commit()
+    await offer_service.create_offer(db, req_id, payload, user)
+    logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -505,16 +454,7 @@ async def reconfirm_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
 
-    now = datetime.now(UTC)
-    offer.reconfirmed_at = now
-    offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
-    offer.expires_at = now + timedelta(days=14)
-    offer.attribution_status = AttributionStatus.ACTIVE
-    offer.is_stale = False
-    offer.updated_at = now
-    offer.updated_by_id = user.id
-    db.commit()
-    logger.info("Offer {} reconfirmed (count={}) by {}", offer_id, offer.reconfirm_count, user.email)
+    offer_service.reconfirm_offer(db, offer, user)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -549,7 +489,12 @@ async def edit_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Save edits to an offer and return refreshed offers tab."""
+    """Save edits to an offer via offer_service.update_offer and return refreshed offers
+    tab.
+
+    Only non-empty submitted values are applied (a blank field never clears a stored
+    value — the historical semantics of this form).
+    """
     from . import requisition_tab
 
     require_requisition_access(db, req_id, user)
@@ -558,61 +503,46 @@ async def edit_offer(
         raise HTTPException(404, "Offer not found")
 
     form = await request.form()
-    trackable = [
+    kwargs: dict = {}
+    for field in (
         "vendor_name",
-        "qty_available",
-        "unit_price",
         "lead_time",
         "condition",
         "date_code",
-        "moq",
         "notes",
         "manufacturer",
-        "spq",
         "packaging",
         "firmware",
         "hardware_code",
         "warranty",
         "country_of_origin",
-        "valid_until",
-    ]
-    now = datetime.now(UTC)
-
-    for field in trackable:
-        new_val = form.get(field, "").strip()
-        old_val = str(getattr(offer, field) or "")
-        if new_val != old_val and new_val:
-            if field in ("qty_available", "moq", "spq"):
-                try:
-                    setattr(offer, field, int(new_val))
-                except ValueError:
-                    continue
-            elif field == "unit_price":
-                try:
-                    setattr(offer, field, float(new_val))
-                except ValueError:
-                    continue
-            elif field == "valid_until":
-                try:
-                    setattr(offer, field, date.fromisoformat(new_val) if new_val else None)
-                except ValueError:
-                    continue
-            else:
-                setattr(offer, field, new_val)
-            db.add(
-                ChangeLog(
-                    entity_type="offer",
-                    entity_id=offer_id,
-                    user_id=user.id,
-                    field_name=field,
-                    old_value=old_val,
-                    new_value=new_val,
-                )
-            )
+    ):
+        val = (form.get(field) or "").strip()
+        if val:
+            kwargs[field] = val
+    for field in ("qty_available", "moq", "spq"):
+        val = (form.get(field) or "").strip()
+        if val:
+            try:
+                kwargs[field] = int(val)
+            except ValueError:
+                continue
+    val = (form.get("unit_price") or "").strip()
+    if val:
+        try:
+            kwargs["unit_price"] = float(val)
+        except ValueError:
+            pass
+    val = (form.get("valid_until") or "").strip()
+    if val:
+        try:
+            kwargs["valid_until"] = date.fromisoformat(val)
+        except ValueError:
+            pass
 
     req_id_val = form.get("requirement_id", "")
     if req_id_val:
-        offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
+        kwargs["requirement_id"] = int(req_id_val) if req_id_val.isdigit() else None
 
     _qkeys = (
         "usage",
@@ -630,15 +560,15 @@ async def edit_offer(
         merged.update(submitted_qual)
         merged.setdefault("requests", [])
         merged["schema"] = 1  # forward-version the qualification blob (spec §3.1)
-        offer.qualification = merged
-    cond_raw = form.get("condition", "").strip()
-    if cond_raw:
-        offer.condition = normalize_offer_condition(cond_raw) or cond_raw
+        kwargs["qualification"] = merged
 
-    apply_qualification(offer)  # non-raising: composes note + sets status
-    offer.updated_at = now
-    offer.updated_by_id = user.id
-    db.commit()
+    try:
+        payload = OfferUpdate(**kwargs)
+    except ValidationError as e:
+        # Surface as a 422 (not a 500) so a bad constrained value is reported.
+        raise RequestValidationError(e.errors()) from e
+
+    offer_service.update_offer(db, offer, payload, user)
     logger.info("Offer {} edited by {}", offer_id, user.email)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
@@ -659,9 +589,7 @@ async def delete_offer_htmx(
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
-    db.delete(offer)
-    db.commit()
-    logger.info("Offer {} deleted by {}", offer_id, user.email)
+    offer_service.delete_offer(db, offer, user)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -681,41 +609,8 @@ async def mark_offer_sold_htmx(
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status == OfferStatus.SOLD:
-        return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
-
-    old_status = offer.status
-    require_valid_transition("offer", offer.status, OfferStatus.SOLD)
-    offer.status = OfferStatus.SOLD
-    offer.updated_at = datetime.now(UTC)
-    offer.updated_by_id = user.id
-    db.add(
-        ChangeLog(
-            entity_type="offer",
-            entity_id=offer_id,
-            user_id=user.id,
-            field_name="status",
-            old_value=old_status,
-            new_value="sold",
-        )
-    )
-
-    _log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
-
-    db.commit()
-    logger.info("Offer {} marked sold by {}", offer_id, user.email)
+    if offer_service.mark_offer_sold(db, offer, user):
+        logger.info("Offer {} marked sold by {}", offer_id, user.email)
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -749,49 +644,20 @@ async def promote_offer_htmx(
     user: User = Depends(require_access(AccessKey.APPROVE_OFFERS)),
     db: Session = Depends(get_db),
 ):
-    """Promote a pending_review offer to active and return refreshed queue."""
-    from . import maybe_release_on_offer
+    """Promote a pending_review offer to active and return refreshed queue.
+
+    Promote IS approve — same pending→ACTIVE transition, one implementation
+    (offer_service.approve_offer).
+    """
     from . import offer_review_queue as _offer_review_queue
 
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != OfferStatus.PENDING_REVIEW:
-        raise HTTPException(400, "Only pending_review offers can be promoted")
 
-    old_status = offer.status
-    require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
-    offer.status = OfferStatus.ACTIVE
-    offer.approved_by_id = user.id
-    offer.approved_at = datetime.now(UTC)
-    offer.updated_at = datetime.now(UTC)
-    offer.updated_by_id = user.id
-
-    # Offer hook: user approval of a pending offer is user-initiated proof of
-    # availability — release the vendor's matching active unavailability records.
-    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user, offer_condition=offer.condition)
-
-    _log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
-
-    db.commit()
+    offer_service.approve_offer(db, offer, user)
     logger.info("Offer {} promoted by {}", offer_id, user.email)
-
-    from ....services.proactive_matching import trigger_rematch_on_offer_approval
-
-    trigger_rematch_on_offer_approval(db, offer)
 
     return await _offer_review_queue(request=request, user=user, db=db)
 
@@ -810,30 +676,8 @@ async def reject_offer_htmx(
     if not offer:
         raise HTTPException(404, "Offer not found")
     require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
-    if offer.status != OfferStatus.PENDING_REVIEW:
-        raise HTTPException(400, "Only pending_review offers can be rejected")
 
-    old_status = offer.status
-    require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
-    offer.status = OfferStatus.REJECTED
-    offer.updated_at = datetime.now(UTC)
-    offer.updated_by_id = user.id
-
-    _log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
-
-    db.commit()
+    offer_service.reject_offer(db, offer, user)
     logger.info("Offer {} rejected by {}", offer_id, user.email)
 
     return await _offer_review_queue(request=request, user=user, db=db)

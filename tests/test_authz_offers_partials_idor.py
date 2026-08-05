@@ -1,6 +1,6 @@
 """Read-IDOR regression for offers.py requisition-scoped GET partials.
 
-Five GET partial handlers in app.routers.htmx.offers loaded the requisition by
+GET partial handlers in app.routers.htmx.offers loaded the requisition by
 id (get_requisition_or_404) but skipped require_requisition_access — so a
 restricted (SALES/TRADER) non-owner could read another rep's requisition name,
 customer, MPNs, and vendor contacts by crafting a direct GET. Their mutating
@@ -18,11 +18,12 @@ import pytest
 from app.constants import UserRole
 
 # GET partials that must enforce require_requisition_access.
+# ("rfq-compose" left this list with the composer-A delete in W3 — the surviving
+# vendor-modal composer's access guards are covered by test_requisition_access_bulk.py.)
 PARTIAL_PATHS = [
     "parse-email-form",
     "paste-offer-form",
     "add-offer-form",
-    "rfq-compose",
 ]
 
 
