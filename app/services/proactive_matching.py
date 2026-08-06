@@ -320,11 +320,20 @@ def _find_requirement_matches(
     """
     # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
     from .activity_service import _update_last_activity
+    from .pricing_history import last_quote_for_part, last_win_for_part
 
     rollup = compute_offer_rollup(db, part=part)
     if not rollup["offer_count"]:
         return []
     our_cost = rollup["low_cost"] or (float(source_offer.unit_price) if source_offer.unit_price else None)
+
+    # Price anchors (D5): computed once per part; spread vs today's low cost feeds
+    # the score, same-customer wins resolved per company inside the loop.
+    quote_anchor = last_quote_for_part(db, part=part)
+    win_anchor = last_win_for_part(db, part=part)
+    quote_spread_pct: float | None = None
+    if quote_anchor and our_cost and quote_anchor["price"]:
+        quote_spread_pct = (quote_anchor["price"] - our_cost) / quote_anchor["price"] * 100
 
     rows = (
         db.query(Requirement, Requisition, CustomerSite)
@@ -448,11 +457,16 @@ def _find_requirement_matches(
         if margin_pct is not None and margin_pct < min_margin:
             continue
 
+        recent_win = None
+        if win_anchor:
+            recent_win = "same_customer" if company_id and win_anchor["company_id"] == company_id else "other_customer"
         score = compute_match_score(
             last_asked_at=newest_req.created_at,
             requirement_count=grp["count"],
             available_qty=rollup["available_qty"],
             last_asked_qty=newest_req.target_qty,
+            quote_spread_pct=quote_spread_pct,
+            recent_win=recent_win,
         )
 
         match = ProactiveMatch(
