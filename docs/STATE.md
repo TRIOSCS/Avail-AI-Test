@@ -136,12 +136,15 @@ approval) verified by test.
   sold/scrapped/withdrawn) + close_list_without_bid stamps no_bids +
   detail-pane form + POST /api/resell/{id}/close-awarded + kernel-walk
   outcome step (tests: test_resell_close_outcome.py, 10 green).
-- [~] W3.A Acceptance: semantics tests green (TTL ✅ / dup ✅ / every-deal
-  ✅); W3 build DEPLOYED to :8443 2026-08-05 ~19:15 UTC (refresh rehearsal
-  #4 — fresh prod copy → head 208, remaps spot-checked; BOTH images
-  rebuilt); kernel walk GREEN on the deployed build: 18 passed / 2 honest
-  keys-off skips, now including the award→outcome tail. Packet 3 assembles
-  after W3.3 lands.
+- [x] W3.A Acceptance COMPLETE: semantics tests green (TTL ✅ / dup ✅ /
+  every-deal ✅); W3.3 landed 2026-08-06 @00a60db1 (full suite 19,102/0;
+  pre-commit converged) and DEPLOYED to :8443 (BOTH images rebuilt, head
+  209, health 200, remap verified: open 17→28 on the live copy); kernel
+  walk GREEN on the deployed W3.3 build: 18 passed / 2 honest keys-off
+  skips. **Packet 3 ASSEMBLED → docs/evidence/packet3.md** (decision
+  queue: D1 notification flags, D2 legacy-PENDING backfill-vs-resubmit,
+  D3 collapse side effects, D4 stage filter pills). Wave 3 CLOSED
+  pending owner flip words.
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
@@ -156,7 +159,7 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 | LOC app/routers/sightings.py | 3,812 | 3,812 |
 | LOC app/static/htmx_app.js | 3,654 | 3,654 |
 | LOC app/search_service.py | 3,604 | 3,604 |
-| Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | 103 (−10 dead, Task 3→2) |
+| Status values (all entities) | 114 across 21 enums — resell subset = 34 (ExcessList 9, LineItem 4, Offer 5, OfferLineMatch 3, CustomerBid 4, Outreach 9); BuyPlan 7; Requisition 9; Task 3 | **92** (W1: −10 dead, Task 3→2; W3: resell 34→27, BuyPlan −INBOUND, Requisition 9→6 stored) + new 4-member outcome vocab (spec §5.3) |
 | Test file count (pytest) | 1,113 | 1,107 |
 | E2E spec files (Playwright) | 12 | 12 |
 | Nav tab count | 10 + Settings (template: app/templates/htmx/partials/shared/mobile_nav.html) | **5 + gear** |
