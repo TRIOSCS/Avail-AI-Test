@@ -153,6 +153,36 @@ approval) verified by test.
   D3 collapse side effects, D4 stage filter pills). Wave 3 CLOSED
   pending owner flip words.
 
+## Wave 4 — merges + splits (spec §10; started 2026-08-06)
+
+Wave-start ritual DONE 2026-08-06 ~23:55Z: DB refresh = cutover
+rehearsal #5 (fresh prod backup → migrations replay → head 209, only
+the 6 stored requisition statuses present, health 200). Acceptance:
+5-tab app fully walkable per §3 script; no router over ~800 lines
+(new static-analysis guard); kernel E2E green on Postgres-backed suite
+(W4.7 defers first under brief §4.6 schedule insurance).
+
+- [ ] W4.1 Split sightings.py (3,812 LOC) → modules; sourcing board slims
+  per §5.1 (split-panel parts workspace → read-only triage: status, best
+  price, "Open deal"; its 7 duplicate tab endpoints deleted) (§5.1, §10 —
+  the split is the Deals-merge precondition)
+- [ ] W4.2 Deals merge: requisition detail = the ONE deal editor with a
+  sales/sourcing lens toggle (extend the existing page ONLY, brief §4.3);
+  part-dossier opens from a deal line; Search/Sightings folds complete (§5.1)
+- [ ] W4.3 Approvals: Sales Orders + Buy Plans tabs → one Deals tab;
+  standalone QP page absorbed into the workspace panes (lock matrix landed
+  W3.7); one-screen fold finished; cut the parallel JSON approval-request
+  API + per-tab CSV export (§5.2)
+- [ ] W4.4 htmx_app.js (3,654 LOC) split into Vite modules (§10)
+- [ ] W4.5 hx-disinherit fix (§10)
+- [ ] W4.6 search_service.py (3,604 LOC) decomposition + scoring v2-only (§10)
+- [ ] W4.7 Postgres test engine — kernel E2E on PG-backed suite (§10;
+  DEFERS FIRST if the wave runs long, brief §4.6)
+- [ ] W4.8 Router-size static guard: no router module over ~800 lines (§10
+  acceptance tooling)
+- [ ] W4.A Acceptance: §3 walk green on the deployed 5-tab build; guard
+  green; suite green → Packet 4 (final numbers + launch-deal scheduling)
+
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 
 All numbers independently re-derived by a second pass before recording.
