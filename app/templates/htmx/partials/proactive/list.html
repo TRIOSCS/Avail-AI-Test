@@ -12,7 +12,7 @@
   <div class="flex items-center justify-between mb-4">
     <div>
       <h1 class="h2">Proactive</h1>
-      <p class="text-sm text-gray-600 mt-0.5">AI-matched vendor stock to customer purchase history</p>
+      <p class="text-sm text-gray-600 mt-0.5">Live vendor stock matched to what customers asked for</p>
     </div>
     <button @click="showScorecard = !showScorecard"
             class="btn-secondary btn-sm inline-flex items-center gap-1.5">
@@ -75,16 +75,33 @@
       </svg>
       Sent
     </a>
+    <a hx-get="/v2/partials/proactive?tab=digests" hx-target="#main-content"
+       role="tab"
+       aria-selected="{{ 'true' if tab == 'digests' else 'false' }}"
+       class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2"
+       style="{% if tab == 'digests' %}background-color:var(--accent);color:var(--accent-contrast);--tw-ring-color:var(--accent-ring);{% else %}background-color:#f3f4f6;color:#374151;border:1px solid #d1d5db;--tw-ring-color:var(--accent-ring);{% endif %}">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+      </svg>
+      Digests
+    </a>
   </div>
 
   {% if tab == 'matches' %}
   {# ═══════════════ Matches tab ═══════════════ #}
+  {# Top-picks strip — lazy, 24h-cached per user, hx-target pinned to itself #}
+  <div hx-get="/v2/partials/proactive/picks"
+       hx-trigger="load"
+       hx-target="this"
+       hx-swap="innerHTML"
+       hx-push-url="false"></div>
   {% if matches %}
     {% for group in matches %}
     <div class="mb-4 bg-white rounded-lg overflow-hidden border border-line-base"
          x-data="{
            selected: {},
            expanded: true,
+           offersOpen: {},
            get selectedCount() { return Object.keys(this.selected).length },
            get selectedIds() { return Object.keys(this.selected).map(Number) },
            toggle(id) {
@@ -161,9 +178,9 @@
               <tr>
                 <th class="w-10 text-left"></th>
                 <th class="text-left">MPN</th>
-                <th class="text-left w-[140px]">Vendor</th>
-                <th class="text-right w-[80px]">Qty</th>
-                <th class="text-right w-[90px]">Price</th>
+                <th class="text-left w-[140px]">Supply</th>
+                <th class="text-right w-[90px]">Available</th>
+                <th class="text-right w-[90px]">Low cost</th>
                 <th class="text-left w-[70px]">Margin</th>
                 <th class="text-left w-[60px]">Score</th>
                 <th class="w-[90px]"></th>
@@ -284,5 +301,9 @@
   {% else %}
 {{ empty_state('M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', 'No offers sent yet', 'Select matches and prepare offers from the Matches tab') }}
   {% endif %}
+
+  {% elif tab == 'digests' %}
+  {# ═══════════════ Digests tab (generate → review → send + tracking) ═══════════════ #}
+  {% include "htmx/partials/proactive/digests.html" %}
   {% endif %}
 </div>

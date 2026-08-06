@@ -47,6 +47,21 @@ from .proactive_helpers import build_batch_dno_set, build_batch_throttle_set
 # Live-supply gate shared by the batch scan and the per-part rollup.
 _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
 
+# Per-user top-picks cache namespace (proactive_service.get_top_picks) — busted
+# here whenever new matches land so a 24h-cached strip never hides fresh work.
+PICKS_CACHE_PREFIX = "proactive_picks:"
+
+
+def _bust_picks_cache() -> None:
+    """Invalidate every user's cached picks strip; tolerant of cache outages."""
+    try:
+        from ..cache.decorators import invalidate_prefix
+
+        invalidate_prefix(PICKS_CACHE_PREFIX)
+    except Exception as exc:  # cache down ≠ matching broken
+        logger.warning("Picks cache invalidation failed: {}", exc)
+
+
 # ── Part identity + windows ──────────────────────────────────────────────
 
 
@@ -78,30 +93,45 @@ def _offer_window_start() -> datetime:
 # ── Supply rollup ────────────────────────────────────────────────────────
 
 
-def compute_offer_rollup(db: Session, *, part: str) -> dict:
-    """Aggregate live supply for one part inside the offer window.
+def compute_offer_rollups(db: Session, *, parts: set[str]) -> dict[str, dict]:
+    """Batch rollup: aggregate live supply for many parts in ONE query.
 
-    available_qty sums every live offer including zero-priced ones; low_cost is the MIN
-    over POSITIVE unit prices only ($0.00 means "price not provided", not free stock).
-    Offers come back newest-first for drill-down display.
+    Per part: available_qty sums every live in-window offer including
+    zero-priced ones; low_cost is the MIN over POSITIVE unit prices only
+    ($0.00 means "price not provided", not free stock). Offers come back
+    newest-first for drill-down display. Callers with a whole match list use
+    this form so query count stays independent of match count.
     """
+    out: dict[str, dict] = {p: {"offers": [], "offer_count": 0, "available_qty": 0, "low_cost": None} for p in parts}
+    if not parts:
+        return out
     offers = (
         db.query(Offer)
         .filter(
-            func.upper(Offer.mpn) == part,
+            func.upper(Offer.mpn).in_(parts),
             Offer.status.in_(_LIVE_STATUSES),
             Offer.created_at >= _offer_window_start(),
         )
         .order_by(Offer.created_at.desc())
         .all()
     )
-    prices = [float(o.unit_price) for o in offers if o.unit_price is not None and float(o.unit_price) > 0]
-    return {
-        "offers": offers,
-        "offer_count": len(offers),
-        "available_qty": sum(o.qty_available or 0 for o in offers),
-        "low_cost": min(prices) if prices else None,
-    }
+    for o in offers:
+        rollup = out.get(part_key(o.mpn) or "")
+        if rollup is None:
+            continue
+        rollup["offers"].append(o)
+        rollup["offer_count"] += 1
+        rollup["available_qty"] += o.qty_available or 0
+        if o.unit_price is not None and float(o.unit_price) > 0:
+            price = float(o.unit_price)
+            if rollup["low_cost"] is None or price < rollup["low_cost"]:
+                rollup["low_cost"] = price
+    return out
+
+
+def compute_offer_rollup(db: Session, *, part: str) -> dict:
+    """Single-part convenience form of compute_offer_rollups."""
+    return compute_offer_rollups(db, parts={part})[part]
 
 
 # ── Scoring ──────────────────────────────────────────────────────────────
@@ -682,6 +712,8 @@ def run_proactive_scan(db: Session) -> dict:
             "matches_created": 0,
         }
 
+    if total_matches:
+        _bust_picks_cache()
     logger.info(
         "Proactive scan: {} offers → {} matches",
         len(new_offers),
@@ -717,6 +749,7 @@ def trigger_rematch_on_offer_approval(db: Session, offer: Offer) -> int:
         db.rollback()
         return 0
     if matches:
+        _bust_picks_cache()
         logger.info("Targeted re-match: offer {} approval → {} matches", offer.id, len(matches))
     return len(matches)
 

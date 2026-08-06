@@ -334,6 +334,120 @@ async def send_digest(db: Session, digest_id: int, actor: User, token: str) -> N
     logger.info("Proactive digest {} sent to {} by {}", digest.id, salesperson.email, actor.email)
 
 
+# ── Review-pane view + line tracking ─────────────────────────────────────
+
+
+def get_digests_for_view(db: Session, *, viewer: User, can_see_all: bool) -> list[dict]:
+    """Template-ready digest cards: drafts first, newest first, lines included.
+
+    Managers/admins see every salesperson's digests (they review and send);
+    salespeople see their own. Line tracking cells are editable by the line's
+    salesperson and by managers/admins.
+    """
+    q = select(ProactiveDigest).order_by(ProactiveDigest.status.asc(), ProactiveDigest.generated_at.desc())
+    if not can_see_all:
+        q = q.where(ProactiveDigest.salesperson_id == viewer.id)
+    digests = db.scalars(q).all()
+
+    user_names = dict(db.execute(select(User.id, User.name)).all())
+    company_names = dict(db.execute(select(Company.id, Company.name)).all())
+
+    out = []
+    for d in digests:
+        lines = db.scalars(
+            select(ProactiveOutreachLine)
+            .where(ProactiveOutreachLine.digest_id == d.id)
+            .order_by(ProactiveOutreachLine.company_id.nullslast(), ProactiveOutreachLine.mpn)
+        ).all()
+        out.append(
+            {
+                "id": d.id,
+                "status": d.status,
+                "salesperson_name": user_names.get(d.salesperson_id) or "—",
+                "sent_by_name": user_names.get(d.sent_by_id) or "—",
+                "generated_at_display": fmt_date(d.generated_at),
+                "sent_at_display": fmt_date(d.sent_at),
+                "body_html": d.body_html,
+                "line_count": len(lines),
+                "lines": [
+                    {
+                        "id": line.id,
+                        "mpn": line.mpn,
+                        "company_name": company_names.get(line.company_id),
+                        "contacted": line.contacted,
+                        "outcome": line.outcome,
+                        "sales_order_number": line.sales_order_number,
+                        "can_edit": can_see_all or line.salesperson_id == viewer.id,
+                    }
+                    for line in lines
+                ],
+            }
+        )
+    return out
+
+
+def update_line_tracking(
+    db: Session,
+    line_id: int,
+    *,
+    viewer: User,
+    can_manage: bool,
+    contacted: bool | None = None,
+    outcome: str | None = None,
+    sales_order_number: str | None = None,
+) -> ProactiveOutreachLine:
+    """Record what came back on one sent digest line. Caller commits.
+
+    Editable by the line's salesperson and managers/admins. Every change is
+    written to the ChangeLog audit trail. ``sales_order_number`` is an external
+    ERP document reference only. Raises ValueError on missing line / not-sent /
+    bad outcome / no permission.
+    """
+    from ..constants import ProactiveOutreachOutcome
+    from ..models import ChangeLog
+
+    line = db.get(ProactiveOutreachLine, line_id)
+    if not line:
+        raise ValueError("Line not found")
+    if not line.sent_at:
+        raise ValueError("Line not sent yet — tracking starts after send")
+    if not can_manage and line.salesperson_id != viewer.id:
+        raise ValueError("Not your line")
+
+    def _log(field: str, old, new) -> None:
+        db.add(
+            ChangeLog(
+                entity_type="proactive_outreach_line",
+                entity_id=line.id,
+                user_id=viewer.id,
+                field_name=field,
+                old_value=str(old) if old is not None else None,
+                new_value=str(new) if new is not None else None,
+            )
+        )
+
+    if contacted is not None and contacted != line.contacted:
+        _log("contacted", line.contacted, contacted)
+        line.contacted = contacted
+    if outcome is not None:
+        outcome = outcome.strip() or None
+        if outcome and outcome not in {o.value for o in ProactiveOutreachOutcome}:
+            raise ValueError(f"Unknown outcome: {outcome}")
+        if outcome != line.outcome:
+            _log("outcome", line.outcome, outcome)
+            line.outcome = outcome
+            if outcome and outcome != ProactiveOutreachOutcome.NO_RESPONSE:
+                if not line.contacted:
+                    _log("contacted", line.contacted, True)
+                line.contacted = True  # a real answer implies contact was made
+    if sales_order_number is not None:
+        sales_order_number = sales_order_number.strip() or None
+        if sales_order_number != line.sales_order_number:
+            _log("sales_order_number", line.sales_order_number, sales_order_number)
+            line.sales_order_number = sales_order_number
+    return line
+
+
 # ── Weekly outreach summary (Step 8) ─────────────────────────────────────
 
 

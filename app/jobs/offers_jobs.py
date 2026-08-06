@@ -44,6 +44,16 @@ def register_offers_jobs(scheduler, settings, db=None):
             name="Push new proactive matches to Teams",
         )
 
+    if get_effective_flag(db, "proactive_matching_enabled", settings.proactive_matching_enabled):
+        # Weekly digest DRAFTS only — a human reviews and sends from the Digests
+        # tab; this job never emails anyone.
+        scheduler.add_job(
+            _job_proactive_digest_drafts,
+            CronTrigger(day_of_week="mon", hour=7, minute=0),
+            id="proactive_digest_drafts",
+            name="Generate proactive digest drafts",
+        )
+
     scheduler.add_job(
         _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Scoring and leaderboards"
     )
@@ -75,8 +85,33 @@ def register_offers_jobs(scheduler, settings, db=None):
 
 
 @_traced_job
+async def _job_proactive_digest_drafts():
+    """Weekly: build/replace DRAFT digests per salesperson. Never sends anything."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from ..services.proactive_digest import generate_digests
+
+        loop = asyncio.get_running_loop()
+        stats = await asyncio.wait_for(loop.run_in_executor(None, generate_digests, db), timeout=300)
+        db.commit()
+        logger.info(
+            "Proactive digest drafts: {} generated from {} matches",
+            stats.get("digests_generated", 0),
+            stats.get("matches_considered", 0),
+        )
+    except Exception as e:
+        logger.exception(f"Proactive digest draft generation error: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
 async def _job_proactive_matching():
-    """Scan new offers/sightings for proactive matching via CPH + archived reqs."""
+    """Scan new offers for proactive matching (requirement history + hotlists)."""
     from ..database import SessionLocal
 
     db = SessionLocal()
@@ -86,7 +121,7 @@ async def _job_proactive_matching():
 
         loop = asyncio.get_running_loop()
 
-        # CPH-based scan (purchase history)
+        # Requirement-history + hotlist scan over new live offers
         scan_result = await asyncio.wait_for(
             loop.run_in_executor(None, run_proactive_scan, db),
             timeout=300,

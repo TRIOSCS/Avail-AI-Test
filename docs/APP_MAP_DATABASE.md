@@ -1006,11 +1006,27 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 
 ### Proactive Matching
 
-**`proactive_matches`** — Vendor offers matched to customer purchase history
-- offer_id -> offers, requirement_id, customer_site_id
+**`proactive_matches`** — Live vendor supply matched to customer demand history
+(2026-08-06 rework, migration 205: seeded from requirement history inside a
+24-month window — ANY requisition status — plus HOTLIST requisitions; purchase
+history is a context signal only). One active row per (part, company); part
+identity is the verbatim trimmed+uppercased string so spelling variants stay
+separate. Supply aggregates (available qty / low cost over 7-day live offers)
+are computed at read time, not stored.
+- offer_id -> offers (triggering offer), requirement_id, customer_site_id
 - match_score, margin_pct, customer_last_price
+- match_source (requirement\|hotlist), requirement_count, last_asked_at, last_asked_qty
 
-**`proactive_offers`** — Emails sent for proactive matches
+**`proactive_offers`** — Customer-facing offer emails sent from the prepare flow
+**`proactive_digests`** — Per-salesperson internal digest (migration 205):
+draft -> human review -> manual send with the reviewer's Graph token; weekly
+draft generation job, nothing ever auto-sends.
+**`proactive_outreach_lines`** — One digest line frozen at generation
+(last asked / available / low cost / quote + win price anchors) + post-send
+tracking: contacted, outcome (still_looking\|looking_again\|needs_more\|
+no_longer_needed\|no_response), produced_requisition_id, produced_quote_id,
+sales_order_number (external ERP reference only). Feeds the weekly
+contact-rate summary.
 **`proactive_throttle`** — Rate limit: MPN + site (unique), last_offered_at
 **`proactive_do_not_offer`** — Blacklist: MPN + company (unique)
 

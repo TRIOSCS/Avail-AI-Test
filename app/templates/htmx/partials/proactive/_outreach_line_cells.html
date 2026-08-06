@@ -1,0 +1,47 @@
+{#
+  proactive/_outreach_line_cells.html — Editable tracking cells for one sent digest line.
+  Receives: line (dict: id, mpn, company_name, contacted, outcome, sales_order_number,
+            can_edit), OUTCOMES comes inline below (mirrors ProactiveOutreachOutcome).
+  Called by: proactive/digests.html rows AND the tracking POST endpoint (row re-render).
+  Depends on: HTMX (per-cell change posts), Tailwind CSS.
+#}
+<td class="text-sm font-mono text-gray-900">{{ line.mpn }}</td>
+<td class="text-sm text-gray-700">{{ line.company_name or 'Trio Back Order' }}</td>
+<td>
+  <input type="checkbox" {{ 'checked' if line.contacted }}
+         {% if not line.can_edit %}disabled{% endif %}
+         hx-post="/v2/partials/proactive/lines/{{ line.id }}/tracking"
+         hx-vals='js:{"contacted": event.target.checked}'
+         hx-target="#outreach-line-{{ line.id }}"
+         hx-swap="innerHTML"
+         aria-label="Contacted for {{ line.mpn }}"
+         class="rounded border-gray-300 input-focus" style="accent-color:var(--accent)">
+</td>
+<td>
+  <select {% if not line.can_edit %}disabled{% endif %}
+          hx-post="/v2/partials/proactive/lines/{{ line.id }}/tracking"
+          hx-vals='js:{"outcome": event.target.value}'
+          hx-target="#outreach-line-{{ line.id }}"
+          hx-swap="innerHTML"
+          aria-label="Outcome for {{ line.mpn }}"
+          class="text-xs border-gray-300 rounded input-focus w-full">
+    <option value="" {{ 'selected' if not line.outcome }}>—</option>
+    <option value="still_looking" {{ 'selected' if line.outcome == 'still_looking' }}>Still looking</option>
+    <option value="looking_again" {{ 'selected' if line.outcome == 'looking_again' }}>Looking again</option>
+    <option value="needs_more" {{ 'selected' if line.outcome == 'needs_more' }}>Needs more</option>
+    <option value="no_longer_needed" {{ 'selected' if line.outcome == 'no_longer_needed' }}>No longer needed</option>
+    <option value="no_response" {{ 'selected' if line.outcome == 'no_response' }}>No response</option>
+  </select>
+</td>
+<td>
+  <input type="text" value="{{ line.sales_order_number or '' }}" maxlength="100"
+         {% if not line.can_edit %}disabled{% endif %}
+         hx-post="/v2/partials/proactive/lines/{{ line.id }}/tracking"
+         hx-vals='js:{"sales_order_number": event.target.value}'
+         hx-trigger="change"
+         hx-target="#outreach-line-{{ line.id }}"
+         hx-swap="innerHTML"
+         placeholder="SO #"
+         aria-label="Sales order number for {{ line.mpn }}"
+         class="text-xs border-gray-300 rounded input-focus w-full">
+</td>
