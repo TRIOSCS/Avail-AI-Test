@@ -1,11 +1,23 @@
-"""Proactive matching engine — finds customer matches for new inventory.
+"""Proactive matching engine — matches live vendor supply to customer demand history.
 
-Uses customer_part_history (CPH) as the primary matching backbone.
+Seeding (2026-08-06 rework): a customer's requirement history inside the
+requirement window (any requisition status — a won/lost/archived ask is exactly
+the dormant demand this feature exists to catch) plus HOTLIST requisitions
+(standing monitors, no window). Purchase history (CPH) no longer seeds matches;
+it enriches them as a context signal ("bought Nx, last paid $X").
+
+Part identity is the verbatim part-number string, trimmed + uppercased —
+interior spaces/hyphens preserved, so spelling variants stay separate until a
+human merges them at source (see part_key). Supply side aggregates per part:
+available qty = SUM across live offers in the offer window, low cost = MIN
+positive unit price (see compute_offer_rollup).
+
 Active/approved Offers (including mined inbound) seed proactive matches;
 unverified (pending_review) and terminal (rejected/sold/won/expired) offers
 are excluded so the tab only surfaces live stock.
 
-Scoring: composite of recency (40%) + frequency (30%) + margin potential (30%).
+Scoring: composite of ask recency (25%) + repeat demand (20%) + quote-vs-cost
+spread (25%) + recent win (15%) + quantity fit (15%).
 
 Called by: scheduler.py (background scan), routers/htmx/proactive.py (endpoints)
 Depends on: models, config, services/proactive_helpers
@@ -14,10 +26,11 @@ Depends on: models, config, services/proactive_helpers
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import OfferStatus, ProactiveMatchStatus, RequisitionStatus
+from ..constants import OfferStatus, ProactiveMatchSource, ProactiveMatchStatus, RequisitionStatus
 from ..models import (
     ActivityLog,
     Company,
@@ -29,41 +42,166 @@ from ..models import (
 )
 from ..models.config import SystemConfig
 from ..models.purchase_history import CustomerPartHistory
-from ..utils.normalization import normalize_mpn
 from .proactive_helpers import build_batch_dno_set, build_batch_throttle_set
+
+# Live-supply gate shared by the batch scan and the per-part rollup.
+_LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
+
+# ── Part identity + windows ──────────────────────────────────────────────
+
+
+def part_key(raw: str | None) -> str | None:
+    """Part identity for matching and rollups: verbatim string, trimmed + uppercased.
+
+    Interior spacing and punctuation are PRESERVED — "LTSR15-NP" and
+    "LTSR 15-NP" are separate materials with separate demand histories until a
+    human merges them in the system of record. The digest's duplicate-materials
+    section flags suspected variants; nothing here merges them silently.
+    (normalize_mpn is NOT used: it collapses interior whitespace.)
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip().upper()
+    return s or None
+
+
+def _requirement_window_start() -> datetime:
+    """Start of the demand window — asks older than this do not seed matches."""
+    return datetime.now(UTC) - timedelta(days=round(settings.proactive_requirement_window_months * 30.44))
+
+
+def _offer_window_start() -> datetime:
+    """Start of the supply window — offers older than this drop out of rollups."""
+    return datetime.now(UTC) - timedelta(days=settings.proactive_offer_window_days)
+
+
+# ── Supply rollup ────────────────────────────────────────────────────────
+
+
+def compute_offer_rollup(db: Session, *, part: str) -> dict:
+    """Aggregate live supply for one part inside the offer window.
+
+    available_qty sums every live offer including zero-priced ones; low_cost is the MIN
+    over POSITIVE unit prices only ($0.00 means "price not provided", not free stock).
+    Offers come back newest-first for drill-down display.
+    """
+    offers = (
+        db.query(Offer)
+        .filter(
+            func.upper(Offer.mpn) == part,
+            Offer.status.in_(_LIVE_STATUSES),
+            Offer.created_at >= _offer_window_start(),
+        )
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    prices = [float(o.unit_price) for o in offers if o.unit_price is not None and float(o.unit_price) > 0]
+    return {
+        "offers": offers,
+        "offer_count": len(offers),
+        "available_qty": sum(o.qty_available or 0 for o in offers),
+        "low_cost": min(prices) if prices else None,
+    }
+
 
 # ── Scoring ──────────────────────────────────────────────────────────────
 
 
-def _score_recency(last_purchased_at: datetime | None) -> int:
-    """Score 0-100 based on how recently the customer bought this part."""
-    if not last_purchased_at:
-        return 20
-    days = (datetime.now(UTC) - last_purchased_at.replace(tzinfo=UTC)).days
-    if days <= 180:
+def _score_ask_recency(last_asked_at: datetime | None) -> int:
+    """Newer asks score higher, but old asks FLOOR at 40 — an archived requirement that
+    suddenly has supply is interesting, not stale."""
+    if not last_asked_at:
+        return 40
+    days = (datetime.now(UTC) - last_asked_at.replace(tzinfo=UTC)).days
+    if days <= 30:
         return 100
+    if days <= 90:
+        return 80
     if days <= 365:
-        return 80
-    if days <= 730:
         return 60
     return 40
 
 
-def _score_frequency(purchase_count: int) -> int:
-    """Score 0-100 based on number of purchases."""
-    if purchase_count >= 5:
+def _score_repeat_demand(requirement_count: int) -> int:
+    """A customer who asked seven times is a different conversation than one who asked
+    once."""
+    if requirement_count >= 5:
         return 100
-    if purchase_count >= 3:
+    if requirement_count >= 3:
         return 80
-    if purchase_count >= 2:
+    if requirement_count == 2:
         return 60
     return 40
+
+
+def _score_quote_spread(quote_spread_pct: float | None) -> int:
+    """Spread between our last quote and today's low cost — thin or negative ranks
+    down."""
+    if quote_spread_pct is None:
+        return 50  # no quote on record = neutral
+    if quote_spread_pct >= 30:
+        return 100
+    if quote_spread_pct >= 20:
+        return 80
+    if quote_spread_pct >= 10:
+        return 60
+    if quote_spread_pct > 0:
+        return 40
+    return 10
+
+
+def _score_recent_win(recent_win: str | None) -> int:
+    """recent_win: 'same_customer' | 'other_customer' | None (inside the price lookback)."""
+    if recent_win == "same_customer":
+        return 100
+    if recent_win == "other_customer":
+        return 80
+    return 40
+
+
+def _score_qty_fit(available_qty: int | None, last_asked_qty: int | None) -> int:
+    """How much of the customer's last ask today's supply covers."""
+    if not last_asked_qty or last_asked_qty <= 0:
+        return 70  # ask size unknown = mild positive, supply exists
+    covered = (available_qty or 0) / last_asked_qty
+    if covered >= 1:
+        return 100
+    if covered >= 0.5:
+        return 70
+    return 40
+
+
+def compute_match_score(
+    *,
+    last_asked_at: datetime | None,
+    requirement_count: int,
+    available_qty: int | None,
+    last_asked_qty: int | None,
+    quote_spread_pct: float | None = None,
+    recent_win: str | None = None,
+) -> int:
+    """Composite match score (0-100).
+
+    Weights: ask recency 25%, repeat demand 20%, quote-vs-cost spread 25%,
+    recent win 15%, quantity fit 15%. Spread and win default to neutral until
+    the caller supplies price-history anchors.
+    """
+    composite = int(
+        _score_ask_recency(last_asked_at) * 0.25
+        + _score_repeat_demand(requirement_count) * 0.20
+        + _score_quote_spread(quote_spread_pct) * 0.25
+        + _score_recent_win(recent_win) * 0.15
+        + _score_qty_fit(available_qty, last_asked_qty) * 0.15
+    )
+    return min(100, max(0, composite))
 
 
 def _score_margin(customer_avg_price: float | None, our_cost: float | None) -> tuple[int, float | None]:
-    """Score 0-100 based on margin potential.
+    """Margin context vs the customer's historical average price (CPH).
 
-    Returns (score, margin_pct).
+    Returns (score, margin_pct). Retained for the margin display + the min-margin gate,
+    which only applies when real purchase history exists — a requirement's target price
+    is aspirational and never suppresses a match.
     """
     if not customer_avg_price or not our_cost or our_cost <= 0:
         return 50, None  # Unknown margin = neutral score
@@ -80,24 +218,7 @@ def _score_margin(customer_avg_price: float | None, our_cost: float | None) -> t
     return 10, round(margin_pct, 1)
 
 
-def compute_match_score(
-    last_purchased_at: datetime | None,
-    purchase_count: int,
-    customer_avg_price: float | None,
-    our_cost: float | None,
-) -> tuple[int, float | None]:
-    """Composite match score (0-100) and margin percentage.
-
-    Weights: recency 40%, frequency 30%, margin 30%.
-    """
-    recency = _score_recency(last_purchased_at)
-    frequency = _score_frequency(purchase_count)
-    margin_score, margin_pct = _score_margin(customer_avg_price, our_cost)
-    composite = int(recency * 0.4 + frequency * 0.3 + margin_score * 0.3)
-    return min(100, max(0, composite)), margin_pct
-
-
-# ── CPH aggregation helper ───────────────────────────────────────────────
+# ── CPH aggregation helper (context signal, no longer the seed) ──────────
 
 
 def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
@@ -141,57 +262,263 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
     """Find customer matches for a single offer.
 
     Two seeding sources:
-      1. CPH (purchase history) via ``_find_matches`` — the primary backbone.
-      2. Active HOTLIST requisitions via ``_find_hotlist_matches`` — surfaces a part
-         the customer never bought but a salesperson explicitly asked to monitor.
+      1. Requirement history inside the requirement window (any requisition
+         status) via ``_find_requirement_matches`` — the primary backbone.
+      2. Active HOTLIST requisitions via ``_find_hotlist_matches`` — surfaces a
+         part the customer never asked for recently but a salesperson
+         explicitly monitors.
 
-    Dedup stays one active match per ``(material_card_id, company_id)``. The CPH pass
-    ``db.add()``s rows that are still uncommitted when the hotlist pass runs, so the
-    hotlist pass's DB query can't see them — we pass the CPH companies in via
+    Dedup stays one active match per (part, company). The requirement pass
+    ``db.add()``s rows that are still uncommitted when the hotlist pass runs, so
+    the hotlist pass's DB query can't see them — we pass the companies in via
     ``skip_company_ids`` so the same customer never gets two matches in one call.
     """
     offer = db.get(Offer, offer_id)
-    if not offer or not offer.material_card_id:
+    part = part_key(offer.mpn) if offer else None
+    if not offer or not part:
         return []
-    cost = float(offer.unit_price) if offer.unit_price else None
-    cph_matches = _find_matches(
-        db,
-        material_card_id=offer.material_card_id,
-        mpn=offer.mpn or "",
-        our_cost=cost,
-        source_offer=offer,
-    )
+    req_matches = _find_requirement_matches(db, part=part, source_offer=offer)
     hot_matches = _find_hotlist_matches(
         db,
-        material_card_id=offer.material_card_id,
-        mpn=offer.mpn or "",
-        our_cost=cost,
+        part=part,
+        our_cost=float(offer.unit_price) if offer.unit_price else None,
         source_offer=offer,
-        skip_company_ids={m.company_id for m in cph_matches},
+        skip_company_ids={m.company_id for m in req_matches if m.company_id},
     )
-    return cph_matches + hot_matches
+    return req_matches + hot_matches
+
+
+def _existing_match_company_ids(db: Session, part: str) -> set[int | None]:
+    """Company ids (None = back-order lines) that already hold an active match for this
+    part."""
+    return {
+        row[0]
+        for row in db.query(ProactiveMatch.company_id)
+        .filter(
+            ProactiveMatch.mpn == part,
+            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
+        )
+        .all()
+    }
+
+
+def _find_requirement_matches(
+    db: Session,
+    *,
+    part: str,
+    source_offer: Offer,
+) -> list[ProactiveMatch]:
+    """Core seeding: one match per customer that asked for this part inside the window.
+
+    Groups the customer's requirement rows into ONE line carrying
+    requirement_count / last_asked_at / last_asked_qty; supply aggregates come
+    from compute_offer_rollup at read time. Requirements on scratch requisitions
+    are excluded (one-off search homes, not customer asks); HOTLIST requisitions
+    are excluded here because _find_hotlist_matches owns them. Requirements with
+    no customer account become back-order lines routed to the requisition owner
+    (company_id NULL, deduped per owner).
+    """
+    # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
+    from .activity_service import _update_last_activity
+
+    rollup = compute_offer_rollup(db, part=part)
+    if not rollup["offer_count"]:
+        return []
+    our_cost = rollup["low_cost"] or (float(source_offer.unit_price) if source_offer.unit_price else None)
+
+    rows = (
+        db.query(Requirement, Requisition, CustomerSite)
+        .join(Requisition, Requirement.requisition_id == Requisition.id)
+        .outerjoin(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
+        .filter(
+            func.upper(Requirement.primary_mpn) == part,
+            Requirement.created_at >= _requirement_window_start(),
+            Requisition.is_scratch.is_(False),
+            Requisition.status != RequisitionStatus.HOTLIST.value,
+        )
+        .order_by(Requirement.created_at.desc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    # ── Group asks per customer (newest first). Customer identity comes from
+    # requisition.company_id, else the requisition's site. Key: company_id, or
+    # ("backorder", owner_id) for requirements with no customer account. ──
+    groups: dict[object, dict] = {}
+    for req_item, requisition, ask_site in rows:
+        row_company_id = requisition.company_id or (ask_site.company_id if ask_site else None)
+        if row_company_id:
+            key: object = row_company_id
+        elif requisition.created_by:
+            key = ("backorder", requisition.created_by)
+        else:
+            continue  # no customer AND no owner — nowhere to route
+        grp = groups.setdefault(
+            key,
+            {
+                "company_id": row_company_id,
+                "owner_id": requisition.created_by,
+                "count": 0,
+                "newest_req": req_item,
+                "newest_requisition": requisition,
+                "newest_site": ask_site,
+            },
+        )
+        grp["count"] += 1
+
+    company_ids = {g["company_id"] for g in groups.values() if g["company_id"]}
+    companies = {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()} if company_ids else {}
+
+    # First active site per company (throttle scope + navigation), preferring
+    # the newest ask's own site.
+    sites: dict[int, CustomerSite] = {}
+    if company_ids:
+        for s in (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active.is_(True))
+            .all()
+        ):
+            sites.setdefault(s.company_id, s)
+
+    dno_company_ids = build_batch_dno_set(db, part, company_ids) if company_ids else set()
+    throttled_site_ids = build_batch_throttle_set(db, part, {s.id for s in sites.values()}) if sites else set()
+    existing = _existing_match_company_ids(db, part)
+
+    # CPH context (purchase history as a signal, not the seed).
+    card_ids = {source_offer.material_card_id} | {g["newest_req"].material_card_id for g in groups.values()}
+    card_ids.discard(None)
+    cph_by_company: dict[int, dict] = {}
+    if company_ids and card_ids:
+        cph_rows = (
+            db.query(CustomerPartHistory)
+            .filter(
+                CustomerPartHistory.company_id.in_(company_ids),
+                CustomerPartHistory.material_card_id.in_(card_ids),
+            )
+            .all()
+        )
+        cph_by_company = _aggregate_cph_by_company(cph_rows)
+
+    min_margin = settings.proactive_min_margin_pct
+    matches: list[ProactiveMatch] = []
+    backorder_owners_matched = {
+        g["owner_id"]
+        for k, g in groups.items()
+        if isinstance(k, tuple)
+        and db.query(ProactiveMatch.id)
+        .filter(
+            ProactiveMatch.mpn == part,
+            ProactiveMatch.company_id.is_(None),
+            ProactiveMatch.salesperson_id == g["owner_id"],
+            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
+        )
+        .first()
+        is not None
+    }
+
+    for key, grp in groups.items():
+        company_id = grp["company_id"]
+        newest_req = grp["newest_req"]
+        newest_requisition = grp["newest_requisition"]
+
+        if company_id:
+            company = companies.get(company_id)
+            if not company:
+                continue
+            # Salesperson: account owner, else the newest ask's requisition owner.
+            salesperson_id = company.account_owner_id or grp["owner_id"]
+            if not salesperson_id:
+                continue
+            if company_id in existing or company_id in dno_company_ids:
+                continue
+            site = grp["newest_site"] or sites.get(company_id)
+            if site and site.id in throttled_site_ids:
+                continue
+        else:
+            salesperson_id = grp["owner_id"]
+            if salesperson_id in backorder_owners_matched:
+                continue
+            company = None
+            site = None
+
+        cph = cph_by_company.get(company_id) if company_id else None
+        margin_score_unused, margin_pct = _score_margin(cph["avg_price"] if cph else None, our_cost)
+        # Min-margin gate only when real purchase history prices the customer.
+        if margin_pct is not None and margin_pct < min_margin:
+            continue
+
+        score = compute_match_score(
+            last_asked_at=newest_req.created_at,
+            requirement_count=grp["count"],
+            available_qty=rollup["available_qty"],
+            last_asked_qty=newest_req.target_qty,
+        )
+
+        match = ProactiveMatch(
+            offer_id=source_offer.id,
+            requirement_id=newest_req.id,
+            requisition_id=newest_requisition.id,
+            customer_site_id=site.id if site else None,
+            salesperson_id=salesperson_id,
+            mpn=part,
+            material_card_id=source_offer.material_card_id or newest_req.material_card_id,
+            company_id=company_id,
+            match_score=score,
+            margin_pct=margin_pct,
+            customer_purchase_count=cph["count"] if cph else 0,
+            customer_last_price=cph["last_unit_price"] if cph else None,
+            customer_last_purchased_at=cph["last_purchased_at"] if cph else None,
+            our_cost=our_cost,
+            match_source=ProactiveMatchSource.REQUIREMENT,
+            requirement_count=grp["count"],
+            last_asked_at=newest_req.created_at,
+            last_asked_qty=newest_req.target_qty,
+        )
+        db.add(match)
+        matches.append(match)
+        if company_id:
+            existing.add(company_id)
+        else:
+            backorder_owners_matched.add(salesperson_id)
+
+        db.add(
+            ActivityLog(
+                user_id=salesperson_id,
+                activity_type="proactive_match",
+                channel="system",
+                requisition_id=newest_requisition.id,
+                company_id=company_id,
+                contact_name=company.name if company else "Trio Back Order",
+                subject=f"Proactive match: {part} — {company.name if company else 'Trio Back Order'} (score {score})",
+            )
+        )
+        if company_id:
+            _update_last_activity({"type": "company", "id": company_id}, db)
+
+    return matches
 
 
 def _find_hotlist_matches(
     db: Session,
     *,
-    material_card_id: int,
-    mpn: str,
+    part: str,
     our_cost: float | None,
     source_offer: Offer | None,
     skip_company_ids: set[int] | None = None,
 ) -> list[ProactiveMatch]:
     """Seed ProactiveMatch rows from active HOTLIST requisitions for this part.
 
-    Unlike the CPH path this does NOT require purchase history — a hotlist is an
-    explicit salesperson request to monitor a part for a customer. Reuses the
-    same suppression + dedup + surface pipeline.
+    Unlike the requirement path this has NO time window — a hotlist is an
+    explicit standing request to monitor a part for a customer. Reuses the
+    same suppression + dedup + surface pipeline. Salesperson falls back to the
+    hotlist requisition's owner when the company has no account owner.
 
-    ``skip_company_ids`` carries the company_ids the CPH pass already produced in
-    THIS call (their ``db.add()``s are uncommitted, so a fresh DB query won't see
-    them) — union them into the existing-match set so dedup holds across both passes.
+    ``skip_company_ids`` carries the company_ids the requirement pass already
+    produced in THIS call (their ``db.add()``s are uncommitted, so a fresh DB
+    query won't see them) — union them into the existing-match set so dedup
+    holds across both passes.
     """
-    mpn_upper = normalize_mpn(mpn) or mpn.upper().strip()
     fallback_offer_id = source_offer.id if source_offer else None
     if not fallback_offer_id:
         return []
@@ -200,11 +527,10 @@ def _find_hotlist_matches(
         db.query(Requisition, CustomerSite, Company)
         .join(Requirement, Requirement.requisition_id == Requisition.id)
         .join(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
-        .join(Company, Company.id == Requisition.company_id)
+        .join(Company, Company.id == func.coalesce(Requisition.company_id, CustomerSite.company_id))
         .filter(
             Requisition.status == RequisitionStatus.HOTLIST.value,
-            Requirement.material_card_id == material_card_id,
-            Company.account_owner_id.isnot(None),
+            func.upper(Requirement.primary_mpn) == part,
             CustomerSite.is_active.is_(True),
         )
         .all()
@@ -212,23 +538,16 @@ def _find_hotlist_matches(
     if not rows:
         return []
 
-    # Existing active matches for this card from the DB, UNION the CPH companies
-    # from this call (uncommitted → invisible to the query above).
-    existing = {
-        r[0]
-        for r in db.query(ProactiveMatch.company_id)
-        .filter(
-            ProactiveMatch.material_card_id == material_card_id,
-            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
-        )
-        .all()
-    }
+    existing = _existing_match_company_ids(db, part)
     existing |= skip_company_ids or set()
 
-    dno = build_batch_dno_set(db, mpn_upper, {c.id for _, _, c in rows})
+    dno = build_batch_dno_set(db, part, {c.id for _, _, c in rows})
 
     out: list[ProactiveMatch] = []
     for req, site, company in rows:
+        salesperson_id = company.account_owner_id or req.created_by
+        if not salesperson_id:
+            continue
         if company.id in existing or company.id in dno:
             continue
         match = ProactiveMatch(
@@ -236,27 +555,29 @@ def _find_hotlist_matches(
             requirement_id=None,
             requisition_id=req.id,
             customer_site_id=site.id,
-            salesperson_id=company.account_owner_id,
-            mpn=mpn_upper,
-            material_card_id=material_card_id,
+            salesperson_id=salesperson_id,
+            mpn=part,
+            material_card_id=source_offer.material_card_id if source_offer else None,
             company_id=company.id,
-            match_score=60,  # baseline — explicit monitor request, no history to weight
+            match_score=60,  # baseline — explicit monitor request, no ask history to weight
             margin_pct=None,
             customer_purchase_count=0,
             our_cost=our_cost,
+            match_source=ProactiveMatchSource.HOTLIST,
+            requirement_count=0,
         )
         db.add(match)
         out.append(match)
         existing.add(company.id)
         db.add(
             ActivityLog(
-                user_id=company.account_owner_id,
+                user_id=salesperson_id,
                 activity_type="proactive_match",
                 channel="system",
                 requisition_id=req.id,
                 company_id=company.id,
                 contact_name=company.name,
-                subject=f"Hotlist match: {mpn_upper} — {company.name}",
+                subject=f"Hotlist match: {part} — {company.name}",
             )
         )
     return out
@@ -289,177 +610,6 @@ def _set_watermark(db: Session, ts: datetime):
     db.flush()
 
 
-def _find_matches(
-    db: Session,
-    *,
-    material_card_id: int,
-    mpn: str,
-    our_cost: float | None,
-    source_offer: Offer | None = None,
-) -> list[ProactiveMatch]:
-    """Core matching logic — query CPH, score, create ProactiveMatch records.
-
-    Uses batch-loaded lookups to avoid N+1 queries. Tightened dedup: material_card_id +
-    company_id only (no offer_id filter). requirement_id and requisition_id are nullable
-    — matches without historical requisitions are valid.
-    """
-    # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
-    from .activity_service import _update_last_activity
-
-    min_margin = settings.proactive_min_margin_pct
-    mpn_upper = normalize_mpn(mpn) or mpn.upper().strip()
-
-    # Find all CPH entries for this part
-    cph_rows = db.query(CustomerPartHistory).filter(CustomerPartHistory.material_card_id == material_card_id).all()
-    if not cph_rows:
-        return []
-
-    # ── Batch pre-load all needed data (fixes N+1) ──────────────────
-    company_ids = {cph.company_id for cph in cph_rows}
-
-    # 1. Companies (with account_owner_id check)
-    companies = {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()}
-
-    # 2. First active site per company
-    sites: dict[int, CustomerSite] = {}
-    for s in (
-        db.query(CustomerSite).filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active.is_(True)).all()
-    ):
-        sites.setdefault(s.company_id, s)
-
-    # 3. Do-not-offer suppression set
-    dno_company_ids = build_batch_dno_set(db, mpn_upper, company_ids)
-
-    # 4. Throttled site IDs
-    site_ids = {s.id for s in sites.values()}
-    throttled_site_ids = build_batch_throttle_set(db, mpn_upper, site_ids)
-
-    # 5. Existing active match company IDs (tightened dedup — no offer_id filter)
-    existing_match_company_ids = {
-        row[0]
-        for row in db.query(ProactiveMatch.company_id)
-        .filter(
-            ProactiveMatch.material_card_id == material_card_id,
-            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
-        )
-        .all()
-    }
-
-    # 6. Requisition history per site (optional — nullable FKs)
-    req_by_site: dict[int, tuple] = {}
-    for req_item, requisition in (
-        db.query(Requirement, Requisition)
-        .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(
-            Requirement.material_card_id == material_card_id,
-            Requisition.customer_site_id.in_(site_ids),
-        )
-        .order_by(Requisition.created_at.desc())
-        .all()
-    ):
-        req_by_site.setdefault(requisition.customer_site_id, (req_item, requisition))
-
-    # 7. Fallback offer (queried once, not per-row — fixes N+1)
-    fallback_offer_id: int | None = None
-    if source_offer:
-        fallback_offer_id = source_offer.id
-    else:
-        fallback_offer = (
-            db.query(Offer.id)
-            .filter(Offer.material_card_id == material_card_id)
-            .order_by(Offer.created_at.desc())
-            .first()
-        )
-        if fallback_offer:
-            fallback_offer_id = fallback_offer[0]
-
-    if not fallback_offer_id:
-        return []
-
-    # ── Aggregate CPH rows per company across all sources ───────────────
-    agg_by_company = _aggregate_cph_by_company(cph_rows)
-
-    # ── Loop uses dict lookups instead of queries ────────────────────
-    matches = []
-    for company_id, agg in agg_by_company.items():
-        company = companies.get(company_id)
-        if not company or not company.account_owner_id:
-            continue
-
-        site = sites.get(company_id)
-        if not site:
-            continue
-
-        # Check do-not-offer
-        if company_id in dno_company_ids:
-            continue
-
-        # Check throttle
-        if site.id in throttled_site_ids:
-            continue
-
-        # Dedup: one active match per part per customer
-        if company_id in existing_match_company_ids:
-            continue
-
-        # Score the match using aggregated values
-        score, margin_pct = compute_match_score(
-            agg["last_purchased_at"],
-            agg["count"],
-            agg["avg_price"],
-            our_cost,
-        )
-
-        # Filter by minimum margin if we can calculate it
-        if margin_pct is not None and margin_pct < min_margin:
-            continue
-
-        # Optional: requisition history (nullable FKs)
-        req_row = req_by_site.get(site.id)
-        requirement_id = req_row[0].id if req_row else None
-        requisition_id = req_row[1].id if req_row else None
-
-        match = ProactiveMatch(
-            offer_id=fallback_offer_id,
-            requirement_id=requirement_id,
-            requisition_id=requisition_id,
-            customer_site_id=site.id,
-            salesperson_id=company.account_owner_id,
-            mpn=mpn_upper,
-            material_card_id=material_card_id,
-            company_id=company_id,
-            match_score=score,
-            margin_pct=margin_pct,
-            customer_purchase_count=agg["count"],
-            customer_last_price=agg["last_unit_price"],
-            customer_last_purchased_at=agg["last_purchased_at"],
-            our_cost=our_cost,
-        )
-        db.add(match)
-        matches.append(match)
-
-        # Track for dedup within this batch
-        existing_match_company_ids.add(company_id)
-
-        # In-app notification
-        db.add(
-            ActivityLog(
-                user_id=company.account_owner_id,
-                activity_type="proactive_match",
-                channel="system",
-                requisition_id=requisition_id,
-                company_id=company_id,
-                contact_name=company.name,
-                subject=f"Proactive match: {mpn_upper} — {company.name} (score {score})",
-            )
-        )
-
-        if company_id:
-            _update_last_activity({"type": "company", "id": company_id}, db)
-
-    return matches
-
-
 # ── Batch scan ───────────────────────────────────────────────────────────
 
 
@@ -477,12 +627,10 @@ def run_proactive_scan(db: Session) -> dict:
     # never be picked up by this batch scan once the watermark advances past its
     # created_at — trigger_rematch_on_offer_approval() below closes that gap with a
     # targeted single-offer re-match, called from the offer-approval routers.
-    _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
     new_offers = (
         db.query(Offer)
         .filter(
             Offer.created_at > since,
-            Offer.material_card_id.isnot(None),
             Offer.status.in_(_LIVE_STATUSES),
         )
         .order_by(Offer.created_at.asc())
@@ -495,13 +643,14 @@ def run_proactive_scan(db: Session) -> dict:
 
     total_matches = 0
 
-    # Deduplicate: don't scan the same material_card_id twice
-    scanned_cards: set[int] = set()
+    # Deduplicate: don't scan the same part twice in one run
+    scanned_parts: set[str] = set()
 
     for offer in new_offers:
-        if offer.material_card_id in scanned_cards:
+        part = part_key(offer.mpn)
+        if not part or part in scanned_parts:
             continue
-        scanned_cards.add(offer.material_card_id)
+        scanned_parts.add(part)
         matches = find_matches_for_offer(offer.id, db)
         total_matches += len(matches)
 
@@ -542,9 +691,9 @@ def trigger_rematch_on_offer_approval(db: Session, offer: Offer) -> int:
 
     Uses its own commit so a re-match failure never blocks the caller's approval
     transaction — the offer status change should succeed even if matching fails. No-op
-    for offers without a material_card_id (find_matches_for_offer requires one).
+    for offers without a part number.
     """
-    if not offer.material_card_id:
+    if not part_key(offer.mpn):
         return 0
     try:
         matches = find_matches_for_offer(offer.id, db)

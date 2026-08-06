@@ -181,24 +181,27 @@ class TestSetWatermarkNewRow:
 class TestFindMatchesFallbackOffer:
     """Covers lines 214-221, 224: fallback Offer query in _find_matches."""
 
-    def test_fallback_offer_when_no_source_offer(self, db_session):
-        """When source_offer=None and no fallback offer exists, returns []."""
-        from app.models import MaterialCard
-        from app.services.proactive_matching import _find_matches
+    def test_no_live_supply_means_no_matches(self, db_session):
+        """2026-08-06 rework: matching requires live in-window supply — a part
+        whose only offer is outside the offer window (or non-live) produces no
+        matches, even with demand history on file (the fallback-offer path is gone)."""
+        from datetime import UTC, datetime, timedelta
+        from decimal import Decimal
 
-        card = MaterialCard(normalized_mpn="LM317T2", display_mpn="LM317T2")
-        db_session.add(card)
-        db_session.flush()
+        from app.models import Offer
+        from app.services.proactive_matching import find_matches_for_offer
 
-        # No source_offer AND no Offer row for this card → fallback_offer_id=None → return []
-        matches = _find_matches(
-            db_session,
-            material_card_id=card.id,
+        offer = Offer(
+            vendor_name="Arrow",
             mpn="LM317T2",
-            our_cost=0.45,
-            source_offer=None,
+            unit_price=Decimal("0.45"),
+            status="active",
+            created_at=datetime.now(UTC) - timedelta(days=30),
         )
-        assert matches == []
+        db_session.add(offer)
+        db_session.commit()
+
+        assert find_matches_for_offer(offer.id, db_session) == []
 
 
 class TestRunProactiveScanCapWarning:

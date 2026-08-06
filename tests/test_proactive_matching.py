@@ -1,4 +1,11 @@
-"""Tests for the proactive matching engine (Phase 2.2)."""
+"""Tests for the proactive matching engine (2026-08-06 requirement-seeded rework).
+
+Covers: part identity (verbatim, variants stay separate), the live-supply
+rollup (SUM qty / MIN positive price / 7-day window), the ask-based scoring
+composite, requirement-window seeding across every requisition status,
+back-order routing, suppression (dedup / do-not-offer / throttle / CPH margin
+gate), the batch scan + watermark, and the retained match actions.
+"""
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -6,10 +13,10 @@ from unittest.mock import patch
 
 import pytest
 
+from app.constants import ProactiveMatchSource, ProactiveMatchStatus
 from app.models import (
     Company,
     CustomerSite,
-    MaterialCard,
     Offer,
     ProactiveMatch,
     Requirement,
@@ -19,22 +26,33 @@ from app.models import (
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
 from app.models.purchase_history import CustomerPartHistory
 from app.services.proactive_matching import (
-    _score_frequency,
+    _score_ask_recency,
     _score_margin,
-    _score_recency,
+    _score_qty_fit,
+    _score_quote_spread,
+    _score_recent_win,
+    _score_repeat_demand,
     compute_match_score,
+    compute_offer_rollup,
     dismiss_match,
     expire_old_matches,
     find_matches_for_offer,
     mark_match_sent,
+    part_key,
     run_proactive_scan,
     trigger_rematch_on_offer_approval,
 )
 from tests.conftest import engine  # noqa: F401
 
+MPN = "STM32F407"
 
-def _setup_scenario(db):
-    """Create a common test scenario: company + site + owner + card + CPH + requisition."""
+
+def _setup_scenario(db, *, req_status="open", account_owner=True, company_on_req=False):
+    """Company + site + owner + one requisition/requirement asking for MPN.
+
+    The requisition links the customer via its site by default (the common
+    shape in real data); ``company_on_req=True`` also sets requisition.company_id.
+    """
     owner = User(
         email="sales@trioscs.com",
         name="Sales Rep",
@@ -48,28 +66,20 @@ def _setup_scenario(db):
     company = Company(
         name="Sensata Technologies",
         is_active=True,
-        account_owner_id=owner.id,
+        account_owner_id=owner.id if account_owner else None,
     )
     db.add(company)
     db.flush()
 
-    site = CustomerSite(
-        company_id=company.id,
-        site_name="Sensata HQ",
-        is_active=True,
-    )
+    site = CustomerSite(company_id=company.id, site_name="Sensata HQ", is_active=True)
     db.add(site)
     db.flush()
 
-    card = MaterialCard(normalized_mpn="stm32f407", display_mpn="STM32F407", search_count=5)
-    db.add(card)
-    db.flush()
-
-    # Create a requisition + requirement so the match has valid FKs
     req = Requisition(
         name="Test Req",
         customer_site_id=site.id,
-        status="archived",
+        company_id=company.id if company_on_req else None,
+        status=req_status,
         created_by=owner.id,
     )
     db.add(req)
@@ -77,51 +87,29 @@ def _setup_scenario(db):
 
     requirement = Requirement(
         requisition_id=req.id,
-        primary_mpn="STM32F407",
+        primary_mpn=MPN,
         normalized_mpn="stm32f407",
-        material_card_id=card.id,
+        target_qty=1000,
+        created_at=datetime.now(UTC) - timedelta(days=20),
     )
     db.add(requirement)
-    db.flush()
-
-    # Purchase history
-    cph = CustomerPartHistory(
-        company_id=company.id,
-        material_card_id=card.id,
-        mpn="STM32F407",
-        source="avail_offer",
-        purchase_count=3,
-        last_purchased_at=datetime.now(UTC) - timedelta(days=60),
-        avg_unit_price=Decimal("12.50"),
-        last_unit_price=Decimal("13.00"),
-        total_quantity=500,
-    )
-    db.add(cph)
     db.commit()
 
     return {
         "owner": owner,
         "company": company,
         "site": site,
-        "card": card,
         "requisition": req,
         "requirement": requirement,
-        "cph": cph,
     }
 
 
-def _make_offer(db, data, **overrides):
-    """Add the standard Arrow/STM32F407 offer for `data`'s scenario and return it.
-
-    Any field can be overridden via kwargs (e.g. vendor_name, unit_price,
-    material_card_id).
-    """
+def _make_offer(db, **overrides):
+    """Add a live in-window offer for MPN and return it."""
     fields = {
-        "requisition_id": data["requisition"].id,
-        "requirement_id": data["requirement"].id,
-        "material_card_id": data["card"].id,
         "vendor_name": "Arrow",
-        "mpn": "STM32F407",
+        "mpn": MPN,
+        "qty_available": 500,
         "unit_price": Decimal("8.00"),
         "status": "active",
     }
@@ -132,67 +120,164 @@ def _make_offer(db, data, **overrides):
     return offer
 
 
-# ── Scoring tests ────────────────────────────────────────────────────────
+# ── Part identity ────────────────────────────────────────────────────────
 
 
-def test_score_recent_frequent_high_margin():
-    """Recent purchase + high frequency + good margin = high score."""
-    score, margin = compute_match_score(
-        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
-        purchase_count=5,
-        customer_avg_price=20.0,
-        our_cost=10.0,
+def test_part_key_uppercases_and_trims():
+    assert part_key("  ltsr15-np ") == "LTSR15-NP"
+
+
+def test_part_key_preserves_interior_space():
+    """Spelling variants stay separate materials — never merged silently."""
+    assert part_key("LTSR 15-NP") == "LTSR 15-NP"
+    assert part_key("LTSR 15-NP") != part_key("LTSR15-NP")
+
+
+def test_part_key_empty_is_none():
+    assert part_key(None) is None
+    assert part_key("   ") is None
+
+
+# ── Supply rollup ────────────────────────────────────────────────────────
+
+
+def test_rollup_sums_qty_and_takes_min_positive_price(db_session):
+    _make_offer(db_session, vendor_name="A", qty_available=1000, unit_price=Decimal("7.50"))
+    _make_offer(db_session, vendor_name="B", qty_available=850, unit_price=Decimal("6.44"))
+    _make_offer(db_session, vendor_name="C", qty_available=3000, unit_price=Decimal("9.00"))
+    r = compute_offer_rollup(db_session, part=MPN)
+    assert r["offer_count"] == 3
+    assert r["available_qty"] == 4850
+    assert r["low_cost"] == 6.44
+
+
+def test_rollup_zero_price_counts_qty_but_not_low_cost(db_session):
+    """$0.00 = price not provided — included in availability, excluded from low cost."""
+    _make_offer(db_session, vendor_name="A", qty_available=177630, unit_price=Decimal("0"))
+    _make_offer(db_session, vendor_name="B", qty_available=100, unit_price=Decimal("0.05"))
+    r = compute_offer_rollup(db_session, part=MPN)
+    assert r["available_qty"] == 177730
+    assert r["low_cost"] == 0.05
+
+
+def test_rollup_all_zero_prices_has_no_low_cost(db_session):
+    _make_offer(db_session, qty_available=10, unit_price=Decimal("0"))
+    r = compute_offer_rollup(db_session, part=MPN)
+    assert r["low_cost"] is None
+
+
+def test_rollup_excludes_offers_outside_window(db_session):
+    _make_offer(db_session, qty_available=100, unit_price=Decimal("5.00"))
+    _make_offer(
+        db_session,
+        vendor_name="Old",
+        qty_available=9999,
+        unit_price=Decimal("1.00"),
+        created_at=datetime.now(UTC) - timedelta(days=10),
     )
-    assert score >= 90
-    assert margin == 50.0
+    r = compute_offer_rollup(db_session, part=MPN)
+    assert r["offer_count"] == 1
+    assert r["available_qty"] == 100
+    assert r["low_cost"] == 5.0
 
 
-def test_score_old_single_no_margin():
-    """Old purchase + single buy + no margin info = low score."""
-    score, margin = compute_match_score(
-        last_purchased_at=datetime.now(UTC) - timedelta(days=800),
-        purchase_count=1,
-        customer_avg_price=None,
-        our_cost=None,
+def test_rollup_excludes_non_live_statuses(db_session):
+    _make_offer(db_session, qty_available=100)
+    _make_offer(db_session, vendor_name="P", qty_available=50, status="pending_review")
+    _make_offer(db_session, vendor_name="S", qty_available=50, status="sold")
+    r = compute_offer_rollup(db_session, part=MPN)
+    assert r["offer_count"] == 1
+
+
+def test_rollup_variant_spelling_stays_separate(db_session):
+    _make_offer(db_session, mpn="LTSR15-NP", qty_available=4850, unit_price=Decimal("6.44"))
+    _make_offer(db_session, mpn="LTSR 15-NP", qty_available=1000, unit_price=Decimal("10.00"))
+    exact = compute_offer_rollup(db_session, part="LTSR15-NP")
+    variant = compute_offer_rollup(db_session, part="LTSR 15-NP")
+    assert exact["available_qty"] == 4850
+    assert variant["available_qty"] == 1000
+
+
+# ── Scoring units ────────────────────────────────────────────────────────
+
+
+def test_ask_recency_tiers():
+    now = datetime.now(UTC)
+    assert _score_ask_recency(now - timedelta(days=10)) == 100
+    assert _score_ask_recency(now - timedelta(days=60)) == 80
+    assert _score_ask_recency(now - timedelta(days=200)) == 60
+
+
+def test_ask_recency_old_ask_floors_not_zero():
+    """An early-2025 archived ask with fresh supply is interesting, not stale."""
+    assert _score_ask_recency(datetime.now(UTC) - timedelta(days=600)) == 40
+    assert _score_ask_recency(None) == 40
+
+
+def test_repeat_demand_tiers():
+    assert _score_repeat_demand(1) == 40
+    assert _score_repeat_demand(2) == 60
+    assert _score_repeat_demand(4) == 80
+    assert _score_repeat_demand(7) == 100
+
+
+def test_quote_spread_tiers():
+    assert _score_quote_spread(None) == 50
+    assert _score_quote_spread(35.0) == 100
+    assert _score_quote_spread(15.0) == 60
+    assert _score_quote_spread(5.0) == 40
+    assert _score_quote_spread(-3.0) == 10
+
+
+def test_recent_win_tiers():
+    assert _score_recent_win("same_customer") == 100
+    assert _score_recent_win("other_customer") == 80
+    assert _score_recent_win(None) == 40
+
+
+def test_qty_fit_tiers():
+    assert _score_qty_fit(1000, 1000) == 100
+    assert _score_qty_fit(600, 1000) == 70
+    assert _score_qty_fit(100, 1000) == 40
+    assert _score_qty_fit(500, None) == 70  # ask size unknown
+
+
+def test_composite_score_bounds():
+    high = compute_match_score(
+        last_asked_at=datetime.now(UTC) - timedelta(days=5),
+        requirement_count=7,
+        available_qty=10_000,
+        last_asked_qty=500,
+        quote_spread_pct=40.0,
+        recent_win="same_customer",
     )
-    assert score <= 50
-    assert margin is None
-
-
-def test_score_no_purchase_date():
-    """No purchase date + good frequency + good margin = medium score."""
-    score, margin = compute_match_score(
-        last_purchased_at=None,
-        purchase_count=4,
-        customer_avg_price=15.0,
-        our_cost=10.0,
+    assert high == 100
+    low = compute_match_score(
+        last_asked_at=datetime.now(UTC) - timedelta(days=700),
+        requirement_count=1,
+        available_qty=10,
+        last_asked_qty=1000,
+        quote_spread_pct=-5.0,
+        recent_win=None,
     )
-    assert 40 < score < 80
-    assert margin is not None
+    assert 0 <= low < 40
 
 
-def test_score_negative_margin():
-    """Negative margin scenario — score should be low."""
-    score, margin = compute_match_score(
-        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
-        purchase_count=3,
-        customer_avg_price=5.0,
-        our_cost=10.0,
-    )
-    # Margin is negative
-    assert margin < 0
-    assert score < 70
+def test_margin_context_retained():
+    score, pct = _score_margin(10.0, 8.0)
+    assert pct == 20.0
+    assert score == 80
+    score, pct = _score_margin(None, 8.0)
+    assert pct is None
 
 
-# ── find_matches_for_offer ───────────────────────────────────────────────
+# ── Requirement-seeded matching ──────────────────────────────────────────
 
 
-def test_find_matches_for_offer(db_session):
-    """Offer with CPH data creates a scored ProactiveMatch."""
+def test_find_matches_from_requirement_history(db_session):
     data = _setup_scenario(db_session)
-
-    # Create an offer for the same part
-    offer = _make_offer(db_session, data, vendor_name="Arrow Electronics", qty_available=200)
+    offer = _make_offer(db_session, unit_price=Decimal("6.44"), qty_available=850)
+    _make_offer(db_session, vendor_name="B", unit_price=Decimal("7.10"), qty_available=4000)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -200,833 +285,347 @@ def test_find_matches_for_offer(db_session):
     assert len(matches) == 1
     m = matches[0]
     assert m.company_id == data["company"].id
-    assert m.material_card_id == data["card"].id
-    assert m.match_score > 0
-    assert m.customer_purchase_count == 3
-    assert m.our_cost == 8.0
-    assert m.margin_pct is not None
     assert m.salesperson_id == data["owner"].id
+    assert m.mpn == MPN
+    assert m.match_source == ProactiveMatchSource.REQUIREMENT
+    assert m.requirement_count == 1
+    assert m.last_asked_qty == 1000
+    assert m.requirement_id == data["requirement"].id
+    assert float(m.our_cost) == 6.44  # low cost across live offers, not this offer's price
 
 
-def test_find_matches_no_cph(db_session):
-    """Offer for a part with no CPH data returns no matches."""
+def test_find_matches_counts_repeat_asks(db_session):
     data = _setup_scenario(db_session)
-
-    # Different card with no CPH
-    card2 = MaterialCard(normalized_mpn="lm358n", display_mpn="LM358N", search_count=0)
-    db_session.add(card2)
-    db_session.flush()
-
-    offer = _make_offer(
-        db_session,
-        data,
-        material_card_id=card2.id,
-        vendor_name="Mouser",
-        mpn="LM358N",
-        unit_price=Decimal("0.50"),
-    )
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
-
-
-def test_find_matches_no_owner(db_session):
-    """Company without account_owner_id is skipped."""
-    data = _setup_scenario(db_session)
-    data["company"].account_owner_id = None
-    db_session.commit()
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
-
-
-def test_find_matches_dedup(db_session):
-    """Duplicate matches for same card+company are not created."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
-    # First call creates match
-    matches1 = find_matches_for_offer(offer.id, db_session)
-    db_session.commit()
-    assert len(matches1) == 1
-
-    # Second call should dedup
-    matches2 = find_matches_for_offer(offer.id, db_session)
-    db_session.commit()
-    assert len(matches2) == 0
-
-
-# ── run_proactive_scan ───────────────────────────────────────────────────
-
-
-def test_run_proactive_scan(db_session):
-    """Batch scan picks up new offers and creates matches."""
-    data = _setup_scenario(db_session)
-
-    _make_offer(db_session, data, created_at=datetime.now(UTC))
-
-    # Set watermark so it picks up the offer
-    from app.models.config import SystemConfig
-
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
-    db_session.commit()
-
-    result = run_proactive_scan(db_session)
-    assert result["scanned_offers"] >= 1
-    assert result["matches_created"] >= 1
-
-
-# ── dismiss + mark_match_sent ────────────────────────────────────────────
-
-
-def test_dismiss_match(db_session):
-    """Dismissing a match sets status and reason."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    db_session.commit()
-    assert len(matches) == 1
-
-    dismiss_match(matches[0].id, data["owner"].id, "Not buying this anymore", db_session)
-
-    m = db_session.get(ProactiveMatch, matches[0].id)
-    assert m.status == "dismissed"
-    assert m.dismiss_reason == "Not buying this anymore"
-
-
-def test_mark_match_sent(db_session):
-    """Marking a match as sent updates status."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    db_session.commit()
-
-    mark_match_sent(matches[0].id, data["owner"].id, db_session)
-
-    m = db_session.get(ProactiveMatch, matches[0].id)
-    assert m.status == "sent"
-
-
-# ── expire_old_matches ───────────────────────────────────────────────────
-
-
-def test_expire_old_matches(db_session):
-    """Old 'new' matches get expired."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    db_session.commit()
-    assert len(matches) == 1
-
-    # Backdate the match
-    matches[0].created_at = datetime.now(UTC) - timedelta(days=60)
-    db_session.commit()
-
-    expired = expire_old_matches(db_session)
-    assert expired == 1
-
-    m = db_session.get(ProactiveMatch, matches[0].id)
-    assert m.status == "expired"
-
-
-# ── Additional scoring branch tests ──────────────────────────────────────
-
-
-def test_score_recency_365_days():
-    """Purchase 200-365 days ago returns 80."""
-    assert _score_recency(datetime.now(UTC) - timedelta(days=250)) == 80
-
-
-def test_score_recency_730_days():
-    """Purchase 366-730 days ago returns 60."""
-    assert _score_recency(datetime.now(UTC) - timedelta(days=500)) == 60
-
-
-def test_score_frequency_two_purchases():
-    """Exactly 2 purchases returns 60."""
-    assert _score_frequency(2) == 60
-
-
-def test_score_margin_10_to_20_pct():
-    """Margin between 10% and 20% returns score=60."""
-    # customer_avg_price=12.5, our_cost=10 → margin = 20% exactly → score 80
-    # customer_avg_price=11.5, our_cost=10 → margin = 13.04% → score 60
-    score, margin = _score_margin(11.5, 10.0)
-    assert score == 60
-    assert margin is not None
-    assert 10 <= margin < 20
-
-
-def test_score_margin_0_to_10_pct():
-    """Margin between 0% and 10% returns score=40."""
-    # customer_avg_price=10.5, our_cost=10 → margin = 4.76% → score 40
-    score, margin = _score_margin(10.5, 10.0)
-    assert score == 40
-    assert margin is not None
-    assert 0 < margin < 10
-
-
-# ── offer not found or no material_card_id (line 100) ────────────────────
-
-
-def test_find_matches_offer_not_found(db_session):
-    """Non-existent offer_id returns [] early (line 100)."""
-    _setup_scenario(db_session)
-    matches = find_matches_for_offer(99999, db_session)
-    assert matches == []
-
-
-def test_find_matches_offer_no_material_card(db_session):
-    """Offer with no material_card_id returns [] early (line 100)."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data, material_card_id=None)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    assert matches == []
-
-
-# ── no active site for company (line 162) ─────────────────────────────────
-
-
-def test_find_matches_no_active_site(db_session):
-    """Company with no active site is skipped."""
-    data = _setup_scenario(db_session)
-
-    # Deactivate the site
-    data["site"].is_active = False
-    db_session.commit()
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
-
-
-# ── do-not-offer suppression (line 174) ──────────────────────────────────
-
-
-def test_find_matches_do_not_offer_suppression(db_session):
-    """Company with do-not-offer record for the MPN is skipped."""
-    data = _setup_scenario(db_session)
-
-    # Add a do-not-offer suppression
-    dno = ProactiveDoNotOffer(
-        mpn="STM32F407",
-        company_id=data["company"].id,
-        created_by_id=data["owner"].id,
-        reason="Customer said no",
-    )
-    db_session.add(dno)
-    db_session.commit()
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
-
-
-# ── throttle check (line 187) ────────────────────────────────────────────
-
-
-def test_find_matches_throttled(db_session):
-    """Recently offered MPN to the same site is throttled (skipped)."""
-    data = _setup_scenario(db_session)
-
-    # Add a recent throttle record
-    throttle = ProactiveThrottle(
-        mpn="STM32F407",
+    req2 = Requisition(
+        name="Second ask",
         customer_site_id=data["site"].id,
-        last_offered_at=datetime.now(UTC) - timedelta(days=1),
+        status="lost",
+        created_by=data["owner"].id,
     )
-    db_session.add(throttle)
+    db_session.add(req2)
+    db_session.flush()
+    newest = Requirement(
+        requisition_id=req2.id,
+        primary_mpn=MPN,
+        target_qty=3000,
+        created_at=datetime.now(UTC) - timedelta(days=3),
+    )
+    db_session.add(newest)
     db_session.commit()
 
-    offer = _make_offer(db_session, data)
-
+    offer = _make_offer(db_session)
     matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
-
-
-# ── margin below min_margin (line 200) ───────────────────────────────────
-
-
-def test_find_matches_below_min_margin(db_session):
-    """Match with margin below min_margin_pct is skipped."""
-    data = _setup_scenario(db_session)
-
-    # Set CPH avg_unit_price very close to our cost so margin is tiny
-    data["cph"].avg_unit_price = Decimal("8.10")
     db_session.commit()
 
-    offer = _make_offer(db_session, data)
-
-    # margin = (8.10 - 8.00) / 8.10 * 100 = 1.23% < 5% (mock min_margin)
-    with patch("app.services.proactive_matching.settings") as mock_settings:
-        mock_settings.proactive_throttle_days = 30
-        mock_settings.proactive_min_margin_pct = 5
-        mock_settings.proactive_match_expiry_days = 30
-        matches = find_matches_for_offer(offer.id, db_session)
-
-    assert len(matches) == 0
+    assert len(matches) == 1  # ONE line per part per customer — never one per ask
+    m = matches[0]
+    assert m.requirement_count == 2
+    assert m.last_asked_qty == 3000  # newest ask wins
+    assert m.requirement_id == newest.id
 
 
-# ── no requisition history — match still valid (nullable FKs) ────────────
-
-
-def test_find_matches_no_requisition_history(db_session):
-    """Company with CPH but no requisition for the part still creates a match.
-
-    With nullable requirement_id/requisition_id, matches without historical requisitions
-    are valid — the match has requirement_id=None, requisition_id=None.
-    """
-    owner = User(
-        email="sales2@trioscs.com",
-        name="Sales2",
-        role="sales",
-        azure_id="sales-002",
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(owner)
-    db_session.flush()
-
-    company = Company(
-        name="NoReq Corp",
-        is_active=True,
-        account_owner_id=owner.id,
-    )
-    db_session.add(company)
-    db_session.flush()
-
-    site = CustomerSite(
-        company_id=company.id,
-        site_name="NoReq HQ",
-        is_active=True,
-    )
-    db_session.add(site)
-    db_session.flush()
-
-    card = MaterialCard(normalized_mpn="atmega328p", display_mpn="ATMEGA328P", search_count=1)
-    db_session.add(card)
-    db_session.flush()
-
-    # CPH exists, but NO requisition/requirement for this card+site
-    cph = CustomerPartHistory(
-        company_id=company.id,
-        material_card_id=card.id,
-        mpn="ATMEGA328P",
-        source="avail_offer",
-        purchase_count=3,
-        last_purchased_at=datetime.now(UTC) - timedelta(days=30),
-        avg_unit_price=Decimal("5.00"),
-        last_unit_price=Decimal("5.50"),
-        total_quantity=100,
-    )
-    db_session.add(cph)
-    db_session.flush()
-
-    # Need a requisition for the Offer FK, but on a DIFFERENT site/card
-    other_site = CustomerSite(
-        company_id=company.id,
-        site_name="Other Site",
-        is_active=True,
-    )
-    db_session.add(other_site)
-    db_session.flush()
-
-    req = Requisition(
-        name="Other Req",
-        customer_site_id=other_site.id,
-        status="archived",
-        created_by=owner.id,
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    requirement = Requirement(
-        requisition_id=req.id,
-        primary_mpn="ATMEGA328P",
-        normalized_mpn="atmega328p",
-        material_card_id=card.id,
-    )
-    db_session.add(requirement)
-    db_session.flush()
-
-    offer = Offer(
-        requisition_id=req.id,
-        requirement_id=requirement.id,
-        material_card_id=card.id,
-        vendor_name="Arrow",
-        mpn="ATMEGA328P",
-        unit_price=Decimal("3.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
-
-    # With nullable FKs, match is created even without requisition history
-    # for the primary site. requirement_id and requisition_id will be None.
+@pytest.mark.parametrize("status", ["won", "lost", "cancelled", "quoted"])
+def test_closed_requisitions_still_seed(db_session, status):
+    """A won/lost ask is demand history — exactly what this feature exists to catch."""
+    _setup_scenario(db_session, req_status=status)
+    offer = _make_offer(db_session)
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 1
-    assert matches[0].requirement_id is None
-    assert matches[0].requisition_id is None
-    assert matches[0].company_id == company.id
 
 
-# ── cross-offer dedup (tightened dedup) ───────────────────────────────────
-
-
-def test_find_matches_batch_dedup_across_offers(db_session):
-    """Two offers for same part+company should not create duplicate matches."""
+def test_requirement_outside_window_does_not_seed(db_session):
     data = _setup_scenario(db_session)
-
-    offer1 = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    offer2 = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="DigiKey",
-        mpn="STM32F407",
-        unit_price=Decimal("7.50"),
-        status="active",
-    )
-    db_session.add_all([offer1, offer2])
+    data["requirement"].created_at = datetime.now(UTC) - timedelta(days=800)
     db_session.commit()
-
-    matches1 = find_matches_for_offer(offer1.id, db_session)
-    db_session.commit()
-    assert len(matches1) == 1
-
-    # Second offer for same part+company should be deduped
-    matches2 = find_matches_for_offer(offer2.id, db_session)
-    db_session.commit()
-    assert len(matches2) == 0
+    offer = _make_offer(db_session)
+    assert find_matches_for_offer(offer.id, db_session) == []
 
 
-# ── run_proactive_scan dedup ──────────────────────────────────────────
-
-
-def test_run_proactive_scan_dedup(db_session):
-    """Batch scan deduplicates same material_card_id across offers."""
-    from app.models.config import SystemConfig
-
+def test_scratch_requisitions_do_not_seed(db_session):
     data = _setup_scenario(db_session)
-
-    # Set watermark to 1 hour ago so new offers are picked up
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
-    db_session.flush()
-
-    # Two offers with the same material_card_id — second should be deduped
-    offer1 = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-        created_at=datetime.now(UTC),
-    )
-    offer2 = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Mouser",
-        mpn="STM32F407",
-        unit_price=Decimal("9.00"),
-        status="active",
-        created_at=datetime.now(UTC),
-    )
-    db_session.add_all([offer1, offer2])
+    data["requisition"].is_scratch = True
     db_session.commit()
-
-    result = run_proactive_scan(db_session)
-
-    # Both offers fetched, but only one card scanned for matches
-    assert result["scanned_offers"] == 2
-    assert result["matches_created"] >= 1
+    offer = _make_offer(db_session)
+    assert find_matches_for_offer(offer.id, db_session) == []
 
 
-# ── run_proactive_scan commit failure (lines 337-340) ────────────────────
-
-
-def test_run_proactive_scan_commit_failure(db_session):
-    """Commit failure in batch scan triggers rollback and returns matches_created=0."""
-    from app.models.config import SystemConfig
-
-    data = _setup_scenario(db_session)
-
-    _make_offer(db_session, data, created_at=datetime.now(UTC))
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
-    db_session.commit()
-
-    with patch.object(db_session, "commit", side_effect=Exception("DB error")):
-        result = run_proactive_scan(db_session)
-
-    assert result["matches_created"] == 0
-    assert result["scanned_offers"] >= 1
-
-
-# ── trigger_rematch_on_offer_approval ──────────────────────────────────────
-
-
-def test_trigger_rematch_on_offer_approval_finds_matches_past_watermark(db_session):
-    """Regression for the proactive_matching.py watermark gap: an offer created as
-    pending_review (invisible to run_proactive_scan's live-status filter) that is
-    approved AFTER the watermark has advanced is still matched via the targeted hook."""
-    from app.models.config import SystemConfig
-
-    data = _setup_scenario(db_session)
-
-    # Advance the watermark to now, simulating a scan that already ran.
-    db_session.add(SystemConfig(key="proactive_last_scan", value=datetime.now(UTC).isoformat()))
-    db_session.commit()
-
-    # Offer created (with an old created_at, before the watermark) as pending_review —
-    # run_proactive_scan's Offer.created_at > since filter would never pick this up.
-    offer = _make_offer(
-        db_session,
-        data,
-        status="pending_review",
-        created_at=datetime.now(UTC) - timedelta(days=1),
-    )
-
-    # A full batch scan finds nothing — the watermark already passed this offer.
-    scan_result = run_proactive_scan(db_session)
-    assert scan_result["matches_created"] == 0
-
-    # Buyer approves the offer — the targeted hook picks it up immediately.
-    offer.status = "approved"
-    db_session.commit()
-    match_count = trigger_rematch_on_offer_approval(db_session, offer)
-
-    assert match_count == 1
-    matches = db_session.query(ProactiveMatch).filter(ProactiveMatch.offer_id == offer.id).all()
+def test_company_on_requisition_directly(db_session):
+    data = _setup_scenario(db_session, company_on_req=True)
+    offer = _make_offer(db_session)
+    matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 1
     assert matches[0].company_id == data["company"].id
 
 
-def test_trigger_rematch_on_offer_approval_no_material_card_is_noop(db_session):
-    data = _setup_scenario(db_session)
-    offer = _make_offer(db_session, data, material_card_id=None)
-
-    match_count = trigger_rematch_on_offer_approval(db_session, offer)
-
-    assert match_count == 0
-
-
-def test_trigger_rematch_on_offer_approval_handles_commit_failure(db_session):
-    data = _setup_scenario(db_session)
-    offer = _make_offer(db_session, data)
-
-    with patch.object(db_session, "commit", side_effect=Exception("DB error")):
-        match_count = trigger_rematch_on_offer_approval(db_session, offer)
-
-    assert match_count == 0
+def test_owner_fallback_when_company_has_no_account_owner(db_session):
+    """Ownerless companies route to the newest ask's requisition owner, not skipped."""
+    data = _setup_scenario(db_session, account_owner=False)
+    offer = _make_offer(db_session)
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1
+    assert matches[0].salesperson_id == data["owner"].id
 
 
-# ── dismiss_match error paths (lines 364, 366) ──────────────────────────
+def test_backorder_requirement_routes_to_requisition_owner(db_session):
+    owner = User(email="t@trioscs.com", name="Trader", role="trader", azure_id="t-1")
+    db_session.add(owner)
+    db_session.flush()
+    req = Requisition(name="Back order", status="open", created_by=owner.id)
+    db_session.add(req)
+    db_session.flush()
+    db_session.add(Requirement(requisition_id=req.id, primary_mpn=MPN, target_qty=50))
+    db_session.commit()
 
-
-def test_dismiss_match_not_found(db_session):
-    """Dismissing a non-existent match raises ValueError."""
-    _setup_scenario(db_session)
-    with pytest.raises(ValueError, match="Match not found"):
-        dismiss_match(99999, 1, "reason", db_session)
-
-
-def test_dismiss_match_wrong_user(db_session):
-    """Dismissing someone else's match raises ValueError."""
-    data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
+    offer = _make_offer(db_session)
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
     assert len(matches) == 1
+    assert matches[0].company_id is None
+    assert matches[0].salesperson_id == owner.id
 
-    # Try to dismiss with a different user_id
-    other_user = User(
-        email="other@trioscs.com",
-        name="Other",
-        role="sales",
-        azure_id="other-001",
-        created_at=datetime.now(UTC),
-    )
-    db_session.add(other_user)
-    db_session.commit()
-
-    with pytest.raises(ValueError, match="Not your match"):
-        dismiss_match(matches[0].id, other_user.id, "reason", db_session)
+    # Dedup holds for back-order lines too
+    offer2 = _make_offer(db_session, vendor_name="B")
+    assert find_matches_for_offer(offer2.id, db_session) == []
 
 
-# ── mark_match_sent error paths (lines 376, 378) ────────────────────────
-
-
-def test_mark_match_sent_not_found(db_session):
-    """Marking a non-existent match as sent raises ValueError."""
+def test_dedup_one_active_match_per_part_customer(db_session):
     _setup_scenario(db_session)
-    with pytest.raises(ValueError, match="Match not found"):
-        mark_match_sent(99999, 1, db_session)
+    offer = _make_offer(db_session)
+    assert len(find_matches_for_offer(offer.id, db_session)) == 1
+    db_session.commit()
+    offer2 = _make_offer(db_session, vendor_name="Second Vendor")
+    assert find_matches_for_offer(offer2.id, db_session) == []
 
 
-def test_mark_match_sent_wrong_user(db_session):
-    """Marking someone else's match as sent raises ValueError."""
+def test_do_not_offer_suppression(db_session):
     data = _setup_scenario(db_session)
-
-    offer = _make_offer(db_session, data)
-
-    matches = find_matches_for_offer(offer.id, db_session)
+    db_session.add(ProactiveDoNotOffer(mpn=MPN, company_id=data["company"].id))
     db_session.commit()
-    assert len(matches) == 1
+    offer = _make_offer(db_session)
+    assert find_matches_for_offer(offer.id, db_session) == []
 
-    other_user = User(
-        email="other2@trioscs.com",
-        name="Other2",
-        role="sales",
-        azure_id="other-002",
-        created_at=datetime.now(UTC),
+
+def test_throttle_suppression(db_session):
+    data = _setup_scenario(db_session)
+    db_session.add(
+        ProactiveThrottle(
+            mpn=MPN,
+            customer_site_id=data["site"].id,
+            last_offered_at=datetime.now(UTC) - timedelta(days=5),
+        )
     )
-    db_session.add(other_user)
     db_session.commit()
-
-    with pytest.raises(ValueError, match="Not your match"):
-        mark_match_sent(matches[0].id, other_user.id, db_session)
-
-
-# ── Scoring boundary tests ────────────────────────────────────────────────
+    offer = _make_offer(db_session)
+    assert find_matches_for_offer(offer.id, db_session) == []
 
 
-class TestScoringBoundaries:
-    """Exact boundary tests for scoring tier transitions."""
+def test_margin_gate_applies_only_with_purchase_history(db_session):
+    """CPH prices the customer → thin margin suppresses.
 
-    def test_margin_exactly_zero_scores_10(self):
-        score, margin = _score_margin(100.0, 100.0)  # (100-100)/100 = 0%
-        assert score == 10
-        assert margin == pytest.approx(0.0)
-
-    def test_margin_exactly_10_pct_scores_60(self):
-        score, margin = _score_margin(100.0, 90.0)
-        assert score == 60
-        assert margin == pytest.approx(10.0, rel=0.01)
-
-    def test_margin_just_below_10_pct_scores_40(self):
-        score, margin = _score_margin(100.0, 90.01)
-        assert score == 40
-
-    def test_margin_exactly_20_pct_scores_80(self):
-        score, margin = _score_margin(100.0, 80.0)
-        assert score == 80
-
-    def test_margin_exactly_30_pct_scores_100(self):
-        score, margin = _score_margin(100.0, 70.0)
-        assert score == 100
-        assert margin == pytest.approx(30.0, rel=0.01)
-
-    def test_margin_just_below_30_pct_scores_80(self):
-        score, margin = _score_margin(100.0, 70.01)
-        assert score == 80
-
-    def test_margin_unknown_both_none_scores_50(self):
-        score, margin = _score_margin(None, None)
-        assert score == 50
-        assert margin is None
-
-    def test_margin_unknown_cost_none_scores_50(self):
-        score, margin = _score_margin(100.0, None)
-        assert score == 50
-        assert margin is None
-
-    def test_recency_exactly_180_days_scores_100(self):
-        dt = datetime.now(UTC) - timedelta(days=180)
-        score = _score_recency(dt)
-        assert score == 100
-
-    def test_recency_181_days_scores_80(self):
-        dt = datetime.now(UTC) - timedelta(days=181)
-        score = _score_recency(dt)
-        assert score == 80
-
-    def test_recency_730_days_scores_60(self):
-        dt = datetime.now(UTC) - timedelta(days=730)
-        score = _score_recency(dt)
-        assert score == 60
-
-    def test_recency_731_days_scores_40(self):
-        dt = datetime.now(UTC) - timedelta(days=731)
-        score = _score_recency(dt)
-        assert score == 40
-
-    def test_recency_none_scores_20(self):
-        score = _score_recency(None)
-        assert score == 20
-
-    def test_recency_future_date_scores_100(self):
-        dt = datetime.now(UTC) + timedelta(days=30)
-        score = _score_recency(dt)
-        assert score == 100  # negative days_ago → <=180
-
-    def test_frequency_zero_scores_40(self):
-        score = _score_frequency(0)
-        assert score == 40  # 0 falls into count < 2 branch → 40
-
-    def test_frequency_exactly_5_scores_100(self):
-        score = _score_frequency(5)
-        assert score == 100
-
-    def test_frequency_exactly_3_scores_80(self):
-        score = _score_frequency(3)
-        assert score == 80
-
-    def test_composite_score_weights(self):
-        """Verify composite = recency*0.4 + frequency*0.3 + margin*0.3."""
-        dt = datetime.now(UTC) - timedelta(days=90)  # recency=100
-        score, margin = compute_match_score(dt, 5, 100.0, 70.0)
-        assert score == 100  # 100*0.4 + 100*0.3 + 100*0.3 = 100
-
-
-# ── CPH aggregation across sources ──────────────────────────────────────────
-
-
-def test_aggregates_cph_across_sources(db_session):
-    """Two CPH rows for same (company, card) are aggregated — not duplicated.
-
-    _setup_scenario creates one CPH row (source="avail_offer", purchase_count=3). We add
-    a second buy_plan row (purchase_count=2). The engine must yield exactly one match
-    with customer_purchase_count == 5 (summed), not two separate matches.
+    A target price never does.
     """
-    data = _setup_scenario(db_session)  # creates one CPH row (source="avail_offer")
-    # add a second, newer buy_plan row for the same company+card
-    buy_plan_date = datetime.now(UTC) - timedelta(days=5)
+    data = _setup_scenario(db_session)
+    card_id = None
+    offer = _make_offer(db_session, unit_price=Decimal("9.90"))
+    # No CPH: match survives even though target price (implicit) is irrelevant
+    assert len(find_matches_for_offer(offer.id, db_session)) == 1
+    db_session.query(ProactiveMatch).delete()
+    db_session.commit()
+
+    # CPH says customer pays ~$10 and our cost is $9.90 → 1% margin < 10% gate
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="stm32f407", display_mpn=MPN)
+    db_session.add(card)
+    db_session.flush()
+    card_id = card.id
+    data["requirement"].material_card_id = card_id
     db_session.add(
         CustomerPartHistory(
             company_id=data["company"].id,
-            material_card_id=data["card"].id,
-            mpn="STM32F407",
+            material_card_id=card_id,
+            mpn=MPN,
             source="buy_plan",
-            purchase_count=2,
-            last_purchased_at=buy_plan_date,
+            purchase_count=3,
+            avg_unit_price=Decimal("10.00"),
+            last_unit_price=Decimal("10.00"),
+            last_purchased_at=datetime.now(UTC) - timedelta(days=90),
+        )
+    )
+    db_session.commit()
+    assert find_matches_for_offer(offer.id, db_session) == []
+
+
+def test_cph_enriches_match_as_context(db_session):
+    data = _setup_scenario(db_session)
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="stm32f407", display_mpn=MPN)
+    db_session.add(card)
+    db_session.flush()
+    data["requirement"].material_card_id = card.id
+    db_session.add(
+        CustomerPartHistory(
+            company_id=data["company"].id,
+            material_card_id=card.id,
+            mpn=MPN,
+            source="buy_plan",
+            purchase_count=4,
             avg_unit_price=Decimal("20.00"),
-            last_unit_price=Decimal("20.00"),
-            total_quantity=40,
+            last_unit_price=Decimal("19.00"),
+            last_purchased_at=datetime.now(UTC) - timedelta(days=45),
         )
     )
     db_session.commit()
-    offer = _make_offer(db_session, data, unit_price=Decimal("8.00"))
+    offer = _make_offer(db_session, unit_price=Decimal("8.00"))
     matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 1  # one match per (company, card), not two
+    assert len(matches) == 1
     m = matches[0]
-    assert m.customer_purchase_count == 3 + 2  # summed across sources
-    # newest-wins: price and date come from the buy_plan row (5 days ago), not avail_offer (60 days ago)
-    assert m.customer_last_price == 20.00
-    assert m.customer_last_purchased_at == buy_plan_date
+    assert m.customer_purchase_count == 4
+    assert float(m.customer_last_price) == 19.0
+    assert m.margin_pct is not None
 
 
-# ── Fix 1: live-offer gate tests ─────────────────────────────────────────
-
-
-def test_scan_excludes_pending_review_offer(db_session):
-    """run_proactive_scan: pending_review offer produces NO match (fix 1)."""
+def test_variant_spelling_does_not_cross_match(db_session):
+    """An offer under 'LTSR 15-NP' must not match a 'LTSR15-NP' requirement."""
     data = _setup_scenario(db_session)
-
-    _make_offer(
-        db_session,
-        data,
-        status="pending_review",
-        created_at=datetime.now(UTC),
-    )
-
-    from app.models.config import SystemConfig
-
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
+    data["requirement"].primary_mpn = "LTSR15-NP"
     db_session.commit()
+    offer = _make_offer(db_session, mpn="LTSR 15-NP")
+    assert find_matches_for_offer(offer.id, db_session) == []
 
-    result = run_proactive_scan(db_session)
-    assert result["matches_created"] == 0, "pending_review offer must not seed proactive matches"
+
+def test_offer_without_material_card_still_matches(db_session):
+    """Card resolution is enrichment, not a prerequisite (seeded SF offers may lack
+    cards)."""
+    _setup_scenario(db_session)
+    offer = _make_offer(db_session, material_card_id=None)
+    assert len(find_matches_for_offer(offer.id, db_session)) == 1
 
 
-def test_scan_includes_active_offer(db_session):
-    """run_proactive_scan: active offer DOES produce a match (fix 1)."""
+# ── Hotlist seeding ──────────────────────────────────────────────────────
+
+
+def _setup_hotlist(db, *, account_owner=True):
+    data = _setup_scenario(db, req_status="hotlist", account_owner=account_owner)
+    return data
+
+
+def test_hotlist_seeds_match(db_session):
+    data = _setup_hotlist(db_session)
+    offer = _make_offer(db_session)
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1
+    m = matches[0]
+    assert m.match_source == ProactiveMatchSource.HOTLIST
+    assert m.match_score == 60
+    assert m.salesperson_id == data["owner"].id
+
+
+def test_hotlist_owner_fallback(db_session):
+    data = _setup_hotlist(db_session, account_owner=False)
+    offer = _make_offer(db_session)
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1
+    assert matches[0].salesperson_id == data["owner"].id
+
+
+def test_hotlist_not_double_matched_with_requirement_pass(db_session):
+    """A customer with both a windowed ask and a hotlist gets ONE line."""
     data = _setup_scenario(db_session)
-
-    _make_offer(
-        db_session,
-        data,
-        status="active",
-        created_at=datetime.now(UTC),
+    hot = Requisition(
+        name="Hotlist",
+        customer_site_id=data["site"].id,
+        company_id=data["company"].id,
+        status="hotlist",
+        created_by=data["owner"].id,
     )
-
-    from app.models.config import SystemConfig
-
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
+    db_session.add(hot)
+    db_session.flush()
+    db_session.add(Requirement(requisition_id=hot.id, primary_mpn=MPN))
     db_session.commit()
+    offer = _make_offer(db_session)
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1
+    assert matches[0].match_source == ProactiveMatchSource.REQUIREMENT
 
-    result = run_proactive_scan(db_session)
-    assert result["matches_created"] >= 1, "active offer must seed proactive matches"
+
+# ── Batch scan ───────────────────────────────────────────────────────────
 
 
-def test_scan_excludes_expired_offer(db_session):
-    """run_proactive_scan: expired offer produces NO match (fix 1)."""
-    data = _setup_scenario(db_session)
+def test_run_proactive_scan(db_session):
+    _setup_scenario(db_session)
+    _make_offer(db_session)
+    with patch("app.services.proactive_matching._get_watermark") as mock_wm:
+        mock_wm.return_value = datetime.now(UTC) - timedelta(hours=1)
+        result = run_proactive_scan(db_session)
+    assert result["scanned_offers"] == 1
+    assert result["matches_created"] == 1
 
-    _make_offer(
-        db_session,
-        data,
-        status="expired",
-        created_at=datetime.now(UTC),
-    )
 
-    from app.models.config import SystemConfig
+def test_run_proactive_scan_dedups_parts(db_session):
+    _setup_scenario(db_session)
+    _make_offer(db_session, vendor_name="A")
+    _make_offer(db_session, vendor_name="B")
+    with patch("app.services.proactive_matching._get_watermark") as mock_wm:
+        mock_wm.return_value = datetime.now(UTC) - timedelta(hours=1)
+        result = run_proactive_scan(db_session)
+    assert result["scanned_offers"] == 2
+    assert result["matches_created"] == 1  # one part → one pass → one line
 
-    db_session.add(
-        SystemConfig(
-            key="proactive_last_scan",
-            value=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-        )
-    )
+
+def test_scan_ignores_offers_before_watermark(db_session):
+    _setup_scenario(db_session)
+    _make_offer(db_session, created_at=datetime.now(UTC) - timedelta(hours=6))
+    with patch("app.services.proactive_matching._get_watermark") as mock_wm:
+        mock_wm.return_value = datetime.now(UTC) - timedelta(hours=1)
+        result = run_proactive_scan(db_session)
+    assert result["scanned_offers"] == 0
+
+
+def test_trigger_rematch_on_offer_approval(db_session):
+    _setup_scenario(db_session)
+    offer = _make_offer(db_session, status="approved")
+    created = trigger_rematch_on_offer_approval(db_session, offer)
+    assert created == 1
+
+
+# ── Match actions (retained behavior) ────────────────────────────────────
+
+
+def _one_match(db):
+    _setup_scenario(db)
+    offer = _make_offer(db)
+    matches = find_matches_for_offer(offer.id, db)
+    db.commit()
+    return matches[0]
+
+
+def test_dismiss_match(db_session):
+    m = _one_match(db_session)
+    dismiss_match(m.id, m.salesperson_id, "not interested", db_session)
+    db_session.refresh(m)
+    assert m.status == ProactiveMatchStatus.DISMISSED
+    assert m.dismiss_reason == "not interested"
+
+
+def test_dismiss_match_wrong_user(db_session):
+    m = _one_match(db_session)
+    with pytest.raises(ValueError, match="Not your match"):
+        dismiss_match(m.id, m.salesperson_id + 999, "nope", db_session)
+
+
+def test_mark_match_sent(db_session):
+    m = _one_match(db_session)
+    mark_match_sent(m.id, m.salesperson_id, db_session)
+    db_session.refresh(m)
+    assert m.status == ProactiveMatchStatus.SENT
+
+
+def test_expire_old_matches(db_session):
+    m = _one_match(db_session)
+    m.created_at = datetime.now(UTC) - timedelta(days=45)
     db_session.commit()
-
-    result = run_proactive_scan(db_session)
-    assert result["matches_created"] == 0, "expired offer must not seed proactive matches"
+    assert expire_old_matches(db_session) == 1
+    db_session.refresh(m)
+    assert m.status == ProactiveMatchStatus.EXPIRED

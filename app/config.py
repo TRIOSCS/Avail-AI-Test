@@ -258,6 +258,15 @@ class Settings(BaseSettings):
     proactive_scan_interval_hours: int = 4
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
+    # Matching windows (2026-08-06 rework): demand = any requirement asked within
+    # the requirement window (all statuses — won/lost/archived asks are exactly the
+    # dormant demand this feature exists to catch) plus HOTLIST requisitions (no
+    # window; a hotlist is a standing monitor). Supply = live offers created within
+    # the offer window. Price-history anchors (last quote / last win) share the
+    # requirement window via proactive_price_lookback_months.
+    proactive_requirement_window_months: int = 24
+    proactive_offer_window_days: int = 7
+    proactive_price_lookback_months: int = 24
     # Push new proactive matches into Teams as an Adaptive Card digest. Default
     # OFF so enabling delivery is a deliberate admin choice (it sends real Teams
     # messages). Admin can override via the proactive_teams_push_enabled flag.
