@@ -40,7 +40,14 @@ warnings in a 48h simp log window; kernel E2E green. Then Packet 1.
 - [x] W1.14 Trouble-ticket AI calls gate behind AI flag, regex fallback per brief §4.5 (§5.5, v1.1 §0.6)
 - [x] W1.15 token_refresh skips-with-notice when Azure creds unset (48h-gate killer found by pre-flight: ~1,150 warnings/48h keys-off; docs/evidence/w1-quiet-preflight.md) (§7 spirit, §11)
 - [x] W1.16 worker_liveness_check skips workers whose enabling creds are unset (48h-gate killer; DB-refresh re-imports is_running=true each wave, so the guard must be code-level) (§7 spirit, §11)
-- [ ] W1.A Acceptance checks pass → assemble + deliver Packet 1 (brief §6; include spec v1.1 §12 final-read checkboxes)
+- [x] W1.A COMPLETE 2026-08-06: 48h quiet gate PASSED (window closed
+  22:55Z; 17 app + 1 worker warnings in 48h, all boot notices or designed
+  keys-off skips — zero recurring from parked/cut features; window spans
+  the W2/W3 deploys so evidence covers the CURRENT build); runtime route
+  recount 675 (167 /api, 483 /v2; 627 unique — FastAPI 0.137 route tree
+  flattened via _IncludedRouter.original_router); **Packet 1 ASSEMBLED →
+  docs/evidence/packet1.md** (draft slots filled). Wave 1 CLOSED pending
+  owner flip words (4 disposition flip-ables + PO-toggle + §12 checkboxes).
 
 ## Wave 2 — the delete/park sweep (spec §10; ADOPTED under owner's continuous-autonomy directive 2026-08-04)
 
