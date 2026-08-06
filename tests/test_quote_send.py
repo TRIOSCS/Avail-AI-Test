@@ -65,8 +65,8 @@ def test_htmx_send_triggers_real_send_email(client, db_session, test_requisition
         return SendQuoteResult(
             sent_to="jane@acme-electronics.com",
             status="sent",
-            req_status=RequisitionStatus.QUOTED,
-            status_changed=True,
+            req_status="quoted",
+            status_changed=False,
             graph_message_id=None,
         )
 
@@ -81,7 +81,10 @@ def test_htmx_send_triggers_real_send_email(client, db_session, test_requisition
 
 
 def test_htmx_send_marks_sent_via_real_service(client, db_session, test_requisition, test_customer_site, test_user):
-    """End-to-end through the REAL service under TESTING=1: status→sent, req→quoted."""
+    """End-to-end through the REAL service under TESTING=1: status→sent; the req's
+    STORED status stays open and the quoted stage is DERIVED (W3.3)."""
+    from app.services.requisition_state import derived_status
+
     quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-E2E")
     resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
     assert resp.status_code == 200
@@ -89,7 +92,8 @@ def test_htmx_send_marks_sent_via_real_service(client, db_session, test_requisit
     assert quote.status == QuoteStatus.SENT
     assert quote.sent_at is not None
     db_session.refresh(test_requisition)
-    assert test_requisition.status == RequisitionStatus.QUOTED
+    assert test_requisition.status == RequisitionStatus.OPEN
+    assert derived_status(db_session, test_requisition) == "quoted"
 
 
 # ── DNC hard-block on the quote path ───────────────────────────────────────────
@@ -186,29 +190,35 @@ def test_json_send_dnc_returns_409(mock_token, client, db_session, test_requisit
 
 
 async def test_service_happy_path_sets_status_and_req(db_session, test_requisition, test_customer_site, test_user):
-    """Direct service call in TESTING mode: status→sent, sent_at set, req→quoted."""
+    """Direct service call in TESTING mode: status→sent, sent_at set; the requisition's
+    STORED status is untouched and req_status reports the DERIVED stage (W3.3)."""
     from app.services.quote_send import send_quote_email
+    from app.services.requisition_state import derived_status
 
     quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-SVC1")
     result = await send_quote_email(db_session, quote, test_user, token="t", testing=True)
 
     assert result.status == "sent"
     assert result.sent_to == "jane@acme-electronics.com"
-    assert result.req_status == RequisitionStatus.QUOTED
-    assert result.status_changed is True
+    # W3.3: req_status carries the PRIMARY req's derived display status ('quoted' —
+    # the QuoteRequisition membership already exists); sending never changes a
+    # requisition's stored status, so status_changed is always False.
+    assert result.req_status == "quoted"
+    assert result.status_changed is False
     db_session.refresh(quote)
     assert quote.status == QuoteStatus.SENT
     assert quote.sent_at is not None
     db_session.refresh(test_requisition)
-    assert test_requisition.status == RequisitionStatus.QUOTED
+    assert test_requisition.status == RequisitionStatus.OPEN
+    assert derived_status(db_session, test_requisition) == "quoted"
 
 
-async def test_service_send_writes_requisition_status_change_audit(
+async def test_service_send_writes_no_requisition_status_change_audit(
     db_session, test_requisition, test_customer_site, test_user
 ):
-    """W3: the requisition advance routes through requisition_state.transition, so the
-    send writes a STATUS_CHANGED ActivityLog row (the old raw `r.status = ...` write
-    bypassed the audit)."""
+    """W3.3: the send no longer transitions the requisition at all, so it writes NO
+    STATUS_CHANGED ActivityLog row — the quoted stage is derived from the
+    QuoteRequisition membership, never a stored-status write."""
     from app.constants import ActivityType
     from app.services.quote_send import send_quote_email
 
@@ -223,16 +233,15 @@ async def test_service_send_writes_requisition_status_change_audit(
         )
         .all()
     )
-    assert any("quoted" in (r.subject or "") for r in rows)
+    assert rows == []
 
 
-async def test_service_send_leaves_illegal_origin_req_untouched(
-    db_session, test_requisition, test_customer_site, test_user
-):
-    """A requisition with no legal edge to QUOTED (draft) stays put and the send still
-    succeeds — the email already went out, so legality logs a warning instead of
-    500ing."""
+async def test_service_send_leaves_draft_req_draft(db_session, test_requisition, test_customer_site, test_user):
+    """A DRAFT requisition stays draft through a send: the send never touches stored
+    status, and derived_status reports 'draft' too — stored intent outranks the quote
+    membership (W3.3)."""
     from app.services.quote_send import send_quote_email
+    from app.services.requisition_state import derived_status
 
     test_requisition.status = RequisitionStatus.DRAFT
     db_session.commit()
@@ -241,10 +250,12 @@ async def test_service_send_leaves_illegal_origin_req_untouched(
     result = await send_quote_email(db_session, quote, test_user, token="t", testing=True)
 
     assert result.status == "sent"
+    assert result.req_status == RequisitionStatus.DRAFT
     db_session.refresh(quote)
     assert quote.status == QuoteStatus.SENT
     db_session.refresh(test_requisition)
     assert test_requisition.status == RequisitionStatus.DRAFT
+    assert derived_status(db_session, test_requisition) == RequisitionStatus.DRAFT
 
 
 async def test_service_writes_outbound_activity_log(db_session, test_requisition, test_customer_site, test_user):
@@ -393,7 +404,8 @@ def test_json_send_returns_documented_shape(
     mock_token, client, db_session, test_requisition, test_customer_site, test_user
 ):
     """crm/quotes.py send_quote keeps its {ok,status,sent_to,req_status,status_changed}
-    JSON."""
+    JSON — req_status now carries the DERIVED display status and status_changed is
+    always False (W3.3)."""
     mock_token.return_value = "fake-token"
     quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-JSON")
 
@@ -410,6 +422,6 @@ def test_json_send_returns_documented_shape(
     assert data["ok"] is True
     assert data["status"] == "sent"
     assert data["sent_to"] == "jane@acme-electronics.com"
-    assert data["req_status"] == RequisitionStatus.QUOTED
-    assert "status_changed" in data
+    assert data["req_status"] == "quoted"
+    assert data["status_changed"] is False
     assert mock_post.called

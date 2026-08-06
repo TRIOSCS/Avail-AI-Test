@@ -9,7 +9,8 @@ requisition list shows per row.
 
 Called by: app/routers/htmx_views.py parts_workspace_partial (the Sales Hub /
            parts workspace) — pipeline_summary feeds the pipeline chip there.
-Depends on: app.models (Requisition, Requirement)
+Depends on: app.models (Requisition, Requirement),
+            app.services.requisition_state (derived pipeline stage)
 """
 
 from __future__ import annotations
@@ -20,6 +21,12 @@ from sqlalchemy.orm import Session
 
 from app.constants import RequisitionStatus
 from app.models import Requirement, Requisition
+from app.services.requisition_state import (
+    STAGE_OFFERS,
+    STAGE_QUOTED,
+    STAGE_RFQS_SENT,
+    derived_status_map,
+)
 
 
 def _resolve_deal_value(
@@ -48,43 +55,46 @@ def _resolve_deal_value(
     return None, "none"
 
 
-# Stage -> win-probability, keyed on the canonical RequisitionStatus pipeline
-# (Sales Hub: DRAFT -> OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST).
+# Stage -> win-probability, keyed on the DISPLAY status: the stored user-intent
+# values plus the derived pipeline stages (W3.3 — rfqs_sent/offers/quoted are
+# computed from data by requisition_state.derived_status, no longer stored).
 # Standard CRM stage-weighting; tune to match real close rates. Terminal stages:
 # won=1.0 (realized), lost/cancelled=0.0 (dead). HOTLIST is an off-pipeline
 # *monitor* state (RequisitionStatus.MONITOR) with NO win probability — it is
-# deliberately absent here so it never enters OPEN_STATUSES, the open-deal count,
-# the open value, or the weighted forecast. This constant is the single
-# forecasting lever — adjust it (not the call sites) if observed close rates differ.
+# deliberately absent here so it never enters the open-deal count, the open
+# value, or the weighted forecast. This constant is the single forecasting
+# lever — adjust it (not the call sites) if observed close rates differ.
 STAGE_WIN_PROBABILITY: dict[str, float] = {
-    RequisitionStatus.DRAFT: 0.05,
-    RequisitionStatus.OPEN: 0.10,
-    RequisitionStatus.RFQS_SENT: 0.25,
-    RequisitionStatus.OFFERS: 0.40,
-    RequisitionStatus.QUOTED: 0.75,
-    RequisitionStatus.WON: 1.00,
-    RequisitionStatus.LOST: 0.0,
-    RequisitionStatus.CANCELLED: 0.0,
+    RequisitionStatus.DRAFT.value: 0.05,
+    RequisitionStatus.OPEN.value: 0.10,
+    STAGE_RFQS_SENT: 0.25,
+    STAGE_OFFERS: 0.40,
+    STAGE_QUOTED: 0.75,
+    RequisitionStatus.WON.value: 1.00,
+    RequisitionStatus.LOST.value: 0.0,
+    RequisitionStatus.CANCELLED.value: 0.0,
 }
 
-# Open = non-terminal = statuses with a live (0 < p < 1) probability, kept in
-# lifecycle order for stable display. HOTLIST (monitor) and the terminal stages
-# are excluded by construction.
+# Display stages with a live (0 < p < 1) probability, in lifecycle order for
+# stable display. Only draft and open are STORED; the last three are derived.
 _OPEN_ORDER: list[str] = [
-    RequisitionStatus.DRAFT,
-    RequisitionStatus.OPEN,
-    RequisitionStatus.RFQS_SENT,
-    RequisitionStatus.OFFERS,
-    RequisitionStatus.QUOTED,
+    RequisitionStatus.DRAFT.value,
+    RequisitionStatus.OPEN.value,
+    STAGE_RFQS_SENT,
+    STAGE_OFFERS,
+    STAGE_QUOTED,
 ]
+# Stored statuses that participate in the open pipeline (query filter).
+_OPEN_STORED: frozenset[str] = frozenset({RequisitionStatus.DRAFT.value, RequisitionStatus.OPEN.value})
+# Display vocabulary with live probability (kept for tests/consumers).
 OPEN_STATUSES: frozenset[str] = frozenset(s for s, p in STAGE_WIN_PROBABILITY.items() if 0.0 < p < 1.0)
 
 _STAGE_LABELS: dict[str, str] = {
-    RequisitionStatus.DRAFT: "Draft",
-    RequisitionStatus.OPEN: "Open",
-    RequisitionStatus.RFQS_SENT: "RFQs Sent",
-    RequisitionStatus.OFFERS: "Offers",
-    RequisitionStatus.QUOTED: "Quoted",
+    RequisitionStatus.DRAFT.value: "Draft",
+    RequisitionStatus.OPEN.value: "Open",
+    STAGE_RFQS_SENT: "RFQs Sent",
+    STAGE_OFFERS: "Offers",
+    STAGE_QUOTED: "Quoted",
 }
 
 
@@ -154,8 +164,11 @@ def pipeline_summary(db: Session, *, owner_id: int | None = None) -> dict:
     if owner_id is not None:
         base = base.filter(Requisition.claimed_by_id == owner_id)
 
-    open_reqs = base.filter(Requisition.status.in_(OPEN_STATUSES)).all()
+    open_reqs = base.filter(Requisition.status.in_(_OPEN_STORED)).all()
     deal_values = bulk_deal_values(db, [r.id for r in open_reqs])
+    # W3.3: bucket stored-open rows by their DERIVED pipeline stage; draft stays
+    # its own (stored) bucket.
+    stage_map = derived_status_map(db, [r.id for r in open_reqs if r.status == RequisitionStatus.OPEN.value])
 
     by_stage_acc: dict[str, dict] = {
         s: {"status": s, "label": _STAGE_LABELS[s], "count": 0, "value": 0.0, "weighted": 0.0} for s in _OPEN_ORDER
@@ -163,12 +176,13 @@ def pipeline_summary(db: Session, *, owner_id: int | None = None) -> dict:
     open_value = 0.0
     weighted_value = 0.0
     for r in open_reqs:
+        display = stage_map.get(r.id, r.status)
         val = deal_values.get(r.id, 0.0)
-        prob = stage_probability(r.status)
+        prob = stage_probability(display)
         weighted = val * prob
         open_value += val
         weighted_value += weighted
-        bucket = by_stage_acc.get(r.status)
+        bucket = by_stage_acc.get(display)
         if bucket is not None:
             bucket["count"] += 1
             bucket["value"] += val

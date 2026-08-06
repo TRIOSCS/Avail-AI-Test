@@ -355,6 +355,10 @@ async def requisitions_list_partial(
         ]
 
     from ...services.activity_service import get_inbox_sync_status
+    from ...services.requisition_state import attach_display_status
+
+    # W3.3: one batch query set per page — badges show the derived pipeline stage.
+    attach_display_status(db, reqs)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -450,18 +454,33 @@ def _requisition_export_rows(
     sort_col = _REQ_EXPORT_SORT_COLUMNS.get(sort, Requisition.created_at)
     order = sort_col.desc().nullslast() if sort_dir == "desc" else sort_col.asc().nullslast()
 
+    from ...services.requisition_state import derived_status_map
+
+    def _flush(chunk: list) -> object:
+        # W3.3: derive the pipeline stage per chunk (matches yield_per) so the
+        # Status column shows what the list shows without an N+1 per row.
+        stage_map = derived_status_map(db, [r.id for r, _ in chunk if (r.status or "open") == "open"])
+        for req, req_count in chunk:
+            yield (
+                req.name,
+                req.customer_name or "",
+                stage_map.get(req.id, req.status or ""),
+                req.claimed_by.name if req.claimed_by else "",
+                req.opportunity_value if req.opportunity_value is not None else "",
+                req.deadline or "",
+                req.created_at.strftime("%Y-%m-%d %H:%M") if req.created_at else "",
+                req_count,
+            )
+
     rows = query.add_columns(req_count_sub.label("req_count")).order_by(order).yield_per(500)
+    chunk: list = []
     for req, req_count in rows:
-        yield (
-            req.name,
-            req.customer_name or "",
-            req.status or "",
-            req.claimed_by.name if req.claimed_by else "",
-            req.opportunity_value if req.opportunity_value is not None else "",
-            req.deadline or "",
-            req.created_at.strftime("%Y-%m-%d %H:%M") if req.created_at else "",
-            req_count,
-        )
+        chunk.append((req, req_count))
+        if len(chunk) >= 500:
+            yield from _flush(chunk)
+            chunk = []
+    if chunk:
+        yield from _flush(chunk)
 
 
 @router.get("/v2/partials/requisitions/export")
@@ -1066,6 +1085,10 @@ async def requisition_detail_partial(
         r.sighting_count = len(r.sightings) if r.sightings else 0
 
     req.offer_count = len(req.offers) if req.offers else 0
+
+    from ...services.requisition_state import attach_display_status
+
+    attach_display_status(db, [req])
 
     # Fetch users for tasks tab assignee dropdown
     users = db.query(User).order_by(User.name).all()

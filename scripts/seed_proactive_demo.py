@@ -276,7 +276,10 @@ def main():
     # 2. Holding requisition for the vendor offers (FK container only)
     holding = db.query(Requisition).filter(Requisition.name == f"AVAIL Vendor Stock — {SEED_TAG}").first()
     if not holding:
-        holding = Requisition(name=f"AVAIL Vendor Stock — {SEED_TAG}", status="archived", created_by=viewer.id)
+        # "cancelled" keeps the FK container off every open list AND inside the
+        # ck_requisitions_status CHECK (the old "archived" value violates it on
+        # any migrated Postgres — it was only ever tolerated by metadata-built DBs).
+        holding = Requisition(name=f"AVAIL Vendor Stock — {SEED_TAG}", status="cancelled", created_by=viewer.id)
         db.add(holding)
         db.flush()
 

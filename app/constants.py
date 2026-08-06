@@ -113,20 +113,20 @@ class QualificationStatus(StrEnum):
 
 
 class RequisitionStatus(StrEnum):
-    """Status lifecycle for Requisition records.
+    """STORED status for Requisition records — user intent only.
 
-    Pipeline (Sales Hub): OPEN -> RFQS_SENT -> OFFERS -> QUOTED -> WON/LOST. DRAFT
-    precedes OPEN. HOTLIST is an off-pipeline *monitor* state: the salesperson watches a
-    part/customer and the Proactive matcher surfaces an offer when stock appears.
-    CANCELLED retained for existing rows. There is no archive/hide capability — a
-    requisition ends in WON or LOST (each carrying a required outcome_reason).
+    The mid-pipeline stages (rfqs_sent / offers / quoted) are NOT stored; they are
+    derived from data (RFQ Contact rows, Offer rows, QuoteRequisition rows) by
+    services/requisition_state.derived_status. A requisition working the pipeline stays
+    stored OPEN until closed. DRAFT precedes OPEN. HOTLIST is an off-pipeline *monitor*
+    state: the salesperson watches a part/customer and the Proactive matcher surfaces an
+    offer when stock appears. CANCELLED retained for existing rows. There is no
+    archive/hide capability — a requisition ends in WON or LOST (each carrying a
+    required outcome_reason, which cannot be derived).
     """
 
     DRAFT = "draft"
-    OPEN = "open"  # entry stage; "open" automatically means sourcing
-    RFQS_SENT = "rfqs_sent"
-    OFFERS = "offers"
-    QUOTED = "quoted"
+    OPEN = "open"  # the whole working pipeline; stage within it is derived
     WON = "won"
     LOST = "lost"
     HOTLIST = "hotlist"  # monitor-only; surfaced by Proactive on a matching offer
@@ -135,8 +135,10 @@ class RequisitionStatus(StrEnum):
     # Terminal (done) — excluded from the default open list. Single source of truth.
     # `nonmember` keeps these off the member list (they're constants, not statuses).
     TERMINAL = nonmember(frozenset({"won", "lost", "cancelled"}))
-    # Active pipeline stages shown by default in the Sales Hub list.
-    OPEN_PIPELINE = nonmember(frozenset({"open", "rfqs_sent", "offers", "quoted"}))
+    # Stored statuses eligible for pipeline work. Collapsed to {open} when the
+    # mid-pipeline stages became derived (spec §5.1); kept as a set so the
+    # membership-style call sites read unchanged.
+    OPEN_PIPELINE = nonmember(frozenset({"open"}))
     # Off-pipeline monitor states (Hotlist).
     MONITOR = nonmember(frozenset({"hotlist"}))
 

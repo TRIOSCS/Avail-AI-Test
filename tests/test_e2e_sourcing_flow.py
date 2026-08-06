@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
+from app.models import Company, Contact, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
 from app.models.buy_plan import (
     BuyPlan,
     BuyPlanLine,
@@ -42,6 +42,7 @@ from app.services.requirement_status import (
     on_quote_built,
     transition_requirement,
 )
+from app.services.requisition_state import derived_status
 from app.services.requisition_state import transition as req_transition
 
 pytestmark = pytest.mark.slow
@@ -152,18 +153,41 @@ def _full_setup(db: Session):
 
 
 class TestRequisitionLifecycle:
-    def test_draft_to_active(self, db_session):
+    def test_draft_to_open(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
         req_transition(req, "open", data["sales"], db_session)
         assert req.status == "open"
 
-    def test_active_to_sourcing(self, db_session):
+    def test_open_to_hotlist_and_back(self, db_session):
         data = _full_setup(db_session)
         req = data["requisition"]
         req_transition(req, "open", data["sales"], db_session)
-        req_transition(req, "rfqs_sent", data["sales"], db_session)
-        assert req.status == "rfqs_sent"
+        req_transition(req, "hotlist", data["sales"], db_session)
+        assert req.status == "hotlist"
+        req_transition(req, "open", data["sales"], db_session)
+        assert req.status == "open"
+
+    def test_rfq_send_derives_stage_without_storing_it(self, db_session):
+        """W3.3: sending RFQs no longer transitions the requisition — the stored status
+        stays 'open' and the pipeline stage is derived from the email Contact rows."""
+        data = _full_setup(db_session)
+        req = data["requisition"]
+        req_transition(req, "open", data["sales"], db_session)
+
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=data["sales"].id,
+                contact_type="email",
+                vendor_name="Arrow Electronics",
+                status="sent",
+            )
+        )
+        db_session.flush()
+
+        assert req.status == "open"
+        assert derived_status(db_session, req) == "rfqs_sent"
 
     def test_illegal_transition_rejected(self, db_session):
         data = _full_setup(db_session)

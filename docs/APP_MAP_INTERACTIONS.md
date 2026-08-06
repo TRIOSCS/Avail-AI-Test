@@ -112,7 +112,7 @@ The unified create/import modal (`requisitions/unified_modal.html`) carries a
 `hotlist: bool = Form(False)` and, when set, creates the requisition in
 `RequisitionStatus.HOTLIST` **instead of** `OPEN`. A Hot List requisition is
 **not sourced** (there is no create-time search kickoff, and the search queue is
-`OPEN_PIPELINE`-scoped so `HOTLIST` is excluded): its parts are stored and market
+`OPEN_PIPELINE`-scoped — just `{open}` since W3.3 — so `HOTLIST` is excluded): its parts are stored and market
 data is built, but nothing is queried out to vendors. Instead the **Proactive
 matcher** (§ 7) surfaces offers when matching stock appears — its query filters
 `status == HOTLIST` and joins `Company` on `Requisition.company_id`, so the
@@ -1695,7 +1695,8 @@ List (2+ selected) ──GET──> /v2/partials/quote-builder/multi?requisition
         v
 save_quote_from_builder_multi -> _save_quote_from_builder_core(db, req_ids, payload, user):
     validate_same_customer (400 on mismatch) · primary = req_ids[0] (Quote.requisition_id)
-    · one Quote + QuoteLines from ALL reqs · transition EVERY req -> QUOTED
+    · one Quote + QuoteLines from ALL reqs · reqs stay stored `open` (W3.3:
+      the `quoted` stage is DERIVED from the QuoteRequisition join rows)
     · link_quote_to_requisitions(quote.id, req_ids)  (join rows; primary self-row already
       created by the Quote after_insert listener)
 ```
@@ -1707,8 +1708,8 @@ each offender), `link_quote_to_requisitions` (idempotent), `requisition_ids_for_
 join-based `Query[Quote]` that REPLACES the old `Quote.requisition_id == req_id` read filter
 so a SECONDARY requisition also surfaces the combined quote on its Quotes tab, Build-Quote
 tab, offers-tab draft lookup, and the list Quotes column (batched one-query-per-page). Quote
-**send** loops the transition + one ActivityLog over every contributing req (response still
-reflects the primary). Building a **buy plan** from a combined quote is HARD-BLOCKED
+**send** loops one ActivityLog over every contributing req — no requisition status write
+(W3.3); the response reflects the primary req's derived display status. Building a **buy plan** from a combined quote is HARD-BLOCKED
 (`buyplan_builder.build_buy_plan` raises `ValueError` "spans N requisitions" → 400) rather than
 silently dropping the non-primary reqs' lines.
 
@@ -1733,8 +1734,10 @@ else `CustomerSite.contact_email`), **hard-blocks DNC** (site-level or a matchin
 message's Graph ids via `email_service._find_sent_message` into `quote.graph_message_id` /
 `graph_conversation_id` (NULL-safe; a raised `SentMessageLookupError` — the lookup's
 lookup-failed state — is swallowed here since the mail already went out: ids stay NULL,
-reply matching degrades). It then transitions the quote→SENT, advances the
-requisition→QUOTED (unless WON/LOST/ARCHIVED), writes an OUTBOUND email `ActivityLog` via
+reply matching degrades). It then transitions the quote→SENT — the requisition's STORED
+status is untouched (W3.3: the `quoted` stage is derived from `QuoteRequisition`
+membership; `SendQuoteResult.req_status` carries the primary req's derived display status
+and `status_changed` is always False) — writes an OUTBOUND email `ActivityLog` via
 `activity_service.log_email_activity`, and commits, returning a frozen `SendQuoteResult`.
 Under `TESTING=1` the Graph POST + Sent-Items lookup are skipped but the quote is still
 marked sent. `QuoteSendError` (no/invalid recipient → 400; Graph error → 502) and
@@ -2616,7 +2619,9 @@ in-app — only the email channel is silenced for that user.
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
 overdue / flagged counts), the **Sales Hub** pipeline chip (`forecast_service.pipeline_summary`
-in `parts_workspace_partial`), and the **CRM** coverage chip (`reporting_service.coverage_report`
+in `parts_workspace_partial` — W3.3: filters STORED status `draft`/`open` and buckets the
+stored-`open` rows by derived stage via `requisition_state.derived_status_map`, so the
+chip still shows rfqs_sent/offers/quoted), and the **CRM** coverage chip (`reporting_service.coverage_report`
 in `crm_service.cdm_list_ctx`). `coverage_report` is global (population-wide, filter-independent),
 so it is short-TTL cached (`@cached_endpoint`) to stay off the aggregation queries on every
 CRM list refresh while the chip still re-renders.

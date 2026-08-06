@@ -59,7 +59,7 @@ from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.crm import Company, CustomerSite
 from app.models.excess import ExcessLineItem, ExcessList
 from app.models.intelligence import MaterialCard
-from app.models.offers import Offer
+from app.models.offers import Contact, Offer
 from app.models.quotes import Quote, QuoteLine
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard
@@ -210,23 +210,38 @@ MATERIAL_CARDS_DATA = [
     },
 ]
 
-# ── Requisition configs (one per status) ──────────────────────────────
+# ── Requisition configs (one per DISPLAY stage) ───────────────────────
+# W3.3: rfqs_sent/offers/quoted are DERIVED, not stored — those examples store
+# OPEN and get the data rows the derivation reads (an email Contact row for
+# rfqs_sent; Offer rows for offers; a QuoteRequisition membership for quoted).
+# "stage" is the display stage the seeded data should produce.
 
 REQ_CONFIGS = [
-    {"name": "Acme - MCU Order Q3", "status": RequisitionStatus.DRAFT, "urgency": "normal"},
-    {"name": "GlobalChip - Regulator Restock", "status": RequisitionStatus.OPEN, "urgency": "normal"},
-    {"name": "Pinnacle - ADC Sourcing", "status": RequisitionStatus.RFQS_SENT, "urgency": "hot"},
-    {"name": "Acme - MOSFET Eval Kit", "status": RequisitionStatus.OFFERS, "urgency": "critical"},
-    {"name": "Pinnacle - Shift Register Build", "status": RequisitionStatus.QUOTED, "urgency": "normal"},
+    {"name": "Acme - MCU Order Q3", "status": RequisitionStatus.DRAFT, "stage": "draft", "urgency": "normal"},
+    {"name": "GlobalChip - Regulator Restock", "status": RequisitionStatus.OPEN, "stage": "open", "urgency": "normal"},
+    {"name": "Pinnacle - ADC Sourcing", "status": RequisitionStatus.OPEN, "stage": "rfqs_sent", "urgency": "hot"},
+    {"name": "Acme - MOSFET Eval Kit", "status": RequisitionStatus.OPEN, "stage": "offers", "urgency": "critical"},
+    {
+        "name": "Pinnacle - Shift Register Build",
+        "status": RequisitionStatus.OPEN,
+        "stage": "quoted",
+        "urgency": "normal",
+    },
     {
         "name": "GlobalChip - AVR Board Win",
         "status": RequisitionStatus.WON,
+        "stage": "won",
         "urgency": "normal",
         "opp_value": Decimal("25400.00"),
     },
-    {"name": "Pinnacle - Diode Array (lost)", "status": RequisitionStatus.LOST, "urgency": "normal"},
-    {"name": "Acme - Timer IC Watch", "status": RequisitionStatus.HOTLIST, "urgency": "hot"},
-    {"name": "GlobalChip - Cancelled Prototype", "status": RequisitionStatus.CANCELLED, "urgency": "normal"},
+    {"name": "Pinnacle - Diode Array (lost)", "status": RequisitionStatus.LOST, "stage": "lost", "urgency": "normal"},
+    {"name": "Acme - Timer IC Watch", "status": RequisitionStatus.HOTLIST, "stage": "hotlist", "urgency": "hot"},
+    {
+        "name": "GlobalChip - Cancelled Prototype",
+        "status": RequisitionStatus.CANCELLED,
+        "stage": "cancelled",
+        "urgency": "normal",
+    },
 ]
 
 
@@ -324,7 +339,7 @@ def seed_material_cards(db):
     return cards
 
 
-def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
+def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards, *, now):
     """Create requisitions in every status, with requirements, offers, quotes, buy
     plans."""
     requisitions = []
@@ -358,6 +373,24 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
         db.flush()
         requisitions.append(req)
 
+        # W3.3: seed the RFQ signal for every stage at-or-past rfqs_sent so the
+        # derived pipeline stage shows what the old stored ladder used to.
+        if cfg["stage"] in ("rfqs_sent", "offers", "quoted", "won", "lost"):
+            vc0 = vendor_cards[i % len(vendor_cards)]
+            db.add(
+                Contact(
+                    requisition_id=req.id,
+                    user_id=user.id,
+                    contact_type="email",
+                    vendor_name=vc0.display_name,
+                    vendor_name_normalized=vc0.normalized_name,
+                    subject=f"RFQ — {cfg['name']}",
+                    status="sent",
+                    sent_at=now - timedelta(days=5),
+                )
+            )
+            db.flush()
+
         # Create 2-3 requirements per req, cycling through sourcing statuses
         num_reqs = 2 + (i % 2)
         for j in range(num_reqs):
@@ -379,13 +412,8 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
             db.flush()
             all_requirements.append(requirement)
 
-            # Create offers for reqs that are past sourcing stage
-            if cfg["status"] in (
-                RequisitionStatus.OFFERS,
-                RequisitionStatus.QUOTED,
-                RequisitionStatus.WON,
-                RequisitionStatus.LOST,
-            ):
+            # Create offers for reqs whose display stage implies offers exist
+            if cfg["stage"] in ("offers", "quoted", "won", "lost"):
                 offer_statuses = list(OfferStatus)
                 for k in range(2):
                     vc = vendor_cards[(i + j + k) % len(vendor_cards)]
@@ -422,7 +450,10 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
 def seed_quotes(db, user, requisitions, offers, sites, *, now):
     """Create quotes in every status."""
     quote_configs = [
-        {"status": QuoteStatus.DRAFT, "req_idx": 3},
+        # W3.3: the draft quote lives on the WON req (idx 5), NOT the offers-stage
+        # req (idx 3) — any QuoteRequisition row would derive idx 3 as 'quoted'
+        # and break the one-example-per-stage intent; stored WON outranks derivation.
+        {"status": QuoteStatus.DRAFT, "req_idx": 5},
         {"status": QuoteStatus.SENT, "req_idx": 4},
         {"status": QuoteStatus.WON, "req_idx": 5, "won_revenue": Decimal("25400.00")},
         {"status": QuoteStatus.LOST, "req_idx": 6, "result_reason": "Price too high"},
@@ -722,7 +753,9 @@ def main():
         companies, sites = seed_companies_and_sites(db, user)
         vendor_cards = seed_vendor_cards(db)
         material_cards = seed_material_cards(db)
-        requisitions, requirements, offers = seed_requisitions(db, user, companies, sites, material_cards, vendor_cards)
+        requisitions, requirements, offers = seed_requisitions(
+            db, user, companies, sites, material_cards, vendor_cards, now=now
+        )
         quotes = seed_quotes(db, user, requisitions, offers, sites, now=now)
         seed_buy_plans(db, user, quotes, offers, now=now)
         seed_excess_lists(db, user, companies, sites)

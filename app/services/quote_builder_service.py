@@ -403,17 +403,16 @@ def _save_quote_from_builder_core(
     primary/anchor; after the quote is written, ``link_quote_to_requisitions`` records the
     full membership so a combined quote is visible on all of its requisitions.
 
-    Fires the same hooks as create_quote: requisition state transition (for EVERY
-    contributing requisition), per-requirement sourcing status update, and knowledge
-    ledger capture.
+    Fires the same hooks as create_quote: per-requirement sourcing status update and
+    knowledge ledger capture. (W3.3: no requisition status write — the "quoted" stage
+    is derived from the QuoteRequisition membership this save records.)
     """
     from loguru import logger
 
-    from app.constants import QuoteStatus, RequisitionStatus
+    from app.constants import QuoteStatus
     from app.models import Quote, QuoteLine, Requisition
     from app.services.crm_service import next_quote_number
     from app.services.quote_requisitions import link_quote_to_requisitions, validate_same_customer
-    from app.services.requisition_state import transition as req_transition
 
     if not req_ids:
         raise ValueError("No requisitions selected")
@@ -464,16 +463,8 @@ def _save_quote_from_builder_core(
     else:
         quote_number = next_quote_number(db)
 
-    # Advance EVERY contributing requisition to "quoted" if appropriate (for a single-req
-    # save this is just the primary; for a combined quote each selected req is advanced so
-    # none is left OPEN/OFFERS after its lines are on the quote).
-    for rid in req_ids:
-        r = db.get(Requisition, rid)
-        if r and r.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS):
-            try:
-                req_transition(r, RequisitionStatus.QUOTED, user, db)
-            except ValueError:
-                pass  # already in quoted or later state
+    # W3.3: no requisition-status advance — the "quoted" pipeline stage is derived
+    # from the QuoteRequisition membership rows this save creates.
 
     # Load customer site for default payment/shipping terms
     from app.models import CustomerSite

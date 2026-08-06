@@ -41,6 +41,11 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
 
     offers = db.query(Offer).filter_by(requisition_id=requisition_id).order_by(Offer.created_at.desc()).all()
 
+    from app.services.requisition_state import attach_display_status
+
+    # W3.3: the document's Status line shows the derived pipeline stage.
+    attach_display_status(db, [requisition])
+
     return _render_pdf(
         "rfq_summary.html",
         requisition=requisition,

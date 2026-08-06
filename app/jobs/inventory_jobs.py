@@ -362,7 +362,8 @@ async def _download_and_import_stock_list(
                 )
                 .join(Requisition, Requirement.requisition_id == Requisition.id)
                 .filter(
-                    Requisition.status.in_([RequisitionStatus.OPEN, RequisitionStatus.OFFERS]),
+                    # W3.3: stored OPEN covers the whole working pipeline (stages derived).
+                    Requisition.status == RequisitionStatus.OPEN,
                     sa_func.upper(Requirement.primary_mpn).in_(imported_mpns_upper),
                 )
                 .all()

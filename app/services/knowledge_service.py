@@ -639,26 +639,25 @@ def build_company_context(db: Session, *, company_id: int) -> str:
             db.query(Requisition)
             .filter(
                 Requisition.customer_site_id.in_(site_ids),
-                Requisition.status.in_(
-                    [
-                        RequisitionStatus.OPEN,
-                        RequisitionStatus.RFQS_SENT,
-                        RequisitionStatus.QUOTED,
-                    ]
-                ),
+                # W3.3: stored OPEN covers the whole working pipeline (stages derived).
+                Requisition.status == RequisitionStatus.OPEN,
             )
             .order_by(Requisition.created_at.desc())
             .limit(20)
             .all()
         )
         if reqs:
+            # W3.3: show the derived pipeline stage, not the (collapsed) stored value.
+            from app.services.requisition_state import derived_status_map
+
+            stage_map = derived_status_map(db, [r.id for r in reqs])
             lines = []
             for r in reqs:
                 lines.append(
                     "- Req #{} '{}' status={} ({})".format(
                         r.id,
                         r.name,
-                        r.status,
+                        stage_map.get(r.id, r.status),
                         r.created_at.strftime("%Y-%m-%d"),
                     )
                 )

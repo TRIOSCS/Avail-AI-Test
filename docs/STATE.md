@@ -84,7 +84,19 @@ approval) verified by test.
   normalized_mpn key form, packaging vocab clamp); PUT edit path aligned
   NULL-on-unmapped; description_service key-form lookup fix; seed drift
   fixed; dedicated unit tests incl. dup detection.
-- [ ] W3.3 Derived requisition status (replaces the stored 9-state ladder)
+- [x] W3.3 Derived requisition status (replaces the stored 9-state ladder):
+  RequisitionStatus → 6 stored user-intent values (draft/open/hotlist/won/
+  lost/cancelled); rfqs_sent/offers/quoted DERIVED from data (email Contact
+  rows / Offer rows / QuoteRequisition membership; quoted > offers >
+  rfqs_sent; stored intent outranks data) by requisition_state.derived_status
+  (+ _map batch, attach_display_status for lists). Migration 209 remaps 11
+  live rows → open + narrows ck_requisitions_status to 6 (round-tripped on
+  throwaway PG 16 incl. CHECK-rejection probe). The 3 auto-advance writers
+  (offer create, quote build, quote send) deleted; inline dropdown →
+  draft/open/hotlist (won/lost stay on the reason-gated row actions); all
+  render surfaces (Sales Hub list/grouped/CSV, detail header, JSON API,
+  company/vendor req tab, forecast pipeline chip, AI contexts, RFQ-summary
+  PDF) show the derived stage via batch maps — display vocabulary unchanged.
 - [x] W3.4 Quote builder — one implementation (combined.html; modal +
   macros deleted)
 - [x] W3.5 RFQ composer deleted (offers/rfq.py + compose/results templates;
@@ -221,6 +233,24 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
   htmx-wiring-vs-Playwright-speed class (upload-form binding wait;
   outcome step reloads detail — the award swap only re-renders the offers
   tab body, so the header form appears on next render, matching real UX).
+
+- 2026-08-06 W3.3: legacy-origin transition entries (active/sourcing/quoting/
+  reopened/archived) deleted from ALLOWED_TRANSITIONS — migration 158's
+  ck_requisitions_status CHECK has forbidden those values on any migrated PG
+  since it ran; they were reachable only on metadata-built test DBs.
+  seed_proactive_demo.py's status='archived' holding req (a real CHECK
+  violation on live PG) → 'cancelled'.
+- 2026-08-06 W3.3 behavior deltas (collapse side effects, Packet 3 flags):
+  (a) parts.py default part list (parent IN [open]) now includes mid-pipeline
+  parents that used to vanish once a req advanced; (b) companies/detail
+  open-req badge now counts mid-pipeline reqs; (c) POST /api/quotes/{id}/send
+  JSON: status_changed now always False (send can't change requisition
+  status), req_status = derived stage; (d) 8x8 (parked) + stock-list-import
+  req filters widen from (open,offers) to all stored-open; (e) deleting a
+  req's only offer honestly drops the derived stage back (the stored ladder
+  kept 'offers' forever); (f) rfqs_sent now lights up from actual RFQ sends —
+  under the ladder NOTHING auto-advanced to it (manual dropdown only), so the
+  stage was unmaintained data.
 
 ### Packet 1 decision queue (owner, one sitting)
 - 4 disposition flip-ables (bid_due_alerts / auto_attribute / auto_dedup deletes; inbox_scan mining sub-ops now flag-gated off)

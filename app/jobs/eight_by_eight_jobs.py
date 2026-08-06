@@ -220,12 +220,8 @@ async def _process_cdrs(db, settings) -> dict:
                 .join(CustomerSite, Requisition.customer_site_id == CustomerSite.id)
                 .filter(
                     CustomerSite.company_id == match["company_id"],
-                    Requisition.status.in_(
-                        [
-                            RequisitionStatus.OPEN,
-                            RequisitionStatus.OFFERS,
-                        ]
-                    ),
+                    # W3.3: stored OPEN covers the whole working pipeline (stages derived).
+                    Requisition.status == RequisitionStatus.OPEN,
                 )
                 .first()
             )

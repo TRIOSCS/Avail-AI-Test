@@ -81,7 +81,7 @@
       hx-trigger="dblclick"
       @click.stop
       title="Double-click to change status">
-    {{ req_status_badge(req.status) }}
+    {{ req_status_badge(req.display_status or req.status) }}
   </td>
 {% endmacro %}
 

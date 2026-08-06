@@ -677,8 +677,10 @@ class TestQueueManager:
         assert item.status == "pending"
         assert item.priority == 1  # "open" is in OPEN_PIPELINE (_ACTIVE_STATUSES)
 
-    def test_enqueue_active_requisition_gets_priority(self, db_session, test_requisition):
-        test_requisition.status = "rfqs_sent"
+    def test_enqueue_open_requisition_gets_priority(self, db_session, test_requisition):
+        # W3.3: OPEN_PIPELINE collapsed to {"open"} — mid-pipeline values are
+        # derived, not stored. Priority semantics unchanged.
+        test_requisition.status = "open"
         db_session.commit()
         req = test_requisition.requirements[0]
         item = enqueue_for_ics_search(req.id, db_session)

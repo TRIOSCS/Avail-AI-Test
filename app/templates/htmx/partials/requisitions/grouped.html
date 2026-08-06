@@ -56,7 +56,7 @@
             </a>
             <span class="text-xs text-gray-400 tabular-nums flex-shrink-0">{{ rg.requirements|length }} line{{ '' if rg.requirements|length == 1 else 's' }}</span>
           </button>
-          {{ req_status_badge(rg.req.status) }}
+          {{ req_status_badge(rg.req.display_status or rg.req.status) }}
           {% if rg.req.urgency and rg.req.urgency != 'normal' %}{{ urgency_badge(rg.req.urgency) }}{% endif %}
         </div>
 

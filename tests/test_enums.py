@@ -20,9 +20,6 @@ from app.constants import (
     [
         (RequisitionStatus.DRAFT, "draft"),
         (RequisitionStatus.OPEN, "open"),
-        (RequisitionStatus.RFQS_SENT, "rfqs_sent"),
-        (RequisitionStatus.OFFERS, "offers"),
-        (RequisitionStatus.QUOTED, "quoted"),
         (RequisitionStatus.WON, "won"),
         (RequisitionStatus.LOST, "lost"),
         (RequisitionStatus.HOTLIST, "hotlist"),
@@ -83,4 +80,4 @@ def test_enum_is_str():
     """StrEnum values are equal to plain strings."""
     assert RequisitionStatus.OPEN == "open"
     assert "open" == RequisitionStatus.OPEN
-    assert RequisitionStatus.OPEN in {"open", "rfqs_sent"}
+    assert RequisitionStatus.OPEN in {"open", "hotlist"}

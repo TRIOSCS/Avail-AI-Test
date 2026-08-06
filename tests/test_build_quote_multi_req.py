@@ -3,13 +3,15 @@
 
 Covers the combined-quote feature end to end:
   - the multi entry renders the SAME Build-Quote body (merged lines) in the modal;
-  - assembling spans every selected requisition into ONE quote (join rows, all QUOTED);
+  - assembling spans every selected requisition into ONE quote (join rows; every
+    contributing req DERIVES the quoted stage, stored status untouched — W3.3);
   - the customer-consistency gate blocks a builder-open (honest 200 fragment) AND an
     assemble (400 naming each offending req) — never a silent partial write;
   - the single-req path is 100% preserved (1 quote, 1 self join-row id == req id);
   - a SECONDARY requisition surfaces the combined quote on its Quotes tab, Build-Quote
     tab, and the list Quotes column;
-  - send advances EVERY contributing requisition + logs one ActivityLog per req;
+  - send leaves EVERY contributing requisition's stored status untouched (the quoted
+    stage stays derived) + logs one ActivityLog per req;
   - a revision carries the full requisition membership;
   - building a buy plan from a combined quote is hard-blocked (single-req still works).
 
@@ -44,6 +46,7 @@ from app.models import (
     User,
 )
 from app.schemas.quote_builder import QuoteBuilderSaveRequest
+from app.services.requisition_state import derived_status
 from tests.conftest import engine
 
 _ = engine
@@ -190,10 +193,15 @@ class TestMultiSave:
         # QuoteLine count = lines from BOTH requisitions.
         qlines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
         assert len(qlines) == 2
-        # BOTH requisitions advanced to QUOTED.
+        # W3.3: STORED status is untouched (stays open); BOTH requisitions DERIVE the
+        # quoted stage from their QuoteRequisition membership.
         db_session.expire_all()
-        assert db_session.get(Requisition, r1.id).status == RequisitionStatus.QUOTED
-        assert db_session.get(Requisition, r2.id).status == RequisitionStatus.QUOTED
+        r1_row = db_session.get(Requisition, r1.id)
+        r2_row = db_session.get(Requisition, r2.id)
+        assert r1_row.status == RequisitionStatus.OPEN
+        assert r2_row.status == RequisitionStatus.OPEN
+        assert derived_status(db_session, r1_row) == "quoted"
+        assert derived_status(db_session, r2_row) == "quoted"
         # The re-render shows the assembled-quote summary inline (modal stays open).
         assert quote.quote_number in resp.text
 
@@ -354,11 +362,11 @@ class TestSecondaryReqVisibility:
         assert _best_quote_status(quotes_for_requisition(db_session, r2.id).all()) == "sent"
 
 
-# ── Send transitions every contributing req ─────────────────────────────────────
+# ── Send logs every contributing req (stored status untouched) ──────────────────
 
 
 class TestSendAllReqs:
-    async def test_send_transitions_all_contributing_reqs(self, db_session, test_user, combo):
+    async def test_send_logs_all_reqs_without_stored_status_change(self, db_session, test_user, combo):
         from app.services.quote_builder_service import save_quote_from_builder_multi
         from app.services.quote_send import send_quote_email
 
@@ -387,10 +395,16 @@ class TestSendAllReqs:
             await send_quote_email(db_session, quote, test_user, token="t", testing=False)
 
         db_session.expire_all()
-        assert db_session.get(Requisition, r1.id).status == RequisitionStatus.QUOTED
-        assert db_session.get(Requisition, r2.id).status == RequisitionStatus.QUOTED
+        # W3.3: the send never advances stored status — both reqs stay OPEN and the
+        # quoted stage is derived from their QuoteRequisition membership.
+        r1_row = db_session.get(Requisition, r1.id)
+        r2_row = db_session.get(Requisition, r2.id)
+        assert r1_row.status == RequisitionStatus.OPEN
+        assert r2_row.status == RequisitionStatus.OPEN
+        assert derived_status(db_session, r1_row) == "quoted"
+        assert derived_status(db_session, r2_row) == "quoted"
         # Exactly one outbound send ActivityLog per contributing requisition (scoped by the
-        # send's own subject so status-transition activity rows don't inflate the count).
+        # send's own subject so unrelated activity rows don't inflate the count).
         for rid in (r1.id, r2.id):
             assert (
                 db_session.query(ActivityLog)

@@ -83,7 +83,7 @@
             hx-swap="innerHTML"
             hx-trigger="click"
             title="Click to change status">
-        {{ req_status_badge(req.status) }}
+        {{ req_status_badge(req.display_status or req.status) }}
       </span>
 
       {# Inline-editable urgency badge #}

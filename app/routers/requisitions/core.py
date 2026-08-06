@@ -50,6 +50,7 @@ from ...schemas.requisitions import (
 from ...schemas.responses import BatchAssignResponse, RequisitionListResponse
 from ...services.activity_service import log_activity
 from ...services.requisition_service import batch_assign_owner
+from ...services.requisition_state import derived_status, derived_status_map
 from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
@@ -362,15 +363,18 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     if creator_ids:
         creators = db.query(User.id, User.name, User.email).filter(User.id.in_(creator_ids)).all()
         creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
+    # W3.3: the JSON contract keeps the full 9-value vocabulary — mid-pipeline
+    # stages are derived per page, not stored.
+    stage_map = derived_status_map(db, [r.id for r, *_ in rows if (r.status or "open") == "open"])
     return {
-        "requisitions": [_serialize_req_row(row, creator_names) for row in rows],
+        "requisitions": [_serialize_req_row(row, creator_names, stage_map) for row in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
     }
 
 
-def _serialize_req_row(row, creator_names):
+def _serialize_req_row(row, creator_names, stage_map=None):
     """Serialize one query row (Requisition + subquery aggregates) into a list-view
     dict."""
     (
@@ -403,7 +407,7 @@ def _serialize_req_row(row, creator_names):
     return {
         "id": r.id,
         "name": r.name,
-        "status": r.status,
+        "status": (stage_map or {}).get(r.id, r.status),
         "customer_site_id": r.customer_site_id,
         "company_id": (r.customer_site.company_id if r.customer_site else None),
         "customer_display": (
@@ -458,7 +462,7 @@ async def get_requisition(
     return {
         "id": req.id,
         "name": req.name,
-        "status": req.status,
+        "status": derived_status(db, req),
         "customer_name": req.customer_name,
         "customer_site_id": req.customer_site_id,
         "created_by": req.created_by,

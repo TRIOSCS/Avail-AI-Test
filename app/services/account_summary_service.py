@@ -131,9 +131,16 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
             contact_lines.append(" ".join(parts))
         ctx_parts.append("Key contacts:\n" + "\n".join(f"  - {cl}" for cl in contact_lines))
 
-    # Pipeline summary
+    # Pipeline summary — W3.3: derived stage granularity, not the collapsed stored value.
     if reqs:
-        status_counts = Counter((r.status or "open").lower() for r in reqs)
+        from app.services.requisition_state import derived_status_map
+
+        stage_map = derived_status_map(db, [r.id for r in reqs if (r.status or "open") == "open"])
+
+        def _display(r) -> str:
+            return stage_map.get(r.id, (r.status or "open")).lower()
+
+        status_counts = Counter(_display(r) for r in reqs)
         pipeline_parts = [f"{st}: {cnt}" for st, cnt in status_counts.items()]
         ctx_parts.append(f"Pipeline ({len(reqs)} total): {', '.join(pipeline_parts)}")
 
@@ -142,7 +149,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
         for r in reqs[:8]:
             mpn_count = req_counts.get(r.id, 0)
             age_days = (now - r.created_at).days if r.created_at else "?"
-            recent_lines.append(f"  - REQ-{r.id} '{r.name}' ({r.status}, {mpn_count} MPNs, {age_days}d ago)")
+            recent_lines.append(f"  - REQ-{r.id} '{r.name}' ({_display(r)}, {mpn_count} MPNs, {age_days}d ago)")
         ctx_parts.append("Recent requisitions:\n" + "\n".join(recent_lines))
 
     # Activity summary

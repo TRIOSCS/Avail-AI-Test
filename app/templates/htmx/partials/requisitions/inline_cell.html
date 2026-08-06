@@ -27,7 +27,7 @@
   {% endset %}
 {% elif field == 'status' %}
   {% set orig_display %}
-    {{ req_status_badge(req.status or 'draft') }}
+    {{ req_status_badge(req.display_status or req.status or 'draft') }}
   {% endset %}
 {% elif field == 'urgency' %}
   {% set urgency_colors = {
@@ -71,7 +71,10 @@
           @change="$el.form.requestSubmit()"
           @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
           @keydown.escape.prevent="{{ cancel_edit }}">
-    {% for s in ['draft', 'open', 'rfqs_sent', 'offers', 'quoted', 'hotlist', 'won', 'lost'] %}
+    {# W3.3: only the STORED user-intent statuses are settable — the pipeline
+       stages (rfqs_sent/offers/quoted) are derived from data, and Won/Lost go
+       through the row actions because they require a close reason. #}
+    {% for s in ['draft', 'open', 'hotlist'] %}
     <option value="{{ s }}" {{ 'selected' if req.status == s else '' }}>{{ s|capitalize }}</option>
     {% endfor %}
   </select>

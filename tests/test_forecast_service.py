@@ -1,8 +1,12 @@
 """Tests for CRM Phase 5b — forecast_service pipeline/forecast rollups.
 
+W3.3: the pipeline stage (rfqs_sent/offers/quoted) is DERIVED from data rows
+(Contact/Offer/Quote), never stored — so pipeline tests seed stored 'open'
+requisitions plus the deriving rows.
+
 Called by: pytest
 Depends on: app.services.forecast_service, app.models (Requisition, Requirement,
-            Quote, Company, User)
+            Contact, Offer, Quote, User)
 """
 
 from datetime import UTC, datetime
@@ -10,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Requirement, Requisition, User
+from app.models import Contact, Offer, Quote, Requirement, Requisition, User
 from app.services.forecast_service import (
     OPEN_STATUSES,
     STAGE_WIN_PROBABILITY,
@@ -36,14 +40,56 @@ def _req(db, created_by, *, status="open", value=None, company_id=None, claimed_
     return req
 
 
+def _send_rfq(db, req, user_id):
+    """Email Contact row → derived stage 'rfqs_sent'."""
+    db.add(
+        Contact(
+            requisition_id=req.id,
+            user_id=user_id,
+            contact_type="email",
+            vendor_name="Arrow Electronics",
+            status="sent",
+        )
+    )
+    db.flush()
+
+
+def _add_offer(db, req, user_id):
+    """Offer row → derived stage 'offers'."""
+    db.add(
+        Offer(
+            requisition_id=req.id,
+            vendor_name="Arrow Electronics",
+            mpn="NE555P",
+            entered_by_id=user_id,
+        )
+    )
+    db.flush()
+
+
+def _add_quote(db, req, user_id):
+    """Quote row → derived stage 'quoted' (after_insert creates the QuoteRequisition
+    membership row)."""
+    db.add(
+        Quote(
+            quote_number=f"Q-FC-{req.id}",
+            requisition_id=req.id,
+            created_by_id=user_id,
+        )
+    )
+    db.flush()
+
+
 class TestStageProbability:
     def test_known_statuses(self):
+        assert stage_probability("draft") == 0.05
         assert stage_probability("open") == 0.10
         assert stage_probability("rfqs_sent") == 0.25
         assert stage_probability("offers") == 0.40
         assert stage_probability("quoted") == 0.75
         assert stage_probability("won") == 1.0
         assert stage_probability("lost") == 0.0
+        assert stage_probability("cancelled") == 0.0
 
     def test_unknown_and_none(self):
         assert stage_probability("nonsense") == 0.0
@@ -97,7 +143,8 @@ class TestBulkDealValues:
 
 class TestPipelineSummary:
     def test_weighted_math(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000)
+        req = _req(db_session, test_user.id, status="open", value=100000)
+        _send_rfq(db_session, req, test_user.id)  # derived stage: rfqs_sent
         summary = pipeline_summary(db_session)
         assert summary["open_count"] == 1
         assert summary["open_value"] == 100000.0
@@ -115,13 +162,16 @@ class TestPipelineSummary:
         assert summary["win_rate"] == pytest.approx(2 / 3)
 
     def test_win_rate_zero_when_nothing_decided(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="rfqs_sent", value=1000)
+        req = _req(db_session, test_user.id, status="open", value=1000)
+        _send_rfq(db_session, req, test_user.id)
         summary = pipeline_summary(db_session)
         assert summary["win_rate"] == 0.0
 
     def test_by_stage_buckets(self, db_session: Session, test_user: User):
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000)
-        _req(db_session, test_user.id, status="quoted", value=40000)
+        rfq = _req(db_session, test_user.id, status="open", value=100000)
+        _send_rfq(db_session, rfq, test_user.id)  # derived: rfqs_sent
+        quoted = _req(db_session, test_user.id, status="open", value=40000)
+        _add_quote(db_session, quoted, test_user.id)  # derived: quoted
         summary = pipeline_summary(db_session)
         by_stage = {b["status"]: b for b in summary["by_stage"]}
         assert by_stage["rfqs_sent"]["count"] == 1
@@ -131,11 +181,21 @@ class TestPipelineSummary:
         # Open stages only; won/lost never appear here.
         assert "won" not in by_stage
 
+    def test_offer_row_buckets_as_offers(self, db_session: Session, test_user: User):
+        req = _req(db_session, test_user.id, status="open", value=10000)
+        _add_offer(db_session, req, test_user.id)  # derived: offers
+        summary = pipeline_summary(db_session)
+        by_stage = {b["status"]: b for b in summary["by_stage"]}
+        assert by_stage["offers"]["count"] == 1
+        assert by_stage["offers"]["weighted"] == 4000.0  # 10000 * 0.40
+
     def test_owner_scoping(self, db_session: Session, test_user: User):
         other = User(name="Other Rep", email="other@example.com", role="sales")
         db_session.add(other)
         db_session.flush()
-        _req(db_session, test_user.id, status="rfqs_sent", value=100000, claimed_by_id=test_user.id)
-        _req(db_session, test_user.id, status="rfqs_sent", value=200000, claimed_by_id=other.id)
+        mine_req = _req(db_session, test_user.id, status="open", value=100000, claimed_by_id=test_user.id)
+        _send_rfq(db_session, mine_req, test_user.id)
+        other_req = _req(db_session, test_user.id, status="open", value=200000, claimed_by_id=other.id)
+        _send_rfq(db_session, other_req, test_user.id)
         mine = pipeline_summary(db_session, owner_id=test_user.id)
         assert mine["open_value"] == 100000.0

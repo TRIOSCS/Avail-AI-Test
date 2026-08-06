@@ -47,7 +47,6 @@ from ..constants import (
     ActivityType,
     AttributionStatus,
     OfferStatus,
-    RequisitionStatus,
 )
 from ..models import ActivityLog, ChangeLog, Offer, Requirement, Requisition, User, VendorCard, VendorResponse
 from ..schemas.crm import OfferCreate, OfferUpdate
@@ -261,13 +260,8 @@ async def create_offer(db: Session, req_id: int, payload: OfferCreate, actor: Us
     apply_qualification(offer)
     db.add(offer)
 
-    if req.status == RequisitionStatus.OPEN:
-        from .requisition_state import transition as req_transition
-
-        try:
-            req_transition(req, "offers", actor, db)
-        except ValueError:
-            pass  # already in offers or later state
+    # W3.3: no requisition-status advance — the "offers" pipeline stage is derived
+    # from this Offer row's existence (requisition_state.derived_status).
 
     # Auto-advance per-part sourcing status when an ACTIVE offer lands on a part
     if payload.requirement_id and offer.status == OfferStatus.ACTIVE:

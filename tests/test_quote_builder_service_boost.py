@@ -4,6 +4,9 @@ Covers: apply_smart_defaults, get_builder_data, and the save_quote_from_builder
 revision path (existing old quote). (build_excel_export left with the Excel-export
 route in the Wave 3 quote-builder consolidation.)
 
+W3.3: the builder never writes requisition.status — the quoted stage is derived
+from the QuoteRequisition membership the save creates; the save tests pin both.
+
 Called by: pytest
 Depends on: conftest fixtures, unittest.mock
 """
@@ -151,7 +154,8 @@ class TestApplySmartDefaults:
 
 class TestSaveQuoteRevision:
     def test_existing_old_quote_creates_revision(self, db_session: Session, req_and_item, test_user: User):
-        """Lines 253-257: payload.quote_id points to existing quote → revision bumped."""
+        """payload.quote_id points to existing quote → revision bumped; the
+        requisition's STORED status is never touched (W3.3)."""
         req, item = req_and_item
 
         old_quote = Quote(
@@ -170,9 +174,8 @@ class TestSaveQuoteRevision:
         db_session.refresh(old_quote)
         old_id = old_quote.id
 
-        with patch("app.services.requisition_state.transition", side_effect=ValueError):
-            with patch("app.services.knowledge_service.capture_quote_fact"):
-                result = save_quote_from_builder(db_session, req.id, _make_payload(quote_id=old_id), test_user)
+        with patch("app.services.knowledge_service.capture_quote_fact"):
+            result = save_quote_from_builder(db_session, req.id, _make_payload(quote_id=old_id), test_user)
 
         assert result["ok"] is True
         assert result["revision"] == 2
@@ -180,6 +183,9 @@ class TestSaveQuoteRevision:
         db_session.expire(old_quote)
         refreshed = db_session.get(Quote, old_id)
         assert refreshed.quote_number == "Q-2026-0001-R1"
+        # W3.3: the builder does NOT change requisition.status.
+        db_session.refresh(req)
+        assert req.status == "open"
 
     def test_revision_number_increments_from_existing(self, db_session: Session, req_and_item, test_user: User):
         """When old quote already has revision=3, new quote gets revision 4."""
@@ -200,29 +206,37 @@ class TestSaveQuoteRevision:
         db_session.commit()
         db_session.refresh(old_quote)
 
-        with patch("app.services.requisition_state.transition", side_effect=ValueError):
-            with patch("app.services.knowledge_service.capture_quote_fact"):
-                result = save_quote_from_builder(db_session, req.id, _make_payload(quote_id=old_quote.id), test_user)
+        with patch("app.services.knowledge_service.capture_quote_fact"):
+            result = save_quote_from_builder(db_session, req.id, _make_payload(quote_id=old_quote.id), test_user)
 
         assert result["revision"] == 4
+        # W3.3: the builder does NOT change requisition.status.
+        db_session.refresh(req)
+        assert req.status == "open"
 
     def test_payment_and_shipping_terms_from_payload(self, db_session: Session, req_and_item, test_user: User):
         """payment_terms and shipping_terms from payload override site defaults."""
         req, item = req_and_item
 
-        with patch("app.services.requisition_state.transition", side_effect=ValueError):
-            with patch("app.services.knowledge_service.capture_quote_fact"):
-                result = save_quote_from_builder(
-                    db_session,
-                    req.id,
-                    _make_payload(payment_terms="NET60", shipping_terms="FOB"),
-                    test_user,
-                )
+        with patch("app.services.knowledge_service.capture_quote_fact"):
+            result = save_quote_from_builder(
+                db_session,
+                req.id,
+                _make_payload(payment_terms="NET60", shipping_terms="FOB"),
+                test_user,
+            )
 
         assert result["ok"] is True
         quote = db_session.get(Quote, result["quote_id"])
         assert quote.payment_terms == "NET60"
         assert quote.shipping_terms == "FOB"
+        # W3.3: stored status stays open; the quoted stage is DERIVED from the
+        # QuoteRequisition membership row this save created.
+        from app.services.requisition_state import derived_status
+
+        db_session.refresh(req)
+        assert req.status == "open"
+        assert derived_status(db_session, req) == "quoted"
 
 
 # ── get_builder_data — active offer path ─────────────────────────────────────

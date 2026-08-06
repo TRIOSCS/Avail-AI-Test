@@ -13,8 +13,9 @@ real Graph POST and Sent-Items lookup are skipped but the quote is still marked 
 
 Depends on: app.utils.graph_client.GraphClient, app.email_service._find_sent_message,
 app.services.status_machine.require_valid_transition (quote), app.services.
-requisition_state.transition (requisition advance), app.services.activity_service.
-log_email_activity, app.models (Quote, Requisition, CustomerSite, SiteContact).
+requisition_state.derived_status (display status in the response), app.services.
+activity_service.log_email_activity, app.models (Quote, Requisition, CustomerSite,
+SiteContact).
 """
 
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..constants import QuoteStatus, RequisitionStatus
+from ..constants import QuoteStatus
 from ..models import CustomerSite, Quote, Requisition, SiteContact, User
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 from .status_machine import require_valid_transition
@@ -151,39 +152,22 @@ async def send_quote_email(
             quote.graph_message_id = graph_message_id
             quote.graph_conversation_id = graph_conversation_id
 
-    # 5. Advance quote + EVERY contributing requisition's status.
+    # 5. Advance the quote's own status. W3.3: requisitions are NOT advanced — the
+    # "quoted" pipeline stage is derived from QuoteRequisition membership, which
+    # already exists by the time a quote can be sent.
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(UTC)
 
     from .activity_service import log_email_activity
     from .quote_requisitions import requisition_ids_for_quote
-    from .requisition_state import transition as req_transition
 
     primary_req = db.get(Requisition, quote.requisition_id)
-    primary_old_status = primary_req.status if primary_req else None
 
-    # A combined quote spans multiple requisitions — advance each to QUOTED (unless already
-    # WON/LOST) and write one OUTBOUND ActivityLog per requisition, so none is left behind
-    # and each requisition's timeline records the send. `or [quote.requisition_id]` keeps
-    # the primary covered even for a (pathological) quote with no join row. The response's
-    # req_status/status_changed still reflect the PRIMARY only (unchanged shape).
-    # W3: the advance routes through requisition_state.transition (legality + STATUS_CHANGED
-    # audit row) instead of the old raw `r.status = ...` write. An illegal edge (e.g. a
-    # draft/cancelled req on a combined quote) must not fail the send — the email already
-    # went out — so it logs and leaves that requisition's status untouched.
+    # A combined quote spans multiple requisitions — write one OUTBOUND ActivityLog per
+    # requisition so each timeline records the send. `or [quote.requisition_id]` keeps
+    # the primary covered even for a (pathological) quote with no join row.
     for rid in requisition_ids_for_quote(db, quote.id) or [quote.requisition_id]:
-        r = db.get(Requisition, rid)
-        if r and r.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
-            try:
-                req_transition(r, RequisitionStatus.QUOTED, user, db)
-            except ValueError:
-                logger.warning(
-                    "Quote {} send: requisition {} not advanced to quoted (illegal from '{}')",
-                    quote.quote_number,
-                    rid,
-                    r.status,
-                )
         # log_email_activity dedupes by external_id, so passing the SAME graph_message_id
         # for every contributing req would silently drop all but the first (a combined
         # quote's send would log activity on the primary req only). Keep the PRIMARY on the
@@ -209,11 +193,16 @@ async def send_quote_email(
     # 7. Commit and return.
     db.commit()
     logger.info("Quote {} sent to {} by {}", quote.quote_number, to_email, user.email)
+    # W3.3: req_status reports the PRIMARY requisition's derived display status;
+    # sending never changes a requisition's stored status, so status_changed is
+    # always False (kept for response-shape compatibility).
+    from .requisition_state import derived_status
+
     return SendQuoteResult(
         sent_to=to_email,
         status="sent",
-        req_status=primary_req.status if primary_req else None,
-        status_changed=bool(primary_req and primary_req.status != primary_old_status),
+        req_status=derived_status(db, primary_req) if primary_req else None,
+        status_changed=False,
         graph_message_id=graph_message_id,
     )
 

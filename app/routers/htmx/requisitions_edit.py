@@ -30,6 +30,7 @@ from ...dependencies import (
     require_user,
 )
 from ...models import Requirement, Requisition, Sighting, User
+from ...services.requisition_state import attach_display_status
 from ...template_env import template_response
 from .._lookup_helpers import get_requisition_or_404
 from ._shared import _base_ctx, _safe_int
@@ -124,6 +125,7 @@ async def requisition_inline_edit_cell(
     if not req:
         return HTMLResponse("Not found", status_code=404)
     users = db.query(User).order_by(User.name).all() if field == "owner" else []
+    attach_display_status(db, [req])
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"req": req, "field": field, "users": users, "context": context})
     return template_response("htmx/partials/requisitions/inline_cell.html", ctx)
@@ -208,6 +210,7 @@ async def requisition_inline_save(
         )
         requirements = req.requirements or []
         req.offer_count = len(req.offers) if req.offers else 0
+        attach_display_status(db, [req])
         users = db.query(User).order_by(User.name).all()
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "requirements": requirements, "users": users})
@@ -230,6 +233,7 @@ async def requisition_inline_save(
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
         req.quote_status = _best_quote_status(req.quotes)
+        attach_display_status(db, [req])
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "user_role": getattr(user, "role", UserRole.SALES), "user": user})
         response = template_response("htmx/partials/requisitions/req_row.html", ctx)

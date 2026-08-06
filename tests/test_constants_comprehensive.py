@@ -134,13 +134,12 @@ def test_requisition_status_members():
 
     assert RequisitionStatus.DRAFT == "draft"
     assert RequisitionStatus.OPEN == "open"
-    assert RequisitionStatus.RFQS_SENT == "rfqs_sent"
-    assert RequisitionStatus.OFFERS == "offers"
-    assert RequisitionStatus.QUOTED == "quoted"
     assert RequisitionStatus.WON == "won"
     assert RequisitionStatus.LOST == "lost"
     assert RequisitionStatus.HOTLIST == "hotlist"
     assert RequisitionStatus.CANCELLED == "cancelled"
+    # rfqs_sent / offers / quoted are derived display stages, not stored members
+    assert {e.value for e in RequisitionStatus} == {"draft", "open", "won", "lost", "hotlist", "cancelled"}
 
 
 def test_requisition_status_nonmembers():
@@ -152,7 +151,7 @@ def test_requisition_status_nonmembers():
     assert "cancelled" in RequisitionStatus.TERMINAL
 
     assert isinstance(RequisitionStatus.OPEN_PIPELINE, frozenset)
-    assert "open" in RequisitionStatus.OPEN_PIPELINE
+    assert RequisitionStatus.OPEN_PIPELINE == frozenset({"open"})
 
     assert isinstance(RequisitionStatus.MONITOR, frozenset)
     assert "hotlist" in RequisitionStatus.MONITOR

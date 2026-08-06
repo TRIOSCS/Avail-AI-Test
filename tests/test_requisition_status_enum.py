@@ -8,7 +8,7 @@ from app.constants import RequisitionStatus
 
 def test_pipeline_members_exact():
     vals = {e.value for e in RequisitionStatus}
-    assert vals == {"draft", "open", "rfqs_sent", "offers", "quoted", "won", "lost", "hotlist", "cancelled"}
+    assert vals == {"draft", "open", "won", "lost", "hotlist", "cancelled"}
 
 
 def test_archived_and_sourcing_removed():
@@ -17,7 +17,14 @@ def test_archived_and_sourcing_removed():
     assert not hasattr(RequisitionStatus, "ACTIVE")
 
 
+def test_derived_stage_members_removed():
+    # rfqs_sent / offers / quoted are derived display stages now, not stored statuses
+    assert not hasattr(RequisitionStatus, "RFQS_SENT")
+    assert not hasattr(RequisitionStatus, "OFFERS")
+    assert not hasattr(RequisitionStatus, "QUOTED")
+
+
 def test_terminal_and_open_pipeline_sets():
     assert RequisitionStatus.TERMINAL == frozenset({"won", "lost", "cancelled"})
-    assert RequisitionStatus.OPEN_PIPELINE == frozenset({"open", "rfqs_sent", "offers", "quoted"})
+    assert RequisitionStatus.OPEN_PIPELINE == frozenset({"open"})
     assert RequisitionStatus.MONITOR == frozenset({"hotlist"})

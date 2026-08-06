@@ -268,15 +268,20 @@ async def company_tab(
             .limit(50)
             .all()
         )
+        from ...services.requisition_state import derived_status_map
+
+        # W3.3: show the derived pipeline stage for stored-open rows.
+        stage_map = derived_status_map(db, [r.id for r in reqs if (r.status or "open") == "open"])
         rows = []
         for r in reqs:
             date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "—"
+            display = stage_map.get(r.id, r.status)
             rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
                 hx-get="/v2/partials/requisitions/{r.id}"
                 hx-target="#main-content"
                 hx-push-url="/v2/requisitions/{r.id}">
               <td class="px-4 py-2 text-sm font-medium text-brand-500">{html_mod.escape(r.name or "")}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(r.status or _DASH)}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(display or _DASH)}</td>
               <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
             </tr>""")
         if rows:
