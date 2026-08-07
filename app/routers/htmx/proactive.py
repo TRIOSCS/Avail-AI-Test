@@ -51,7 +51,8 @@ async def proactive_list_partial(
     user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
-    """Proactive matches list partial — shows matches and sent offers."""
+    """Proactive matches list partial — Matches / Sent / Digests tabs."""
+    from ...dependencies import is_manager_or_admin
     from ...services.proactive_service import get_matches_for_user, get_sent_offers
 
     result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
@@ -65,6 +66,13 @@ async def proactive_list_partial(
     ctx["tab"] = tab
     ctx["match_count"] = match_count
     ctx["success_msg"] = request.query_params.get("success_msg", "")
+    if tab == "digests":
+        from ...services.proactive_digest import get_digests_for_view, weekly_outreach_summary
+
+        can_send = is_manager_or_admin(user)
+        ctx["digests"] = get_digests_for_view(db, viewer=user, can_see_all=can_send)
+        ctx["outreach_summary"] = weekly_outreach_summary(db)
+        ctx["can_send"] = can_send
     return template_response("htmx/partials/proactive/list.html", ctx)
 
 
@@ -651,3 +659,167 @@ async def proactive_do_not_offer(
 
     # Return an empty collapsed row so the table structure stays valid
     return HTMLResponse('<tr style="display:none" aria-hidden="true"></tr>')
+
+
+# ── Rollup drill-down + picks + digests (2026-08-06 augmentation) ────────
+
+
+@router.get("/v2/partials/proactive/{match_id}/offers", response_class=HTMLResponse)
+async def proactive_offers_drilldown(
+    request: Request,
+    match_id: int,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """The individual live offers behind one rolled-up match line."""
+    from ...dependencies import is_manager_or_admin
+    from ...models import ProactiveMatch
+    from ...services.proactive_matching import compute_offer_rollup
+
+    match = db.get(ProactiveMatch, match_id)
+    if not match:
+        raise HTTPException(404, "Match not found")
+    if match.salesperson_id != user.id and not is_manager_or_admin(user):
+        raise HTTPException(403, "Not your match")
+
+    rollup = compute_offer_rollup(db, part=(match.mpn or "").strip().upper())
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["offers"] = [
+        {
+            "vendor_name": o.vendor_name,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price is not None else None,
+            "condition": o.condition,
+            "lead_time": o.lead_time,
+            "created_at_display": f"{o.created_at.month}/{o.created_at.day}/{o.created_at.year}"
+            if o.created_at
+            else "",
+        }
+        for o in rollup["offers"]
+    ]
+    return template_response("htmx/partials/proactive/_offers_drilldown.html", ctx)
+
+
+@router.get("/v2/partials/proactive/picks", response_class=HTMLResponse)
+async def proactive_picks(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Top-picks strip — highest-scored actionable lines, cached 24h per user."""
+    from ...services.proactive_service import get_top_picks
+
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["picks"] = get_top_picks(db, user.id)
+    return template_response("htmx/partials/proactive/_picks.html", ctx)
+
+
+def _render_digests_tab(request: Request, user: User, db: Session) -> HTMLResponse:
+    """Shared re-render for the digests tab after generate/send."""
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_digest import get_digests_for_view, weekly_outreach_summary
+    from ...services.proactive_service import get_matches_for_user
+
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
+    can_send = is_manager_or_admin(user)
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = result.get("groups", [])
+    ctx["sent"] = []
+    ctx["tab"] = "digests"
+    ctx["match_count"] = result.get("stats", {}).get("total", 0)
+    ctx["success_msg"] = ""
+    ctx["digests"] = get_digests_for_view(db, viewer=user, can_see_all=can_send)
+    ctx["outreach_summary"] = weekly_outreach_summary(db)
+    ctx["can_send"] = can_send
+    return template_response("htmx/partials/proactive/list.html", ctx)
+
+
+@router.post("/v2/partials/proactive/digests/generate", response_class=HTMLResponse)
+async def proactive_digests_generate(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Build/replace draft digests from this week's matches (manager/admin).
+
+    Never sends.
+    """
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_digest import generate_digests
+
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only managers generate digests")
+    stats = generate_digests(db)
+    db.commit()
+    logger.info("Proactive digests generated by {}: {}", user.email, stats)
+    return _render_digests_tab(request, user, db)
+
+
+@router.post("/v2/partials/proactive/digests/{digest_id}/send", response_class=HTMLResponse)
+async def proactive_digest_send(
+    request: Request,
+    digest_id: int,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Email a reviewed draft to its salesperson with the reviewer's own mailbox."""
+    from ...dependencies import is_manager_or_admin
+    from ...scheduler import get_valid_token
+    from ...services.proactive_digest import send_digest
+
+    if not is_manager_or_admin(user):
+        raise HTTPException(403, "Only managers send digests")
+    token = await get_valid_token(user, db)
+    if not token:
+        raise HTTPException(400, "No valid Microsoft token — sign in again to send")
+    try:
+        await send_digest(db, digest_id, user, token)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    db.commit()
+    return _render_digests_tab(request, user, db)
+
+
+@router.post("/v2/partials/proactive/lines/{line_id}/tracking", response_class=HTMLResponse)
+async def proactive_line_tracking(
+    request: Request,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Record contact/outcome/SO-number on one sent digest line; returns the row
+    cells."""
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_digest import update_line_tracking
+
+    form = await request.form()
+    contacted_raw = form.get("contacted")
+    can_manage = is_manager_or_admin(user)
+    try:
+        line = update_line_tracking(
+            db,
+            line_id,
+            viewer=user,
+            can_manage=can_manage,
+            contacted=(str(contacted_raw).lower() == "true") if contacted_raw is not None else None,
+            outcome=str(form.get("outcome")) if form.get("outcome") is not None else None,
+            sales_order_number=str(form.get("sales_order_number"))
+            if form.get("sales_order_number") is not None
+            else None,
+        )
+    except ValueError as e:
+        raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
+    db.commit()
+
+    company = db.get(Company, line.company_id) if line.company_id else None
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["line"] = {
+        "id": line.id,
+        "mpn": line.mpn,
+        "company_name": company.name if company else None,
+        "contacted": line.contacted,
+        "outcome": line.outcome,
+        "sales_order_number": line.sales_order_number,
+        "can_edit": can_manage or line.salesperson_id == user.id,
+    }
+    return template_response("htmx/partials/proactive/_outreach_line_cells.html", ctx)

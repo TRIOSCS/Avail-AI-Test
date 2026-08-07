@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from ..constants import ProactiveMatchStatus
+from ..constants import ProactiveDigestStatus, ProactiveMatchSource, ProactiveMatchStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -321,7 +321,14 @@ class MaterialCardAudit(Base):
 
 
 class ProactiveMatch(Base):
-    """A match between a new vendor offer and an archived customer requirement."""
+    """One actionable line: live vendor supply for a part a customer asked for.
+
+    One active row per (part, company). Seeded from the customer's requirement
+    history inside the requirement window (any requisition status) or from a
+    HOTLIST requisition (see ProactiveMatchSource). Offer-side aggregates
+    (available qty, low cost) are computed at read time over live offers inside
+    the offer window — offer_id anchors the triggering offer only.
+    """
 
     __tablename__ = "proactive_matches"
     id = Column(Integer, primary_key=True)
@@ -331,9 +338,10 @@ class ProactiveMatch(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"), nullable=True)
     salesperson_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     mpn = Column(String(255), nullable=False)
-    status = Column(String(20), default=ProactiveMatchStatus.NEW)  # new | sent | dismissed | converted
+    # ProactiveMatchStatus: new | sent | failed | dismissed | converted | expired
+    status = Column(String(20), default=ProactiveMatchStatus.NEW)
 
-    # CPH-enriched fields (populated by matching engine)
+    # CPH-enriched fields (purchase history is a context signal, not the seed)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     match_score = Column(Integer, default=0)  # 0-100 composite score
@@ -343,6 +351,12 @@ class ProactiveMatch(Base):
     customer_last_purchased_at = Column(UTCDateTime)
     our_cost = Column(Numeric(12, 4))
     dismiss_reason = Column(String(255))
+
+    # Requirement-demand signals (2026-08-06 rework — seeded from asks, not purchases)
+    match_source = Column(String(20), default=ProactiveMatchSource.REQUIREMENT)  # requirement | hotlist
+    requirement_count = Column(Integer, default=0)  # asks by this customer inside the window
+    last_asked_at = Column(UTCDateTime)
+    last_asked_qty = Column(Integer)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
@@ -435,6 +449,88 @@ class ProactiveDoNotOffer(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
 
     __table_args__ = (Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),)
+
+
+class ProactiveDigest(Base):
+    """A per-salesperson outreach digest: generated as a draft, reviewed by a
+    manager, sent manually with the reviewer's token. Nothing sends automatically.
+    Regenerating replaces an unsent draft; sent digests are permanent."""
+
+    __tablename__ = "proactive_digests"
+    id = Column(Integer, primary_key=True)
+    salesperson_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), default=ProactiveDigestStatus.DRAFT)  # draft | sent | discarded
+    subject = Column(String(500))
+    body_html = Column(Text)
+    generated_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    sent_at = Column(UTCDateTime)
+    sent_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+
+    salesperson = relationship("User", foreign_keys=[salesperson_id])
+    sent_by = relationship("User", foreign_keys=[sent_by_id])
+    lines = relationship("ProactiveOutreachLine", back_populates="digest", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_pdig_sales", "salesperson_id"),
+        Index("ix_pdig_status", "status"),
+        Index("ix_pdig_generated", "generated_at"),
+    )
+
+
+class ProactiveOutreachLine(Base):
+    """One digest line, frozen at generation time, tracked after send.
+
+    The snapshot fields (last asked / available / low cost / price anchors) record what
+    the salesperson was actually told; the tracking fields (contacted / outcome /
+    produced_*) record what came back. Price anchors can carry another customer's
+    pricing — internal reference only, never forwarded. sales_order_number is an
+    external ERP document reference only (ERP-neutral).
+    """
+
+    __tablename__ = "proactive_outreach_lines"
+    id = Column(Integer, primary_key=True)
+    digest_id = Column(Integer, ForeignKey("proactive_digests.id", ondelete="CASCADE"), nullable=False)
+    match_id = Column(Integer, ForeignKey("proactive_matches.id", ondelete="SET NULL"))
+    mpn = Column(String(255), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
+    salesperson_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+
+    # Snapshot at generation
+    last_asked_at = Column(UTCDateTime)
+    last_asked_qty = Column(Integer)
+    requirement_count = Column(Integer, default=0)
+    available_qty = Column(Integer)
+    low_cost = Column(Numeric(12, 4))
+    last_quote_price = Column(Numeric(12, 4))
+    last_quote_at = Column(UTCDateTime)
+    last_quote_company = Column(String(255))
+    last_quote_rep = Column(String(255))
+    last_win_price = Column(Numeric(12, 4))
+    last_win_at = Column(UTCDateTime)
+    last_win_company = Column(String(255))
+    last_win_rep = Column(String(255))
+
+    # Tracking after send
+    sent_at = Column(UTCDateTime)
+    contacted = Column(Boolean, nullable=False, default=False, server_default="false")
+    outcome = Column(String(20))  # ProactiveOutreachOutcome, null until known
+    produced_requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
+    produced_quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
+    sales_order_number = Column(String(100))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+
+    digest = relationship("ProactiveDigest", back_populates="lines")
+    company = relationship("Company", foreign_keys=[company_id])
+    salesperson = relationship("User", foreign_keys=[salesperson_id])
+
+    __table_args__ = (
+        Index("ix_pol_digest", "digest_id"),
+        Index("ix_pol_sales", "salesperson_id"),
+        Index("ix_pol_company", "company_id"),
+        Index("ix_pol_mpn", "mpn"),
+        Index("ix_pol_sent", "sent_at"),
+    )
 
 
 class ChangeLog(Base):

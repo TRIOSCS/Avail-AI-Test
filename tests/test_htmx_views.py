@@ -2093,7 +2093,7 @@ class TestProactive:
         resp = client.get("/v2/partials/proactive")
         assert resp.status_code == 200
         assert '<h1 class="h2">Proactive</h1>' in resp.text
-        assert "AI-matched vendor stock to customer purchase history" in resp.text
+        assert "Live vendor stock matched to what customers asked for" in resp.text
 
     def test_scorecard(self, client: TestClient):
         resp = client.get("/v2/partials/proactive/scorecard")

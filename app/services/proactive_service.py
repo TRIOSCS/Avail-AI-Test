@@ -1,10 +1,13 @@
-"""proactive_service.py — Background matching engine and proactive offer logic.
+"""proactive_service.py — Proactive match retrieval, prepare/send flow, scorecard.
 
-Scans newly-logged offers against archived requisitions (closed 30+ days).
-Generates ProactiveMatch records for salespeople to review and send to customers.
+Read/present side of the proactive surface (the matching engine itself lives in
+proactive_matching.py, seeded from windowed requirement history + hotlists).
+Match rows carry the part-level supply rollup — available qty summed and low
+cost MIN'd across live offers in the offer window — plus the demand signals
+(requirement_count, last asked) the 2026-08-06 rework stores on each match.
 
-Called by: scheduler.py (background scan), routers/htmx/proactive.py (endpoints)
-Depends on: models, config, utils/graph_client
+Called by: routers/htmx/proactive.py (endpoints), services/proactive_digest
+Depends on: models, config, utils/graph_client, services/proactive_matching
 """
 
 import html
@@ -25,6 +28,7 @@ from ..constants import (
 )
 from ..models import (
     BuyPlan,
+    Company,
     CustomerSite,
     Offer,
     ProactiveDoNotOffer,
@@ -93,6 +97,12 @@ def get_matches_for_user(
     all_margins = []
     high_margin_count = 0
 
+    # Part-level supply rollup — ONE batch query for every distinct part in the
+    # match set, so query count stays independent of match count (PERF guard).
+    from .proactive_matching import compute_offer_rollups
+
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
+
     for m in matches:
         # Skip matches suppressed by do-not-offer
         site = m.customer_site
@@ -100,6 +110,7 @@ def get_matches_for_user(
         mpn_upper = (m.mpn or "").strip().upper()
         if company_id and (mpn_upper, company_id) in dno_set:
             continue
+        rollup = rollups.get(mpn_upper) or {"offers": [], "offer_count": 0, "available_qty": 0, "low_cost": None}
 
         site_id = m.customer_site_id
         if site_id not in groups:
@@ -145,6 +156,15 @@ def get_matches_for_user(
                 "original_req_name": m.requisition.name if m.requisition else "",
                 "status": m.status,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
+                # Part-level supply rollup (2026-08-06 rework — the actionable line)
+                "available_qty": rollup["available_qty"],
+                "low_cost": rollup["low_cost"],
+                "offer_count": rollup["offer_count"],
+                # Demand signals
+                "requirement_count": m.requirement_count or 0,
+                "last_asked_at": m.last_asked_at,
+                "last_asked_qty": m.last_asked_qty,
+                "match_source": m.match_source or "requirement",
                 # CPH-enriched fields
                 "match_score": score,
                 "margin_pct": margin,
@@ -202,6 +222,64 @@ def get_match_count(db: Session, user_id: int) -> int:
         )
         .count()
     )
+
+
+PICKS_CACHE_PREFIX = "proactive_picks:"
+
+
+def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
+    """Top-ranked NEW matches for the picks strip, cached 24h per user.
+
+    Deterministic — the composite match_score already carries repeat demand, quote-vs-
+    cost spread, recent wins, and ask age (2026-08-06 rework). The cache is busted by
+    the scan/rematch paths via PICKS_CACHE_PREFIX.
+    """
+    from sqlalchemy import select
+
+    from ..cache.intel_cache import get_cached, set_cached
+    from .proactive_matching import compute_offer_rollups
+
+    cache_key = f"{PICKS_CACHE_PREFIX}{user_id}"
+    cached = get_cached(cache_key)
+    if isinstance(cached, dict) and isinstance(cached.get("picks"), list):
+        return list(cached["picks"])
+
+    matches = db.scalars(
+        select(ProactiveMatch)
+        .where(
+            ProactiveMatch.salesperson_id == user_id,
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
+        )
+        .order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.created_at.desc())
+        .limit(limit)
+    ).all()
+    company_ids = {m.company_id for m in matches if m.company_id}
+    company_names: dict[int, str] = {}
+    if company_ids:
+        company_names = dict(db.execute(select(Company.id, Company.name).where(Company.id.in_(company_ids))).all())
+
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
+    picks = []
+    for m in matches:
+        rollup = rollups.get((m.mpn or "").strip().upper()) or {"offer_count": 0}
+        if not rollup["offer_count"]:
+            continue  # supply evaporated — not actionable, not a pick
+        picks.append(
+            {
+                "match_id": m.id,
+                "mpn": m.mpn,
+                "company_name": company_names.get(m.company_id) or ("Trio Back Order" if not m.company_id else ""),
+                "score": m.match_score or 0,
+                "available_qty": rollup["available_qty"],
+                "low_cost": rollup["low_cost"],
+                "requirement_count": m.requirement_count or 0,
+                "last_asked_display": (
+                    f"{m.last_asked_at.month}/{m.last_asked_at.day}/{m.last_asked_at.year}" if m.last_asked_at else ""
+                ),
+            }
+        )
+    set_cached(cache_key, {"picks": picks}, ttl_days=1)
+    return picks
 
 
 # ── Send Proactive Offer ──────────────────────────────────────────────────

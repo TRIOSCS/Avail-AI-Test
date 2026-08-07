@@ -16,11 +16,20 @@
            class="rounded border-gray-300 input-focus"
            style="accent-color:var(--accent)">
   </td>
-  {# MPN + Manufacturer #}
+  {# MPN + ask context #}
   <td>
     <p class="text-sm font-medium text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
-    {% if match.manufacturer %}
-    <p class="text-secondary mt-0.5">{{ match.manufacturer }}</p>
+    {% if match.last_asked_at %}
+    <p class="text-secondary mt-0.5">
+      last asked {{ match.last_asked_at.month }}/{{ match.last_asked_at.day }}/{{ match.last_asked_at.year }}
+      {%- if match.last_asked_qty %} for {{ "{:,}".format(match.last_asked_qty|int) }} pcs{% endif %}
+      {% if match.requirement_count and match.requirement_count > 1 %}
+      <span class="badge-mini bg-sky-50 text-sky-700 ml-1"
+            title="{{ match.requirement_count }} requirement records inside the window">{{ match.requirement_count }} requests</span>
+      {% endif %}
+    </p>
+    {% elif match.match_source == 'hotlist' %}
+    <p class="text-secondary mt-0.5">hotlist</p>
     {% endif %}
     {% if match.customer_purchase_count %}
     <span class="inline-flex items-center gap-0.5 text-secondary mt-0.5"
@@ -30,22 +39,34 @@
     </span>
     {% endif %}
   </td>
-  {# Vendor + reliability #}
+  {# Supply: offer count with drill-down, or the single vendor #}
   <td class="text-sm text-gray-700">
+    {% if match.offer_count and match.offer_count > 1 %}
+    <button type="button"
+            hx-get="/v2/partials/proactive/{{ match.id }}/offers"
+            hx-target="#offers-drilldown-{{ match.id }}"
+            hx-swap="innerHTML"
+            @click="offersOpen[{{ match.id }}] = !offersOpen[{{ match.id }}]; offersOpen = {...offersOpen}"
+            class="text-xs font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2" style="--tw-ring-color:var(--accent-ring)"
+            title="Show the individual offers behind this line">
+      {{ match.offer_count }} offers
+    </button>
+    {% else %}
     {{ match.vendor_name | default('--') }}
     {% if match.ghost_rate is not none and match.ghost_rate > 30 %}
     <span class="ml-1 text-xs text-rose-500 font-medium">unreliable</span>
     {% elif match.vendor_score is not none and match.vendor_score >= 70 %}
     <span class="ml-1 text-xs text-emerald-500 font-medium">trusted</span>
     {% endif %}
+    {% endif %}
   </td>
-  {# Qty #}
+  {# Available qty — SUM across live offers in the window #}
   <td class="text-sm text-gray-700 text-right tabular-nums">
-    {{ "{:,}".format(match.qty_available|int) if match.qty_available else '--' }}
+    {{ "{:,}".format(match.available_qty|int) if match.available_qty else '--' }}
   </td>
-  {# Unit Price #}
+  {# Low cost — MIN positive unit price across those offers #}
   <td class="text-sm text-gray-700 text-right tabular-nums">
-    {% if match.unit_price %}${{ "%.4f"|format(match.unit_price) }}{% else %}--{% endif %}
+    {% if match.low_cost %}${{ "%.2f"|format(match.low_cost) }}{% else %}--{% endif %}
   </td>
   {# Margin pill — .badge-mini via semantic color map #}
   <td>{{ margin_badge(match.margin_pct) }}</td>
@@ -76,3 +97,9 @@
     </form>
   </td>
 </tr>
+{# Drill-down: the individual live offers behind the rolled-up line #}
+{% if match.offer_count and match.offer_count > 1 %}
+<tr x-show="offersOpen[{{ match.id }}]" x-cloak>
+  <td colspan="8" class="bg-gray-50 px-6 py-2" id="offers-drilldown-{{ match.id }}"></td>
+</tr>
+{% endif %}

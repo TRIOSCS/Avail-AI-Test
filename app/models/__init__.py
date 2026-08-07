@@ -90,9 +90,11 @@ from .intelligence import (
     MaterialCardAudit,  # noqa: F401
     MaterialCardDatasheet,  # noqa: F401
     MaterialVendorHistory,  # noqa: F401
+    ProactiveDigest,  # noqa: F401
     ProactiveDoNotOffer,  # noqa: F401
     ProactiveMatch,  # noqa: F401
     ProactiveOffer,  # noqa: F401
+    ProactiveOutreachLine,  # noqa: F401
     ProactiveThrottle,  # noqa: F401
 )
 

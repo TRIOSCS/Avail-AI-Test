@@ -451,6 +451,36 @@ class ProactiveOfferStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class ProactiveMatchSource(StrEnum):
+    """How a ProactiveMatch was seeded (2026-08-06 rework).
+
+    REQUIREMENT — the customer asked for this part inside the requirement window (any
+    requisition status; a won/lost ask is still demand history). HOTLIST — a salesperson
+    explicitly monitors this part for the customer.
+    """
+
+    REQUIREMENT = "requirement"
+    HOTLIST = "hotlist"
+
+
+class ProactiveDigestStatus(StrEnum):
+    """Status lifecycle for ProactiveDigest records (generate → review → send)."""
+
+    DRAFT = "draft"
+    SENT = "sent"
+    DISCARDED = "discarded"
+
+
+class ProactiveOutreachOutcome(StrEnum):
+    """What the customer said when the salesperson followed up on a digest line."""
+
+    STILL_LOOKING = "still_looking"
+    LOOKING_AGAIN = "looking_again"
+    NEEDS_MORE = "needs_more"
+    NO_LONGER_NEEDED = "no_longer_needed"
+    NO_RESPONSE = "no_response"
+
+
 class TicketStatus(StrEnum):
     """Status lifecycle for TroubleTicket records."""
 

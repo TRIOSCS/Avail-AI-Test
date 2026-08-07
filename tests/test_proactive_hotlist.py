@@ -117,9 +117,9 @@ def test_hotlist_match_surfaces_status_new(db_session):
 def test_hotlist_and_cph_dedup_one_match(db_session):
     """A company with BOTH a hotlist req AND CPH history for the part gets ONE match.
 
-    The CPH pass produces the match first; the hotlist pass must skip the company
-    (uncommitted CPH adds are invisible to its DB query, so dedup rides on the
-    skip_company_ids set passed in from find_matches_for_offer).
+    Since the 2026-08-06 rework CPH no longer seeds matches — the hotlist pass owns this
+    customer's only demand record (the HOTLIST requisition), and the single active-
+    match-per-(part, company) slot holds across both passes.
     """
     db = db_session
     d = _setup(db, mpn="GHI789")
@@ -155,5 +155,5 @@ def test_hotlist_and_cph_dedup_one_match(db_session):
     )
     assert len(rows) == 1
     assert len([m for m in matches if m.company_id == co.id]) == 1
-    # CPH wins the single slot (purchase history → its requirement-aware path).
-    assert rows[0].customer_purchase_count == 2
+    # The hotlist pass owns the slot — purchase history is context, not a seed.
+    assert rows[0].match_source == "hotlist"

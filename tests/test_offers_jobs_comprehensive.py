@@ -74,7 +74,8 @@ class TestRegisterOffersJobs:
         assert "flag_stale_offers" in job_ids
         assert "expire_strategic_vendors" in job_ids
         assert "warn_strategic_expiring" in job_ids
-        assert mock_scheduler.add_job.call_count == 6
+        assert "proactive_digest_drafts" in job_ids
+        assert mock_scheduler.add_job.call_count == 7
 
     def test_registers_without_proactive_matching(self):
         """When proactive_matching_enabled=False, proactive_matching job is skipped."""

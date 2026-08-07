@@ -534,7 +534,8 @@ authoritative reference. Static-analysis tests in
 |-----|-----------|---------|
 | inbox_monitor | 30 min | Poll Graph API for RFQ replies, parse with Claude |
 | requirement_refresh | 4 hours | Re-search stale requirements |
-| proactive_matcher | Daily | Match vendor offers to customer history |
+| proactive_matcher | 4 hours | Match live offers to requirement history (24mo, any status) + hotlists |
+| proactive_digest_drafts | Weekly (Mon 07:00) | Generate per-salesperson digest DRAFTS (human reviews + sends) |
 | vendor_scorer | Daily | Update vendor reliability scores |
 | health_check | 5 min | DB, Redis, API connector health |
 | backup | 6 hours | pg_dump |

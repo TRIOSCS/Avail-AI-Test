@@ -1,0 +1,106 @@
+{#
+  proactive/digests.html — Digests tab: generate → review → send + line tracking.
+  Receives: digests (list of dicts from get_digests_for_view), outreach_summary (dict),
+            can_send (bool — manager/admin), tab.
+  Called by: proactive/list.html ({% elif tab == 'digests' %}).
+  Depends on: Alpine.js, Tailwind CSS, HTMX.
+#}
+
+{# ── Weekly outreach summary (manager view: is the outreach happening?) ── #}
+<div class="mb-4 bg-white rounded-lg border border-line-base p-4">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold text-gray-900">Last 7 days</h2>
+    {% if can_send %}
+    <button hx-post="/v2/partials/proactive/digests/generate"
+            hx-target="#main-content"
+            data-loading-disable
+            class="btn-primary btn-sm">
+      Generate digests
+    </button>
+    {% endif %}
+  </div>
+  {% set t = outreach_summary.totals %}
+  <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+    <div><p class="text-lg font-semibold tabular-nums">{{ "{:,}".format(t.lines_sent) }}</p><p class="text-xs text-gray-500">Lines sent</p></div>
+    <div><p class="text-lg font-semibold tabular-nums">{{ "{:,}".format(t.lines_contacted) }}</p><p class="text-xs text-gray-500">Contacted</p></div>
+    <div><p class="text-lg font-semibold tabular-nums">{{ t.contact_rate }}%</p><p class="text-xs text-gray-500">Contact rate</p></div>
+    <div><p class="text-lg font-semibold tabular-nums">{{ "{:,}".format(t.requirements_reopened) }}</p><p class="text-xs text-gray-500">Reqs reopened</p></div>
+    <div><p class="text-lg font-semibold tabular-nums">{{ "{:,}".format(t.orders_won) }}</p><p class="text-xs text-gray-500">Orders won</p></div>
+  </div>
+  {% if outreach_summary.by_salesperson %}
+  <div class="mt-3 border-t border-line-base pt-2">
+    {% for rep, s in outreach_summary.by_salesperson.items() %}
+    <div class="flex items-center justify-between text-xs text-gray-600 py-0.5">
+      <span>{{ rep }}</span>
+      <span class="tabular-nums">{{ s.contacted }}/{{ s.sent }} contacted ({{ s.contact_rate }}%)</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{# ── Digest cards ── #}
+{% if digests %}
+  {% for d in digests %}
+  <div class="mb-4 bg-white rounded-lg border border-line-base overflow-hidden"
+       x-data="{ open: {{ 'true' if d.status == 'draft' else 'false' }} }">
+    <div class="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-line-base">
+      <button @click="open = !open" class="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none focus:ring-2 rounded" style="--tw-ring-color:var(--accent-ring)">
+        <svg class="h-4 w-4 transition-transform" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-900">{{ d.salesperson_name }}</p>
+        <p class="text-xs text-gray-500">
+          {{ d.line_count }} line{{ 's' if d.line_count != 1 }} ·
+          {% if d.status == 'sent' %}sent {{ d.sent_at_display }} by {{ d.sent_by_name }}{% else %}generated {{ d.generated_at_display }}{% endif %}
+        </p>
+      </div>
+      <span class="badge-mini {{ 'bg-amber-50 text-amber-700' if d.status == 'draft' else 'bg-emerald-50 text-emerald-700' }}">{{ d.status | upper }}</span>
+      {% if d.status == 'draft' and can_send %}
+      <button hx-post="/v2/partials/proactive/digests/{{ d.id }}/send"
+              hx-target="#main-content"
+              hx-confirm="Email this digest to {{ d.salesperson_name | e }}?"
+              data-loading-disable
+              class="btn-primary btn-sm">
+        Send
+      </button>
+      {% endif %}
+    </div>
+
+    <div x-show="open" x-cloak>
+      {# Rendered digest body — exactly what the salesperson receives #}
+      <div class="px-4 py-3 border-b border-line-base text-sm">{{ d.body_html | safe }}</div>
+
+      {# Per-line tracking (sent digests) — contacted / outcome / SO number #}
+      {% if d.status == 'sent' %}
+      <div class="overflow-x-auto">
+        <table class="data-table w-full">
+          <thead>
+            <tr>
+              <th class="text-left">MPN</th>
+              <th class="text-left">Customer</th>
+              <th class="text-left w-[90px]">Contacted</th>
+              <th class="text-left w-[160px]">Outcome</th>
+              <th class="text-left w-[140px]">SO #</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in d.lines %}
+            <tr id="outreach-line-{{ line.id }}">
+              {% include "htmx/partials/proactive/_outreach_line_cells.html" %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="bg-white rounded-lg border border-line-base p-8 text-center text-sm text-gray-500">
+  No digests yet.{% if can_send %} Generate drafts from this week's matches, review each one, then send.{% else %} Your manager generates and sends these from the week's matches.{% endif %}
+</div>
+{% endif %}

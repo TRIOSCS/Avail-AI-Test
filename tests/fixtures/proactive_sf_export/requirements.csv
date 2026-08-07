@@ -1,0 +1,43 @@
+material_name,req_item_number,customer_account_name,requisition_owner_full_name,qty,target_price_per_unit,sourcing_status,created_date
+02PX530,ReqItem#-12000067444,IBM Corporation,Marcus Moawad,80,,Archived,4/8/2025
+6M4TN,ReqItem#-12000073135,Dell - Roundrock TX (Global HQ),Marcus Moawad,150,,,7/30/2026
+900-21010-0040-000,ReqItem#-12000073155,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,12,"$28,000.00",Requirement,8/5/2026
+900-23946-0000-000,ReqItem#-12000073158,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,3,$500.00,Requirement,8/5/2026
+900-5G190-2570-000,ReqItem#-12000072378,Barco NV,Martina Tewes,200,,,5/12/2026
+AS-8126GS-NB3RT,ReqItem#-12000073150,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,1,,Requirement,7/31/2026
+BSM300GA120DN2HOSA1,ReqItem#-12000073126,RES - Renewable Energy Systems -Spain -,Martina Tewes,950,$60.00,,7/28/2026
+CM1000DUC-34NF,ReqItem#-12000073136,Convesys Ltd.,Tsetso Kanev,30,,Quoted,7/30/2026
+DZ800S17K3,ReqItem#-12000073122,RES - Renewable Energy Systems -Spain -,Martina Tewes,50,,,7/28/2026
+EE-SY1200,ReqItem#-12000073129,PROCEPT BIOROBOTICS,Patricia Cash,60000,$1.92,Requirement,7/28/2026
+G2JCY,ReqItem#-12000071869,Dell Services - SourceDay,Marcus Moawad,10,,,2/17/2026
+GSOT36C-E3-08,ReqItem#-12000073148,Beckhoff Automation GmbH & Co. KG,Martina Tewes,500000,,Requirement,7/30/2026
+J6426,ReqItem#-12000073145,"Advantech Co., LTD -HQ- incl. China",Martina Tewes,500,,,7/30/2026
+K467XP-HYM-I,ReqItem#-12000072153,Dell Services - SourceDay,Marcus Moawad,35,,Won,4/1/2026
+LOGIC PRO 8 - BLACK,ReqItem#-12000073154,"Boeing- Mesa, Arizona",Sally Garcia,1,,Requirement,8/4/2026
+LTC3106IUDC#TRPBF,ReqItem#-12000073157,Trio Back Order,Martina Tewes,10000,,,8/5/2026
+LTC3106IUDC#TRPBF,ReqItem#-12000073083,Novomatic,Martina Tewes,10000,,,7/21/2026
+LTSR15-NP,ReqItem#-12000073153,Beckhoff Automation GmbH & Co. KG,Martina Tewes,3000,$3.00,,8/3/2026
+LTSR15-NP,ReqItem#-12000072990,Beckhoff Automation GmbH & Co. KG,Martina Tewes,3000,$3.00,,6/30/2026
+LTSR 15-NP,ReqItem#-12000072122,Beckhoff Automation GmbH & Co. KG,Martina Tewes,5000,,,3/30/2026
+M321R8GA0PB0-CWM,ReqItem#-12000066751,AMAX Engineering Corporation,Martina Tewes,32,,Requirement,1/22/2025
+MT25QU01GBBB1EW9-0SIT TR,ReqItem#-12000073119,Novanta,Sally Garcia,4000,,Requirement,7/27/2026
+MT35XU02GCBA1G12-0SIT,ReqItem#-12000072020,Celestica - Malaysia,Marcus Moawad,2278,,,3/9/2026
+MT35XU02GCBA1G12-0SIT,ReqItem#-12000072021,Celestica - Malaysia,Marcus Moawad,7248,,,3/9/2026
+MT35XU02GCBA1G12-0SIT,ReqItem#-12000072014,IBM Guad,Marcus Moawad,10000,,Quoted,3/4/2026
+MTFDDAK7T6TGA-1BC15ABYY,ReqItem#-12000073132,Trenton Systems,Marcus Moawad,9,,,7/30/2026
+MZTL21T9HCJR-00A07,ReqItem#-12000073152,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,4,,Requirement,8/3/2026
+MZTL23T8HCLS-00A07,ReqItem#-12000073151,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,16,,Requirement,8/3/2026
+MZVL81T0HELB-00B07,ReqItem#-12000073127,Beckhoff Automation GmbH & Co. KG,Martina Tewes,5000,$220.00,,7/28/2026
+MZVL81T0HELB-00B07,ReqItem#-12000072930,Beckhoff Automation GmbH & Co. KG,Martina Tewes,5000,$240.00,,6/24/2026
+MZVL8512HELU-00B07,ReqItem#-12000073128,Beckhoff Automation GmbH & Co. KG,Martina Tewes,3000,$150.00,,7/28/2026
+Q370,ReqItem#-12000073139,"Advantech Co., LTD -HQ- incl. China",Martina Tewes,650,,,7/30/2026
+SDINBDA6-32G-ZA1,ReqItem#-12000072314,"Via Technologies, Inc - Taiwan",Marcus Moawad,10000,,,5/4/2026
+SRKUD,ReqItem#-12000073081,"Via Technologies, Inc - Taiwan",Marcus Moawad,3000,$65.00,,7/20/2026
+SRKXA,ReqItem#-12000073137,Pivot International,Marcus Moawad,1000,,,7/30/2026
+SYS-822GS-NB3RT - custom config,ReqItem#-12000073149,FUXIN INTERNATIONAL SUPPLY CHAIN LIMITED,Tsetso Kanev,1,,Requirement,7/31/2026
+T521X477M016ATE020,ReqItem#-12000073156,Trio Back Order,Martina Tewes,5119,,,8/5/2026
+T521X477M016ATE020,ReqItem#-12000073131,Trio Back Order,Martina Tewes,6119,,Archived,7/29/2026
+T521X477M016ATK020,ReqItem#-12000072891,Trio Back Order,Martina Tewes,10000,,Archived,6/15/2026
+TT215N22KOF,ReqItem#-12000073125,RES - Renewable Energy Systems -Spain -,Martina Tewes,20,,,7/28/2026
+TZ740N22KOF,ReqItem#-12000073121,RES - Renewable Energy Systems -Spain -,Martina Tewes,20,,,7/28/2026
+XC95144XL-10TQG144C,ReqItem#-12000072997,Scanfil Poland Sp. z o.o,Martina Tewes,3498,,,7/6/2026
