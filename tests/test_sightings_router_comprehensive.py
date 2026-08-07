@@ -347,7 +347,7 @@ class TestSightingsRefreshBranches:
     def test_refresh_publishes_sse(self, client, db_session):
         """Refresh publishes SSE event."""
         _, r, _ = _seed(db_session)
-        with patch("app.routers.sightings.broker") as mock_broker:
+        with patch("app.routers.sightings.common.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
             assert resp.status_code == 200
@@ -574,7 +574,7 @@ class TestSendInquiry:
         with (
             patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send,
             patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=True),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_send.return_value = [{"vendor": "Good Vendor", "status": "sent"}]
             mock_broker.publish = AsyncMock()
@@ -594,7 +594,7 @@ class TestSendInquiry:
         _, r, _ = _seed(db_session)
         with (
             patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send,
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_send.side_effect = Exception("SMTP error")
             mock_broker.publish = AsyncMock()

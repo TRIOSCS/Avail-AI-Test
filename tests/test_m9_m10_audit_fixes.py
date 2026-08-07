@@ -36,9 +36,9 @@ class TestLikeEscapeIntegration:
         """User-facing search inputs must have LIKE wildcards escaped."""
         assert escape_like(raw) == expected
 
-    @pytest.mark.parametrize("module_name", ["sightings"])
+    @pytest.mark.parametrize("module_name", ["sightings.board"])
     def test_router_imports_escape_like(self, module_name):
-        """sightings.py must import escape_like."""
+        """The sightings board module must import escape_like."""
         import importlib
 
         router_module = importlib.import_module(f"app.routers.{module_name}")

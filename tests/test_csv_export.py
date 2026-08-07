@@ -44,6 +44,6 @@ async def test_stream_csv_headers_and_rows():
 def test_shared_safe_cell_is_the_single_implementation():
     """The sightings + CRM exports must reuse the shared safe_cell — no private
     ``_safe_cell`` copies may linger in either router."""
-    for rel in ("routers/sightings.py", "routers/crm/export.py"):
+    for rel in ("routers/sightings/board.py", "routers/crm/export.py"):
         src = (_APP_ROOT / rel).read_text()
         assert "_safe_cell" not in src, f"{rel} still defines/uses a local _safe_cell"

@@ -103,7 +103,7 @@ class TestH10RefreshWarning:
 
         with (
             patch("app.search_service.search_requirement", side_effect=RuntimeError("API down")),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
@@ -121,7 +121,7 @@ class TestH10RefreshWarning:
                 "app.search_service.search_requirement",
                 new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
             ),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")

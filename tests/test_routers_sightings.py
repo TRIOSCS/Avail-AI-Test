@@ -58,7 +58,7 @@ class TestSightingsRefreshSourceParam:
     def test_sightings_refresh_sse_skips_broker_publish(self, client: TestClient, req_with_item: tuple):
         """POST ?source=sse → broker.publish NOT called."""
         _, item = req_with_item
-        with patch("app.routers.sightings.broker") as mock_broker:
+        with patch("app.routers.sightings.common.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
             with patch(
                 "app.search_service.search_requirement",
@@ -74,7 +74,7 @@ class TestSightingsRefreshSourceParam:
     def test_sightings_refresh_user_calls_broker_publish(self, client: TestClient, req_with_item: tuple):
         """POST without source → broker.publish called once with sighting-updated."""
         _, item = req_with_item
-        with patch("app.routers.sightings.broker") as mock_broker:
+        with patch("app.routers.sightings.common.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
             with patch(
                 "app.search_service.search_requirement",
@@ -152,7 +152,7 @@ class TestSightingsRefreshFailureToast:
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
-            with patch("app.routers.sightings.broker") as mock_broker:
+            with patch("app.routers.sightings.common.broker") as mock_broker:
                 mock_broker.publish = AsyncMock()
                 resp = client.post(
                     f"/v2/partials/sightings/{item.id}/refresh?source=sse",
@@ -170,7 +170,7 @@ class TestSightingsRefreshFailureToast:
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
-            with patch("app.routers.sightings.broker") as mock_broker:
+            with patch("app.routers.sightings.common.broker") as mock_broker:
                 mock_broker.publish = AsyncMock()
                 resp = client.post(
                     f"/v2/partials/sightings/{item.id}/refresh",
@@ -263,7 +263,7 @@ class TestSightingsDetailDoesNotSearch:
         scheduled = MagicMock()
         real_search = AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}})
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
             patch("app.search_service.search_requirement", new=real_search),
         ):
             resp = client.post(

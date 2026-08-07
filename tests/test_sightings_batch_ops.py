@@ -128,7 +128,7 @@ def test_batch_refresh_schedules_one_background_job_for_all_ids(client, db_sessi
     scheduled = MagicMock()
     real_search = AsyncMock()
     with (
-        patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+        patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
         patch("app.search_service.search_requirement", new=real_search),
     ):
         resp = client.post(
@@ -403,7 +403,7 @@ def test_mark_unavailable_marks_sightings(client, db_session, test_user):
     from fastapi.responses import HTMLResponse as _HTMLResponse
 
     with patch(
-        "app.routers.sightings.sightings_detail",
+        "app.routers.sightings.detail.sightings_detail",
         new_callable=AsyncMock,
         return_value=_HTMLResponse("<div>detail</div>"),
     ):

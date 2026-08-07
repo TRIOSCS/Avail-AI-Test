@@ -2102,7 +2102,7 @@ class TestComposerVendor:
 
         # The duplicate service reports an EXACT match on an id that no longer exists.
         stale = {"id": 999999, "match": "exact", "score": 100}
-        with patch("app.routers.sightings.check_vendor_duplicate", return_value=[stale]):
+        with patch("app.routers.sightings.composer.check_vendor_duplicate", return_value=[stale]):
             resp = client.post(self.URL, data={"vendor_name": "Vanished Vendor"})
 
         assert resp.status_code == 200

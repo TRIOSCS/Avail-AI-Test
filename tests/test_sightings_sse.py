@@ -78,7 +78,7 @@ class TestSSEPublishOnMutation:
         if extra_setup is not None:
             extra_setup(db_session, r.id)
 
-        with patch("app.routers.sightings.broker") as mock_broker:
+        with patch("app.routers.sightings.common.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
             request = getattr(client, method)
             url = f"/v2/partials/sightings/{r.id}/{path_suffix}"
@@ -109,7 +109,7 @@ class TestSSEPublishOnBatchRefresh:
         db_session.add(r2)
         db_session.commit()
 
-        with patch("app.routers.sightings.broker") as mock_broker:
+        with patch("app.routers.sightings.common.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",

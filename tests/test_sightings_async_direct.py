@@ -77,7 +77,7 @@ async def test_batch_refresh_success(db_session: Session, test_user: User, test_
     )
 
     with (
-        patch("app.routers.sightings.broker") as mock_broker,
+        patch("app.routers.sightings.common.broker") as mock_broker,
         patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search,
     ):
         mock_broker.publish = AsyncMock()
@@ -105,7 +105,7 @@ async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
         }
     )
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
@@ -127,7 +127,7 @@ async def test_batch_refresh_id_not_found(db_session: Session, test_user: User):
         }
     )
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
@@ -154,7 +154,7 @@ async def test_batch_refresh_search_raises(db_session: Session, test_user: User,
     )
 
     with (
-        patch("app.routers.sightings.broker") as mock_broker,
+        patch("app.routers.sightings.common.broker") as mock_broker,
         patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search,
     ):
         mock_broker.publish = AsyncMock()
@@ -195,7 +195,7 @@ async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: U
         }
     )
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
@@ -504,8 +504,8 @@ async def test_mark_unavailable_success(db_session: Session, test_user: User, te
     )
 
     with (
-        patch("app.routers.sightings.broker") as mock_broker,
-        patch("app.routers.sightings.sightings_detail", new_callable=AsyncMock) as mock_detail,
+        patch("app.routers.sightings.common.broker") as mock_broker,
+        patch("app.routers.sightings.detail.sightings_detail", new_callable=AsyncMock) as mock_detail,
     ):
         mock_broker.publish = AsyncMock()
         mock_detail.return_value = MagicMock(status_code=200)
@@ -556,8 +556,8 @@ async def test_advance_status_valid_transition(db_session: Session, test_user: U
     )
 
     with (
-        patch("app.routers.sightings.broker") as mock_broker,
-        patch("app.routers.sightings.sightings_detail", new_callable=AsyncMock) as mock_detail,
+        patch("app.routers.sightings.common.broker") as mock_broker,
+        patch("app.routers.sightings.detail.sightings_detail", new_callable=AsyncMock) as mock_detail,
     ):
         mock_broker.publish = AsyncMock()
         mock_detail.return_value = MagicMock(status_code=200)
@@ -646,7 +646,7 @@ async def test_preview_inquiry_success(
 
     mock_req.form = _form
 
-    with patch("app.routers.sightings.template_response") as mock_template_response:
+    with patch("app.routers.sightings.rfq_send.template_response") as mock_template_response:
         mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_preview_inquiry(
             request=mock_req,
@@ -715,8 +715,8 @@ async def test_send_inquiry_success(
 
     with (
         patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_rfq,
-        patch("app.routers.sightings.broker") as mock_broker,
-        patch("app.routers.sightings.log_rfq_activity"),
+        patch("app.routers.sightings.common.broker") as mock_broker,
+        patch("app.routers.sightings.rfq_send.log_rfq_activity"),
         patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=True),
     ):
         mock_rfq.return_value = [{"vendor_name": test_vendor_card.display_name}]
@@ -781,7 +781,7 @@ async def test_send_inquiry_rfq_exception(
 
     with (
         patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_rfq,
-        patch("app.routers.sightings.broker") as mock_broker,
+        patch("app.routers.sightings.common.broker") as mock_broker,
     ):
         mock_rfq.side_effect = Exception("Email service down")
         mock_broker.publish = AsyncMock()
@@ -809,7 +809,7 @@ async def test_vendor_modal_with_requirement_ids(db_session: Session, test_user:
     mock_req = MagicMock(spec=Request)
     mock_req.headers = {}
 
-    with patch("app.routers.sightings.template_response") as mock_template_response:
+    with patch("app.routers.sightings.composer.template_response") as mock_template_response:
         mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_vendor_modal(
             request=mock_req,
@@ -831,7 +831,7 @@ async def test_vendor_modal_empty_requirement_ids(db_session: Session, test_user
     mock_req = MagicMock(spec=Request)
     mock_req.headers = {}
 
-    with patch("app.routers.sightings.template_response") as mock_template_response:
+    with patch("app.routers.sightings.composer.template_response") as mock_template_response:
         mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_vendor_modal(
             request=mock_req,
@@ -852,7 +852,7 @@ async def test_batch_refresh_invalid_json_raises_400(db_session: Session, test_u
 
     mock_req = _make_form_request({"requirement_ids": "not-valid-json!!{"})
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         with pytest.raises(HTTPException) as exc:
             await sightings_batch_refresh(
@@ -872,7 +872,7 @@ async def test_batch_refresh_non_list_json_resets_to_empty(db_session: Session, 
     # JSON object instead of list — valid JSON but not a list
     mock_req = _make_form_request({"requirement_ids": '{"key": "value"}'})
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         resp = await sightings_batch_refresh(
             request=mock_req,
@@ -893,7 +893,7 @@ async def test_batch_refresh_exceeds_max_batch_size_raises_400(db_session: Sessi
     ids = list(range(1, 52))
     mock_req = _make_form_request({"requirement_ids": json.dumps(ids)})
 
-    with patch("app.routers.sightings.broker") as mock_broker:
+    with patch("app.routers.sightings.common.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
         with pytest.raises(HTTPException) as exc:
             await sightings_batch_refresh(

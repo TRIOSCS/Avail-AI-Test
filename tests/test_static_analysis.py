@@ -8,7 +8,7 @@ swaps in the past. Each rule is documented in
 mechanically so a future regression fails CI before it ships.
 
 Called by: pytest
-Depends on: app/routers/sightings.py, app/templates, app/static/htmx_app.js
+Depends on: app/routers/sightings/ (package), app/templates, app/static/htmx_app.js
 """
 
 import os
@@ -23,7 +23,7 @@ def test_broker_publish_calls_have_source_gate():
     """Every endpoint in sightings router that calls broker.publish must accept a
     'source' query param so SSE-triggered calls can suppress publication and break the
     self-trigger loop."""
-    src = Path("app/routers/sightings.py").read_text()
+    src = "\n".join(p.read_text() for p in sorted(Path("app/routers/sightings").glob("*.py")))
     lines = src.splitlines()
     publish_lines = [(i, line) for i, line in enumerate(lines, 1) if "broker.publish(" in line]
 
@@ -310,7 +310,7 @@ def test_sightings_template_responses_set_rendered_req_id():
     """Every template_response() rendering a context-sensitive sightings partial must
     set the X-Rendered-Req-Id header so the client htmx:beforeSwap stale-response guard
     works."""
-    src = Path("app/routers/sightings.py").read_text()
+    src = "\n".join(p.read_text() for p in sorted(Path("app/routers/sightings").glob("*.py")))
     lines = src.splitlines()
     failures: list[str] = []
     for i, line in enumerate(lines, 1):

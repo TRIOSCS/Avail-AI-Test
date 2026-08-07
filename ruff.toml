@@ -90,7 +90,12 @@ ignore = [
 "app/routers/part_dossier.py" = ["BLE001"]
 "app/routers/prepayment_confirm.py" = ["BLE001"]
 "app/routers/requisitions/requirements.py" = ["BLE001"]
-"app/routers/sightings.py" = ["BLE001"]
+# W4.1 split relocated sightings.py's 5 frozen catches into the package — same
+# pre-existing code, new paths; the untouched package files get full enforcement.
+"app/routers/sightings/composer.py" = ["BLE001"]
+"app/routers/sightings/detail.py" = ["BLE001"]
+"app/routers/sightings/offers_actions.py" = ["BLE001"]
+"app/routers/sightings/rfq_send.py" = ["BLE001"]
 "app/routers/sources.py" = ["BLE001"]
 "app/routers/vendor_contacts.py" = ["BLE001"]
 "app/search_service.py" = ["BLE001"]

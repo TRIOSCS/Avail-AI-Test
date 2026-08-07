@@ -24,6 +24,7 @@ from app.constants import ExcessListStatus
 from app.models import Company, User
 from app.models.sourcing import Requirement, Requisition
 from app.routers import sightings as sightings_router
+from app.routers.sightings import board as sightings_board
 from app.routers.sightings import build_board_requirement_query
 from app.schemas.sightings import SightingsListParams
 from app.services.excess_service import create_excess_list, import_line_items
@@ -136,7 +137,7 @@ def test_dashboard_counters_exclude_mirror_virtual_requirement(
         captured["ctx"] = ctx
         return HTMLResponse("<html/>")
 
-    monkeypatch.setattr(sightings_router, "template_response", _capture)
+    monkeypatch.setattr(sightings_board, "template_response", _capture)
     resp = client.get("/v2/partials/sightings")
     assert resp.status_code == 200
 
@@ -165,7 +166,7 @@ def test_stat_counts_exclude_mirror_virtual_requirement(client, db_session: Sess
         captured["ctx"] = ctx
         return HTMLResponse("<html/>")
 
-    monkeypatch.setattr(sightings_router, "template_response", _capture)
+    monkeypatch.setattr(sightings_board, "template_response", _capture)
     resp = client.get("/v2/partials/sightings")
     assert resp.status_code == 200
 

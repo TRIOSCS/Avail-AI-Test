@@ -66,7 +66,7 @@ class TestRowRefreshAsync:
         scheduled = MagicMock()
         real_search = AsyncMock(return_value={"mpn_results": {}})
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
             patch("app.search_service.search_requirement", new=real_search),
         ):
             resp = client.post(
@@ -90,7 +90,7 @@ class TestRowRefreshAsync:
         """No ?source → treated as a user click: still schedules + returns searching."""
         item = _requirement(db_session, test_requisition)
         scheduled = MagicMock()
-        with patch("app.routers.sightings._run_search_and_publish", new=scheduled):
+        with patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled):
             resp = client.post(
                 f"/v2/partials/sightings/{item.id}/refresh",
                 headers={"HX-Request": "true"},
@@ -107,8 +107,8 @@ class TestRowRefreshAsync:
         item = _requirement(db_session, test_requisition)
         scheduled = MagicMock()
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             resp = client.post(
@@ -143,7 +143,7 @@ class TestBulkRefreshAsync:
         scheduled = MagicMock()
         real_search = AsyncMock(return_value={"mpn_results": {}})
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
             patch("app.search_service.search_requirement", new=real_search),
         ):
             resp = client.post(
@@ -172,7 +172,7 @@ class TestBulkRefreshAsync:
         body plus the "Searching…" toast."""
         item = _requirement(db_session, test_requisition)
         scheduled = MagicMock()
-        with patch("app.routers.sightings._run_search_and_publish", new=scheduled):
+        with patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled):
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
                 data={"requirement_ids": json.dumps([item.id])},
@@ -185,7 +185,7 @@ class TestBulkRefreshAsync:
     def test_missing_ids_schedule_nothing(self, client: TestClient, db_session: Session):
         """Non-existent requirement IDs are dropped; nothing is scheduled."""
         scheduled = MagicMock()
-        with patch("app.routers.sightings._run_search_and_publish", new=scheduled):
+        with patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled):
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
                 data={"requirement_ids": json.dumps([88888])},
@@ -199,8 +199,8 @@ class TestBulkRefreshAsync:
         item = _requirement(db_session, test_requisition)
         scheduled = MagicMock()
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.detail._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             resp = client.post(
@@ -236,7 +236,7 @@ class TestBackgroundJob:
         with (
             patch("app.database.SessionLocal", sm),
             patch("app.search_service.search_requirement", new=search_mock),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             await sightings_router._run_search_and_publish([item.id], test_user.id)
@@ -258,7 +258,7 @@ class TestBackgroundJob:
         with (
             patch("app.database.SessionLocal", sm),
             patch("app.search_service.search_requirement", new=AsyncMock(return_value={})),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             await sightings_router._run_search_and_publish([item.id], test_user.id, source="sse")
@@ -274,7 +274,7 @@ class TestBackgroundJob:
         with (
             patch("app.database.SessionLocal", sm),
             patch("app.search_service.search_requirement", new=AsyncMock(side_effect=RuntimeError("boom"))),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             await sightings_router._run_search_and_publish([item.id], test_user.id)
@@ -308,7 +308,7 @@ class TestBackgroundJob:
         with (
             patch("app.database.SessionLocal", sm),
             patch("app.search_service.search_requirement", side_effect=slow_search),
-            patch("app.routers.sightings.broker") as mock_broker,
+            patch("app.routers.sightings.common.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()
             await sightings_router._run_search_and_publish(ids, test_user.id)
