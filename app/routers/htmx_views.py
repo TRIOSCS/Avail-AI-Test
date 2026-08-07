@@ -309,7 +309,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
 @router.get("/v2/buy-plans/{bp_id:int}")
 async def buy_plans_hub_retired_redirect(bp_id: int | None = None) -> RedirectResponse:
     """308 the retired Buy Plans hub (and its detail deep links) to the workspace."""
-    target = "/v2/approvals?tab=buy-plans"
+    target = "/v2/approvals?tab=deals"
     if bp_id is not None:
         target = f"{target}&select={bp_id}"
     return RedirectResponse(target, status_code=308)

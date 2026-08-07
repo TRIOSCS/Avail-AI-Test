@@ -227,9 +227,10 @@ class TestDeletedRoutes:
         for rel in _DELETED_TEMPLATES:
             assert not (_TEMPLATES / rel).exists(), f"{rel} should be deleted"
 
-    def test_approvals_rest_cluster_left_intact(self):
-        """The Approvals REST cluster is LEFT (the standalone JSON decision/reassign/
-        cancel routes outlive the retired hub read models)."""
+    def test_approvals_rest_cluster_now_gone(self):
+        """The Approvals REST cluster died in W4.3 (routers/approvals.py deleted) — the
+        standalone JSON decision/reassign/cancel/list routes must stay gone
+        (test_approvals_bridge.py pins the same contract from the other side)."""
         for path in (
             "/v2/approvals/requests/{id}/decision",
             "/v2/approvals/requests/{id}/reassign",
@@ -237,7 +238,7 @@ class TestDeletedRoutes:
             "/v2/approvals/requests",
             "/v2/approvals/requests/{id}",
         ):
-            assert any(getattr(r, "path", "") == path for r in iter_routes(app.routes)), f"{path} must remain"
+            assert not any(getattr(r, "path", "") == path for r in iter_routes(app.routes)), f"{path} must stay gone"
 
     def test_no_import_breakage(self):
         import importlib

@@ -1,10 +1,10 @@
 {#
-  approvals/approvals_hub.html — Approvals Workspace shell (4-tab split-view console).
-  Tabs: Sales Orders · Buy Plans · Purchase Orders · Prepayments — four lenses on the
-  same pipeline rooted at the sales order (specs/approvals-workspace.md §5). Each pill
+  approvals/approvals_hub.html — Approvals Workspace shell (3-tab split-view console).
+  Tabs: Deals · Purchase Orders · Prepayments — three views on the same pipeline
+  rooted at the sales order (specs/approvals-workspace.md §5). Each pill
   carries a per-viewer "waiting on you" badge; the active tab's split view lazy-loads
   into #ap-hub-body. Decisions never navigate — panes decide in place.
-  Receives: active_tab (str, one of the four tab keys), tabs (list[(key, label)]),
+  Receives: active_tab (str, one of the three tab keys), tabs (list[(key, label)]),
             badges (dict tab_key → int, items waiting on the viewer),
             select (int|None — plan id from a /v2/buy-plans/{id} deep link; rides the
             lazy body URL so the SO/BP list preselects that plan's pane).

@@ -6344,7 +6344,6 @@ shared helper:
 | Requisitions | `GET /v2/partials/requisitions/export` | `routers/htmx/requisitions.py` |
 | Vendors | `GET /v2/partials/vendors/export` | `routers/htmx/vendors.py` |
 | Resell | `GET /v2/partials/resell/{list_id}/offers/export` + `.../outreach/export` + `.../bid-sheet` (blank bid sheet) + `GET /api/resell/{list_id}/bid/{bid_id}/csv` (clean bid-back CSV) | `routers/resell.py` |
-| Approvals | `GET /v2/partials/approvals/{tab}/export` | `routers/htmx/approvals_hub.py` |
 
 The **Sightings board** export (`GET /v2/sightings/export`, `routers/sightings.py`)
 and the **CRM** exports (`GET /v2/customers/export.csv` +
@@ -7159,7 +7158,7 @@ neither `check_completion` nor the stock-sale auto-complete job
 complete past an undecided PO. The stall detectors are per-line too:
 `plan_needs_approver_reason` returns `"purchase_order"` when any PENDING_VERIFY line's
 amount has no eligible approver (`has_eligible_approver(PURCHASE_ORDER, _line_amount)`) —
-the predicate behind the workspace BP-tab stall warnings.
+the predicate behind the workspace Deals-tab stall warnings.
 `routing._eligible_approvers`'s `PURCHASE_ORDER` branch stays (it powers those per-line
 checks); the workspace Purchase Orders tab's history feed is decision-log-backed (no new
 gate rows are ever created).
@@ -7167,12 +7166,12 @@ gate rows are ever created).
 **QP native sections (QP Phase C2b):** the QP detail (`qp/detail.html`) `{% include %}`s four
 section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_section_serial.html`,
 `_section_fru.html` — replacing the Phase-2 placeholders.
-- *Sales / Purchasing fields:* each is one `<form>` that `hx-patch`es `/v2/qp/{id}/sales` (or
-  `/purchasing`) `hx-trigger="change"` and swaps the section partial into itself. The router
-  writes only the whitelisted `_SALES_FIELDS`/`_PURCHASING_FIELDS` (so a stray form key can't set
-  an arbitrary column), coercing Y/N→tri-state Boolean, qty→int, else stripped string|None. A PATCH
-  is a no-op once the section is approved (read-only). The grid is read-only while a request is
-  `requested` or the section is approved.
+- *Sales / Purchasing fields:* **read-only since W4.3 (QP absorption).** The standalone
+  section editors (`PATCH /v2/qp/{id}/sales` + `/purchasing`, with their
+  `_SALES_FIELDS`/`_PURCHASING_FIELDS` whitelists) were deleted — these sections are edited in
+  the Approvals workspace panes (QP-sales on the deal pane, QP-purchasing on the PO-line
+  confirm form). The QP page renders each as a read-only grid with a one-line
+  "Edited in the Approvals workspace" pointer (`tests/test_c2b_sections.py` pins the 404s).
 - *Completeness gate:* `validate_section(qp, gate_type)` → `_validate_sales_section`/
   `_validate_purchasing_section` (required: the SO#/PO# + condition + product commodity + testing-
   required, plus quantity for Sales). `submit_section` now calls it FIRST and raises
@@ -7184,7 +7183,7 @@ section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_sec
 - *FRU pin/unpin:* `POST /v2/qp/{id}/fru` resolves `fru_norm` via `normalize_mpn_key`, checks the
   `(qp_id, fru_norm)` unique constraint (re-pin = no-op), and the section live-joins `FruLink` by
   `fru_norm` (`_fru_rows`) to show the related model/carrier/series edges; `DELETE …/fru/{lookup_id}`
-  unpins. All C2b mutation endpoints keep the `_require_qp_access` ownership scope (404 not 403).
+  unpins. All serial/FRU mutation endpoints keep the `_require_qp_access` ownership scope (404 not 403).
 
 **Leaving PENDING outside `decide()` cancels the open engine request (no orphan, no
 resurrection):** a PENDING plan carries a live `REQUESTED` `BUY_PLAN` `ApprovalRequest`, so
@@ -7224,10 +7223,13 @@ ONLY pending plans with **no open `BUY_PLAN` `ApprovalRequest`**, so a post-C1 p
 on the **Approvals** badge alone (no double-count) while a pre-C1 transition-window plan (no
 engine request) still surfaces on the buy-plans badge and never goes invisible.
 
-The **read-only buy-plan bridge is RETIRED** (C1). `list_requests` (`routers/approvals.py`)
-is engine-only: a buy plan surfaces as a native `ApprovalRequest` (`gate_type=buy_plan`,
-`subject_type=buy_plan`). `_serialize_request(r)` is the single 11-field engine-item
-projection shared by `list_requests` + `get_request` (carrying `subject_type`/`subject_id`).
+The **read-only buy-plan bridge is RETIRED** (C1), and W4.3 then deleted the whole
+parallel JSON approval-request API (`routers/approvals.py` — list / detail / decision /
+reassign / cancel at `/v2/approvals/requests*`). The Approvals Workspace is the ONE
+approvals surface; decisions post the existing `buy_plans.py` / `prepayments.py` routes.
+Reassign died with it — any-of routing makes it redundant (any eligible approver just
+acts); `services/approvals/events.reassign` keeps no HTTP caller
+(`tests/test_approvals_bridge.py` pins the route-gone contract).
 
 **Per-gate approvals — engine queue only (pinned stage-tab sections RETIRED in F-2).** The
 per-gate "Pending approvals (N)" sections that used to render inside each lifecycle stage tab
@@ -7236,24 +7238,24 @@ were removed with those tabs in Phase F-2 (`approvals/_pending_section.html` +
 four-sub-tab `approvals/_queue.html` lens was already retired before that).
 `services/approvals/queue.build_queue_view(db, user, tab=<gate>)` remains defined (TAB_GATE /
 per-gate projection) but is no longer wired to a human surface; the only human-facing approvals
-queue is now the engine API (`GET /v2/approvals/requests` + the standalone Approvals page).
-Subjects resolve by `subject_type` (buy_plan→plan detail, quality_plan→`/v2/qp/{id}`,
-prepayment→vendor + payment method). **Visibility is ownership-scoped** (parity with
+queue is the Approvals Workspace (the engine JSON API at `GET /v2/approvals/requests` was
+deleted in W4.3). Subjects resolve by `subject_type` (buy_plan→plan detail,
+quality_plan→label only — W4.3 dropped the latent `/v2/qp/{id}` `subject_href` no renderer
+consumed, prepayment→vendor + payment method). **Visibility is ownership-scoped** (parity with
 requisition-derived data): unrestricted roles (buyer/manager/admin) see every request, but
 `RESTRICTED_ROLES` (SALES/TRADER) see only requests they submitted (`requested_by_id`), own
-(`owner_id`), or must personally decide (a PENDING `ApprovalStepRecipient` row) — enforced on
-BOTH `list_requests` (`_restricted_visibility_clause`) and `get_request`
-(`_can_view_request`; 404-not-403 so existence isn't leaked, mirroring
-`require_requisition_access`). approve/reject still act only for an eligible PENDING recipient
-(`decide()`). The legacy
+(`owner_id`), or must personally decide (a PENDING `ApprovalStepRecipient` row) — that
+visibility clause died with the JSON list in W4.3; the workspace lists scope by the same
+ownership rules through their own read models. approve/reject still act only for an
+eligible PENDING recipient (`decide()`). The legacy
 `GET /v2/approvals/queue` redirect is long gone; any stale `/v2/buy-plans*` URL now
-**308s** to `/v2/approvals?tab=buy-plans` (the hub retired post-parity).
+**308s** to `/v2/approvals?tab=deals` (the hub retired post-parity; W4.3 renamed the tab).
 `ApprovalRequestActionSource` (`AlertKind.APPROVAL_ACTION`) is registered under the
 **`buy-plans`** tab, so its "awaiting me" count merges onto the Approvals nav badge.
 
 **Sales Order origination from RFQ offers (SP-2).** A buy plan no longer requires a
 customer quote: `buy_plans_v3.quote_id` is **nullable** (migration 163). The workspace
-SO/BP lists carry the **"New sales order"** button
+Deals list carries the **"New sales order"** button
 → `GET /v2/partials/buy-plans/sales-orders/new` (`sales_order_new`,
 `partials/approvals/_sales_order_new.html` — SELF-HOSTED in `#so-origination`, loaded into
 `#main-content`), a dual-mode surface: first a **requisition

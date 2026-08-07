@@ -337,7 +337,7 @@ test('Build Buy Plan from the won quote', async () => {
 test('edit a plan line (whole-table edit mode) before submitting', async () => {
   // The draft plan's working editor: workspace row → pane → "Open full plan →"
   // (the Build-Buy-Plan response is a slim summary without the edit affordances).
-  await page.goto('/v2/approvals?tab=sales-orders');
+  await page.goto('/v2/approvals?tab=deals');
   await expect(page.locator("#aw-filters input[name='q']")).toBeVisible({ timeout: 20_000 });
   const row = page.locator(`#aw-list [data-row-key="plan-${planId}"]`);
   await expect(row).toBeVisible({ timeout: 20_000 });
@@ -369,7 +369,7 @@ test('submit the plan for approval with the SO number', async () => {
 
 test('QP sales section is editable in the workspace pane (pending plan)', async () => {
   // QP-sales locks once the plan is ACTIVE (spec §7 matrix) — edit while PENDING.
-  const row = await openApprovalRow('sales-orders', `[data-row-key="plan-${planId}"]`);
+  const row = await openApprovalRow('deals', `[data-row-key="plan-${planId}"]`);
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.click();
 

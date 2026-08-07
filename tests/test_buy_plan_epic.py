@@ -95,10 +95,10 @@ def test_new_param_lands_hub_on_create_flow(client: TestClient):
     assert "/v2/partials/buy-plans/sales-orders/new" in resp.text
 
 
-def test_approvals_buy_plan_list_has_new_sales_order_link(client: TestClient):
-    """The workspace SO/BP lists carry the origination entry point (spec §8) — now a
+def test_approvals_deals_list_has_new_sales_order_link(client: TestClient):
+    """The workspace Deals list carries the origination entry point (spec §8) — now a
     direct load of the self-hosted picker into #main-content (hub ?new=1 retired)."""
-    resp = client.get("/v2/partials/approvals/buy-plans/list")
+    resp = client.get("/v2/partials/approvals/deals/list")
     assert resp.status_code == 200
     assert "New sales order" in resp.text
     assert 'hx-get="/v2/partials/buy-plans/sales-orders/new"' in resp.text

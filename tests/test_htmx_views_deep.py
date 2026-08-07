@@ -207,7 +207,7 @@ class TestBuyPlansRoutes:
         # renders its own lazy body container + explicit hx-target after the redirect.
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 308
-        assert resp.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+        assert resp.headers["location"] == "/v2/partials/approvals?tab=deals"
         followed = client.get(path, follow_redirects=True)
         assert followed.status_code == 200
         assert 'id="ap-hub-body"' in followed.text

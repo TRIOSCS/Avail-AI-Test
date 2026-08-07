@@ -487,7 +487,7 @@ authoritative reference. Static-analysis tests in
 | Tickets | 4 | partials/tickets/ |
 | Settings | 9 | partials/settings/ — tabs: **Connectors** (unified, replaces Sources + API Keys; admin-only), Profile, System, Data Ops, **Data export** (capability-gated on `EXPORT_BULK_DATA` — admin-by-default, per-user manager override possible; ISS-028 — the five bulk dataset CSV exports, `data_export.html`, `GET /v2/partials/settings/data-export`; see Authorization & Access Control's Bulk dataset export row), Ops Group, **Users** (admin-only); legacy `/sources` + `/api-keys` routes 302 → Connectors. Users tab = `users.html` (invite/role/activate table) + `user_access_panel.html` (per-user access editor modal) + `users_audit.html` (audit-log viewer); see Authorization & Access Control. |
 | Shared | 18 | partials/shared/ |
-| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module**, ONE surface: the **Approvals Workspace** at `/v2/approvals` (4-tab split view — Sales Orders / Buy Plans / Purchase Orders / Prepayments; `routers/htmx/approvals_hub.py`, see the Approvals Workspace section). The old two-lens Buy Plans hub (My Queue + Pipeline) **RETIRED post-parity** (spec §11.1; `docs/APPROVALS_PARITY_CHECKLIST.md`): `buy_plans/hub.html`, `approvals/_surface_my_queue.html`, `approvals/_surface_pipeline.html`, `approvals/_pipeline_macros.html` and `approvals/_pipeline_archive_rows.html` are deleted, `/v2/buy-plans[/{id}]` and the hub partial URLs 308 onto the workspace, and the hub read models (`my_queue`/`QueueRow`, `deals_board`, `completed_archive`, `open_avg_margin`, `supervise_overview`, the line queues) are deleted — `services/buyplan_hub.py` survives only as the shared helpers (`_customer_name`, `_age_hours`, `_line_mpn`, `_query_po_pending_verify`) the workspace PO queue (`services/approvals/po_queue.py`) imports. Origination (`_sales_order_new.html`, self-hosted in `#so-origination`) and the single-plan `detail.html`/`_macros.html` stay under `routers/htmx/buy_plans.py`. The write-side state machine, `services/buyplan_workflow.py` (1,855 lines), is now a **package** (P4.3+): `buyplan_approval.py` (submit/approve/reject, halt/resume, reset/cancel/resubmit, `check_completion`), `buyplan_po.py` (buyer PO confirmation + approver PO verification + `mark_line_received`), `buyplan_lines.py` (claim/flag/resolve/resource + the line-editing API), `buyplan_reports.py` (favoritism detection + case-report generation), and `buyplan_state.py` (W3 — the single enforced `BuyPlan.status` transition table + `transition()` writer, mirroring `requisition_state.py`; every lifecycle writer routes its status write through it, and W3 deleted `BuyPlanStatus.INBOUND` alongside it, migration 208) — `__init__.py` re-exports every public AND internal name reached via `app.services.buyplan_workflow.<name>` so no caller/test needs to change its import path. The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
+| Approvals | 12 | partials/buy_plans/ + partials/approvals/ — the **Approvals module**, ONE surface: the **Approvals Workspace** at `/v2/approvals` (3-tab split view — Deals / Purchase Orders / Prepayments; W4.3 merged the old Sales Orders + Buy Plans tabs into one Deals tab; `routers/htmx/approvals_hub.py`, see the Approvals Workspace section). The old two-lens Buy Plans hub (My Queue + Pipeline) **RETIRED post-parity** (spec §11.1; `docs/APPROVALS_PARITY_CHECKLIST.md`): `buy_plans/hub.html`, `approvals/_surface_my_queue.html`, `approvals/_surface_pipeline.html`, `approvals/_pipeline_macros.html` and `approvals/_pipeline_archive_rows.html` are deleted, `/v2/buy-plans[/{id}]` and the hub partial URLs 308 onto the workspace, and the hub read models (`my_queue`/`QueueRow`, `deals_board`, `completed_archive`, `open_avg_margin`, `supervise_overview`, the line queues) are deleted — `services/buyplan_hub.py` survives only as the shared helpers (`_customer_name`, `_age_hours`, `_line_mpn`, `_query_po_pending_verify`) the workspace PO queue (`services/approvals/po_queue.py`) imports. Origination (`_sales_order_new.html`, self-hosted in `#so-origination`) and the single-plan `detail.html`/`_macros.html` stay under `routers/htmx/buy_plans.py`. The write-side state machine, `services/buyplan_workflow.py` (1,855 lines), is now a **package** (P4.3+): `buyplan_approval.py` (submit/approve/reject, halt/resume, reset/cancel/resubmit, `check_completion`), `buyplan_po.py` (buyer PO confirmation + approver PO verification + `mark_line_received`), `buyplan_lines.py` (claim/flag/resolve/resource + the line-editing API), `buyplan_reports.py` (favoritism detection + case-report generation), and `buyplan_state.py` (W3 — the single enforced `BuyPlan.status` transition table + `transition()` writer, mirroring `requisition_state.py`; every lifecycle writer routes its status write through it, and W3 deleted `BuyPlanStatus.INBOUND` alongside it, migration 208) — `__init__.py` re-exports every public AND internal name reached via `app.services.buyplan_workflow.<name>` so no caller/test needs to change its import path. The retired `/v2/reporting` page folded its analytics in here + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
 
@@ -703,12 +703,15 @@ Single-file services worth flagging individually (not grouped under a shared pac
 
 ## Approvals Workspace (spec v4 rebuild — Phases 0–1)
 
-`/v2/approvals` is now the **Approvals Workspace**: one page, four tabs — **Sales
-Orders · Buy Plans · Purchase Orders · Prepayments** — four lenses on the same
-pipeline rooted at the sales order (`specs/approvals-workspace.md`). The 3-tab decide
-console was rebuilt **in place** (D12); legacy tab keys (`buy-plan` / `po-approval` /
-`prepayment`) alias onto the new tabs (`LEGACY_TAB_ALIASES`), so old pushed URLs and
-the `origin=approvals_hub` decide re-renders keep working. The **approvals engine is
+`/v2/approvals` is now the **Approvals Workspace**: one page, three tabs — **Deals ·
+Purchase Orders · Prepayments** — views on the same pipeline rooted at the sales order
+(`specs/approvals-workspace.md`). W4.3 (spec §5.2) merged the original Sales Orders +
+Buy Plans tabs into the one **Deals** tab — they were two lenses on the same rows, the
+same pane, and the same single approval, and the lens plumbing died with the merge.
+The old decide console was rebuilt **in place** (D12); legacy tab keys
+(`sales-orders` / `buy-plans` / `buy-plan` / `po-approval` / `prepayment`) alias onto
+the new tabs (`LEGACY_TAB_ALIASES`), so old pushed URLs and the
+`origin=approvals_hub` decide re-renders keep working. The **approvals engine is
 untouched** — every decision posts the existing `buy_plans.py` / `prepayments.py`
 routes; new `origin=approvals_workspace` branches re-render the deciding pane in place
 and fire `awListRefresh` so the left list repaints. The `/v2/buy-plans` personal hub
@@ -717,7 +720,7 @@ all its full-page and partial URLs 308 onto the workspace.
 
 ### Router — `app/routers/htmx/approvals_hub.py` (rebuilt)
 
-- `GET /v2/partials/approvals` — shell (`require_access(BUY_PLANS)`): 4 pills with
+- `GET /v2/partials/approvals` — shell (`require_access(BUY_PLANS)`): 3 pills with
   **per-viewer badges** (`_viewer_badges` — decidable engine requests per gate;
   the PO badge adds verifiable PENDING_VERIFY lines + the viewer's own AWAITING_PO
   lines) + lazy tab body.
@@ -730,19 +733,20 @@ all its full-page and partial URLs 308 onto the workspace.
   the oldest decision default-selected (`aw-default`, applied only when nothing is
   selected). Read models: `buy_plan_tracking_rows` (now carrying the sanctioned
   read-side `order_type`), `build_po_queue_view`, `pending/resolved_rows_for_gate`.
-- Panes: `GET /plan/{id}/pane?lens=` (`_pane_sales_order.html` — one anatomy for both
-  SO/BP lenses), `GET /po/{line_id}/pane` (`_pane_po_line.html` — buyer confirm-PO
+- Panes: `GET /plan/{id}/pane` (`_pane_sales_order.html` — the one deal-pane anatomy;
+  the `?lens=` param died in W4.3), `GET /po/{line_id}/pane` (`_pane_po_line.html` — buyer confirm-PO
   form vs manager decide), `GET /po/{line_id}/sent-check` (**display-only**
   `verify_po_sent` detection — never auto-verifies), `GET /prepayments/{id}/pane`
   (`_pane_prepayment.html`) and `POST /prepayments/{id}/method` (approver-only,
   REQUESTED-only, stale-guarded, field-audited method adjust).
 - `PO_DECISION_LABELS` — spec §5 display vocabulary (`pending_verify` → "Pending
   approval", `verified` → "Approved"); display map only, backend names unchanged.
-- CSV export retained per tab (legacy keys alias).
+- The per-tab CSV export was CUT in W4.3 (`approvals_hub_export` + the list's
+  Export CSV button are gone; `tests/test_approvals_hub_tabs.py` pins the 404).
 
 ### Templates — `partials/approvals/`
 
-`approvals_hub.html` (4-pill shell) · `_workspace_split.html` · `_workspace_list.html`
+`approvals_hub.html` (3-pill shell) · `_workspace_split.html` · `_workspace_list.html`
 · `_pane_sales_order.html` · `_pane_po_line.html` · `_pane_prepayment.html` ·
 `_sales_order_new.html` (order-type select + lite branch). The old
 `_tab_buy_plan/_tab_po_approval/_tab_prepayment.html` are **deleted** (the
@@ -814,8 +818,8 @@ all its full-page and partial URLs 308 onto the workspace.
 - **Lifecycle controls on the pane**: manager-only halt/resume/cancel/reset block on
   `_pane_sales_order.html` posting the existing `buy_plans.py` routes with
   `origin=approvals_workspace` (shared `_workspace_pane_response`).
-  `plan_needs_approver_reason` stall warnings on BP-tab list rows
-  (`WorkspaceRow.stalled`) and on the pane.
+  `plan_needs_approver_reason` stall warnings on Deals list rows
+  (`WorkspaceRow.stalled`, unconditional since the W4.3 tabs merge) and on the pane.
 
 ### Phase 3 — PO kanban
 

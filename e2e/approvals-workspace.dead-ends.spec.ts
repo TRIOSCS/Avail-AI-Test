@@ -15,7 +15,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const TABS = ['sales-orders', 'buy-plans', 'purchase-orders', 'prepayments'];
+const TABS = ['deals', 'purchase-orders', 'prepayments'];
 
 // Every GET surface the workspace UI links to (tab pills, lazy list, filter bar,
 // Mine/All + Live/Closed toggles, the empty-search state, sent-check).

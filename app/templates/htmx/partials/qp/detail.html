@@ -3,15 +3,12 @@
   Renders the QP header (customer/owner/SO# derived from the linked BuyPlan) plus
   collapsible sections, each an {% include %} of its own partial (C2b):
   Sales, Purchasing, Buy Plan (populated), Serial, FRU Crosswalk.
-  The Sales/Purchasing sections edit inline while the ONE lock matrix says they are
-  open (can_edit_qp_sales / can_edit_qp_purchasing — W3.7; the Mark-Reviewed
-  ceremony and its chips are gone).
+  The Sales/Purchasing sections render READ-ONLY — they are edited in the Approvals
+  workspace panes (W4.3 absorbed the standalone section editors).
 
   Receives: qp (QualityPlan ORM with serial_entries + fru_lookups eager-loaded),
             bp (BuyPlan ORM), bp_lines (list[BuyPlanLine]), user (User),
             errors (list[str]),
-            sales_errors / purchasing_errors (list[str]),
-            can_edit_qp_sales / can_edit_qp_purchasing (bool — lock matrix),
             fru_rows (list of {"pin": QpFruLookup, "links": [FruLink]}),
             buy_plan_gate / prepayment_gate (ApprovalRequest|None).
   Called by: routers/quality_plans.py qp_detail / _qp_detail_response.

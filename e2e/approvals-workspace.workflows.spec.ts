@@ -14,17 +14,17 @@
 
 import { test, expect } from '@playwright/test';
 
-const TABS = ['sales-orders', 'buy-plans', 'purchase-orders', 'prepayments'];
-const LEGACY_TABS = ['buy-plan', 'po-approval', 'prepayment'];
+const TABS = ['deals', 'purchase-orders', 'prepayments'];
+const LEGACY_TABS = ['sales-orders', 'buy-plans', 'buy-plan', 'po-approval', 'prepayment'];
 const HX = { 'HX-Request': 'true' };
 
 test.describe('Approvals Workspace — shell and tabs', () => {
-  test('shell renders the four tab pills and the lazy body', async ({ request }) => {
+  test('shell renders the three tab pills and the lazy body', async ({ request }) => {
     const res = await request.get('/v2/partials/approvals', { headers: HX });
     expect(res.status(), 'approvals shell crashed').toBeLessThan(500);
     if (res.status() === 200) {
       const html = await res.text();
-      for (const label of ['Sales Orders', 'Buy Plans', 'Purchase Orders', 'Prepayments']) {
+      for (const label of ['Deals', 'Purchase Orders', 'Prepayments']) {
         expect(html, `shell missing tab pill: ${label}`).toContain(label);
       }
       expect(html, 'shell missing the lazy tab body target').toContain('ap-hub-body');
@@ -103,7 +103,6 @@ test.describe('Approvals Workspace — detail panes', () => {
   test('panes reject missing ids cleanly (404, never 5xx)', async ({ request }) => {
     const urls = [
       '/v2/partials/approvals/plan/999999/pane',
-      '/v2/partials/approvals/plan/999999/pane?lens=buy-plans',
       '/v2/partials/approvals/po/999999/pane',
       '/v2/partials/approvals/prepayments/999999/pane',
       '/v2/partials/approvals/po/999999/sent-check',

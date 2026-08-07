@@ -123,13 +123,13 @@ async def _notify_if_completed(plan_id: int, just_completed: bool) -> None:
 SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
 
 
-def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int, form) -> HTMLResponse:
+def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int) -> HTMLResponse:
     """The shared origin=approvals_workspace re-render for plan lifecycle POSTs (halt /
-    resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an awListRefresh
+    resume / cancel / reset — 2.5): the plan's deal pane in place + an awListRefresh
     nudge so the left work list repaints its status."""
     from .approvals_hub import render_plan_pane
 
-    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp = render_plan_pane(request, user, db, plan_id)
     resp.headers["HX-Trigger"] = "awListRefresh"
     return resp
 
@@ -148,7 +148,7 @@ async def buy_plans_list_partial(
     """
     if new:
         return RedirectResponse("/v2/partials/buy-plans/sales-orders/new", status_code=308)
-    return RedirectResponse("/v2/partials/approvals?tab=buy-plans", status_code=308)
+    return RedirectResponse("/v2/partials/approvals?tab=deals", status_code=308)
 
 
 def _normalize_order_type(raw: str | None) -> str:
@@ -723,7 +723,7 @@ async def buy_plan_approve_partial(
         # listens for it), so the decided row leaves the Needs-your-approval group.
         from .approvals_hub import render_plan_pane
 
-        resp = render_plan_pane(request, user, db, plan_id, lens=form.get("lens", "sales-orders"))
+        resp = render_plan_pane(request, user, db, plan_id)
         resp.headers["HX-Trigger"] = "awListRefresh"
         return resp
     if origin == "approvals_hub":
@@ -769,7 +769,7 @@ async def buy_plan_halt_partial(
         raise HTTPException(400, str(e)) from e
 
     if origin == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
+        return _workspace_pane_response(request, user, db, plan_id)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1099,8 +1099,8 @@ async def buy_plan_receive_line_partial(
     the state gate (verified, or the paid-risk prepay state) live service-side in
     ``mark_line_received``; idempotent (an already-received line is a no-op). Never
     touches plan status machinery. ``origin=approvals_workspace`` re-renders the
-    workspace pane in place: with a ``lens`` the SO/BP pane (the kanban card's Mark
-    received), without one the PO-line pane.
+    workspace pane in place: with ``pane=plan`` the deal pane (the kanban card's Mark
+    received), without it the PO-line pane.
     """
     from ...services.buyplan_workflow import mark_line_received
 
@@ -1118,9 +1118,8 @@ async def buy_plan_receive_line_partial(
     if origin == "approvals_workspace":
         from .approvals_hub import render_plan_pane, render_po_pane
 
-        lens = str(form.get("lens") or "")
-        if lens:
-            resp = render_plan_pane(request, user, db, plan_id, lens=lens)
+        if form.get("pane") == "plan":
+            resp = render_plan_pane(request, user, db, plan_id)
         else:
             resp = render_po_pane(request, user, db, line_id)
         resp.headers["HX-Trigger"] = "awListRefresh"
@@ -1218,7 +1217,7 @@ async def buy_plan_cancel_partial(
         raise HTTPException(400, str(e)) from e
 
     if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
+        return _workspace_pane_response(request, user, db, plan_id)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1251,7 +1250,7 @@ async def buy_plan_resume_partial(
 
     form = await request.form()
     if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
+        return _workspace_pane_response(request, user, db, plan_id)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -1539,6 +1538,6 @@ async def buy_plan_reset_partial(
 
     form = await request.form()
     if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
+        return _workspace_pane_response(request, user, db, plan_id)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)

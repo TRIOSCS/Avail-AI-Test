@@ -72,7 +72,7 @@
           title="{{ 'Back to live work' if show_closed else 'Show completed and cancelled' }}">
     {{ 'Closed' if show_closed else 'Live' }}
   </button>
-  {% if tab in ('sales-orders', 'buy-plans') %}
+  {% if tab == 'deals' %}
   {# New sales order — the origination picker (spec §8: create with order type). Loads
      the self-hosted picker surface into #main-content (no URL push: a reload lands
      back on the workspace, matching the pre-retirement behavior). #}
@@ -81,9 +81,6 @@
     New sales order
   </a>
   {% endif %}
-  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). #}
-  <a hx-boost="false" href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}"
-     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
 </form>
 
 {# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a

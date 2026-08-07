@@ -1,17 +1,15 @@
-"""test_approvals_resell_export.py — CSV export for the Approvals console lists AND the
-Resell offers / outreach data (UX-audit gap: a manager could not pull these for
-reporting).
+"""test_approvals_resell_export.py — CSV export for the Resell offers / outreach data
+(UX-audit gap: a manager could not pull these for reporting).
 
-Covers the new GET export endpoints:
-  - Approvals hub (GET /v2/partials/approvals/{tab}/export): the Buy Plans / Sales Orders
-    tracking list (buy-plan) + the Prepayment and PO Approval "Recently resolved" audit
-    feeds — same require_user auth + SEE-ALL/SEE-MINE scope as the console tab body.
-  - Resell detail (GET /v2/partials/resell/{list_id}/offers|outreach/export): the
-    competing-broker Offers tab + the Outreach tracker — same owner-only gate as the tabs.
+The Approvals-hub half of this file died in W4.3: the per-tab console export
+(GET /v2/partials/approvals/{tab}/export) was cut with the 3-tab merge, and
+test_approvals_hub_tabs.py pins its death.
 
-Each endpoint: 200 + text/csv + attachment header, a header row + one row per matching
-record, scope/owner scoping, auth parity, and the export anchors rendering with
-hx-boost="false".
+Covers the Resell GET export endpoints
+(GET /v2/partials/resell/{list_id}/offers|outreach/export): the competing-broker
+Offers tab + the Outreach tracker — same owner-only gate as the tabs. Each endpoint:
+200 + text/csv + attachment header, a header row + one row per matching record,
+owner scoping, auth parity, and the export anchors rendering with hx-boost="false".
 
 Called by: pytest
 Depends on: conftest (client, unauthenticated_client, db_session, test_user, test_company),
@@ -31,21 +29,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import (
-    ActivityType,
-    ApprovalGateType,
-    ApprovalRecipientStatus,
-    ApprovalRequestStatus,
-    ApprovalSubjectType,
-    BuyPlanStatus,
     ExcessListStatus,
     ExcessOfferStatus,
     ExcessOutreachStatus,
     OfferLineMatchStatus,
-    SOVerificationStatus,
 )
 from app.models import Company, User, VendorCard
-from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
-from app.models.buy_plan import BuyPlan
 from app.models.excess import (
     ExcessLineItem,
     ExcessList,
@@ -53,10 +42,6 @@ from app.models.excess import (
     ExcessOfferLine,
     ExcessOutreach,
 )
-from app.models.intelligence import ActivityLog
-from app.models.quality_plan import Prepayment
-from app.models.quotes import Quote
-from app.models.sourcing import Requirement, Requisition
 
 
 def _parse_csv(text: str) -> list[list[str]]:
@@ -71,288 +56,10 @@ def _assert_attachment(resp, *, filename_contains: str) -> None:
     assert filename_contains in disposition
 
 
-# ══════════════════════════ Approvals hub builders ══════════════════════════
-
-
-def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement]:
-    req = Requisition(
-        name=f"REQ-{uuid.uuid4().hex[:6]}",
-        customer_name="AcmeCo",
-        status="active",
-        created_by=user.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(req)
-    db.flush()
-    rq = Requirement(requisition_id=req.id, primary_mpn="LM317", created_at=datetime.now(UTC))
-    db.add(rq)
-    db.flush()
-    q = Quote(
-        requisition_id=req.id,
-        quote_number=f"Q-{uuid.uuid4().hex[:8]}",
-        line_items=[],
-        status="sent",
-        created_by_id=user.id,
-        created_at=datetime.now(UTC),
-    )
-    db.add(q)
-    db.flush()
-    return req, q, rq
-
-
-def _plan(db: Session, req: Requisition, q: Quote, *, status: str = BuyPlanStatus.ACTIVE.value) -> BuyPlan:
-    bp = BuyPlan(
-        requisition_id=req.id,
-        quote_id=q.id,
-        status=status,
-        so_status=SOVerificationStatus.APPROVED.value,
-        sales_order_number=f"SO-{uuid.uuid4().hex[:4]}",
-        submitted_by_id=req.created_by,
-        total_cost=1000.0,
-        total_revenue=2000.0,
-        total_margin_pct=50.0,
-        created_at=datetime.now(UTC),
-    )
-    db.add(bp)
-    db.flush()
-    return bp
-
-
-def _resolved_prepay(db: Session, bp: BuyPlan, user: User, *, beneficiary: str = "Northwind LLC") -> Prepayment:
-    """A PREPAYMENT request in the resolved (approved) state — lands in Recently-
-    resolved."""
-    vc = VendorCard(
-        normalized_name=f"vc-{uuid.uuid4().hex[:8]}",
-        display_name="WireVendor",
-        legal_name=beneficiary,
-    )
-    db.add(vc)
-    db.flush()
-    pp = Prepayment(
-        buy_plan_id=bp.id,
-        vendor_card_id=vc.id,
-        total_incl_fees=Decimal("2500.00"),
-        currency="USD",
-        wire_reference="FT-EXPORT-1",
-        created_by_id=user.id,
-    )
-    db.add(pp)
-    db.flush()
-    now = datetime.now(UTC)
-    ar = ApprovalRequest(
-        gate_type=ApprovalGateType.PREPAYMENT,
-        status=ApprovalRequestStatus.APPROVED.value,
-        subject_type=ApprovalSubjectType.PREPAYMENT,
-        subject_id=pp.id,
-        amount=Decimal("2500.00"),
-        currency="USD",
-        requested_by_id=user.id,
-        owner_id=user.id,
-        resolved_at=now,
-    )
-    db.add(ar)
-    db.flush()
-    step = ApprovalStep(request_id=ar.id, seq=1, rule="any", status="approved")
-    db.add(step)
-    db.flush()
-    db.add(
-        ApprovalStepRecipient(
-            step_id=step.id,
-            user_id=user.id,
-            status=ApprovalRecipientStatus.APPROVED.value,
-            decided_at=now,
-        )
-    )
-    db.flush()
-    return pp
-
-
-def _po_history(db: Session, bp: BuyPlan, user: User) -> ActivityLog:
-    """A durable PO_LINE_VERIFIED activity — the PO Approval Recently-resolved feed."""
-    log = ActivityLog(
-        user_id=user.id,
-        activity_type=ActivityType.PO_LINE_VERIFIED,
-        channel="system",
-        buy_plan_id=bp.id,
-        subject="PO-EXPORT verified",
-        notes="PO-EXPORT verified by buyer",
-        occurred_at=datetime.now(UTC),
-        created_at=datetime.now(UTC),
-    )
-    db.add(log)
-    db.flush()
-    return log
-
-
-def _other_user(db: Session) -> User:
-    u = User(
-        email=f"other-{uuid.uuid4().hex[:6]}@t.com",
-        name="Other Owner",
-        role="buyer",
-        azure_id=f"az-{uuid.uuid4().hex[:8]}",
-        created_at=datetime.now(UTC),
-    )
-    db.add(u)
-    db.flush()
-    return u
-
-
-# ══════════════════════════ Approvals hub — buy-plan ══════════════════════════
-
-
-def test_buy_plan_export_is_csv_attachment(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    _plan(db_session, req, q)
-    db_session.commit()
-
-    resp = client.get("/v2/partials/approvals/buy-plan/export")
-    # The legacy buy-plan key aliases onto the workspace Sales Orders export.
-    _assert_attachment(resp, filename_contains="approvals_sales_orders_all.csv")
-
-
-def test_buy_plan_export_header_and_one_row_per_plan(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    db_session.commit()
-
-    rows = _parse_csv(client.get("/v2/partials/approvals/buy-plan/export").text)
-
-    assert rows[0] == ["Plan ID", "Customer", "Sales Order", "Order Type", "Status", "Value"]
-    assert len(rows) == 2  # header + one plan
-    body = "\n".join(",".join(r) for r in rows[1:])
-    assert str(bp.id) in body
-    assert "AcmeCo" in body
-    assert bp.sales_order_number in body
-    assert BuyPlanStatus.ACTIVE.value in body
-
-
-def test_buy_plan_export_scope_mine_filters_to_own_plans(client: TestClient, db_session: Session, test_user: User):
-    my_req, my_q, _ = _req_quote(db_session, test_user)
-    mine = _plan(db_session, my_req, my_q)
-    other = _other_user(db_session)
-    o_req, o_q, _ = _req_quote(db_session, other)
-    theirs = _plan(db_session, o_req, o_q)
-    db_session.commit()
-
-    # Compare the Plan ID column (rows[i][0]) exactly — a bare substring check can false-match
-    # a small id inside a random SO number or the value cell.
-    all_ids = {r[0] for r in _parse_csv(client.get("/v2/partials/approvals/buy-plan/export?scope=all").text)[1:]}
-    assert {str(mine.id), str(theirs.id)} <= all_ids
-
-    resp = client.get("/v2/partials/approvals/buy-plan/export?scope=mine")
-    assert "approvals_sales_orders_mine.csv" in resp.headers["content-disposition"]
-    mine_ids = {r[0] for r in _parse_csv(resp.text)[1:]}
-    assert str(mine.id) in mine_ids
-    assert str(theirs.id) not in mine_ids
-
-
-# ══════════════════════════ Approvals hub — prepayment ══════════════════════════
-
-
-def test_prepayment_resolved_export_row(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    pp = _resolved_prepay(db_session, bp, test_user, beneficiary="Northwind Components LLC")
-    db_session.commit()
-
-    resp = client.get("/v2/partials/approvals/prepayment/export")
-    _assert_attachment(resp, filename_contains="approvals_prepayments_resolved_all.csv")
-    rows = _parse_csv(resp.text)
-
-    assert rows[0][0] == "Prepayment ID" and "Beneficiary" in rows[0] and "Wire Reference" in rows[0]
-    assert len(rows) == 2  # header + one resolved prepayment
-    body = "\n".join(",".join(r) for r in rows[1:])
-    assert str(pp.id) in body
-    assert "Northwind Components LLC" in body  # beneficiary (legal name)
-    assert "FT-EXPORT-1" in body  # wire reference
-    assert "Test Buyer" in body  # decided-by (test_user)
-
-
-def test_prepayment_export_scope_mine_filters_to_own(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    mine = _resolved_prepay(db_session, bp, test_user, beneficiary="Mine Payee LLC")
-    # A resolved prepayment owned/requested by someone else — org-wide visible under scope=all.
-    other = _other_user(db_session)
-    theirs = _resolved_prepay(db_session, bp, other, beneficiary="Their Payee LLC")
-    db_session.commit()
-
-    all_body = client.get("/v2/partials/approvals/prepayment/export?scope=all").text
-    assert str(mine.id) in all_body and str(theirs.id) in all_body
-
-    mine_body = client.get("/v2/partials/approvals/prepayment/export?scope=mine").text
-    assert "Mine Payee LLC" in mine_body
-    assert "Their Payee LLC" not in mine_body
-
-
-# ══════════════════════════ Approvals hub — po-approval ══════════════════════════
-
-
-def test_po_approval_history_export_row(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    _po_history(db_session, bp, test_user)
-    db_session.commit()
-
-    resp = client.get("/v2/partials/approvals/po-approval/export")
-    _assert_attachment(resp, filename_contains="approvals_po_resolved.csv")
-    rows = _parse_csv(resp.text)
-
-    assert rows[0] == ["Plan ID", "Outcome", "Description", "Actor", "Note", "Resolved Date"]
-    assert len(rows) == 2  # header + one history event
-    body = "\n".join(",".join(r) for r in rows[1:])
-    assert str(bp.id) in body
-    assert "verified" in body  # outcome kind
-    assert "PO-EXPORT verified" in body  # label
-    assert "Test Buyer" in body  # actor
-
-
-# ══════════════════════════ Approvals hub — auth / 404 / buttons ══════════════════════════
-
-
-@pytest.mark.parametrize("tab", ["buy-plan", "prepayment", "po-approval"])
-def test_approvals_export_unauthenticated_rejected(unauthenticated_client: TestClient, tab: str):
-    resp = unauthenticated_client.get(f"/v2/partials/approvals/{tab}/export", follow_redirects=False)
-    assert resp.status_code in (401, 403)
-
-
-def test_approvals_export_unknown_tab_404(client: TestClient):
-    assert client.get("/v2/partials/approvals/bogus/export").status_code == 404
-
-
-def test_buy_plan_tab_renders_export_anchor(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    _plan(db_session, req, q)
-    db_session.commit()
-
-    html = client.get("/v2/partials/approvals/buy-plans/list").text
-    assert "Export CSV" in html
-    assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/buy-plans/export?scope=all" in html
-
-
-def test_prepayment_tab_renders_export_anchor(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    _resolved_prepay(db_session, bp, test_user)
-    db_session.commit()
-
-    html = client.get("/v2/partials/approvals/prepayments/list").text
-    assert "Export CSV" in html
-    assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/prepayments/export?scope=all" in html
-
-
-def test_po_approval_tab_renders_export_anchor(client: TestClient, db_session: Session, test_user: User):
-    req, q, _ = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q)
-    _po_history(db_session, bp, test_user)
-    db_session.commit()
-
-    html = client.get("/v2/partials/approvals/purchase-orders/list").text
-    assert "Export CSV" in html
-    assert 'hx-boost="false"' in html
-    assert "/v2/partials/approvals/purchase-orders/export?scope=all" in html
+# ══════════════════════════ Approvals hub exports — GONE (W4.3) ══════════════════════════
+# The per-tab Approvals CSV export (GET /v2/partials/approvals/{tab}/export) died in
+# W4.3 with the 3-tab merge; test_approvals_hub_tabs.py pins the route's death
+# (registry + live 404). Only the Resell exports remain below.
 
 
 # ══════════════════════════ Resell fixtures ══════════════════════════

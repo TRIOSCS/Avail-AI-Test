@@ -1,8 +1,8 @@
-"""E2E coverage for the Approvals Workspace (/v2/approvals — 4-tab split-view console).
+"""E2E coverage for the Approvals Workspace (/v2/approvals — 3-tab split-view console).
 
 Validates, in a real browser against the live container (specs/approvals-workspace.md
 §5–§8):
-- the shell renders the four tab pills (with per-viewer badges) and switches tabs via
+- the shell renders the three tab pills (with per-viewer badges) and switches tabs via
   HTMX swaps, never a full-page reload,
 - selecting a work-list row loads the matching detail pane (SO / PO line / prepayment),
 - the two-part sales-order approve: "Approve & notify" (proceed) and "Send back for
@@ -30,7 +30,7 @@ import time
 import pytest
 from playwright.sync_api import Page, expect
 
-TAB_LABELS = ["Sales Orders", "Buy Plans", "Purchase Orders", "Prepayments"]
+TAB_LABELS = ["Deals", "Purchase Orders", "Prepayments"]
 
 STALE_TOAST = "This changed — refresh."
 
@@ -64,7 +64,7 @@ def _app_errors(errors: list[str], failed_same_origin: list[str]) -> list[str]:
     return [e for e in errors if "Failed to load resource" not in e or failed_same_origin]
 
 
-def _open_tab(page: Page, base_url: str, tab: str = "sales-orders") -> list[str]:
+def _open_tab(page: Page, base_url: str, tab: str = "deals") -> list[str]:
     """Navigate to the workspace tab; wait for the left list to render."""
     errors, failed = _collect_errors(page, base_url)
     page.goto(f"{base_url}/v2/approvals?tab={tab}", wait_until="domcontentloaded")
@@ -107,7 +107,7 @@ class TestWorkspaceShell:
         errors = _open_tab(authed_page, base_url)
         assert not errors, "console/page errors on /v2/approvals:\n" + "\n".join(errors[:20])
 
-    def test_four_tabs_render_with_badges(self, authed_page: Page, base_url: str):
+    def test_three_tabs_render_with_badges(self, authed_page: Page, base_url: str):
         _open_tab(authed_page, base_url)
         for label in TAB_LABELS:
             pill = authed_page.locator("button", has_text=label).first
@@ -405,7 +405,7 @@ class TestStaleEditGuard:
 
 
 class TestEmptyStates:
-    @pytest.mark.parametrize("tab", ["sales-orders", "buy-plans", "purchase-orders", "prepayments"])
+    @pytest.mark.parametrize("tab", ["deals", "purchase-orders", "prepayments"])
     def test_no_match_search_renders_guidance(self, authed_page: Page, base_url: str, tab: str):
         _open_tab(authed_page, base_url, tab)
         search = authed_page.locator("#aw-filters input[name='q']")

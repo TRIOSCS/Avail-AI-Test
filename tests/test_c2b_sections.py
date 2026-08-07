@@ -1,12 +1,11 @@
 """test_c2b_sections.py — QP Phase C2b: native Sales/Purchasing sections + children.
 
-Covers the C2b contract:
+Covers the C2b contract as it stands after W4.3 (QP absorption):
   - _validate_sales_section / _validate_purchasing_section flag a blank SO#/PO# (and the
     other QC-required fields); a complete section validates clean.
-  - the PATCH section editors write whitelisted fields under the ONE lock matrix
-    (W3.7: sales edits on a DRAFT plan, purchasing edits only on an ACTIVE plan;
-    a locked stage → 403 and no write). The matrix itself is pinned in
-    tests/test_qp_lock_matrix.py.
+  - the standalone PATCH section editors are GONE (W4.3 — Sales/Purchasing edit in the
+    Approvals workspace panes): registry + live-404 pins, and the sections render
+    read-only with the workspace pointer.
   - serial-entry create/delete via the router endpoints (and the CASCADE child relation).
   - FRU pin resolves fru_norm + the (qp_id, fru_norm) unique constraint makes a re-pin a
     no-op; unpin removes it. The FRU section live-joins FruLink by fru_norm.
@@ -154,54 +153,41 @@ def qp_client(db_session: Session):
             app.dependency_overrides.pop(dep, None)
 
 
-# ── PATCH section editors (under the W3.7 lock matrix) ───────────────────
+# ── The standalone PATCH section editors are GONE (W4.3) ─────────────────
 
 
-def test_patch_sales_updates_field(qp_client, db_session: Session) -> None:
-    """PATCH /v2/qp/{id}/sales writes the whitelisted field and returns the partial.
+def test_qp_section_patch_routes_removed_from_registry() -> None:
+    """PATCH /v2/qp/{id}/sales + /purchasing died with W4.3 — the sections edit in the
+    Approvals workspace panes now (test_qp_lock_matrix pattern)."""
+    from app.main import app
+    from tests._route_helpers import iter_routes
 
-    The fixture plan is DRAFT and the owner is an admin — sales is open per the matrix.
-    """
+    paths = {getattr(route, "path", None) for route in iter_routes(app.routes)}
+    assert "/v2/qp/{qp_id}/sales" not in paths
+    assert "/v2/qp/{qp_id}/purchasing" not in paths
+
+
+def test_qp_section_patch_404s_and_writes_nothing(qp_client, db_session: Session) -> None:
+    """A live PATCH to either former editor 404s (route gone, not 405/500) and the field
+    is untouched."""
     client, _owner, qp = qp_client
     r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "Refurbished"})
-    assert r.status_code == 200
-    db_session.refresh(qp)
-    assert qp.sales_condition == "Refurbished"
-
-
-def test_patch_purchasing_updates_field_on_active_plan(qp_client, db_session: Session) -> None:
-    """PATCH /v2/qp/{id}/purchasing writes the field once the plan is ACTIVE.
-
-    Purchasing only opens in the plan's ACTIVE (confirm-PO) window per the matrix.
-    """
-    client, _owner, qp = qp_client
-    qp.buy_plan.status = BuyPlanStatus.ACTIVE.value
-    db_session.commit()
+    assert r.status_code == 404
     r = client.patch(f"/v2/qp/{qp.id}/purchasing", data={"purchasing_packaging": "ESD bag"})
-    assert r.status_code == 200
-    db_session.refresh(qp)
-    assert qp.purchasing_packaging == "ESD bag"
-
-
-def test_patch_sales_locked_on_active_plan_403(qp_client, db_session: Session) -> None:
-    """PATCH sales on an ACTIVE plan → 403 (matrix locks sales past pending), no
-    write."""
-    client, _owner, qp = qp_client
-    qp.buy_plan.status = BuyPlanStatus.ACTIVE.value
-    db_session.commit()
-    r = client.patch(f"/v2/qp/{qp.id}/sales", data={"sales_condition": "Refurbished"})
-    assert r.status_code == 403
+    assert r.status_code == 404
     db_session.refresh(qp)
     assert qp.sales_condition == "New"  # untouched
-
-
-def test_patch_purchasing_locked_on_draft_plan_403(qp_client, db_session: Session) -> None:
-    """PATCH purchasing on a DRAFT plan → 403 (purchasing opens only when ACTIVE)."""
-    client, _owner, qp = qp_client  # fixture plan is DRAFT
-    r = client.patch(f"/v2/qp/{qp.id}/purchasing", data={"purchasing_packaging": "ESD bag"})
-    assert r.status_code == 403
-    db_session.refresh(qp)
     assert qp.purchasing_packaging is None  # untouched
+
+
+def test_qp_sections_render_read_only_with_workspace_pointer(qp_client) -> None:
+    """The Sales/Purchasing sections render read-only (no PATCH form) with the one-line
+    pointer to the Approvals workspace."""
+    client, _owner, qp = qp_client
+    r = client.get(f"/v2/qp/{qp.id}")
+    assert r.status_code == 200
+    assert "hx-patch" not in r.text  # no section edit form anywhere on the page
+    assert r.text.count("Edited in the Approvals workspace") == 2  # both sections
 
 
 # ── Serial CRUD ───────────────────────────────────────────────────────────
@@ -304,29 +290,3 @@ def test_detail_renders_all_section_partials(qp_client) -> None:
     assert r.status_code == 200
     for marker in ("qp-section-sales", "qp-section-purchasing", "qp-section-serial", "qp-section-fru"):
         assert marker in r.text
-
-
-def test_incomplete_section_errors_render_inline(db_session: Session) -> None:
-    """The detail view lists the still-missing required Sales fields inline."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    owner = _make_user(db_session)
-    qp = _make_qp(db_session, owner)  # incomplete
-    db_session.commit()
-
-    def _db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = _db
-    app.dependency_overrides[require_user] = lambda: owner
-    try:
-        client = TestClient(app)
-        r = client.get(f"/v2/qp/{qp.id}")
-    finally:
-        for dep in (get_db, require_user):
-            app.dependency_overrides.pop(dep, None)
-
-    assert r.status_code == 200
-    assert "Sales Order # is required" in r.text

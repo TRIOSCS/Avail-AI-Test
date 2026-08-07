@@ -168,14 +168,17 @@ def test_pane_lines_use_display_vocabulary(hub_client: TestClient, db_session: S
     assert 'data-copy-value="PO-9"' in body  # line PO# copy chip
 
 
-def test_pane_lens_buy_plans_threads_lens(hub_client: TestClient, db_session: Session, test_user: User):
+def test_pane_ignores_stale_lens_param(hub_client: TestClient, db_session: Session, test_user: User):
+    """The lens concept died with the W4.3 tabs merge: an old ?lens= pane URL still
+    renders (the param is ignored) and the pane carries no lens form field."""
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
     _pending_buy_plan_request(db_session, bp, test_user)
     db_session.commit()
 
-    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane?lens=buy-plans").text
-    assert 'name="lens" value="buy-plans"' in body  # decide re-renders into the same lens
+    r = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane?lens=buy-plans")
+    assert r.status_code == 200
+    assert 'name="lens"' not in r.text
 
 
 def test_pane_missing_plan_404s(hub_client: TestClient):
@@ -196,7 +199,7 @@ def test_approve_from_pane_rerenders_pane_and_refreshes_list(
     with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
         r = hub_client.post(
             f"/v2/partials/buy-plans/{bp.id}/approve",
-            data={"action": "approve", "origin": "approvals_workspace", "lens": "sales-orders"},
+            data={"action": "approve", "origin": "approvals_workspace"},
         )
     assert r.status_code == 200
     assert "Approved by Test Buyer" in r.text  # the refreshed PANE, not a tab body
@@ -217,7 +220,6 @@ def test_reject_from_pane_returns_draft_pane(hub_client: TestClient, db_session:
             data={
                 "action": "reject",
                 "origin": "approvals_workspace",
-                "lens": "buy-plans",
                 "notes": "wrong sell price — fix line 1",
             },
         )
@@ -264,7 +266,7 @@ def test_halt_from_pane_rerenders_halted_pane(hub_client: TestClient, db_session
     with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
         r = hub_client.post(
             f"/v2/partials/buy-plans/{bp.id}/halt",
-            data={"origin": "approvals_workspace", "lens": "buy-plans", "reason": "customer credit hold"},
+            data={"origin": "approvals_workspace", "reason": "customer credit hold"},
         )
     assert r.status_code == 200
     assert r.headers.get("HX-Trigger") == "awListRefresh"
@@ -285,7 +287,7 @@ def test_resume_from_pane(hub_client: TestClient, db_session: Session, test_user
 
     r = hub_client.post(
         f"/v2/partials/buy-plans/{bp.id}/resume",
-        data={"origin": "approvals_workspace", "lens": "buy-plans"},
+        data={"origin": "approvals_workspace"},
     )
     assert r.status_code == 200
     assert r.headers.get("HX-Trigger") == "awListRefresh"
@@ -302,7 +304,7 @@ def test_cancel_from_pane(hub_client: TestClient, db_session: Session, test_user
     with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
         r = hub_client.post(
             f"/v2/partials/buy-plans/{bp.id}/cancel",
-            data={"origin": "approvals_workspace", "lens": "sales-orders", "reason": "deal lost"},
+            data={"origin": "approvals_workspace", "reason": "deal lost"},
         )
     assert r.status_code == 200
     assert "Cancelled" in r.text and "deal lost" in r.text
@@ -318,7 +320,7 @@ def test_reset_from_pane_returns_draft(hub_client: TestClient, db_session: Sessi
 
     r = hub_client.post(
         f"/v2/partials/buy-plans/{bp.id}/reset",
-        data={"origin": "approvals_workspace", "lens": "buy-plans"},
+        data={"origin": "approvals_workspace"},
     )
     assert r.status_code == 200
     assert "Draft — not yet submitted" in r.text
@@ -329,19 +331,19 @@ def test_reset_from_pane_returns_draft(hub_client: TestClient, db_session: Sessi
 # ── Stall warning (2.5) — plan_needs_approver_reason ─────────────────────
 
 
-def test_stalled_pending_row_warns_on_bp_tab_list(hub_client: TestClient, db_session: Session, test_user: User):
+def test_stalled_pending_row_warns_on_deals_list(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
     # Nobody holds the buy-plan approval right → the pending plan is stalled.
     test_user.can_approve_buy_plans = False
     db_session.commit()
 
-    body = hub_client.get("/v2/partials/approvals/buy-plans/list").text
+    body = hub_client.get("/v2/partials/approvals/deals/list").text
     assert "No approver configured — stalled" in body
 
     test_user.can_approve_buy_plans = True
     db_session.commit()
-    body = hub_client.get("/v2/partials/approvals/buy-plans/list").text
+    body = hub_client.get("/v2/partials/approvals/deals/list").text
     assert "No approver configured — stalled" not in body
 
 

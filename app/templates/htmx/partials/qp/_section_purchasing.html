@@ -1,21 +1,15 @@
 {#
-  qp/_section_purchasing.html — Quality Plan § Purchasing "Quality Questions" (C2b).
-  Same pattern as _section_sales: editable form PATCHing /v2/qp/{id}/purchasing on change
-  while the ONE lock matrix says the section is open (can_edit_qp_purchasing — W3.7:
-  qp_workspace.can_edit_qp_section, the SAME predicate the PATCH route enforces; open
-  only in the plan's ACTIVE / confirm-PO window), read-only otherwise. Server-driven
-  purchasing_errors list the still-missing required fields (PO# + the QC-required ones).
+  qp/_section_purchasing.html — Quality Plan § Purchasing "Quality Questions" (read-only).
+  Same pattern as _section_sales: a read-only field grid. Editing moved to the Approvals
+  workspace PO-line pane (W4.3 absorbed the standalone editor — the PATCH
+  /v2/qp/{id}/purchasing route is gone); a one-line pointer below the grid says where
+  to edit.
 
-  Receives: qp (QualityPlan ORM), purchasing_errors (list[str]), user (User),
-            can_edit_qp_purchasing (bool — from the lock matrix).
-  Called by: routers/quality_plans.py (_render_purchasing_section, _qp_detail_response)
-             and qp/detail.html ({% include %}).
-  Depends on: HTMX, Tailwind CSS. Swaps into its own #qp-section-purchasing wrapper.
+  Receives: qp (QualityPlan ORM), user (User).
+  Called by: qp/detail.html ({% include %}).
+  Depends on: Tailwind CSS.
 #}
-{% set locked = not can_edit_qp_purchasing %}
-
 <div id="qp-section-purchasing">
-  {% if locked %}
   <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs md:grid-cols-3">
     {% macro ro(label, value) %}
     <div>
@@ -40,57 +34,5 @@
     {{ ro_bool('Will TPO Ship Complete', qp.purchasing_tpo_ship_complete) }}
     {{ ro('TPO Notes / Shipping Schedule', qp.purchasing_tpo_notes) }}
   </dl>
-  <p class="mt-3 text-xs text-gray-400">Locked at the plan's current stage — read-only.</p>
-
-  {% else %}
-  <form hx-patch="/v2/qp/{{ qp.id }}/purchasing"
-        hx-target="#qp-section-purchasing"
-        hx-swap="outerHTML"
-        hx-trigger="change"
-        class="grid grid-cols-1 gap-3 md:grid-cols-2">
-    {% macro txt(name, label, value) %}
-    <label class="block text-xs">
-      <span class="text-gray-600">{{ label }}</span>
-      <input type="text" name="{{ name }}" value="{{ value if value is not none else '' }}"
-             class="mt-0.5 w-full rounded border-gray-300 text-xs">
-    </label>
-    {% endmacro %}
-    {% macro area(name, label, value) %}
-    <label class="block text-xs md:col-span-2">
-      <span class="text-gray-600">{{ label }}</span>
-      <textarea name="{{ name }}" rows="2"
-                class="mt-0.5 w-full rounded border-gray-300 text-xs">{{ value if value is not none else '' }}</textarea>
-    </label>
-    {% endmacro %}
-    {% macro yn(name, label, value) %}
-    <label class="block text-xs">
-      <span class="text-gray-600">{{ label }}</span>
-      <select name="{{ name }}" class="mt-0.5 w-full rounded border-gray-300 text-xs">
-        <option value="" {{ 'selected' if value is none }}>—</option>
-        <option value="true" {{ 'selected' if value is true }}>Yes</option>
-        <option value="false" {{ 'selected' if value is false }}>No</option>
-      </select>
-    </label>
-    {% endmacro %}
-    {{ txt('purchasing_po_number', 'Purchase Order #', qp.purchasing_po_number) }}
-    {{ txt('purchasing_condition', 'Condition', qp.purchasing_condition) }}
-    {{ txt('purchasing_product_commodity', 'Product Commodity', qp.purchasing_product_commodity) }}
-    {{ area('purchasing_fw_hw_rev', 'FW / HW / REV / Date & Week Codes', qp.purchasing_fw_hw_rev) }}
-    {{ yn('purchasing_testing_required', 'Testing Required', qp.purchasing_testing_required) }}
-    {{ txt('purchasing_testing_option', 'Testing Option', qp.purchasing_testing_option) }}
-    {{ txt('purchasing_routing_prescreening_whs', 'Routing / Prescreening WHS', qp.purchasing_routing_prescreening_whs) }}
-    {{ area('purchasing_packaging', 'Packaging', qp.purchasing_packaging) }}
-    {{ yn('purchasing_tpo_ship_complete', 'Will TPO Ship Complete', qp.purchasing_tpo_ship_complete) }}
-    {{ area('purchasing_tpo_notes', 'TPO Notes / Shipping Schedule', qp.purchasing_tpo_notes) }}
-  </form>
-
-  {% if purchasing_errors %}
-  <div class="mt-3 rounded border border-amber-200 bg-amber-50 p-2">
-    <p class="text-xs font-semibold text-amber-700 mb-0.5">Required fields missing:</p>
-    <ul class="list-disc list-inside">
-      {% for e in purchasing_errors %}<li class="text-xs text-amber-700">{{ e }}</li>{% endfor %}
-    </ul>
-  </div>
-  {% endif %}
-  {% endif %}
+  <p class="mt-3 text-xs text-gray-400">Edited in the Approvals workspace — this page is read-only.</p>
 </div>

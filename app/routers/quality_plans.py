@@ -2,18 +2,17 @@
 
 Purpose: Exposes GET /v2/qp/for-buy-plan/{bp_id} (the front door — get-or-create the QP
          for a buy plan and render its native detail), GET /v2/qp/{id} (QP detail
-         partial), and the QP Phase C2b native-section editors: PATCH /v2/qp/{id}/sales +
-         /purchasing (inline field edit → refreshed section partial), serial CRUD
-         (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]), and FRU pin/unpin (POST/DELETE
-         /v2/qp/{id}/fru[/{lookup_id}]). All return the refreshed partial. Section
-         editability rides the ONE lock matrix (qp_workspace.can_edit_qp_section) —
-         the Mark-Reviewed toggles and their reviewed-stamp lock were dropped in W3.7.
+         partial), serial CRUD (POST/DELETE /v2/qp/{id}/serial[/{entry_id}]), and FRU
+         pin/unpin (POST/DELETE /v2/qp/{id}/fru[/{lookup_id}]). All return the refreshed
+         partial. The Sales/Purchasing sections render READ-ONLY here — they are edited
+         in the Approvals workspace panes (W4.3 absorbed the standalone section editors;
+         the old PATCH /v2/qp/{id}/sales + /purchasing routes are gone). This page stays
+         as the app's serial/FRU surface (spec §5.2 Decision E — absorbing those into
+         the workspace pane is post-launch).
          Thin router: business logic lives in app.services.quality_plan_service.
 
 Called by: app.main (router registration).
-Depends on: app.services.quality_plan_service (validate_complete, validate_section,
-            create_qp),
-            app.services.qp_workspace (can_edit_qp_section — the lock matrix),
+Depends on: app.services.quality_plan_service (validate_complete, create_qp),
             app.models.quality_plan (QualityPlan, QpSerialEntry, QpFruLookup),
             app.models.buy_plan (BuyPlan, BuyPlanLine),
             app.models.approvals (ApprovalRequest), app.models.fru_link (FruLink),
@@ -39,11 +38,9 @@ from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
 from ..models.quality_plan import QpFruLookup, QpSerialEntry, QualityPlan
 from ..models.quotes import Quote
-from ..services.qp_workspace import can_edit_qp_section
 from ..services.quality_plan_service import (
     create_qp,
     validate_complete,
-    validate_section,
 )
 from ..template_env import template_response
 from ..utils.normalization import normalize_mpn_key
@@ -51,47 +48,11 @@ from .htmx._shared import full_page_shell
 
 router = APIRouter(tags=["quality_plans"])
 
-# Section field editors: which gate + form fields each PATCH endpoint owns. The value
-# maps a form field name → (model attribute, coercion kind). "bool" coerces a checkbox /
+# Form-value coercion for the serial CRUD inputs. "bool" coerces a checkbox /
 # "true"/"false" string to a tri-state (None when absent), "int" to int|None, "str" to a
-# stripped string|None. Keeps the two PATCH handlers a single shared implementation.
+# stripped string|None.
 _BOOL_TRUE = {"true", "on", "1", "yes", "y"}
 _BOOL_FALSE = {"false", "off", "0", "no", "n"}
-
-
-# Per-section editable fields: model attribute → coercion kind. The PATCH handler only
-# writes attributes listed here, so a stray form field can never set an arbitrary column.
-_SALES_FIELDS: dict[str, str] = {
-    "sales_condition": "str",
-    "sales_quantity": "int",
-    "sales_fw_hw_rev": "str",
-    "sales_product_commodity": "str",
-    "sales_testing_required": "bool",
-    "sales_testing_option": "str",
-    "sales_testing_specifics": "str",
-    "sales_test_location": "str",
-    "sales_serial_preapproval_required": "bool",
-    "sales_authorized_ship_early": "bool",
-    "sales_authorized_ship_partial": "bool",
-    "sales_routing_prescreening_whs": "str",
-    "sales_vendor_rating": "str",
-    "sales_third_party_pkg_ok": "bool",
-    "sales_pkg_requirements": "str",
-    "sales_bom_matrix_links": "str",
-    "sales_notes": "str",
-}
-_PURCHASING_FIELDS: dict[str, str] = {
-    "purchasing_po_number": "str",
-    "purchasing_condition": "str",
-    "purchasing_fw_hw_rev": "str",
-    "purchasing_product_commodity": "str",
-    "purchasing_testing_required": "bool",
-    "purchasing_testing_option": "str",
-    "purchasing_routing_prescreening_whs": "str",
-    "purchasing_packaging": "str",
-    "purchasing_tpo_ship_complete": "bool",
-    "purchasing_tpo_notes": "str",
-}
 
 
 def _coerce(kind: str, raw: str | None) -> str | int | bool | None:
@@ -154,8 +115,8 @@ def _qp_detail_response(
     """Build and render the QP detail partial.
 
     Loads the linked BuyPlan with its lines (eager), computes completeness errors for
-    inline display, and renders qp/detail.html. Sales/Purchasing editability comes from
-    the ONE lock matrix (can_edit_qp_section — W3.7); the Buy-Plan and Prepayment
+    inline display, and renders qp/detail.html. The Sales/Purchasing sections render
+    read-only (edited in the Approvals workspace — W4.3); the Buy-Plan and Prepayment
     approval-request context is still resolved for their read-only status chips.
     """
     bp = (
@@ -183,14 +144,9 @@ def _qp_detail_response(
         "bp": bp,
         "bp_lines": (bp.lines or []) if bp else [],
         "errors": errors,
-        "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
-        "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
         "fru_rows": _fru_rows(db, qp),
         "buy_plan_gate": _get_gate(db, qp.id, ApprovalGateType.BUY_PLAN),
         "prepayment_gate": _get_gate(db, qp.id, ApprovalGateType.PREPAYMENT),
-        # ONE lock matrix (W3.7): the same predicates the PATCH routes enforce.
-        "can_edit_qp_sales": can_edit_qp_section(user, bp, "sales"),
-        "can_edit_qp_purchasing": can_edit_qp_section(user, bp, "purchasing"),
     }
     return template_response("htmx/partials/qp/detail.html", ctx)
 
@@ -308,18 +264,18 @@ def qp_detail(
     return _qp_detail_response(request, user, db, qp)
 
 
-# ── C2b: native-section editors ──────────────────────────────────────────────────
-# W3.7 dropped the Mark-Reviewed toggles (POST /v2/qp/{id}/sales/review +
-# /purchasing/review) and their reviewed-stamp lock: section editability now rides
-# the ONE lock matrix (qp_workspace.can_edit_qp_section). The reviewed_* stamp
-# columns stay on the model as historical data; nothing writes or gates on them.
+# ── Serial + FRU CRUD ────────────────────────────────────────────────────────────
+# The Sales/Purchasing section editors that used to live here (PATCH /v2/qp/{id}/sales
+# + /purchasing, C2b) were absorbed into the Approvals workspace in W4.3 — those
+# sections now render read-only on this page. Serial/FRU stays native here (spec §5.2
+# Decision E).
 
 
 def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
     """Fetch a QP (with section children) and enforce ownership, or raise 404/HTTP.
 
-    Shared by all C2b mutation endpoints so each handler stays thin. Eager-loads the
-    serial entries + FRU pins the refreshed section partials render.
+    Shared by the serial/FRU mutation endpoints so each handler stays thin. Eager-loads
+    the serial entries + FRU pins the refreshed section partials render.
     """
     qp = db.get(
         QualityPlan,
@@ -337,34 +293,6 @@ def _load_qp_for_edit(db: Session, qp_id: int, user) -> QualityPlan:
     return qp
 
 
-def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
-    """Render the refreshed Sales section partial."""
-    return template_response(
-        "htmx/partials/qp/_section_sales.html",
-        {
-            "request": request,
-            "user": user,
-            "qp": qp,
-            "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
-            "can_edit_qp_sales": can_edit_qp_section(user, qp.buy_plan, "sales"),
-        },
-    )
-
-
-def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
-    """Render the refreshed Purchasing section partial."""
-    return template_response(
-        "htmx/partials/qp/_section_purchasing.html",
-        {
-            "request": request,
-            "user": user,
-            "qp": qp,
-            "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
-            "can_edit_qp_purchasing": can_edit_qp_section(user, qp.buy_plan, "purchasing"),
-        },
-    )
-
-
 def _render_serial_section(request: Request, qp: QualityPlan, user) -> HTMLResponse:
     """Render the refreshed Serial section partial."""
     return template_response(
@@ -380,57 +308,6 @@ def _render_fru_section(request: Request, db: Session, qp: QualityPlan, user) ->
         "htmx/partials/qp/_section_fru.html",
         {"request": request, "user": user, "qp": qp, "fru_rows": _fru_rows(db, qp)},
     )
-
-
-@router.patch("/v2/qp/{qp_id}/sales", response_class=HTMLResponse)
-async def qp_patch_sales(
-    request: Request,
-    qp_id: int,
-    db: Session = Depends(get_db),
-    user=Depends(require_user),
-) -> HTMLResponse:
-    """Inline-edit the Sales section fields → refreshed Sales section partial.
-
-    403 when the lock matrix says the section is not editable at the plan's current
-    stage (can_edit_qp_section — the SAME predicate the workspace pane enforces). Only
-    the whitelisted _SALES_FIELDS are written, so a stray form key can never set an
-    arbitrary column.
-    """
-    qp = _load_qp_for_edit(db, qp_id, user)
-    if not can_edit_qp_section(user, qp.buy_plan, "sales"):
-        raise HTTPException(status_code=403, detail="Quality sales section is locked at this stage")
-    form = await request.form()
-    for field, kind in _SALES_FIELDS.items():
-        if field in form:
-            setattr(qp, field, _coerce(kind, form.get(field)))
-    db.commit()
-    qp = _load_qp_for_edit(db, qp_id, user)
-    return _render_sales_section(request, db, qp, user)
-
-
-@router.patch("/v2/qp/{qp_id}/purchasing", response_class=HTMLResponse)
-async def qp_patch_purchasing(
-    request: Request,
-    qp_id: int,
-    db: Session = Depends(get_db),
-    user=Depends(require_user),
-) -> HTMLResponse:
-    """Inline-edit the Purchasing section fields → refreshed Purchasing section partial.
-
-    403 when the lock matrix says the section is not editable at the plan's current
-    stage (can_edit_qp_section — editable only in the plan's ACTIVE / confirm-PO
-    window). Only the whitelisted _PURCHASING_FIELDS are written.
-    """
-    qp = _load_qp_for_edit(db, qp_id, user)
-    if not can_edit_qp_section(user, qp.buy_plan, "purchasing"):
-        raise HTTPException(status_code=403, detail="Quality purchasing section is locked at this stage")
-    form = await request.form()
-    for field, kind in _PURCHASING_FIELDS.items():
-        if field in form:
-            setattr(qp, field, _coerce(kind, form.get(field)))
-    db.commit()
-    qp = _load_qp_for_edit(db, qp_id, user)
-    return _render_purchasing_section(request, db, qp, user)
 
 
 @router.post("/v2/qp/{qp_id}/serial", response_class=HTMLResponse)

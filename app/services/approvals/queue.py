@@ -470,7 +470,9 @@ def _resolve_subject(ar: ApprovalRequest, subjects: dict) -> tuple[str, str | No
         req = getattr(bp, "requisition", None) if bp is not None else None
         if req is not None:
             parent = req.customer_name or req.name
-        return f"QP #{ar.subject_id}", f"/v2/qp/{ar.subject_id}", parent, None
+        # No subject link: QP sections are edited in the workspace panes (W4.3) and
+        # no renderer ever consumed this href for QUALITY_PLAN rows.
+        return f"QP #{ar.subject_id}", None, parent, None
 
     if obj is not None and ar.subject_type == ApprovalSubjectType.PREPAYMENT:
         vendor = obj.vendor_card.display_name if obj.vendor_card else f"Prepayment #{ar.subject_id}"

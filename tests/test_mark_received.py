@@ -277,7 +277,7 @@ def test_receive_route_rerenders_po_pane(ws_client: TestClient, db_session: Sess
     assert line.received_at is not None
 
 
-def test_receive_route_with_lens_rerenders_plan_pane(ws_client: TestClient, db_session: Session, test_user: User):
+def test_receive_route_with_pane_plan_rerenders_plan_pane(ws_client: TestClient, db_session: Session, test_user: User):
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     line = _verified_line(db_session, bp, rq, test_user)
@@ -285,10 +285,10 @@ def test_receive_route_with_lens_rerenders_plan_pane(ws_client: TestClient, db_s
 
     r = ws_client.post(
         f"/v2/partials/buy-plans/{bp.id}/lines/{line.id}/receive",
-        data={"origin": "approvals_workspace", "lens": "sales-orders"},
+        data={"origin": "approvals_workspace", "pane": "plan"},
     )
     assert r.status_code == 200
-    assert "aw-pane-body" in r.text  # the SO/BP pane (kanban home), not the PO pane
+    assert "aw-pane-body" in r.text  # the deal pane (kanban home), not the PO pane
     db_session.expire_all()
     assert line.received_at is not None
 

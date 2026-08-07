@@ -5,7 +5,7 @@ renders as a pinned "Pending approvals" section INSIDE its stage tab, shown only
 matching approver. Covers:
   - the Buy Plans stage tab hides the pinned section for a non-approver and shows it for
     a user holding can_approve_buy_plans (with a pending row);
-  - the full page threads ?lens= into the lazy hub partial (new stage-tab keys);
+  - old pushed /v2/buy-plans?lens= URLs 308 onto the workspace Deals tab (W4.3);
   - the approvals alert count still merges onto the Buy Plans nav badge.
 
 Called by: pytest
@@ -44,15 +44,16 @@ def _seed_pending_buy_plan_approval(db, user):
 
 class TestPinnedApprovalSection:
     def test_full_page_lens_urls_308_to_workspace(self, nonadmin_client):
-        """Old pushed /v2/buy-plans?lens= URLs 308 onto the workspace Buy Plans tab —
-        the hub retired post-parity (spec §11.1) and the lens key is dropped.
+        """Old pushed /v2/buy-plans?lens= URLs 308 onto the workspace Deals tab — the
+        hub retired post-parity (spec §11.1) and the lens key is dropped (W4.3 merged
+        the SO/BP tabs into Deals).
 
         (v2_page authenticates via the session cookie, so this needs nonadmin_client.)
         """
         for lens in ("pipeline", "bogus"):
             resp = nonadmin_client.get(f"/v2/buy-plans?lens={lens}", follow_redirects=False)
             assert resp.status_code == 308
-            assert resp.headers["location"] == "/v2/approvals?tab=buy-plans"
+            assert resp.headers["location"] == "/v2/approvals?tab=deals"
 
 
 class TestBadgeMerge:

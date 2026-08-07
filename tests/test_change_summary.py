@@ -145,7 +145,7 @@ def test_proceed_approves(hub_client, db_session, test_user):
     with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
         r = hub_client.post(
             f"/v2/partials/buy-plans/{bp.id}/approve",
-            data={"handoff": "proceed", "origin": "approvals_workspace", "lens": "sales-orders"},
+            data={"handoff": "proceed", "origin": "approvals_workspace"},
         )
     assert r.status_code == 200
     db_session.expire_all()

@@ -831,7 +831,6 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.alerts import router as alerts_router
-from .routers.approvals import router as approvals_router
 from .routers.attachments_extra import router as attachments_extra_router
 from .routers.auth import router as auth_router
 from .routers.avatars import router as avatars_router
@@ -891,7 +890,6 @@ app.include_router(sightings_router)
 app.include_router(sources_router)
 app.include_router(resell_router)
 app.include_router(v13_router)
-app.include_router(approvals_router)
 app.include_router(prepayments_router)
 app.include_router(prepayment_confirm_router)
 app.include_router(quality_plans_router)

@@ -1,18 +1,21 @@
-"""test_approvals_hub_tabs.py — the Approvals Workspace 4-tab split-view console.
+"""test_approvals_hub_tabs.py — the Approvals Workspace 3-tab split-view console.
 
-/v2/approvals is now one page, four tabs — Sales Orders · Buy Plans · Purchase Orders ·
-Prepayments — served by routers/htmx/approvals_hub.py (specs/approvals-workspace.md).
+/v2/approvals is one page, three tabs — Deals · Purchase Orders · Prepayments — served
+by routers/htmx/approvals_hub.py (specs/approvals-workspace.md; W4.3 merged the old
+Sales Orders + Buy Plans tabs into one Deals tab).
 Covers:
-  - the 4-pill shell (per-viewer badges, lazy split-view body, legacy tab-key aliases);
+  - the 3-pill shell (per-viewer badges, lazy split-view body, legacy tab-key aliases —
+    including the retired sales-orders / buy-plans keys);
   - each tab's split view (list URL + pane target + selection plumbing);
   - the left work lists: Needs-your-approval grouped first (oldest default-selected),
     search, Mine/All scope, the live/closed filter, order-type badges, copy chips;
   - the origin=approvals_hub decide re-render branches still return a workspace body;
-  - the CSV export (legacy keys alias onto the new tabs).
+  - the CSV export routes are GONE (W4.3 — registry + live 404 pins).
 
 Called by: pytest
 Depends on: conftest (db_session, test_user), app.routers.htmx.approvals_hub,
-            app.services.approvals, app.models.*, app.constants.
+            app.services.approvals, app.models.*, app.constants,
+            tests._route_helpers (iter_routes).
 """
 
 from __future__ import annotations
@@ -224,13 +227,13 @@ def _other_user(db: Session) -> User:
     return u
 
 
-TABS = ("sales-orders", "buy-plans", "purchase-orders", "prepayments")
+TABS = ("deals", "purchase-orders", "prepayments")
 
 
 # ── Shell ────────────────────────────────────────────────────────────────
 
 
-def test_shell_renders_four_tabs(hub_client: TestClient):
+def test_shell_renders_three_tabs(hub_client: TestClient):
     r = hub_client.get("/v2/partials/approvals")
     assert r.status_code == 200
     for key in TABS:
@@ -238,14 +241,20 @@ def test_shell_renders_four_tabs(hub_client: TestClient):
     assert 'hx-target="#ap-hub-body"' in r.text
 
 
-def test_shell_defaults_to_sales_orders(hub_client: TestClient):
+def test_shell_defaults_to_deals(hub_client: TestClient):
     r = hub_client.get("/v2/partials/approvals")
-    assert "/v2/partials/approvals/sales-orders" in r.text  # lazy body loads the default tab
+    assert "/v2/partials/approvals/deals" in r.text  # lazy body loads the default tab
 
 
 @pytest.mark.parametrize(
     ("legacy", "mapped"),
-    [("buy-plan", "buy-plans"), ("po-approval", "purchase-orders"), ("prepayment", "prepayments")],
+    [
+        ("sales-orders", "deals"),
+        ("buy-plans", "deals"),
+        ("buy-plan", "deals"),
+        ("po-approval", "purchase-orders"),
+        ("prepayment", "prepayments"),
+    ],
 )
 def test_shell_legacy_tab_keys_alias(hub_client: TestClient, legacy: str, mapped: str):
     r = hub_client.get(f"/v2/partials/approvals?tab={legacy}")
@@ -261,8 +270,8 @@ def test_shell_badges_show_waiting_on_viewer(hub_client: TestClient, db_session:
 
     r = hub_client.get("/v2/partials/approvals")
     assert r.status_code == 200
-    # The decidable plan badges BOTH lenses (Sales Orders + Buy Plans pills).
-    assert r.text.count("min-w-[18px]") >= 2
+    # The decidable plan badges the Deals pill.
+    assert r.text.count("min-w-[18px]") >= 1
 
 
 # ── Tab bodies (split view) ──────────────────────────────────────────────
@@ -279,7 +288,13 @@ def test_tab_body_is_split_view(hub_client: TestClient, tab: str):
 
 @pytest.mark.parametrize(
     ("legacy", "mapped"),
-    [("buy-plan", "buy-plans"), ("po-approval", "purchase-orders"), ("prepayment", "prepayments")],
+    [
+        ("sales-orders", "deals"),
+        ("buy-plans", "deals"),
+        ("buy-plan", "deals"),
+        ("po-approval", "purchase-orders"),
+        ("prepayment", "prepayments"),
+    ],
 )
 def test_tab_body_legacy_keys_alias(hub_client: TestClient, legacy: str, mapped: str):
     r = hub_client.get(f"/v2/partials/approvals/{legacy}")
@@ -292,10 +307,10 @@ def test_unknown_tab_404s(hub_client: TestClient):
     assert hub_client.get("/v2/partials/approvals/bogus/list").status_code == 404
 
 
-# ── Sales Orders / Buy Plans lists ───────────────────────────────────────
+# ── Deals list ───────────────────────────────────────────────────────────
 
 
-def test_so_list_groups_needs_approval_first_and_default_selects(
+def test_deals_list_groups_needs_approval_first_and_default_selects(
     hub_client: TestClient, db_session: Session, test_user: User
 ):
     req, q, _ = _req_quote(db_session, test_user)
@@ -303,28 +318,31 @@ def test_so_list_groups_needs_approval_first_and_default_selects(
     _pending_buy_plan_request(db_session, bp, test_user)
     db_session.commit()
 
-    r = hub_client.get("/v2/partials/approvals/sales-orders/list")
+    r = hub_client.get("/v2/partials/approvals/deals/list")
     assert r.status_code == 200
     assert "Needs your approval" in r.text
     assert f"Plan #{bp.id}" in r.text
-    # The oldest decidable row is the default selection, targeting the SO-lens pane.
+    # The oldest decidable row is the default selection, targeting the plan pane.
     assert "aw-default" in r.text
-    assert f"/v2/partials/approvals/plan/{bp.id}/pane?lens=sales-orders" in r.text
+    assert f"/v2/partials/approvals/plan/{bp.id}/pane" in r.text
 
 
-def test_buy_plans_list_is_a_lens_on_the_same_rows(hub_client: TestClient, db_session: Session, test_user: User):
+@pytest.mark.parametrize("legacy", ["sales-orders", "buy-plans"])
+def test_legacy_list_keys_alias_onto_deals(hub_client: TestClient, db_session: Session, test_user: User, legacy: str):
+    """Old pushed /{sales-orders,buy-plans}/list URLs keep resolving — same rows, same
+    pane, one Deals surface (W4.3)."""
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
     _pending_buy_plan_request(db_session, bp, test_user)
     db_session.commit()
 
-    r = hub_client.get("/v2/partials/approvals/buy-plans/list")
+    r = hub_client.get(f"/v2/partials/approvals/{legacy}/list")
     assert r.status_code == 200
     assert f"Plan #{bp.id}" in r.text
-    assert f"/v2/partials/approvals/plan/{bp.id}/pane?lens=buy-plans" in r.text
+    assert f"/v2/partials/approvals/plan/{bp.id}/pane" in r.text
 
 
-def test_so_list_oldest_decidable_first(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_oldest_decidable_first(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     older = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value, quote_id=None)
     req2, q2, _ = _req_quote(db_session, test_user)
@@ -333,7 +351,7 @@ def test_so_list_oldest_decidable_first(hub_client: TestClient, db_session: Sess
     _pending_buy_plan_request(db_session, newer, test_user)
     db_session.commit()
 
-    r = hub_client.get("/v2/partials/approvals/sales-orders/list")
+    r = hub_client.get("/v2/partials/approvals/deals/list")
     body = r.text
     # Decision queue is oldest-first: the older plan renders before the newer one AND
     # is the default selection.
@@ -341,23 +359,23 @@ def test_so_list_oldest_decidable_first(hub_client: TestClient, db_session: Sess
     assert f"aw-default', {{key: 'plan-{older.id}'" in body or f"plan-{older.id}" in body.split("aw-default")[1]
 
 
-def test_so_list_closed_filter(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_closed_filter(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     live = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     req2, q2, _ = _req_quote(db_session, test_user)
     done = _plan(db_session, req2, q2, status=BuyPlanStatus.COMPLETED.value)
     db_session.commit()
 
-    live_txt = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    live_txt = hub_client.get("/v2/partials/approvals/deals/list").text
     assert f"Plan #{live.id}" in live_txt
     assert f"Plan #{done.id}" not in live_txt
 
-    closed_txt = hub_client.get("/v2/partials/approvals/sales-orders/list?show_closed=true").text
+    closed_txt = hub_client.get("/v2/partials/approvals/deals/list?show_closed=true").text
     assert f"Plan #{done.id}" in closed_txt
     assert f"Plan #{live.id}" not in closed_txt
 
 
-def test_so_list_search_filters(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_search_filters(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     bp.sales_order_number = "SO-777"
@@ -366,12 +384,12 @@ def test_so_list_search_filters(hub_client: TestClient, db_session: Session, tes
     other.sales_order_number = "SO-888"
     db_session.commit()
 
-    txt = hub_client.get("/v2/partials/approvals/sales-orders/list?q=SO-777").text
+    txt = hub_client.get("/v2/partials/approvals/deals/list?q=SO-777").text
     assert f"plan-{bp.id}" in txt
     assert f"plan-{other.id}" not in txt
 
 
-def test_so_list_scope_mine(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_scope_mine(hub_client: TestClient, db_session: Session, test_user: User):
     my_req, my_q, _ = _req_quote(db_session, test_user)
     mine = _plan(db_session, my_req, my_q, status=BuyPlanStatus.ACTIVE.value)
     other = _other_user(db_session)
@@ -379,30 +397,32 @@ def test_so_list_scope_mine(hub_client: TestClient, db_session: Session, test_us
     theirs = _plan(db_session, o_req, o_q, status=BuyPlanStatus.ACTIVE.value)
     db_session.commit()
 
-    all_txt = hub_client.get("/v2/partials/approvals/sales-orders/list?scope=all").text
+    all_txt = hub_client.get("/v2/partials/approvals/deals/list?scope=all").text
     assert f"plan-{mine.id}" in all_txt and f"plan-{theirs.id}" in all_txt
 
-    mine_txt = hub_client.get("/v2/partials/approvals/sales-orders/list?scope=mine").text
+    mine_txt = hub_client.get("/v2/partials/approvals/deals/list?scope=mine").text
     assert f"plan-{mine.id}" in mine_txt
     assert f"plan-{theirs.id}" not in mine_txt
 
 
-def test_so_list_shows_order_type_badge_and_so_copy_chip(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_shows_order_type_badge_and_so_copy_chip(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value, order_type=SalesOrderType.STOCK_SALE.value)
     bp.sales_order_number = "SO-1234"
     db_session.commit()
 
-    txt = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    txt = hub_client.get("/v2/partials/approvals/deals/list").text
     assert "Stock Sale" in txt  # order-type badge
     assert 'data-copy-value="SO-1234"' in txt  # one-tap Acctivate copy chip (spec §5)
 
 
-def test_so_list_age_on_every_row(hub_client: TestClient, db_session: Session, test_user: User):
+def test_deals_list_age_on_every_row(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     db_session.commit()
-    txt = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    txt = hub_client.get("/v2/partials/approvals/deals/list").text
     assert "just now" in txt or "m ago" in txt or "h ago" in txt or "now" in txt.lower()
 
 
@@ -517,11 +537,11 @@ def test_list_filters_round_trip_show_closed(hub_client: TestClient, db_session:
     """The #aw-filters form carries a hidden show_closed input, so a search (hx-
     include="#aw-filters") — and the split shell's awListRefresh refetch — stays inside
     the Closed view instead of snapping back to Live."""
-    body = hub_client.get("/v2/partials/approvals/sales-orders/list?show_closed=true&q=acme").text
+    body = hub_client.get("/v2/partials/approvals/deals/list?show_closed=true&q=acme").text
     assert 'name="show_closed" value="true"' in body
     assert 'name="scope" value="all"' in body
 
-    live_body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    live_body = hub_client.get("/v2/partials/approvals/deals/list").text
     assert 'name="show_closed" value="false"' in live_body
 
 
@@ -606,7 +626,7 @@ def test_approve_origin_approvals_hub_rerenders_workspace(hub_client: TestClient
             data={"action": "approve", "origin": "approvals_hub"},
         )
     assert r.status_code == 200
-    assert "/v2/partials/approvals/buy-plans/list" in r.text  # the workspace BP tab body
+    assert "/v2/partials/approvals/deals/list" in r.text  # the workspace Deals tab body
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.ACTIVE.value
 
@@ -629,14 +649,22 @@ def test_prepay_decide_origin_approvals_hub_rerenders_workspace(
     assert ar.status == ApprovalRequestStatus.APPROVED.value
 
 
-# ── CSV export (legacy keys alias) ───────────────────────────────────────
+# ── CSV export routes are GONE (W4.3) ────────────────────────────────────
 
 
-@pytest.mark.parametrize("tab", ["sales-orders", "buy-plan", "purchase-orders", "prepayments"])
-def test_export_streams_csv(hub_client: TestClient, tab: str):
-    r = hub_client.get(f"/v2/partials/approvals/{tab}/export")
-    assert r.status_code == 200
-    assert "text/csv" in r.headers["content-type"]
+def test_export_route_removed_from_registry():
+    """The per-tab CSV export died with W4.3 — absent from the route registry."""
+    from app.main import app
+    from tests._route_helpers import iter_routes
+
+    paths = {getattr(route, "path", None) for route in iter_routes(app.routes)}
+    assert "/v2/partials/approvals/{tab}/export" not in paths
+
+
+@pytest.mark.parametrize("tab", ["deals", "sales-orders", "buy-plan", "purchase-orders", "prepayments"])
+def test_export_get_404s(hub_client: TestClient, tab: str):
+    """A live GET to any former export URL 404s (route gone, not 405/500)."""
+    assert hub_client.get(f"/v2/partials/approvals/{tab}/export").status_code == 404
 
 
 # ── Origination + hub home (unchanged homes) ─────────────────────────────
@@ -649,13 +677,13 @@ def test_sales_order_new_stays_off_approvals_prefix(hub_client: TestClient):
 
 def test_buy_plans_hub_retired_308s_to_workspace(hub_client: TestClient):
     # Post-parity retirement (spec §11.1): the old hub full page and its shell
-    # partial both 308 onto the workspace's Buy Plans tab...
+    # partial both 308 onto the workspace's Deals tab...
     r = hub_client.get("/v2/buy-plans", follow_redirects=False)
     assert r.status_code == 308
-    assert r.headers["location"] == "/v2/approvals?tab=buy-plans"
+    assert r.headers["location"] == "/v2/approvals?tab=deals"
     partial = hub_client.get("/v2/partials/buy-plans", follow_redirects=False)
     assert partial.status_code == 308
-    assert partial.headers["location"] == "/v2/partials/approvals?tab=buy-plans"
+    assert partial.headers["location"] == "/v2/partials/approvals?tab=deals"
     # ...and following the shell redirect serves the workspace on that tab.
     followed = hub_client.get("/v2/partials/buy-plans", follow_redirects=True)
     assert followed.status_code == 200
@@ -670,18 +698,21 @@ def test_buy_plan_detail_308_carries_select(hub_client: TestClient):
     keeps its plan instead of landing on the tab's default selection."""
     r = hub_client.get("/v2/buy-plans/123", follow_redirects=False)
     assert r.status_code == 308
-    assert r.headers["location"] == "/v2/approvals?tab=buy-plans&select=123"
+    assert r.headers["location"] == "/v2/approvals?tab=deals&select=123"
 
 
 def test_select_threads_shell_to_tab_body_to_list(hub_client: TestClient):
     """?select= rides the shell's lazy tab-body URL, then the tab body's lazy list URL —
     the full chain a redirected deep link travels."""
-    shell = hub_client.get("/v2/partials/approvals?tab=buy-plans&select=42")
+    shell = hub_client.get("/v2/partials/approvals?tab=deals&select=42")
     assert shell.status_code == 200
-    assert "/v2/partials/approvals/buy-plans?select=42" in shell.text
-    body = hub_client.get("/v2/partials/approvals/buy-plans?select=42")
+    assert "/v2/partials/approvals/deals?select=42" in shell.text
+    body = hub_client.get("/v2/partials/approvals/deals?select=42")
     assert body.status_code == 200
-    assert "/v2/partials/approvals/buy-plans/list?scope=all&select=42" in body.text
+    assert "/v2/partials/approvals/deals/list?scope=all&select=42" in body.text
+    # A legacy pushed ?tab= key lands on the same Deals body.
+    legacy = hub_client.get("/v2/partials/approvals?tab=buy-plans&select=42")
+    assert "/v2/partials/approvals/deals?select=42" in legacy.text
 
 
 def test_list_select_preselects_that_plan_not_the_oldest(hub_client: TestClient, db_session: Session, test_user: User):
@@ -695,14 +726,14 @@ def test_list_select_preselects_that_plan_not_the_oldest(hub_client: TestClient,
     _pending_buy_plan_request(db_session, newer, test_user)
     db_session.commit()
 
-    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={newer.id}")
+    r = hub_client.get(f"/v2/partials/approvals/deals/list?select={newer.id}")
     assert r.status_code == 200
     dispatch = r.text.split("aw-default")[1]
     assert f"'plan-{newer.id}'" in dispatch
-    assert f"/v2/partials/approvals/plan/{newer.id}/pane?lens=buy-plans" in dispatch
-    # Both tabs honor select — same object, either lens may carry the deep link.
+    assert f"/v2/partials/approvals/plan/{newer.id}/pane" in dispatch
+    # A legacy list key honors select too — same object, one Deals surface.
     so = hub_client.get(f"/v2/partials/approvals/sales-orders/list?select={newer.id}")
-    assert f"/v2/partials/approvals/plan/{newer.id}/pane?lens=sales-orders" in so.text.split("aw-default")[1]
+    assert f"/v2/partials/approvals/plan/{newer.id}/pane" in so.text.split("aw-default")[1]
 
 
 def test_list_select_unknown_plan_falls_back_to_default(hub_client: TestClient, db_session: Session, test_user: User):
@@ -712,7 +743,7 @@ def test_list_select_unknown_plan_falls_back_to_default(hub_client: TestClient, 
     _pending_buy_plan_request(db_session, bp, test_user)
     db_session.commit()
 
-    r = hub_client.get("/v2/partials/approvals/sales-orders/list?select=999999")
+    r = hub_client.get("/v2/partials/approvals/deals/list?select=999999")
     assert r.status_code == 200
     dispatch = r.text.split("aw-default")[1]
     assert f"'plan-{bp.id}'" in dispatch
@@ -732,7 +763,7 @@ def test_list_select_inaccessible_plan_falls_back(hub_client: TestClient, db_ses
     test_user.role = "sales"  # RESTRICTED_ROLES — may only see own requisitions' plans
     db_session.commit()
 
-    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={theirs.id}")
+    r = hub_client.get(f"/v2/partials/approvals/deals/list?select={theirs.id}")
     assert r.status_code == 200
     # Neither listed (closed) nor dispatched (inaccessible — no pane stand-in).
     assert f"'plan-{theirs.id}'" not in r.text
@@ -750,9 +781,9 @@ def test_list_select_closed_plan_still_dispatches_its_pane(
     done = _plan(db_session, req, q, status=BuyPlanStatus.COMPLETED.value)
     db_session.commit()
 
-    r = hub_client.get(f"/v2/partials/approvals/buy-plans/list?select={done.id}")
+    r = hub_client.get(f"/v2/partials/approvals/deals/list?select={done.id}")
     assert r.status_code == 200
     assert f"Plan #{done.id}" not in r.text  # not a rendered live row
     dispatch = r.text.split("aw-default")[1]
     assert f"'plan-{done.id}'" in dispatch
-    assert f"/v2/partials/approvals/plan/{done.id}/pane?lens=buy-plans" in dispatch
+    assert f"/v2/partials/approvals/plan/{done.id}/pane" in dispatch

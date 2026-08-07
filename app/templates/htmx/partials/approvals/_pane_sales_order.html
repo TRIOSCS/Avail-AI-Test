@@ -1,15 +1,14 @@
 {#
-  approvals/_pane_sales_order.html — the SO/BP detail pane (both lenses, one anatomy).
+  approvals/_pane_sales_order.html — the deal (SO/BP) detail pane.
   Spec §8, top to bottom: header (customer · SO# copy chip · order-type badge · status)
   → APPROVAL BLOCK ("Awaiting your approval" + Approve/Reject when pending & decidable;
   the "Approved by X · date" stamp after) → Quality — sales section (collapsible;
   starts collapsed once the lock matrix closes editing — W3.7 can_edit_qp_sales;
   links out to the QP serial/FRU page — spec §5.2 Decision E) → lines →
   PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
-  Approve is reachable from BOTH the Sales Orders and Buy Plans tabs — same object,
-  same single approval. Decide posts the EXISTING approve route with
+  Decide posts the EXISTING approve route with
   origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
-  Receives: bp (BuyPlan), lines, lens, qp (QualityPlan|None), can_decide (bool),
+  Receives: bp (BuyPlan), lines, qp (QualityPlan|None), can_decide (bool),
             is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS),
             can_edit_qp_sales (bool), qp_stale_token (str), change_edits,
             thread_* (notes block), can_lifecycle (bool), no_approver_reason.
@@ -63,7 +62,6 @@
       <div class="flex items-center gap-1.5">
         <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML">
           <input type="hidden" name="origin" value="approvals_workspace">
-          <input type="hidden" name="lens" value="{{ lens }}">
           <input type="hidden" name="handoff" value="proceed">
           <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve &amp; notify</button>
         </form>
@@ -77,7 +75,6 @@
           hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
           class="mt-2 space-y-1.5">
       <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
       <input type="hidden" name="handoff" value="send_back">
       <textarea name="notes" rows="2" placeholder="Optional note to the salesperson — the change summary rides along."
                 class="input input-sm w-full"></textarea>
@@ -87,7 +84,6 @@
           hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
           class="mt-2 space-y-1.5">
       <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
       <input type="hidden" name="action" value="reject">
       <textarea name="notes" rows="2" required placeholder="Note to the fixer — why is this going back?"
                 class="input input-sm w-full"></textarea>
@@ -169,7 +165,6 @@
             hx-post="/v2/partials/approvals/plan/{{ bp.id }}/qp-sales"
             hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-2">
         <input type="hidden" name="expected_updated_at" value="{{ qp_stale_token }}">
-        <input type="hidden" name="lens" value="{{ lens }}">
         <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
           {{ qps_text('sales_condition', 'Condition', qp.sales_condition if qp else none) }}
           {{ qps_text('sales_quantity', 'Quantity', qp.sales_quantity if qp else none) }}
@@ -301,7 +296,6 @@
         {% if _resumable %}
         <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/resume" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
           <input type="hidden" name="origin" value="approvals_workspace">
-          <input type="hidden" name="lens" value="{{ lens }}">
           <button type="submit" data-loading-disable class="btn-primary btn-sm">Resume</button>
         </form>
         {% endif %}
@@ -309,7 +303,6 @@
         <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset" hx-target="#aw-pane" hx-swap="innerHTML" class="inline"
               hx-confirm="Reset this plan to draft? The halt/cancel audit fields are cleared.">
           <input type="hidden" name="origin" value="approvals_workspace">
-          <input type="hidden" name="lens" value="{{ lens }}">
           <button type="submit" data-loading-disable class="btn-secondary btn-sm">Reset to draft</button>
         </form>
         {% endif %}
@@ -323,7 +316,6 @@
           hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt" hx-target="#aw-pane" hx-swap="innerHTML"
           class="mt-2 space-y-1.5">
       <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
       <textarea name="reason" rows="2" required placeholder="Why is this deal being halted?"
                 class="input input-sm w-full"></textarea>
       <button type="submit" data-loading-disable class="btn-secondary btn-sm">Confirm halt</button>
@@ -334,7 +326,6 @@
           hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel" hx-target="#aw-pane" hx-swap="innerHTML"
           class="mt-2 space-y-1.5">
       <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
       <textarea name="reason" rows="2" required placeholder="Why is this deal being cancelled?"
                 class="input input-sm w-full"></textarea>
       <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm cancel</button>
