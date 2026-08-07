@@ -444,8 +444,13 @@ ROLE_ACCESS_DEFAULTS: dict[UserRole, frozenset] = {
 
 
 class ProactiveOfferStatus(StrEnum):
-    """Status lifecycle for ProactiveOffer records."""
+    """Status lifecycle for ProactiveOffer records.
 
+    DRAFT rows are per-customer prepared offers staged by the Matches tab's Process flow
+    — reviewed and sent one click at a time, never automatically.
+    """
+
+    DRAFT = "draft"
     SENT = "sent"
     CONVERTED = "converted"
     EXPIRED = "expired"

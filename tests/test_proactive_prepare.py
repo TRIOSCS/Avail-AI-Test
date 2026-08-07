@@ -525,7 +525,9 @@ def test_send_form_path_includes_sell_price(db_session):
     # Capture what sell_prices dict is passed to the service
     captured: dict = {}
 
-    async def _fake_send(*, db, user, token, match_ids, contact_ids, sell_prices, subject=None, email_html=None):
+    async def _fake_send(
+        *, db, user, token, match_ids, contact_ids, sell_prices, subject=None, email_html=None, allow_all=False
+    ):
         captured["sell_prices"] = sell_prices
         # Return minimal result the route needs to render success
         return {

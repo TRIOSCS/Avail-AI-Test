@@ -41,6 +41,31 @@ from ._shared import _base_ctx
 router = APIRouter(tags=["htmx-views"])
 
 
+def _render_matches_tab(request: Request, user: User, db: Session, *, scope: str = "mine", success_msg: str = ""):
+    """One renderer for every endpoint that lands back on the Matches tab.
+
+    ``scope=all`` (manager/admin only) shows every rep's matches with rep
+    attribution; everyone else always gets their own. The prepared strip
+    (staged per-customer draft offers from Process) rides along.
+    """
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_service import get_matches_for_user, list_draft_offers
+
+    can_see_all = is_manager_or_admin(user)
+    admin_all = scope == "all" and can_see_all
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW, admin_all=admin_all)
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = result.get("groups", []) if isinstance(result, dict) else result
+    ctx["sent"] = []
+    ctx["tab"] = "matches"
+    ctx["match_count"] = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
+    ctx["success_msg"] = success_msg
+    ctx["scope"] = "all" if admin_all else "mine"
+    ctx["can_see_all"] = can_see_all
+    ctx["prepared"] = list_draft_offers(db, user, allow_all=admin_all)
+    return template_response("htmx/partials/proactive/list.html", ctx)
+
+
 # ── Proactive Part Match ─────────────────────────────────────────────
 
 
@@ -48,12 +73,18 @@ router = APIRouter(tags=["htmx-views"])
 async def proactive_list_partial(
     request: Request,
     tab: str = "matches",
+    scope: str = "mine",
     user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Proactive matches list partial — Matches / Sent / Digests tabs."""
     from ...dependencies import is_manager_or_admin
     from ...services.proactive_service import get_matches_for_user, get_sent_offers
+
+    if tab == "matches":
+        return _render_matches_tab(
+            request, user, db, scope=scope, success_msg=request.query_params.get("success_msg", "")
+        )
 
     result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
     groups = result.get("groups", []) if isinstance(result, dict) else result
@@ -84,21 +115,9 @@ async def proactive_refresh(
 ):
     """Trigger a proactive scan then return the matches list partial."""
     from ...services.proactive_matching import run_proactive_scan
-    from ...services.proactive_service import get_matches_for_user
 
     await asyncio.to_thread(run_proactive_scan, db)
-
-    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
-    groups = result.get("groups", []) if isinstance(result, dict) else result
-    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
-
-    ctx = _base_ctx(request, user, "proactive")
-    ctx["matches"] = groups
-    ctx["sent"] = []
-    ctx["tab"] = "matches"
-    ctx["match_count"] = match_count
-    ctx["success_msg"] = ""
-    return template_response("htmx/partials/proactive/list.html", ctx)
+    return _render_matches_tab(request, user, db)
 
 
 @router.post("/v2/partials/proactive/batch-dismiss", response_class=HTMLResponse)
@@ -115,28 +134,20 @@ async def proactive_batch_dismiss(
     match_ids = [int(mid) for mid in match_ids_raw if mid and str(mid).isdigit()]
 
     if match_ids:
-        db.query(ProactiveMatch).filter(
+        from ...dependencies import is_manager_or_admin
+
+        query = db.query(ProactiveMatch).filter(
             ProactiveMatch.id.in_(match_ids),
-            ProactiveMatch.salesperson_id == user.id,
             ProactiveMatch.status == ProactiveMatchStatus.NEW,
-        ).update(
+        )
+        if not is_manager_or_admin(user):
+            query = query.filter(ProactiveMatch.salesperson_id == user.id)
+        query.update(
             {"status": ProactiveMatchStatus.DISMISSED, "dismiss_reason": "batch_dismiss"}, synchronize_session=False
         )
         db.commit()
 
-    # Re-render list
-    from ...services.proactive_service import get_matches_for_user
-
-    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
-    groups = result.get("groups", []) if isinstance(result, dict) else result
-    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
-    ctx = _base_ctx(request, user, "proactive")
-    ctx["matches"] = groups
-    ctx["sent"] = []
-    ctx["tab"] = "matches"
-    ctx["match_count"] = match_count
-    ctx["success_msg"] = ""
-    return template_response("htmx/partials/proactive/list.html", ctx)
+    return _render_matches_tab(request, user, db)
 
 
 @router.post("/v2/proactive/prepare/{site_id}", response_class=HTMLResponse)
@@ -161,11 +172,12 @@ async def proactive_prepare_page(
 
         return RedirectResponse("/v2/proactive", status_code=303)
 
-    matches = (
-        db.query(ProactiveMatch)
-        .filter(ProactiveMatch.id.in_(match_ids), ProactiveMatch.salesperson_id == user.id)
-        .all()
-    )
+    from ...dependencies import is_manager_or_admin
+
+    match_query = db.query(ProactiveMatch).filter(ProactiveMatch.id.in_(match_ids))
+    if not is_manager_or_admin(user):
+        match_query = match_query.filter(ProactiveMatch.salesperson_id == user.id)
+    matches = match_query.all()
     if not matches:
         from starlette.responses import RedirectResponse
 
@@ -280,15 +292,12 @@ async def proactive_add_contact(
     if site is None:
         raise HTTPException(404, "Site not found")
 
-    owns_match = (
-        db.query(ProactiveMatch.id)
-        .filter(
-            ProactiveMatch.customer_site_id == site_id,
-            ProactiveMatch.salesperson_id == user.id,
-        )
-        .first()
-    )
-    if not owns_match:
+    from ...dependencies import is_manager_or_admin
+
+    owns_query = db.query(ProactiveMatch.id).filter(ProactiveMatch.customer_site_id == site_id)
+    if not is_manager_or_admin(user):
+        owns_query = owns_query.filter(ProactiveMatch.salesperson_id == user.id)
+    if not owns_query.first():
         raise HTTPException(403, "Not authorized to add a contact for this site")
 
     full_name = full_name.strip()
@@ -353,11 +362,12 @@ async def proactive_draft_for_prepare(
     if not match_ids:
         return HTMLResponse('<div class="text-sm text-rose-600">No matches selected.</div>')
 
-    matches = (
-        db.query(ProactiveMatch)
-        .filter(ProactiveMatch.id.in_(match_ids), ProactiveMatch.salesperson_id == user.id)
-        .all()
-    )
+    from ...dependencies import is_manager_or_admin
+
+    draft_query = db.query(ProactiveMatch).filter(ProactiveMatch.id.in_(match_ids))
+    if not is_manager_or_admin(user):
+        draft_query = draft_query.filter(ProactiveMatch.salesperson_id == user.id)
+    matches = draft_query.all()
     if not matches:
         return HTMLResponse('<div class="text-sm text-rose-600">No valid matches found.</div>')
 
@@ -501,6 +511,8 @@ async def proactive_send_offer(
             body_html = html_mod.escape(body).replace("\n", "<br>")
             email_html = f'<div style="font-family:Arial,sans-serif;max-width:700px"><p>{body_html}</p></div>'
 
+        from ...dependencies import is_manager_or_admin
+
         result = await send_proactive_offer(
             db=db,
             user=user,
@@ -510,24 +522,15 @@ async def proactive_send_offer(
             sell_prices=sell_prices,
             subject=subject or None,
             email_html=email_html,
+            allow_all=is_manager_or_admin(user),
         )
 
         # Success — reload matches list with success banner
-        from ...services.proactive_service import get_matches_for_user
-
-        match_result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
-        groups = match_result.get("groups", []) if isinstance(match_result, dict) else match_result
-        match_count = match_result.get("stats", {}).get("total", 0) if isinstance(match_result, dict) else 0
         parts_count = len(result.get("line_items", []))
         contacts_count = len(result.get("recipient_emails", []))
-
-        ctx = _base_ctx(request, user, "proactive")
-        ctx["matches"] = groups
-        ctx["sent"] = []
-        ctx["tab"] = "matches"
-        ctx["match_count"] = match_count
-        ctx["success_msg"] = f"Offer sent to {contacts_count} contact(s) ({parts_count} parts)."
-        return template_response("htmx/partials/proactive/list.html", ctx)
+        return _render_matches_tab(
+            request, user, db, success_msg=f"Offer sent to {contacts_count} contact(s) ({parts_count} parts)."
+        )
 
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -823,3 +826,83 @@ async def proactive_line_tracking(
         "can_edit": can_manage or line.salesperson_id == user.id,
     }
     return template_response("htmx/partials/proactive/_outreach_line_cells.html", ctx)
+
+
+# ── Process flow: check send/ignore → stage per-customer drafts → review → send ──
+
+
+@router.post("/v2/partials/proactive/process", response_class=HTMLResponse)
+async def proactive_process(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Process the checked matches: dismiss the ignores, stage one draft offer
+    per customer for review. Nothing is emailed here."""
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_service import process_matches
+
+    form = await request.form()
+    send_ids = [int(x) for x in form.getlist("send_ids") if str(x).isdigit()]
+    ignore_ids = [int(x) for x in form.getlist("ignore_ids") if str(x).isdigit()]
+    if not send_ids and not ignore_ids:
+        return _render_matches_tab(request, user, db, scope=form.get("scope", "mine"))
+
+    stats = process_matches(db, user, send_ids=send_ids, ignore_ids=ignore_ids, allow_all=is_manager_or_admin(user))
+    db.commit()
+
+    parts = []
+    if stats.get("drafts_created"):
+        parts.append(f"{stats['drafts_created']} offer(s) prepared for review")
+    if stats.get("ignored"):
+        parts.append(f"{stats['ignored']} ignored")
+    if stats.get("needs_contact"):
+        parts.append(f"{stats['needs_contact']} need a contact")
+    if stats.get("skipped_backorder"):
+        parts.append(f"{stats['skipped_backorder']} back-order line(s) skipped (no customer account)")
+    if stats.get("skipped_already_queued"):
+        parts.append(f"{stats['skipped_already_queued']} already staged")
+    logger.info("Proactive process by {}: {}", user.email, stats)
+    return _render_matches_tab(request, user, db, scope=form.get("scope", "mine"), success_msg="; ".join(parts) + ".")
+
+
+@router.post("/v2/partials/proactive/prepared/{po_id}/send", response_class=HTMLResponse)
+async def proactive_prepared_send(
+    request: Request,
+    po_id: int,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Send one staged per-customer draft from the review strip."""
+    from ...dependencies import is_manager_or_admin
+    from ...scheduler import get_valid_token
+    from ...services.proactive_service import send_draft_offer
+
+    token = await get_valid_token(user, db)
+    if not token:
+        raise HTTPException(400, "No valid Microsoft token — sign in again to send")
+    try:
+        result = await send_draft_offer(db, user, token, po_id, allow_all=is_manager_or_admin(user))
+    except ValueError as e:
+        raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
+    recipients = ", ".join(result.get("recipient_emails", []))
+    return _render_matches_tab(request, user, db, success_msg=f"Offer sent to {recipients}.")
+
+
+@router.post("/v2/partials/proactive/prepared/{po_id}/discard", response_class=HTMLResponse)
+async def proactive_prepared_discard(
+    request: Request,
+    po_id: int,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """Discard a staged draft; its matches stay in the list (nothing was sent)."""
+    from ...dependencies import is_manager_or_admin
+    from ...services.proactive_service import discard_draft_offer
+
+    try:
+        discard_draft_offer(db, user, po_id, allow_all=is_manager_or_admin(user))
+    except ValueError as e:
+        raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
+    db.commit()
+    return _render_matches_tab(request, user, db, success_msg="Draft discarded — matches back in the list.")

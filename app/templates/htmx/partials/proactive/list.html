@@ -7,20 +7,44 @@
 #}
 {%- from "htmx/partials/proactive/_macros.html" import company_header, empty_state, margin_badge %}
 
-<div class="page-fluid" x-data="{ showScorecard: false }">
-  {# Header — page title + scorecard toggle #}
+<div class="page-fluid"
+     x-data="{
+       showScorecard: false,
+       sel: {},
+       mark(id, kind) {
+         this.sel[id] = this.sel[id] === kind ? undefined : kind;
+         this.sel = {...this.sel};
+       },
+       ids(kind) { return Object.keys(this.sel).filter(k => this.sel[k] === kind); },
+       get sendCount() { return this.ids('send').length },
+       get ignoreCount() { return this.ids('ignore').length },
+     }">
+  {# Header — page title + check-for-matches + scorecard toggle #}
   <div class="flex items-center justify-between mb-4">
     <div>
       <h1 class="h2">Proactive</h1>
       <p class="text-sm text-gray-600 mt-0.5">Live vendor stock matched to what customers asked for</p>
     </div>
-    <button @click="showScorecard = !showScorecard"
-            class="btn-secondary btn-sm inline-flex items-center gap-1.5">
-      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-      </svg>
-      Scorecard
-    </button>
+    <div class="flex items-center gap-2">
+      <button hx-post="/v2/partials/proactive/refresh"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+              data-loading-disable
+              class="btn-secondary btn-sm inline-flex items-center gap-1.5"
+              title="Scan the latest offers for new matches">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Check for matches
+      </button>
+      <button @click="showScorecard = !showScorecard"
+              class="btn-secondary btn-sm inline-flex items-center gap-1.5">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        Scorecard
+      </button>
+    </div>
   </div>
 
   {# Scorecard panel — lazy-loaded, explicit hx-target to prevent main-content takeover #}
@@ -95,28 +119,44 @@
        hx-target="this"
        hx-swap="innerHTML"
        hx-push-url="false"></div>
+
+  {# Scope toggle — managers/admins can work every rep's matches #}
+  {% if can_see_all %}
+  <div class="flex gap-2 mb-3">
+    <a hx-get="/v2/partials/proactive?tab=matches&scope=mine" hx-target="#main-content"
+       class="chip cursor-pointer {{ 'bg-gray-800 text-white border-gray-800' if scope == 'mine' else 'bg-gray-100 text-gray-600 border-gray-200' }}">My matches</a>
+    <a hx-get="/v2/partials/proactive?tab=matches&scope=all" hx-target="#main-content"
+       class="chip cursor-pointer {{ 'bg-gray-800 text-white border-gray-800' if scope == 'all' else 'bg-gray-100 text-gray-600 border-gray-200' }}">All salespeople</a>
+  </div>
+  {% endif %}
+
+  {# Prepared offers — staged per-customer drafts awaiting review/send #}
+  {% include "htmx/partials/proactive/_prepared_offers.html" %}
+
   {% if matches %}
+    {# Process bar — one action for everything checked across every customer #}
+    <form method="POST" action="/v2/partials/proactive/process"
+          hx-post="/v2/partials/proactive/process"
+          hx-target="#main-content"
+          data-loading-disable
+          class="sticky top-0 z-10 mb-3 bg-white rounded-lg border border-line-base px-4 py-2.5 flex items-center gap-3">
+      <p class="text-sm text-gray-600 flex-1">
+        Check <span class="font-medium text-emerald-700">Send</span> or
+        <span class="font-medium text-gray-500">Ignore</span> on each line, then process.
+      </p>
+      <input type="hidden" name="scope" value="{{ scope | default('mine') }}">
+      <template x-for="id in ids('send')" :key="'s'+id"><input type="hidden" name="send_ids" :value="id"></template>
+      <template x-for="id in ids('ignore')" :key="'i'+id"><input type="hidden" name="ignore_ids" :value="id"></template>
+      <button type="submit"
+              :disabled="sendCount === 0 && ignoreCount === 0"
+              class="btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
+        Process (<span x-text="sendCount">0</span> send / <span x-text="ignoreCount">0</span> ignore)
+      </button>
+    </form>
+
     {% for group in matches %}
     <div class="mb-4 bg-white rounded-lg overflow-hidden border border-line-base"
-         x-data="{
-           selected: {},
-           expanded: true,
-           offersOpen: {},
-           get selectedCount() { return Object.keys(this.selected).length },
-           get selectedIds() { return Object.keys(this.selected).map(Number) },
-           toggle(id) {
-             if (this.selected[id]) { delete this.selected[id]; this.selected = {...this.selected}; }
-             else { this.selected[id] = true; this.selected = {...this.selected}; }
-           },
-           selectAll() {
-             {% for match in group.matches %}this.selected[{{ match.id }}] = true;{% endfor %}
-             this.selected = {...this.selected};
-           },
-           deselectAll() { this.selected = {} },
-           toggleAll() {
-             this.selectedCount === {{ group.matches|length }} ? this.deselectAll() : this.selectAll();
-           },
-         }">
+         x-data="{ expanded: true, offersOpen: {} }">
 
       {# Group header — border-line-base hairline #}
       <div class="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-line-base">
@@ -128,46 +168,16 @@
 {{ company_header(group, 'Unknown Customer') }}
         {# Per-group match count as .chip #}
         <span class="chip bg-gray-100 text-gray-600 border-gray-200 mr-2">{{ group.matches|length }} match{{ 'es' if group.matches|length != 1 }}</span>
+        {% if scope == 'all' and group.salesperson_name %}
+        <span class="chip bg-sky-50 text-sky-700 border-sky-200 mr-2">{{ group.salesperson_name }}</span>
+        {% endif %}
 
-        {# Select all checkbox — accent via accent-color + input-focus ring #}
-        <label class="flex items-center gap-1 text-xs text-gray-600 cursor-pointer mr-2">
-          <input type="checkbox" @change="toggleAll()"
-                 :checked="selectedCount === {{ group.matches|length }}"
-                 class="rounded border-gray-300 input-focus"
-                 style="accent-color:var(--accent)">
-          All
-        </label>
-
-        {# Prepare button — .btn-primary .btn-sm #}
-        <form method="POST" action="/v2/proactive/prepare/{{ group.customer_site_id }}"
-              hx-post="/v2/proactive/prepare/{{ group.customer_site_id }}"
-              hx-target="#main-content"
-              data-loading-disable>
-          <template x-for="id in selectedIds" :key="id">
-            <input type="hidden" name="match_ids" :value="id">
-          </template>
-          <button type="submit"
-                  :disabled="selectedCount === 0"
-                  class="btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
-            Prepare (<span x-text="selectedCount">0</span>)
-          </button>
-        </form>
-
-        {# Dismiss button — .btn-secondary .btn-sm #}
-        <form method="POST" action="/v2/partials/proactive/batch-dismiss"
-              data-loading-disable
-              hx-post="/v2/partials/proactive/batch-dismiss"
-              hx-target="#main-content"
-              hx-confirm="Dismiss selected matches?">
-          <template x-for="id in selectedIds" :key="id">
-            <input type="hidden" name="match_ids" :value="id">
-          </template>
-          <button type="submit"
-                  :disabled="selectedCount === 0"
-                  class="btn-secondary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
-            Dismiss (<span x-text="selectedCount">0</span>)
-          </button>
-        </form>
+        {# Mark the whole customer for send in one tap #}
+        <button type="button"
+                @click="{% for match in group.matches %}sel[{{ match.id }}] = 'send'; {% endfor %}sel = {...sel}"
+                class="text-xs font-medium px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors focus:outline-none focus:ring-2" style="--tw-ring-color:var(--accent-ring)">
+          All → send
+        </button>
       </div>
 
       {# Match table — .data-table for unified density + line tokens #}
@@ -176,7 +186,7 @@
           <table class="data-table w-full">
             <thead>
               <tr>
-                <th class="w-10 text-left"></th>
+                <th class="w-[110px] text-left">Send / Ignore</th>
                 <th class="text-left">MPN</th>
                 <th class="text-left w-[140px]">Supply</th>
                 <th class="text-right w-[90px]">Available</th>
