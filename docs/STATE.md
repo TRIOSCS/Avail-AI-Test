@@ -339,3 +339,26 @@ Route count = runtime `app.routes` (flattened), not decorator grep.
 ## Backlog (Rule 2.1 stops — net-new items, never built during simplification)
 
 - (none yet)
+
+## Owner sitting 2026-08-07 — decisions EXECUTED (post-Wave-4)
+
+- D2 BACKFILL: migration 210 stamps engine-less PENDING plans (2 on the
+  current copy); pre-engine fallback + approve_buy_plan() + notify_rejected
+  seam DELETED — decide() is the one implementation.
+- P4-D4: pg_trgm dedup cutoff → 0.80 (PG only; rapidfuzz 85 unchanged);
+  company-path same-class gap flagged, untouched.
+- PO-approver toggle ON + durable in simp-refresh-db.sh.
+- Packet 2 APPLIED: glossary rows 1/2/4/5/6 (100 sites); row 3 REJECTED —
+  owner definition recorded (Sighting = raw API listing; Availability =
+  buyer-verified/negotiated/qualified offer); REQ- kept; letterhead →
+  "Deal Details"/"Requested parts (n)". Screen diet 1-18 applied (19
+  pre-dead) + 7 spec-field demotes.
+- One-screen fold COMPLETED (§5.2 residual): Request-prepayment button in
+  the workspace PO pane (gate-timed: cut PO pre-verify); walk re-sequenced
+  to the real order. **KERNEL WALK: 20 passed / 0 skipped** — all three
+  approval gates end-to-end on the deployed instance. Suite 18,903/0.
+- Owner disclosure: ALL DATA except customer accounts will be WIPED before
+  group testing (test data freely creatable; wipe runbook NOT yet requested).
+- Ops note: origin/simplification was archived+deleted by the other lane's
+  branch-cleanup (no PR protects it); push recreated it. A draft PR would
+  protect the branch — owner's word needed.

@@ -18,7 +18,7 @@ was executed as recommended; one word flips any of them.
 | search_service.py | 3,604 lines, one file | **10-module package** (largest 689) |
 | Scoring implementations | 4 generations disagreeing on screen | **1** (persisted v2; screen == stored, pinned by test) |
 | Offer-entry doors / QP ceremonies / notification paths | 5 / 5 / up to 4 | **2 / 3 / exactly 1** (Wave 3) |
-| Kernel walk (nightly, deployed instance) | — | **18 passed / 2 honest keys-off skips, 20 steps** |
+| Kernel walk (nightly, deployed instance) | — | **20 passed / 0 skipped** — all three approval gates end-to-end (PO toggle ON per your sitting) |
 
 ## 2. What Wave 4 did (spec §5.1/§5.2/§9/§10)
 
@@ -108,9 +108,13 @@ to end on https://app.availai.net:8443 — the walk with real money.
 Cutover (CUTOVER.md, rehearsed 5× via the wave-start DB refreshes)
 executes only on your explicit word after that deal completes clean.
 
-Suggested sitting: (1) reply flip words or "all stands" for Packets
-1/3/4; (2) flip the PO-approver toggle so tonight's walk runs 20/20;
-(3) pick the launch-deal day.
+Your sitting answers are already executed: PENDING backfill (migration
+210) + the last duplicate approval path deleted; trgm dedup at 0.80;
+PO toggle ON (durable across refreshes) — the walk now runs 20/20 with
+the one-screen fold completed (Request-prepayment in the PO pane);
+Packet 2 glossary + screen diet APPLIED (Sighting kept per your
+definition; REQ- kept; letterhead reworded). Remaining ask: any flip
+words on the informational decisions above, and the launch-deal day.
 
 — End of Packet 4, and of the four packets. The instance is ready when
 you are.
