@@ -6,7 +6,7 @@ _parse_xlsx_rows, and the new MAX_IMPORT_UPLOAD_BYTES (10MB) upload cap — both
 JSON-mode and HTML-fragment-mode responses.
 
 Called by: pytest
-Depends on: app/routers/htmx/requisitions.py, tests/conftest.py (client)
+Depends on: app/routers/htmx/requisitions/create_import.py, tests/conftest.py (client)
 """
 
 from io import BytesIO
@@ -22,7 +22,7 @@ from app.routers.htmx.requisitions import MAX_IMPORT_UPLOAD_BYTES, _parse_xlsx_r
 def _ai_key_configured(monkeypatch):
     """Pretend an AI key is configured so import-parse reaches the parse body (the §7
     keys-off guard answers 'AI is off' first under TESTING otherwise)."""
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: True)
 
 
 def _make_xlsx_bytes(rows: list[list[str]]) -> bytes:
@@ -60,7 +60,7 @@ class TestImportParseXlsxUploadEndToEnd:
         }
 
         with patch(
-            "app.routers.htmx.requisitions.parse_freeform_rfq",
+            "app.routers.htmx.requisitions.create_import.parse_freeform_rfq",
             new_callable=AsyncMock,
             return_value=mock_result,
         ) as mock_parse:
@@ -110,7 +110,7 @@ class TestImportParseUploadSizeCap:
             "requirements": [{"primary_mpn": "LM358DR", "target_qty": 500, "brand": "TI", "condition": "new"}],
         }
         with patch(
-            "app.routers.htmx.requisitions.parse_freeform_rfq",
+            "app.routers.htmx.requisitions.create_import.parse_freeform_rfq",
             new_callable=AsyncMock,
             return_value=mock_result,
         ) as mock_parse:

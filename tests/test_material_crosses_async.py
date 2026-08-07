@@ -169,12 +169,14 @@ def test_find_crosses_nonexistent_still_404(client):
 def test_find_crosses_returns_finding_partial_immediately(client, db_session, monkeypatch):
     """Via HTTP: the response is the "Finding crosses…" polling partial, returned without
     running the (neutralised) background lookup."""
-    from app.routers.htmx import materials as mat
+    from app.routers.htmx.materials import actions
 
     card = _make_card(db_session, "cross-005")
     # Neutralise the background runner so this test only asserts the immediate response
     # (TestClient runs background tasks synchronously after the response).
-    monkeypatch.setattr(mat, "_run_card_crosses", AsyncMock())
+    # Patch the defining submodule: find_crosses (actions.py) resolves the name from
+    # actions' globals, so patching the package attribute would not intercept the call.
+    monkeypatch.setattr(actions, "_run_card_crosses", AsyncMock())
 
     resp = client.post(f"/v2/partials/materials/{card.id}/find-crosses", headers={"HX-Request": "true"})
     assert resp.status_code == 200

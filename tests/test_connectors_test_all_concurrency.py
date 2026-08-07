@@ -13,7 +13,7 @@ Covers:
 - request.is_disconnected() aborts the sweep promptly without waiting out the probes
 
 Called by: pytest
-Depends on: app/routers/htmx/settings.py, app/routers/sources.py, tests/conftest.py
+Depends on: app/routers/htmx/settings/connectors.py, app/routers/sources.py, tests/conftest.py
 """
 
 import asyncio
@@ -24,7 +24,7 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, MagicMock
 
-import app.routers.htmx.settings as st
+import app.routers.htmx.settings.connectors as st
 import app.routers.sources as rs
 from app.models import ApiSource
 from tests.conftest import engine  # noqa: F401

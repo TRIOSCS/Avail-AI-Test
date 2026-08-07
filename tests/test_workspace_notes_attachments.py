@@ -279,7 +279,7 @@ class TestAttachmentsRoutes:
         store = AsyncMock()
         with (
             patch(
-                "app.routers.htmx.approvals_hub._resolve_note_subject",
+                "app.routers.htmx.approvals_hub.notes._resolve_note_subject",
                 return_value=(None, None, None),  # a broken resolver: zero subjects
             ),
             patch("app.services.attachment_service.store_and_attach", store),

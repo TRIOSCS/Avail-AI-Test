@@ -229,7 +229,7 @@ class TestBackorderResourceRoute:
         req = _FakeRequest({"reason_code": "defective", "scope": "line"})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans.po_lines, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
             result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session

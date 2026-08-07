@@ -180,17 +180,33 @@ the 6 stored requisition statuses present, health 200). Acceptance:
   workspace → read-only triage: 24 endpoints + 13 templates deleted,
   parts.py 1,341→384 LOC, rows are Open-deal doors (keyboard-a11y);
   kernel walk lens flips added.
-- [ ] W4.3 Approvals: Sales Orders + Buy Plans tabs → one Deals tab;
-  standalone QP page absorbed into the workspace panes (lock matrix landed
-  W3.7); one-screen fold finished; cut the parallel JSON approval-request
-  API + per-tab CSV export (§5.2)
-- [ ] W4.4 htmx_app.js (3,654 LOC) split into Vite modules (§10)
-- [ ] W4.5 hx-disinherit fix (§10)
-- [ ] W4.6 search_service.py (3,604 LOC) decomposition + scoring v2-only (§10)
+- [x] W4.3 COMPLETE @892250c0: tabs 4→3 (Deals/POs/Prepayments; legacy
+  aliases keep old URLs; lens plumbing dead, stall detection
+  unconditional); QP standalone page → read-only for sales/purchasing
+  (edited ONLY in workspace panes; page survives as the app's only
+  serial/FRU surface — Decision E deferral); app/routers/approvals.py
+  (parallel JSON API) deleted whole (Packet-4 flag: reassign was the
+  delegate machinery's only exposure, zero UI callers); per-tab CSV cut.
+  Suite 18,947/0; deployed; walk 18/2 GREEN.
+- [x] W4.4 COMPLETE (in @74190452): htmx_app.js 3,292→38-line entry +
+  13 modules (largest 485); vite build green (manifest key intact);
+  vitest 217/217. hx-disinherit="*" on #main-content (0 reliers among
+  652 elements; repairs the live add-manufacturer page-wipe).
+- [x] W4.5 COMPLETE (in @74190452): search_service.py 3,604 → 10-module
+  package (largest 689); 204 patch sites re-pointed, 73 kept at the
+  facade by design. Scoring v2-only: v1/v3/v4 deleted; every display
+  reads persisted sightings.score; streaming computes v2 (screen==stored,
+  pinned); MaterialVendorHistory = join newest scored sighting. Suite
+  18,913/0 (covering W4.4 too); deployed; walk 18/2 GREEN.
+- [x] W4.8 BUILT (gates running): ALL TEN remaining >800 routers split to
+  packages via the sightings pattern by 10 mapped agents (resell 2,830→8
+  files ≤694; contacts, buy_plans, requisitions, materials, vendors,
+  companies/core, approvals_hub, settings, archive) — route counts and
+  order-sensitive matching runtime-verified per router; largest router
+  file in the tree now 796. test_no_router_over_800_lines guard landed
+  (no allowlist).
 - [ ] W4.7 Postgres test engine — kernel E2E on PG-backed suite (§10;
   DEFERS FIRST if the wave runs long, brief §4.6)
-- [ ] W4.8 Router-size static guard: no router module over ~800 lines (§10
-  acceptance tooling)
 - [ ] W4.A Acceptance: §3 walk green on the deployed 5-tab build; guard
   green; suite green → Packet 4 (final numbers + launch-deal scheduling)
 

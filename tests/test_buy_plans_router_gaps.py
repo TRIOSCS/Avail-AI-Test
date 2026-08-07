@@ -146,7 +146,7 @@ def test_create_so_duplicate_error(client, test_requisition):
     ):
         with patch("app.dependencies.require_requisition_access"):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.sales_orders.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
@@ -185,7 +185,7 @@ def test_create_so_success(client, test_requisition):
     ):
         with patch("app.dependencies.require_requisition_access"):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.sales_orders.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
@@ -261,7 +261,7 @@ def test_submit_notifies_submitted_never_approved(client, buy_plan):
     with patch("app.services.buyplan_workflow.submit_buy_plan", return_value=mock_plan):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=mock_bg):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
@@ -297,7 +297,7 @@ def test_approve_risk3_fallback_no_open_request(approver_client, buy_plan):
     with patch("app.services.buyplan_workflow.approve_buy_plan") as mock_approve:
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = approver_client.post(
@@ -313,7 +313,7 @@ def test_approve_reject_notify(approver_client, buy_plan):
     with patch("app.services.buyplan_workflow.approve_buy_plan"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = approver_client.post(
@@ -357,7 +357,7 @@ def test_approve_stale_my_queue_origin_falls_through_to_detail(approver_client, 
     with patch("app.services.buyplan_workflow.approve_buy_plan"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=detail_mock,
             ):
                 resp = approver_client.post(
@@ -416,7 +416,7 @@ def test_halt_stale_my_queue_origin_falls_through_to_detail(client, buy_plan):
     with patch("app.services.buyplan_workflow.halt_plan", return_value=mock_plan):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=detail_mock,
             ):
                 resp = client.post(
@@ -437,7 +437,7 @@ def test_confirm_po_bad_ship_date(client, buy_plan):
     with patch("app.services.buyplan_workflow.confirm_po") as mock_confirm:
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.po_lines.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = client.post(
@@ -510,7 +510,7 @@ def test_verify_po_completion_triggers_notify(po_approver_client, buy_plan):
     with patch("app.services.buyplan_workflow.verify_po", return_value=completed_line):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                "app.routers.htmx.buy_plans.po_lines.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
             ):
                 resp = po_approver_client.post(
@@ -529,7 +529,7 @@ def test_verify_po_stale_my_queue_origin_falls_through_to_detail(po_approver_cli
             with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
                 detail_mock = AsyncMock(return_value=_ok_html())
                 with patch(
-                    "app.routers.htmx.buy_plans.buy_plan_detail_partial",
+                    "app.routers.htmx.buy_plans.po_lines.buy_plan_detail_partial",
                     new=detail_mock,
                 ):
                     resp = po_approver_client.post(

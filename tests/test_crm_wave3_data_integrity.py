@@ -450,7 +450,9 @@ class TestVendorContactEmailSync:
         """The sync logic must be ONE shared helper, not copy-pasted blocks."""
         import inspect
 
-        import app.routers.htmx.vendors as htmx_vendors
+        # getsource on the vendors PACKAGE would return only __init__.py; point at the
+        # defining submodule (the three call sites live in contact add/edit/delete).
+        import app.routers.htmx.vendors.contacts as htmx_vendors
         import app.routers.vendor_contacts as legacy
         from app.utils.vendor_helpers import sync_card_emails_on_contact_change  # noqa: F401
 

@@ -1134,7 +1134,7 @@ class TestRequisitionImport:
     def _ai_key_configured(self, monkeypatch):
         """Pretend an AI key is configured so import-parse reaches the parse body (the
         §7 keys-off guard answers 'AI is off' first under TESTING otherwise)."""
-        monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
+        monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: True)
 
     def test_import_parse_no_data(self, client: TestClient):
         resp = client.post(
@@ -1156,7 +1156,9 @@ class TestRequisitionImport:
     def test_import_parse_with_text(self, client: TestClient):
         mock_result = {"requirements": [{"primary_mpn": "LM317T", "target_qty": 100}], "name": "AI Name"}
         with patch(
-            "app.routers.htmx.requisitions.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
+            "app.routers.htmx.requisitions.create_import.parse_freeform_rfq",
+            new_callable=AsyncMock,
+            return_value=mock_result,
         ) as mock_parse:
             resp = client.post(
                 "/v2/partials/requisitions/import-parse",
@@ -1175,7 +1177,9 @@ class TestRequisitionImport:
             "customer_name": "AI Customer",
         }
         with patch(
-            "app.routers.htmx.requisitions.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
+            "app.routers.htmx.requisitions.create_import.parse_freeform_rfq",
+            new_callable=AsyncMock,
+            return_value=mock_result,
         ):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse?format=json",

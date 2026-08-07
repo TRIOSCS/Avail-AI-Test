@@ -767,7 +767,7 @@ class TestOfferCompareDirectQuery:
         db_session.commit()
         import re as _re
 
-        source = open("app/routers/resell.py").read()
+        source = open("app/routers/resell/offers.py").read()  # W4.8: defining submodule of the split package
         compare_fn = source.split("def resell_line_offer_compare")[1].split("\nasync def ")[0].split("\ndef ")[0]
         assert not _re.search(r"\bel\.offers\b", compare_fn)
         restore = _as_user(client, owner)
@@ -868,6 +868,9 @@ class TestCompanySelectSlim:
         assert test_company.name in body
 
     def test_router_never_loads_full_company_entities(self):
-        source = open("app/routers/resell.py").read()
+        # W4.8: resell.py became the package app/routers/resell/ — scan every submodule.
+        from pathlib import Path
+
+        source = "".join(p.read_text() for p in sorted(Path("app/routers/resell").glob("*.py")))
         assert "db.query(Company).order_by" not in source
         assert "select(Company).order_by" not in source

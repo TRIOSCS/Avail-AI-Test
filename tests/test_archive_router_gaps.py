@@ -1,8 +1,9 @@
-"""test_archive_router_gaps.py — Coverage gap tests for app/routers/htmx/archive.py.
+"""test_archive_router_gaps.py — Coverage gap tests for app/routers/htmx/archive/.
 
-Targets uncovered lines: 210, 217, 291, 293, 296-300, 339, 391-398, 419-421,
-470-477, 498-499, 526-528, 576, 604-632, 659, 676-704, 739-742, 765-769, 799,
-801, 865-868.
+Originally written against the single-file app/routers/htmx/archive.py (W4.8
+split it into the archive/ package); patch targets point at the defining
+submodule (tasks_crud / tasks_lifecycle / notes) because patching a package
+attribute cannot intercept a submodule-local lookup.
 
 Called by: pytest
 Depends on: conftest fixtures, app.models, app.services.task_service
@@ -167,7 +168,7 @@ def test_create_account_task_403_not_owner(client, db_session, test_user):
     # Company with a different owner — test_user is not admin so can't manage
     co = _make_company(db_session, owner_id=None)
     db_session.commit()
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok):
         resp = client.post(
             f"/v2/partials/customers/{co.id}/tasks",
             data={"title": "Task X", "due_at": ""},
@@ -184,7 +185,7 @@ def test_create_account_task_invalid_date(client, db_session, test_user):
     """POST /v2/partials/customers/{id}/tasks returns date error on bad due_at."""
     co = _make_company(db_session, owner_id=test_user.id)
     db_session.commit()
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok):
         resp = client.post(
             f"/v2/partials/customers/{co.id}/tasks",
             data={"title": "Good Title", "due_at": "not-a-date"},
@@ -204,7 +205,7 @@ def test_create_contact_task_403_not_owner(client, db_session, test_user):
     site = _make_site(db_session, co.id)
     contact = _make_contact(db_session, site.id)
     db_session.commit()
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok):
         resp = client.post(
             f"/v2/partials/customers/{co.id}/contacts/{contact.id}/tasks",
             data={"title": "Contact Task", "due_at": ""},
@@ -218,7 +219,7 @@ def test_create_contact_task_invalid_date(client, db_session, test_user):
     site = _make_site(db_session, co.id)
     contact = _make_contact(db_session, site.id)
     db_session.commit()
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok):
         resp = client.post(
             f"/v2/partials/customers/{co.id}/contacts/{contact.id}/tasks",
             data={"title": "Real Title", "due_at": "bad-date"},
@@ -252,7 +253,7 @@ def test_complete_task_vendor_contact_found(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
     assert resp.status_code == 200
     # Must resolve vendor_id via the vendor_contact -> vendor_card_id lookup and
@@ -341,7 +342,7 @@ def test_delete_task_vendor_card_branch(admin_client, db_session, admin_user):
     task = _make_task(db_session, admin_user.id, vendor_card_id=card.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -358,7 +359,7 @@ def test_delete_task_vendor_contact_branch(admin_client, db_session, admin_user)
     task = _make_task(db_session, admin_user.id, vendor_contact_id=vc.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = admin_client.delete(f"/v2/partials/tasks/{task.id}")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -405,7 +406,7 @@ def test_task_edit_form_vendor_contact(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.get(f"/v2/partials/tasks/{task.id}/edit-form")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -445,7 +446,7 @@ def test_edit_task_vendor_card_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_card_id=card.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/tasks/{task.id}/edit",
             data={"title": "Updated Vendor Task", "due_at": ""},
@@ -466,7 +467,7 @@ def test_edit_task_vendor_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/tasks/{task.id}/edit",
             data={"title": "Updated VC Task", "due_at": ""},
@@ -524,7 +525,7 @@ def test_snooze_task_vendor_card_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_card_id=card.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -542,7 +543,7 @@ def test_snooze_task_vendor_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, vendor_contact_id=vc.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -562,7 +563,7 @@ def test_create_vendor_task_invalid_date(client, db_session):
     card = _make_vendor_card(db_session)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok):
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok):
         resp = client.post(
             f"/v2/partials/vendors/{card.id}/tasks",
             data={"title": "Vendor Task", "due_at": "bad-date"},
@@ -625,7 +626,7 @@ def test_create_account_task_with_valid_date(client, db_session, test_user):
     co = _make_company(db_session, owner_id=test_user.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/customers/{co.id}/tasks",
             data={"title": "Task With Date", "due_at": "2026-12-31"},
@@ -667,7 +668,7 @@ def test_create_contact_task_with_valid_date(client, db_session, test_user):
     contact = _make_contact(db_session, site.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/customers/{co.id}/contacts/{contact.id}/tasks",
             data={"title": "Contact With Date", "due_at": "2026-11-30"},
@@ -693,7 +694,7 @@ def test_complete_task_site_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, site_contact_id=contact.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(f"/v2/partials/tasks/{task.id}/complete")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -717,7 +718,7 @@ def test_delete_task_site_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, site_contact_id=contact.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.delete(f"/v2/partials/tasks/{task.id}")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -740,7 +741,7 @@ def test_edit_task_site_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, site_contact_id=contact.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/tasks/{task.id}/edit",
             data={"title": "Updated Contact Task", "due_at": ""},
@@ -795,7 +796,7 @@ def test_snooze_task_site_contact_branch(client, db_session, test_user):
     task = _make_task(db_session, test_user.id, site_contact_id=contact.id)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_lifecycle.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(f"/v2/partials/tasks/{task.id}/snooze")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -878,7 +879,7 @@ def test_vendor_task_add_form_get(client, db_session):
     card = _make_vendor_card(db_session)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok) as mock_render:
         resp = client.get(f"/v2/partials/vendors/{card.id}/tasks/add-form")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]
@@ -897,7 +898,7 @@ def test_create_vendor_task_with_valid_date(client, db_session):
     card = _make_vendor_card(db_session)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.tasks_crud.template_response", side_effect=_html_ok) as mock_render:
         resp = client.post(
             f"/v2/partials/vendors/{card.id}/tasks",
             data={"title": "Vendor Task With Date", "due_at": "2026-12-31"},
@@ -931,7 +932,7 @@ def test_vendor_activity_add_note_form_get(client, db_session):
     card = _make_vendor_card(db_session)
     db_session.commit()
 
-    with patch("app.routers.htmx.archive.template_response", side_effect=_html_ok) as mock_render:
+    with patch("app.routers.htmx.archive.notes.template_response", side_effect=_html_ok) as mock_render:
         resp = client.get(f"/v2/partials/vendors/{card.id}/activity/add-note-form")
     assert resp.status_code == 200
     template_name, ctx = mock_render.call_args[0]

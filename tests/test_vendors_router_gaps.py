@@ -5,7 +5,7 @@ Covers lines: 231-264, 577, 595-602, 682-696, 701-706, 709-713, 846-874,
               897-918, 999, 1076-1092, 1116, 1149, 1197-1213
 
 Called by: pytest
-Depends on: app/routers/htmx/vendors.py, conftest.py fixtures
+Depends on: app/routers/htmx/vendors/ (crud.py, contacts.py), conftest.py fixtures
 """
 
 from datetime import UTC, datetime
@@ -85,7 +85,7 @@ class TestCreateVendorSuccess:
         # so patch at the source module where it lives.
         with patch("app.utils.vendor_helpers.find_vendor_card_by_name", return_value=None):
             with patch(
-                "app.routers.htmx.vendors.vendor_detail_partial",
+                "app.routers.htmx.vendors.crud.vendor_detail_partial",
                 new=AsyncMock(return_value=HTMLResponse("<div>vendor detail</div>")),
             ):
                 resp = client.post(
@@ -104,7 +104,7 @@ class TestCreateVendorSuccess:
         """Lines 240-264: emails and phones are parsed from form data."""
         with patch("app.utils.vendor_helpers.find_vendor_card_by_name", return_value=None):
             with patch(
-                "app.routers.htmx.vendors.vendor_detail_partial",
+                "app.routers.htmx.vendors.crud.vendor_detail_partial",
                 new=AsyncMock(return_value=HTMLResponse("<div>ok</div>")),
             ):
                 resp = client.post(
@@ -229,7 +229,7 @@ class TestVendorEdit:
     def test_edit_display_name_updates_vendor(self, client, db_session, test_vendor_card):
         """Lines 682-696: display_name provided in form → vendor name updated."""
         with patch(
-            "app.routers.htmx.vendors.vendor_detail_partial",
+            "app.routers.htmx.vendors.crud.vendor_detail_partial",
             new=AsyncMock(return_value=HTMLResponse("<div>updated</div>")),
         ):
             resp = client.post(
@@ -251,7 +251,7 @@ class TestVendorEdit:
     def test_edit_emails_valid_updates_emails(self, client, db_session, test_vendor_card):
         """Lines 695-703: valid emails in form → vendor.emails updated."""
         with patch(
-            "app.routers.htmx.vendors.vendor_detail_partial",
+            "app.routers.htmx.vendors.crud.vendor_detail_partial",
             new=AsyncMock(return_value=HTMLResponse("<div>ok</div>")),
         ):
             resp = client.post(
@@ -273,7 +273,7 @@ class TestVendorEdit:
     def test_edit_phones_updates_phones(self, client, db_session, test_vendor_card):
         """Lines 705-707: phones_raw present → vendor.phones updated."""
         with patch(
-            "app.routers.htmx.vendors.vendor_detail_partial",
+            "app.routers.htmx.vendors.crud.vendor_detail_partial",
             new=AsyncMock(return_value=HTMLResponse("<div>ok</div>")),
         ):
             resp = client.post(
@@ -294,7 +294,7 @@ class TestVendorContactAdd:
     def test_add_contact_creates_contact(self, client, db_session, test_vendor_card):
         """Lines 846-874: valid email + full_name → contact created, row rendered."""
         with patch(
-            "app.routers.htmx.vendors.template_response",
+            "app.routers.htmx.vendors.contacts.template_response",
         ) as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<tr>contact row</tr>")
             resp = client.post(

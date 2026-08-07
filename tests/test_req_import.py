@@ -9,7 +9,7 @@ import pytest
 def _ai_key_configured(monkeypatch):
     """Pretend an AI key is configured so import-parse reaches the parse body (the §7
     keys-off guard answers 'AI is off' first under TESTING otherwise)."""
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: True)
 
 
 @pytest.mark.asyncio
@@ -54,7 +54,7 @@ def test_import_parse_html_returns_unified_modal(client, monkeypatch):
     async def mock_parse(text):
         return mock_result
 
-    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.parse_freeform_rfq", mock_parse)
     resp = client.post(
         "/v2/partials/requisitions/import-parse",
         data={"name": "Test RFQ", "raw_text": "LM358DR 500 TI\nSTM32F407 100"},

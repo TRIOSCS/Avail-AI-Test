@@ -17,7 +17,7 @@ from app.models.crm import CustomerSite
 def _ai_key_configured(monkeypatch):
     """Pretend an AI key is configured so import-parse reaches the parse body (the §7
     keys-off guard answers 'AI is off' first under TESTING otherwise)."""
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: True)
 
 
 @pytest.mark.parametrize(
@@ -76,7 +76,7 @@ def test_import_parse_json_path_returns_data(client, monkeypatch):
     async def mock_parse(text):
         return mock_result
 
-    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.parse_freeform_rfq", mock_parse)
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",
         data={"name": "Test RFQ", "raw_text": "LM317T 500 TI"},
@@ -101,7 +101,7 @@ def test_import_parse_html_path_returns_unified_modal(client, monkeypatch):
     async def mock_parse(text):
         return mock_result
 
-    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.parse_freeform_rfq", mock_parse)
     resp = client.post(
         "/v2/partials/requisitions/import-parse",
         data={"name": "Test RFQ", "raw_text": "LM317T 100"},

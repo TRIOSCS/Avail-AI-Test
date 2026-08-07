@@ -232,7 +232,7 @@ def _seed_sources(db_session) -> list[ApiSource]:
 @pytest.fixture(autouse=True)
 def _stub_clay_oauth(monkeypatch):
     """Stub clay_oauth helpers so they don't open a raw SessionLocal connection."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -275,7 +275,7 @@ def test_connectors_tab_key_card_has_field(admin_client):
 
 def test_connectors_tab_clay_connect(admin_client, monkeypatch):
     """When Clay is disconnected the page shows the /auth/clay/connect link."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -343,7 +343,7 @@ def test_test_all_button_wiring(admin_client):
 
 def test_clay_card_connect_disconnect(admin_client, monkeypatch):
     """Disconnected → Connect Clay link; connected → Disconnect control."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
@@ -359,7 +359,7 @@ def test_clay_card_connect_disconnect(admin_client, monkeypatch):
 
 def test_clay_card_no_key_text_input(admin_client, monkeypatch):
     """Clay uses the oauth_clay control — there must be no CLAY_API_KEY text input."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
     html = admin_client.get("/v2/partials/settings/connectors").text
@@ -507,7 +507,7 @@ def test_activate_emits_success_toast(admin_client, db_session):
 
 def test_clay_disconnect_has_confirm(admin_client, monkeypatch):
     """Connected Clay card carries an hx-confirm on Disconnect."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
     html = admin_client.get("/v2/partials/settings/connectors").text
@@ -792,7 +792,7 @@ def test_capability_holder_can_save_credentials_and_toggle(connector_manager_cli
 def test_clay_controls_admin_only_for_non_admin_holder(connector_manager_client, monkeypatch):
     """Clay OAuth is a backend-wide authorization kept admin-only: a non-admin holder
     sees Clay STATUS but no connect/disconnect control (no dead 403 button)."""
-    import app.routers.htmx.settings as v
+    import app.routers.htmx.settings.connectors as v
 
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
     html = connector_manager_client.get("/v2/partials/settings/connectors").text

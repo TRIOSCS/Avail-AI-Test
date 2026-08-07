@@ -869,7 +869,7 @@ def test_submit_outreach_email_keys_off_honest_409(client, db_session, trader_us
     try:
         with (
             patch.dict(_os.environ, {"TESTING": "0"}),
-            patch("app.routers.resell.require_fresh_token", new=token_mock),
+            patch("app.routers.resell.outreach_send.require_fresh_token", new=token_mock),
         ):
             resp = client.post(
                 f"/api/resell/{posted_list.id}/outreach",

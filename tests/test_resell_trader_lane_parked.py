@@ -168,14 +168,16 @@ def test_buyer_panel_parked_empty_with_manual_add(client, monkeypatch, posted_li
     """The offer-to-buyers panel (kernel outreach door) still renders, but with the
     buyer-intelligence sections PARKED: ranking is never computed, the empty state
     shows, and the manual-add path + finding-#6 setChannel wiring stay intact."""
-    import app.routers.resell as resell_router
+    import app.routers.resell.outreach_send as resell_outreach_send
 
     def _boom(*args, **kwargs):
         raise AssertionError("buyer-intelligence computed while parked (W2.3)")
 
     # If the park regresses and either helper is called, the render errors.
-    monkeypatch.setattr(resell_router, "_suggestion_rows", _boom)
-    monkeypatch.setattr(resell_router, "_no_contact_buyers", _boom)
+    # (Patch the defining submodule — resell_offer_buyers_form looks the helpers
+    # up there, so a package-level patch could not intercept the call.)
+    monkeypatch.setattr(resell_outreach_send, "_suggestion_rows", _boom)
+    monkeypatch.setattr(resell_outreach_send, "_no_contact_buyers", _boom)
 
     restore = _as_owner(client, owner_trader)
     try:

@@ -119,7 +119,9 @@ class TestFindContactsSearch:
         The persistence / dedup / error behaviours of the background runner and the poller's
         terminal swap are covered in test_vendor_find_contacts_async.py.
         """
-        from app.routers.htmx import vendors as ven
+        # Patch on the DEFINING submodule: vendor_find_contacts looks the runner up in
+        # prospects-module globals, so a package-attribute setattr would not intercept it.
+        from app.routers.htmx.vendors import prospects as ven
         from app.services.vendor_contact_runs import vendor_contact_runs
 
         vendor_contact_runs.clear(vendor_with_domain.id)

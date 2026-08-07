@@ -17,12 +17,12 @@ def _ai_key_configured(monkeypatch):
     The keys-off honesty guard (spec §7) answers "AI is off" before the parser runs when
     ANTHROPIC_API_KEY is absent — which it always is under TESTING.
     """
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: True)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: True)
 
 
 def test_import_parse_keys_off_honest_state(client, db_session, monkeypatch):
     """With no AI key, JSON mode answers the honest 'AI is off' state — no 500."""
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: False)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: False)
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",
         data={"raw_text": "LM317T 500", "name": "Test"},
@@ -35,7 +35,7 @@ def test_import_parse_keys_off_honest_state(client, db_session, monkeypatch):
 
 def test_import_parse_keys_off_html_mode(client, db_session, monkeypatch):
     """With no AI key, the HTML path renders the honest state — no 500."""
-    monkeypatch.setattr("app.routers.htmx.requisitions.claude_configured", lambda: False)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.claude_configured", lambda: False)
     resp = client.post(
         "/v2/partials/requisitions/import-parse",
         data={"raw_text": "LM317T 500", "name": "Test"},
@@ -50,7 +50,7 @@ def _patch_parse(monkeypatch, result):
     async def mock_parse(text):
         return result
 
-    monkeypatch.setattr("app.routers.htmx.requisitions.parse_freeform_rfq", mock_parse)
+    monkeypatch.setattr("app.routers.htmx.requisitions.create_import.parse_freeform_rfq", mock_parse)
 
 
 def test_import_parse_json_format(client, db_session, monkeypatch):

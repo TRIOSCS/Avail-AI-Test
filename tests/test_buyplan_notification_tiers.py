@@ -308,7 +308,7 @@ async def _drive_verify_po(action, db_session, mock_bg):
         patch("app.services.buyplan_workflow.verify_po", return_value=stub_line),
         patch("app.services.buyplan_workflow.check_completion", return_value=None),
         patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-        patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+        patch.object(htmx_buy_plans.po_lines, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
     ):
         await htmx_buy_plans.buy_plan_verify_po_partial(
             req, plan_id=plan.id, line_id=line.id, user=actor, db=db_session

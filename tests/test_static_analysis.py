@@ -817,3 +817,21 @@ def test_resizable_modal_review_fixes_locked_in():
     assert "max-h-40" in picker_dropdown, (
         f"customer-picker dropdown must stay shrunk at max-h-40; got: {picker_dropdown.strip()!r}"
     )
+
+
+def test_no_router_over_800_lines():
+    """W4.8 (spec §10 Wave-4 acceptance): no router module over ~800 lines.
+
+    The Wave-4 splits took every oversized router to a package of focused
+    modules (sightings/resell/materials/vendors/settings/archive/companies/
+    buy_plans/requisitions/approvals_hub). This guard keeps them that way —
+    a module crossing the bar means a new regression factory is forming:
+    split it (the app/routers/sightings/ package is the pattern), don't
+    raise the limit or add an allowlist.
+    """
+    over = []
+    for p in sorted(Path("app/routers").rglob("*.py")):
+        loc = len(p.read_text().splitlines())
+        if loc > 800:
+            over.append(f"{p} — {loc} lines")
+    assert not over, "Router modules over the 800-line guard:\n" + "\n".join(over)

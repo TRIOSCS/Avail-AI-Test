@@ -259,12 +259,16 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   `_safe_float()` + the ops-group check `_is_ops_member()` (each shared between a moved
   cluster and a route that stayed in the monolith). Single source of truth — sub-routers and
   (where still used) `htmx_views.py` import these names so behavior is unchanged.
-- `app/routers/htmx/requisitions.py` — **first extracted domain**: the Requisition partials
-  (`GET/POST /v2/partials/requisitions/*` list, unified create/import modal + AI parse/save,
-  detail shell, requirement add, search-all, detail tabs) plus the AI customer
-  lookup/quick-create (`POST /v2/partials/customers/lookup` + `/quick-create`) that the
-  create modal uses. `htmx_views.py` re-imports `requisitions_list_partial` /
-  `requisition_tab` from here because its offer/response routes re-render those partials.
+- `app/routers/htmx/requisitions/` — **first extracted domain**, now a package (W4.8 split
+  of the former single file along its audited seams): `common.py` (the shared APIRouter),
+  `list.py` (list partial + CSV export), `create_import.py` (unified create/import modal +
+  AI parse/save, plus the AI customer lookup/quick-create `POST /v2/partials/customers/lookup`
+  + `/quick-create` and the customer typeahead the modal uses), `detail.py` (detail shell,
+  requirement add, search-all, detail-tab registration), `tasks.py` (Task-board mutations).
+  `__init__` imports the submodules in the original registration order (load-bearing: the
+  static GETs must attach before `GET /{req_id}`) and re-exports every former top-level name,
+  so `requisitions_edit.py` (`_best_quote_status`, `requisitions_list_partial`) and
+  `my_day.py` (`_coerce_task_priority`) keep importing from the package root.
 - `app/routers/htmx/vendors.py` — **CRM-cluster split (vendor slice)**: the vendor + vendor-
   contact partials (`/v2/partials/vendors/*` + `/v2/partials/vendor-contacts`) — vendor list,
   global vendor-contacts list, vendor CRUD, detail shell + tabs, vendor-contact CRUD, vendor

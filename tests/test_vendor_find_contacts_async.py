@@ -163,7 +163,9 @@ def test_find_contacts_nonexistent_still_404(client):
 def test_find_contacts_returns_finding_partial_immediately(client, db_session, vendor, monkeypatch):
     """Via HTTP: the response is the "Finding contacts…" polling partial, returned without
     running the (neutralised) background search."""
-    from app.routers.htmx import vendors as ven
+    # Patch on the DEFINING submodule: vendor_find_contacts looks the runner up in
+    # prospects-module globals, so a package-attribute setattr would not intercept it.
+    from app.routers.htmx.vendors import prospects as ven
 
     # Neutralise the background runner so this test only asserts the immediate response
     # (TestClient runs background tasks synchronously after the response).

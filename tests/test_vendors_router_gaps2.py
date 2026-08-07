@@ -5,7 +5,7 @@ That 42-statement block is the single largest uncovered region and crossing it a
 pushes vendors.py from 83 % to 85 %+.
 
 Called by: pytest
-Depends on: app/routers/htmx/vendors.py, conftest.py fixtures
+Depends on: app/routers/htmx/vendors/ (listing.py), conftest.py fixtures
 """
 
 import os
@@ -106,7 +106,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "sales@techparts.com", "Alice Smith")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>contacts</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts")
 
@@ -125,7 +125,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "unrelated@totally.com", "Unrelated Person")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>filtered</div>")
             # Search by the unique first name — only the first contact should match
             resp = gaps2_client.get("/v2/partials/vendor-contacts?search=zephyr")
@@ -144,7 +144,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "zzz@sort.com", "Z Person")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>sorted</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?sort=email&dir=desc")
 
@@ -159,7 +159,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "contact@vendorsort.com", "Sort Contact")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>ok</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?sort=vendor&dir=asc")
 
@@ -173,7 +173,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "scored@vendor.com", "Scored Contact")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>ok</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?sort=score&dir=asc")
 
@@ -193,7 +193,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "zzz@fallback.com", "Alpha Fallback")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>ok</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?sort=unknown_col")
 
@@ -210,7 +210,7 @@ class TestVendorContactsPartial:
             _contact(db_session, card, f"contact{i}@page.com", f"Contact {i}")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>paged</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?limit=2&offset=1")
 
@@ -234,7 +234,7 @@ class TestVendorContactsPartial:
         _contact(db_session, blacklisted, "bl@blacklisted.com", "BL Contact")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>ok</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts")
 
@@ -257,7 +257,7 @@ class TestVendorContactsPartial:
         _contact(db_session, inactive, "inactive@vendor.com", "Inactive Contact")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>ok</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts")
 
@@ -273,7 +273,7 @@ class TestVendorContactsPartial:
         _contact(db_session, card, "two@all.com", "Two")
         db_session.commit()
 
-        with patch("app.routers.htmx.vendors.template_response") as mock_tpl:
+        with patch("app.routers.htmx.vendors.listing.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("<div>all</div>")
             resp = gaps2_client.get("/v2/partials/vendor-contacts?search=")
 

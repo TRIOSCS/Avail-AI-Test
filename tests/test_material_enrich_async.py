@@ -93,7 +93,12 @@ async def test_enrich_schedules_background_and_does_not_run_inline(db_session, t
     monkeypatch.setattr("app.services.spec_enrichment_service.enrich_card_specs", specs_mock)
     monkeypatch.setattr("app.database.SessionLocal", lambda: fake_bg_session)
     # Skip the (heavy) template render — this test only inspects scheduling + status.
-    monkeypatch.setattr(mat, "material_detail_partial", AsyncMock(return_value=HTMLResponse("queued")))
+    # Patch the defining submodule: enrich_material (actions.py) resolves the name from
+    # actions' globals, so patching the package attribute would not intercept the call.
+    monkeypatch.setattr(
+        "app.routers.htmx.materials.actions.material_detail_partial",
+        AsyncMock(return_value=HTMLResponse("queued")),
+    )
 
     bg = BackgroundTasks()
     await mat.enrich_material(_make_request(), card.id, bg, test_user, db_session)
@@ -122,7 +127,12 @@ async def test_enrich_double_click_does_not_stack_second_run(db_session, test_us
     from app.routers.htmx import materials as mat
 
     card = _make_card(db_session, "async-002")
-    monkeypatch.setattr(mat, "material_detail_partial", AsyncMock(return_value=HTMLResponse("queued")))
+    # Patch the defining submodule: enrich_material (actions.py) resolves the name from
+    # actions' globals, so patching the package attribute would not intercept the call.
+    monkeypatch.setattr(
+        "app.routers.htmx.materials.actions.material_detail_partial",
+        AsyncMock(return_value=HTMLResponse("queued")),
+    )
 
     # Simulate a run already in flight.
     assert enrich_runs.begin(card.id) is True
@@ -141,11 +151,13 @@ def test_enrich_nonexistent_still_404(client):
 def test_enrich_returns_queued_badge_immediately(client, db_session, monkeypatch):
     """Via HTTP: the response is the detail partial showing the polling 'Queued' badge,
     and the card is left unenriched (the worker hasn't produced a terminal status yet)."""
-    from app.routers.htmx import materials as mat
+    from app.routers.htmx.materials import actions
 
     card = _make_card(db_session, "async-003", status="verified", enriched=True)
     # Neutralise the background runner so this test only asserts the immediate response.
-    monkeypatch.setattr(mat, "_run_card_enrichment", AsyncMock())
+    # Patch the defining submodule: enrich_material (actions.py) resolves the name from
+    # actions' globals, so patching the package attribute would not intercept the call.
+    monkeypatch.setattr(actions, "_run_card_enrichment", AsyncMock())
 
     resp = client.post(f"/v2/partials/materials/{card.id}/enrich", headers={"HX-Request": "true"})
     assert resp.status_code == 200

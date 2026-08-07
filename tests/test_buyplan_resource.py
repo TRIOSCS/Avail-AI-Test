@@ -401,7 +401,7 @@ class TestResourceRoutes:
         req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "line"})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans.po_lines, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
             result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session
@@ -431,7 +431,7 @@ class TestResourceRoutes:
         req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "plan", "also_line_ids": [str(line_b.id)]})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans.po_lines, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
         ):
             await htmx_buy_plans.buy_plan_resource_line_partial(req, plan.id, line_a.id, user=test_user, db=db_session)
 
@@ -462,7 +462,9 @@ class TestResourceRoutes:
 
         winner = _second_buyer(db_session)
         req = _FakeRequest({})
-        with patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"):
+        with patch.object(
+            htmx_buy_plans.po_lines, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"
+        ):
             await htmx_buy_plans.buy_plan_claim_line_partial(req, plan.id, line.id, user=winner, db=db_session)
             with pytest.raises(HTTPException) as exc:
                 await htmx_buy_plans.buy_plan_claim_line_partial(req, plan.id, line.id, user=test_user, db=db_session)
