@@ -83,12 +83,13 @@ class TestRegisterOffersJobs:
     @pytest.mark.parametrize(
         "enabled, scan_interval_hours, expected_jobs",
         [
-            # 6 jobs: proactive_matching + performance_tracking + proactive_offer_expiry
-            # + flag_stale_offers + expire_strategic_vendors + warn_strategic_expiring
-            pytest.param(True, 4, 6, id="enabled"),
-            # 5 jobs (no proactive_matching)
+            # 7 jobs: proactive_matching + proactive_digest_drafts + performance_tracking
+            # + proactive_offer_expiry + flag_stale_offers + expire_strategic_vendors
+            # + warn_strategic_expiring
+            pytest.param(True, 4, 7, id="enabled"),
+            # 5 jobs (no proactive_matching, no digest drafts)
             pytest.param(False, None, 5, id="disabled"),
-            pytest.param(True, 0, 6, id="interval_below_min"),
+            pytest.param(True, 0, 7, id="interval_below_min"),
         ],
     )
     def test_register(self, enabled, scan_interval_hours, expected_jobs):
