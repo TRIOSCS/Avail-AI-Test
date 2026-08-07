@@ -284,8 +284,10 @@ def test_wipe_succeeds_with_fk_enforcement(db_session: Session) -> None:
     would raise IntegrityError here instead of silently passing on an FK-off engine.
     """
     # Assert FK enforcement is actually active for this connection — otherwise this
-    # test would be a no-op guarantee (sqlite-masks-postgres trap).
-    assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+    # test would be a no-op guarantee (sqlite-masks-postgres trap). Postgres enforces
+    # FKs unconditionally, so the PRAGMA probe only applies on the SQLite engine.
+    if db_session.get_bind().dialect.name == "sqlite":
+        assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
 
     sds.seed(db_session)
     deleted = sds.wipe(db_session)  # must not raise under RESTRICT FK enforcement
@@ -421,7 +423,9 @@ def test_wipe_with_owner_succeeds_under_fk_enforcement(db_session: Session) -> N
     survives must still satisfy ondelete=RESTRICT — this exercises that path under the
     conftest engine's PRAGMA foreign_keys=ON (else it's a no-op guarantee).
     """
-    assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+    # Postgres enforces FKs unconditionally — the PRAGMA probe is SQLite-only.
+    if db_session.get_bind().dialect.name == "sqlite":
+        assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
 
     sds.seed(db_session, owner_email="fkowner@trioscs.com")
     owner = db_session.query(User).filter(User.email == "fkowner@trioscs.com").one()

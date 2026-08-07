@@ -14,6 +14,7 @@ os.environ["TESTING"] = "1"
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -87,6 +88,8 @@ class TestCheckVendorDuplicateEmpty:
 class TestCheckVendorDuplicateFuzzyPythonPath:
     def test_sqlite_uses_python_fuzzy_path(self, db_session: Session):
         """SQLite dialect triggers _fuzzy_match_python, not pg_trgm."""
+        if db_session.get_bind().dialect.name != "sqlite":
+            pytest.skip("pins the SQLite-only python fuzzy fallback; the PG engine takes the pg_trgm path")
         _make_vendor(db_session, "digikey", "Digi-Key Electronics")
 
         with patch("app.services.vendor_duplicates._fuzzy_match_python", return_value=[]) as mock_py:

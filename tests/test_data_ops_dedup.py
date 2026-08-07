@@ -87,7 +87,10 @@ class TestRenderNoCruft:
     def test_render_has_working_merge_buttons_and_no_dead_alpine(self, admin_client, db_session):
         """The render must NOT carry the dead `merged`/x-if/x-cloak wrapper that hid the
         merge buttons (the root cause), and MUST carry live hx-post merge buttons."""
-        v1, v2 = _vendors(db_session)
+        # Long pair clears the finder threshold on BOTH backends (pg_trgm 0.90) —
+        # the default "Acme Components"/"Acme Components Inc" is 0.818 on pg_trgm
+        # and renders the empty state on the PG engine.
+        v1, v2 = _vendors(db_session, "Acme Components International", "Acme Components Internationa")
         resp = admin_client.get("/v2/partials/settings/data-ops")
         assert resp.status_code == 200
         html = resp.text
@@ -220,7 +223,8 @@ class TestDeleteBoth:
 
 class TestBulkActions:
     def test_render_has_multiselect_scaffold(self, admin_client, db_session):
-        _vendors(db_session)
+        # Long pair clears the finder threshold on BOTH backends (see TestRenderNoCruft).
+        _vendors(db_session, "Acme Components International", "Acme Components Internationa")
         html = admin_client.get("/v2/partials/settings/data-ops").text
         assert "dedupSelect()" in html
         assert "Select all" in html

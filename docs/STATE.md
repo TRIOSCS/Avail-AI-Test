@@ -205,10 +205,22 @@ the 6 stored requisition statuses present, health 200). Acceptance:
   order-sensitive matching runtime-verified per router; largest router
   file in the tree now 796. test_no_router_over_800_lines guard landed
   (no allowlist).
-- [ ] W4.7 Postgres test engine — kernel E2E on PG-backed suite (§10;
-  DEFERS FIRST if the wave runs long, brief §4.6)
-- [ ] W4.A Acceptance: §3 walk green on the deployed 5-tab build; guard
-  green; suite green → Packet 4 (final numbers + launch-deal scheduling)
+- [x] W4.7 COMPLETE — no deferral needed: main test engine runs on PG
+  when PG_TEST_DSN is set (per-xdist-worker throwaway DBs, same per-test
+  isolation, double-import bootstrap guard); SQLite default unchanged.
+  Census: 10 mechanical failures / 6 files, all fixed. PG suite
+  18,933/0; SQLite 18,914/0. Product find → Packet 4 P4-D4 (pg_trgm 85
+  cutoff misses near-identical vendor pairs in production).
+- [x] W4.A ACCEPTANCE COMPLETE: 5-tab app fully §3-walkable — kernel
+  walk 18/2 GREEN on FIVE consecutive deployed builds this wave (W4.1,
+  W4.2, W4.3, W4.4+4.5, W4.8); no router over 800 lines
+  (test_no_router_over_800_lines, no allowlist); suite green on the
+  Postgres-backed engine. **Packet 4 ASSEMBLED →
+  docs/evidence/packet4.md** (final numbers: routes 809→643, statuses
+  114→92, nav 10→5+gear, largest router 3,812→796; decisions P4-D1..D4;
+  launch-deal scheduling ask). WAVE 4 CLOSED — ALL FOUR WAVES COMPLETE;
+  cutover awaits the launch deal + owner's word (CUTOVER.md, rehearsed
+  5×).
 
 ## Baseline metrics (Rule 3.6 — recorded before any Wave 1 work)
 

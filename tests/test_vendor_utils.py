@@ -304,16 +304,20 @@ class TestFindVendorDedupCandidates:
 
         from app.models import VendorCard
 
+        # Pair must clear threshold=85 on BOTH backends: pg_trgm similarity() gives
+        # this pair 0.90 (rapidfuzz 98). The shorter "arrow electronics"/"arrow
+        # electronic" pair scores only 0.842 on pg_trgm and is missed on the PG
+        # engine at the default threshold.
         cards = [
             VendorCard(
-                normalized_name="arrow electronics",
-                display_name="Arrow Electronics",
+                normalized_name="arrow electronics corporation",
+                display_name="Arrow Electronics Corporation",
                 sighting_count=100,
                 created_at=datetime.now(UTC),
             ),
             VendorCard(
-                normalized_name="arrow electronic",
-                display_name="Arrow Electronic",
+                normalized_name="arrow electronics corporatio",
+                display_name="Arrow Electronics Corporatio",
                 sighting_count=5,
                 created_at=datetime.now(UTC),
             ),
@@ -482,18 +486,21 @@ class TestFindVendorDedupCandidates:
                     created_at=datetime.now(UTC),
                 )
             )
+        # Pair calibrated to clear threshold=85 on BOTH backends (pg_trgm 0.909,
+        # rapidfuzz 98) — "zyquin components"/"zyquin component" scores 0.842 on
+        # pg_trgm and is missed on the PG engine.
         db_session.add(
             VendorCard(
-                normalized_name="zyquin components",
-                display_name="Zyquin Components",
+                normalized_name="zyquin components international",
+                display_name="Zyquin Components International",
                 sighting_count=0,
                 created_at=datetime.now(UTC),
             )
         )
         db_session.add(
             VendorCard(
-                normalized_name="zyquin component",
-                display_name="Zyquin Component",
+                normalized_name="zyquin components internationa",
+                display_name="Zyquin Components Internationa",
                 sighting_count=1,
                 created_at=datetime.now(UTC),
             )
@@ -502,9 +509,9 @@ class TestFindVendorDedupCandidates:
 
         results = find_vendor_dedup_candidates(db_session, threshold=85, limit=50)
         names = {(r["vendor_a"]["name"], r["vendor_b"]["name"]) for r in results}
-        assert ("Zyquin Components", "Zyquin Component") in names or (
-            "Zyquin Component",
-            "Zyquin Components",
+        assert ("Zyquin Components International", "Zyquin Components Internationa") in names or (
+            "Zyquin Components Internationa",
+            "Zyquin Components International",
         ) in names
 
     def test_uses_pg_path_when_dialect_is_postgresql(self):

@@ -81,14 +81,17 @@ class TestNullScoreSortsLastOnPostgres:
         """GET /v2/partials/sightings's per-requirement 'top vendor' pick must be the
         scored vendor — a NULL-scored row sorting first (no ``.nullslast()``) would
         silently promote the un-scored summary as 'top'."""
+        # W4.8 split the sightings router into a package — the board view (and its
+        # template_response name) now lives in the ``board`` submodule.
         from app.routers import sightings as sightings_router
+        from app.routers.sightings import board as sightings_board
 
         user = pg_session.query(User).filter_by(email="pgbuyer@trioscs.com").one()
         requirement = _seed_requirement(pg_session, user, "PGNULL-BOARD-1")
         _seed_summaries(pg_session, requirement)
         sightings_router._invalidate_cache("sightings_stat_counts")
 
-        captured = _capture_ctx(monkeypatch, sightings_router)
+        captured = _capture_ctx(monkeypatch, sightings_board)
         resp = pg_client.get("/v2/partials/sightings")
         assert resp.status_code == 200
 
@@ -99,13 +102,14 @@ class TestNullScoreSortsLastOnPostgres:
     def test_detail_panel_lists_scored_vendor_before_null(self, pg_client, pg_session: Session, monkeypatch):
         """GET /v2/partials/sightings/{id}/detail renders ``summaries`` in query order —
         the scored vendor must render BEFORE the NULL-scored one."""
-        from app.routers import sightings as sightings_router
+        # W4.8 package split: the detail view renders from the ``detail`` submodule.
+        from app.routers.sightings import detail as sightings_detail
 
         user = pg_session.query(User).filter_by(email="pgbuyer@trioscs.com").one()
         requirement = _seed_requirement(pg_session, user, "PGNULL-DETAIL-1")
         _seed_summaries(pg_session, requirement)
 
-        captured = _capture_ctx(monkeypatch, sightings_router)
+        captured = _capture_ctx(monkeypatch, sightings_detail)
         resp = pg_client.get(f"/v2/partials/sightings/{requirement.id}/detail")
         assert resp.status_code == 200
 

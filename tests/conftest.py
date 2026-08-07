@@ -1,11 +1,12 @@
 """conftest.py — Shared Test Fixtures for AVAIL AI.
 
-Provides an in-memory SQLite database, FastAPI TestClient with auth
-overrides, and factory fixtures for core models (User, Requisition,
-Company, VendorCard).
+Provides the shared test database engine — in-memory SQLite by default, a real
+per-xdist-worker PostgreSQL database when ``PG_TEST_DSN`` is set — plus a FastAPI
+TestClient with auth overrides and factory fixtures for core models (User,
+Requisition, Company, VendorCard).
 
 Business Rules:
-- All tests run against isolated in-memory DB (no prod data risk)
+- All tests run against an isolated throwaway DB (no prod data risk)
 - Auth is overridden so tests don't need M365 tokens
 - Each test function gets a fresh DB session (auto-rollback)
 
@@ -61,10 +62,23 @@ from app.models import (
     VendorContact,
 )
 
-# ── In-memory SQLite engine ──────────────────────────────────────────
-# SQLite can't handle PostgreSQL ARRAY columns — remap them to JSON.
+# ── Shared test engine: Postgres when PG_TEST_DSN is set, SQLite otherwise ──
+# Default = in-memory SQLite (zero-dependency local runs, unchanged). Setting
+# ``PG_TEST_DSN`` to a superuser DSN (e.g. postgresql://u:p@host:port/postgres)
+# switches the MAIN suite engine to real PostgreSQL: each xdist worker gets its
+# OWN throwaway database (availtest_gw0, availtest_gw1, …; availtest_main when
+# xdist is off), created fresh at import time from the DSN's admin connection and
+# dropped best-effort at process exit — workers never share state, reruns start
+# clean. ``app.database``'s TESTING engine stays sqlite:// in both modes; only
+# the fixture-injected session talks to Postgres.
 
-TEST_DB_URL = "sqlite://"  # in-memory, fresh per session
+PG_TEST_DSN = os.environ.get("PG_TEST_DSN", "")
+
+TEST_DB_URL = "sqlite://"  # SQLite fallback: in-memory, fresh per session
+
+# Tables using PostgreSQL-only types (ARRAY) that SQLite can't handle.
+# Excluded from the SQLite test DB only — on the PG engine every table exists.
+_PG_ONLY_TABLES = {"buyer_profiles"}
 
 
 def _patch_types_for_sqlite():
@@ -77,31 +91,84 @@ def _patch_types_for_sqlite():
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "JSON"
 
 
-_patch_types_for_sqlite()
+_patch_types_for_sqlite()  # always — app.database's TESTING engine is sqlite:// either way
 
-engine = create_engine(
-    TEST_DB_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+
+def _make_pg_worker_engine():
+    """CREATE this worker's own throwaway database and return an engine bound to it.
+
+    Runs at conftest import (once per xdist worker process). The database name is
+    derived from ``PYTEST_XDIST_WORKER`` so parallel workers can never collide; a
+    stale DB from a crashed run is force-dropped first. ``pg_trgm`` is created
+    before ``create_all`` so the GIN trigram indexes build. The ``atexit`` hook
+    drops the worker DB best-effort — a failure only leaks a throwaway database.
+
+    DOUBLE-IMPORT GUARD: this conftest executes TWICE per process — pytest loads
+    it as ``conftest`` while ``from tests.conftest import engine`` loads a second
+    ``tests.conftest`` module object (no ``tests/__init__.py``; see the note in
+    tests/test_api_health.py). Without a guard the second execution force-drops
+    and recreates the worker DB out from under the first engine's live pool
+    ("terminating connection due to administrator command" mid-suite). The
+    sentinel lives in ``os.environ`` because that is shared across both module
+    instances but NOT across xdist worker processes with different worker names.
+    """
+    import atexit
+
+    from sqlalchemy.engine import make_url
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    db_name = f"availtest_{worker}"
+    sentinel = f"_AVAIL_PG_TESTDB_READY_{worker}"
+    admin_engine = create_engine(make_url(PG_TEST_DSN), isolation_level="AUTOCOMMIT")
+    first_import = sentinel not in os.environ
+    if first_import:
+        with admin_engine.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+            conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        os.environ[sentinel] = "1"
+    eng = create_engine(make_url(PG_TEST_DSN).set(database=db_name))
+    if first_import:
+        with eng.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        Base.metadata.create_all(bind=eng)  # ALL tables — the _PG_ONLY_TABLES gate is SQLite-only
+
+        def _drop_worker_db() -> None:
+            try:
+                eng.dispose()
+                with admin_engine.connect() as conn:
+                    conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+            except Exception as exc:  # best-effort teardown of a throwaway DB
+                logger.warning("Could not drop test database {}: {}", db_name, exc)
+            finally:
+                admin_engine.dispose()
+                os.environ.pop(sentinel, None)
+
+        atexit.register(_drop_worker_db)
+    return eng
+
+
+if PG_TEST_DSN:
+    engine = _make_pg_worker_engine()
+else:
+    engine = create_engine(
+        TEST_DB_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_fk(dbapi_conn, _):
+        """SQLite ignores FKs by default — turn them on."""
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
+    # Create tables once at import time — NOT per test.
+    _sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG_ONLY_TABLES]
+    Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
+
+_IS_PG = engine.dialect.name == "postgresql"
 TestSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=True)
 
-
-@event.listens_for(engine, "connect")
-def _enable_fk(dbapi_conn, _):
-    """SQLite ignores FKs by default — turn them on."""
-    dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
-
 # ── Fixtures ─────────────────────────────────────────────────────────
-
-# Tables using PostgreSQL-only types (ARRAY) that SQLite can't handle.
-# These are excluded from the test DB; tests needing them require PostgreSQL.
-_PG_ONLY_TABLES = {"buyer_profiles"}
-
-# Create tables once at import time — NOT per test.
-_sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG_ONLY_TABLES]
-Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
 
 # Pre-compute delete order (respects FK dependencies via reversed create order).
 #
@@ -117,7 +184,7 @@ _tables_by_name = {t.name: t for t in Base.metadata.sorted_tables}
 _delete_order_names = [n for n in _CYCLE_DELETE_FIRST if n in _tables_by_name] + [
     t.name for t in reversed(Base.metadata.sorted_tables) if t.name not in _CYCLE_DELETE_FIRST
 ]
-_delete_stmts = [_tables_by_name[n].delete() for n in _delete_order_names if n not in _PG_ONLY_TABLES]
+_delete_stmts = [_tables_by_name[n].delete() for n in _delete_order_names if _IS_PG or n not in _PG_ONLY_TABLES]
 
 
 def _cleanup_all_rows() -> None:
@@ -149,6 +216,18 @@ def _cleanup_all_rows() -> None:
             except Exception:
                 sp.rollback()
                 logger.warning("Test cleanup could not delete {} — rows may leak", stmt.table.name)
+        if _IS_PG:
+            # SQLite hands out max(rowid)+1, so after delete-all the next test's ids
+            # restart at 1; PG sequences would keep climbing instead. Reset every
+            # sequence in one statement so both engines assign identical ids
+            # test-over-test (mirrors the SQLite isolation semantics exactly).
+            conn.execute(
+                text(
+                    "SELECT setval(c.oid, 1, false) FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind = 'S' AND n.nspname = 'public'"
+                )
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -340,12 +419,14 @@ def db_session():
         yield session
     finally:
         session.rollback()
-        # Restore FK enforcement in case a test flipped it OFF and never restored
-        # it — the StaticPool engine shares ONE connection per worker, so a leaked
-        # OFF poisons every later test in the process (the ``connect`` listener
-        # only fires once). Must run after rollback: the pragma is a no-op while
-        # a transaction is open.
-        session.execute(text("PRAGMA foreign_keys=ON"))
+        if not _IS_PG:
+            # Restore FK enforcement in case a test flipped it OFF and never restored
+            # it — the StaticPool engine shares ONE connection per worker, so a leaked
+            # OFF poisons every later test in the process (the ``connect`` listener
+            # only fires once). Must run after rollback: the pragma is a no-op while
+            # a transaction is open. (PG needs no equivalent: sqlite_fk_disabled's PG
+            # branch restores session_replication_role itself, per session.)
+            session.execute(text("PRAGMA foreign_keys=ON"))
         # Delete all rows in FK-safe order — much faster than drop_all/create_all.
         # Per-table savepoints keep one failure from cascading (see _cleanup_all_rows).
         _cleanup_all_rows()
@@ -366,7 +447,24 @@ def sqlite_fk_disabled(db: Session):
     WARNING: entering this context rolls back any uncommitted work already staged
     on *db* before the ``with`` block (the entry pragma flip requires no open
     transaction) — callers must ``db.commit()`` their own pending changes first.
+
+    On the Postgres engine (PG_TEST_DSN set) the equivalent is
+    ``SET session_replication_role = replica``, which suppresses the RI (FK)
+    triggers for this session only — requires the superuser DSN the PG test
+    engine already mandates. Plain ``SET`` is transactional in PG, so both flips
+    are committed; the error path rolls back seeds AND the flip together.
     """
+    if _IS_PG:
+        db.rollback()  # mirror the SQLite contract: pending work is discarded on entry
+        db.execute(text("SET session_replication_role = replica"))
+        try:
+            yield db
+            db.commit()
+        finally:
+            db.rollback()  # error path: undo seeds + the (uncommitted) replica flip
+            db.execute(text("SET session_replication_role = DEFAULT"))
+            db.commit()
+        return
     db.rollback()  # close any open tx so the OFF pragma takes effect
     db.execute(text("PRAGMA foreign_keys=OFF"))
     try:
@@ -400,8 +498,7 @@ def force_card_category(db: Session, card: MaterialCard, raw_value: str) -> None
 # the ``requires_postgres`` marker: they RUN against a real Postgres only when
 # ``PG_TEST_DSN`` is set (the dedicated CI "postgres-paths" job sets it), and SKIP
 # cleanly on SQLite so the default local ``-n auto`` suite stays GREEN.
-
-PG_TEST_DSN = os.environ.get("PG_TEST_DSN", "")
+# (``PG_TEST_DSN`` itself is read once, up top, where the engine branch lives.)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -433,21 +530,16 @@ def requires_postgres(obj):
 def pg_engine():
     """A real PostgreSQL engine with the full ORM schema + the pg_trgm extension.
 
-    Session-scoped: builds the schema once via ``Base.metadata.create_all``. The
-    ``pg_trgm`` extension is created FIRST so the GIN trigram indexes on
-    ``vendor_cards``/``site_contacts`` build. Every consumer is gated by the
-    ``requires_postgres`` marker, so this only runs when ``PG_TEST_DSN`` is set.
+    Whenever ``PG_TEST_DSN`` is set the MAIN suite engine already IS that — a
+    per-xdist-worker throwaway database with ``pg_trgm`` and the full schema built
+    at import — so this simply hands out the shared engine. That keeps every
+    ``requires_postgres`` consumer on the worker-scoped database instead of racing
+    other xdist workers' TRUNCATEs on one shared DSN database. Not disposed here:
+    the import-time ``atexit`` hook owns the engine's lifecycle.
     """
     if not PG_TEST_DSN:
         pytest.skip("PG_TEST_DSN not set")
-    from sqlalchemy import text as sa_text
-
-    eng = create_engine(PG_TEST_DSN)
-    with eng.begin() as conn:
-        conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-    Base.metadata.create_all(bind=eng)
-    yield eng
-    eng.dispose()
+    yield engine
 
 
 @pytest.fixture()

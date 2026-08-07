@@ -113,8 +113,11 @@ class TestScanErrorState:
 class TestMergeDisambiguation:
     def test_vendor_rows_show_suggested_keep_hint(self, admin_client, db_session):
         """Vendor dedup rows surface a 'suggested keep' hint, like company rows."""
-        _vendor(db_session, "arrow electronics", "Arrow Electronics", 100)
-        _vendor(db_session, "arrow electronic", "Arrow Electronic", 5)
+        # Pair must clear the default threshold on BOTH backends (pg_trgm 0.90,
+        # rapidfuzz 98) — "arrow electronics"/"arrow electronic" is 0.842 on pg_trgm
+        # and invisible to the PG engine's dedup finder.
+        _vendor(db_session, "arrow electronics corporation", "Arrow Electronics Corporation", 100)
+        _vendor(db_session, "arrow electronics corporatio", "Arrow Electronics Corporatio", 5)
         db_session.commit()
 
         resp = admin_client.get("/v2/partials/settings/data-ops")
@@ -122,7 +125,7 @@ class TestMergeDisambiguation:
         html = resp.text
         assert "suggested keep" in html.lower()
         # The actual vendor names must render (the row is not blank/undefined).
-        assert "Arrow Electronics" in html
+        assert "Arrow Electronics Corporation" in html
 
     def test_company_empty_state_says_companies_not_customers(self, admin_client, db_session):
         """The Company Duplicates empty state uses 'companies', matching the card
