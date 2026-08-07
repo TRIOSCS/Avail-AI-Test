@@ -1,0 +1,61 @@
+{#
+  proactive/_prepared_offers.html — Review strip: staged per-customer draft offers.
+  One card per customer produced by Process; the rep reviews and fires each with
+  one click (or opens the full Prepare page to tweak contacts/prices/body).
+  Receives: prepared (list of dicts from list_draft_offers), scope.
+  Called by: proactive/list.html (Matches tab, above the groups).
+  Depends on: Alpine.js, Tailwind CSS, HTMX.
+#}
+{% if prepared %}
+<div class="mb-4">
+  <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+    Prepared offers — review and send ({{ prepared|length }})
+  </p>
+  {% for p in prepared %}
+  <div class="mb-2 bg-white rounded-lg border border-line-base overflow-hidden" x-data="{ open: false }">
+    <div class="flex items-center gap-3 px-4 py-2.5">
+      <button @click="open = !open" class="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none focus:ring-2 rounded" style="--tw-ring-color:var(--accent-ring)" aria-label="Preview offer email">
+        <svg class="h-4 w-4 transition-transform" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-900 truncate">{{ p.company_name }}</p>
+        <p class="text-xs text-gray-500 truncate">
+          {{ p.line_count }} part{{ 's' if p.line_count != 1 }} · ${{ "{:,.2f}".format(p.total_sell) }}
+          {% if scope == 'all' %} · {{ p.salesperson_name }}{% endif %}
+          ·
+          {% if p.recipient_emails %}to {{ p.recipient_emails | join(', ') }}{% else %}<span class="text-rose-600 font-medium">no contact on file</span>{% endif %}
+        </p>
+      </div>
+      {# Open in Prepare — full editor for contacts / prices / body #}
+      <form method="POST" action="/v2/proactive/prepare/{{ p.customer_site_id }}"
+            hx-post="/v2/proactive/prepare/{{ p.customer_site_id }}"
+            hx-target="#main-content" class="inline">
+        {% for mid in p.match_ids %}<input type="hidden" name="match_ids" value="{{ mid }}">{% endfor %}
+        <button type="submit" class="btn-secondary btn-sm">Prepare</button>
+      </form>
+      <button hx-post="/v2/partials/proactive/prepared/{{ p.id }}/discard"
+              hx-target="#main-content"
+              hx-confirm="Discard this prepared offer? Its matches go back in the list."
+              data-loading-disable
+              class="btn-secondary btn-sm">
+        Discard
+      </button>
+      <button hx-post="/v2/partials/proactive/prepared/{{ p.id }}/send"
+              hx-target="#main-content"
+              hx-confirm="Email this offer to {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
+              data-loading-disable
+              {% if not p.recipient_emails %}disabled title="No contact on file — open Prepare to pick or add one"{% endif %}
+              class="btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
+        Send
+      </button>
+    </div>
+    <div x-show="open" x-cloak class="border-t border-line-base px-4 py-3 text-sm bg-gray-50">
+      <p class="text-xs text-gray-500 mb-2">Subject: {{ p.subject }}</p>
+      <div class="bg-white rounded border border-line-base p-3 overflow-x-auto">{{ p.body_html | safe }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

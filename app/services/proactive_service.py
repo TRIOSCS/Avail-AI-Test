@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from loguru import logger
-from sqlalchemy import case, func
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
@@ -103,6 +103,13 @@ def get_matches_for_user(
 
     rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
 
+    # Rep attribution for the manager's See-All view.
+    rep_names: dict[int, str] = {}
+    if admin_all:
+        rep_ids = {m.salesperson_id for m in matches if m.salesperson_id}
+        if rep_ids:
+            rep_names = dict(db.execute(select(User.id, User.name).where(User.id.in_(rep_ids))).all())
+
     for m in matches:
         # Skip matches suppressed by do-not-offer
         site = m.customer_site
@@ -122,6 +129,7 @@ def get_matches_for_user(
                 "company_id": company_id,
                 "company_name": company_name,
                 "site_name": site.site_name if site else "",
+                "salesperson_name": rep_names.get(m.salesperson_id, "") if admin_all else "",
                 "matches": [],
             }
         offer = m.offer
@@ -234,8 +242,6 @@ def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
     cost spread, recent wins, and ask age (2026-08-06 rework). The cache is busted by
     the scan/rematch paths via PICKS_CACHE_PREFIX.
     """
-    from sqlalchemy import select
-
     from ..cache.intel_cache import get_cached, set_cached
     from .proactive_matching import compute_offer_rollups
 
@@ -285,6 +291,91 @@ def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
 # ── Send Proactive Offer ──────────────────────────────────────────────────
 
 
+def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, Decimal]:
+    """Line items + totals for a customer offer email.
+
+    Shared by the prepare-page send and the Process draft builder. Missing sell prices
+    default to cost x 1.3.
+    """
+    line_items = []
+    total_sell = Decimal("0")
+    total_cost = Decimal("0")
+    for m in matches:
+        offer = m.offer
+        if not offer:
+            continue
+        cost = float(offer.unit_price) if offer.unit_price else 0
+        sell = sell_prices.get(str(m.id), cost * 1.3)
+        target = m.requirement.target_qty if m.requirement else 0
+        avail = offer.qty_available or 0
+        qty = min(avail, target) if target > 0 else avail
+        total_sell += Decimal(str(sell)) * qty
+        total_cost += Decimal(str(cost)) * qty
+        line_items.append(
+            {
+                "match_id": m.id,
+                "offer_id": offer.id,
+                "mpn": m.mpn,
+                "vendor_name": offer.vendor_name,
+                "manufacturer": offer.manufacturer,
+                "qty": qty,
+                "unit_price": cost,
+                "sell_price": float(sell),
+                "condition": offer.condition,
+                "lead_time": offer.lead_time,
+            }
+        )
+    return line_items, total_sell, total_cost
+
+
+def _template_email_html(salesperson_name: str, contacts: list, line_items: list, notes: str | None) -> str:
+    """Deterministic customer-offer email body (no AI).
+
+    Shared template fallback.
+    """
+    rows_html = ""
+    for item in line_items:
+        rows_html += f"""<tr>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item["mpn"]))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("manufacturer", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">{item["qty"]:,}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">${item["sell_price"]:.4f}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("condition", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
+        </tr>"""
+
+    contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
+    if len(contacts) == 1 and contacts[0].full_name:
+        greeting = f"Hi {html.escape(str(contacts[0].full_name))},"
+    elif contact_names:
+        greeting = f"Hi {html.escape(str(contact_names))},"
+    else:
+        greeting = "Hello,"
+
+    notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
+
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:700px">
+        <p>{greeting}</p>
+        <p>We have the following parts available that may be of interest based on your previous requirements:</p>
+        <table style="border-collapse:collapse;width:100%;margin:16px 0">
+            <thead><tr style="background:#f3f4f6">
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Part Number</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Manufacturer</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty Available</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Price</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Condition</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
+            </tr></thead>
+            <tbody>{rows_html}</tbody>
+        </table>
+        {notes_html}
+        <p>Please reply to this email if you'd like to place an order or need more details on any of these items.</p>
+        <p>Best regards,<br>{html.escape(str(salesperson_name))}<br>Trio Supply Chain Solutions</p>
+    </div>
+    """
+
+
 async def send_proactive_offer(
     db: Session,
     user: User,
@@ -295,20 +386,19 @@ async def send_proactive_offer(
     subject: str | None = None,
     notes: str | None = None,
     email_html: str | None = None,
+    allow_all: bool = False,
 ) -> dict:
     """Send a proactive offer email to a customer.
 
-    Returns the created ProactiveOffer dict.
+    ``allow_all`` lets a manager/admin send on a rep's matches; the offer is
+    always attributed to the matches' salesperson, the mail goes out from the
+    ACTOR's mailbox. Returns the created ProactiveOffer dict.
     """
     # Load and validate matches
-    matches = (
-        db.query(ProactiveMatch)
-        .filter(
-            ProactiveMatch.id.in_(match_ids),
-            ProactiveMatch.salesperson_id == user.id,
-        )
-        .all()
-    )
+    query = db.query(ProactiveMatch).filter(ProactiveMatch.id.in_(match_ids))
+    if not allow_all:
+        query = query.filter(ProactiveMatch.salesperson_id == user.id)
+    matches = query.all()
     if not matches:
         raise ValueError("No valid matches found")
 
@@ -334,38 +424,12 @@ async def send_proactive_offer(
         raise ValueError("Selected contacts have no email addresses")
 
     # Build line items
-    line_items = []
-    total_sell = Decimal("0")
-    total_cost = Decimal("0")
-    for m in matches:
-        offer = m.offer
-        if not offer:
-            continue
-        cost = float(offer.unit_price) if offer.unit_price else 0
-        sell = sell_prices.get(str(m.id), cost * 1.3)
-        target = m.requirement.target_qty if m.requirement else 0
-        avail = offer.qty_available or 0
-        qty = min(avail, target) if target > 0 else avail
-        line_total_sell = Decimal(str(sell)) * qty
-        line_total_cost = Decimal(str(cost)) * qty
-        total_sell += line_total_sell
-        total_cost += line_total_cost
-        line_items.append(
-            {
-                "match_id": m.id,
-                "offer_id": offer.id,
-                "mpn": m.mpn,
-                "vendor_name": offer.vendor_name,
-                "manufacturer": offer.manufacturer,
-                "qty": qty,
-                "unit_price": cost,
-                "sell_price": float(sell),
-                "condition": offer.condition,
-                "lead_time": offer.lead_time,
-            }
-        )
+    line_items, total_sell, total_cost = _build_line_items(matches, sell_prices)
 
-    # Build email HTML
+    # Build email HTML — signed by the relationship owner (the matches' rep),
+    # even when a manager is the one clicking send.
+    owner_id = matches[0].salesperson_id or user.id
+    owner = user if owner_id == user.id else (db.get(User, owner_id) or user)
     if not subject:
         subject = f"Parts Available — {company_name}"
 
@@ -373,54 +437,13 @@ async def send_proactive_offer(
         # Use AI-drafted or user-edited HTML
         html_body = email_html
     else:
-        # Fallback: build template HTML
-        rows_html = ""
-        for item in line_items:
-            rows_html += f"""<tr>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item["mpn"]))}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("manufacturer", "")))}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">{item["qty"]:,}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">${item["sell_price"]:.4f}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("condition", "")))}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
-            </tr>"""
-
-        contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
-        if len(contacts) == 1 and contacts[0].full_name:
-            greeting = f"Hi {html.escape(str(contacts[0].full_name))},"
-        elif contact_names:
-            greeting = f"Hi {html.escape(str(contact_names))},"
-        else:
-            greeting = "Hello,"
-
-        notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
-        salesperson_name = user.name or user.email.split("@")[0]
-
-        html_body = f"""
-        <div style="font-family:Arial,sans-serif;max-width:700px">
-            <p>{greeting}</p>
-            <p>We have the following parts available that may be of interest based on your previous requirements:</p>
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-                <thead><tr style="background:#f3f4f6">
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Part Number</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Manufacturer</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty Available</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Price</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Condition</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
-                </tr></thead>
-                <tbody>{rows_html}</tbody>
-            </table>
-            {notes_html}
-            <p>Please reply to this email if you'd like to place an order or need more details on any of these items.</p>
-            <p>Best regards,<br>{html.escape(str(salesperson_name))}<br>Trio Supply Chain Solutions</p>
-        </div>
-        """
+        salesperson_name = owner.name or owner.email.split("@")[0]
+        html_body = _template_email_html(salesperson_name, contacts, line_items, notes)
 
     # Create ProactiveOffer record first to get ID for subject tag
     po = ProactiveOffer(
         customer_site_id=site_id,
-        salesperson_id=user.id,
+        salesperson_id=owner_id,
         line_items=line_items,
         recipient_contact_ids=[c.id for c in contacts],
         recipient_emails=recipient_emails,
@@ -490,8 +513,264 @@ async def send_proactive_offer(
                 # Mirror autoflush: a later match with the same MPN updates this row.
                 throttle_by_mpn[m.mpn] = new_throttle
 
+        # A full prepare-page send supersedes any staged Process draft that
+        # references the same matches — drop it so nothing double-sends.
+        sent_match_ids = {m.id for m in matches}
+        for draft in db.scalars(
+            select(ProactiveOffer).where(
+                ProactiveOffer.customer_site_id == site_id,
+                ProactiveOffer.status == ProactiveOfferStatus.DRAFT,
+            )
+        ).all():
+            draft_match_ids = {li.get("match_id") for li in (draft.line_items or [])}
+            if draft_match_ids & sent_match_ids:
+                db.delete(draft)
+
     db.commit()
     return _proactive_offer_to_dict(po)
+
+
+# ── Process flow: per-customer draft offers (check → Process → review → send) ──
+
+
+def _draft_queued_match_ids(db: Session) -> set[int]:
+    """Match ids already referenced by a staged DRAFT offer (double-queue guard)."""
+    queued: set[int] = set()
+    for draft in db.scalars(select(ProactiveOffer).where(ProactiveOffer.status == ProactiveOfferStatus.DRAFT)).all():
+        queued |= {li.get("match_id") for li in (draft.line_items or []) if li.get("match_id")}
+    return queued
+
+
+def process_matches(
+    db: Session,
+    user: User,
+    *,
+    send_ids: list[int],
+    ignore_ids: list[int],
+    allow_all: bool = False,
+) -> dict:
+    """The Matches tab's Process action: dismiss the ignores, stage the sends.
+
+    Ignored matches are dismissed immediately (a future rematch can resurface the part).
+    Send-marked matches become ONE DRAFT ProactiveOffer per customer — default contact,
+    sell prices seeded from the last quote on the part (else cost x 1.3), template email
+    body — staged for review. Nothing is emailed here. Caller commits.
+    """
+    ignored = 0
+    if ignore_ids:
+        conditions = [
+            ProactiveMatch.id.in_(ignore_ids),
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
+        ]
+        if not allow_all:
+            conditions.append(ProactiveMatch.salesperson_id == user.id)
+        ignored = db.execute(
+            update(ProactiveMatch)
+            .where(*conditions)
+            .values(status=ProactiveMatchStatus.DISMISSED, dismiss_reason="processed_ignore")
+            .execution_options(synchronize_session=False)
+        ).rowcount
+    staged = build_draft_offers(db, user, send_ids, allow_all=allow_all) if send_ids else {}
+    return {"ignored": ignored, **staged}
+
+
+def build_draft_offers(db: Session, user: User, match_ids: list[int], *, allow_all: bool = False) -> dict:
+    """Stage one DRAFT ProactiveOffer per customer from the given matches."""
+    from .pricing_history import last_quote_for_part
+
+    stmt = select(ProactiveMatch).where(
+        ProactiveMatch.id.in_(match_ids),
+        ProactiveMatch.status == ProactiveMatchStatus.NEW,
+    )
+    if not allow_all:
+        stmt = stmt.where(ProactiveMatch.salesperson_id == user.id)
+    matches = list(
+        db.scalars(stmt.options(joinedload(ProactiveMatch.offer), joinedload(ProactiveMatch.requirement))).unique()
+    )
+
+    queued = _draft_queued_match_ids(db)
+    skipped_queued = len([m for m in matches if m.id in queued])
+    matches = [m for m in matches if m.id not in queued]
+
+    by_site: dict[int, list] = {}
+    skipped_backorder = 0
+    for m in matches:
+        if m.customer_site_id:
+            by_site.setdefault(m.customer_site_id, []).append(m)
+        else:
+            skipped_backorder += 1  # no customer account — nowhere to email
+
+    drafts_created = 0
+    needs_contact = 0
+    for site_id, site_matches in by_site.items():
+        site = db.get(CustomerSite, site_id)
+        company_name = site.company.name if site and site.company else "Customer"
+        contact = db.scalars(
+            select(SiteContact)
+            .where(
+                SiteContact.customer_site_id == site_id,
+                SiteContact.email.isnot(None),
+                SiteContact.email != "",
+            )
+            .order_by(SiteContact.id)
+        ).first()
+        if not contact:
+            needs_contact += 1
+
+        sell_prices: dict[str, float] = {}
+        for m in site_matches:
+            anchor = last_quote_for_part(db, part=(m.mpn or "").strip().upper())
+            if anchor and anchor["price"]:
+                sell_prices[str(m.id)] = float(anchor["price"])
+
+        line_items, total_sell, total_cost = _build_line_items(site_matches, sell_prices)
+        if not line_items:
+            continue
+
+        owner_id = site_matches[0].salesperson_id or user.id
+        owner = user if owner_id == user.id else (db.get(User, owner_id) or user)
+        owner_name = owner.name or owner.email.split("@")[0]
+        contacts = [contact] if contact else []
+
+        db.add(
+            ProactiveOffer(
+                customer_site_id=site_id,
+                salesperson_id=owner_id,
+                status=ProactiveOfferStatus.DRAFT,
+                sent_at=None,
+                line_items=line_items,
+                recipient_contact_ids=[c.id for c in contacts],
+                recipient_emails=[c.email for c in contacts],
+                subject=f"Parts Available — {company_name}",
+                email_body_html=_template_email_html(owner_name, contacts, line_items, None),
+                total_sell=total_sell,
+                total_cost=total_cost,
+            )
+        )
+        drafts_created += 1
+
+    return {
+        "drafts_created": drafts_created,
+        "needs_contact": needs_contact,
+        "skipped_backorder": skipped_backorder,
+        "skipped_already_queued": skipped_queued,
+    }
+
+
+def list_draft_offers(db: Session, user: User, *, allow_all: bool = False) -> list[dict]:
+    """Staged per-customer drafts for the review strip, newest first."""
+    stmt = select(ProactiveOffer).where(ProactiveOffer.status == ProactiveOfferStatus.DRAFT)
+    if not allow_all:
+        stmt = stmt.where(ProactiveOffer.salesperson_id == user.id)
+    drafts = (
+        db.scalars(
+            stmt.options(joinedload(ProactiveOffer.customer_site).joinedload(CustomerSite.company)).order_by(
+                ProactiveOffer.id.desc()
+            )
+        )
+        .unique()
+        .all()
+    )
+    rep_names = dict(db.execute(select(User.id, User.name)).all())
+    out = []
+    for po in drafts:
+        site = po.customer_site
+        out.append(
+            {
+                "id": po.id,
+                "customer_site_id": po.customer_site_id,
+                "company_name": site.company.name if site and site.company else "Customer",
+                "salesperson_name": rep_names.get(po.salesperson_id) or "—",
+                "salesperson_id": po.salesperson_id,
+                "recipient_emails": po.recipient_emails or [],
+                "subject": po.subject,
+                "body_html": po.email_body_html,
+                "line_count": len(po.line_items or []),
+                "match_ids": [li.get("match_id") for li in (po.line_items or []) if li.get("match_id")],
+                "total_sell": float(po.total_sell) if po.total_sell else 0.0,
+            }
+        )
+    return out
+
+
+async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, allow_all: bool = False) -> dict:
+    """Send one staged draft to its customer with the ACTOR's mailbox.
+
+    Marks the offer SENT, flips its matches to SENT, and writes the same throttle
+    entries as the prepare-page send. Raises ValueError on wrong status / no recipients
+    / no permission.
+    """
+    from ..utils.graph_client import GraphClient
+
+    po = db.get(ProactiveOffer, po_id)
+    if not po or po.status != ProactiveOfferStatus.DRAFT:
+        raise ValueError("Draft offer not found")
+    if not allow_all and po.salesperson_id != user.id:
+        raise ValueError("Not your draft")
+    recipient_emails = po.recipient_emails or []
+    if not recipient_emails:
+        raise ValueError("No contact on file — open Prepare to pick or add one")
+
+    tagged_subject = f"[AVAIL-PROACTIVE-{po.id}] {po.subject}"
+    gc = GraphClient(token)
+    await gc.post_json(
+        "/me/sendMail",
+        {
+            "message": {
+                "subject": tagged_subject,
+                "body": {"contentType": "HTML", "content": po.email_body_html},
+                "toRecipients": [{"emailAddress": {"address": e}} for e in recipient_emails],
+            },
+            "saveToSentItems": "true",
+        },
+    )
+    now = datetime.now(UTC)
+    po.status = ProactiveOfferStatus.SENT
+    po.sent_at = now
+
+    match_ids = [li.get("match_id") for li in (po.line_items or []) if li.get("match_id")]
+    matches = list(db.scalars(select(ProactiveMatch).where(ProactiveMatch.id.in_(match_ids)))) if match_ids else []
+    throttle_by_mpn = {
+        t.mpn: t
+        for t in db.scalars(
+            select(ProactiveThrottle).where(
+                ProactiveThrottle.mpn.in_({m.mpn for m in matches} or {""}),
+                ProactiveThrottle.customer_site_id == po.customer_site_id,
+            )
+        )
+    }
+    for m in matches:
+        m.status = ProactiveMatchStatus.SENT
+        existing_throttle = throttle_by_mpn.get(m.mpn)
+        if existing_throttle:
+            existing_throttle.last_offered_at = now
+            existing_throttle.proactive_offer_id = po.id
+        else:
+            new_throttle = ProactiveThrottle(
+                mpn=m.mpn,
+                customer_site_id=po.customer_site_id,
+                last_offered_at=now,
+                proactive_offer_id=po.id,
+            )
+            db.add(new_throttle)
+            throttle_by_mpn[m.mpn] = new_throttle
+
+    logger.info("Proactive draft #{} sent to {} by {}", po.id, ", ".join(recipient_emails), user.email)
+    db.commit()
+    return _proactive_offer_to_dict(po)
+
+
+def discard_draft_offer(db: Session, user: User, po_id: int, *, allow_all: bool = False) -> None:
+    """Delete a staged draft; its matches stay NEW (nothing was sent).
+
+    Caller commits.
+    """
+    po = db.get(ProactiveOffer, po_id)
+    if not po or po.status != ProactiveOfferStatus.DRAFT:
+        raise ValueError("Draft offer not found")
+    if not allow_all and po.salesperson_id != user.id:
+        raise ValueError("Not your draft")
+    db.delete(po)
 
 
 # ── Conversion to Win ──────────────────────────────────────────────────────
@@ -682,8 +961,8 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             0,
         )
 
-    # Base filter
-    base_filter = []
+    # Base filter — staged Process drafts are not outreach yet, never counted.
+    base_filter = [ProactiveOffer.status != ProactiveOfferStatus.DRAFT]
     if salesperson_id:
         base_filter.append(ProactiveOffer.salesperson_id == salesperson_id)
 
@@ -813,6 +1092,7 @@ def get_sent_offers(db: Session, user_id: int) -> list[dict]:
         db.query(ProactiveOffer)
         .filter(
             ProactiveOffer.salesperson_id == user_id,
+            ProactiveOffer.status != ProactiveOfferStatus.DRAFT,  # staged, not sent
         )
         .options(joinedload(ProactiveOffer.customer_site).joinedload(CustomerSite.company))
         .order_by(ProactiveOffer.sent_at.desc())

@@ -7,14 +7,27 @@
 {%- from "htmx/partials/proactive/_macros.html" import margin_badge %}
 <tr id="match-row-{{ match.id }}"
     class="hover:bg-gray-50 transition-colors"
-    :class="selected[{{ match.id }}] && 'bg-blue-50'">
-  {# Checkbox — accent via accent-color + input-focus ring (not brand-500) #}
-  <td class="w-10">
-    <input aria-label="Select match {{ match.mpn | default('') }}" type="checkbox"
-           :checked="selected[{{ match.id }}]"
-           @change="toggle({{ match.id }})"
-           class="rounded border-gray-300 input-focus"
-           style="accent-color:var(--accent)">
+    :class="sel[{{ match.id }}] === 'send' ? 'bg-emerald-50' : sel[{{ match.id }}] === 'ignore' ? 'bg-gray-100 opacity-60' : ''">
+  {# Send / Ignore — mutually exclusive marks feeding the global Process bar #}
+  <td class="w-[110px]">
+    <div class="flex items-center gap-2">
+      <label class="flex items-center gap-1 text-xs text-emerald-700 cursor-pointer" title="Offer this to the customer">
+        <input aria-label="Send {{ match.mpn | default('') }}" type="checkbox"
+               :checked="sel[{{ match.id }}] === 'send'"
+               @change="mark({{ match.id }}, 'send')"
+               class="rounded border-gray-300 input-focus"
+               style="accent-color:#059669">
+        Send
+      </label>
+      <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer" title="Dismiss this match">
+        <input aria-label="Ignore {{ match.mpn | default('') }}" type="checkbox"
+               :checked="sel[{{ match.id }}] === 'ignore'"
+               @change="mark({{ match.id }}, 'ignore')"
+               class="rounded border-gray-300 input-focus"
+               style="accent-color:#6b7280">
+        Ignore
+      </label>
+    </div>
   </td>
   {# MPN + ask context #}
   <td>
