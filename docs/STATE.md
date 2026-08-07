@@ -162,13 +162,24 @@ the 6 stored requisition statuses present, health 200). Acceptance:
 (new static-analysis guard); kernel E2E green on Postgres-backed suite
 (W4.7 defers first under brief §4.6 schedule insurance).
 
-- [ ] W4.1 Split sightings.py (3,812 LOC) → modules; sourcing board slims
-  per §5.1 (split-panel parts workspace → read-only triage: status, best
-  price, "Open deal"; its 7 duplicate tab endpoints deleted) (§5.1, §10 —
-  the split is the Deals-merge precondition)
-- [ ] W4.2 Deals merge: requisition detail = the ONE deal editor with a
-  sales/sourcing lens toggle (extend the existing page ONLY, brief §4.3);
-  part-dossier opens from a deal line; Search/Sightings folds complete (§5.1)
+- [x] W4.1 COMPLETE @ec398959: sightings.py (3,811 LOC) → 8-module package
+  (largest 796), 32 routes on the ONE shared router, URLs identical,
+  __init__ re-exports everything; ~50 test patch sites re-pointed to
+  defining submodules; BLE001 freeze entries follow the code. Full suite
+  0 failed; DEPLOYED to :8443 (both images); kernel walk 18/2 GREEN on
+  the deployed split.
+- [x] W4.2 BUILT (gates running): (a) lens toggle on the requisition
+  detail page — Sales(Parts/Quotes/Build Quote/Tasks/Activity) vs
+  Sourcing(Parts/Offers/Responses/Buy Plans), persisted, deep-links
+  auto-flip; (b) per-line sourcing drawer inlining the existing
+  sightings detail pane (single-open protocol; only the open drawer
+  carries #sightings-detail); (c) part-dossier one-door on each deal
+  line's MPN (+ /v2/search?mpn= deep link); (d) sale_notes moved onto
+  the deal line (workspace notes tab retired); (e) Sourcing-board door
+  on the Deals view toggle (Sightings fold, no 6th tab); (f) parts
+  workspace → read-only triage: 24 endpoints + 13 templates deleted,
+  parts.py 1,341→384 LOC, rows are Open-deal doors (keyboard-a11y);
+  kernel walk lens flips added.
 - [ ] W4.3 Approvals: Sales Orders + Buy Plans tabs → one Deals tab;
   standalone QP page absorbed into the workspace panes (lock matrix landed
   W3.7); one-screen fold finished; cut the parallel JSON approval-request

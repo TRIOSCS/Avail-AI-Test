@@ -120,22 +120,19 @@ create path populates `company_id` from the chosen site for **every** create
 (Hot List or not), guarded for the no-site case. A "Hot List" filter pill on the
 requisitions list (`requisitions/list.html`) surfaces created monitor deals.
 
-### 1b. Sales-Hub per-part Won/Lost (replaced the bulk Archive)
+### 1b. Sales-Hub parts list is read-only triage (W4.2, spec §5.1)
 
-The Sales-Hub parts workspace selection bar offers **Mark Won** / **Mark Lost**
-in place of the removed bulk Archive. `POST /v2/partials/parts/bulk-outcome`
-(`bulk_outcome`, `routers/htmx/parts.py`) takes
-`{requirement_ids, outcome: "won"|"lost", reason}` and resolves each selected
-line at the **part level**: every `Requirement` is transitioned to
-`SourcingStatus.WON`/`LOST` via the sourcing state machine
-(`transition_requirement`) and stamped with the one shared `outcome_reason`
-(migration 185; see APP_MAP_DATABASE § requirements). A **blank reason 400s** the
-whole request; ids missing or not in a legal source state are logged and skipped
-(never 500 the batch); the handler commits once and re-renders the parts list
-with a "N part(s) marked Won/Lost" toast. Ownership is guarded per line via
-`require_requisition_access` (mirrors the retired `bulk_archive`). This is the
-per-line analogue of the requisition-level required-reason close to Won/Lost
-(§ 1) — there is no part-line archive.
+The Sales-Hub parts workspace is now a **read-only triage list** (status badge,
+offer count, best price): every row is an "Open deal" door
+(`GET /v2/partials/requisitions/{req_id}` into `#main-content`, pushing
+`/v2/requisitions/{req_id}`) into the requisition detail page — the ONE deal
+editor. The former selection bar and its `POST /v2/partials/parts/bulk-outcome`
+Mark Won / Mark Lost endpoint were deleted along with the split-panel detail
+tabs and every part-level write route in `routers/htmx/parts.py` (header/cell/
+spec inline edits, notes, tasks, archive/unarchive single + bulk). Line
+outcomes and edits happen on the requisition detail page; the requisition-level
+required-reason close to Won/Lost (§ 1) is unchanged. `outcome_reason`
+(migration 185; see APP_MAP_DATABASE § requirements) remains on the model.
 
 ## 2. Search (User-Initiated Only)
 
@@ -1598,9 +1595,10 @@ misconfiguration.
 (PR quotes-relocation). Bare `/v2/quotes` 307-redirects to
 `/v2/requisitions`. Quotes are now accessed in two places:
 
-- **Reqs workspace Quotes tab** — `GET /v2/partials/parts/{requirement_id}/tab/quotes`
-  (reuses `requisitions/tabs/quotes.html`). Reached from the requirement
-  detail panel inside the Reqs workspace.
+- **Requisition detail Quotes tab** — `GET /v2/partials/requisitions/{req_id}/tab/quotes`
+  (`requisitions/tabs/quotes.html`) on the requisition detail page. (The old
+  per-part quotes tab `GET /v2/partials/parts/{id}/tab/quotes` died with the
+  split-panel parts workspace — W4.2, spec §5.1.)
 - **CRM account Quotes tab** — `GET /v2/partials/customers/{id}/tab/quotes`
   (renders `customers/tabs/quotes_tab.html` with an Alpine status filter).
   The account quote set is the **union** of site-linked quotes (via the
@@ -2522,10 +2520,11 @@ convention.
 **Phase 7 (mirror-consumer follow-ups, deep-review-2 THEME F, re-verification of Phase 6).**
 - *`.nullslast()` re-verified on Postgres (finding #F1).* The three `VendorSightingSummary.score.desc()`
   order-bys added in Phase 6 (`routers/sightings.py` — board top-vendor pick + the detail-panel
-  list — and `routers/htmx/parts.py`'s `part_tab_sourcing`) are untestable on SQLite (its `DESC`
+  list — and `routers/htmx/parts.py`'s `part_tab_sourcing`, since deleted with the split-panel
+  workspace in W4.2 spec §5.1) are untestable on SQLite (its `DESC`
   default already sorts NULLs last, the opposite of Postgres). `tests/test_score_nullslast_postgres.py`
-  (`@requires_postgres`) pins a NULL-scored summary sorting LAST — not first — on all three surfaces
-  against a real Postgres engine.
+  (`@requires_postgres`) pins a NULL-scored summary sorting LAST — not first — on the two surviving
+  sightings surfaces against a real Postgres engine.
 - *Dashboard-strip + facet-count exclusion tests (finding #F2).* The Phase-6 `is_scratch` filters on
   `active_req_select` (dashboard counters) and the cached `sightings_stat_counts` query were
   revert-green (no test asserted the actual numbers). `tests/test_sightings_mirror_exclusion.py`
@@ -6412,7 +6411,7 @@ registry.)
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 47 | CRUD, search, bulk archive/assign, claim. The canonical surface is `/v2/requisitions` (**Sales Hub** = the split-panel parts workspace, `partials/parts/workspace.html`); the legacy `/requisitions2` split-panel was retired in #622 — `app/routers/requisitions2.py` now 302-redirects every `/requisitions2/*` URL to `/v2/requisitions` (no templates, no offers/activity sub-routes). **View toggle (finding REQ-12)**: a segmented switch (`partials/requisitions/_view_toggle.html`, in the workspace eyebrow + the list header) flips between the Sales Hub workspace and the flat **"Requisitions list"** (`partials/requisitions/list.html`). Clean full-page push URLs: `/v2/requisitions` → workspace (default); `/v2/requisitions?view=list` → list (`v2_page` honours `?view=list`). Every link that loads the flat list partial (detail back-link, dashboard "Open Requisitions" card, proactive convert-success) pushes `?view=list` so a reload/bookmark reproduces the list. **Create/import flow (unified_modal)**: `POST /v2/partials/requisitions/import-save` parses the modal's `reqs[i].substitutes_json` (per-sub mpn+manufacturer) via `parse_substitute_mpns()` into the canonical `[{mpn, manufacturer}]` list (falls back to the legacy comma-joined `reqs[i].substitutes` MPN string) — never stores raw strings. On success it fires `HX-Trigger: reqListRefresh` (no longer hard-targets the workspace-only `#parts-list`); **both** launch surfaces listen for `reqListRefresh from:body` — the parts workspace `#parts-list` and a hidden hook in `requisitions/list.html` (reloads the list into `#main-content`) — so the create modal refreshes whichever surface opened it. The parts-tab edit row (`tabs/req_row.html`) coerces legacy string subs → `{mpn, manufacturer}` dicts before Alpine binds `sub.mpn`. **By-Customer grouping (Workspace grouping)**: `requisitions_list_partial` takes a `group_by` param; `group_by=customer` builds a server-side nested tree (Customer → Requisition → requirement lines) over the CURRENT PAGE's rows (page-scoped, mirrors sightings; ownership inherited from the already-filtered query) and renders `partials/requisitions/grouped.html`. Both levels collapse (keys `cust:<name>` / `req:<id>`) against a per-user `$persist({}).as('saleshub-group-collapse')` map on the list root x-data; groups start expanded. The `group_by` `<select>` lives inside `#req-filters` so grouping rides `hx-include` and stays sticky across filter/sort/page changes. A **Clean & reset** button does a full reset: GET `/v2/partials/requisitions` with no params (clears search + all filters + grouping) + expands all groups + clears the `selectedIds` bulk basket |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim. The canonical surface is `/v2/requisitions` (**Sales Hub** = the read-only parts triage workspace, `partials/parts/workspace.html` — rows open the requisition detail editor; W4.2 spec §5.1); the legacy `/requisitions2` split-panel was retired in #622 — `app/routers/requisitions2.py` now 302-redirects every `/requisitions2/*` URL to `/v2/requisitions` (no templates, no offers/activity sub-routes). **View toggle (finding REQ-12)**: a segmented switch (`partials/requisitions/_view_toggle.html`, in the workspace eyebrow + the list header) flips between the Sales Hub workspace and the flat **"Requisitions list"** (`partials/requisitions/list.html`). Clean full-page push URLs: `/v2/requisitions` → workspace (default); `/v2/requisitions?view=list` → list (`v2_page` honours `?view=list`). Every link that loads the flat list partial (detail back-link, dashboard "Open Requisitions" card, proactive convert-success) pushes `?view=list` so a reload/bookmark reproduces the list. **Create/import flow (unified_modal)**: `POST /v2/partials/requisitions/import-save` parses the modal's `reqs[i].substitutes_json` (per-sub mpn+manufacturer) via `parse_substitute_mpns()` into the canonical `[{mpn, manufacturer}]` list (falls back to the legacy comma-joined `reqs[i].substitutes` MPN string) — never stores raw strings. On success it fires `HX-Trigger: reqListRefresh` (no longer hard-targets the workspace-only `#parts-list`); **both** launch surfaces listen for `reqListRefresh from:body` — the parts workspace `#parts-list` and a hidden hook in `requisitions/list.html` (reloads the list into `#main-content`) — so the create modal refreshes whichever surface opened it. The parts-tab edit row (`tabs/req_row.html`) coerces legacy string subs → `{mpn, manufacturer}` dicts before Alpine binds `sub.mpn`. **By-Customer grouping (Workspace grouping)**: `requisitions_list_partial` takes a `group_by` param; `group_by=customer` builds a server-side nested tree (Customer → Requisition → requirement lines) over the CURRENT PAGE's rows (page-scoped, mirrors sightings; ownership inherited from the already-filtered query) and renders `partials/requisitions/grouped.html`. Both levels collapse (keys `cust:<name>` / `req:<id>`) against a per-user `$persist({}).as('saleshub-group-collapse')` map on the list root x-data; groups start expanded. The `group_by` `<select>` lives inside `#req-filters` so grouping rides `hx-include` and stays sticky across filter/sort/page changes. A **Clean & reset** button does a full reset: GET `/v2/partials/requisitions` with no params (clears search + all filters + grouping) + expands all groups + clears the `selectedIds` bulk basket |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 57 | CRUD, contacts, stock history, reviews, tags; new create: `POST /api/vendors` (201, 409 dup), `GET /v2/partials/vendors/create-form`, `GET /v2/partials/vendors/check-duplicate` (HTML `#dup-warning` fragment off the form's `display_name` input; see "CRM -> Vendors surface" section), `POST /v2/partials/vendors/create`; delete UI: `DELETE /v2/partials/vendors/{id}` (admin, 400 if active offers) — both returning vendor detail/list HTML; stock-list upload UI: `POST /v2/partials/vendors/import-stock` (`import_vendor_stock_list`, require_buyer — thin wrapper over `stock_list_ingest.ingest_stock_list`, result banner into `#vendor-stock-result`); CRM parity: activity tab, add-note, tasks tab + CRUD, attachments; **migration 145 (P1)**: HTMX vendor contact CRUD (`POST /v2/partials/vendors/{id}/contacts` require_user, `PUT .../contacts/{cid}` require_user, `DELETE .../contacts/{cid}` require_admin, `POST .../contacts/{cid}/set-primary` require_user — clears all others atomically; add/edit/delete mirror the address into the legacy `VendorCard.emails[]` reachability array via the SHARED `utils.vendor_helpers.sync_card_emails_on_contact_change` — the same helper the JSON API in `routers/vendor_contacts.py` uses, Wave 3 item 5); ownership badge (`GET/POST .../claim` require_user, `POST .../release` require_user — wraps `strategic_vendor_service.claim_vendor`/`drop_vendor`); custom fields (`POST/DELETE /v2/partials/vendors/{id}/custom-fields[/{label}]` require_user, mirrors company custom-fields); is_primary column on vendor_contacts; custom_fields JSONB on vendor_cards |
 | Companies/CRM | 47 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`); CRM task CRUD: `DELETE /v2/partials/tasks/{id}` (delete), `GET /v2/partials/tasks/{id}/edit-form` + `POST /v2/partials/tasks/{id}/edit` (edit; the edit-form fragment AND both validation-error responses re-carry the swapped container id `#account-tasks-{cid}`/`#contact-tasks-{ctid}`/`#vendor-tasks-{vid}` at their root — the flow outerHTML-swaps that container, so an id-less fragment would destroy its own Save/Cancel hx-target); account add-note: `GET /v2/partials/customers/{id}/activity/add-note-form` + `POST /v2/partials/customers/{id}/activity/add-note` (cadence-neutral, direction=None → no last_outbound_at bump); all three gates reuse `_is_crm_task_authorized` (task) or `can_manage_account` (note); contact merge (dedup): `GET /v2/partials/customers/{cid}/contacts/{ctid}/merge-form` + preview + `POST .../merge` (can_manage_account on source company, merge_contacts service); contact move: `GET .../move-form` + `POST .../move` (can_manage_account on BOTH source+target companies, target site must be active); **migration 144**: contact secondary fields (secondary_email, secondary_phone in EDITABLE_CONTACT_FIELDS), reports_to_id self-FK in create+edit; contact tag routes: `POST /v2/partials/customers/{cid}/contacts/{ctid}/tags` (assign segment tag by tag_id or tag_name), `DELETE /v2/partials/customers/{cid}/contacts/{ctid}/tags/{tag_id}` (unassign), `GET /v2/partials/customers/{cid}/contacts/for-select` (JSON list for reports_to picker, exclude_id param); EntityTag entity_type='site_contact' now valid; **bulk actions**: `POST /v2/partials/customers/bulk/{action}` (deactivate, send-to-prospecting, assign-owner) — auth-scoped: deactivate+send-to-prospecting gate per-company via `can_manage_account` (skips non-manageable; summary), assign-owner is MANAGER/ADMIN ONLY (403 for reps); **CSV import**: `POST /v2/partials/customers/import/preview` (parse+flag dupes/invalid, no writes) + `POST /v2/partials/customers/import/confirm` (create Companies, dedup by normalized_name, sets importer as account_owner_id); **contact CSV import**: `POST /v2/partials/customers/import/contacts/preview` (parse+flag duplicate emails) |

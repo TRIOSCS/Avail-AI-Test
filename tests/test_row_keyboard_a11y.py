@@ -43,7 +43,7 @@ _A11Y_ROW_TEMPLATES = (
     "app/templates/htmx/partials/requisitions/tabs/buy_plans.html",
     "app/templates/htmx/partials/customers/tabs/quotes_tab.html",
     "app/templates/htmx/partials/customers/tabs/buy_plans_tab.html",
-    "app/templates/htmx/partials/parts/tabs/quotes.html",
+    "app/templates/htmx/partials/parts/list.html",
 )
 
 # Capture each <tr ...> opening tag, including multi-line tags. None of these rows embed a

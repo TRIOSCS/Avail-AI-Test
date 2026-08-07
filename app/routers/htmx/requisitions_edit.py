@@ -456,6 +456,7 @@ async def update_requirement(
     hardware_codes: str = Form(""),
     packaging: str = Form(""),
     notes: str = Form(""),
+    sale_notes: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -502,6 +503,9 @@ async def update_requirement(
     item.hardware_codes = hardware_codes.strip() or None
     item.packaging = packaging.strip() or None
     item.notes = notes.strip() or None
+    # W4.2: sale_notes is edited on the deal line now (the parts-workspace notes
+    # tab — its only other editor besides the create modal — was retired).
+    item.sale_notes = sale_notes.strip() or None
     # Parse need_by_date from ISO string
     if need_by_date.strip():
         try:

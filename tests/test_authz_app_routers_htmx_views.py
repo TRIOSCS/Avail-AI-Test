@@ -198,59 +198,9 @@ def test_review_response_blocks_non_owner_sales(client, db_session, foreign_req,
 
 
 # Requisition archive/unarchive HTMX routes were removed (a req ends Won/Lost, no
-# hide capability); foreign-req IDOR coverage remains via the responses/review and
-# part-header cases above/below.
-
-
-def test_part_header_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.patch(
-        f"/v2/partials/parts/{rid}/header",
-        data={"field": "target_qty", "value": "5"},
-    )
-    assert resp.status_code == 404
-
-
-def test_part_cell_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.patch(
-        f"/v2/partials/parts/{rid}/cell",
-        data={"field": "target_qty", "value": "5"},
-    )
-    assert resp.status_code == 404
-
-
-def test_part_save_spec_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.patch(
-        f"/v2/partials/parts/{rid}/save-spec",
-        data={"field": "condition", "value": "New"},
-    )
-    assert resp.status_code == 404
-
-
-def test_part_notes_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.patch(f"/v2/partials/parts/{rid}/notes", data={"sale_notes": "hi"})
-    assert resp.status_code == 404
-
-
-def test_part_tasks_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.post(f"/v2/partials/parts/{rid}/tasks", data={"title": "T"})
-    assert resp.status_code == 404
-
-
-def test_part_archive_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
-    rid = _requirement_id(db_session, foreign_req)
-    _make_sales(db_session, test_user)
-    resp = client.patch(f"/v2/partials/parts/{rid}/archive")
-    assert resp.status_code == 404
+# hide capability), and the part header/cell/spec/notes/tasks/archive write routes
+# died with the split-panel workspace (spec §5.1); foreign-req IDOR coverage
+# remains via the responses/review and log-activity cases above/below.
 
 
 def test_log_activity_blocks_non_owner_sales(client, db_session, foreign_req, test_user):

@@ -37,14 +37,36 @@
 
   {# Tabs — Build Quote is the in-workspace single-stage assembly tab (sibling to the
      Quotes list). It points at its own owner/buyer-gated endpoint (NOT /tab/…) with an
-     explicit hx-target so the lazy load lands in #tab-content, never #main-content. #}
-  <div x-data="{ activeTab: '{{ initial_tab or 'parts' }}' }"
-       {% if initial_tab == 'build_quote' %}x-init="$nextTick(() => $refs.buildQuoteTab && htmx.trigger($refs.buildQuoteTab, 'click'))"{% endif %}>
-    <div class="border-b border-gray-200 mb-4">
+     explicit hx-target so the lazy load lands in #tab-content, never #main-content.
+
+     W4.2 Deals merge (spec §5.1): ONE deal editor with a Sales/Sourcing lens toggle.
+     The lens shows/hides existing tabs only — Parts (the deal spine) shows in both.
+     The choice persists per browser; a deep-linked tab flips the lens to whichever
+     side contains it so the active tab is never hidden. #}
+  <div x-data="{
+         activeTab: '{{ initial_tab or 'parts' }}',
+         lens: localStorage.getItem('deal-lens') || 'sales',
+         lensTabs: {
+           sales: ['parts', 'quotes', 'build_quote', 'tasks', 'activity'],
+           sourcing: ['parts', 'offers', 'responses', 'buy_plans']
+         },
+         setLens(l) {
+           this.lens = l;
+           localStorage.setItem('deal-lens', l);
+           if (!this.lensTabs[l].includes(this.activeTab)) {
+             this.activeTab = 'parts';
+             if (this.$refs.partsTab) htmx.trigger(this.$refs.partsTab, 'click');
+           }
+         }
+       }"
+       x-init="if (!lensTabs[lens].includes(activeTab)) { lens = lensTabs.sourcing.includes(activeTab) ? 'sourcing' : 'sales' }
+               {% if initial_tab == 'build_quote' %};$nextTick(() => $refs.buildQuoteTab && htmx.trigger($refs.buildQuoteTab, 'click')){% endif %}">
+    <div class="border-b border-gray-200 mb-4 flex items-center justify-between gap-4">
       <nav class="flex gap-6 -mb-px overflow-x-auto">
         {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('responses', 'Responses'), ('quotes', 'Quotes'), ('build_quote', 'Build Quote'), ('buy_plans', 'Buy Plans'), ('tasks', 'Tasks'), ('activity', 'Activity')] %}
         <button @click="activeTab = '{{ tab_id }}'"
-                {% if tab_id == 'build_quote' %}x-ref="buildQuoteTab" hx-get="/v2/partials/requisitions/{{ req.id }}/build-quote"{% else %}hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"{% endif %}
+                x-show="lensTabs[lens].includes('{{ tab_id }}')"
+                {% if tab_id == 'build_quote' %}x-ref="buildQuoteTab" hx-get="/v2/partials/requisitions/{{ req.id }}/build-quote"{% elif tab_id == 'parts' %}x-ref="partsTab" hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"{% else %}hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"{% endif %}
                 hx-target="#tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"
@@ -54,6 +76,15 @@
         </button>
         {% endfor %}
       </nav>
+      <div role="group" aria-label="Deal lens"
+           class="inline-flex flex-none items-center rounded border border-line-base bg-white p-px text-xs font-medium leading-none mb-2">
+        <button type="button" @click="setLens('sales')"
+                :class="lens === 'sales' ? 'bg-accent-500 text-white' : 'text-gray-600 hover:text-accent-600 hover:bg-accent-50'"
+                class="px-2 py-1 rounded-sm cursor-pointer transition-colors">Sales</button>
+        <button type="button" @click="setLens('sourcing')"
+                :class="lens === 'sourcing' ? 'bg-accent-500 text-white' : 'text-gray-600 hover:text-accent-600 hover:bg-accent-50'"
+                class="px-2 py-1 rounded-sm cursor-pointer transition-colors">Sourcing</button>
+      </div>
     </div>
 
     {# Tab content — Parts is rendered inline (the default first view); a deep-linked

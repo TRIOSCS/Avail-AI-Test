@@ -374,9 +374,11 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   (`POST /v2/partials/proactive/prepare/{site_id}/add-contact` → re-renders `_contact_picker.html`
   into `#proactive-contact-list`, auto-selecting the new contact so Send unblocks — PROACTIVE-04),
   the legacy send/convert routes, scorecard, and do-not-offer (the nav badge count moved into `services/nav_badges.py` — spec §5.5).
-- `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
-  detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
-  spec editors, notes save, per-part tasks, and the part archive/unarchive (single + bulk) actions.
+- `app/routers/htmx/parts.py` — **tail split (parts triage slice)**: the read-only parts triage
+  list (`GET /v2/partials/parts`, filter/sort/paginate + offer count/best price) and its CSV
+  export. W4.2 (spec §5.1) deleted the split-panel body — the 7 detail tabs, header/cell/spec
+  inline editors, notes save, per-part tasks, and archive/bulk actions; each list row is now an
+  "Open deal" door into the requisition detail page (the one deal editor).
   **Trap:** the workspace SHELL entry (`GET /v2/partials/parts/workspace`) stays in `htmx_views.py`.
 - `app/routers/htmx/archive.py` — **tail split (tasks/tickets lifecycle slice)**: trouble-ticket
   workspace/list/detail, account + contact + vendor tasks (add-form/create/list), task
@@ -475,7 +477,7 @@ authoritative reference. Static-analysis tests in
 | Customers | 14 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
 | Resell | 11 | partials/resell/ — resell-brokerage workspace (replaced the removed `partials/excess/`; router `routers/resell.py`) |
-| Parts | 13 | partials/parts/ |
+| Parts | 2 | partials/parts/ — `workspace.html` (pipeline strip + full-width lazy list) + `list.html` (read-only triage table; every row is an "Open deal" door into the requisition detail page). The split-panel tabs/editors (`tabs/*`, `header.html`, `cell_*`, `spec_*`, `_macros.html`) were deleted in W4.2 (spec §5.1). |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope). `list.html` (the workspace shell) carries a top **quick-links** bar with count-badged entry points to the offer-review queue + follow-up queue (both nav-swap `#main-content`, pushing their canonical URLs). |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
@@ -505,7 +507,7 @@ authoritative reference. Static-analysis tests in
 
 ### Inline Editing
 
-- **Part header descriptions:** AI-generated descriptions are inline-editable in the part header partial (`parts/header.html`). Users click to edit, submit via `hx-patch`, and the display swaps back.
+- **Part fields:** edited on the requisition detail page (the one deal editor) — the old inline-editable part header partial (`parts/header.html`) died with the split-panel workspace (W4.2, spec §5.1).
 
 ## External Service Integration
 

@@ -99,22 +99,6 @@ def test_tasks_filtered_zero_state_keeps_no_match_message():
     assert "New task" not in html
 
 
-# ── Fix 4: Parts Offers empty state ───────────────────────────────────────────
-
-
-def test_parts_offers_empty_state_has_icon_and_hint():
-    html = _render(
-        "htmx/partials/parts/tabs/offers.html",
-        offers=[],
-        requirement=SimpleNamespace(primary_mpn="ABC123"),
-        vendor_tier_map={},
-    )
-    assert "<svg" in html
-    assert "Offers arrive from vendor replies." in html
-    # The old bare dashed one-liner is gone.
-    assert "border-dashed" not in html
-
-
 # ── Fix 5: Search "All" tab View-all overflow ─────────────────────────────────
 
 

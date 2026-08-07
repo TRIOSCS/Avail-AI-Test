@@ -1,10 +1,12 @@
-"""test_archive_system.py — Tests for the part-level archive system.
+"""test_archive_system.py — Tests for archived-part visibility in the parts list.
 
-Tests single-part archive/unarchive (Requirement.sourcing_status), bulk
-archive/unarchive of parts (optionally scoped by requisition), and the archived
-pill filter in the parts list. There is NO requisition-level archive/hide
-capability — a requisition ends in Won or Lost (see test_requisition_state) — so
-the only archive flag here is the part-level sourcing_status.
+Tests the archived pill filter and default archived-exclusion in
+GET /v2/partials/parts (Requirement.sourcing_status). The archive/unarchive
+WRITE endpoints died with the split-panel workspace (spec §5.1) — archiving now
+happens from the requisition detail editor. There is NO requisition-level
+archive/hide capability — a requisition ends in Won or Lost (see
+test_requisition_state) — so the only archive flag here is the part-level
+sourcing_status.
 
 Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user, test_requisition)
@@ -42,90 +44,6 @@ def _make_requirement(db, requisition_id, mpn="LM317T", sourcing_status="open"):
     db.add(item)
     db.flush()
     return item
-
-
-def test_archive_single_part(client, db_session, test_user):
-    """PATCH /v2/partials/parts/{id}/archive sets sourcing_status to archived."""
-    req = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, req.id, mpn="ABC123", sourcing_status="open")
-    db_session.commit()
-
-    resp = client.patch(f"/v2/partials/parts/{part.id}/archive")
-    assert resp.status_code == 200
-
-    db_session.refresh(part)
-    assert part.sourcing_status == "archived"
-
-
-def test_archive_single_part_not_found(client):
-    """PATCH nonexistent part returns 404."""
-    resp = client.patch("/v2/partials/parts/99999/archive")
-    assert resp.status_code == 404
-
-
-def test_unarchive_single_part(client, db_session, test_user):
-    """PATCH /v2/partials/parts/{id}/unarchive restores to open."""
-    req = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, req.id, mpn="ABC123", sourcing_status="archived")
-    db_session.commit()
-
-    resp = client.patch(f"/v2/partials/parts/{part.id}/unarchive")
-    assert resp.status_code == 200
-
-    db_session.refresh(part)
-    assert part.sourcing_status == "open"
-
-
-def test_bulk_archive(client, db_session, test_user):
-    """POST /v2/partials/parts/bulk-archive archives mixed part and requisition IDs.
-
-    Requisition IDs cascade to their parts' sourcing_status — there is no requisition-
-    level archive flag, so the requisition row itself is unchanged.
-    """
-    req1 = _make_requisition(db_session, test_user.id, name="REQ-BULK-1")
-    p1 = _make_requirement(db_session, req1.id, mpn="BULK-A", sourcing_status="open")
-
-    req2 = _make_requisition(db_session, test_user.id, name="REQ-BULK-2")
-    p2 = _make_requirement(db_session, req2.id, mpn="BULK-B", sourcing_status="open")
-    p3 = _make_requirement(db_session, req2.id, mpn="BULK-C", sourcing_status="sourcing")
-    db_session.commit()
-
-    resp = client.post(
-        "/v2/partials/parts/bulk-archive",
-        json={"requirement_ids": [p1.id], "requisition_ids": [req2.id]},
-    )
-    assert resp.status_code == 200
-
-    db_session.refresh(p1)
-    assert p1.sourcing_status == "archived"
-
-    # Requisition IDs cascade to their parts only.
-    for p in [p2, p3]:
-        db_session.refresh(p)
-        assert p.sourcing_status == "archived"
-
-
-def test_bulk_unarchive(client, db_session, test_user):
-    """POST /v2/partials/parts/bulk-unarchive restores parts (incl.
-
-    requisition-scoped).
-    """
-    req = _make_requisition(db_session, test_user.id, name="REQ-BULKUN")
-    p1 = _make_requirement(db_session, req.id, mpn="UN-A", sourcing_status="archived")
-    p2 = _make_requirement(db_session, req.id, mpn="UN-B", sourcing_status="archived")
-    db_session.commit()
-
-    resp = client.post(
-        "/v2/partials/parts/bulk-unarchive",
-        json={"requirement_ids": [p1.id], "requisition_ids": [req.id]},
-    )
-    assert resp.status_code == 200
-
-    db_session.refresh(p1)
-    assert p1.sourcing_status == "open"
-
-    db_session.refresh(p2)
-    assert p2.sourcing_status == "open"
 
 
 def test_archived_pill_filter(client, db_session, test_user):

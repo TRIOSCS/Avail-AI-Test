@@ -28,4 +28,16 @@
             {{ 'bg-accent-500 text-white' if active == 'list' else 'text-gray-600 hover:text-accent-600 hover:bg-accent-50' }}">
     List view
   </a>
+  {# W4.2 (§4/§5.1): Sightings folded into Deals — the buyer sourcing board's door
+     lives here now (no separate nav tab). #}
+  <a href="/v2/sightings"
+     hx-get="/v2/partials/sightings/workspace"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
+     hx-push-url="/v2/sightings"
+     {% if active == 'board' %}aria-current="page"{% endif %}
+     class="px-2 py-1 rounded-sm cursor-pointer transition-colors
+            {{ 'bg-accent-500 text-white' if active == 'board' else 'text-gray-600 hover:text-accent-600 hover:bg-accent-50' }}">
+    Sourcing board
+  </a>
 </div>

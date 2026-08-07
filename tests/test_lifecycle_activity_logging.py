@@ -68,18 +68,6 @@ def test_claim_requisition_logs_assignment_changed(db_session, test_requisition,
     assert legacy == []
 
 
-def test_save_part_notes_logs_sales_note(client, db_session, test_requisition):
-    """Editing a requirement's sale notes writes a sales_note activity row."""
-    requirement = test_requisition.requirements[0]
-    resp = client.patch(
-        f"/v2/partials/parts/{requirement.id}/notes",
-        data={"sale_notes": "Customer wants expedited quote"},
-    )
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.SALES_NOTE)
-    assert len(rows) == 1
-
-
 def test_unclaim_requisition_logs_assignment_changed(db_session, test_requisition, test_user):
     """Unclaiming a requisition writes an assignment_changed row (not a raw-string
     type); the actor-None path still logs without raising."""
@@ -174,29 +162,3 @@ def test_reopen_task_does_not_log_task_reopened(db_session, test_requisition, te
     # assert by the raw string that reopening writes no such row.
     rows = _activity_rows(db_session, test_requisition.id, "task_reopened")
     assert len(rows) == 0, "task reopen must not produce an ActivityLog row (no-fake-logging)"
-
-
-def test_mark_task_done_does_not_log_task_completed(client, db_session, test_requisition, test_user):
-    """Marking a task done via the htmx route must NOT write an ActivityLog row.
-
-    Step 5 deliberately removed task_completed logging from the htmx endpoint. Task
-    completion is a status change recorded on the task row (status, completed_at), not
-    real contact activity. This test enforces the no-fake-logging invariant.
-    """
-    from app.models import RequisitionTask
-
-    requirement = test_requisition.requirements[0]
-    task = RequisitionTask(
-        requisition_id=test_requisition.id,
-        requirement_id=requirement.id,
-        title="Call the vendor",
-        created_by=test_user.id,
-        assigned_to_id=test_user.id,
-    )
-    db_session.add(task)
-    db_session.commit()
-
-    resp = client.post(f"/v2/partials/parts/tasks/{task.id}/done")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_COMPLETED)
-    assert len(rows) == 0, "htmx mark-done must not produce an ActivityLog row (no-fake-logging)"

@@ -133,27 +133,7 @@ def test_bulk_assign_blocks_non_owner_trader(client, db_session, test_requisitio
 #  in-handler manager/admin gate, which the fixture does NOT bypass.)
 
 
-# ── parts bulk archive/unarchive + sightings batch-refresh (round-2 misses) ──
-def test_parts_bulk_archive_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    _as_sales_non_owner(db_session, test_user, test_requisition, admin_user)
-    resp = client.post(
-        "/v2/partials/parts/bulk-archive",
-        json={"requisition_ids": [test_requisition.id], "requirement_ids": []},
-    )
-    assert resp.status_code == 404
-    db_session.refresh(test_requisition)
-    assert test_requisition.status != "archived"
-
-
-def test_parts_bulk_unarchive_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
-    _as_sales_non_owner(db_session, test_user, test_requisition, admin_user)
-    resp = client.post(
-        "/v2/partials/parts/bulk-unarchive",
-        json={"requisition_ids": [test_requisition.id], "requirement_ids": []},
-    )
-    assert resp.status_code == 404
-
-
+# ── sightings batch-refresh (round-2 miss) ──
 def test_batch_refresh_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
     req = _requirement(db_session, test_requisition)
     _as_sales_non_owner(db_session, test_user, test_requisition, admin_user)

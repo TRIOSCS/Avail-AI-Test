@@ -111,19 +111,3 @@ class TestNullScoreSortsLastOnPostgres:
 
         names = [s.vendor_name for s in captured["ctx"]["summaries"]]
         assert names.index("Scored Vendor") < names.index("Null Score Vendor")
-
-    def test_part_tab_sourcing_lists_scored_vendor_before_null(self, pg_client, pg_session: Session, monkeypatch):
-        """GET /v2/partials/parts/{id}/tab/sourcing renders ``summaries`` in query order
-        too — same NULL-sorts-last requirement."""
-        from app.routers.htmx import parts as parts_router
-
-        user = pg_session.query(User).filter_by(email="pgbuyer@trioscs.com").one()
-        requirement = _seed_requirement(pg_session, user, "PGNULL-PARTS-1")
-        _seed_summaries(pg_session, requirement)
-
-        captured = _capture_ctx(monkeypatch, parts_router)
-        resp = pg_client.get(f"/v2/partials/parts/{requirement.id}/tab/sourcing")
-        assert resp.status_code == 200
-
-        names = [s.vendor_name for s in captured["ctx"]["summaries"]]
-        assert names.index("Scored Vendor") < names.index("Null Score Vendor")

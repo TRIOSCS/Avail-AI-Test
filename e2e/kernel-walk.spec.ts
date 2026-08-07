@@ -246,6 +246,8 @@ test('RFQ composer opens (send is not exercised)', async () => {
 
 test('manual Add-offer door creates an offer', async () => {
   await page.goto(`/v2/requisitions/${reqId}`);
+  // W4.2 lens toggle: Offers lives in the Sourcing lens (default is Sales).
+  await page.getByRole('group', { name: 'Deal lens' }).getByRole('button', { name: 'Sourcing' }).click();
   await page.getByRole('button', { name: 'Offers', exact: true }).click();
   const tab = page.locator('#tab-content');
   await expect(tab.getByRole('button', { name: 'Add Offer' })).toBeVisible({ timeout: 20_000 });
@@ -270,6 +272,8 @@ test('manual Add-offer door creates an offer', async () => {
 });
 
 test('Build Quote assembles — margin guardrail visible, PDF downloads', async () => {
+  // W4.2 lens toggle: Build Quote lives in the Sales lens (we're on Sourcing after Add Offer).
+  await page.getByRole('group', { name: 'Deal lens' }).getByRole('button', { name: 'Sales' }).click();
   await page.getByRole('button', { name: 'Build Quote' }).click();
   const tab = page.locator('#tab-content');
   await expect(tab.getByRole('button', { name: /Assemble (quote|revision)/ })).toBeVisible({ timeout: 20_000 });

@@ -440,7 +440,7 @@ class TestPartsWorkspace:
     def test_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/parts/workspace")
         assert resp.status_code == 200
-        # Split-panel shell: Sales Hub eyebrow + lazy-loaded parts list.
+        # Triage shell: Sales Hub eyebrow + lazy-loaded parts list.
         assert "Sales Hub" in resp.text
         assert 'hx-get="/v2/partials/parts"' in resp.text
 
@@ -2033,12 +2033,12 @@ class TestInsights:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Parts List (split-panel)
+# Parts List (read-only triage)
 # ══════════════════════════════════════════════════════════════════════════
 
 
 class TestPartsList:
-    """Test the parts list partial (the new split-panel view)."""
+    """Test the parts list partial (read-only triage list)."""
 
     def test_list(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -2076,211 +2076,6 @@ class TestPartsList:
         resp = client.get("/v2/partials/parts?sort=mpn&dir=asc")
         assert resp.status_code == 200
         assert resp.text.index("AAA111") < resp.text.index("ZZZ999")
-
-
-class TestPartTabs:
-    """Test part-level tab endpoints."""
-
-    @pytest.mark.parametrize(
-        "tab, marker",
-        [
-            ("offers", "0 offers"),
-            ("sourcing", "0 vendors"),
-            ("req-details", 'id="req-details-fields"'),
-            ("activity", "0 events"),
-            ("comms", "New task or note..."),
-            ("notes", "Sales Notes"),
-        ],
-    )
-    def test_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str, marker: str):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/{tab}")
-        assert resp.status_code == 200
-        assert marker in resp.text
-
-
-class TestPartHeader:
-    """Test part header and inline edits."""
-
-    def test_header(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/header")
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text
-        assert f"/v2/partials/parts/{item.id}/header/edit/substitutes" in resp.text
-
-    def test_header_edit_mpn(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/brand")
-        assert resp.status_code == 200
-        assert 'name="value"' in resp.text
-        assert f"/v2/partials/parts/{item.id}/header" in resp.text
-
-    def test_header_save(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/header",
-            data={"field": "brand", "value": "Texas Instruments"},
-        )
-        assert resp.status_code == 200
-        assert json.loads(resp.headers["HX-Trigger"]) == {"part-updated": {"id": item.id}}
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).brand == "Texas Instruments"
-
-
-class TestPartCellEdit:
-    """Test part cell edit and save."""
-
-    def test_cell_edit(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/edit/target_qty")
-        assert resp.status_code == 200
-        # Edit input prefilled with the current qty, saving back to the cell PATCH.
-        assert 'value="1000"' in resp.text
-        assert f'hx-patch="/v2/partials/parts/{item.id}/cell"' in resp.text
-
-    def test_cell_display(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/display/target_qty")
-        assert resp.status_code == 200
-        assert "1,000" in resp.text  # formatted current value
-
-    def test_cell_save(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/cell",
-            data={"field": "target_qty", "value": "500"},
-        )
-        assert resp.status_code == 200
-        assert "500" in resp.text  # display cell re-renders with the new value
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).target_qty == 500
-
-
-class TestPartSpecEdit:
-    """Test part spec edit/save."""
-
-    def test_spec_edit(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/condition")
-        assert resp.status_code == 200
-        assert f'hx-patch="/v2/partials/parts/{item.id}/save-spec"' in resp.text
-        assert '<input type="hidden" name="field" value="condition">' in resp.text
-
-    def test_spec_save(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/save-spec",
-            data={"field": "condition", "value": "new"},
-        )
-        assert resp.status_code == 200
-        assert ">new</span>" in resp.text  # spec_display fragment with the saved value
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).condition == "new"
-
-
-class TestPartNotes:
-    """Test part notes save."""
-
-    def test_save_notes(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/notes",
-            data={"sale_notes": "This is a test note"},
-        )
-        assert resp.status_code == 200
-        assert "This is a test note" in resp.text  # notes tab re-renders with the note
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sale_notes == "This is a test note"
-
-
-class TestPartTasks:
-    """Test part task create, done, reopen."""
-
-    def test_create_task(self, client: TestClient, db_session: Session, test_user: User):
-        from app.models import RequisitionTask
-
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/parts/{item.id}/tasks",
-            data={"title": "Test task", "priority": "1"},
-        )
-        assert resp.status_code == 200
-        assert "Test task" in resp.text  # refreshed comms tab lists the task
-        task = db_session.query(RequisitionTask).filter_by(requirement_id=item.id).one()
-        assert task.title == "Test task"
-        assert task.created_by == test_user.id
-
-
-class TestPartArchive:
-    """Test archive/unarchive single parts and bulk."""
-
-    def test_archive_part(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/parts/{item.id}/archive")
-        assert resp.status_code == 200
-        assert json.loads(resp.headers["HX-Trigger"]) == {"part-archived": {"id": item.id}}
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
-
-    def test_unarchive_part(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req, sourcing_status="archived")
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text  # restored part is back in the default list
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
-
-    def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
-        )
-        assert resp.status_code == 200
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
-
-    def test_bulk_unarchive(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req, sourcing_status="archived")
-        db_session.commit()
-        resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
-        )
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text  # restored part renders in the refreshed list
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
 
 
 # ══════════════════════════════════════════════════════════════════════════

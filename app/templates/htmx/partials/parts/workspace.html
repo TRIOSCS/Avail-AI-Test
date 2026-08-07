@@ -1,13 +1,15 @@
-{# Parts workspace — resizable split-panel layout.
-   Left: filterable parts table with top scrollbar. Right: detail tabs for selected part.
-   Called by: GET /v2/requisitions (full page load → partial swap)
-   Depends on: parts/list.html, Alpine.js, HTMX
+{# Parts workspace — read-only triage list (Sales Hub).
+   Pipeline context strip + full-width filterable parts table (status, best
+   price). Editing happens on the requisition detail page — every row is an
+   "Open deal" door into it; the old split-panel detail tabs are gone.
+   Called by: GET /v2/partials/parts/workspace (htmx_views.py shell)
+   Depends on: parts/list.html, HTMX
    Receives: pipeline (forecast_service.pipeline_summary) for the slim context strip.
 #}
 
 {# ── Pipeline context strip — slim, subordinate header (no card/dashboard). Open deals,
      open value, and stage-weighted forecast, near the requisitions they summarize. The
-     split-panel height below subtracts this 26px strip so the layout doesn't overflow. #}
+     list height below subtracts this 26px strip so the layout doesn't overflow. #}
 {% if pipeline %}
 {# border-line-base replaces border-gray-200 (finding 12) #}
 <div class="h-[26px] flex items-center gap-4 px-3 text-secondary bg-gray-50 border-b border-line-base">
@@ -34,144 +36,14 @@
 </div>
 {% endif %}
 
-<div class="{{ 'h-[calc(100vh-116px)]' if pipeline else 'h-[calc(100vh-90px)]' }} flex"
-     x-data="{
-       splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.50'),
-       dragging: false,
-       selectedPartId: null,
-       activeTab: 'offers',
-       clearPartIfGone() {
-         if (this.selectedPartId && !document.querySelector('[data-part-id=\'' + this.selectedPartId + '\']')) {
-           this.selectedPartId = null;
-         }
-       },
-       startDrag(e) {
-         this.dragging = true;
-         e.preventDefault();
-       },
-       onDrag(e) {
-         if (!this.dragging) return;
-         const container = this.$refs.container;
-         const rect = container.getBoundingClientRect();
-         const ratio = (e.clientX - rect.left) / rect.width;
-         this.splitRatio = Math.max(0.2, Math.min(0.8, ratio));
-       },
-       stopDrag() {
-         if (this.dragging) {
-           this.dragging = false;
-           localStorage.setItem('parts-split', this.splitRatio.toFixed(3));
-         }
-       },
-       selectPart(id) {
-         this.selectedPartId = id;
-         if (!this.activeTab) this.activeTab = 'offers';
-       },
-       syncScroll(source, target) {
-         const el = document.getElementById(target);
-         if (el) el.scrollLeft = document.getElementById(source).scrollLeft;
-       }
-     }"
-     x-ref="container"
-     @mousemove.window="onDrag($event)"
-     @mouseup.window="stopDrag()"
-     @htmx:after-swap.window="if ($event.detail.target && $event.detail.target.id === 'parts-list') $nextTick(() => clearPartIfGone())">
-
-  {# ── Left Panel: Parts Table ──────────────────────────────── #}
-  {# border-line-base replaces border-gray-200 (finding 12) #}
-  <div class="flex flex-col min-w-0 border-r border-line-base" :style="'width: ' + (splitRatio * 100) + '%'">
-    <div id="parts-list" class="flex-1 flex flex-col min-h-0"
-         hx-get="/v2/partials/parts"
-         hx-trigger="load, reqListRefresh from:body"
-         hx-target="#parts-list"
-         hx-swap="innerHTML"
-         hx-indicator="#parts-load-spinner">
-      <div id="parts-load-spinner" class="htmx-indicator p-8 text-center text-gray-400">Loading parts...</div>
-    </div>
-  </div>
-
-  {# ── Drag Handle — accent hover/active (finding 12) ──────── #}
-  <div class="w-[3px] cursor-col-resize bg-gray-200 hover:bg-accent-400 transition-colors flex-shrink-0 relative group"
-       :class="dragging ? 'bg-accent-500' : ''"
-       @mousedown="startDrag($event)">
-    <div class="absolute inset-y-0 -left-2 -right-2"></div>
-    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-      <div class="w-1 h-1 rounded-full bg-white"></div>
-    </div>
-  </div>
-
-  {# ── Right Panel: Detail Tabs ─────────────────────────────── #}
-  <div class="flex-1 min-w-0 flex flex-col bg-white">
-
-    {# Tab bar — compact industrial tabs #}
-    <template x-if="selectedPartId" x-cloak>
-      <div>
-        {# Part header — persistent context strip #}
-        <div id="part-header-wrap"
-             x-effect="if (selectedPartId) htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})">
-        </div>
-        {# Tab bar — border-line-base replaces border-brand-200 (finding 4) #}
-        <div class="border-b border-line-base bg-white px-2 flex-shrink-0">
-          <nav class="flex -mb-[1px] overflow-x-auto">
-            {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sightings'), ('notes', 'Sales Notes'), ('activity', 'Activity'), ('comms', 'Tasks'), ('req-details', 'REQ Detail'), ('quotes', 'Quotes')] %}
-            <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"
-                    :class="activeTab === '{{ tab_key }}' ? 'ws-tab-active' : ''"
-                    class="ws-tab shrink-0 whitespace-nowrap">
-              {{ tab_label }}
-            </button>
-            {% endfor %}
-          </nav>
-        </div>
-      </div>
-    </template>
-
-    {# Detail content — with top scrollbar #}
-    <div class="flex-1 flex flex-col min-h-0">
-      {# Empty state — shown when no part selected #}
-      <div x-show="!selectedPartId" x-cloak class="flex flex-col items-center justify-center h-full text-gray-400">
-        <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <p class="text-sm font-medium text-gray-600">Select a part</p>
-        <p class="text-secondary mt-1">Click a row to view offers, sourcing & activity</p>
-      </div>
-      {# Scrollbar + content — always in DOM, shown when part selected #}
-      <div x-show="selectedPartId" x-cloak class="flex flex-col flex-1 min-h-0">
-        <div class="top-scroll-bar" id="right-top-scroll" data-sync-target="right-table-content">
-          <div class="scroll-spacer h-px"></div>
-        </div>
-        <div class="top-scroll-content flex-1 min-h-0" id="right-table-content">
-          <div id="part-detail" class="p-3"></div>
-        </div>
-      </div>
-    </div>
+{# ── Parts triage table — full width, lazy-loaded ─────────────── #}
+<div class="{{ 'h-[calc(100vh-116px)]' if pipeline else 'h-[calc(100vh-90px)]' }} flex flex-col">
+  <div id="parts-list" class="flex-1 flex flex-col min-h-0"
+       hx-get="/v2/partials/parts"
+       hx-trigger="load, reqListRefresh from:body"
+       hx-target="#parts-list"
+       hx-swap="innerHTML"
+       hx-indicator="#parts-load-spinner">
+    <div id="parts-load-spinner" class="htmx-indicator p-8 text-center text-gray-400">Loading parts...</div>
   </div>
 </div>
-
-{# ── Scroll sync script ──────────────────────────────────────── #}
-<script>
-  function initScrollSync() {
-    requestAnimationFrame(function() {
-      document.querySelectorAll('.top-scroll-bar').forEach(function(bar) {
-        var contentId = bar.dataset.syncTarget;
-        var content = document.getElementById(contentId);
-        if (!content) return;
-        var scrollW = content.scrollWidth;
-        var spacer = bar.querySelector('.scroll-spacer');
-        if (spacer && scrollW > content.clientWidth) {
-          spacer.style.width = scrollW + 'px';
-          bar.style.display = '';
-        } else if (spacer) {
-          bar.style.display = 'none';
-        }
-        bar.onscroll = function() { content.scrollLeft = bar.scrollLeft; };
-        content.onscroll = function() { bar.scrollLeft = content.scrollLeft; };
-      });
-    });
-  }
-  document.addEventListener('htmx:afterSwap', initScrollSync);
-  document.addEventListener('htmx:afterSettle', initScrollSync);
-</script>
