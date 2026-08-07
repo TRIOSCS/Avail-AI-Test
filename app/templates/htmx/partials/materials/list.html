@@ -37,7 +37,7 @@
      href="/v2/partials/materials/export"
      :href="'/v2/partials/materials/export?' + new URLSearchParams({commodity: commodity || '', q: q || '', sub_filters: JSON.stringify(subFilters || {}), statuses: (statuses || []).join(','), lifecycle: (lifecycle || []).join(','), rohs: (rohs || []).join(','), condition: (condition || []).join(','), has_datasheet: hasDatasheet || false, has_stock: hasStock || false, has_price: hasPrice || false, has_crosses: hasCrosses || false, internal: internal || 'all', searched_within: searchedWithin || 'any', min_searches: minSearches || 0}).toString()"
      class="btn-secondary btn-sm ml-auto whitespace-nowrap"
-     title="Download all matching materials as a CSV file">
+     title="Download all matching parts as a CSV file">
     Export CSV
   </a>
 </div>

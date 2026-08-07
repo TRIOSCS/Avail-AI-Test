@@ -2,7 +2,7 @@
 (HTMX).
 
 Covers the requisitions-list bulk action (reassign owner), inline cell edit +
-save (name/status/urgency/deadline/owner), win-probability + opportunity-value
+save (name/status/urgency/deadline/owner), opportunity-value
 inline edits, row-level actions (claim/unclaim/won/lost/clone), the inbox-poll
 trigger, and the requirement delete/update endpoints. Extracted verbatim from
 htmx_views.py (same `/v2/partials/requisitions/...` paths, same `htmx-views`
@@ -240,44 +240,6 @@ async def requisition_inline_save(
 
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     return response
-
-
-@router.patch("/v2/partials/requisitions/{req_id}/win-probability", response_class=HTMLResponse)
-async def requisition_win_probability_save(
-    request: Request,
-    req_id: int,
-    win_probability: str = Form(""),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Set win_probability (0-100) on a requisition, or clear it (empty string → NULL).
-
-    Authz: same gate as other inline requisition edits (require_requisition_access).
-    Returns an inline display span with the new value.
-    """
-    req = db.get(Requisition, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-    require_requisition_access(db, req_id, user)
-    stripped = win_probability.strip()
-    if stripped == "":
-        prob = None
-    else:
-        try:
-            prob = int(stripped)
-        except (ValueError, TypeError):
-            raise HTTPException(400, "win_probability must be an integer") from None
-        if not (0 <= prob <= 100):
-            raise HTTPException(400, "win_probability must be between 0 and 100")
-    req.win_probability = prob
-    req.updated_at = datetime.now(UTC)
-    req.updated_by_id = user.id
-    db.commit()
-    db.refresh(req)
-    logger.info("Requisition {} win_probability set to {} by user {}", req_id, prob, user.id)
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["req"] = req
-    return template_response("htmx/partials/requisitions/_win_probability.html", ctx)
 
 
 @router.patch("/v2/partials/requisitions/{req_id}/opportunity-value", response_class=HTMLResponse)

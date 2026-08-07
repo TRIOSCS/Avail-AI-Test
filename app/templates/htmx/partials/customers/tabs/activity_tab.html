@@ -158,7 +158,7 @@
                    hx-target='#main-content'
                    hx-push-url='/v2/requisitions/{{ rfq_req.id }}'
                    class='text-xs text-brand-500 hover:text-brand-600 cursor-pointer whitespace-nowrap'>
-                  Req #{{ rfq_req.id }}
+                  Deal #{{ rfq_req.id }}
                 </a>
                 {% endif %}
                 <span class='text-[11px] text-gray-400 whitespace-nowrap'>{{ ts|localdate('%b %d') if ts else "" }}</span>

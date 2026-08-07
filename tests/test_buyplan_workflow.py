@@ -1,10 +1,11 @@
 """Tests for app/services/buyplan_workflow.py — Buy Plan workflow operations.
 
-Covers: submit, approve, reject, SO verification, PO confirmation, PO verification,
-issue flagging, completion, reset-to-draft, resubmit, favoritism detection,
-case report generation, auto-approval logic, line edits, line overrides,
-financials recalculation, stock sale detection, buyer task generation,
-and async PO verification scanning (v1 and v3).
+Covers: submit, approve/reject via the approvals engine (decide() — the only
+decision path since the legacy approve_buy_plan died with migration 210),
+SO verification, PO confirmation, PO verification, issue flagging, completion,
+reset-to-draft, resubmit, favoritism detection, case report generation,
+line edits, financials recalculation, stock sale detection, buyer task
+generation, and async PO verification scanning (v1 and v3).
 
 Called by: pytest
 Depends on: conftest fixtures, buyplan_workflow module
@@ -24,11 +25,9 @@ from app.models import Offer, Quote, Requirement, Requisition, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember
 from app.services.buyplan_workflow import (
     RESUBMITTABLE_STATUSES,
-    _apply_line_overrides,
     _generate_buyer_tasks,
     _is_stock_sale,
     _recalculate_financials,
-    approve_buy_plan,
     cancel_buy_plan,
     check_completion,
     confirm_po,
@@ -233,11 +232,40 @@ def _grant_po_approver(db: Session, user: User) -> User:
     return user
 
 
+def _open_request(db: Session, plan: BuyPlan, requester: User):
+    """Open the engine's BUY_PLAN gate for *plan* exactly as submit does (routing reads
+    the per-user can_approve_buy_plans toggles at request time)."""
+    from app.constants import ApprovalGateType
+    from app.services.approvals.service import create_request
+
+    return create_request(
+        db,
+        gate_type=ApprovalGateType.BUY_PLAN,
+        amount=plan.total_cost,
+        subject=plan,
+        requested_by=requester,
+        owner=requester,
+    )
+
+
+def _decide_plan(db: Session, plan: BuyPlan, approver: User, action: str = "approve", notes: str | None = None):
+    """Modern (and only) approval path: open the engine gate, decide it, return the
+    plan."""
+    from app.services.approvals.service import decide
+
+    req = _open_request(db, plan, approver)
+    decide(db, req.id, approver, action, comment=notes)
+    db.refresh(plan)
+    return plan
+
+
 class TestApproveBuyPlan:
-    """Tests for approve_buy_plan().
+    """Approve/reject via the approvals engine (decide()) — the only decision path since
+    the legacy approve_buy_plan entry point died with migration 210 (Packet 3 D2).
 
     Approval is gated by the per-user ``can_approve_buy_plans`` right (admin-toggled),
-    NOT by role — so each authorising test grants the flag explicitly.
+    NOT by role — routing creates a PENDING recipient row per flag holder, and decide()
+    refuses anyone without one.
     """
 
     def test_approve(
@@ -250,7 +278,7 @@ class TestApproveBuyPlan:
         db_session.refresh(plan)
 
         with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            result = approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="LGTM")
+            result = _decide_plan(db_session, plan, manager_user, "approve", notes="LGTM")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.approved_by_id == manager_user.id
@@ -273,7 +301,7 @@ class TestApproveBuyPlan:
         db_session.refresh(plan)
 
         with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            approve_buy_plan(plan.id, "approve", manager_user, db_session)
+            _decide_plan(db_session, plan, manager_user, "approve")
 
         # The fold already cleared the SO gate — completion needs no verify_so call.
         line.status = BuyPlanLineStatus.VERIFIED.value
@@ -290,7 +318,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        result = approve_buy_plan(plan.id, "reject", manager_user, db_session, notes="Needs changes")
+        result = _decide_plan(db_session, plan, manager_user, "reject", notes="Needs changes")
 
         assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Needs changes"
@@ -301,14 +329,17 @@ class TestApproveBuyPlan:
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         """Reject with no reason (None or whitespace) is refused; plan stays pending."""
+        from app.services.approvals.service import decide
+
         _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
+        req = _open_request(db_session, plan, manager_user)
         for bad in (None, "", "   "):
-            with pytest.raises(ValueError, match="rejection reason is required"):
-                approve_buy_plan(plan.id, "reject", manager_user, db_session, notes=bad)
+            with pytest.raises(ValueError, match="reject requires a non-blank comment"):
+                decide(db_session, req.id, manager_user, "reject", comment=bad)
         db_session.refresh(plan)
         assert plan.status == BuyPlanStatus.PENDING.value
 
@@ -326,7 +357,7 @@ class TestApproveBuyPlan:
         db_session.refresh(plan)
 
         with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            approve_buy_plan(plan.id, "approve", manager_user, db_session, notes="ok")
+            _decide_plan(db_session, plan, manager_user, "approve", notes="ok")
 
         row = (
             db_session.query(ActivityLog)
@@ -347,7 +378,7 @@ class TestApproveBuyPlan:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        approve_buy_plan(plan.id, "reject", manager_user, db_session, notes="too expensive")
+        _decide_plan(db_session, plan, manager_user, "reject", notes="too expensive")
 
         row = (
             db_session.query(ActivityLog)
@@ -356,58 +387,50 @@ class TestApproveBuyPlan:
         )
         assert row.user_id == manager_user.id
 
-    def test_approve_with_line_overrides(
-        self,
-        db_session: Session,
-        manager_user: User,
-        test_user: User,
-        test_quote: Quote,
-        test_requisition: Requisition,
-        test_offer: Offer,
-    ):
-        """An approver can approve with line overrides."""
-        _grant_approver(db_session, manager_user)
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
-        line = _make_line(db_session, plan, unit_sell=3.00)
-        db_session.refresh(plan)
+    def test_decide_unknown_request(self, db_session: Session, manager_user: User):
+        """Deciding a nonexistent request raises (was approve_buy_plan's plan-not-
+        found)."""
+        from app.services.approvals.service import decide
 
-        overrides = [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap vendor"}]
-
-        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            result = approve_buy_plan(plan.id, "approve", manager_user, db_session, line_overrides=overrides)
-
-        assert result.status == BuyPlanStatus.ACTIVE.value
-
-    def test_approve_not_found(self, db_session: Session, manager_user: User):
         _grant_approver(db_session, manager_user)
         with pytest.raises(ValueError, match="not found"):
-            approve_buy_plan(9999, "approve", manager_user, db_session)
+            decide(db_session, 999999, manager_user, "approve")
 
     def test_approve_not_pending(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
+        """The side-effect state guard refuses a decision on a plan that left PENDING
+        (e.g. a stale request on an already-ACTIVE plan)."""
+        from app.services.approvals.service import decide
+
         _grant_approver(db_session, manager_user)
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        with pytest.raises(ValueError, match="Can only approve/reject pending"):
-            approve_buy_plan(plan.id, "approve", manager_user, db_session)
+        req = _open_request(db_session, plan, manager_user)
+        with pytest.raises(ValueError, match="Can only approve a pending plan"):
+            decide(db_session, req.id, manager_user, "approve")
 
     def test_approve_without_right(
         self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
-        """Even a manager WITHOUT the can_approve_buy_plans right is refused — the
-        column, not the role, is the single source of truth."""
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
-        for actor in (test_user, manager_user):  # neither has the flag granted
-            with pytest.raises(PermissionError, match="approval right required"):
-                approve_buy_plan(plan.id, "approve", actor, db_session)
+        """A manager WITHOUT the can_approve_buy_plans right is refused — routing only
+        made recipients of flag holders, so the flagless manager holds no PENDING
+        recipient row (the column, not the role, is the single source of truth)."""
+        from app.services.approvals.service import decide
 
-    def test_approve_invalid_action(
-        self, db_session: Session, manager_user: User, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        _grant_approver(db_session, manager_user)
+        _grant_approver(db_session, test_user)  # the only flag holder → the only recipient
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
-        with pytest.raises(ValueError, match="Invalid action"):
-            approve_buy_plan(plan.id, "bogus", manager_user, db_session)
+        req = _open_request(db_session, plan, test_user)
+        with pytest.raises(PermissionError, match="not a pending recipient"):
+            decide(db_session, req.id, manager_user, "approve")
+        db_session.refresh(plan)
+        assert plan.status == BuyPlanStatus.PENDING.value
+
+    def test_approve_invalid_action(self, db_session: Session, manager_user: User):
+        from app.services.approvals.service import decide
+
+        _grant_approver(db_session, manager_user)
+        with pytest.raises(ValueError, match="action must be one of"):
+            decide(db_session, 1, manager_user, "bogus")
 
     def test_right_grants_access_regardless_of_role(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -420,7 +443,7 @@ class TestApproveBuyPlan:
         db_session.refresh(plan)
 
         with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            result = approve_buy_plan(plan.id, "approve", test_user, db_session)
+            result = _decide_plan(db_session, plan, test_user, "approve")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
 
@@ -1008,29 +1031,10 @@ class TestHelpers:
             # Should not raise
             _generate_buyer_tasks(plan, db_session)
 
-    def test_apply_line_overrides(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition, test_offer: Offer
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition)
-        line = _make_line(db_session, plan, unit_sell=3.00)
-        db_session.refresh(plan)
-
-        _apply_line_overrides(
-            plan, [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap"}], db_session
-        )
-
-        assert line.offer_id == test_offer.id
-        assert line.quantity == 200
-        assert line.manager_note == "Swap"
-
-    def test_apply_line_overrides_missing_line(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        """Override with nonexistent line_id is silently skipped."""
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition)
-        db_session.refresh(plan)
-
-        _apply_line_overrides(plan, [{"line_id": 9999, "offer_id": 1}], db_session)
+    # (test_apply_line_overrides / test_apply_line_overrides_missing_line deleted:
+    # _apply_line_overrides died with the legacy approve_buy_plan entry point —
+    # its only caller. Managers edit lines through the workspace line-edit routes
+    # before deciding; migration 210 / Packet 3 D2.)
 
 
 # ── Favoritism Detection ─────────────────────────────────────────────

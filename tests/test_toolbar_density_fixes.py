@@ -119,7 +119,7 @@ class TestAccountsUtilityRow:
         assert 'name="sort"' in html
         assert 'name="disposition"' in html
         assert "My accounts" in html
-        assert "Has open reqs" in html
+        assert "Has open deals" in html
 
     def test_export_csv_hidden_for_all_roles(self, client, manager_client, test_company):
         """ISS-028: bulk export controls never appear on the list toolbar for ANY

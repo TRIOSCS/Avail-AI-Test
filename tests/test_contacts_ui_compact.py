@@ -282,12 +282,18 @@ class TestExpandDrawerContainsWechatTeamsNotes:
         # Alpine expand toggle must be present
         assert "x-show" in html or "x-data" in html
 
-    def test_expand_drawer_contains_wechat_when_set(self):
+    def test_expand_drawer_wechat_removed(self):
+        """WeChat display cut by the Packet-2 screen diet (items 14-16): the drawer no
+        longer renders it even when set.
+
+        Column stays.
+        """
         contact = _make_contact(wechat_id="alice_wechat")
         site = _make_site()
         rows = [{"contact": contact, "site": site, "legacy": False, "cadence": "new"}]
         html = _render_grouped_list(rows)
-        assert "alice_wechat" in html or "WeChat" in html
+        assert "alice_wechat" not in html
+        assert "WeChat" not in html
 
     def test_expand_drawer_contains_teams_deeplink(self):
         contact = _make_contact(email="alice@acme.com")
@@ -329,11 +335,13 @@ class TestExpandDrawerContainsWechatTeamsNotes:
 class TestEditModalSurfacesBlankFields:
     """Edit form must show all known contact fields, including blank ones."""
 
-    def test_edit_form_shows_wechat_field(self):
+    def test_edit_form_wechat_field_removed(self):
+        """wechat_id input cut by the Packet-2 screen diet (items 14-16)."""
         contact = _make_contact(wechat_id=None)
         site = _make_site()
         html = _render_contact_form(contact=contact, site=site, mode="edit")
-        assert "wechat_id" in html or "WeChat" in html
+        assert "wechat_id" not in html
+        assert "WeChat" not in html
 
     def test_edit_form_shows_linkedin_field(self):
         contact = _make_contact(linkedin_url=None)
@@ -347,17 +355,19 @@ class TestEditModalSurfacesBlankFields:
         html = _render_contact_form(contact=contact, site=site, mode="edit")
         assert "notes" in html or "Notes" in html
 
-    def test_edit_form_shows_secondary_email_field(self):
+    def test_edit_form_secondary_email_removed(self):
+        """secondary_email input cut by the Packet-2 screen diet (items 14-16)."""
         contact = _make_contact(secondary_email=None)
         site = _make_site()
         html = _render_contact_form(contact=contact, site=site, mode="edit")
-        assert "secondary_email" in html or "Secondary Email" in html
+        assert "secondary_email" not in html
 
-    def test_edit_form_shows_secondary_phone_field(self):
+    def test_edit_form_secondary_phone_removed(self):
+        """secondary_phone input cut by the Packet-2 screen diet (items 14-16)."""
         contact = _make_contact(secondary_phone=None)
         site = _make_site()
         html = _render_contact_form(contact=contact, site=site, mode="edit")
-        assert "secondary_phone" in html or "Secondary Phone" in html
+        assert "secondary_phone" not in html
 
     def test_edit_form_shows_phone_field(self):
         contact = _make_contact(phone=None)
@@ -382,7 +392,9 @@ class TestEditModalSurfacesBlankFields:
         site = _make_site()
         html = _render_contact_form(contact=contact, site=site, mode="edit")
         assert "alice@acme.com" in html
-        assert "alice_wechat" in html
+        # wechat_id input cut by the Packet-2 screen diet (items 14-16) — the
+        # stored value no longer surfaces in the form.
+        assert "alice_wechat" not in html
 
 
 class TestContactRowFilterAttributes:

@@ -14,7 +14,7 @@
 
   {# ── Header ──────────────────────────────────────────────────────── #}
   <div class="flex items-center justify-between mb-4 flex-shrink-0">
-    <h2 class="h2">New Requisition</h2>
+    <h2 class="h2">New Deal</h2>
     {# Close handled by the global modal chrome X (base.html) #}
   </div>
 
@@ -196,14 +196,9 @@
         <div class="flex-none w-[70px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Qty</div>
         <div class="flex-none w-[80px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Cond</div>
         <div class="flex-none w-[90px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Target $</div>
-        <div class="flex-none w-[100px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Cust PN</div>
         <div class="flex-none w-[120px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Description</div>
-        <div class="flex-none w-[90px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Packaging</div>
         <div class="flex-none w-[70px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Rev</div>
-        <div class="flex-none w-[70px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">DC</div>
-        <div class="flex-none w-[70px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">FW</div>
-        <div class="flex-none w-[70px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">HW</div>
-        <div class="flex-none w-[120px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Need By</div>
+        <div class="flex-none w-[72px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Specs</div>
         <div class="flex-1 min-w-[80px] px-2 py-3" style="border-right: 1px solid rgba(255,255,255,0.1);">Notes</div>
         <div class="flex-none w-8"></div>
       </div>
@@ -257,20 +252,10 @@
               <input aria-label="$" type="number" step="0.01" x-model.number="part.target_price" placeholder="$"
                      class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
             </div>
-            {# Cust PN #}
-            <div class="flex-none w-[100px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="Cust PN" type="text" x-model="part.customer_pn" placeholder="Cust PN"
-                     class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
-            </div>
             {# Description — AI standardizes on blur #}
             <div class="flex-none w-[120px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
               <input aria-label="Description" type="text" x-model="part.description" placeholder="Description"
                      @blur="standardizeDescription(part)"
-                     class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
-            </div>
-            {# Packaging #}
-            <div class="flex-none w-[90px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="Packaging" type="text" x-model="part.packaging" placeholder="T&R, QFP..."
                      class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
             </div>
             {# Rev #}
@@ -278,25 +263,14 @@
               <input aria-label="Rev" type="text" x-model="part.revision" placeholder="Rev"
                      class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
             </div>
-            {# DC #}
-            <div class="flex-none w-[70px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="DC" type="text" x-model="part.date_codes" placeholder="DC"
-                     class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
-            </div>
-            {# FW #}
-            <div class="flex-none w-[70px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="FW" type="text" x-model="part.firmware" placeholder="FW"
-                     class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
-            </div>
-            {# HW #}
-            <div class="flex-none w-[70px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="HW" type="text" x-model="part.hardware_codes" placeholder="HW"
-                     class="w-full px-2 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
-            </div>
-            {# Need By #}
-            <div class="flex-none w-[120px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
-              <input aria-label="Need by" type="date" x-model="part.need_by_date"
-                     class="w-full px-1.5 py-1.5 text-[13px] text-gray-800 border border-gray-300 rounded input-focus bg-white">
+            {# Specs toggle — the six demoted spec fields (§4.2) live in the
+               collapsible row below; count chip lights when any carries a value. #}
+            <div class="flex-none w-[72px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
+              <button type="button" @click="part.showSpecs = !part.showSpecs"
+                      class="w-full text-[11px] font-semibold px-1.5 py-1.5 rounded transition-colors"
+                      :class="[part.customer_pn, part.need_by_date, part.packaging, part.date_codes, part.firmware, part.hardware_codes].filter(Boolean).length ? 'bg-brand-100 text-brand-700 hover:bg-brand-200' : 'text-gray-400 hover:bg-gray-100 border border-transparent'">
+                <span x-text="'Specs' + (part.showSpecs ? ' ▴' : ' ▾')"></span>
+              </button>
             </div>
             {# Notes — fills remaining width #}
             <div class="flex-1 min-w-[80px] px-2 py-2.5" style="border-right: 1px solid #E8EBF0;">
@@ -333,6 +307,42 @@
                   <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
               </button>
+            </div>
+          </div>
+
+          {# ── Specs detail row (demoted fields — §4.2 Specs disclosure) ──
+             Same x-show (not template x-if) rationale as the substitute rows below:
+             submission reads the Alpine part model via the hidden inputs, so
+             display-only gating is safe. #}
+          <div x-show="part.showSpecs" x-cloak class="border-t border-gray-200">
+            <div class="flex items-center bg-sky-50/60 border-b border-sky-200/50 border-l-[3px] border-l-sky-400">
+              <div class="flex-none w-[40px] px-2 py-1.5 text-center">
+                <span class="text-[9px] font-bold text-sky-500 uppercase">Spec</span>
+              </div>
+              <div class="flex-none w-[110px] px-1.5 py-1.5">
+                <input aria-label="Cust PN" type="text" x-model="part.customer_pn" placeholder="Cust PN"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
+              <div class="flex-none w-[130px] px-1.5 py-1.5">
+                <input aria-label="Need by" type="date" x-model="part.need_by_date"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
+              <div class="flex-none w-[110px] px-1.5 py-1.5">
+                <input aria-label="Packaging" type="text" x-model="part.packaging" placeholder="Packaging"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
+              <div class="flex-none w-[90px] px-1.5 py-1.5">
+                <input aria-label="DC" type="text" x-model="part.date_codes" placeholder="DC"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
+              <div class="flex-none w-[90px] px-1.5 py-1.5">
+                <input aria-label="FW" type="text" x-model="part.firmware" placeholder="FW"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
+              <div class="flex-none w-[90px] px-1.5 py-1.5">
+                <input aria-label="HW" type="text" x-model="part.hardware_codes" placeholder="HW"
+                       class="w-full px-1.5 py-1 text-[13px] text-gray-800 border border-sky-300 rounded input-focus bg-white">
+              </div>
             </div>
           </div>
 
@@ -453,7 +463,7 @@
               :class="hasErrors ? 'bg-amber-500' : 'bg-accent-500'"
               class="px-4 py-1.5 text-xs font-semibold text-white rounded hover:opacity-90 transition-colors disabled:opacity-50">
         <template x-if="!hasErrors" x-cloak>
-          <span x-text="saving ? 'Saving...' : 'Create Requisition (' + validCount + ' parts)'"></span>
+          <span x-text="saving ? 'Saving...' : 'Create Deal (' + validCount + ' parts)'"></span>
         </template>
         <template x-if="hasErrors" x-cloak>
           <span x-text="validCount + ' OK · ' + errorCount + ' need manufacturer'"></span>

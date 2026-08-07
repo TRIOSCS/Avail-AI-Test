@@ -127,10 +127,10 @@ def test_picker_non_sourcing_lists_offerless_requisitions(
     req = _open_req(db_session, test_user)  # no offers at all
 
     sourcing_txt = lite_client.get("/v2/partials/buy-plans/sales-orders/new").text
-    assert f"REQ #{req.id}" not in sourcing_txt  # sourcing path requires offers
+    assert f"Deal #{req.id}" not in sourcing_txt  # sourcing path requires offers
 
     lite_txt = lite_client.get("/v2/partials/buy-plans/sales-orders/new?order_type=stock_sale").text
-    assert f"REQ #{req.id}" in lite_txt  # lite path lists it
+    assert f"Deal #{req.id}" in lite_txt  # lite path lists it
     assert "Lite path" in lite_txt
 
 

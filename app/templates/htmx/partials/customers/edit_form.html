@@ -95,16 +95,6 @@
               {% endfor %}
             </select>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Revenue Range</label>
-            <select name="revenue_range"
-                    class="input">
-              <option value="">— Select —</option>
-              {% for opt in ["<$1M", "$1M-$10M", "$10M-$50M", "$50M-$200M", "$200M-$1B", ">$1B"] %}
-              <option value="{{ opt }}"{% if company.revenue_range == opt %} selected{% endif %}>{{ opt }}</option>
-              {% endfor %}
-            </select>
-          </div>
         </div>
       </fieldset>
 
@@ -152,12 +142,6 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
             <input type="text" name="credit_terms" maxlength="{{ column_maxlength('company', 'credit_terms') }}" value="{{ company.credit_terms or '' }}"
                    placeholder="e.g. Net 30"
-                   class="input">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Tax ID (EIN / VAT)</label>
-            <input type="text" name="tax_id" maxlength="{{ column_maxlength('company', 'tax_id') }}" value="{{ company.tax_id or '' }}"
-                   placeholder="e.g. 12-3456789"
                    class="input">
           </div>
         </div>

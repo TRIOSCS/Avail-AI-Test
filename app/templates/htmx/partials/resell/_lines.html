@@ -128,7 +128,6 @@
     <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
       <div><span class="block text-secondary uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
       <div><span class="block text-secondary uppercase tracking-wide">Condition</span><span class="font-medium">{{ item.condition or '—' }}</span></div>
-      <div><span class="block text-secondary uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
       <div>
         <span class="block text-secondary uppercase tracking-wide">Best offer</span>
         {# Owner-only: a non-owner broker must never see the current best COMPETING

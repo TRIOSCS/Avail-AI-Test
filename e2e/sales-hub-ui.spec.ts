@@ -23,7 +23,7 @@ test.describe('Sales Hub — parts/list partial', () => {
     const res = await request.get('/v2/partials/parts', { headers: HX_HEADER });
     const body = await res.text();
     if (body.includes('No parts found')) {
-      expect(body).toContain('Add Requisition');
+      expect(body).toContain('Add Deal');
       expect(body).toContain('btn-primary');
     }
   });
@@ -67,7 +67,7 @@ test.describe('Sales Hub — parts/workspace partial', () => {
   test('pipeline strip always shows Sales Hub eyebrow', async ({ request }) => {
     const res = await request.get('/v2/partials/parts/workspace', { headers: HX_HEADER });
     const body = await res.text();
-    expect(body).toContain('Sales Hub');
+    expect(body).toContain('Deals');
   });
 
   test('drag handle uses accent-400/accent-500 not brand-400/brand-500', async ({ request }) => {

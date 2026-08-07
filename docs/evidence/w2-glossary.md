@@ -1,6 +1,11 @@
 # Wave 2 UI Glossary — FINAL for Packet 2 (brief §4.1, SIGN-OFF-GATED)
 
-Status: **FINAL — apply only after Packet-2 sign-off.** First drafted
+Status: **APPLIED 2026-08-07** — Packet-2 sign-off received; rows 1, 2, 4,
+5, 6 swept against the then-current tree (re-scan first, per plan; the
+2026-08-04 counts below are historical). Row 3 **REJECTED** by the owner
+(see row). Owner also approved the vendor-facing `documents/rfq_summary.html`
+rewording ("Deal Details" / "Requested parts (n)") — applied; the displayed
+**REQ-** record prefix stays REQ- (owner: keep). First drafted
 2026-08-04; **re-verified 2026-08-04 late eve against the live W2 working
 tree** (W2 surface deletes in flight — Dashboard, Sourcing Leads,
 Email-Intelligence, Knowledge already gone from the tree; counts below are
@@ -23,7 +28,7 @@ gated sweep. Seeded from the owner's vocabulary map and spec v1.1 Decision B
 |---|---|---|---|---|
 | 1 | Requisition / Requisitions | **Deal / Deals** | 54 in 33 files | **RECOMMENDED.** Spec Decision B already names the tab **Deals**; the entity label must match the tab. Alternative (noted, not recommended): keep the owner's "Req" shorthand and skip rows 1–2 — but then tab says Deals while every page says Req. One word must win; recommendation is **Deal**. |
 | 2 | Req / Reqs / REQ # | **Deal / Deal #** | 21 in 17 files | **RECOMMENDED** (follows row 1). **EXCEPT 2 sites = displayed "REQ-" record prefix → KEEP-until-sign-off** (see marker section below). |
-| 3 | Sighting / Sightings | **Availability** ("Recent availability", "Availability score") | 26 in 16 files | **FLAGGED — NEEDS EXPLICIT OWNER SIGN-OFF on the word itself.** The one proposal with no seed in the owner's vocabulary — invented here from trade usage ("checking availability"). "Vendor offer" would collide with the Offer entity. Do not apply row 3 on a general packet OK; it needs its own yes. Nav tab disappears in W2.1 regardless; the Deals fold is W4. |
+| 3 | Sighting / Sightings | ~~Availability~~ | 26 in 16 files | **REJECTED (owner, 2026-08-07 Packet-2 sign-off) — "Sighting" STAYS everywhere.** The two words name different things in the owner's vocabulary: a **Sighting** = "we saw it listed on an API trading-vendor site" — a raw listing; an **Availability** = an offer — the buyer contacted the vendor, verified stock, negotiated, and qualified it. Renaming Sighting to Availability would collapse that distinction. Do not re-propose. |
 | 4 | Requirement / Requirements | **Line / Lines** ("Add line", "No lines yet") | 18 in 11 files (19 raw − 1 plain-English use kept: `requisitions/unified_modal.html` "…customer requirements") | **RECOMMENDED.** "Line" is how RFQs/POs are spoken of in the trade. **EXCEPT the vendor-facing `documents/rfq_summary.html` site → KEEP-until-sign-off** (marker section below). |
 | 5 | Sales Hub | **Deals** | 2 headings in `htmx/partials/parts/workspace.html` | **RECOMMENDED.** The nav tuple rename itself ships ungated in W2.1 (Decision B); this row is only the 2 page headings. |
 | 6 | Materials | **Parts** | 2 in `htmx/partials/materials/workspace.html` | **RECOMMENDED.** Nav entry leaves the bar in W2.1 anyway (contextual lookup); the page heading should read Parts. |
@@ -35,8 +40,8 @@ gated sweep. Seeded from the owner's vocabulary map and spec v1.1 Decision B
 
 | Marker | Sites | Why gated separately |
 |---|---|---|
-| **Displayed "REQ-" record prefix** | `htmx/partials/offers/review_queue.html:72` (`REQ-{{ requisition_id }}`); `htmx/partials/sightings/preview_inquiry.html:105` (`REQ-{{ group.req_id }}` subhead in the vendor-inquiry preview) | Renaming a displayed record prefix mid-stream can break references the owner or vendors already hold. Stays **REQ-** until the owner explicitly signs the prefix change (or both surfaces die first: review_queue is on the §5.1 W4 delete list; preview_inquiry rides the W4 sightings work). |
-| **Vendor-facing document `documents/rfq_summary.html`** | `:29` "Requisition Details", `:39` "Requirements (n)" | External-facing copy that vendors receive. Stays as-is until the owner explicitly approves the wording (suggested: "Deal Details" / "Requested parts (n)" — owner's call, it is his letterhead). |
+| **Displayed "REQ-" record prefix** | `htmx/partials/sightings/preview_inquiry.html:105` (`REQ-{{ group.req_id }}` — the review_queue site died with the W4 deletes) | **RESOLVED 2026-08-07: owner says KEEP.** The displayed REQ- record prefix stays REQ- everywhere. |
+| **Vendor-facing document `documents/rfq_summary.html`** | `:29` "Requisition Details", `:40` "Requirements (n)" | **RESOLVED 2026-08-07: owner APPROVED the suggested wording — applied.** Headings now read "Deal Details" / "Requested parts (n)". |
 
 ## Considered and KEPT (unchanged from draft; re-confirmed)
 

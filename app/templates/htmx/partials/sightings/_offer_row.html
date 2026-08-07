@@ -31,7 +31,7 @@
       </div>
       <div class="text-xs text-gray-300 mt-0.5">
         ↳ {{ (o.requisition.customer_name or '—') if o.requisition else '—' }}
-        {% if o.requisition_id %}· Req #{{ o.requisition_id }}{% endif %}
+        {% if o.requisition_id %}· Deal #{{ o.requisition_id }}{% endif %}
       </div>
     </div>
     <div class="relative shrink-0" @click.outside="open = false">

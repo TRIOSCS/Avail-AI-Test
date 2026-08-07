@@ -26,7 +26,7 @@
   <h1>{{ requisition.name | e }}</h1>
   <p class="subtitle">RFQ Summary Report — Generated {{ generated_at }}</p>
 
-  <h2>Requisition Details</h2>
+  <h2>Deal Details</h2>
   <table class="meta-table">
     <tr><td class="meta-label">Customer</td><td>{{ (requisition.customer_name | e) or '—' }}</td></tr>
     {%- set req_display = requisition.display_status or requisition.status -%}
@@ -37,7 +37,7 @@
     {% endif %}
   </table>
 
-  <h2>Requirements ({{ requirements|length }})</h2>
+  <h2>Requested parts ({{ requirements|length }})</h2>
   <table>
     <thead>
       <tr><th>#</th><th>MPN</th><th>Qty</th><th>Target Price</th></tr>

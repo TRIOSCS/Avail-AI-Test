@@ -31,10 +31,10 @@
               class="btn-primary btn-md">
         <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
         <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        New Requisition
+        New Deal
       </button>
       <div>
-        <h1 class="h1">Requisitions list</h1>
+        <h1 class="h1">Deals list</h1>
         <p class="text-secondary">{{ total }} total</p>
       </div>
     </div>
@@ -54,7 +54,7 @@
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
           <input type="text" id="req-search" name="q" value="{{ q }}" placeholder="Search by name, customer, or part #..."
-                 aria-label="Search requisitions"
+                 aria-label="Search deals"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
                  hx-swap="innerHTML"
@@ -173,7 +173,7 @@
            mirrors the owner dropdown pattern (no extra Alpine state needed). #}
         <span class="text-gray-300 mx-1 self-center">|</span>
         <span class="text-xs text-gray-600 self-center mr-1">Group:</span>
-        <select name="group_by" aria-label="Group requisitions"
+        <select name="group_by" aria-label="Group deals"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
@@ -273,7 +273,7 @@
         <thead class="bg-white">
           <tr>
             <th class="px-3 py-3 w-10">
-              <input aria-label="Select all requisitions" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus"
+              <input aria-label="Select all deals" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
             {# Role-based column order: sales omits Owner, puts Status before Parts; non-sales includes Owner and puts Parts/Offers before Status #}

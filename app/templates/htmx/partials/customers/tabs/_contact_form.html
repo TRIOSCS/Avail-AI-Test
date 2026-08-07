@@ -124,21 +124,6 @@
              class='input'>
     </div>
 
-    <div class='grid grid-cols-2 gap-2'>
-      <div>
-        <label class='form-label'>Secondary Email</label>
-        <input type='email' name='secondary_email' maxlength='255'
-               value='{{ ((contact.secondary_email or "") if contact else "") | e }}'
-               class='input'>
-      </div>
-      <div>
-        <label class='form-label'>Secondary Phone</label>
-        <input type='tel' name='secondary_phone' maxlength='100'
-               value='{{ ((contact.secondary_phone or "") if contact else "") | e }}'
-               class='input'>
-      </div>
-    </div>
-
     {# ── Reports to (same-company contacts, self excluded in edit mode) ──── #}
     {% if mode == 'edit' and site %}
     <div>
@@ -157,13 +142,6 @@
       </select>
     </div>
     {% endif %}
-
-    <div>
-      <label class='form-label'>WeChat ID</label>
-      <input type='text' name='wechat_id' maxlength='100'
-             value='{{ ((contact.wechat_id or "") if contact else "") | e }}'
-             class='input'>
-    </div>
 
     {# ── Role select — CANONICAL_ROLES (roles global) is the single source; labels
        come from the contact_role_labels global (app/constants.py CONTACT_ROLE_LABELS,

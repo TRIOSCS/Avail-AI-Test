@@ -635,29 +635,9 @@ class TestNotifyApproved:
         assert _outbox_rows(db_session) == []
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# notify_rejected — no-op seam (decide() owns the single delivery)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNotifyRejected:
-    @pytest.mark.asyncio
-    async def test_rejected_is_noop(self, db_session):
-        """The reject decision email is enqueued by approvals.service.decide —
-        notify_rejected must add NOTHING (no outbox row, no email, no ActivityLog)."""
-        from app.services.buyplan_notifications import notify_rejected
-
-        user = _make_user(db_session)
-        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id, approved_by_id=mgr.id, approval_notes="Too expensive")
-        _make_request(db_session, plan, status=ApprovalRequestStatus.REJECTED)
-
-        with patch("app.services.buyplan_notifications._send_email", new_callable=AsyncMock) as mock_email:
-            await notify_rejected(plan, db_session)
-
-        mock_email.assert_not_awaited()
-        assert _outbox_rows(db_session) == []
-        assert db_session.query(ActivityLog).count() == 0
+# (TestNotifyRejected deleted: the notify_rejected no-op seam died with the
+# legacy-PENDING fallback — the reject event's single delivery is the engine
+# decide() outbox email, and the router no longer dispatches anything on reject.)
 
 
 # ═══════════════════════════════════════════════════════════════════════

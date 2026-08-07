@@ -78,7 +78,7 @@
       <button @click="selectCommodity(null)" x-show="!categorySearch"
               :class="!commodity ? 'bg-accent-100 text-accent-800 font-semibold border-l-[3px] border-accent-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r transition-colors mb-1">
-        All Materials <span class="text-secondary">({{ total_materials }})</span>
+        All Parts <span class="text-secondary">({{ total_materials }})</span>
       </button>
       <span id="mfr-filter-spinner" class="htmx-indicator text-xs text-gray-400">Loading...</span>
       <div hx-get="/v2/partials/materials/filters/tree"
@@ -280,7 +280,7 @@
         {# Page header — title + active-commodity breadcrumb (folded inline). min-w-0
            lets the breadcrumb truncate under pressure while the title never shrinks. #}
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class="h2 flex-shrink-0">Materials</h1>
+          <h1 class="h2 flex-shrink-0">Parts</h1>
           <template x-if="commodity" x-cloak>
             <span class="flex items-center gap-1 min-w-0 text-gray-400 text-xs">
               <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -305,7 +305,7 @@
 
         {# Search input — triggers AI interpret when 3+ words #}
         <div class="relative flex-1">
-          <input aria-label="Search materials" type="text" x-model="q"
+          <input aria-label="Search parts" type="text" x-model="q"
                  @input.debounce.400ms="applyFilters()"
                  hx-get="/v2/partials/materials/ai-interpret"
                  {# htmx event filter [..] MUST hug the event name; trailing a modifier
@@ -316,7 +316,7 @@
                  hx-swap="none"
                  name="q"
                  placeholder="Search by MPN, manufacturer, or try: 'DDR5 32GB ECC server memory'..."
-                 aria-label="Search materials by MPN, manufacturer, or natural language"
+                 aria-label="Search parts by MPN, manufacturer, or natural language"
                  class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-accent-500 focus:border-accent-500">
           <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -402,7 +402,7 @@
     </div>
 
     {# Results loading indicator (referenced by #materials-results hx-indicator) #}
-    <div id="materials-results-spinner" class="htmx-indicator px-3 py-2 text-xs text-gray-400">Loading materials…</div>
+    <div id="materials-results-spinner" class="htmx-indicator px-3 py-2 text-xs text-gray-400">Loading parts…</div>
 
     {# Results container #}
     {# hx-vals js: MUST be an object-literal expression. htmx wraps any value not starting

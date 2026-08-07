@@ -1,6 +1,19 @@
 # Wave 2 Screen Diet — FINAL for Packet 2 (brief §4.2, SIGN-OFF-GATED)
 
-Status: **FINAL — apply only after Packet-2 sign-off.** Drafted 2026-08-04;
+Status: **APPLIED 2026-08-07** — Packet-2 sign-off received; all 19 cut
+items + the 7-field DEMOTE set applied against the then-current tree.
+Per-item outcomes: items 1–18 applied as planned (item 11's list Score
+column removal also carried the cell's Blacklisted/Archived badges — the
+row tint + "Hide blacklisted" filter keep that signal); item 19 was
+**already gone** (the W2.5 Proactive park removed the quotes/detail.html
+badge — a comment at the site records it). DEMOTE: six spec fields
+collapsed into a "Specs" disclosure in all three requirement forms
+(tabs/parts.html add form, tabs/req_row.html inline edit, unified_modal.html
+per-part collapsible spec row) and dropped from the requirement-row columns;
+`parts/list.html` deliberately untouched (its Bid Due triage column and
+spec-count chip are workflow surfaces, already a demoted presentation).
+customer_name: header + list row now render the company relation only.
+Drafted 2026-08-04;
 **every CUT/DEMOTE row re-verified 2026-08-04 late eve**: null rates
 re-queried on `availai-simp-db-1` (prod copy, SELECTs only) and render sites
 re-checked against the live W2 working tree (surface deletes in flight).

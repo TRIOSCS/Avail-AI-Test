@@ -1,11 +1,13 @@
-"""Buy Plan — Workflow package: submit, approve, verify, complete, intelligence.
+"""Buy Plan — Workflow package: submit, approval side effects, verify, complete,
+intelligence. (The approve/reject DECISION lives in the approvals engine — decide().)
 
 Phase 4: Approval + Execution — submit, approve, verify SO/PO, flag issues,
          auto-complete, favoritism detection, case reports.
 
 P4.3 split of the former monolithic `buyplan_workflow.py` (1,855 lines) into a
 package along its audited seams:
-  - `buyplan_approval` — submit/approve/reject, halt/resume, reset/cancel/resubmit,
+  - `buyplan_approval` — submit + the engine-dispatched approve/reject side effects,
+    halt/resume, reset/cancel/resubmit,
     and auto-completion (one module: every transition shares the same engine-
     request/prepayment teardown helpers).
   - `buyplan_state` — the enforced BuyPlan status transition table + transition()
@@ -29,7 +31,6 @@ from .buyplan_approval import (
     HALTABLE_STATUSES,
     RESUBMITTABLE_STATUSES,
     _apply_line_edits,
-    _apply_line_overrides,
     _can_halt,
     _cancel_open_engine_requests_for_plan,
     _cancel_open_prepayment_requests_for_plan,
@@ -42,7 +43,6 @@ from .buyplan_approval import (
     _recalculate_financials,
     _run_approve_side_effects,
     _run_reject_side_effects,
-    approve_buy_plan,
     cancel_buy_plan,
     check_completion,
     halt_plan,
@@ -88,7 +88,6 @@ __all__ = [
     "_LOCKED_EDIT_STATUSES",
     "_MANAGER_ONLY_EDIT_STATUSES",
     "_apply_line_edits",
-    "_apply_line_overrides",
     "_can_halt",
     "_cancel_open_engine_requests_for_plan",
     "_cancel_open_prepayment_requests_for_plan",
@@ -108,7 +107,6 @@ __all__ = [
     "_run_approve_side_effects",
     "_run_reject_side_effects",
     "add_buy_plan_line",
-    "approve_buy_plan",
     "bulk_edit_buy_plan_lines",
     "can_edit_buy_plan_lines",
     "cancel_buy_plan",

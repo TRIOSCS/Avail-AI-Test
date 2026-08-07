@@ -123,7 +123,6 @@
                 class="input input-sm">
           <option value="sighting_count" {{ 'selected' if sort == 'sighting_count' }}>Most Sightings</option>
           <option value="display_name" {{ 'selected' if sort == 'display_name' }}>Name A–Z</option>
-          <option value="overall_win_rate" {{ 'selected' if sort == 'overall_win_rate' }}>Win Rate</option>
           <option value="outbound_asc" {{ 'selected' if sort == 'outbound_asc' }}>Stalest outbound</option>
         </select>
         <div x-data="{ hideBlacklisted: {{ 'true' if hide_blacklisted else 'false' }} }">
@@ -170,7 +169,7 @@
         <tr>
           {# Cadence dot column — no label, narrow #}
           <th class="w-6 px-2"></th>
-          {% for col_name, col_key in [('Vendor', 'display_name'), ('Score', None), ('Sightings', 'sighting_count'), ('Win Rate', 'overall_win_rate'), ('Location', 'hq_country'), ('Industry', 'industry')] %}
+          {% for col_name, col_key in [('Vendor', 'display_name'), ('Sightings', 'sighting_count')] %}
           <th>
             {% if col_key %}
             <a hx-get="/v2/partials/vendors?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
@@ -213,21 +212,7 @@
               {% if v.domain %}<p class="text-xs text-gray-600">{{ v.domain }}</p>{% endif %}
             </div>
           </td>
-          <td>
-            {% if v.is_blacklisted %}
-              {{ badge('Blacklisted', 'danger') }}
-            {% elif not v.is_active %}
-              {{ badge('Archived', 'neutral') }}
-            {% elif v.vendor_score %}
-              <span class="badge badge-success">{{ "%.0f"|format(v.vendor_score) }}</span>
-            {% else %}
-              <span class="text-xs text-gray-600">&mdash;</span>
-            {% endif %}
-          </td>
           <td class="text-gray-600">{{ v.sighting_count or 0 }}</td>
-          <td class="text-gray-600">{{ "%.0f%%"|format(v.overall_win_rate * 100) if v.overall_win_rate else "—" }}</td>
-          <td class="text-gray-600">{{ v.hq_country or "—" }}</td>
-          <td class="text-gray-600">{{ v.industry or "—" }}</td>
           {# Dual cadence clocks #}
           <td class="text-right">
             <p class="text-[11px] {% if v.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif v.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">

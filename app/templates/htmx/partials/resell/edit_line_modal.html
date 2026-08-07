@@ -39,10 +39,6 @@
         </select>
       </div>
       <div>
-        <label class="form-label">Date code</label>
-        <input type="text" name="date_code" class="input" value="{{ line.date_code or '' }}">
-      </div>
-      <div>
         <label class="form-label">Asking price</label>
         <input type="number" name="asking_price" step="0.01" min="0" class="input"
                value="{{ '%.2f'|format(line.asking_price|float) if line.asking_price is not none else '' }}">

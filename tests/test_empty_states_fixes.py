@@ -118,7 +118,7 @@ def test_search_all_tab_shows_view_all_when_capped():
         query="acme",
         ai_search=False,
     )
-    assert "View all 11 Requisitions" in html
+    assert "View all 11 Deals" in html
     assert "tab = 'requisitions'" in html
 
 

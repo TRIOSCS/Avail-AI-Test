@@ -2,9 +2,9 @@
    Called by: shortlist_bar.html "Add to Requisition" button
    Depends on: htmx_views requisition_picker + add_to_requisition routes
 #}
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-label="Add to requisition" @click.self="$el.remove()" @keydown.escape="$el.remove()">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-label="Add to deal" @click.self="$el.remove()" @keydown.escape="$el.remove()">
   <div class="bg-white rounded-lg border border-brand-200 shadow-float w-full max-w-md mx-4 p-6">
-    <h3 class="h2 mb-4">Add to Requisition</h3>
+    <h3 class="h2 mb-4">Add to Deal</h3>
 
     {% if requisitions %}
     <div class="space-y-2 max-h-64 overflow-y-auto">
@@ -23,7 +23,7 @@
     </div>
     {% else %}
     <div class="text-center py-6">
-      <p class="text-sm text-gray-600">No requisitions yet.</p>
+      <p class="text-sm text-gray-600">No deals yet.</p>
       {# Launch the existing create-requisition flow in the shared global modal (same
          @open-modal dispatch used by Requisitions › New Requisition and the prospect
          "Create Requisition" button) — replaces this picker's content with the form. #}
@@ -31,7 +31,7 @@
               @click="$dispatch('open-modal', {url: '/v2/partials/requisitions/create-form'})"
               class="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700">
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-        New requisition
+        New deal
       </button>
     </div>
     {% endif %}

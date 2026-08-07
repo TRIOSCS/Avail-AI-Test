@@ -128,7 +128,7 @@ test('app shell loads for the authenticated admin', async () => {
   // The Deals list view (the workspace default is the parts triage board).
   const resp = await page.goto('/v2/requisitions?view=list');
   expect(resp?.status()).toBe(200);
-  await expect(page.getByRole('button', { name: 'New Requisition' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'New Deal' })).toBeVisible({ timeout: 20_000 });
 });
 
 test('admin approver rights checked in the app (read-only)', async () => {
@@ -157,7 +157,7 @@ test('requisition created with manual lines (no AI parse)', async () => {
   await test.step('paste-parse — SKIPPED keys-off: "Parse with AI" needs the AI key; manual rows used instead (§3.1)', async () => {});
   await page.goto('/v2/requisitions?view=list');
   await openModal(
-    page.getByRole('button', { name: 'New Requisition' }),
+    page.getByRole('button', { name: 'New Deal' }),
     'input[placeholder="e.g. Acme Q2 BOM, Harris RFQ #4521"]',
   );
   const modal = page.locator('#modal-content');
@@ -183,7 +183,7 @@ test('requisition created with manual lines (no AI parse)', async () => {
   await modal.getByLabel('Mfr *').nth(1).fill('Texas Instruments');
   await modal.getByLabel('Qty').nth(1).fill('25');
 
-  await modal.locator('button[type="submit"]', { hasText: 'Create Requisition' }).click();
+  await modal.locator('button[type="submit"]', { hasText: 'Create Deal' }).click();
   // import-save closes the modal, toasts, and refreshes the list.
   await expect(page.locator('#main-content')).toContainText(REQ_NAME, { timeout: 20_000 });
 

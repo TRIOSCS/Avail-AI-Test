@@ -689,14 +689,17 @@ class TestContactPanel:
         # The site-level last_activity_at bump depends on this attribute.
         assert f'data-site-id="{site.id}"' in resp.text
 
-    def test_wechat_action_renders_when_handle_set(self, client: TestClient, db_session: Session, test_user: User):
-        """WeChat deep link renders only for contacts with a wechat_id."""
+    def test_wechat_action_removed_even_with_handle(self, client: TestClient, db_session: Session, test_user: User):
+        """The WeChat display was cut by the Packet-2 screen diet (w2-screen-diet.md
+        items 14-16): no WeChat action renders even when the contact has a handle.
+
+        The column stays; git restores the display.
+        """
         company, _, _ = self._make_company_with_contact(db_session, wechat_id="jane_wc")
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert 'data-channel="wechat"' in resp.text
-        assert 'data-value="jane_wc"' in resp.text
-        assert "navigator.clipboard" in resp.text
+        assert 'data-channel="wechat"' not in resp.text
+        assert "weixin://" not in resp.text
 
     def test_no_wechat_action_without_handle(self, client: TestClient, db_session: Session, test_user: User):
         """No WeChat button when the contact has no wechat_id."""
@@ -1804,12 +1807,13 @@ class TestVendorListCadence:
         # The null reply shows a dash, not the word "never"
         assert "—" in resp.text or "&mdash;" in resp.text
 
-    def test_vendor_list_score_column_still_present(self, client: TestClient, db_session: Session, test_user: User):
-        """Vendor score column is still rendered (additive — not removed by cadence)."""
+    def test_vendor_list_score_column_removed(self, client: TestClient, db_session: Session, test_user: User):
+        """The vendor-list Score column was cut by the Packet-2 screen diet (w2-screen-
+        diet.md item 11); the score badge no longer renders."""
         self._make_vendor(db_session, "ScoreStillThere Vendor", vendor_score=72.0)
         resp = client.get("/v2/partials/vendors")
         assert resp.status_code == 200
-        assert "72" in resp.text
+        assert "badge-success" not in resp.text
 
     def test_vendor_list_stalest_outbound_sort_option(self, client: TestClient, db_session: Session, test_user: User):
         """sort=outbound_asc is a valid option in vendor list (accepted, returns
@@ -1968,13 +1972,13 @@ class TestVendorDetailCadenceHero:
         assert "—" in resp.text or "&mdash;" in resp.text
         assert "never replied" not in resp.text.lower()
 
-    def test_vendor_detail_score_block_still_present(self, client: TestClient, db_session: Session, test_user: User):
-        """vendor_score block is still shown in header (not removed by cadence hero)."""
+    def test_vendor_detail_score_hero_removed(self, client: TestClient, db_session: Session, test_user: User):
+        """The vendor-detail score hero was cut by the Packet-2 screen diet (w2-screen-
+        diet.md item 11); the breakdown hover no longer renders."""
         v = self._make_vendor(db_session, "ScoreKept Vendor", vendor_score=85.0)
         resp = client.get(f"/v2/partials/vendors/{v.id}")
         assert resp.status_code == 200
-        assert "85" in resp.text
-        assert "Score" in resp.text
+        assert "Score factors" not in resp.text
 
     def test_vendor_detail_stat_row_still_present(self, client: TestClient, db_session: Session, test_user: User):
         """4-stat row (Sightings, Win Rate, POs, Avg Response) still renders."""
@@ -4305,9 +4309,10 @@ class TestFullWidthContactsForwardLayout:
         resp = client.get(f"/v2/partials/vendors/{vendor.id}")
         assert resp.status_code == 200
         assert "max-w-5xl" not in resp.text
-        # The 4 stats survive the compression into a slim strip.
+        # The stat strip survives the compression (Win Rate / Avg Response cut
+        # by the Packet-2 screen diet, items 8 + 10).
         assert "Sightings" in resp.text
-        assert "Win Rate" in resp.text
+        assert "Total POs" in resp.text
 
 
 class TestNoCache:
@@ -4448,15 +4453,15 @@ class TestCompanyPhase0FormFields:
         assert resp.status_code == 200
         html = resp.text
         for field in [
+            # revenue_range + tax_id cut from the forms by the Packet-2 screen
+            # diet (w2-screen-diet.md items 12-13); columns stay.
             "legal_name",
             "employee_size",
-            "revenue_range",
             "phone",
             "hq_city",
             "hq_state",
             "hq_country",
             "credit_terms",
-            "tax_id",
             "source",
         ]:
             assert f'name="{field}"' in html, f"create_form missing input[name={field}]"
@@ -4488,15 +4493,15 @@ class TestCompanyPhase0FormFields:
         assert resp.status_code == 200
         html = resp.text
         for field in [
+            # revenue_range + tax_id cut from the forms by the Packet-2 screen
+            # diet (w2-screen-diet.md items 12-13); columns stay.
             "legal_name",
             "employee_size",
-            "revenue_range",
             "phone",
             "hq_city",
             "hq_state",
             "hq_country",
             "credit_terms",
-            "tax_id",
             "source",
         ]:
             assert f'name="{field}"' in html, f"edit_form missing input[name={field}]"
@@ -4573,7 +4578,6 @@ class TestCompanyPhase0FormFields:
                 "hq_state": "IL",
                 "hq_country": "United States",
                 "credit_terms": "Net 60",
-                "tax_id": "33-9876543",
                 "source": "sfdc",
             },
         )
@@ -4581,12 +4585,14 @@ class TestCompanyPhase0FormFields:
         db_session.refresh(co)
         assert co.legal_name == "HTMXEdit P0 LLC"
         assert co.employee_size == "201-500"
-        assert co.revenue_range == "$50M-$200M"
         assert co.hq_city == "Chicago"
         assert co.hq_country == "US"
         assert co.credit_terms == "Net 60"
-        assert co.tax_id == "33-9876543"
         assert co.source == "sfdc"
+        # revenue_range + tax_id left the edit registry with the Packet-2 screen
+        # diet (items 12-13): submitted values are ignored, columns stay.
+        assert co.revenue_range is None
+        assert co.tax_id is None
 
     # ── Normalization: phone E.164 via HTMX path ─────────────────────────────
 
@@ -5153,8 +5159,9 @@ class TestAccountActivityTab:
 class TestKnownFieldGrid:
     """WS2: account detail renders a known-field grid; empty fields show '+ Add <label>'."""
 
-    def test_empty_tax_id_shows_add_affordance(self, client: TestClient, db_session: Session):
-        """Company with no tax_id: account detail shows '+ Add Tax ID'."""
+    def test_tax_id_row_removed_from_grid(self, client: TestClient, db_session: Session):
+        """tax_id was cut from the account-detail field grid by the Packet-2 screen diet
+        (w2-screen-diet.md item 12): no Tax ID row, no add affordance."""
         co = Company(name="Grid Test Co", is_active=True)
         db_session.add(co)
         db_session.commit()
@@ -5162,7 +5169,8 @@ class TestKnownFieldGrid:
 
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
-        assert "Add Tax ID" in resp.text
+        assert "Add Tax ID" not in resp.text
+        assert "Tax ID" not in resp.text
 
     def test_filled_industry_shows_value(self, client: TestClient, db_session: Session):
         """Company with industry set: account detail shows the industry value."""

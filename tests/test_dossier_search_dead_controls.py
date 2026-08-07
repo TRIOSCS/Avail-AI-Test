@@ -30,7 +30,7 @@ def test_cache_hit_dossier_market_includes_shortlist_bar():
     )
     # Shortlist bar markers (from shortlist_bar.html).
     assert "$store.shortlist.count > 0" in html
-    assert "Add to Requisition" in html
+    assert "Add to Deal" in html
     assert "Create RFQ" in html
     # The cached row checkbox binds to the same store.
     assert "$store.shortlist.toggle(" in html
@@ -62,6 +62,6 @@ def test_requisition_picker_empty_state_has_create_affordance():
         items_json="[]",
     )
     assert "/v2/partials/requisitions/create-form" in html
-    assert "New requisition" in html
+    assert "New deal" in html
     # Uses the shared global-modal dispatch, not a dead link.
     assert "$dispatch('open-modal'" in html

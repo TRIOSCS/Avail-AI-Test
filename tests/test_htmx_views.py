@@ -424,7 +424,7 @@ class TestGlobalSearch:
         resp = client.get("/v2/partials/search/global?q=UNI-999")
         assert resp.status_code == 200
         body = resp.text
-        assert "Material Hub" in body
+        assert "Part Cards" in body
         assert "Sightings" in body
         assert "UNI-999" in body
 
@@ -440,8 +440,8 @@ class TestPartsWorkspace:
     def test_workspace(self, client: TestClient):
         resp = client.get("/v2/partials/parts/workspace")
         assert resp.status_code == 200
-        # Triage shell: Sales Hub eyebrow + lazy-loaded parts list.
-        assert "Sales Hub" in resp.text
+        # Triage shell: Deals eyebrow + lazy-loaded parts list.
+        assert "Deals" in resp.text
         assert 'hx-get="/v2/partials/parts"' in resp.text
 
 
@@ -454,11 +454,18 @@ class TestRequisitionsListPartial:
     """Test the requisitions list partial with filters."""
 
     def test_list_no_filters(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user)
+        from app.models import Company
+
+        co = Company(name="Acme")
+        db_session.add(co)
+        db_session.flush()
+        _make_requisition(db_session, test_user, company_id=co.id)
         db_session.commit()
         resp = client.get("/v2/partials/requisitions")
         assert resp.status_code == 200
         assert "REQ-TEST" in resp.text
+        # customer_name demote (§4.2): the Customer cell renders the linked
+        # company relation, not the free-text legacy field.
         assert "Acme" in resp.text
 
     def test_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
@@ -717,13 +724,13 @@ class TestRequisitionCreateForm:
     def test_create_form(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/create-form")
         assert resp.status_code == 200
-        assert "New Requisition" in resp.text
+        assert "New Deal" in resp.text
         assert 'hx-post="/v2/partials/requisitions/import-save"' in resp.text
 
     def test_import_form(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/import-form")
         assert resp.status_code == 200
-        assert "New Requisition" in resp.text
+        assert "New Deal" in resp.text
         assert 'hx-post="/v2/partials/requisitions/import-save"' in resp.text
 
 
@@ -1168,7 +1175,7 @@ class TestRequisitionImport:
             assert resp.status_code == 200
             # The AI parser is invoked with the pasted text and the modal re-renders.
             mock_parse.assert_awaited_once_with("LM317T 100pcs")
-            assert "New Requisition" in resp.text
+            assert "New Deal" in resp.text
 
     def test_import_parse_json_mode(self, client: TestClient):
         mock_result = {
@@ -1259,7 +1266,7 @@ class TestSaveParsedOffers:
             },
         )
         assert resp.status_code == 200
-        assert "1 offer saved to this requisition." in resp.text
+        assert "1 offer saved to this deal." in resp.text
         saved = db_session.query(Offer).filter_by(requisition_id=req.id).one()
         assert (saved.vendor_name, saved.mpn) == ("Arrow", "LM317T")
         assert saved.qty_available == 1000
@@ -1868,7 +1875,7 @@ class TestMaterials:
         resp = client.get("/v2/partials/materials/workspace")
         assert resp.status_code == 200
         assert 'id="materials-workspace"' in resp.text
-        assert "All Materials" in resp.text
+        assert "All Parts" in resp.text
 
     def test_materials_faceted(self, client: TestClient):
         with patch("app.services.faceted_search_service.search_materials_faceted", return_value=([], 0)):

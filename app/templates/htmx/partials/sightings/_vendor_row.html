@@ -96,7 +96,7 @@
             {% endif %}
             {% if overlap > 1 %}
             <span class="chip bg-indigo-50 text-indigo-700 border-indigo-200">
-              Also on {{ overlap - 1 }} other req{{ 's' if overlap - 1 != 1 }}
+              Also on {{ overlap - 1 }} other line{{ 's' if overlap - 1 != 1 }}
             </span>
             {% endif %}
             {% for mpn in sub_matches %}
@@ -275,13 +275,6 @@
           <div>
             <span class="text-secondary">Price Range:</span>
             <span class="font-mono text-gray-700">${{ '%.2f'|format(s.best_price) }} — ${{ '%.2f'|format(s.avg_price) }}</span>
-          </div>
-          {% endif %}
-
-          {% if intel.get('response_rate') is not none %}
-          <div>
-            <span class="text-secondary">Response Rate:</span>
-            <span class="text-gray-700">{{ (intel.response_rate * 100)|int }}%</span>
           </div>
           {% endif %}
 

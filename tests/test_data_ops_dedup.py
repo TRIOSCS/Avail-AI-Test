@@ -87,9 +87,10 @@ class TestRenderNoCruft:
     def test_render_has_working_merge_buttons_and_no_dead_alpine(self, admin_client, db_session):
         """The render must NOT carry the dead `merged`/x-if/x-cloak wrapper that hid the
         merge buttons (the root cause), and MUST carry live hx-post merge buttons."""
-        # Long pair clears the finder threshold on BOTH backends (pg_trgm 0.90) —
-        # the default "Acme Components"/"Acme Components Inc" is 0.818 on pg_trgm
-        # and renders the empty state on the PG engine.
+        # Long pair clears the finder gates on BOTH backends (pg_trgm 0.90 >= the
+        # 0.80 trgm gate; rapidfuzz >= 85). Chosen back when the PG gate was 0.85
+        # and "Acme Components"/"Acme Components Inc" (0.818) rendered the empty
+        # state there; still fine under the 0.80 gate.
         v1, v2 = _vendors(db_session, "Acme Components International", "Acme Components Internationa")
         resp = admin_client.get("/v2/partials/settings/data-ops")
         assert resp.status_code == 200

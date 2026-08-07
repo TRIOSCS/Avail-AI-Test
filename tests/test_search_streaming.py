@@ -519,7 +519,7 @@ def test_shortlist_bar_template_renders():
     """shortlist_bar.html renders with Alpine.js directives."""
     html = _render_template("htmx/partials/search/shortlist_bar.html")
     assert "$store.shortlist" in html
-    assert "Add to Requisition" in html
+    assert "Add to Deal" in html
 
 
 def test_search_run_empty_mpn_returns_error(client):
@@ -799,7 +799,7 @@ def test_requisition_picker_renders(client, db_session):
     )
     assert resp.status_code == 200
     assert "Pick Me" in resp.text
-    assert "Add to Requisition" in resp.text
+    assert "Add to Deal" in resp.text
 
 
 def test_lead_detail_reads_from_cache(client, db_session):

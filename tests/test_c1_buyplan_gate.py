@@ -9,8 +9,8 @@ Covers the C1 contract + its three reviewed risk-mitigations:
   - decide(reject) drives the reject side effects: plan → DRAFT, request REJECTED.
   - resubmit cancels the stale open request so exactly ONE REQUESTED request remains
     (RISK 2 — no double request).
-  - the approve router falls back to legacy approve_buy_plan when no open engine request
-    exists (RISK 3 — pre-C1 transition window) and does not crash.
+  - the approve router refuses (400) when no open engine request exists — the pre-C1
+    fallback (legacy approve_buy_plan) died with migration 210's Packet 3 D2 backfill.
   - NoEligibleApproverError (no approver configured) leaves the plan PENDING with no
     orphan engine state.
   - ApprovalRequestActionSource counts open requests the user must decide (nav badge).
@@ -44,7 +44,6 @@ from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.services.approvals.service import decide as svc_decide
 from app.services.buyplan_workflow import (
-    approve_buy_plan,
     cancel_buy_plan,
     halt_plan,
     resubmit_buy_plan,
@@ -296,7 +295,7 @@ def test_submit_with_no_approver_leaves_plan_pending(db_session: Session) -> Non
     assert _open_requests(db_session, plan.id) == []
 
 
-# ── RISK 3: router fallback when no open request (pre-C1 plan) ─────────────
+# ── No open request: the router refuses (the pre-C1 fallback is deleted) ───
 
 
 @contextlib.contextmanager
@@ -320,12 +319,14 @@ def _build_client(db: Session, user: User):
             app.dependency_overrides.pop(key, None)
 
 
-def test_approve_router_falls_back_when_no_open_request(db_session: Session) -> None:
-    """RISK 3: a plan that is PENDING with NO open engine request (submitted pre-C1) is
-    approved via the legacy approve_buy_plan fallback — the action does not crash."""
+def test_approve_router_400_when_no_open_request(db_session: Session) -> None:
+    """A PENDING plan with NO open engine request can no longer be decided: the legacy
+    approve_buy_plan fallback is deleted (migration 210 backfilled the pre-engine
+    plans), so the router refuses with 400 and the plan is untouched."""
     approver = _make_approver(db_session)
     plan = _make_draft_plan(db_session, approver)
-    # Put the plan straight into PENDING WITHOUT opening an engine request (pre-C1 state).
+    # Force PENDING WITHOUT opening an engine request (the old pre-C1 shape — post-210
+    # this state only means a stale pane or a no-approver stall).
     plan.status = BuyPlanStatus.PENDING.value
     plan.submitted_by_id = approver.id
     db_session.flush()
@@ -338,11 +339,11 @@ def test_approve_router_falls_back_when_no_open_request(db_session: Session) -> 
             data={"action": "approve"},
         )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 400
     db_session.expire_all()
     plan2 = db_session.get(BuyPlan, plan.id)
-    assert plan2.status == BuyPlanStatus.ACTIVE.value
-    assert plan2.approved_by_id == approver.id
+    assert plan2.status == BuyPlanStatus.PENDING.value  # untouched — no side effects ran
+    assert plan2.approved_by_id is None
 
 
 def test_approve_router_uses_engine_when_request_open(db_session: Session) -> None:
@@ -385,32 +386,6 @@ def test_approval_action_source_counts_my_open_requests(db_session: Session) -> 
     svc_decide(db_session, ar.id, approver, "approve", comment="done")
     db_session.flush()
     assert source.count_for_user(db_session, approver) == 0
-
-
-# ── Side-effect helper parity (extraction was behavior-neutral) ───────────
-
-
-def test_legacy_approve_and_engine_decide_reach_same_active_state(db_session: Session) -> None:
-    """approve_buy_plan and decide() both call the shared _run_approve_side_effects, so
-    a plan approved either way lands in the same ACTIVE end-state."""
-    approver = _make_approver(db_session)
-
-    # Legacy path (no engine request): force PENDING then approve directly.
-    legacy_plan = _make_draft_plan(db_session, approver)
-    legacy_plan.status = BuyPlanStatus.PENDING.value
-    db_session.flush()
-    approve_buy_plan(legacy_plan.id, "approve", approver, db_session, notes="legacy")
-    assert legacy_plan.status == BuyPlanStatus.ACTIVE.value
-    assert legacy_plan.approved_by_id == approver.id
-
-    # Engine path.
-    engine_plan = _make_draft_plan(db_session, approver)
-    submit_buy_plan(engine_plan.id, "SO-1010", approver, db_session)
-    ar = _open_requests(db_session, engine_plan.id)[0]
-    svc_decide(db_session, ar.id, approver, "approve", comment="engine")
-    db_session.refresh(engine_plan)
-    assert engine_plan.status == BuyPlanStatus.ACTIVE.value
-    assert engine_plan.approved_by_id == approver.id
 
 
 # ── Cancel / halt cascade the open engine request (no orphan, no resurrection) ──

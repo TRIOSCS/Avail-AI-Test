@@ -2,7 +2,8 @@
 
 Covers:
 - check_completion idempotency (no duplicate case reports)
-- approve_buy_plan requires manager/admin role
+- approval right (can_approve_buy_plans column) gates the engine decide() path
+  (the legacy approve_buy_plan entry point died with migration 210)
 
 Called by: pytest
 Depends on: conftest fixtures, app/services/buyplan_workflow.py
@@ -25,9 +26,27 @@ from app.models.buy_plan import (
     SOVerificationStatus,
 )
 from app.services.buyplan_workflow import (
-    approve_buy_plan,
     check_completion,
 )
+
+
+def _decide_via_engine(db: Session, plan: BuyPlan, actor: User, action: str = "approve", notes: str | None = None):
+    """Open the engine's BUY_PLAN gate and decide it as *actor* — the only approval path
+    (routing reads the per-user can_approve_buy_plans toggles at request time)."""
+    from app.services.approvals.service import create_request, decide
+
+    req = create_request(
+        db,
+        gate_type=ApprovalGateType.BUY_PLAN,
+        amount=plan.total_cost,
+        subject=plan,
+        requested_by=actor,
+        owner=actor,
+    )
+    decide(db, req.id, actor, action, comment=notes)
+    db.refresh(plan)
+    return plan
+
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -221,22 +240,49 @@ class TestCheckCompletionIdempotency:
         assert result.status == BuyPlanStatus.ACTIVE.value
 
 
-# ── approve_buy_plan role check ────────────────────────────────────────
+# ── approval-right check (engine decide() path) ────────────────────────
 
 
 class TestApproveBuyPlanRoleCheck:
-    """Approval is gated by the per-user can_approve_buy_plans right, NOT by role."""
+    """Approval is gated by the per-user can_approve_buy_plans right, NOT by role:
+
+    routing makes a PENDING recipient of each flag holder, and the engine decide()
+    refuses anyone without a recipient row.
+    """
 
     def test_user_without_right_cannot_approve(self, db_session):
         """A user lacking the approval right is rejected even with a manager role."""
+        from app.services.approvals.service import create_request, decide
+
         plan, user = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.PENDING.value,
         )
         user.role = "manager"  # role alone no longer qualifies
+        # A separate flag holder exists, so the request routes — but only to them.
+        approver = User(
+            email="approver@trioscs.com",
+            name="Approver",
+            role="sales",
+            azure_id="az-approver",
+            can_approve_buy_plans=True,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(approver)
         db_session.flush()
-        with pytest.raises(PermissionError, match="approval right required"):
-            approve_buy_plan(plan.id, "approve", user, db_session)
+
+        req = create_request(
+            db_session,
+            gate_type=ApprovalGateType.BUY_PLAN,
+            amount=plan.total_cost,
+            subject=plan,
+            requested_by=user,
+            owner=user,
+        )
+        with pytest.raises(PermissionError, match="not a pending recipient"):
+            decide(db_session, req.id, user, "approve")
+        db_session.refresh(plan)
+        assert plan.status == BuyPlanStatus.PENDING.value
 
     def test_approver_right_can_approve(self, db_session):
         """A user holding the approval right can approve buy plans."""
@@ -247,7 +293,7 @@ class TestApproveBuyPlanRoleCheck:
         user.can_approve_buy_plans = True
         db_session.flush()
 
-        result = approve_buy_plan(plan.id, "approve", user, db_session)
+        result = _decide_via_engine(db_session, plan, user, "approve")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.approved_by_id == user.id
@@ -262,7 +308,7 @@ class TestApproveBuyPlanRoleCheck:
         user.can_approve_buy_plans = True
         db_session.flush()
 
-        result = approve_buy_plan(plan.id, "approve", user, db_session)
+        result = _decide_via_engine(db_session, plan, user, "approve")
 
         assert result.status == BuyPlanStatus.ACTIVE.value
 
@@ -275,7 +321,7 @@ class TestApproveBuyPlanRoleCheck:
         user.can_approve_buy_plans = True
         db_session.flush()
 
-        result = approve_buy_plan(plan.id, "reject", user, db_session, notes="Needs revision")
+        result = _decide_via_engine(db_session, plan, user, "reject", notes="Needs revision")
 
         assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Needs revision"

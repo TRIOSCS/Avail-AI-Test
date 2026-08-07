@@ -1,6 +1,6 @@
 """Tests for the requisition opportunity_value (Deal $ Value) inline edit.
 
-Mirrors the win_probability inline-edit tests. Covers the PATCH route
+Mirrors the (since-cut) win_probability inline-edit pattern. Covers the PATCH route
 /v2/partials/requisitions/{req_id}/opportunity-value:
 - valid set persists as Decimal and renders formatted ($1,500)
 - empty form clears to NULL (200, not 400)

@@ -1,8 +1,8 @@
 # tests/test_saleshub_view_toggle.py
 """Tests for the Sales-Hub relabel + view toggle (finding REQ-12).
 
-The split-panel parts workspace stays the canonical "Sales Hub"; the flat
-requisitions list is relabeled "Requisitions list" and both surfaces carry a
+The split-panel parts workspace heading reads "Deals" (Packet-2 glossary); the
+flat deals list is relabeled "Deals list" and both surfaces carry a
 segmented toggle. Clean full-page URLs: /v2/requisitions -> workspace,
 /v2/requisitions?view=list -> flat list.
 
@@ -51,26 +51,26 @@ def test_full_page_view_list_loads_list_partial(client, test_user):
     assert 'hx-get="/v2/partials/requisitions"' in resp.text
 
 
-# ── Workspace keeps "Sales Hub" and gains the toggle ──
+# ── Workspace heading reads "Deals" and gains the toggle ──
 
 
-def test_workspace_partial_keeps_sales_hub_and_has_toggle(client):
+def test_workspace_partial_deals_heading_and_has_toggle(client):
     resp = client.get("/v2/partials/parts/workspace")
     assert resp.status_code == 200
-    assert "Sales Hub" in resp.text
+    assert "Deals" in resp.text
     # Toggle present with both segments and the clean list push URL.
     assert "Workspace" in resp.text
     assert "List view" in resp.text
     assert 'hx-push-url="/v2/requisitions?view=list"' in resp.text
 
 
-# ── List is relabeled "Requisitions list", no longer "Sales Hub" ──
+# ── List is relabeled "Deals list", no longer "Sales Hub" ──
 
 
 def test_list_partial_relabeled_and_has_toggle(client):
     resp = client.get("/v2/partials/requisitions")
     assert resp.status_code == 200
-    assert "Requisitions list" in resp.text
+    assert "Deals list" in resp.text
     assert "Sales Hub" not in resp.text
     # Toggle back to the workspace is discoverable from the list.
     assert "Workspace" in resp.text
@@ -84,5 +84,5 @@ def test_detail_back_link_relabeled(client, db_session, test_user):
     req = _make_req(db_session, test_user)
     resp = client.get(f"/v2/partials/requisitions/{req.id}")
     assert resp.status_code == 200
-    assert "Requisitions list" in resp.text
+    assert "Deals list" in resp.text
     assert 'hx-push-url="/v2/requisitions?view=list"' in resp.text

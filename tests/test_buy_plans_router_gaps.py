@@ -2,7 +2,7 @@
 
 Targets the missing lines from app/routers/htmx/buy_plans.py:
   306-356 (sales_order_create), 389-390 (prepay_request_decide errors),
-  submit notify path + submit ValueError, 595/607-616 (approve RISK3/errors/queue),
+  submit notify path + submit ValueError, approve (engine-only path/errors/queue),
   644-647/650 (halt errors/queue), 676-677 (receive ValueError),
   708-711/717-718 (confirm_po bad date + ValueError), 746-750 (_resource ValueError),
   786 (resource no reason_code), 881-884/887 (verify_po completion/queue),
@@ -288,30 +288,58 @@ def test_submit_value_error(client, buy_plan):
     assert resp.status_code == 400
 
 
-# ── buy_plan_approve_partial (lines 595, 607-613, 616) ───────────────
+# ── buy_plan_approve_partial (engine-only path — the pre-engine fallback died
+#    with migration 210 / Packet 3 D2) ──────────────────────────────────
 
 
-def test_approve_risk3_fallback_no_open_request(approver_client, buy_plan):
-    """No open ApprovalRequest → falls back to legacy approve_buy_plan (line 595)."""
-    # DB has no ApprovalRequest rows → open_request is None → RISK3 path
-    with patch("app.services.buyplan_workflow.approve_buy_plan") as mock_approve:
-        with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
-            with patch(
-                "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
-            ):
-                resp = approver_client.post(
-                    f"/v2/partials/buy-plans/{buy_plan.id}/approve",
-                    data={"action": "approve"},
-                )
-    mock_approve.assert_called_once()
-    assert resp.status_code == 200
+def _open_engine_request(db, plan, user):
+    """A REQUESTED BUY_PLAN ApprovalRequest for *plan* routed to *user* (PENDING
+    recipient) — the state the modern submit path leaves behind."""
+    from app.constants import ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType
+    from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+
+    ar = ApprovalRequest(
+        gate_type=ApprovalGateType.BUY_PLAN,
+        status=ApprovalRequestStatus.REQUESTED,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=plan.id,
+        requested_by_id=user.id,
+        owner_id=user.id,
+    )
+    db.add(ar)
+    db.flush()
+    step = ApprovalStep(request_id=ar.id, seq=1, rule="any")
+    db.add(step)
+    db.flush()
+    db.add(ApprovalStepRecipient(step_id=step.id, user_id=user.id, status="pending"))
+    db.commit()
+    return ar
 
 
-def test_approve_reject_notify(approver_client, buy_plan):
-    """Action=reject → notify_rejected is called (lines 607-613)."""
-    with patch("app.services.buyplan_workflow.approve_buy_plan"):
-        with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
+def test_approve_no_open_request_is_400(approver_client, buy_plan):
+    """No open ApprovalRequest → 400 refusal.
+
+    The legacy approve_buy_plan fallback (RISK 3 transition window) is deleted —
+    migration 210 backfilled the last pre-engine PENDING plans, so an engine-less plan
+    is a stale pane or a no-approver stall, never a decidable one.
+    """
+    resp = approver_client.post(
+        f"/v2/partials/buy-plans/{buy_plan.id}/approve",
+        data={"action": "approve"},
+    )
+    assert resp.status_code == 400
+    assert "No open approval request" in resp.text
+
+
+def test_approve_notifies_only_on_approve(approver_client, buy_plan, db_session, test_user):
+    """Approve → run_notify_bg(notify_approved); reject → NO router dispatch (the engine
+    decide() outbox email is the reject event's single delivery, W3.8)."""
+    from app.services.buyplan_notifications import notify_approved
+
+    _open_engine_request(db_session, buy_plan, test_user)
+    mock_notify = AsyncMock()
+    with patch("app.services.approvals.service.decide") as mock_decide:
+        with patch("app.services.buyplan_notifications.run_notify_bg", new=mock_notify):
             with patch(
                 "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",
                 new=AsyncMock(return_value=_ok_html()),
@@ -320,15 +348,27 @@ def test_approve_reject_notify(approver_client, buy_plan):
                     f"/v2/partials/buy-plans/{buy_plan.id}/approve",
                     data={"action": "reject", "notes": "not approved"},
                 )
+                assert resp.status_code == 200
+                mock_notify.assert_not_called()  # reject: engine outbox owns delivery
+
+                resp = approver_client.post(
+                    f"/v2/partials/buy-plans/{buy_plan.id}/approve",
+                    data={"action": "approve"},
+                )
     assert resp.status_code == 200
-    mock_notify.assert_called()
+    assert mock_decide.call_count == 2
+    mock_notify.assert_awaited_once()
+    notify_fn, plan_id = mock_notify.await_args.args
+    assert notify_fn is notify_approved
+    assert plan_id == buy_plan.id
 
 
-def test_approve_permission_error(approver_client, buy_plan):
-    """PermissionError in approve path → 403 (lines 608-611)."""
+def test_approve_permission_error(approver_client, buy_plan, db_session, test_user):
+    """PermissionError from the engine decide → 403."""
+    _open_engine_request(db_session, buy_plan, test_user)
     with patch(
-        "app.services.buyplan_workflow.approve_buy_plan",
-        side_effect=PermissionError("insufficient rights"),
+        "app.services.approvals.service.decide",
+        side_effect=PermissionError("not a pending recipient"),
     ):
         resp = approver_client.post(
             f"/v2/partials/buy-plans/{buy_plan.id}/approve",
@@ -337,10 +377,11 @@ def test_approve_permission_error(approver_client, buy_plan):
     assert resp.status_code == 403
 
 
-def test_approve_value_error(approver_client, buy_plan):
-    """ValueError in approve path → 400 (lines 612-613)."""
+def test_approve_value_error(approver_client, buy_plan, db_session, test_user):
+    """ValueError from the engine decide → 400."""
+    _open_engine_request(db_session, buy_plan, test_user)
     with patch(
-        "app.services.buyplan_workflow.approve_buy_plan",
+        "app.services.approvals.service.decide",
         side_effect=ValueError("wrong status"),
     ):
         resp = approver_client.post(
@@ -350,11 +391,12 @@ def test_approve_value_error(approver_client, buy_plan):
     assert resp.status_code == 400
 
 
-def test_approve_stale_my_queue_origin_falls_through_to_detail(approver_client, buy_plan):
+def test_approve_stale_my_queue_origin_falls_through_to_detail(approver_client, buy_plan, db_session, test_user):
     """The my_queue origin retired with its surface — a stale origin=my_queue post falls
     through to the default detail-partial re-render."""
+    _open_engine_request(db_session, buy_plan, test_user)
     detail_mock = AsyncMock(return_value=_ok_html())
-    with patch("app.services.buyplan_workflow.approve_buy_plan"):
+    with patch("app.services.approvals.service.decide"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
                 "app.routers.htmx.buy_plans.lifecycle.buy_plan_detail_partial",

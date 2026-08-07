@@ -11,7 +11,7 @@
   <div class="mb-4">
     <h3 id="modal-title" class="h2">Combined quote — {{ customer_name or req.name }}</h3>
     <p class="text-sm text-gray-500 mt-0.5">
-      One quote across {{ req_count }} requisitions · {{ req.name or ('#' ~ req.id) }} (#{{ req.id }}) is the anchor.
+      One quote across {{ req_count }} deals · {{ req.name or ('#' ~ req.id) }} (#{{ req.id }}) is the anchor.
     </p>
   </div>
   <div id="combined-quote-body">

@@ -144,13 +144,13 @@ def test_workspace_title_folded_into_search_row(client):
     html = resp.text
 
     # Title is preserved.
-    assert "Materials</h1>" in html, "Materials title must still render"
+    assert "Parts</h1>" in html, "Parts title must still render"
     # The old standalone title row (its distinctive padding signature) is gone.
     assert "px-3 pt-3 pb-1" not in html, "standalone title row must be removed"
 
     # Title and search input now live in the SAME bordered row: the title appears before
     # the search input, with no border-b row boundary separating them.
-    idx_title = html.find("Materials</h1>")
+    idx_title = html.find("Parts</h1>")
     idx_search = html.find("Search by MPN")
     assert idx_title != -1 and idx_search != -1, "title/search input not found"
     assert idx_title < idx_search, "title must precede the search input in the folded row"

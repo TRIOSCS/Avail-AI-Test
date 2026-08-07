@@ -3493,7 +3493,7 @@ class TestVendorOverlap:
     """Phase 4.7: Cross-requirement vendor overlap counts in detail panel."""
 
     def test_overlap_badge_shown_when_vendor_on_multiple_reqs(self, client, db_session):
-        """Vendor appearing on 2+ active reqs shows 'Also on N other reqs' badge."""
+        """Vendor appearing on 2+ active lines shows 'Also on N other lines' badge."""
         req = Requisition(name="RFQ-1", status="open", customer_name="Acme Corp")
         db_session.add(req)
         db_session.flush()
@@ -3533,7 +3533,7 @@ class TestVendorOverlap:
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{r1.id}/detail")
         assert resp.status_code == 200
-        assert "Also on 1 other req" in resp.text
+        assert "Also on 1 other line" in resp.text
 
     def test_no_overlap_badge_for_single_req_vendor(self, client, db_session):
         """Vendor on only one requirement shows no overlap badge."""
@@ -3543,7 +3543,7 @@ class TestVendorOverlap:
         assert "Also on" not in resp.text
 
     def test_overlap_counts_multiple_reqs(self, client, db_session):
-        """Vendor on 3 reqs shows 'Also on 2 other reqs'."""
+        """Vendor on 3 lines shows 'Also on 2 other lines'."""
         req = Requisition(name="RFQ-M", status="open", customer_name="Multi Corp")
         db_session.add(req)
         db_session.flush()
@@ -3571,7 +3571,7 @@ class TestVendorOverlap:
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{reqs[0].id}/detail")
         assert resp.status_code == 200
-        assert "Also on 2 other reqs" in resp.text
+        assert "Also on 2 other lines" in resp.text
 
     def test_overlap_excludes_inactive_requisitions(self, client, db_session):
         """Vendors on inactive requisitions are not counted in overlap."""

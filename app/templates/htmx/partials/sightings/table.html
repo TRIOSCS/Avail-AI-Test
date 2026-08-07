@@ -100,7 +100,7 @@
 {# Caption when grouped by manufacturer to guide buyer toward cross-req basket assembly #}
 {% if group_by == 'manufacturer' %}
 <div class="px-3 py-1 text-[11px] text-gray-400 bg-gray-50 border-b border-gray-100">
-  Use the "Select all" checkbox on a manufacturer group to build one cross-requisition RFQ across all its parts.
+  Use the "Select all" checkbox on a manufacturer group to build one cross-deal RFQ across all its parts.
 </div>
 {% endif %}
 
@@ -132,7 +132,7 @@
     <thead>
       <tr>
         <th class="w-8">
-          <input aria-label="Select all requirements" type="checkbox" x-model="toggleAll"
+          <input aria-label="Select all lines" type="checkbox" x-model="toggleAll"
                  @change="document.querySelectorAll('.req-checkbox').forEach(cb => { cb.checked = toggleAll; if (toggleAll) $store.sightingSelection.toggle(parseInt(cb.value)); else $store.sightingSelection.clear(); })"
                  class="rounded border-gray-300">
         </th>
@@ -164,7 +164,7 @@
           {% if collapse_key %}data-gkey="{{ collapse_key|e }}" x-show="!collapsed[$el.dataset.gkey]"{% endif %}
           data-req-id="{{ r.id }}">
         <td @click.stop>
-          <input aria-label="Select requirement {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
+          <input aria-label="Select line {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
                  :checked="$store.sightingSelection.has({{ r.id }})"
                  @change="$store.sightingSelection.toggle({{ r.id }})">
         </td>
@@ -199,7 +199,7 @@
             {% else %}
             <span class="text-[10px] text-gray-400 w-7 text-right">{{ cov_pct }}%</span>
             <button class="ml-0.5 text-gray-300 hover:text-amber-500 transition-colors"
-                    title="Search this requirement"
+                    title="Search this line"
                     hx-post="/v2/partials/sightings/{{ r.id }}/refresh"
                     hx-target="#sightings-detail"
                     hx-swap="innerHTML"

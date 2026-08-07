@@ -29,7 +29,6 @@ from app.models.buy_plan import (
 )
 from app.services.buyplan_builder import build_buy_plan
 from app.services.buyplan_workflow import (
-    approve_buy_plan,
     check_completion,
     confirm_po,
     flag_line_issue,
@@ -46,6 +45,37 @@ from app.services.requisition_state import derived_status
 from app.services.requisition_state import transition as req_transition
 
 pytestmark = pytest.mark.slow
+
+
+def _decide_plan(db: Session, plan_id: int, actor: User, action: str = "approve", notes: str | None = None) -> BuyPlan:
+    """Resolve the plan's open engine request as *actor* — the modern (and only)
+    approval path.
+
+    submit_buy_plan/resubmit_buy_plan opened the BUY_PLAN ApprovalRequest; the legacy
+    approve_buy_plan died with migration 210.
+    """
+    from sqlalchemy import select
+
+    from app.constants import ApprovalRequestStatus, ApprovalSubjectType
+    from app.models.approvals import ApprovalRequest
+    from app.services.approvals.service import decide
+
+    ar = (
+        db.execute(
+            select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.subject_id == plan_id,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    decide(db, ar.id, actor, action, comment=notes)
+    plan = db.get(BuyPlan, plan_id)
+    db.refresh(plan)
+    return plan
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -305,7 +335,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Manager approves → active
-        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "approve")
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Confirm PO
@@ -336,7 +366,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Manager approves
-        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "approve")
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
     def test_rejection_resubmit_flow(self, db_session):
@@ -349,7 +379,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Reject
-        plan = approve_buy_plan(plan.id, "reject", ctx["manager"], db_session, notes="Needs better margin")
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "reject", notes="Needs better margin")
         assert plan.status == BuyPlanStatus.DRAFT.value
 
         # Resubmit
@@ -357,7 +387,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Approve
-        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "approve")
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
     def test_issue_flag_prevents_completion(self, db_session):
@@ -367,7 +397,7 @@ class TestBuyPlanFullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-004", ctx["sales"], db_session)
-        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "approve")
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Flag issue on line
@@ -383,15 +413,17 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.ACTIVE.value  # not completed
 
     def test_buyer_cannot_approve(self, db_session):
-        """A user without the can_approve_buy_plans right cannot approve buy plans."""
+        """A user without the can_approve_buy_plans right cannot approve buy plans:
+        routing only made recipients of flag holders, so the buyer holds no PENDING
+        recipient row and the engine decide() refuses."""
         ctx = self._setup_plan(db_session, total_cost=10000.0)
         plan = ctx["plan"]
 
         plan = submit_buy_plan(plan.id, "SO-005", ctx["sales"], db_session)
         assert plan.status == BuyPlanStatus.PENDING.value
 
-        with pytest.raises(PermissionError, match="approval right required"):
-            approve_buy_plan(plan.id, "approve", ctx["buyer"], db_session)
+        with pytest.raises(PermissionError, match="not a pending recipient"):
+            _decide_plan(db_session, plan.id, ctx["buyer"], "approve")
 
     def test_po_reject_resubmit_cycle(self, db_session):
         """PO rejection sends line back to awaiting_po."""
@@ -400,7 +432,7 @@ class TestBuyPlanFullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-006", ctx["sales"], db_session)
-        plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
+        plan = _decide_plan(db_session, plan.id, ctx["manager"], "approve")
         line = confirm_po(plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=UTC), ctx["buyer"], db_session)
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 

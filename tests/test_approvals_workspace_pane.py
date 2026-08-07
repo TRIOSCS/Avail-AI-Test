@@ -270,7 +270,11 @@ def test_halt_from_pane_rerenders_halted_pane(hub_client: TestClient, db_session
         )
     assert r.status_code == 200
     assert r.headers.get("HX-Trigger") == "awListRefresh"
-    assert "Halted" in r.text and "customer credit hold" in r.text
+    # The so_rejection_note suffix left the halted banner with the Packet-2
+    # screen diet (w2-screen-diet.md item 18) — the reason is stored (asserted
+    # below via status + the buy_plan_epic halt tests), not displayed here.
+    assert "Halted" in r.text
+    assert "customer credit hold" not in r.text
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.HALTED.value
 

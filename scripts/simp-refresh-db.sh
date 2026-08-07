@@ -54,6 +54,17 @@ gunzip -c "$SCRATCH/dump.gz" | docker exec -i "$SIMP_DB_CONTAINER" \
 echo "==> Restarting app (entrypoint runs alembic upgrade head)..."
 docker compose -p "$SIMP_PROJECT" -f "$WORKDIR/docker-compose.simp.yml" --project-directory "$WORKDIR" up -d --wait app enrichment-worker
 
+echo "==> Post-restore fixups (owner-approved, Packet-1/4 sitting 2026-08-07)..."
+# The seeded admin's PO-approver toggle is OFF in prod data; the owner turned it
+# ON for this instance so the nightly kernel walk exercises the PO-verify +
+# prepayment gates (20/20 instead of 18/2). Re-apply on every refresh — the
+# restore re-imports prod's OFF.
+DEFAULT_USER_EMAIL=$(grep '^DEFAULT_USER_EMAIL=' "$WORKDIR/.env" | cut -d= -f2)
+if [ -n "$DEFAULT_USER_EMAIL" ]; then
+  docker exec "$SIMP_DB_CONTAINER" psql -U "$POSTGRES_USER" -d "${POSTGRES_DB:-availai}" -c \
+    "UPDATE users SET can_approve_purchase_orders = true WHERE email = '$DEFAULT_USER_EMAIL';"
+fi
+
 echo "==> Verifying alembic head + row sanity..."
 docker exec "$SIMP_DB_CONTAINER" psql -U "$POSTGRES_USER" -d "${POSTGRES_DB:-availai}" -tAc \
   "SELECT version_num FROM alembic_version;"

@@ -255,15 +255,17 @@ class TestContactFieldEdit:
         assert resp.status_code == 200
         assert "Add Email" in resp.text
 
-    def test_empty_wechat_renders_add_placeholder(self, owner_client, test_company, site_and_contact, db_session):
+    def test_wechat_field_removed_from_registry(self, owner_client, test_company, site_and_contact, db_session):
+        """wechat_id was cut from the inline-edit registry by the Packet-2 screen diet
+        (w2-screen-diet.md items 14-16); the display endpoint now 404s.
+
+        The column stays — only the UI surface is gone.
+        """
         _, contact = site_and_contact
-        contact.wechat_id = None
-        db_session.commit()
         resp = owner_client.get(
             f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field/display/wechat_id"
         )
-        assert resp.status_code == 200
-        assert "Add WeChat ID" in resp.text
+        assert resp.status_code == 404
 
     def test_post_linkedin_saves(self, owner_client, test_company, site_and_contact, db_session):
         _, contact = site_and_contact
@@ -342,11 +344,14 @@ class TestContactFieldEditAuthz:
 class TestCompanyKnownFields:
     """WS2: new fields added to EDITABLE_ACCOUNT_FIELDS (domain, tax_id, source, notes)."""
 
-    def test_known_fields_include_new_fields(self, owner_client, test_company):
-        """GET display endpoint for tax_id returns 200 with a field span."""
+    def test_tax_id_removed_from_registry(self, owner_client, test_company):
+        """tax_id was cut from the inline-edit registry by the Packet-2 screen diet
+        (w2-screen-diet.md item 12); the display endpoint now 404s.
+
+        Column stays.
+        """
         resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/display/tax_id")
-        assert resp.status_code == 200
-        assert "field-company" in resp.text
+        assert resp.status_code == 404
 
     def test_post_notes_saves(self, owner_client, test_company, db_session):
         """POST notes field persists and returns display."""

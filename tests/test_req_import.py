@@ -133,7 +133,7 @@ def test_import_form_loads(client):
     """GET import form returns 200."""
     resp = client.get("/v2/partials/requisitions/import-form")
     assert resp.status_code == 200
-    assert "New Requisition" in resp.text
+    assert "New Deal" in resp.text
 
 
 def test_company_lookup_form_accessible(client):

@@ -55,9 +55,9 @@
 
   <p class="text-sm text-gray-600 mb-4">
     {% if sourcing %}
-    Pick a requisition with offers to build the sales order directly from its RFQ offers.
+    Pick a deal with offers to build the sales order directly from its RFQ offers.
     {% else %}
-    Pick the requisition this {{ order_type.replace('_', ' ') }} order belongs to.
+    Pick the deal this {{ order_type.replace('_', ' ') }} order belongs to.
     {% endif %}
   </p>
   {% if picker_rows %}
@@ -69,7 +69,7 @@
             class="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
       <span class="min-w-0">
         <span class="text-sm font-semibold text-gray-900 truncate">{{ row.name or 'REQ #' ~ row.id }}</span>
-        <span class="block text-xs text-gray-500">REQ #{{ row.id }}{% if row.customer %} · {{ row.customer }}{% endif %}</span>
+        <span class="block text-xs text-gray-500">Deal #{{ row.id }}{% if row.customer %} · {{ row.customer }}{% endif %}</span>
       </span>
       {% if sourcing %}
       <span class="chip bg-brand-50 text-brand-700 border-brand-200 flex-shrink-0">
@@ -82,9 +82,9 @@
   {% else %}
   <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
     {% if sourcing %}
-    No open requisitions with offers are available to build a sales order.
+    No open deals with offers are available to build a sales order.
     {% else %}
-    No open requisitions are available.
+    No open deals are available.
     {% endif %}
   </div>
   {% endif %}
@@ -97,7 +97,7 @@
       <h2 class="h2 truncate">
         New Sales Order — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
       </h2>
-      <p class="text-xs text-gray-600">REQ #{{ selected_req.id }} · {{ order_type.replace('_', ' ') | title }}</p>
+      <p class="text-xs text-gray-600">Deal #{{ selected_req.id }} · {{ order_type.replace('_', ' ') | title }}</p>
     </div>
     <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
             hx-target="#so-origination"
@@ -199,7 +199,7 @@
   </form>
   {% else %}
   <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-    This requisition has no active offers to build a sales order from.
+    This deal has no active offers to build a sales order from.
   </div>
   {% endif %}
   {% endif %}

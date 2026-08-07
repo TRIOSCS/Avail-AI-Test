@@ -7,7 +7,6 @@
                partials/shared/_macros.html (cadence_hero).
 #}
 {% from "htmx/partials/shared/_macros.html" import cadence_hero %}
-{% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
 
 <title hx-swap-oob="true">{{ vendor.display_name }} — Vendors — AvailAI</title>
 
@@ -49,25 +48,10 @@
             {% if vendor.domain %}
               <a href="https://{{ vendor.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ vendor.domain }}</a>
             {% endif %}
-            {% if vendor.hq_city %}
-              <span class="text-gray-300">·</span>
-              <span>{{ vendor.hq_city }}{% if vendor.hq_country %}, {{ vendor.hq_country }}{% endif %}</span>
-            {% endif %}
-            {% if vendor.industry %}
-              <span class="text-gray-300">·</span>
-              <span>{{ vendor.industry }}</span>
-            {% endif %}
           </div>
         </div>
       </div>
       <div class="flex items-center gap-3">
-        {# Vendor score (large) #}
-        {% if vendor.vendor_score and not vendor.is_blacklisted %}
-          <div class="text-center px-3">
-            <p class="text-3xl font-bold text-emerald-600">{{ score_breakdown("%.0f"|format(vendor.vendor_score), vendor_score_breakdown, title='Score factors') }}</p>
-            <p class="text-xs font-medium text-gray-600">{{ score_def('Score', 'Vendor score (0-100): how far the vendor advances offers through the pipeline (order advancement), blended 80/20 with buyer review ratings.') }}</p>
-          </div>
-        {% endif %}
         {# Toggle blacklist #}
         <button hx-post="/v2/partials/vendors/{{ vendor.id }}/toggle-blacklist"
                 hx-target="#vendor-detail-{{ vendor.id }}"
@@ -127,11 +111,7 @@
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
       <span class="text-gray-600">Sightings <span class="font-semibold text-gray-900">{{ vendor.sighting_count or 0 }}</span></span>
       <span class="text-gray-300">·</span>
-      <span class="text-gray-600">Win Rate <span class="font-semibold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "—" }}</span></span>
-      <span class="text-gray-300">·</span>
       <span class="text-gray-600">Total POs <span class="font-semibold text-gray-900">{{ vendor.total_pos or 0 }}</span></span>
-      <span class="text-gray-300">·</span>
-      <span class="text-gray-600">Avg Response <span class="font-semibold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "—" }}</span></span>
     </div>
   </div>
 

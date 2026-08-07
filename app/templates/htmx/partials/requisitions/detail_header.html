@@ -22,8 +22,8 @@
         {{ req.name }}
       </h1>
       <div class="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600">
-        {% if req.customer_name %}
-        <span>Customer: <span class="text-gray-900">{{ req.customer_name }}</span></span>
+        {% if req.company %}
+        <span>Customer: <span class="text-gray-900">{{ req.company.name }}</span></span>
         {% endif %}
         {# Inline-editable deadline #}
         <span class="inline-flex items-center gap-1">
@@ -38,8 +38,6 @@
             {{ req.deadline or "Not set" }}
           </span>
         </span>
-        {# Win probability inline editor #}
-        {% include "htmx/partials/requisitions/_win_probability.html" %}
         {# Deal $ value inline editor #}
         {% include "htmx/partials/requisitions/_opportunity_value.html" %}
         {% if req.creator %}

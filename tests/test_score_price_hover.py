@@ -19,7 +19,6 @@ from datetime import UTC, datetime, timedelta
 from app.models.intelligence import MaterialCard
 from app.models.price_snapshot import MaterialPriceSnapshot
 from app.models.prospect_account import ProspectAccount
-from app.models.vendors import VendorCard
 from app.scoring import score_sighting_v2, score_sighting_v2_breakdown
 from app.services.part_history_service import price_series_for_card
 from app.services.prospect_scoring import (
@@ -351,39 +350,10 @@ def test_vendor_score_breakdown_db_empty_below_floor_and_unknown(db_session):
     assert compute_single_vendor_score_breakdown(db_session, 999999) == []
 
 
-def test_vendor_detail_renders_score_hover_wired_to_real_data():
-    """Vendor detail renders the Score header definition + the value breakdown popover
-    wired to a real (label, contribution) list — deterministic, no AI call."""
-    vendor = VendorCard(
-        id=1,
-        normalized_name="acme corp",
-        display_name="Acme Corp",
-        vendor_score=56.0,
-        is_blacklisted=False,
-        is_active=True,
-        total_pos=10,
-    )
-    # Real breakdown from the same weights the score uses (reconciles to 56.0).
-    breakdown = compute_vendor_score_breakdown(offer_count=10, stage_points_sum=40.0, avg_rating=4.0)
-    html = templates.get_template("htmx/partials/vendors/detail.html").render(
-        vendor=vendor,
-        contacts=[],
-        recent_sightings=[],
-        safety_band=None,
-        mpn_filter=None,
-        cadence_state="new",
-        next_best_touch="Reach out soon",
-        now_utc=datetime(2026, 3, 1, tzinfo=UTC),
-        vendor_score_breakdown=breakdown,
-    )
-    # Value breakdown popover wired to the real drivers.
-    assert 'role="tooltip"' in html
-    assert "Score factors" in html
-    assert "Order advancement" in html
-    assert "Buyer reviews" in html
-    # Header definition hover on the "Score" label.
-    assert 'title="Vendor score (0-100):' in html
-    assert "decoration-dotted" in html
+# test_vendor_detail_renders_score_hover_wired_to_real_data removed — the vendor
+# detail score hero (score_breakdown hover) was cut by the Packet-2 screen diet
+# (w2-screen-diet.md item 11). Scoring-service breakdown tests above stay:
+# persisted v2 scoring is untouched.
 
 
 # ── Prospecting AI-screen trio — def-only hover (no fabricated breakdown) ──

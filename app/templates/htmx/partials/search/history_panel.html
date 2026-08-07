@@ -44,7 +44,7 @@
       <span><span class="font-semibold text-gray-900">{{ history.offers_count }}</span> Offers</span>
       <span><span class="font-semibold text-gray-900">{{ history.confirmed_count }}</span> Won</span>
       <span><span class="font-semibold text-gray-900">{{ history.sightings_count }}</span> Sightings</span>
-      <span><span class="font-semibold text-gray-900">{{ history.requirements_count }}</span> Reqs</span>
+      <span><span class="font-semibold text-gray-900">{{ history.requirements_count }}</span> Lines</span>
       <span><span class="font-semibold text-gray-900">{{ history.buyers|length }}</span> Buyers</span>
     </div>
     {% if history.buyers %}
@@ -107,7 +107,7 @@
   {% call section('reqs', 'Requisitions', history.requirements_count) %}
     {% for r in history.requirements %}
     <div class="flex items-center justify-between py-1 border-b border-line-subtle last:border-0">
-      <span class="truncate">Req #{{ r.requisition_id }}</span>
+      <span class="truncate">Deal #{{ r.requisition_id }}</span>
       <span class="shrink-0 text-gray-600">{{ r.sourcing_status }}</span>
     </div>
     {% else %}<p class="py-1 text-gray-400">None.</p>{% endfor %}

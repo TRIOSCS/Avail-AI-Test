@@ -47,9 +47,6 @@
             <span class="chip ml-2 bg-indigo-50 text-indigo-700 border-indigo-200"
                   title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
             {% endif %}
-            {% if v.response_rate %}
-            <span class="ml-2 text-xs text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
-            {% endif %}
             {# Lead time discrete span — own span, never middot-concatenated #}
             {% if v.lead_time_days is not none %}
             <span class="ml-2 text-xs text-gray-400">{{ v.lead_time_days }}d lead</span>
@@ -59,8 +56,6 @@
           </div>
           {% if v.engagement_score %}
           <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness (engagement score = reply rate × recency). This number is their engagement score.">Score: {{ v.engagement_score|round|int }}</span>
-          {% elif v.vendor_score is not none %}
-          <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness. This is the overall vendor quality score (no engagement data yet).">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
           {# Commodity signal chip — only when current commodity is known and vendor has history #}
           {% if current_commodity and v.card and commodity_signals.get(v.id) %}
@@ -221,7 +216,7 @@
     <div class="mb-4">
       <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts</label>
       {% if requisition_count is defined and requisition_count > 1 %}
-      <p class="text-xs text-accent-600 mt-0.5 mb-1">Spanning {{ requisition_count }} requisitions</p>
+      <p class="text-xs text-accent-600 mt-0.5 mb-1">Spanning {{ requisition_count }} deals</p>
       {% endif %}
       <div class="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
         {% for p in parts %}

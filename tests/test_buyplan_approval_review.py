@@ -78,6 +78,34 @@ def _grant(db: Session, user: User) -> None:
     db.flush()
 
 
+def _open_engine_request(db: Session, plan: BuyPlan, recipient: User):
+    """A REQUESTED BUY_PLAN ApprovalRequest for *plan* with *recipient* as its PENDING
+    recipient — the state the modern submit path leaves behind.
+
+    Required since the approve route is engine-only (the pre-engine fallback died with
+    migration 210).
+    """
+    from app.constants import ApprovalGateType, ApprovalRequestStatus, ApprovalSubjectType
+    from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+
+    ar = ApprovalRequest(
+        gate_type=ApprovalGateType.BUY_PLAN,
+        status=ApprovalRequestStatus.REQUESTED,
+        subject_type=ApprovalSubjectType.BUY_PLAN,
+        subject_id=plan.id,
+        requested_by_id=plan.submitted_by_id,
+        owner_id=plan.submitted_by_id,
+    )
+    db.add(ar)
+    db.flush()
+    step = ApprovalStep(request_id=ar.id, seq=1, rule="any")
+    db.add(step)
+    db.flush()
+    db.add(ApprovalStepRecipient(step_id=step.id, user_id=recipient.id, status="pending"))
+    db.flush()
+    return ar
+
+
 def _approve_route(plan_id: int) -> str:
     return f"/v2/partials/buy-plans/{plan_id}/approve"
 
@@ -158,14 +186,17 @@ def test_approve_post_403_for_non_approver(db_session: Session, test_user, sales
 def test_approve_service_permissionerror_maps_to_403(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """Defense-in-depth: if the dependency is satisfied but the service-level approval
-    check fires (PermissionError), the route maps it to 403, not 400. Simulated by
-    overriding the dependency to a user who lacks the right."""
+    """Defense-in-depth: if the dependency is satisfied but the engine-level recipient
+    check fires (PermissionError — the caller holds no PENDING recipient slot on the
+    open request), the route maps it to 403, not 400. Simulated by overriding the
+    dependency to a user the request was NOT routed to."""
     from app.dependencies import require_buyplan_approver
     from app.main import app
 
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
-    db_session.commit()  # test_user has NO approval right
+    # The open request is routed to the submitter only — test_user holds no slot.
+    _open_engine_request(db_session, plan, sales_user)
+    db_session.commit()  # test_user has NO approval right / recipient row
 
     app.dependency_overrides[require_buyplan_approver] = lambda: test_user
     try:
@@ -190,6 +221,7 @@ def test_approve_sets_state_and_writes_activity(
 
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     _grant(db_session, test_user)
+    _open_engine_request(db_session, plan, test_user)
     db_session.commit()
 
     app.dependency_overrides[require_buyplan_approver] = lambda: test_user
@@ -225,6 +257,8 @@ def test_reject_without_reason_is_refused(
 
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     _grant(db_session, test_user)
+    # An open request exists, so the 400 below is the blank-reason guard specifically.
+    _open_engine_request(db_session, plan, test_user)
     db_session.commit()
 
     app.dependency_overrides[require_buyplan_approver] = lambda: test_user
@@ -247,6 +281,7 @@ def test_reject_with_reason_sends_back_to_draft_and_audits(
 
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     _grant(db_session, test_user)
+    _open_engine_request(db_session, plan, test_user)
     db_session.commit()
 
     app.dependency_overrides[require_buyplan_approver] = lambda: test_user

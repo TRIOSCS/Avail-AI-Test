@@ -248,6 +248,9 @@ class TestClearOnBlankSemantics:
         db_session.refresh(test_company)
         assert test_company.tax_id == "12-3456789"
 
+        # W2 screen diet item 12 (applied 2026-08-07): tax_id left the editable
+        # registry — the form can no longer clear it; the stored value is
+        # preserved even when the field is posted blank.
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": test_company.name, "tax_id": ""},
@@ -255,7 +258,7 @@ class TestClearOnBlankSemantics:
         )
         assert resp.status_code == 200
         db_session.refresh(test_company)
-        assert test_company.tax_id is None
+        assert test_company.tax_id == "12-3456789"
 
     def test_source_sentinel_preserved(
         self, client: TestClient, db_session: Session, test_company: Company, test_user: User

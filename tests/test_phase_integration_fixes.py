@@ -210,7 +210,7 @@ class TestVendorEmailsBacklink:
 
         resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/emails")
         assert resp.status_code == 200
-        assert f"Req #{req.id}" in resp.text
+        assert f"Deal #{req.id}" in resp.text
         assert f"/v2/requisitions/{req.id}" in resp.text
 
 
@@ -308,7 +308,7 @@ class TestCompanyActivityTab:
         assert resp.status_code == 200
         assert "Activity Vendor" in resp.text
         assert "RFQ — Activity Vendor" in resp.text  # unified timeline RFQ row title
-        assert f"Req #{req.id}" in resp.text
+        assert f"Deal #{req.id}" in resp.text
 
     def test_company_activity_tab_empty(self, client: TestClient, db_session: Session, test_user: User):
         """Empty company activity tab shows placeholder."""
@@ -388,7 +388,7 @@ class TestCompanyActivityTab:
 
         # RFQ contact row must appear
         assert "RFQ — RFQ Vendor" in resp.text, "RFQ contact row missing from Emails section"
-        assert f"Req #{req.id}" in resp.text, "Req backlink missing from RFQ row"
+        assert f"Deal #{req.id}" in resp.text, "Deal backlink missing from RFQ row"
 
         # Regular email ActivityLog must appear
         assert "Follow-up email sent" in resp.text, "ActivityLog EMAIL row missing from Emails section"

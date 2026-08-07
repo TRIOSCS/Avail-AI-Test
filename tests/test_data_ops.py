@@ -113,9 +113,9 @@ class TestScanErrorState:
 class TestMergeDisambiguation:
     def test_vendor_rows_show_suggested_keep_hint(self, admin_client, db_session):
         """Vendor dedup rows surface a 'suggested keep' hint, like company rows."""
-        # Pair must clear the default threshold on BOTH backends (pg_trgm 0.90,
-        # rapidfuzz 98) — "arrow electronics"/"arrow electronic" is 0.842 on pg_trgm
-        # and invisible to the PG engine's dedup finder.
+        # Pair clears BOTH default gates (pg_trgm 0.90 >= 0.80, rapidfuzz 98 >= 85).
+        # The shorter "arrow electronics"/"arrow electronic" pair (0.842 on pg_trgm)
+        # is pinned by TestArrowPairTrgmGatePG in tests/test_vendor_utils.py.
         _vendor(db_session, "arrow electronics corporation", "Arrow Electronics Corporation", 100)
         _vendor(db_session, "arrow electronics corporatio", "Arrow Electronics Corporatio", 5)
         db_session.commit()

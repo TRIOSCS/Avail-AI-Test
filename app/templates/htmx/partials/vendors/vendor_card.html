@@ -36,48 +36,6 @@
     {% endif %}
   </div>
 
-  {# Row 2: Score bar #}
-  {% if v.vendor_score %}
-  <div>
-    <div class="flex items-center justify-between mb-1">
-      <span class="text-xs text-gray-600">Score</span>
-      <span class="text-sm font-semibold
-        {% if v.vendor_score >= 66 %}text-emerald-700
-        {% elif v.vendor_score >= 33 %}text-brand-600
-        {% else %}text-amber-700{% endif %}">
-        {{ '%.0f'|format(v.vendor_score) }}
-      </span>
-    </div>
-    <div class="w-full bg-gray-200 rounded-full h-1.5">
-      <div class="h-1.5 rounded-full transition-all
-        {% if v.vendor_score >= 66 %}bg-emerald-500
-        {% elif v.vendor_score >= 33 %}bg-brand-500
-        {% else %}bg-amber-500{% endif %}"
-           style="width: {{ [v.vendor_score, 100]|min }}%"></div>
-    </div>
-  </div>
-  {% else %}
-  <p class="text-secondary italic">New — no score yet</p>
-  {% endif %}
-
-  {# Row 3: Brand + commodity tags #}
-  {% if v.brand_tags or v.commodity_tags %}
-  <div class="flex flex-wrap gap-1">
-    {% for tag in (v.brand_tags or [])[:5] %}
-    <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-violet-50 text-violet-600">{{ tag }}</span>
-    {% endfor %}
-    {% if (v.brand_tags or [])|length > 5 %}
-    <span class="px-1.5 py-0.5 text-xs text-gray-400">+{{ (v.brand_tags|length) - 5 }} more</span>
-    {% endif %}
-    {% for tag in (v.commodity_tags or [])[:4] %}
-    <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-sky-50 text-sky-600">{{ tag }}</span>
-    {% endfor %}
-    {% if (v.commodity_tags or [])|length > 4 %}
-    <span class="px-1.5 py-0.5 text-xs text-gray-400">+{{ (v.commodity_tags|length) - 4 }} more</span>
-    {% endif %}
-  </div>
-  {% endif %}
-
   {# Row 4: Rating stars #}
   {% if v.avg_rating %}
   <div class="flex items-center gap-1">
@@ -95,14 +53,5 @@
   {# Row 5: Stats #}
   <div class="flex items-center justify-between text-xs text-gray-600 pt-2 border-t border-gray-100">
     <span>{{ v.sighting_count or 0 }} sightings</span>
-    <span>{{ '%.0f%%'|format((v.overall_win_rate or 0) * 100) }} win</span>
-    <span>{{ '%.0f%%'|format((v.response_rate or 0) * 100) }} resp</span>
   </div>
-
-  {# Row 6: Location + industry #}
-  {% if v.hq_country or v.industry %}
-  <div class="text-secondary truncate">
-    {{ v.hq_country or '' }}{% if v.hq_country and v.industry %} · {% endif %}{{ v.industry or '' }}
-  </div>
-  {% endif %}
 </div>

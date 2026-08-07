@@ -203,12 +203,19 @@ class TestContactPhoneNormalize:
         apply_contact_field(contact, "phone", "(415) 555-1234", contact.customer_site_id, db_session)
         assert contact.phone == "+14155551234"
 
-    def test_apply_contact_field_normalizes_secondary_phone(self, db_session, site_and_contact):
+    def test_secondary_phone_no_longer_editable(self, db_session, site_and_contact):
+        """W2 screen diet items 14-16 (applied 2026-08-07): secondary_phone left the
+        editable registry with its phone-kind branch — apply_contact_field 404s on
+        it."""
+        from fastapi import HTTPException
+
         from app.routers.htmx.companies import apply_contact_field
 
         _, contact = site_and_contact
-        apply_contact_field(contact, "secondary_phone", "415-555-9999", contact.customer_site_id, db_session)
-        assert contact.secondary_phone == "+14155559999"
+        with pytest.raises(HTTPException) as exc:
+            apply_contact_field(contact, "secondary_phone", "415-555-9999", contact.customer_site_id, db_session)
+        assert exc.value.status_code == 404
+        assert contact.secondary_phone is None
 
     def test_blank_phone_clears(self, db_session, site_and_contact):
         from app.routers.htmx.companies import apply_contact_field

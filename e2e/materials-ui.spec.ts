@@ -17,8 +17,8 @@ test.describe('materials workspace UI', () => {
     });
     expect(res.status()).toBeLessThan(500);
     const html = await res.text();
-    // Page header "Materials" title
-    expect(html).toContain('Materials');
+    // Page header "Parts" title (Packet-2 glossary row 6)
+    expect(html).toContain('Parts');
     // Needs-review attention chip
     expect(html).toContain('Needs review');
     // Accent classes present (accent migration)

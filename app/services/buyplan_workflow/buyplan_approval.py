@@ -1,5 +1,9 @@
-"""Buy Plan — Approval/rejection + plan lifecycle: submit, approve, halt, resume, reset,
-cancel, resubmit, and auto-completion.
+"""Buy Plan — Approval/rejection side effects + plan lifecycle: submit, halt, resume,
+reset, cancel, resubmit, and auto-completion. The approve/reject DECISION itself lives
+solely in the approvals engine (services/approvals/service.decide), which dispatches to
+the shared ``_run_approve_side_effects`` / ``_run_reject_side_effects`` here — the
+legacy ``approve_buy_plan`` entry point (pre-engine fallback) was deleted with migration
+210 (Packet 3 D2 backfill).
 
 Split from the former monolithic `buyplan_workflow.py` (P4.3) along the "approval/
 rejection lifecycle" + "plan lifecycle (reset/cancel/resubmit)" seams — kept as one
@@ -8,8 +12,9 @@ because every state transition here shares the same engine-request/prepayment
 teardown helpers (``_cancel_open_engine_requests_for_plan`` /
 ``_cancel_open_prepayment_requests_for_plan``).
 
-Called by: routers/htmx/buy_plans.py, services/approvals/service.py (decide()
-    dispatch), services/buyplan_hub.py, jobs/inventory_jobs.py, services/buyplan_po
+Called by: routers/htmx/buy_plans/ (submit/halt/cancel/resume/reset routes),
+    services/approvals/service.py (decide() side-effect dispatch),
+    services/buyplan_hub.py, jobs/inventory_jobs.py, services/buyplan_po
     (verify_po's completion check, lazy import to avoid a cycle)
 Depends on: buyplan_scoring, buyplan_po (_line_amount), buyplan_reports
     (generate_case_report), approvals service (lazy), models, config
@@ -93,49 +98,7 @@ def submit_buy_plan(
     return plan
 
 
-# ── Workflow: Approval ───────────────────────────────────────────────
-
-
-def approve_buy_plan(
-    plan_id: int,
-    action: str,
-    user: User,
-    db: Session,
-    *,
-    line_overrides: list[dict] | None = None,
-    notes: str | None = None,
-) -> BuyPlan:
-    """Manager approves or rejects a pending buy plan.
-
-    Approve → active (lines go to buyers). Reject → draft (back to salesperson). Line
-    overrides let manager swap vendors on specific lines.
-    """
-    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
-    if not plan:
-        raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.PENDING.value:
-        raise ValueError(f"Can only approve/reject pending plans (current: {plan.status})")
-
-    # Single source of truth for the approval right: the per-user can_approve_buy_plans
-    # column (admin-toggled, not role-derived). This MUST match the predicate that hides
-    # the UI and the require_buyplan_approver dependency that gates the POST.
-    from ...dependencies import can_approve_buy_plans
-
-    if not can_approve_buy_plans(user):
-        raise PermissionError("Buy-plan approval right required to approve/reject")
-
-    if action == "approve":
-        _run_approve_side_effects(plan, user, db, line_overrides=line_overrides, notes=notes)
-    elif action == "reject":
-        reason = (notes or "").strip()
-        if not reason:
-            raise ValueError("A rejection reason is required")
-        _run_reject_side_effects(plan, user, db, reason=reason)
-    else:
-        raise ValueError(f"Invalid action: {action}")
-
-    db.flush()
-    return plan
+# ── Workflow: Approval side effects (dispatched by the engine's decide()) ──
 
 
 def _run_approve_side_effects(
@@ -143,29 +106,24 @@ def _run_approve_side_effects(
     user: User,
     db: Session,
     *,
-    line_overrides: list[dict] | None = None,
     notes: str | None = None,
 ) -> None:
     """Apply the on-approve side effects to *plan* (status→ACTIVE + buyer tasks).
 
-    The single arbitration point for a buy-plan approval's effects, called by BOTH the
-    legacy ``approve_buy_plan`` path and the approvals-engine ``decide()`` dispatch so the
-    two paths can never drift. Optional manager ``line_overrides`` swap vendors/quantities
-    before the plan is activated. Stamps approver/decision metadata, generates the buyer
-    'Cut PO' tasks, and writes the audit ActivityLog row. The caller owns the flush/commit.
+    The single arbitration point for a buy-plan approval's effects, dispatched by the
+    approvals-engine ``decide()`` (the only decision path — the legacy
+    ``approve_buy_plan`` entry point died with migration 210). Stamps approver/decision
+    metadata, generates the buyer 'Cut PO' tasks, and writes the audit ActivityLog row.
+    The caller owns the flush/commit.
 
-    State guard FIRST: only a PENDING plan may be approved. This is the single point that
-    protects BOTH approval paths — if an approver decides a STALE engine request whose plan
-    has since left PENDING (e.g. it was cancelled or halted out from under the queue), this
-    raises cleanly so the router turns it into a 400 / idempotent no-op instead of silently
-    resurrecting the cancelled plan to ACTIVE. ``approve_buy_plan`` keeps its own pre-check
-    (defense in depth); the engine ``decide()`` dispatch relies on this one.
+    State guard FIRST: only a PENDING plan may be approved — if an approver decides a
+    STALE engine request whose plan has since left PENDING (e.g. it was cancelled or
+    halted out from under the queue), this raises cleanly so the router turns it into a
+    400 / idempotent no-op instead of silently resurrecting the cancelled plan to ACTIVE.
     """
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only approve a pending plan (current: {plan.status})")
     now = datetime.now(UTC)
-    if line_overrides:
-        _apply_line_overrides(plan, line_overrides, db)
     transition(plan, BuyPlanStatus.ACTIVE)
     # Phase D — one approval absorbs SO verification: the single manager approval IS the
     # SO sign-off, so stamp so_status=APPROVED here. ``check_completion``'s
@@ -185,8 +143,8 @@ def _run_approve_side_effects(
 def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: str) -> None:
     """Apply the on-reject side effects to *plan* (status→DRAFT, back to salesperson).
 
-    Counterpart to ``_run_approve_side_effects``; shared by the legacy path and the engine
-    ``decide()`` dispatch. Stamps the rejecting user + reason and writes the audit
+    Counterpart to ``_run_approve_side_effects``; dispatched by the engine ``decide()``
+    (the only decision path). Stamps the rejecting user + reason and writes the audit
     ActivityLog row. The caller owns the flush/commit.
 
     State guard FIRST (same rationale as ``_run_approve_side_effects``): only a PENDING plan
@@ -808,33 +766,6 @@ def _apply_line_edits(plan: BuyPlan, edits: list[dict], db: Session):
                 sales_note=edit.get("sales_note"),
             )
             plan.lines.append(new_line)
-
-    _recalculate_financials(plan)
-
-
-def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
-    """Apply manager's line-level overrides (vendor swap, quantity, notes)."""
-    for ovr in overrides:
-        line = next((ln for ln in plan.lines if ln.id == ovr["line_id"]), None)
-        if not line:
-            logger.warning("Override line_id {} not found in plan {}", ovr["line_id"], plan.id)
-            continue
-
-        if ovr.get("offer_id"):
-            offer = db.get(Offer, ovr["offer_id"])
-            if offer:
-                line.offer_id = offer.id
-                line.unit_cost = float(offer.unit_price) if offer.unit_price else None
-                if line.unit_sell and line.unit_cost and float(line.unit_sell) > 0:
-                    line.margin_pct = round(
-                        ((float(line.unit_sell) - float(line.unit_cost)) / float(line.unit_sell)) * 100, 2
-                    )
-
-        if ovr.get("quantity"):
-            line.quantity = ovr["quantity"]
-
-        if ovr.get("manager_note"):
-            line.manager_note = ovr["manager_note"]
 
     _recalculate_financials(plan)
 

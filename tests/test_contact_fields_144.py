@@ -214,7 +214,9 @@ class TestSecondaryFieldEdit:
         site_and_two_contacts,
         db_session: Session,
     ):
-        """POST edit with secondary_email persists it."""
+        """secondary_email left the contact edit surface with the Packet-2 screen diet
+        (w2-screen-diet.md items 14-16): a submitted value is ignored, the column
+        stays."""
         test_company.account_owner_id = test_user.id
         db_session.commit()
         site, alice, _bob = site_and_two_contacts
@@ -224,7 +226,7 @@ class TestSecondaryFieldEdit:
         )
         assert resp.status_code == 200
         db_session.refresh(alice)
-        assert alice.secondary_email == "alice-alt@acme.com"
+        assert alice.secondary_email is None
 
     def test_edit_saves_reports_to_id(
         self,
@@ -280,7 +282,11 @@ class TestInlineEditSecondaryFields:
         site_and_two_contacts,
         db_session: Session,
     ):
-        """Inline POST secondary_email persisted."""
+        """secondary_email was cut from the inline-edit registry (Packet-2 screen diet,
+        items 14-16): the field endpoint now 404s.
+
+        Column stays.
+        """
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -289,9 +295,7 @@ class TestInlineEditSecondaryFields:
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/field",
             data={"field": "secondary_email", "value": "alice-inline@acme.com"},
         )
-        assert resp.status_code == 200
-        db_session.refresh(alice)
-        assert alice.secondary_email == "alice-inline@acme.com"
+        assert resp.status_code == 404
 
     def test_inline_edit_secondary_phone_persists(
         self,
@@ -301,7 +305,11 @@ class TestInlineEditSecondaryFields:
         site_and_two_contacts,
         db_session: Session,
     ):
-        """Inline POST secondary_phone persisted."""
+        """secondary_phone was cut from the inline-edit registry (Packet-2 screen diet,
+        items 14-16): the field endpoint now 404s.
+
+        Column stays.
+        """
         test_company.account_owner_id = test_user.id
         db_session.commit()
 
@@ -310,10 +318,7 @@ class TestInlineEditSecondaryFields:
             f"/v2/partials/customers/{test_company.id}/contacts/{alice.id}/field",
             data={"field": "secondary_phone", "value": "+1-800-555-4444"},
         )
-        assert resp.status_code == 200
-        db_session.refresh(alice)
-        # CRM P5 trust: contact phone fields normalize to E.164 on save.
-        assert alice.secondary_phone == "+18005554444"
+        assert resp.status_code == 404
 
 
 # ── 3. reports_to select endpoint ────────────────────────────────────────────

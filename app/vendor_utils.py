@@ -422,6 +422,27 @@ def _enrich_with_vendor_cards(results: dict, db) -> None:
         group["blacklisted_count"] = blacklisted_count
 
 
+# ── Vendor dedup gates: TWO named thresholds because the two fuzzy backends
+# score the SAME pair on different scales ────────────────────────────
+#
+# rapidfuzz token_sort_ratio (0-100) and pg_trgm similarity() (0.0-1.0) are not
+# one number on two scales — trigram overlap punishes near-identical names far
+# harder than token-sort edit distance does. The canonical example:
+#
+#   "arrow electronics" vs "arrow electronic"
+#     pg_trgm  similarity()      = 0.842
+#     rapidfuzz token_sort_ratio = 96.97  (fuzzy_score_vendor truncates to 96)
+#
+# The old single threshold (85, naively mapped to 0.85 on the PG path via
+# threshold/100) sat ABOVE 0.842, so production PostgreSQL silently missed
+# near-identical pairs that the SQLite/rapidfuzz path — and the test suite
+# running on it — always flagged. Owner decision P4-D4 (2026-08): lower the
+# pg_trgm gate to 0.80 so the 0.842-class near-dupes surface; the rapidfuzz
+# gate stays at 85 on its own 0-100 scale.
+VENDOR_DEDUP_FUZZ_THRESHOLD = 85  # rapidfuzz token_sort_ratio scale (0-100), SQLite/fallback path
+VENDOR_DEDUP_TRGM_THRESHOLD = 0.80  # pg_trgm similarity() scale (0.0-1.0), PostgreSQL path
+
+
 def _vendor_pair_dict(card_a: Any, card_b: Any, score: float) -> dict:
     """Build the public candidate shape shared by both dedup backends below."""
     return {
@@ -439,8 +460,12 @@ def _vendor_pair_dict(card_a: Any, card_b: Any, score: float) -> dict:
     }
 
 
-def _find_vendor_dedup_candidates_pg(db, threshold: int, limit: int) -> list[dict]:
+def _find_vendor_dedup_candidates_pg(db, trgm_threshold: float, limit: int) -> list[dict]:
     """PostgreSQL path: pg_trgm self-join on normalized_name via func.similarity().
+
+    ``trgm_threshold`` is on pg_trgm similarity()'s OWN 0.0-1.0 scale (see the
+    two-scale note above VENDOR_DEDUP_TRGM_THRESHOLD) — it is NOT the rapidfuzz
+    0-100 ``threshold`` divided by 100.
 
     Uses the ix_vendor_cards_name_trgm GIN index (migration 024_vendor_trgm_index) so
     every vendor card is compared, not just the top 500 by sighting_count — a
@@ -472,7 +497,7 @@ def _find_vendor_dedup_candidates_pg(db, threshold: int, limit: int) -> list[dic
             a.c.normalized_name != "",
             b.c.normalized_name != "",
             a.c.normalized_name.op("%")(b.c.normalized_name),
-            sim >= (threshold / 100.0),
+            sim >= trgm_threshold,
         )
         .order_by(text("sim DESC"))
         .limit(limit)
@@ -554,11 +579,21 @@ def _find_vendor_dedup_candidates_blocked(db, threshold: int, limit: int) -> lis
     return candidates[:limit]
 
 
-def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
+def find_vendor_dedup_candidates(
+    db,
+    threshold: int = VENDOR_DEDUP_FUZZ_THRESHOLD,
+    limit: int = 50,
+    trgm_threshold: float = VENDOR_DEDUP_TRGM_THRESHOLD,
+) -> list[dict]:
     """Find potential duplicate vendor cards using fuzzy matching.
 
     Returns groups of vendors that may be duplicates, sorted by match score
     descending: [{"vendor_a": {id, name, sightings}, "vendor_b": {...}, "score": int}].
+
+    Two threshold knobs because the two backends score on DIFFERENT scales (see
+    the two-scale note above VENDOR_DEDUP_TRGM_THRESHOLD): ``threshold`` (0-100,
+    rapidfuzz) gates ONLY the SQLite/fallback path; ``trgm_threshold`` (0.0-1.0,
+    pg_trgm similarity()) gates ONLY the PostgreSQL path.
 
     Backend by dialect (same output shape either way):
       - PostgreSQL: pg_trgm self-join on normalized_name via func.similarity() over
@@ -568,5 +603,5 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
         low-sighting-count duplicates.
     """
     if db.bind is not None and db.bind.dialect.name == "postgresql":
-        return _find_vendor_dedup_candidates_pg(db, threshold, limit)
+        return _find_vendor_dedup_candidates_pg(db, trgm_threshold, limit)
     return _find_vendor_dedup_candidates_blocked(db, threshold, limit)

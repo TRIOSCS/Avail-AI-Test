@@ -31,7 +31,6 @@
           <th class="text-left">Part number</th>
           <th class="text-left">Manufacturer</th>
           <th class="text-right">Qty</th>
-          <th class="text-left">Date code</th>
           <th class="text-left">Condition</th>
           <th class="text-right">Asking price</th>
         </tr>
@@ -42,7 +41,6 @@
           <td class="font-mono">{{ row.part_number or '—' }}</td>
           <td>{{ row.manufacturer or '—' }}</td>
           <td class="text-right tabular-nums">{{ row.quantity or '—' }}</td>
-          <td>{{ row.date_code or '—' }}</td>
           <td>{{ row.condition or '—' }}</td>
           <td class="text-right tabular-nums">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '—' }}</td>
         </tr>

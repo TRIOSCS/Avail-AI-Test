@@ -53,7 +53,6 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
     "credit_terms": {"label": "Credit Terms", "kind": "text"},
     "website": {"label": "Website", "kind": "text"},
     "legal_name": {"label": "Legal Name", "kind": "text"},
-    "revenue_range": {"label": "Revenue Range", "kind": "text"},
     "hq_city": {"label": "HQ City", "kind": "text"},
     "hq_state": {"label": "HQ State", "kind": "text"},
     "hq_country": {"label": "HQ Country", "kind": "text"},
@@ -64,7 +63,6 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
     },
     "domain": {"label": "Domain", "kind": "text"},
     "linkedin_url": {"label": "LinkedIn URL", "kind": "text"},
-    "tax_id": {"label": "Tax ID", "kind": "text"},
     "source": {"label": "Source", "kind": "text"},
     "notes": {"label": "Notes", "kind": "text"},
 }
@@ -77,9 +75,6 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
     "title": {"label": "Title", "kind": "text"},
     "email": {"label": "Email", "kind": "text"},
     "phone": {"label": "Phone", "kind": "text"},
-    "secondary_email": {"label": "Secondary Email", "kind": "text"},
-    "secondary_phone": {"label": "Secondary Phone", "kind": "text"},
-    "wechat_id": {"label": "WeChat ID", "kind": "text"},
     "linkedin_url": {"label": "LinkedIn", "kind": "text"},
     "contact_role": {
         "label": "Role",
@@ -109,11 +104,9 @@ KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
     ("domain", "Domain", "text", None),
     ("phone", "Phone", "text", None),
     ("employee_size", "Employees", "text", None),
-    ("revenue_range", "Revenue Range", "text", None),
     ("hq_city", "HQ City", "text", None),
     ("hq_state", "HQ State", "text", None),
     ("hq_country", "HQ Country", "text", None),
-    ("tax_id", "Tax ID", "text", None),
     ("account_type", "Account Type", "select", ["Customer", "Prospect", "Partner", "Competitor"]),
     ("source", "Source", "text", None),
     ("notes", "Notes", "text", None),
@@ -241,7 +234,7 @@ def apply_contact_field(
             if dup:
                 raise HTTPException(409, f"Another contact at this site already uses {v}")
         contact.email = v or None
-    elif field in ("phone", "secondary_phone"):
+    elif field == "phone":
         # Normalize to E.164 on save, mirroring the account phone path
         # (apply_company_field) — reuses the shared normalize_phone_e164 util.
         setattr(contact, field, (normalize_phone_e164(v) or v) if v else None)

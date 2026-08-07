@@ -6,7 +6,7 @@ outbox (W3.8/§5.5 — the durable single path; the drain job sends it):
 - Approve → outbox email per buyer ("create POs"); the submitter's decision notice
   is the approvals engine's own outbox email (approvals.service.decide)
 - Reject  → no delivery here — the engine's decide() outbox email (with the reject
-  comment) is the event's single delivery; notify_rejected is a kept no-op seam
+  comment) is the event's single delivery (the router dispatches nothing on reject)
 - Halted (notify_so_rejected) → outbox email to the salesperson
 - PO Confirmed → outbox email to each active ops verification member
 - PO Rejected → outbox email to the line's buyer
@@ -414,17 +414,6 @@ async def notify_approved(plan: BuyPlan, db: Session):
         )
 
     db.commit()
-
-
-async def notify_rejected(plan: BuyPlan, db: Session):
-    """No-op seam: the reject decision email is the approvals engine's own outbox row.
-
-    The approve/reject router dispatches this on every reject; the engine's decide()
-    already enqueues the "rejected" outbox email (with the reject comment) to the
-    request owner — the event's single delivery (W3.8/§5.5). The old direct email,
-    in-app row, and Teams DM here duplicated it and were deleted.
-    """
-    logger.debug("notify_rejected: single delivery handled by the approvals outbox (plan {})", plan.id)
 
 
 async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):

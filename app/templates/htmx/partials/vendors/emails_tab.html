@@ -54,7 +54,7 @@
           <a hx-get="/v2/partials/requisitions/{{ c.requisition_id }}"
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ c.requisition_id }}"
-             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ c.requisition_id }}</a>
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Deal #{{ c.requisition_id }}</a>
           {% endif %}
         </div>
       </div>
@@ -103,7 +103,7 @@
           <a hx-get="/v2/partials/requisitions/{{ r.requisition_id }}"
              hx-target="#main-content"
              hx-push-url="/v2/requisitions/{{ r.requisition_id }}"
-             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ r.requisition_id }}</a>
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Deal #{{ r.requisition_id }}</a>
           {% endif %}
         </div>
         {% if r.parsed_data %}

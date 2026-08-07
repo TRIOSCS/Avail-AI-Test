@@ -203,25 +203,22 @@ async def buy_plan_approve_partial(
     Gated by ``require_buyplan_approver`` (403 unless the user holds the per-user
     can_approve_buy_plans right). Reject requires a reason (enforced in the service).
 
-    QP Phase C1: the approval engine OWNS the gate. We look up the open BUY_PLAN
-    ApprovalRequest for this plan and resolve it via the engine's ``decide`` — which drives
-    the buy-plan side effects (ACTIVE + buyer tasks / DRAFT) in the SAME transaction. We let
-    ``decide`` raise (no swallowing) so a side-effect failure rolls back the whole decision
-    atomically (RISK 1). If NO open request exists — a plan that went PENDING before C1
-    deployed — we fall back to the legacy ``approve_buy_plan`` and log a WARNING (RISK 3,
-    transition window; the fallback is removed in a follow-up once no pre-C1 plans remain).
+    QP Phase C1: the approval engine OWNS the gate — the ONLY decision path. We look up
+    the open BUY_PLAN ApprovalRequest for this plan and resolve it via the engine's
+    ``decide``, which drives the buy-plan side effects (ACTIVE + buyer tasks / DRAFT) in
+    the SAME transaction. We let ``decide`` raise (no swallowing) so a side-effect failure
+    rolls back the whole decision atomically (RISK 1). No open request → 400: migration
+    210 stamped the last pre-engine PENDING plans into the engine (Packet 3 D2), so a
+    PENDING plan without an open request is either already decided under a stale pane or
+    stalled with no approver configured — the legacy ``approve_buy_plan`` fallback
+    (RISK 3 transition window) is deleted.
     """
     from sqlalchemy import select as _select
 
     from ....constants import ApprovalRequestStatus, ApprovalSubjectType
     from ....models.approvals import ApprovalRequest
     from ....services.approvals.service import decide as svc_decide
-    from ....services.buyplan_notifications import (
-        notify_approved,
-        notify_rejected,
-        run_notify_bg,
-    )
-    from ....services.buyplan_workflow import approve_buy_plan
+    from ....services.buyplan_notifications import notify_approved, run_notify_bg
     from ....services.workspace_notes import add_note
 
     form = await request.form()
@@ -257,26 +254,21 @@ async def buy_plan_approve_partial(
         .first()
     )
 
+    if open_request is None:
+        # Post-210 there is no legacy pre-engine state left: a PENDING plan without an
+        # open request means a stale pane (already decided/cancelled elsewhere) or a
+        # no-approver stall — refuse cleanly instead of deciding outside the engine.
+        logger.info("Buy plan {} approve refused: no open engine ApprovalRequest", plan_id)
+        raise HTTPException(400, "No open approval request for this buy plan — it may already be decided.")
+
     try:
-        if open_request is not None:
-            # Engine path: decide() resolves the request AND drives the plan side effects.
-            svc_decide(db, open_request.id, user, action, comment=notes or None)
-        else:
-            # RISK 3 fallback: plan pending pre-C1 with no engine request yet. Still
-            # load-bearing for the pre-engine PENDING plans (owner decision pending:
-            # backfill an ApprovalRequest vs reset+resubmit — Packet 3); deletable
-            # only after that decision lands.
-            logger.warning(
-                "LEGACY APPROVAL FALLBACK FIRED: buy plan {} is PENDING with no open engine "
-                "ApprovalRequest (pre-engine plan) — deciding via legacy approve_buy_plan",
-                plan_id,
-            )
-            approve_buy_plan(plan_id, action, user, db, notes=notes)
+        # Engine path: decide() resolves the request AND drives the plan side effects.
+        svc_decide(db, open_request.id, user, action, comment=notes or None)
         db.commit()
         if action == "approve":
+            # Reject needs no dispatch here: the engine's decide() outbox email (with
+            # the reject comment) is the event's single delivery (W3.8/§5.5).
             await run_notify_bg(notify_approved, plan_id)
-        else:
-            await run_notify_bg(notify_rejected, plan_id)
     except PermissionError as e:
         # The dependency already 403s unauthorized callers; this maps the service's
         # defense-in-depth approval-right check to 403 (not 400) if it is ever reached.
@@ -288,7 +280,8 @@ async def buy_plan_approve_partial(
     #   reject / send-back → the note-to-the-fixer lands on the plan's notes thread
     #   tagged with the decision. (The approve-with-changes summary and the reject
     #   in-app pings wrote only write-only Notification rows — deleted, W2.9/§5.5;
-    #   the submitter still gets the reject/approve email via run_notify_bg above.)
+    #   the submitter's reject email is the engine decide() outbox row, and the
+    #   buyers' approve email is the run_notify_bg dispatch above.)
     if action == "reject" and notes:
         add_note(db, user=user, body=notes, buy_plan_id=plan_id, decision=decision_tag)
         db.commit()

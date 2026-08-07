@@ -20,7 +20,7 @@
     <div class="flex items-center gap-2">
       <button @click="$dispatch('open-modal', {url: '/v2/partials/search/requisition-picker?items=' + encodeURIComponent(JSON.stringify($store.shortlist.items))})"
               class="btn-primary">
-        Add to Requisition
+        Add to Deal
       </button>
       <button @click="$dispatch('open-modal', {url: '/v2/partials/search/requisition-picker?action=rfq&items=' + encodeURIComponent(JSON.stringify($store.shortlist.items))})"
               class="btn-secondary">

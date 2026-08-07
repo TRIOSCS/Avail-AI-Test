@@ -7,13 +7,17 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.vendor_utils import (
+    VENDOR_DEDUP_FUZZ_THRESHOLD,
+    VENDOR_DEDUP_TRGM_THRESHOLD,
     find_vendor_dedup_candidates,
     fuzzy_dedup_scan,
     fuzzy_match_vendor,
+    fuzzy_score_vendor,
     merge_emails_into_card,
     merge_phones_into_card,
     normalize_vendor_name,
 )
+from tests.conftest import requires_postgres
 
 # ── normalize_vendor_name ────────────────────────────────────────────
 
@@ -304,10 +308,10 @@ class TestFindVendorDedupCandidates:
 
         from app.models import VendorCard
 
-        # Pair must clear threshold=85 on BOTH backends: pg_trgm similarity() gives
-        # this pair 0.90 (rapidfuzz 98). The shorter "arrow electronics"/"arrow
-        # electronic" pair scores only 0.842 on pg_trgm and is missed on the PG
-        # engine at the default threshold.
+        # Pair clears BOTH default gates: pg_trgm similarity() gives this pair
+        # 0.90 (>= trgm gate 0.80), rapidfuzz 98 (>= fuzz gate 85). The shorter
+        # "arrow electronics"/"arrow electronic" pair (0.842 on pg_trgm) is
+        # covered by the dedicated TestArrowPairTrgmGatePG below.
         cards = [
             VendorCard(
                 normalized_name="arrow electronics corporation",
@@ -486,9 +490,8 @@ class TestFindVendorDedupCandidates:
                     created_at=datetime.now(UTC),
                 )
             )
-        # Pair calibrated to clear threshold=85 on BOTH backends (pg_trgm 0.909,
-        # rapidfuzz 98) — "zyquin components"/"zyquin component" scores 0.842 on
-        # pg_trgm and is missed on the PG engine.
+        # Pair calibrated to clear BOTH default gates (pg_trgm 0.909 >= 0.80,
+        # rapidfuzz 98 >= 85).
         db_session.add(
             VendorCard(
                 normalized_name="zyquin components international",
@@ -526,7 +529,8 @@ class TestFindVendorDedupCandidates:
         with patch("app.vendor_utils._find_vendor_dedup_candidates_pg", return_value=[]) as mock_pg:
             find_vendor_dedup_candidates(mock_db)
 
-        mock_pg.assert_called_once_with(mock_db, 85, 50)
+        # The PG path gets the trgm-scale gate (0.80), NOT the rapidfuzz 85.
+        mock_pg.assert_called_once_with(mock_db, VENDOR_DEDUP_TRGM_THRESHOLD, 50)
 
     def test_pg_path_empty_pairs(self):
         """PG path returns [] when no similar pairs are found."""
@@ -539,9 +543,103 @@ class TestFindVendorDedupCandidates:
         mock_q.limit.return_value = mock_q
         mock_q.all.return_value = []
 
-        result = _find_vendor_dedup_candidates_pg(mock_db, 85, 50)
+        result = _find_vendor_dedup_candidates_pg(mock_db, VENDOR_DEDUP_TRGM_THRESHOLD, 50)
 
         assert result == []
+
+
+# ── Two-scale dedup gates (P4-D4): pg_trgm 0.80 vs rapidfuzz 85 ──────
+
+
+class TestArrowPairRapidfuzzPin:
+    """The rapidfuzz side of the two-scale split is UNCHANGED: gate 85, and the
+    arrow pair scores 96 (token_sort_ratio 96.97, int-truncated) — comfortably
+    above it, exactly as before the trgm gate was lowered."""
+
+    def test_arrow_pair_rapidfuzz_score_pinned(self):
+        assert fuzzy_score_vendor("arrow electronics", "arrow electronic") == 96
+
+    def test_fuzz_threshold_constant_unchanged(self):
+        assert VENDOR_DEDUP_FUZZ_THRESHOLD == 85
+
+    def test_arrow_pair_flagged_by_rapidfuzz_fallback_at_85(self, db_session):
+        """The blocked (rapidfuzz) backend flags the arrow pair at its 85 gate — on ANY
+        engine, since it is a plain ORM scan."""
+        from datetime import datetime
+
+        from app.models import VendorCard
+        from app.vendor_utils import _find_vendor_dedup_candidates_blocked
+
+        db_session.add_all(
+            [
+                VendorCard(
+                    normalized_name="arrow electronics",
+                    display_name="Arrow Electronics",
+                    sighting_count=10,
+                    created_at=datetime.now(UTC),
+                ),
+                VendorCard(
+                    normalized_name="arrow electronic",
+                    display_name="Arrow Electronic",
+                    sighting_count=1,
+                    created_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        results = _find_vendor_dedup_candidates_blocked(db_session, VENDOR_DEDUP_FUZZ_THRESHOLD, 50)
+        names = {frozenset((r["vendor_a"]["name"], r["vendor_b"]["name"])) for r in results}
+        assert frozenset(("Arrow Electronics", "Arrow Electronic")) in names
+
+
+@requires_postgres
+class TestArrowPairTrgmGatePG:
+    """P4-D4 regression pin: pg_trgm similarity('arrow electronics','arrow
+    electronic') = 0.842 sat BELOW the old 0.85 gate — production PG missed a
+    pair the rapidfuzz path always flagged. The trgm gate is now 0.80, so the
+    pair merges."""
+
+    def test_trgm_threshold_constant_lowered(self):
+        assert VENDOR_DEDUP_TRGM_THRESHOLD == 0.80
+
+    def test_arrow_pair_0842_now_flagged_on_pg(self, pg_session):
+        from datetime import datetime
+
+        from sqlalchemy import text
+
+        from app.models import VendorCard
+
+        # Pin the premise: the raw pg_trgm score really is 0.842 — inside the
+        # band (>= 0.80, < 0.85) the old gate missed.
+        sim = pg_session.execute(text("SELECT similarity('arrow electronics', 'arrow electronic')")).scalar()
+        assert sim == pytest.approx(0.842, abs=0.001)
+        assert VENDOR_DEDUP_TRGM_THRESHOLD <= sim < 0.85
+
+        pg_session.add_all(
+            [
+                VendorCard(
+                    normalized_name="arrow electronics",
+                    display_name="Arrow Electronics",
+                    sighting_count=10,
+                    created_at=datetime.now(UTC),
+                ),
+                VendorCard(
+                    normalized_name="arrow electronic",
+                    display_name="Arrow Electronic",
+                    sighting_count=1,
+                    created_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        pg_session.commit()
+
+        # Default gates → PG path at 0.80: the pair is now surfaced.
+        results = find_vendor_dedup_candidates(pg_session)
+        by_pair = {frozenset((r["vendor_a"]["name"], r["vendor_b"]["name"])): r["score"] for r in results}
+        pair = frozenset(("Arrow Electronics", "Arrow Electronic"))
+        assert pair in by_pair
+        assert by_pair[pair] == 84  # round(0.842 * 100)
 
 
 class TestVendorBlockingKey:

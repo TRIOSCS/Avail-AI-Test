@@ -39,7 +39,7 @@
 {% endmacro %}
 
 {% macro cell_customer() %}
-  <td class="table-cell text-sm text-gray-600">{{ req.customer_name or "—" }}</td>
+  <td class="table-cell text-sm text-gray-600">{{ req.company.name if req.company else "—" }}</td>
 {% endmacro %}
 
 {% macro cell_owner() %}
@@ -193,7 +193,7 @@
     hx-trigger="click, keyup[key=='Enter']">
   {# Checkbox (stops row click propagation) #}
   <td class="px-3 py-3 w-10" @click.stop>
-    <input aria-label="Select requisition {{ req.name }}" type="checkbox" :value="{{ req.id }}"
+    <input aria-label="Select deal {{ req.name }}" type="checkbox" :value="{{ req.id }}"
            @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
            :checked="selectedIds.has({{ req.id }})"
            class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus">

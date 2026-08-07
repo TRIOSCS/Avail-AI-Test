@@ -192,14 +192,14 @@ class TestDossierHeroDensity:
         assert "Market price" in html
         assert "What we know" in html
         # Knowledge count tiles.
-        for tile in ("Offers", "Won", "Sightings", "Reqs"):
+        for tile in ("Offers", "Won", "Sightings", "Lines"):
             assert tile in html, f"count tile {tile!r} missing"
 
     def test_hero_renders_action_ctas(self, client: TestClient, db_session: Session):
         html = client.get("/v2/partials/search/dossier/hero", params={"mpn": "NEWPART99"}).text
         assert "Send RFQ" in html
         assert "Add Offer" in html
-        assert "Add to Requisition" in html
+        assert "Add to Deal" in html
 
     def test_shell_renders_live_market_and_tight_rhythm(self, client: TestClient, db_session: Session):
         """The dossier shell keeps the Live market section wired and applies the
