@@ -57,6 +57,7 @@ let planId = '';
 let planApproved = false;
 let poVerifyRightOn = false;
 let poVerified = false;
+let prepayRequested = false;
 let resellListId = '';
 
 test.describe.configure({ mode: 'serial' });
@@ -424,6 +425,21 @@ test('buy instruction → enter PO number (+ QP purchasing) → per-line verify'
   await pane.getByRole('button', { name: 'Confirm PO' }).click();
   await expect(pane.getByText('Pending approval').first()).toBeVisible({ timeout: 20_000 });
 
+  // Request the prepayment NOW — the real-world window is the cut PO awaiting
+  // verify (a completed plan blocks new prepay requests by design). The pane
+  // carries the one-screen-fold button (§5.2).
+  const requestBtn = page.locator('#aw-pane').getByRole('button', { name: 'Request prepayment' });
+  if ((await requestBtn.count()) > 0) {
+    await requestBtn.first().click();
+    const modal = page.locator('#modal-content');
+    const total = modal.locator("input[name='total_incl_fees']");
+    await expect(total).toBeVisible({ timeout: 15_000 });
+    await total.fill('180.00');
+    await modal.locator('button[type="submit"]').first().click();
+    await settle(800);
+    prepayRequested = true;
+  }
+
   // Per-line verify (manager, dollar-limit permitting).
   const approve = pane.locator("form[hx-post*='verify-po']").getByRole('button', { name: 'Approve' });
   if ((await approve.count()) === 0) {
@@ -439,20 +455,12 @@ test('buy instruction → enter PO number (+ QP purchasing) → per-line verify'
   poVerified = true;
 });
 
-test('prepayment request + OK-to-pay (pay-link confirm stays keys-off)', async () => {
+test('prepayment OK-to-pay (request made on the cut PO pre-verify; pay-link confirm stays keys-off)', async () => {
   test.skip(!poVerified, 'no verified PO line (previous step skipped) — nothing to prepay');
-
-  const requestBtn = page.locator('#aw-pane').getByRole('button', { name: 'Request prepayment' });
-  if ((await requestBtn.count()) === 0) {
-    test.skip(true, 'Request-prepayment not offered to this viewer on the verified line — §3 marks prepayment "when needed"');
-  }
-  await requestBtn.first().click();
-  const modal = page.locator('#modal-content');
-  const total = modal.locator("input[name='total_incl_fees']");
-  await expect(total).toBeVisible({ timeout: 15_000 });
-  await total.fill('180.00');
-  await modal.locator('button[type="submit"]').first().click();
-  await settle(800);
+  test.skip(
+    !prepayRequested,
+    'Request-prepayment was not offered on the cut PO pre-verify — §3 marks prepayment "when needed"',
+  );
 
   // Decide it in the Prepayments tab.
   const row = await openApprovalRow('prepayments', '[data-row-key^="prepay-"]');

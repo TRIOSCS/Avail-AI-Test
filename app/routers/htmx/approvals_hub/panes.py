@@ -23,9 +23,10 @@ from ....constants import (
     SalesOrderType,
 )
 from ....database import get_db
-from ....dependencies import can_verify_po_line, require_user
+from ....dependencies import can_request_prepayment, can_verify_po_line, require_user
 from ....models import BuyPlan, BuyPlanLine, User
 from ....models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+from ....services.prepayment_service import prepayment_state_for_lines
 from ....template_env import template_response
 from .._shared import _base_ctx
 from .common import ORDER_TYPE_LABELS, PO_DECISION_LABELS, _notes_ctx, router
@@ -267,6 +268,10 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
                 and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
             ),
             "manager_edited": line.id in manager_edited_line_ids(db, plan),
+            # One-screen fold (§5.2): Request-prepayment lives in this pane too —
+            # same call-site gate + live-state pill the plan-detail lines use.
+            "can_request_prepay": can_request_prepayment(user, line),
+            "prepay_state": prepayment_state_for_lines(db, [line.id]),
             # Notes + attachments (2.4): the line's own thread.
             **_notes_ctx(db, user, plan_id=plan.id, line_id=line.id),
         }

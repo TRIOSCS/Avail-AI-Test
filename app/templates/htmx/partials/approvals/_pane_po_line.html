@@ -17,7 +17,7 @@
               buy_plans/_macros.html resource_form.
 #}
 {% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form %}
+{% from "htmx/partials/buy_plans/_macros.html" import resource_form, request_prepayment_button, prepay_requested_pill %}
 
 {% macro qp_text_input(name, label, value) %}
 <label class="block min-w-0">
@@ -251,6 +251,17 @@
 
   {% elif line.status == 'cancelled' %}
   <div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-500">Cancelled.</div>
+  {% endif %}
+
+  {# ── One-screen fold (§5.2): Request-prepayment lives in this pane. The gate
+     (can_request_prepayment) already restricts to a cut PO at pending_verify /
+     verified on a non-terminal plan — the real-world window: wire the vendor
+     before/at verify. Same duplicate-guard pill as the plan-detail lines. ── #}
+  {% if can_request_prepay %}
+  {% set _req_state = (prepay_state or {}).get(line.id) %}
+  <div>
+    {% if _req_state %}{{ prepay_requested_pill(_req_state) }}{% else %}{{ request_prepayment_button(line, plan, origin='approvals_hub') }}{% endif %}
+  </div>
   {% endif %}
 
   {% if line.status != 'awaiting_po' %}
