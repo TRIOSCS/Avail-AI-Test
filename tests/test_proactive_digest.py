@@ -223,6 +223,30 @@ def test_duplicate_materials_section(db_session):
     assert "LTSR 15-NP / LTSR15-NP" in body
 
 
+def test_regenerate_clears_stale_draft_when_matches_moved(db_session):
+    """A rep whose matches were reassigned (or evaporated) must not keep a stale draft.
+
+    Found live 2026-08-07: the seed's actor held a 32-line draft that survived
+    regeneration after every match moved to the real reps.
+    """
+    old_rep = _mk_user(db_session, "Old Rep", "old@trioscs.com")
+    new_rep = _mk_user(db_session, "New Rep", "new@trioscs.com")
+    customer, _ = _mk_customer(db_session, "IBM", old_rep)
+    _mk_offer(db_session, mpn="02PX530", qty=214, price="275")
+    m = _mk_match(db_session, mpn="02PX530", owner=old_rep, company=customer)
+    generate_digests(db_session)
+    db_session.commit()
+    assert db_session.query(ProactiveDigest).one().salesperson_id == old_rep.id
+
+    m.salesperson_id = new_rep.id
+    db_session.commit()
+    generate_digests(db_session)
+    db_session.commit()
+    drafts = db_session.query(ProactiveDigest).all()
+    assert len(drafts) == 1
+    assert drafts[0].salesperson_id == new_rep.id  # old rep's stale draft is gone
+
+
 def test_regenerate_replaces_draft_not_sent(db_session):
     owner = _mk_user(db_session, "Sales Rep", "sr@trioscs.com")
     customer, _ = _mk_customer(db_session, "IBM", owner)

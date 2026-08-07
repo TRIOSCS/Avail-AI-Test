@@ -32,7 +32,7 @@ rapidfuzz>=3.0.0,<4.0
 # PDF generation
 weasyprint==69.0
 # PDF text extraction (datasheet verification)
-pypdf==6.14.2
+pypdf==6.15.0
 # Scheduling
 apscheduler>=3.11.3,<4.0
 # Migrations

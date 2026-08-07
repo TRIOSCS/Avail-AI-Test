@@ -206,6 +206,13 @@ def generate_digests(db: Session) -> dict:
 
     dup_groups = find_duplicate_material_groups(db)
 
+    # Drafts are disposable — clear ALL of them up front, not per-salesperson,
+    # so a rep whose matches evaporated (or were reassigned) since last
+    # generation doesn't keep a stale draft forever. SENT digests are untouched.
+    for stale in db.scalars(select(ProactiveDigest).where(ProactiveDigest.status == ProactiveDigestStatus.DRAFT)).all():
+        db.delete(stale)
+    db.flush()
+
     # Assemble per salesperson → per customer (Trio Back Order last).
     per_sales: dict[int, dict] = {}
     for m in matches:
@@ -244,16 +251,6 @@ def generate_digests(db: Session) -> dict:
 
         line_parts = {ln["mpn"] for _, lines_ in groups for ln in lines_}
         digest_dups = [g for g in dup_groups if any(p in line_parts for p in g)]
-
-        # Replace any unsent draft for this salesperson.
-        for stale in db.scalars(
-            select(ProactiveDigest).where(
-                ProactiveDigest.salesperson_id == salesperson_id,
-                ProactiveDigest.status == ProactiveDigestStatus.DRAFT,
-            )
-        ).all():
-            db.delete(stale)
-        db.flush()
 
         digest = ProactiveDigest(
             salesperson_id=salesperson_id,
