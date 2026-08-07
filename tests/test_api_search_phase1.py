@@ -209,8 +209,8 @@ class TestRedisOffEventLoop:
         from app import search_service
 
         src = inspect.getsource(search_service._fetch_fresh)
-        assert "asyncio.to_thread(_get_search_cache" in src
-        assert "asyncio.to_thread(_set_search_cache" in src
+        assert "asyncio.to_thread(cache._get_search_cache" in src
+        assert "asyncio.to_thread(cache._set_search_cache" in src
 
     @pytest.mark.asyncio
     async def test_blocking_redis_does_not_stall_the_loop(self, monkeypatch):
@@ -223,7 +223,7 @@ class TestRedisOffEventLoop:
                 time.sleep(0.15)  # simulate a slow / hung Redis GET
                 return None
 
-        monkeypatch.setattr(search_service, "_get_search_redis", lambda: _BlockingRedis())
+        monkeypatch.setattr(search_service.cache, "_get_search_redis", lambda: _BlockingRedis())
 
         ticks = 0
 

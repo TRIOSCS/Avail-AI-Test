@@ -28,6 +28,7 @@
   <div class="px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 cursor-pointer transition-colors"
        hx-post="/v2/partials/manufacturers/add"
        hx-vals='{"name": {{ q|tojson }}}'
+       hx-target="this"
        hx-swap="outerHTML"
        data-loading-disable
        data-mfr-q='{{ q|tojson }}'

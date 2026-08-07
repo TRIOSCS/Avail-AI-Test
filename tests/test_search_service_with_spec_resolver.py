@@ -3,7 +3,7 @@
 resolver wiring itself live so the pending-row writes happen.
 
 Called by: pytest auto-discovery.
-Depends on: app/search_service.py, app/services/spec_code_resolver.py.
+Depends on: app/search_service/, app/services/spec_code_resolver.py.
 """
 
 from __future__ import annotations
@@ -145,7 +145,7 @@ async def test_known_mpn_does_not_trigger_resolver(db_session, enable_flag, know
     async def fake_fetch_fresh(mpns, db):
         return ([_hit_sighting_row("ABC123")], [_ok_stat()])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     resolve_spy = AsyncMock()
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
@@ -184,7 +184,7 @@ async def test_zero_hit_triggers_resolver_and_re_fanout(db_session, enable_flag,
             [_ok_stat("oemsecrets")],
         )
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
         _fake_resolve_pending,
@@ -212,7 +212,7 @@ async def test_flag_off_skips_resolver_on_zero(db_session, spec_code_requirement
     async def fake_fetch_fresh(mpns, db):
         return ([], [_ok_stat()])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     resolve_spy = AsyncMock()
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
@@ -234,7 +234,7 @@ async def test_resolver_pending_records_requirement_id(db_session, enable_flag, 
         # the pending bookkeeping here).
         return ([], [_ok_stat("mouser")])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
 
     await search_service.search_requirement(spec_code_requirement, db_session)
 
@@ -260,7 +260,7 @@ async def test_used_in_requirement_ids_is_idempotent_on_double_search(
     async def fake_fetch_fresh(mpns, db):
         return ([], [_ok_stat("mouser")])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
 
     # Two consecutive searches for the same requirement
     await search_service.search_requirement(spec_code_requirement, db_session)
@@ -284,7 +284,7 @@ async def test_avl_cooldown_skips_fetch_within_window(db_session, enable_flag, s
         fetch_calls.append(list(mpns))
         return ([], [_ok_stat("mouser")])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
         _fake_resolve_approved,
@@ -300,7 +300,7 @@ async def test_avl_cooldown_skips_fetch_within_window(db_session, enable_flag, s
             return [], mpns  # to_search=[], cached=mpns → resolver-block skips fetch
         return real_partition(db, mpns, now=now)
 
-    monkeypatch.setattr(search_service, "_mpn_cooldown_partition", fake_cooldown_partition)
+    monkeypatch.setattr(search_service.mpn_expansion, "_mpn_cooldown_partition", fake_cooldown_partition)
 
     await search_service.search_requirement(spec_code_requirement, db_session)
 
@@ -322,7 +322,7 @@ async def test_avl_refanout_stamps_material_card_so_cooldown_engages(
         # Both the primary and the AVL fanout return zero hits.
         return ([], [_ok_stat("oemsecrets")])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
         _fake_resolve_pending,
@@ -350,7 +350,7 @@ async def test_avl_fetch_fresh_exception_logged_and_continues(
             return ([], [_ok_stat("mouser")])
         raise RuntimeError("AVL fanout boom")
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
         _fake_resolve_approved,
@@ -366,8 +366,8 @@ async def test_avl_fetch_fresh_exception_logged_and_continues(
         enqueue_calls.append(("nc", override_mpn))
         return None
 
-    monkeypatch.setattr(search_service, "enqueue_for_ics_search", fake_enqueue_ics)
-    monkeypatch.setattr(search_service, "enqueue_for_nc_search", fake_enqueue_nc)
+    monkeypatch.setattr(search_service.pipeline, "enqueue_for_ics_search", fake_enqueue_ics)
+    monkeypatch.setattr(search_service.pipeline, "enqueue_for_nc_search", fake_enqueue_nc)
 
     # Should NOT raise even though _fetch_fresh crashed on the AVL fanout.
     await search_service.search_requirement(spec_code_requirement, db_session)
@@ -393,7 +393,7 @@ async def test_avl_connector_crash_keeps_workers_and_does_not_abort_session(
             return ([], [_ok_stat("mouser")])
         raise RuntimeError("AVL connectors down")
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
         _fake_resolve_approved,
@@ -409,8 +409,8 @@ async def test_avl_connector_crash_keeps_workers_and_does_not_abort_session(
         enqueued.append(f"nc:{override_mpn}")
         return None
 
-    monkeypatch.setattr(search_service, "enqueue_for_ics_search", fake_enqueue_ics)
-    monkeypatch.setattr(search_service, "enqueue_for_nc_search", fake_enqueue_nc)
+    monkeypatch.setattr(search_service.pipeline, "enqueue_for_ics_search", fake_enqueue_ics)
+    monkeypatch.setattr(search_service.pipeline, "enqueue_for_nc_search", fake_enqueue_nc)
 
     req_id = spec_code_requirement.id
     # Must not raise despite the AVL connector crash.
@@ -453,7 +453,7 @@ async def test_non_ibm_oem_hint_is_passed_to_resolver(db_session, enable_flag, t
     async def fake_fetch_fresh(mpns, db):
         return ([], [_ok_stat("mouser")])
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
 
     captured: dict = {}
 

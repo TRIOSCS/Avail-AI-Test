@@ -1,10 +1,10 @@
 """test_search_service_stream.py — Coverage tests for stream_search_mpn in
-app/search_service.py.
+app/search_service/.
 
 Covers lines 1959-2110: streaming search via SSE.
 
 Called by: pytest
-Depends on: app/search_service.py, tests/conftest.py
+Depends on: app/search_service/, tests/conftest.py
 """
 
 import os
@@ -24,7 +24,7 @@ from tests.conftest import engine  # noqa: F401
 def _own_session(db_session):
     """stream_search_mpn opens its own SessionLocal(); point it at the test session so
     the worker does not touch the real database."""
-    with patch("app.search_service.SessionLocal", lambda: db_session):
+    with patch("app.search_service.streaming.SessionLocal", lambda: db_session):
         yield
 
 
@@ -39,7 +39,7 @@ class TestStreamSearchMpnNoConnectors:
         mock_broker.publish = AsyncMock()
 
         with (
-            patch("app.search_service._build_connectors", return_value=([], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await stream_search_mpn("test-search-001", "LM317T")
@@ -57,7 +57,7 @@ class TestStreamSearchMpnNoConnectors:
         mock_broker.publish = AsyncMock()
 
         with (
-            patch("app.search_service._build_connectors", return_value=([], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await stream_search_mpn("test-search-002", "LM317T")
@@ -83,11 +83,11 @@ class TestStreamSearchMpnWithResults:
         )
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-search-003", "LM317T")
 
@@ -107,11 +107,11 @@ class TestStreamSearchMpnWithResults:
         )
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value=""),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value=""),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             # Should not raise
             await stream_search_mpn("test-search-004", "LM317T")
@@ -132,11 +132,11 @@ class TestStreamSearchMpnWithResults:
         fake_card = {"mpn_matched": "LM317T", "vendor_name": "Mouser", "qty_available": 200}
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div>card</div>"),
-            patch("app.search_service._incremental_dedup", return_value=([fake_card], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div>card</div>"),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([fake_card], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-search-005", "LM317T")
 
@@ -158,11 +158,13 @@ class TestStreamSearchMpnWithResults:
         fake_updated = {"mpn_matched": "LM317T", "vendor_name": "Nexar", "qty_available": 300}
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div>updated</div>"),
-            patch("app.search_service._incremental_dedup", return_value=([], [fake_updated])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch(
+                "app.search_service.presentation._render_search_vendor_cards_html", return_value="<div>updated</div>"
+            ),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [fake_updated])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-search-006", "LM317T")
 
@@ -185,7 +187,7 @@ class TestStreamSearchMpnConnectorException:
         mock_conn.search = AsyncMock(side_effect=RuntimeError("API down"))
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             # Must not raise
@@ -209,7 +211,7 @@ class TestStreamSearchMpnConnectorException:
         mock_conn.search = AsyncMock(side_effect=ValueError("Timeout"))
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await stream_search_mpn("test-search-008", "LM317T")
@@ -233,13 +235,13 @@ class TestStreamSearchMpnConnectorException:
 
         with (
             patch(
-                "app.search_service._build_connectors",
+                "app.search_service.fanout._build_connectors",
                 return_value=([mock_conn_fail, mock_conn_ok], {}, set()),
             ),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value=""),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value=""),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-search-009", "LM317T")
 
@@ -263,9 +265,9 @@ class TestStreamSearchMpnRedisCacheFailure:
 
         # _get_search_redis raises so the except branch (line 2098) is hit
         with (
-            patch("app.search_service._build_connectors", return_value=([], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._get_search_redis", side_effect=Exception("no redis")),
+            patch("app.search_service.cache._get_search_redis", side_effect=Exception("no redis")),
         ):
             await stream_search_mpn("test-search-010", "LM317T")
 
@@ -285,12 +287,12 @@ class TestStreamSearchMpnRedisCacheFailure:
         mock_redis.setex = MagicMock(side_effect=Exception("Redis write failed"))
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._get_search_redis", return_value=mock_redis),
-            patch("app.search_service._render_search_vendor_cards_html", return_value=""),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.cache._get_search_redis", return_value=mock_redis),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value=""),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-search-011", "LM317T")
 
@@ -303,9 +305,9 @@ class TestStreamSearchMpnRedisCacheFailure:
         mock_broker.publish = AsyncMock()
 
         with (
-            patch("app.search_service._build_connectors", return_value=([], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._get_search_redis", return_value=None),
+            patch("app.search_service.cache._get_search_redis", return_value=None),
         ):
             await stream_search_mpn("test-search-012", "LM317T")
 
@@ -328,12 +330,12 @@ class TestStreamSearchMpnDonePayload:
         mock_conn.search = AsyncMock(return_value=[])
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value=""),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
-            patch("app.search_service._get_search_redis", return_value=None),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value=""),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.cache._get_search_redis", return_value=None),
         ):
             await stream_search_mpn("test-search-013", "LM317T")
 
@@ -351,7 +353,7 @@ class TestStreamSearchMpnDonePayload:
         mock_broker.publish = AsyncMock()
 
         with (
-            patch("app.search_service._build_connectors", return_value=([], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await stream_search_mpn("my-unique-id-999", "LM317T")
@@ -386,12 +388,12 @@ class TestStreamSearchMpnLatestPointer:
         mock_rc = MagicMock()
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
-            patch("app.search_service._get_search_redis", return_value=mock_rc),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.cache._get_search_redis", return_value=mock_rc),
         ):
             await stream_search_mpn("sid-pointer-1", "LM317T")
 
@@ -439,11 +441,11 @@ class TestStreamSearchMpnRelevanceGuard:
         )
 
         with (
-            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-relevance-001", "17P9905")
 
@@ -470,11 +472,11 @@ class TestStreamSearchMpnRelevanceGuard:
         conn = self._conn([{"mpn_matched": "17P9905-LF", "vendor_name": "BrokerCo"}])
 
         with (
-            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-relevance-002", "17P9905")
 
@@ -497,11 +499,11 @@ class TestStreamSearchMpnRelevanceGuard:
         conn = self._conn([{"vendor_name": "BrokerCo", "qty_available": 5}])  # no mpn_matched
 
         with (
-            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-relevance-003", "17P9905")
 
@@ -534,11 +536,11 @@ class TestStreamSearchMpnRelevanceGuard:
         )
 
         with (
-            patch("app.search_service._build_connectors", return_value=([c1, c2], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([c1, c2], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-relevance-multi", "17P9905")
 
@@ -558,7 +560,7 @@ class TestStreamSearchMpnRelevanceGuard:
         c.search = AsyncMock(side_effect=RuntimeError("API down"))
 
         with (
-            patch("app.search_service._build_connectors", return_value=([c], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([c], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await stream_search_mpn("test-relevance-err", "17P9905")
@@ -597,13 +599,13 @@ class TestStreamSearchMpnSharedCache:
         cached_stats = [{"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"}]
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
             patch(
-                "app.search_service._get_search_cache",
+                "app.search_service.cache._get_search_cache",
                 return_value=(cached_results, cached_stats, "2026-01-01T00:00:00+00:00"),
             ),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
         ):
             await stream_search_mpn("test-cache-hit", "LM317T")
 
@@ -633,13 +635,13 @@ class TestStreamSearchMpnSharedCache:
             set_calls.append((key, results, stats))
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._get_search_cache", return_value=None),
-            patch("app.search_service._set_search_cache", side_effect=_capture_set),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.cache._get_search_cache", return_value=None),
+            patch("app.search_service.cache._set_search_cache", side_effect=_capture_set),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await stream_search_mpn("test-cache-miss", "LM317T")
 

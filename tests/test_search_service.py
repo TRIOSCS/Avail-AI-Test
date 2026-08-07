@@ -1,4 +1,4 @@
-"""Tests for app/search_service.py — search orchestration, connector aggregation,
+"""Tests for app/search_service/ — search orchestration, connector aggregation,
 deduplication, scoring, material card upsert, history, and error handling.
 
 Achieves 100% coverage of search_service.py by testing:
@@ -124,14 +124,14 @@ def _make_api_source(db: Session, name: str, status: str = "live") -> ApiSource:
 def _all_connector_patches():
     """Context managers for patching all connector classes."""
     return (
-        patch("app.search_service.NexarConnector"),
-        patch("app.search_service.BrokerBinConnector"),
-        patch("app.search_service.EbayConnector"),
-        patch("app.search_service.DigiKeyConnector"),
-        patch("app.search_service.MouserConnector"),
-        patch("app.search_service.OEMSecretsConnector"),
-        patch("app.search_service.SourcengineConnector"),
-        patch("app.search_service.Element14Connector"),
+        patch("app.search_service.fanout.NexarConnector"),
+        patch("app.search_service.fanout.BrokerBinConnector"),
+        patch("app.search_service.fanout.EbayConnector"),
+        patch("app.search_service.fanout.DigiKeyConnector"),
+        patch("app.search_service.fanout.MouserConnector"),
+        patch("app.search_service.fanout.OEMSecretsConnector"),
+        patch("app.search_service.fanout.SourcengineConnector"),
+        patch("app.search_service.fanout.Element14Connector"),
     )
 
 
@@ -181,10 +181,10 @@ def _patched_connectors(creds_value="fake-key"):
     """
     with ExitStack() as stack:
         stack.enter_context(
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch(creds_value))
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=_fake_creds_batch(creds_value))
         )
         stack.enter_context(patch("app.services.credential_service.get_credential", return_value=creds_value))
-        mocks = [stack.enter_context(patch(f"app.search_service.{cls}")) for cls in _CONNECTOR_CLASS_NAMES]
+        mocks = [stack.enter_context(patch(f"app.search_service.fanout.{cls}")) for cls in _CONNECTOR_CLASS_NAMES]
         _setup_mock_connectors(mocks)
         yield SimpleNamespace(**dict(zip(_CONNECTOR_ATTR_NAMES, mocks)))
 
@@ -453,7 +453,7 @@ class TestSightingToDict:
 
 
 class TestHistoryToResult:
-    def _make_history(self, last_seen_delta_days=0, times_seen=1):
+    def _make_history(self, last_seen_delta_days=0, times_seen=1, persisted_score=None, persisted_components=None):
         now = datetime.now(UTC)
         last_seen = now - timedelta(days=last_seen_delta_days)
         return {
@@ -470,39 +470,40 @@ class TestHistoryToResult:
             "last_seen": last_seen,
             "times_seen": times_seen,
             "material_card_id": 99,
+            # Joined by _get_material_history from the newest matching sighting's
+            # persisted columns (spec §9). None = no surviving scored sighting.
+            "persisted_score": persisted_score,
+            "persisted_score_components": persisted_components,
         }, now
 
-    def test_recent_under_7_days(self):
-        h, now = self._make_history(last_seen_delta_days=3, times_seen=1)
+    def test_reads_persisted_score(self):
+        """The row's score IS the joined persisted v2 score — verbatim (spec §9)."""
+        h, now = self._make_history(last_seen_delta_days=3, persisted_score=47.3, persisted_components={"trust": 95.0})
         result = _history_to_result(h, now)
         assert result["is_material_history"] is True
         assert result["is_historical"] is False
-        # base 55, bonus 0, age_penalty = 3*0.1 = 0.3 => 54.7
-        assert result["score"] >= 50
+        assert result["score"] == 47.3
+        assert result["confidence_pct"] == 47
+        assert result["confidence_color"] == "red"
+        assert result["source_badge"] == "Historical"
+        assert result["score_components"] == {"trust": 95.0}
 
-    def test_7_to_30_days(self):
-        h, now = self._make_history(last_seen_delta_days=15, times_seen=2)
-        result = _history_to_result(h, now)
-        # base 45, bonus 3, age_penalty = 1.5 => 46.5
-        assert 40 < result["score"] < 50
-
-    def test_30_to_90_days(self):
+    def test_no_persisted_score_is_metadata_only(self):
+        """No surviving scored sighting → metadata-only row: score 0, no confidence chip
+        — never a re-derived number (the old age-band formula is dead)."""
         h, now = self._make_history(last_seen_delta_days=60, times_seen=3)
         result = _history_to_result(h, now)
-        # base 35, bonus 6, age_penalty = 6.0 => 35.0
-        assert 30 <= result["score"] <= 40
+        assert result["score"] == 0
+        assert result["confidence_pct"] is None
+        assert result["confidence_color"] is None
+        assert result["material_times_seen"] == 3
 
-    def test_over_90_days(self):
-        h, now = self._make_history(last_seen_delta_days=200, times_seen=1)
-        result = _history_to_result(h, now)
-        # base 30, bonus 0, age_penalty = 20.0 => max(10, 10.0) = 10
-        assert result["score"] == 10
-
-    def test_bonus_capped_at_15(self):
-        h, now = self._make_history(last_seen_delta_days=1, times_seen=20)
-        result = _history_to_result(h, now)
-        # base 55, bonus=min(15, 19*3)=15, age=0.1 => ~69.9
-        assert result["score"] > 65
+    def test_age_and_times_seen_no_longer_produce_a_score(self):
+        """Same persisted score in, same score out — age bands / repeat bonuses are no
+        longer scoring inputs (they were the v4 generation)."""
+        h_young, now = self._make_history(last_seen_delta_days=1, times_seen=20, persisted_score=52.0)
+        h_old, _ = self._make_history(last_seen_delta_days=200, times_seen=1, persisted_score=52.0)
+        assert _history_to_result(h_young, now)["score"] == _history_to_result(h_old, now)["score"] == 52.0
 
     def test_none_last_seen(self):
         now = datetime.now(UTC)
@@ -522,8 +523,9 @@ class TestHistoryToResult:
             "material_card_id": 1,
         }
         result = _history_to_result(h, now)
-        # age_days = 999, base = 30, bonus = 0, score = max(10, 30 + 0 - 99.9) = 10
-        assert result["score"] == 10
+        # No persisted score joined → metadata-only (spec §9)
+        assert result["score"] == 0
+        assert result["confidence_pct"] is None
         assert result["created_at"] is None
         assert result["material_last_seen"] is None
         assert result["material_first_seen"] is None
@@ -807,7 +809,7 @@ class TestUpsertMaterialCard:
         db_session.add(s)
         db_session.commit()
 
-        monkeypatch.setattr(ss, "resolve_material_card", lambda pn, db: None)
+        monkeypatch.setattr(ss.material_cards, "resolve_material_card", lambda pn, db: None)
         result = _upsert_material_card("LM317T", [s], db_session, now)
         assert result is None
         assert db_session.query(MaterialCard).count() == 0
@@ -1404,7 +1406,7 @@ class TestSaveSightings:
                 "confidence": 0,
             }
         ]
-        with patch("app.search_service.normalize_quantity", return_value=None):
+        with patch("app.search_service.persistence.normalize_quantity", return_value=None):
             result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
         assert result[0].qty_available == 42
 
@@ -1423,7 +1425,7 @@ class TestSaveSightings:
                 "confidence": 0,
             }
         ]
-        with patch("app.search_service.normalize_price", return_value=None):
+        with patch("app.search_service.persistence.normalize_price", return_value=None):
             result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
         assert float(result[0].unit_price) == 1.25
 
@@ -1769,7 +1771,7 @@ class TestFetchFresh:
             _make_api_source(db_session, name, status="disabled")
 
         with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
         ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
@@ -1782,7 +1784,7 @@ class TestFetchFresh:
     async def test_no_credentials(self, db_session):
         """When no credentials are configured, all sources are skipped."""
         with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch(None)),
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=_fake_creds_batch(None)),
             patch("app.services.credential_service.get_credential", return_value=None),
         ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
@@ -1961,9 +1963,9 @@ class TestFetchFresh:
             return {(src, var): ("fake-key" if src == "brokerbin" else None) for src, var in requests}
 
         with (
-            patch("app.search_service.get_credentials_batch", side_effect=selective_batch),
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=selective_batch),
             patch("app.services.credential_service.get_credential", side_effect=selective_cred),
-            patch("app.search_service.BrokerBinConnector") as MockBB,
+            patch("app.search_service.fanout.BrokerBinConnector") as MockBB,
         ):
             MockBB.return_value.search = AsyncMock(
                 return_value=[
@@ -2040,7 +2042,7 @@ class TestFetchFresh:
             _make_api_source(db_session, name, status="disabled")
 
         with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
         ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
@@ -2192,18 +2194,18 @@ class TestFetchFresh:
         env_no_testing = {k: v for k, v in os.environ.items() if k != "TESTING"}
         with (
             patch.dict("os.environ", env_no_testing, clear=True),
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.search_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.AIWebSearchConnector") as MockAI,
-            patch("app.search_service.should_trigger_ai_search", return_value=False),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
+            patch("app.search_service.fanout.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.search_service.fanout.get_credential", return_value="fake-key"),
+            patch("app.search_service.fanout.AIWebSearchConnector") as MockAI,
+            patch("app.search_service.fanout.should_trigger_ai_search", return_value=False),
+            patch("app.search_service.fanout.NexarConnector") as MockNexar,
+            patch("app.search_service.fanout.BrokerBinConnector") as MockBB,
+            patch("app.search_service.fanout.EbayConnector") as MockEbay,
+            patch("app.search_service.fanout.DigiKeyConnector") as MockDK,
+            patch("app.search_service.fanout.MouserConnector") as MockMouser,
+            patch("app.search_service.fanout.OEMSecretsConnector") as MockOEM,
+            patch("app.search_service.fanout.SourcengineConnector") as MockSrc,
+            patch("app.search_service.fanout.Element14Connector") as MockE14,
         ):
             mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
             _setup_mock_connectors(mocks)
@@ -2224,7 +2226,7 @@ class TestFetchFresh:
 # ── search_requirement ───────────────────────────────────────────────────
 
 
-@patch("app.search_service._schedule_background_enrichment", new_callable=AsyncMock)
+@patch("app.search_service.material_cards._schedule_background_enrichment", new_callable=AsyncMock)
 class TestSearchRequirement:
     @pytest.mark.asyncio
     async def test_empty_pns_returns_empty(self, _mock_enrich, db_session):
@@ -2261,7 +2263,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 1, "ms": 100, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2308,7 +2310,7 @@ class TestSearchRequirement:
             {"source": "mouser", "results": 1, "ms": 120, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             await search_requirement(req, db_session)
 
@@ -2335,7 +2337,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 0, "ms": 100, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = ([], mock_stats)
             await search_requirement(req, db_session)
 
@@ -2366,8 +2368,8 @@ class TestSearchRequirement:
         ]
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service._upsert_material_card", side_effect=Exception("DB error")),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.material_cards._upsert_material_card", side_effect=Exception("DB error")),
         ):
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
@@ -2408,7 +2410,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 2, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2458,7 +2460,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2482,7 +2484,7 @@ class TestSearchRequirement:
             {"source": "brokerbin", "results": 1, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2505,7 +2507,7 @@ class TestSearchRequirement:
             {"source": "mouser", "results": 0, "ms": 50, "error": "auth failed", "status": "error"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             await search_requirement(req, db_session)
 
@@ -2542,7 +2544,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 1, "ms": 100, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             await search_requirement(req, db_session)
 
@@ -2567,7 +2569,7 @@ class TestSearchRequirement:
             {"source": "mouser", "results": 0, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             await search_requirement(req, db_session)
 
@@ -2609,7 +2611,7 @@ class TestSearchRequirement:
             {"source": "mouser", "results": 1, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2640,7 +2642,7 @@ class TestSearchRequirement:
             {"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"},
         ]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             result = await search_requirement(req, db_session)
 
@@ -2659,7 +2661,7 @@ class TestSearchRequirement:
 
         src = inspect.getsource(search_service.search_requirement)
         collapsed = " ".join(src.split())
-        assert "asyncio.to_thread( _persist_search_write" in collapsed
+        assert "asyncio.to_thread( persistence._persist_search_write" in collapsed
 
     async def test_material_card_id_linked_after_threaded_write(self, _mock_enrich, db_session):
         """The requirement's material_card_id is durably linked by the threaded write
@@ -2681,7 +2683,7 @@ class TestSearchRequirement:
         ]
         mock_stats = [{"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"}]
 
-        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+        with patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = (mock_fresh, mock_stats)
             await search_requirement(req, db_session)
 
@@ -3008,7 +3010,7 @@ async def test_stream_search_mpn_opens_and_closes_its_own_session(monkeypatch):
         sessions_created.append(s)
         return s
 
-    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+    monkeypatch.setattr(search_service.streaming, "SessionLocal", fake_session_local, raising=False)
 
     # No connectors → worker takes the early-return done path
     monkeypatch.setattr(
@@ -3059,12 +3061,12 @@ async def test_stream_search_mpn_publishes_done_and_closes_session_on_exception(
         sessions_created.append(s)
         return s
 
-    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+    monkeypatch.setattr(search_service.streaming, "SessionLocal", fake_session_local, raising=False)
 
     def boom(_db):
         raise RuntimeError("connector build failure")
 
-    monkeypatch.setattr(search_service, "_build_connectors", boom)
+    monkeypatch.setattr(search_service.fanout, "_build_connectors", boom)
 
     publishes: list[tuple[str, str, str]] = []
 
@@ -3385,7 +3387,7 @@ class TestSaveSightingsVendorCardBatching:
         # Build the fresh lists (and their VendorCards) OUTSIDE the counted region.
         fresh_one = _fresh(1)
         req_one = _make_requirement(db_session, reqn)
-        with patch("app.search_service.sync_leads_for_sightings", return_value=0):
+        with patch("app.search_service.persistence.sync_leads_for_sightings", return_value=0):
             with _VendorCardSelectCounter(db_session) as c_one:
                 _save_sightings(fresh_one, req_one, db_session, succeeded_sources={"nexar"})
 

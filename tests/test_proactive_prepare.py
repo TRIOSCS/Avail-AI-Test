@@ -828,7 +828,8 @@ def test_afterswap_reinits_alpine_on_proactive_contact_list():
     import re
     from pathlib import Path
 
-    js = Path("app/static/htmx_app.js").read_text()
+    # W4.4 split: the afterSwap Alpine.initTree allowlist lives in the htmx-wiring module.
+    js = Path("app/static/modules/htmx_wiring.js").read_text()
 
     # Isolate the afterSwap Alpine.initTree gate: the `if (...) { Alpine.initTree(t); }`
     # block guarded by `typeof Alpine.initTree === 'function'`. Matching just this region
@@ -838,7 +839,7 @@ def test_afterswap_reinits_alpine_on_proactive_contact_list():
         js,
         re.DOTALL,
     )
-    assert m is not None, "afterSwap Alpine.initTree gate not found in htmx_app.js"
+    assert m is not None, "afterSwap Alpine.initTree gate not found in modules/htmx_wiring.js"
     allowlist = m.group(0)
 
     # The swap target the add-contact form posts into (hx-target in prepare.html).

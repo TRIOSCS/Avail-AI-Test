@@ -26,7 +26,7 @@ from ...database import get_db
 from ...dependencies import require_access, require_requisition_access, require_user
 from ...models import ApiSource, Requirement, Requisition, Sighting, SourcingLead, User
 from ...rate_limit import limiter
-from ...scoring import classify_lead, explain_lead, score_unified
+from ...scoring import classify_lead, confidence_color, explain_lead, source_badge
 from ...services.sighting_ingest import sighting_from_row
 from ...services.vendor_unavailability import apply_to_fresh_sightings
 from ...template_env import template_response, templates
@@ -383,25 +383,17 @@ async def search_lead_detail(
 
     r = results[idx]
 
-    # Enrich the single result with scoring data
-    unified = score_unified(
-        source_type=r.get("source_type", ""),
-        vendor_score=r.get("vendor_score"),
-        is_authorized=r.get("is_authorized", False),
-        unit_price=r.get("unit_price"),
-        qty_available=r.get("qty_available"),
-        age_hours=r.get("age_hours"),
-        has_price=bool(r.get("unit_price")),
-        has_qty=bool(r.get("qty_available")),
-        has_lead_time=bool(r.get("lead_time")),
-        has_condition=bool(r.get("condition")),
-    )
-    r["confidence_pct"] = unified["confidence_pct"]
-    r["confidence_color"] = unified["confidence_color"]
-    r["source_badge"] = unified["source_badge"]
-    r["score_components"] = unified.get("components", {})
+    # Spec §9: the drawer READS the row's own v2 score (quick_search_mpn scores each
+    # row with the same score_sighting_v2 generation _save_sightings persists) — the
+    # old score_unified call here re-derived a THIRD number for the same row.
+    row_score = r.get("score") or 0
+    pct = int(round(row_score))
+    r["confidence_pct"] = pct
+    r["confidence_color"] = confidence_color(pct)
+    r["source_badge"] = source_badge(r.get("source_type"))
+    r["score_components"] = r.get("score_components") or {}
     r["lead_quality"] = classify_lead(
-        score=unified["score"],
+        score=row_score,
         is_authorized=r.get("is_authorized", False),
         has_price=bool(r.get("unit_price")),
         has_qty=bool(r.get("qty_available")),

@@ -220,7 +220,7 @@ class TestMarketSourceHealth:
             "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
             "hunter_enrichment": {"source": "hunter_enrichment", "status": "disabled", "error": None},
         }
-        with patch("app.search_service._build_connectors", return_value=([mouser], stats, set())):
+        with patch("app.search_service.fanout._build_connectors", return_value=([mouser], stats, set())):
             h = get_market_source_health(db_session)
 
         assert h["available"] == 1
@@ -279,7 +279,7 @@ def test_market_health_all_down_no_available(db_session):
         "nexar": {"source": "nexar", "status": "error_skipped", "error": "Quota exhausted"},
         "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
     }
-    with patch("app.search_service._build_connectors", return_value=([], stats, set())):
+    with patch("app.search_service.fanout._build_connectors", return_value=([], stats, set())):
         h = get_market_source_health(db_session)
 
     assert h["available"] == 0

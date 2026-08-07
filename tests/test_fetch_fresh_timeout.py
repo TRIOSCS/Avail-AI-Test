@@ -23,7 +23,7 @@ class _FastFakeConnector:
 
     async def search(self, pn: str) -> list[dict]:
         # Key names must match what _fetch_fresh's dedup + junk-vendor filter
-        # expect (vendor_name, vendor_sku) — see app/search_service.py:971-984
+        # expect (vendor_name, vendor_sku) — see app/search_service/:971-984
         # and JUNK_VENDORS in app/shared_constants.py ("" is junk).
         return [
             {
@@ -61,9 +61,9 @@ async def test_fetch_fresh_returns_within_budget_when_one_connector_hangs(monkey
     def _fake_build(_db):
         return ([_FastFakeConnector(), _SlowFakeConnector()], {}, set())
 
-    monkeypatch.setattr(search_service, "_build_connectors", _fake_build)
-    monkeypatch.setattr(search_service, "_get_search_cache", lambda _k: None)
-    monkeypatch.setattr(search_service, "_set_search_cache", lambda *_a, **_kw: None)
+    monkeypatch.setattr(search_service.fanout, "_build_connectors", _fake_build)
+    monkeypatch.setattr(search_service.cache, "_get_search_cache", lambda _k: None)
+    monkeypatch.setattr(search_service.cache, "_set_search_cache", lambda *_a, **_kw: None)
 
     loop = asyncio.get_event_loop()
     start = loop.time()
@@ -75,7 +75,7 @@ async def test_fetch_fresh_returns_within_budget_when_one_connector_hangs(monkey
     except TimeoutError:
         pytest.fail(
             "_fetch_fresh did not return within 15s — the async gather at "
-            "app/search_service.py:931 has no outer timeout wrapper, so one "
+            "app/search_service/:931 has no outer timeout wrapper, so one "
             "hung connector blocks the whole orchestrator until Caddy's 30s "
             "lb_try_duration cuts the HTTP connection."
         )

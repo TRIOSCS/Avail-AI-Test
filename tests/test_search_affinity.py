@@ -128,8 +128,8 @@ class TestSearchIncludesVendorAffinity:
         """Affinity suggestions appear in search results with
         source_type='vendor_affinity'."""
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
             result = await search_requirement(requirement, db_session)
@@ -153,8 +153,8 @@ class TestAffinityResultFields:
     async def test_affinity_results_have_correct_fields(self, db_session, requirement):
         """Affinity results include source_badge, confidence_pct, and reasoning."""
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
             result = await search_requirement(requirement, db_session)
@@ -194,8 +194,8 @@ class TestAffinityDedupWithLiveResults:
         ]
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=affinity_with_dupe),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=affinity_with_dupe),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
             result = await search_requirement(requirement, db_session)
@@ -236,8 +236,8 @@ class TestAffinityRunsOffEventLoop:
             return list(MOCK_AFFINITY)
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", side_effect=_spy),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", side_effect=_spy),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
             await search_requirement(requirement, db_session)

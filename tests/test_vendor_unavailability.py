@@ -1651,7 +1651,7 @@ class TestSilentFailureHardening:
 
 
 class TestSearchPathReapplication:
-    """app/search_service.py _save_sightings — the synchronous resurrection hole:
+    """app/search_service/ _save_sightings — the synchronous resurrection hole:
 
     the connector-aware delete + recreate must re-stamp fresh rows while the record is
     active, and leave them unstamped once it has expired.

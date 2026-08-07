@@ -1288,7 +1288,7 @@ test:
 - [ ] `app/routers/crm/offers.py`
 - [ ] `app/routers/htmx/prospecting.py`
 - [ ] `app/routers/vendors_crud.py`
-- [ ] `app/search_service.py`
+- [ ] `app/search_service/` (package)
 - [ ] `app/services/activity_service.py`
 - [ ] `app/services/enrichment_types.py`
 - [ ] `app/services/global_search_service.py`
@@ -1314,7 +1314,7 @@ PG-only *query logic* to exercise beyond what the ORM read/write round-trip alre
 covers on both dialects (SQLAlchemy's `JSONB` type falls back to JSON semantics on
 SQLite) — those are listed for completeness/auditability, not because each needs its
 own bespoke `@requires_postgres` test. Prioritize the ones with actual `ILIKE`/
-`similarity()`/`tsvector` *query* logic (`services/*`, `routers/*`, `search_service.py`,
+`similarity()`/`tsvector` *query* logic (`services/*`, `routers/*`, `search_service/`,
 `vendor_utils.py`, `company_utils.py`) over pure-model JSONB declarations.
 
 ---

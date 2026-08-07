@@ -1,12 +1,14 @@
-"""Tests for Phase 4 Task 5 — Search Results Presentation with unified scoring.
+"""Tests for search-results presentation — v2-persisted display reads (spec §9).
 
-Verifies that search results include source_badge, confidence_pct, confidence_color
-from score_unified(), that affinity/AI results carry reasoning, and that results
-are sorted by confidence_pct descending.
+Verifies that sighting_to_dict derives confidence_pct/confidence_color from the
+PERSISTED v2 score verbatim (screen == DB), that history rows carry the joined
+persisted score (or render metadata-only, never a re-derived number), that
+affinity rows are confidence-only, and that results sort None-safely by
+confidence_pct descending.
 
 Called by: pytest
-Depends on: app.search_service (sighting_to_dict, _history_to_result),
-            app.scoring (score_unified)
+Depends on: app.search_service (sighting_to_dict, _history_to_result,
+            _affinity_match_to_result), app.scoring (confidence_color, source_badge)
 """
 
 import os
@@ -16,7 +18,7 @@ os.environ["TESTING"] = "1"
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from app.search_service import _history_to_result, sighting_to_dict
+from app.search_service import _affinity_match_to_result, _history_to_result, sighting_to_dict
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -71,15 +73,19 @@ def _make_history(**overrides) -> dict:
         "first_seen": now - timedelta(days=60),
         "times_seen": 3,
         "material_card_id": 42,
+        # Joined by _get_material_history from the newest matching sighting's
+        # persisted columns (spec §9). None = no surviving scored sighting.
+        "persisted_score": 55.0,
+        "persisted_score_components": {"trust": 50.0},
     }
     defaults.update(overrides)
     return defaults
 
 
 def _sort_by_confidence(results: list[dict]) -> None:
-    """Sort results in place using the same key as search_requirement."""
+    """Sort results in place using the same (None-safe) key as search_requirement."""
     results.sort(
-        key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)),
+        key=lambda x: (x.get("confidence_pct") or 0, x.get("score") or 0),
         reverse=True,
     )
 
@@ -88,33 +94,54 @@ def _sort_by_confidence(results: list[dict]) -> None:
 
 
 def test_results_have_unified_fields():
-    """Every result from sighting_to_dict has source_badge, confidence_pct,
-    confidence_color."""
-    s = _make_sighting()
+    """sighting_to_dict derives its display fields from the PERSISTED score verbatim
+    (spec §9: screen == DB — no display-time re-derivation)."""
+    s = _make_sighting(score=50.0)
     d = sighting_to_dict(s)
 
-    assert "source_badge" in d
-    assert "confidence_pct" in d
-    assert "confidence_color" in d
-    assert isinstance(d["source_badge"], str)
-    assert len(d["source_badge"]) > 0
-    assert isinstance(d["confidence_pct"], int)
-    assert 0 <= d["confidence_pct"] <= 100
-    assert d["confidence_color"] in ("green", "amber", "red")
+    assert d["score"] == 50.0
+    assert d["confidence_pct"] == 50  # int(round(persisted score)), not a re-mapping
+    assert d["confidence_color"] == "amber"
+    assert d["source_badge"] == "Live Stock"
 
 
-def test_history_results_have_unified_fields():
-    """Historical results from _history_to_result also carry unified fields."""
-    h = _make_history()
+def test_sighting_confidence_tracks_persisted_score():
+    """confidence_pct moves 1:1 with sightings.score — the 70-95 band remap is gone."""
+    assert sighting_to_dict(_make_sighting(score=92.4))["confidence_pct"] == 92
+    assert sighting_to_dict(_make_sighting(score=12.0))["confidence_pct"] == 12
+    assert sighting_to_dict(_make_sighting(score=12.0))["confidence_color"] == "red"
+
+
+def test_history_results_read_persisted_score():
+    """History rows display the JOINED persisted v2 score of their newest matching
+    sighting — never a re-derived age-band number."""
+    h = _make_history(persisted_score=61.4)
     now = datetime.now(UTC)
     d = _history_to_result(h, now)
 
-    assert "source_badge" in d
-    assert "confidence_pct" in d
-    assert "confidence_color" in d
     assert d["source_badge"] == "Historical"
-    assert isinstance(d["confidence_pct"], int)
-    assert d["confidence_color"] in ("green", "amber", "red")
+    assert d["score"] == 61.4
+    assert d["confidence_pct"] == 61
+    assert d["confidence_color"] == "amber"
+    assert d["score_components"] == {"trust": 50.0}
+
+
+def test_history_row_without_persisted_score_is_metadata_only():
+    """No surviving scored sighting for the (card, vendor) pair → metadata-only row:
+
+    score 0, no confidence chip — a number is never re-derived (spec §9).
+    """
+    h = _make_history(persisted_score=None, persisted_score_components=None)
+    d = _history_to_result(h, datetime.now(UTC))
+
+    assert d["score"] == 0
+    assert d["confidence_pct"] is None
+    assert d["confidence_color"] is None
+    assert d["score_components"] is None
+    assert d["source_badge"] == "Historical"
+    # Metadata fields still render
+    assert d["material_times_seen"] == 3
+    assert d["is_material_history"] is True
 
 
 def test_live_results_have_no_reasoning():
@@ -132,34 +159,23 @@ def test_history_results_have_no_reasoning():
     assert d["reasoning"] is None
 
 
-def test_affinity_has_reasoning():
-    """Affinity results carry non-empty reasoning (built inline in search_requirement).
-
-    We verify the dict structure that search_requirement builds for affinity matches.
-    """
-    # Simulate the affinity dict as built in search_requirement
+def test_affinity_has_reasoning_and_no_derived_score():
+    """Affinity rows carry reasoning + confidence_pct ONLY — the old confidence*20
+    pseudo-score died in the §9 scoring cut."""
     match = {
         "vendor_name": "Preferred Vendor",
         "vendor_id": 99,
         "confidence": 0.85,
         "reasoning": "Previously supplied similar TI parts with 95% on-time delivery",
     }
-    conf_pct = round(match["confidence"] * 100)
-    affinity_result = {
-        "vendor_name": match["vendor_name"],
-        "source_type": "vendor_affinity",
-        "source_badge": "Vendor Match",
-        "confidence_pct": conf_pct,
-        "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
-        "reasoning": match["reasoning"],
-        "score": max(5, match["confidence"] * 20),
-    }
+    affinity_result = _affinity_match_to_result(match, "LM358N")
 
-    assert affinity_result["reasoning"] is not None
-    assert len(affinity_result["reasoning"]) > 0
+    assert affinity_result["reasoning"] == match["reasoning"]
     assert affinity_result["source_badge"] == "Vendor Match"
     assert affinity_result["confidence_pct"] == 85
     assert affinity_result["confidence_color"] == "green"
+    assert affinity_result["score"] == 0
+    assert affinity_result["is_affinity"] is True
 
 
 def test_results_sorted_by_confidence():
@@ -192,20 +208,25 @@ def test_confidence_pct_tiebreak_uses_score():
 
 
 def test_live_stock_above_historical():
-    """Live stock at high confidence appears before older historical results."""
-    live = _make_sighting(source_type="nexar", qty_available=5000, unit_price=0.45)
+    """A higher persisted score sorts first; a metadata-only history row (no confidence
+    chip) sorts last via the None-safe key."""
+    live = _make_sighting(source_type="nexar", score=72.0)
     live_d = sighting_to_dict(live)
 
     hist_h = _make_history(
         source_type="historical",
         last_seen=datetime.now(UTC) - timedelta(days=60),
+        persisted_score=40.0,
     )
     hist_d = _history_to_result(hist_h, datetime.now(UTC))
 
-    # Live results get mapped to 70-95 range, historical decays from 80
-    # With 60-day-old history, confidence should be lower
-    results = [hist_d, live_d]
+    meta_h = _make_history(persisted_score=None, persisted_score_components=None)
+    meta_d = _history_to_result(meta_h, datetime.now(UTC))
+
+    results = [meta_d, hist_d, live_d]
     _sort_by_confidence(results)
 
     assert results[0]["source_badge"] == "Live Stock"
-    assert results[0]["confidence_pct"] >= results[1]["confidence_pct"]
+    assert results[0]["confidence_pct"] == 72
+    assert results[1]["confidence_pct"] == 40
+    assert results[2]["confidence_pct"] is None

@@ -78,7 +78,7 @@ class TestSearchRequirementStamp:
         ],
         ids=["stamps_on_success", "does_not_stamp_on_total_failure"],
     )
-    @patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+    @patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
     async def test_search_requirement_stamp(
         self, mock_fetch, db_session, req_name, mpn, source_statuses, expect_stamped
     ):

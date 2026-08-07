@@ -47,7 +47,8 @@
        hidden></div>
 
   {# ── Page content ─────────────────────────────────────────── #}
-  <main id="main-content" class="main-content p-3 pb-[52px] bg-white" hx-target="this" hx-swap="innerHTML">
+  {# hx-disinherit="*" stops main's hx-target/hx-swap leaking into descendants — kills the "action element missing its own hx-target swaps the ENTIRE page into #main-content" wipe class. #}
+  <main id="main-content" class="main-content p-3 pb-[52px] bg-white" hx-target="this" hx-swap="innerHTML" hx-disinherit="*">
     {% block content %}{% endblock %}
   </main>
 

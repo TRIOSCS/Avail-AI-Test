@@ -103,6 +103,7 @@ class TestWiring:
         assert templates.env.globals["stale_token"] is stale_token
 
     def test_htmx_app_js_skips_409_generic_toast(self):
-        src = open("app/static/htmx_app.js").read()
+        # W4.4: the responseError handler lives in the htmx-wiring module of the split bundle.
+        src = open("app/static/modules/htmx_wiring.js").read()
         handler = src.split("htmx:responseError")[1][:600]
         assert "status === 409" in handler  # generic 4xx toast must skip stale 409s

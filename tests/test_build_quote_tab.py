@@ -197,7 +197,8 @@ class TestBuildQuoteAssemble:
         copy."""
         from pathlib import Path
 
-        js = Path("app/static/htmx_app.js").read_text()
+        # W4.4 split: quoteBuilderTab lives in the requisitions module.
+        js = Path("app/static/modules/requisitions.js").read_text()
         assert "quoteBuilderTab" in js
         assert "below cost" in js
         assert "thin margin" in js
@@ -264,7 +265,8 @@ class TestBuildQuoteAssemble:
         offer_id."""
         from pathlib import Path
 
-        js = Path("app/static/htmx_app.js").read_text()
+        # W4.4 split: quoteBuilderTab lives in the requisitions module.
+        js = Path("app/static/modules/requisitions.js").read_text()
         assert "offer_id: l.offerId" in js
 
     def test_assemble_rejects_empty_selection(self, client: TestClient, quoteable_req: Requisition):

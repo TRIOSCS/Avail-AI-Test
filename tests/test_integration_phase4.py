@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition, User
-from app.scoring import confidence_color, score_unified
+from app.scoring import confidence_color, source_badge
 from app.search_service import search_requirement
 from tests.conftest import engine  # noqa: F401
 
@@ -184,8 +184,8 @@ class TestSearchReturnsAllFourLayers:
         ]
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
         ):
             mock_fetch.return_value = (combined_fresh, combined_stats)
             result = await search_requirement(req, db_session)
@@ -239,8 +239,8 @@ class TestSmartTriggerIntegration:
         ]
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=[]),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=[]),
         ):
             mock_fetch.return_value = (combined_fresh, combined_stats)
             result = await search_requirement(req, db_session)
@@ -251,10 +251,11 @@ class TestSmartTriggerIntegration:
         ai_results = [s for s in sightings if s.get("source_badge") == "AI Found"]
         assert len(ai_results) >= 1, "AI Found results should be in final output"
 
-        # The AI result should have the capped confidence (max 60)
+        # Spec §9: AI rows display the SAME persisted v2 score as every other row —
+        # the old score_unified 60-cap re-derivation is gone. Screen == DB.
         for ar in ai_results:
-            assert ar["confidence_pct"] <= 60, (
-                f"AI Found confidence_pct should be capped at 60, got {ar['confidence_pct']}"
+            assert ar["confidence_pct"] == int(round(ar["score"])), (
+                f"AI Found confidence_pct must derive from the persisted score, got {ar['confidence_pct']}"
             )
 
         # The original thin result should also be there
@@ -303,8 +304,8 @@ class TestAffinityDedupInFullSearch:
         ]
 
         with (
-            patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
-            patch("app.search_service.find_vendor_affinity", return_value=affinity_with_dupe),
+            patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
+            patch("app.search_service.pipeline.find_vendor_affinity", return_value=affinity_with_dupe),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH_LIVE), list(MOCK_STATS_OK))
             result = await search_requirement(req, db_session)
@@ -326,75 +327,89 @@ class TestAffinityDedupInFullSearch:
         assert "Arrow" not in affinity_names
 
 
-# ── Test: unified scoring consistency ────────────────────────────────────
+# ── Test: display-field consistency (v2-persisted reads, spec §9) ────────
 
 
-class TestUnifiedScoringConsistency:
-    """Verify that score_unified returns consistent fields for all source types."""
+class TestDisplayFieldConsistency:
+    """Every result-row shape carries the same display fields, all derived from the
+    persisted v2 score (or metadata-only) + the static source_badge map — the old
+    score_unified re-derivation is gone."""
 
-    REQUIRED_KEYS = {"score", "source_badge", "confidence_pct", "confidence_color", "components"}
+    DISPLAY_KEYS = {"score", "source_badge", "confidence_pct", "confidence_color"}
 
-    def test_live_stock_scoring(self):
-        """Live API results produce all required scoring fields."""
-        result = score_unified(
-            source_type="nexar",
-            vendor_score=80.0,
-            is_authorized=True,
-            unit_price=0.50,
-            qty_available=1000,
-            has_price=True,
-            has_qty=True,
+    def test_live_history_and_affinity_rows_share_display_keys(self):
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+
+        from app.search_service import _affinity_match_to_result, _history_to_result, sighting_to_dict
+
+        now = datetime.now(UTC)
+        live = sighting_to_dict(
+            SimpleNamespace(
+                id=1,
+                requirement_id=None,
+                vendor_name="Arrow",
+                vendor_email=None,
+                vendor_phone=None,
+                mpn_matched="LM317T",
+                manufacturer="TI",
+                qty_available=100,
+                unit_price=0.5,
+                currency="USD",
+                source_type="nexar",
+                is_authorized=False,
+                confidence=0.0,
+                score=64.2,
+                raw_data={},
+                is_unavailable=False,
+                moq=None,
+                date_code=None,
+                packaging=None,
+                condition=None,
+                lead_time_days=None,
+                lead_time=None,
+                evidence_tier="T3",
+                score_components={"trust": 35.0},
+                created_at=now,
+            )
         )
-        assert self.REQUIRED_KEYS.issubset(result.keys()), f"Missing keys: {self.REQUIRED_KEYS - result.keys()}"
-        assert result["source_badge"] == "Live Stock"
-        assert 70 <= result["confidence_pct"] <= 95
-        assert result["confidence_color"] in {"green", "amber", "red"}
-
-    def test_historical_scoring(self):
-        """Historical results produce all required scoring fields."""
-        result = score_unified(
-            source_type="historical",
-            age_hours=720.0,  # ~30 days
-            repeat_sighting_count=3,
+        hist = _history_to_result(
+            {
+                "vendor_name": "Old Vendor",
+                "mpn_matched": "LM317T",
+                "manufacturer": "TI",
+                "qty_available": 10,
+                "unit_price": 1.0,
+                "currency": "USD",
+                "source_type": "nexar",
+                "is_authorized": False,
+                "vendor_sku": None,
+                "first_seen": now - timedelta(days=60),
+                "last_seen": now - timedelta(days=10),
+                "times_seen": 2,
+                "material_card_id": 1,
+                "persisted_score": 41.0,
+                "persisted_score_components": None,
+            },
+            now,
         )
-        assert self.REQUIRED_KEYS.issubset(result.keys())
-        assert result["source_badge"] == "Historical"
-        assert 0 <= result["confidence_pct"] <= 100
-        assert result["confidence_color"] in {"green", "amber", "red"}
+        affinity = _affinity_match_to_result({"vendor_name": "Preferred", "confidence": 0.65}, "LM317T")
 
-    def test_vendor_affinity_scoring(self):
-        """Vendor affinity results produce all required scoring fields."""
-        result = score_unified(
-            source_type="vendor_affinity",
-            claude_confidence=0.65,
-        )
-        assert self.REQUIRED_KEYS.issubset(result.keys())
-        assert result["source_badge"] == "Vendor Match"
-        assert result["confidence_pct"] == 65
-        assert result["confidence_color"] == "amber"
+        for row in (live, hist, affinity):
+            assert self.DISPLAY_KEYS.issubset(row.keys())
+            assert row["confidence_color"] in {"green", "amber", "red", None}
 
-    def test_ai_live_web_scoring(self):
-        """AI research results produce all required scoring fields and are capped at
-        60."""
-        result = score_unified(
-            source_type="ai_live_web",
-            claude_confidence=0.90,
-        )
-        assert self.REQUIRED_KEYS.issubset(result.keys())
-        assert result["source_badge"] == "AI Found"
-        assert result["confidence_pct"] <= 60, "AI results should be capped at 60"
-        assert result["confidence_color"] in {"green", "amber", "red"}
+        # Display derives from the persisted/computed v2 number verbatim.
+        assert live["confidence_pct"] == 64
+        assert hist["confidence_pct"] == 41
+        assert affinity["confidence_pct"] == 65
+        assert affinity["score"] == 0  # confidence-only rows carry no derived score
 
-    def test_all_types_have_same_keys(self):
-        """All four source types return dictionaries with identical key sets."""
-        live = score_unified(source_type="nexar", has_price=True, has_qty=True)
-        historical = score_unified(source_type="historical", age_hours=100.0)
-        affinity = score_unified(source_type="vendor_affinity", claude_confidence=0.5)
-        ai = score_unified(source_type="ai_live_web", claude_confidence=0.5)
-
-        assert live.keys() == historical.keys() == affinity.keys() == ai.keys(), (
-            "All source types must return the same top-level keys"
-        )
+    def test_source_badges_are_a_static_map(self):
+        assert source_badge("nexar") == "Live Stock"
+        assert source_badge("historical") == "Historical"
+        assert source_badge("vendor_affinity") == "Vendor Match"
+        assert source_badge("ai_live_web") == "AI Found"
 
     def test_confidence_color_boundaries(self):
         """Verify confidence_color thresholds: >=75 green, >=50 amber, <50 red."""

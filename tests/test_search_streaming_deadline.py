@@ -13,7 +13,7 @@ Covers:
   a 30s sleep always outlives it and gets cancelled anyway)
 
 Called by: pytest
-Depends on: app/search_service.py, app/connectors/sources.py, tests/conftest.py
+Depends on: app/search_service/, app/connectors/sources.py, tests/conftest.py
 """
 
 import asyncio
@@ -105,7 +105,7 @@ class TestAwaitNextWithinBudget:
 class TestStreamingBudgetIntegration:
     @pytest.fixture(autouse=True)
     def _own_session(self, db_session):
-        with patch("app.search_service.SessionLocal", lambda: db_session):
+        with patch("app.search_service.streaming.SessionLocal", lambda: db_session):
             yield
 
     @pytest.fixture()
@@ -143,7 +143,7 @@ class TestStreamingBudgetIntegration:
         hung.search = lambda pn: asyncio.sleep(30)  # never completes within the budget
 
         with (
-            patch("app.search_service._build_connectors", return_value=([hung], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([hung], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             await asyncio.wait_for(stream_search_mpn("search-budget-1", "LM317T"), timeout=5.0)
@@ -189,11 +189,11 @@ class TestStreamingBudgetIntegration:
         conn.search = AsyncMock(return_value=[{"mpn_matched": "LM317T", "vendor_name": "Arrow", "qty_available": 5}])
 
         with (
-            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
-            patch("app.search_service._incremental_dedup", return_value=([], [])),
-            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.dedupe._incremental_dedup", return_value=([], [])),
+            patch("app.search_service.presentation._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             await asyncio.wait_for(stream_search_mpn("search-budget-2", "LM317T"), timeout=5.0)
 

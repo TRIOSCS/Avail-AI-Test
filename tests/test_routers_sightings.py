@@ -193,10 +193,14 @@ class TestSightingsClickPendingCounter:
     """
 
     def test_no_click_in_flight_field_in_htmx_app_js(self):
-        """htmx_app.js must not reintroduce the clickInFlight boolean."""
-        js = Path("app/static/htmx_app.js").read_text()
+        """The bundle JS (entry + W4.4 modules) must not reintroduce the clickInFlight
+        boolean."""
+        js = "\n".join(
+            p.read_text() for p in [Path("app/static/htmx_app.js"), *sorted(Path("app/static/modules").glob("*.js"))]
+        )
         assert "clickInFlight" not in js, (
-            "clickInFlight reintroduced in htmx_app.js — multi-click race regression. Use clickPending counter instead."
+            "clickInFlight reintroduced in the bundle JS — multi-click race regression. "
+            "Use clickPending counter instead."
         )
 
     def test_no_click_in_flight_field_in_sightings_list_template(self):
@@ -210,10 +214,12 @@ class TestSightingsClickPendingCounter:
     def test_click_pending_counter_present_in_htmx_app_js(self):
         """htmx_app.js exposes the clickPending counter on the sightingSelection
         store."""
-        js = Path("app/static/htmx_app.js").read_text()
-        assert "clickPending: 0" in js, "clickPending counter missing from sightingSelection store"
+        # W4.4 split: the store lives in stores.js, the decrement in htmx_wiring.js.
+        stores = Path("app/static/modules/stores.js").read_text()
+        wiring = Path("app/static/modules/htmx_wiring.js").read_text()
+        assert "clickPending: 0" in stores, "clickPending counter missing from sightingSelection store"
         # Decrement uses Math.max clamp to guard against double-decrement.
-        assert "Math.max(0, store.clickPending - 1)" in js, "clickPending decrement must clamp at 0 via Math.max"
+        assert "Math.max(0, store.clickPending - 1)" in wiring, "clickPending decrement must clamp at 0 via Math.max"
 
     def test_click_pending_counter_present_in_sightings_list_template(self):
         """SelectReq fires ONE request (GET /detail), so the counter increments by 1.
@@ -532,7 +538,8 @@ class TestPreviewInlineEmailFix:
         """FixVendorEmail method exists in rfqVendorModal and calls loadPreview."""
         from pathlib import Path
 
-        js = Path("app/static/htmx_app.js").read_text()
+        # W4.4 split: rfqVendorModal lives in its own module.
+        js = Path("app/static/modules/rfq_vendor_modal.js").read_text()
         assert "fixVendorEmail(" in js, "fixVendorEmail method missing from rfqVendorModal"
         # After a successful fix, loadPreview() must be called
         # Find the fixVendorEmail function body

@@ -9,7 +9,7 @@ Covers:
   a cache-HIT run does NOT re-persist.
 
 Called by: pytest
-Depends on: app/search_service.py, app/models/sourcing.py (Sighting.requirement_id
+Depends on: app/search_service/, app/models/sourcing.py (Sighting.requirement_id
             nullable, migration 198_sighting_req_id_nullable)
 """
 
@@ -199,8 +199,8 @@ def _own_session_and_engine(db_session):
     silently land in a different database than ``db_session`` reads from.
     """
     with (
-        patch("app.search_service.SessionLocal", lambda: db_session),
-        patch("app.search_service.engine", db_session.get_bind()),
+        patch("app.search_service.streaming.SessionLocal", lambda: db_session),
+        patch("app.search_service.streaming.engine", db_session.get_bind()),
     ):
         yield
 
@@ -227,11 +227,11 @@ class TestStreamSearchMpnPersistsRequirementLessSightings:
         )
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
-            patch("app.search_service._get_search_cache", return_value=None),
-            patch("app.search_service._set_search_cache"),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.cache._get_search_cache", return_value=None),
+            patch("app.search_service.cache._set_search_cache"),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
         ):
             await stream_search_mpn("live-persist-search", "LM317T")
 
@@ -266,16 +266,43 @@ class TestStreamSearchMpnPersistsRequirementLessSightings:
         cached_stats = [{"source": "nexar", "results": 1, "ms": 50, "error": None, "status": "ok"}]
 
         with (
-            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.search_service.fanout._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
             patch(
-                "app.search_service._get_search_cache",
+                "app.search_service.cache._get_search_cache",
                 return_value=(cached_results, cached_stats, "2026-01-01T00:00:00+00:00"),
             ),
-            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service.presentation._render_search_vendor_cards_html", return_value="<div></div>"),
         ):
             await stream_search_mpn("cache-hit-no-persist", "LM317T")
 
         event_types = [c[0][1] for c in mock_broker.publish.call_args_list]
         assert "done" in event_types
         assert db_session.query(Sighting).filter_by(vendor_name="CachedOnlyVendor").count() == 0
+
+
+# ── Streamed card score == persisted score (spec §9) ─────────────────────
+
+
+class TestStreamedScoreMatchesPersisted:
+    def test_streamed_card_score_equals_persisted_score_after_save(self, db_session: Session):
+        """The score a streamed SSE card displays (_score_raw_hit, v2) equals the score
+        _save_sightings persists for the same hit — screen == DB (spec §9; the old v1
+        streaming score disagreed with the stored v2 value forever).
+
+        The hit deliberately has NO price: the price factor is the one input that can
+        differ between the incremental per-row scorer (no batch median available) and
+        the batch save (median over the whole batch); every other factor is identical.
+        """
+        from app.search_service.presentation import _score_raw_hit
+
+        hit = _fresh_hit("Arrow Electronics", unit_price=None)
+
+        card_dict = _score_raw_hit(dict(hit), vendor_score_map={})
+        saved = _save_sightings([dict(hit)], None, db_session, succeeded_sources={"nexar"})
+
+        assert len(saved) == 1
+        assert card_dict["score"] == saved[0].score
+        assert card_dict["score_components"] == saved[0].score_components
+        # And the card's confidence chip derives from that same number verbatim.
+        assert card_dict["confidence_pct"] == int(round(saved[0].score))

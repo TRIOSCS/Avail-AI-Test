@@ -79,7 +79,7 @@ disable_error_code = [
 
 [[tool.mypy.overrides]]
 # ~100 ORM-noise errors (arg-type:57 attr-defined:23 assignment:15 ...).
-module = ["app.search_service"]
+module = ["app.search_service", "app.search_service.*"]
 disable_error_code = ["arg-type", "attr-defined", "assignment", "call-overload"]
 
 [[tool.mypy.overrides]]

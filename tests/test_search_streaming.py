@@ -1,7 +1,7 @@
 """Tests for search streaming, aggressive dedup, and shortlist features.
 
 Called by: pytest
-Depends on: app/search_service.py, app/connectors/sources.py
+Depends on: app/search_service/, app/connectors/sources.py
 """
 
 import json
@@ -53,7 +53,7 @@ def test_build_connectors_all_skipped_when_no_creds(db_session):
     """_build_connectors skips all sources when no credentials are configured."""
     from app.search_service import _build_connectors
 
-    with patch("app.search_service.get_credentials_batch", return_value={}):
+    with patch("app.search_service.fanout.get_credentials_batch", return_value={}):
         connectors, stats, disabled = _build_connectors(db_session)
 
     assert isinstance(connectors, list)
@@ -68,7 +68,7 @@ def test_build_connectors_instantiates_with_creds(db_session):
     from app.search_service import _build_connectors
 
     fake_creds = {("mouser", "MOUSER_API_KEY"): "fake-mouser-key"}
-    with patch("app.search_service.get_credentials_batch", return_value=fake_creds):
+    with patch("app.search_service.fanout.get_credentials_batch", return_value=fake_creds):
         connectors, stats, disabled = _build_connectors(db_session)
 
     assert len(connectors) == 1
@@ -91,14 +91,14 @@ def test_build_connectors_brokerbin_gates_on_bearer_token(db_session):
 
     # Token only → connector built (Bearer doesn't need a username)
     only_key = {("brokerbin", "BROKERBIN_API_KEY"): "key-only"}
-    with patch("app.search_service.get_credentials_batch", return_value=only_key):
+    with patch("app.search_service.fanout.get_credentials_batch", return_value=only_key):
         connectors, stats, _ = _build_connectors(db_session)
     assert any(isinstance(c, BrokerBinConnector) for c in connectors)
     assert "brokerbin" not in stats
 
     # No token → skipped (Bearer auth requires the token)
     only_secret = {("brokerbin", "BROKERBIN_API_SECRET"): "user-only"}
-    with patch("app.search_service.get_credentials_batch", return_value=only_secret):
+    with patch("app.search_service.fanout.get_credentials_batch", return_value=only_secret):
         connectors, stats, _ = _build_connectors(db_session)
     assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
     assert stats["brokerbin"]["status"] == "skipped"
@@ -121,7 +121,7 @@ class TestConnectorConfigCache:
             call_count["n"] += 1
             return {}
 
-        with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+        with patch("app.search_service.fanout.get_credentials_batch", side_effect=_counting_batch):
             _build_connectors(db_session)
             _build_connectors(db_session)
 
@@ -144,7 +144,7 @@ class TestConnectorConfigCache:
 
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+            with patch("app.search_service.fanout.get_credentials_batch", side_effect=_counting_batch):
                 _build_connectors(db_session)
                 _build_connectors(db_session)
         finally:
@@ -171,7 +171,7 @@ class TestConnectorConfigCache:
 
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.search_service.get_credentials_batch", side_effect=_counting_batch):
+            with patch("app.search_service.fanout.get_credentials_batch", side_effect=_counting_batch):
                 _build_connectors(db_session)
                 _reset_connector_config_cache()
                 _build_connectors(db_session)
@@ -327,8 +327,8 @@ async def test_stream_search_publishes_events(db_session):
     # in-memory test engine with tables created by conftest).
     with (
         patch("app.search_service.broker", create=True) as mock_broker,
-        patch("app.search_service._build_connectors") as mock_build,
-        patch("app.search_service.SessionLocal", lambda: db_session),
+        patch("app.search_service.fanout._build_connectors") as mock_build,
+        patch("app.search_service.streaming.SessionLocal", lambda: db_session),
     ):
         mock_broker.publish = mock_publish
 
@@ -945,7 +945,7 @@ class TestBuildConnectorsErroredBranch:
         # exclusion is unambiguously due to the 'error' branch (not "no
         # creds").
         with patch(
-            "app.search_service.get_credentials_batch",
+            "app.search_service.fanout.get_credentials_batch",
             return_value={("oemsecrets", "OEMSECRETS_API_KEY"): "test-key"},
         ):
             connectors, source_stats_map, _ = _build_connectors(db_session)
@@ -1004,10 +1004,10 @@ class TestStreamSearchMpnNonOkChips:
         with (
             patch("app.search_service.broker", create=True) as mock_broker,
             patch(
-                "app.search_service._build_connectors",
+                "app.search_service.fanout._build_connectors",
                 return_value=([fake_connector], seeded_stats, set()),
             ),
-            patch("app.search_service.SessionLocal", lambda: db_session),
+            patch("app.search_service.streaming.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
             await stream_search_mpn("test-search-id", "LM317T")
@@ -1052,10 +1052,10 @@ class TestStreamSearchMpnNonOkChips:
         with (
             patch("app.search_service.broker", create=True) as mock_broker,
             patch(
-                "app.search_service._build_connectors",
+                "app.search_service.fanout._build_connectors",
                 return_value=([], seeded_stats, set()),
             ),
-            patch("app.search_service.SessionLocal", lambda: db_session),
+            patch("app.search_service.streaming.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
             await stream_search_mpn("test-search-id", "LM317T")
@@ -1083,10 +1083,10 @@ class TestStreamSearchMpnNonOkChips:
         with (
             patch("app.search_service.broker", create=True) as mock_broker,
             patch(
-                "app.search_service._build_connectors",
+                "app.search_service.fanout._build_connectors",
                 return_value=([], seeded_stats, set()),
             ),
-            patch("app.search_service.SessionLocal", lambda: db_session),
+            patch("app.search_service.streaming.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
             await stream_search_mpn("test-search-id", "LM317T")

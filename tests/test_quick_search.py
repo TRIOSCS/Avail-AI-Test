@@ -35,7 +35,7 @@ def test_quick_search_rejects_invalid_mpn(client, payload, expected_error):
 # ── Successful search (mocked connectors) ────────────────────────────────
 
 
-@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+@patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_returns_results(mock_fetch, client, db_session: Session):
     """Should return scored sightings from supplier APIs."""
     mock_fetch.return_value = (
@@ -87,7 +87,7 @@ def test_quick_search_returns_results(mock_fetch, client, db_session: Session):
     assert "LM358DR" in call_args[0][0]
 
 
-@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+@patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_empty_results(mock_fetch, client):
     """Should return empty sightings when no results found."""
     mock_fetch.return_value = (
@@ -104,7 +104,7 @@ def test_quick_search_empty_results(mock_fetch, client):
     assert data["material_card"] is None
 
 
-@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+@patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_includes_material_card(mock_fetch, client, db_session: Session):
     """Should include material card summary when card exists."""
     card = MaterialCard(
@@ -130,7 +130,7 @@ def test_quick_search_includes_material_card(mock_fetch, client, db_session: Ses
     assert data["material_card"]["lifecycle_status"] == "Active"
 
 
-@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+@patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_includes_vendor_history(mock_fetch, client, db_session: Session):
     """Should include material vendor history when no fresh results overlap."""
     card = MaterialCard(
@@ -168,7 +168,7 @@ def test_quick_search_includes_vendor_history(mock_fetch, client, db_session: Se
     assert hist[0]["vendor_name"] == "Old Vendor Co"
 
 
-@patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+@patch("app.search_service.fanout._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_currency_conversion_affects_score(mock_fetch, client):
     """A EUR-priced offer and a USD-priced offer at the same nominal price must not
     score identically on price competitiveness — median + per-offer price comparisons

@@ -176,7 +176,7 @@ class TestVendorFeedbackAdjustmentWiredIntoScoring:
             calls.append(vendor_card_id)
             return original(db, vendor_card_id)
 
-        monkeypatch.setattr(search_service, "get_vendor_feedback_adjustment", _counting)
+        monkeypatch.setattr(search_service.persistence, "get_vendor_feedback_adjustment", _counting)
 
         fresh = [
             _fresh_hit("Vendor A Electronics", mpn="LM317T"),

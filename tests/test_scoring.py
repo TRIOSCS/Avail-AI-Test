@@ -14,31 +14,9 @@ from app.scoring import (
     confidence_color,
     explain_lead,
     is_weak_lead,
-    score_sighting,
     score_sighting_v2,
-    score_unified,
+    source_badge,
 )
-
-# ---------------------------------------------------------------------------
-# score_sighting
-# ---------------------------------------------------------------------------
-
-
-class TestScoreSighting:
-    @pytest.mark.parametrize(
-        ("vendor_score", "is_authorized", "expected"),
-        [
-            pytest.param(50.0, True, 100.0, id="authorized_returns_100"),
-            pytest.param(None, True, 100.0, id="authorized_ignores_vendor_score"),
-            pytest.param(None, False, NEW_VENDOR_BASELINE, id="none_vendor_score_returns_baseline"),
-            pytest.param(72.456, False, 72.5, id="specific_vendor_score_rounded"),
-            pytest.param(0.0, False, 0.0, id="zero_vendor_score"),
-            pytest.param(100.0, False, 100.0, id="full_vendor_score"),
-        ],
-    )
-    def test_score_sighting(self, vendor_score, is_authorized, expected):
-        assert score_sighting(vendor_score, is_authorized=is_authorized) == expected
-
 
 # ---------------------------------------------------------------------------
 # score_sighting_v2
@@ -321,140 +299,34 @@ class TestConfidenceColor:
 
 
 # ---------------------------------------------------------------------------
-# score_unified
+# source_badge + the dead scoring generations (spec §9)
 # ---------------------------------------------------------------------------
 
 
-class TestScoreUnified:
-    def test_live_source_maps_70_95(self):
-        result = score_unified(
-            "live_api",
-            vendor_score=80.0,
-            is_authorized=True,
-            has_price=True,
-            has_qty=True,
-            has_lead_time=True,
-            has_condition=True,
-            unit_price=10.0,
-            median_price=10.0,
-            qty_available=1000,
-            target_qty=1000,
-            age_hours=0.0,
-        )
-        assert 70 <= result["confidence_pct"] <= 95
-        assert result["source_badge"] == "Live Stock"
-        assert result["confidence_color"] == "green"
-        assert "trust" in result["components"]
+class TestSourceBadge:
+    @pytest.mark.parametrize(
+        ("source_type", "expected"),
+        [
+            pytest.param("historical", "Historical", id="historical"),
+            pytest.param("vendor_affinity", "Vendor Match", id="vendor_affinity"),
+            pytest.param("ai_live_web", "AI Found", id="ai_live_web"),
+            pytest.param("nexar", "Live Stock", id="live_market_source"),
+            pytest.param("some_random_source", "Live Stock", id="unknown_source"),
+            pytest.param("", "Live Stock", id="empty"),
+            pytest.param(None, "Live Stock", id="none"),
+            pytest.param("HISTORICAL", "Historical", id="case_insensitive"),
+        ],
+    )
+    def test_source_badge(self, source_type, expected):
+        assert source_badge(source_type) == expected
 
-    def test_live_source_minimum_70(self):
-        # Worst-case live: all penalties
-        result = score_unified("nexar")
-        assert result["confidence_pct"] >= 70
 
-    def test_live_source_maximum_95(self):
-        result = score_unified(
-            "digikey",
-            is_authorized=True,
-            unit_price=5.0,
-            median_price=10.0,
-            qty_available=5000,
-            target_qty=100,
-            age_hours=0.0,
-            has_price=True,
-            has_qty=True,
-            has_lead_time=True,
-            has_condition=True,
-        )
-        assert result["confidence_pct"] <= 95
+class TestDeadGenerationsRemoved:
+    def test_v1_and_v3_are_gone(self):
+        """Spec §9: score_sighting (v1 trust-only) and score_unified (v3 display-time
+        re-derivation) are deleted — score_sighting_v2, persisted once at
+        _save_sightings, is the one truth every display path reads."""
+        import app.scoring as scoring
 
-    def test_historical_base_80(self):
-        result = score_unified("historical", age_hours=0.0)
-        assert result["source_badge"] == "Historical"
-        assert result["confidence_pct"] == 80
-        assert result["components"]["base"] == 80.0
-
-    def test_historical_age_decay(self):
-        # 2 months old → decay = 5 * 2 = 10, base = 70
-        result = score_unified("historical", age_hours=1440.0)
-        assert result["score"] < 80.0
-        assert result["components"]["age_decay"] > 0
-
-    def test_historical_repeat_boost(self):
-        result = score_unified("historical", age_hours=0.0, repeat_sighting_count=3)
-        assert result["score"] == 86.0
-        assert result["components"]["repeat_boost"] == 6.0
-
-    def test_historical_repeat_boost_capped(self):
-        result = score_unified("historical", age_hours=0.0, repeat_sighting_count=100)
-        assert result["components"]["repeat_boost"] == 10.0
-
-    def test_vendor_affinity(self):
-        result = score_unified("vendor_affinity", claude_confidence=0.85)
-        assert result["source_badge"] == "Vendor Match"
-        assert result["confidence_pct"] == 85
-        assert result["components"]["claude_confidence"] == 0.85
-
-    def test_vendor_affinity_no_confidence(self):
-        result = score_unified("vendor_affinity")
-        assert result["confidence_pct"] == 0
-        assert result["confidence_color"] == "red"
-
-    def test_ai_live_web_capped_at_60(self):
-        result = score_unified("ai_live_web", claude_confidence=0.95)
-        assert result["confidence_pct"] <= 60
-        assert result["source_badge"] == "AI Found"
-        assert result["components"]["capped_at"] == 60
-
-    def test_ai_live_web_below_cap(self):
-        result = score_unified("ai_live_web", claude_confidence=0.40)
-        assert result["confidence_pct"] == 40
-
-    def test_unknown_source_fallback(self):
-        # The code checks `st not in (...)` so unknown goes to live path
-        # Actually, any source not in the three special types goes to live
-        result = score_unified("some_random_source")
-        assert result["source_badge"] == "Live Stock"
-
-    def test_no_dead_fallback_shape(self):
-        # Regression: the old unreachable fallback returned
-        # {source_badge == source_type, score 0.0, color "red"}. Every input —
-        # including unknown / empty / the three special types — must route to a
-        # real branch and never produce that dead-fallback shape.
-        for st in (
-            "some_random_source",
-            None,
-            "",
-            "live_api",
-            "historical",
-            "vendor_affinity",
-            "ai_live_web",
-        ):
-            result = score_unified(st, claude_confidence=0.5, age_hours=0.0)
-            assert result["source_badge"] in {
-                "Live Stock",
-                "Historical",
-                "Vendor Match",
-                "AI Found",
-            }
-            # The removed fallback echoed source_type verbatim as the badge.
-            assert result["source_badge"] != st
-
-    def test_none_source_type(self):
-        result = score_unified(None)
-        assert result["source_badge"] == "Live Stock"
-
-    def test_historical_very_old_clamped(self):
-        # Very old data: base goes negative, clamped at 0
-        result = score_unified("historical", age_hours=72000.0)
-        assert result["score"] >= 0.0
-        assert result["confidence_pct"] >= 0
-
-    def test_result_keys(self):
-        result = score_unified("live_api")
-        assert set(result.keys()) == {
-            "score",
-            "source_badge",
-            "confidence_pct",
-            "confidence_color",
-            "components",
-        }
+        assert not hasattr(scoring, "score_sighting")
+        assert not hasattr(scoring, "score_unified")

@@ -4,14 +4,15 @@ Verifies: HTMX history cache is enabled, and nav highlighting is reactive
 via Alpine.js in mobile_nav.html (no sidebar).
 
 Called by: pytest
-Depends on: app/static/htmx_app.js, app/templates/htmx/partials/shared/mobile_nav.html
+Depends on: app/static/modules/htmx_wiring.js (htmx config, W4.4 split),
+    app/templates/htmx/partials/shared/mobile_nav.html
 """
 
 from pathlib import Path
 
 import pytest
 
-JS_PATH = Path("app/static/htmx_app.js")
+JS_PATH = Path("app/static/modules/htmx_wiring.js")
 JS_CONTENT = JS_PATH.read_text()
 
 NAV_PATH = Path("app/templates/htmx/partials/shared/mobile_nav.html")

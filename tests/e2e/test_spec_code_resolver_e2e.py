@@ -122,7 +122,7 @@ async def test_e2e_sprej_resolution_persists_sighting_and_pending(db_session, en
             "reasoning": "matched IBM redbook",
         }
 
-    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(search_service.fanout, "_fetch_fresh", fake_fetch_fresh)
     with patch("app.services.spec_code_resolver._default_claude_call", new=fake_claude):
         await search_service.search_requirement(req, db_session)
 

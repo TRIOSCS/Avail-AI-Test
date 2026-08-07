@@ -250,7 +250,11 @@ sightings.py (router) → search_requirement(req, db)
     +---> Returns {sightings, source_stats, mpn_results: {mpn: "searched"|"cached"}}
     |
     v
-search_service.py (orchestrator)
+search_service/ (package — W4.5a split of the former 3,604-line search_service.py:
+cache / mpn_expansion / dedupe / fanout / persistence / material_cards /
+presentation / pipeline / streaming; the facade __init__ re-exports every former
+top-level name, so `from app.search_service import X` is unchanged. pipeline.py
+is the orchestrator)
     |
     +---> ai_part_normalizer.py --> Claude API (normalize MPN)
     |
@@ -377,7 +381,7 @@ site — the earlier dark "terminal" look was the visual outlier and has been re
 Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
 
 **Market-baseline strip (price-sanity signal)** — `compute_market_baseline(rows)` in
-`app/search_service.py` filters the already-fetched cached rows to
+`app/search_service/cache.py` filters the already-fetched cached rows to
 `is_authorized=True` rows and computes: franchise-median price (same upper-median
 algorithm as `search_service._median`), authorized stock (sum of `qty_available`),
 and authorized source count. `part_dossier.dossier_market` passes it as
@@ -739,8 +743,8 @@ robustness items that do not change the retry/breaker/health semantics above:
 - **Vendor feedback reaches live sighting scores.**
   `get_vendor_feedback_adjustment` (sourcing_leads) is batched per distinct
   vendor card in `_save_sightings` — one grouped query per vendor, applied via
-  `_effective_trust_score` to the vendor_score input of `score_sighting` /
-  `score_sighting_v2` (clamped 0-100); a `do_not_contact` vendor's trust input
+  `_effective_trust_score` to the vendor_score input of `score_sighting_v2`
+  (clamped 0-100); a `do_not_contact` vendor's trust input
   is floored at ≤15 rather than the sighting being dropped.
 - **Currency-aware price scoring.** `app/utils/currency.py` (`to_usd`, static
   approximate FX table, SCORING-ONLY — never invoicing/PO/customer-facing
@@ -1137,7 +1141,7 @@ that persist fresh Sighting rows calls `apply_to_fresh_sightings(db,
 requirement, rows)` — which embeds the O1/O2/O3 matrix, so every path gets
 policy behavior for free — in its OWN session, right where the rows are created:
 
-1. `app/search_service.py` — after the fresh-Sighting construction loop that
+1. `app/search_service/persistence.py` — after the fresh-Sighting construction loop that
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
@@ -5816,6 +5820,20 @@ unified_score_service.py (top-level, monthly)
             +---> vendor_metrics_snapshot (DB)
 
 SIGHTING SCORING (per search result, score_sighting_v2, app/scoring.py):
+    ONE generation only (spec §9): score_sighting_v2 is computed once at save time
+    (search_service/persistence._save_sightings) and persisted to sightings.score +
+    sightings.score_components; every display path READS the persisted columns
+    (confidence_pct = round(score), color via confidence_color(), badge via the
+    static scoring.source_badge() map). The dead generations are removed: v1
+    score_sighting (trust-only), v3 score_unified (display-time re-derivation),
+    and the v4 ad-hoc inline formulas (history age-band score, affinity
+    confidence*20, the never-persisted price-outlier 0.2x mutation — the outlier
+    now sets a flag only). History rows (MaterialVendorHistory has NO score
+    column) JOIN the newest matching sighting's persisted score in
+    _get_material_history; a pair with no surviving scored sighting renders
+    metadata-only (no confidence chip). Streaming cards (_score_raw_hit) score
+    with the same score_sighting_v2 (median unavailable per-row), so the streamed
+    number matches what _persist_interactive_sightings stores.
     scoring.py — 5-factor weighted (SIGHTING_V2_WEIGHTS — built once at import from
     the SIGHTING_WEIGHT_TRUST/PRICE/QUANTITY/FRESHNESS/COMPLETENESS settings;
     defaults below preserve the historical hardcoded split, and Settings fail-fasts

@@ -4,20 +4,21 @@ Optimized for lead usefulness: a smaller number of strong, explainable
 leads beats a large number of weak ones.  Missing data is penalized (not
 neutral) because a buyer can't act on a lead that has no price or qty.
 
-score_sighting_v2() weights trust, price, quantity, freshness, and
-completeness.  classify_lead() and explain_lead() add human-readable
-quality labels and plain-English reasons a buyer should care.
+score_sighting_v2() is the ONE score (spec §9): computed once at save time
+(search_service.persistence._save_sightings) and persisted to
+sightings.score + sightings.score_components — every display path READS
+the persisted value instead of re-deriving it. classify_lead() and
+explain_lead() add human-readable quality labels and plain-English reasons
+a buyer should care; confidence_color() / source_badge() map a persisted
+score and source_type to display chrome. The older generations
+(score_sighting v1 trust-only, score_unified v3 display-time re-derivation)
+were removed in the §9 scoring cut.
 
-score_unified() provides a single scoring entry point for all search
-result types (live API, historical, vendor affinity, AI research),
-returning a normalised confidence percentage, color, and source badge.
-
-Called by: search_service._save_sightings(), sighting_to_dict(),
-           search_service.search_requirement()
+Called by: search_service.persistence._save_sightings(),
+           search_service.presentation.sighting_to_dict(),
+           search_service.pipeline.search_requirement()
 Depends on: app.config (SIGHTING_WEIGHT_* settings); otherwise pure logic
 """
-
-from loguru import logger
 
 from .config import settings
 
@@ -59,18 +60,6 @@ SIGHTING_V2_LABELS: dict[str, str] = {
     "freshness": "Freshness",
     "completeness": "Data completeness",
 }
-
-
-def score_sighting(vendor_score: float | None, is_authorized: bool) -> float:
-    """Score a sighting based on the vendor's unified score.
-
-    Returns 0-100.
-    """
-    if is_authorized:
-        return 100.0
-    if vendor_score is None:
-        return NEW_VENDOR_BASELINE
-    return round(vendor_score, 1)
 
 
 def score_sighting_v2(
@@ -280,7 +269,7 @@ def is_weak_lead(
 
 
 # ---------------------------------------------------------------------------
-# Unified confidence scoring
+# Display chrome for the persisted v2 score
 # ---------------------------------------------------------------------------
 
 
@@ -296,119 +285,15 @@ def confidence_color(pct: int) -> str:
     return "red"
 
 
-def score_unified(
-    source_type: str,
-    vendor_score: float | None = None,
-    is_authorized: bool = False,
-    unit_price: float | None = None,
-    median_price: float | None = None,
-    qty_available: int | None = None,
-    target_qty: int | None = None,
-    age_hours: float | None = None,
-    has_price: bool = False,
-    has_qty: bool = False,
-    has_lead_time: bool = False,
-    has_condition: bool = False,
-    repeat_sighting_count: int = 0,
-    claude_confidence: float | None = None,
-) -> dict:
-    """Unified confidence scoring across all search result types.
+# Static source_type → badge map (spec §9): a badge is a LABEL for where the row
+# came from, not a score product. Anything not listed is a live market source.
+_SOURCE_BADGES = {
+    "historical": "Historical",
+    "vendor_affinity": "Vendor Match",
+    "ai_live_web": "AI Found",
+}
 
-    Returns a dict with:
-        score           – raw float (0-100)
-        source_badge    – human-readable badge string
-        confidence_pct  – integer 0-100
-        confidence_color– "green" / "amber" / "red"
-        components      – breakdown dict (varies by source type)
-    """
-    st = (source_type or "").lower()
 
-    # -- Live API results -------------------------------------------------
-    if st not in ("historical", "vendor_affinity", "ai_live_web"):
-        raw_score, components = score_sighting_v2(
-            vendor_score=vendor_score,
-            is_authorized=is_authorized,
-            unit_price=unit_price,
-            median_price=median_price,
-            qty_available=qty_available,
-            target_qty=target_qty,
-            age_hours=age_hours,
-            has_price=has_price,
-            has_qty=has_qty,
-            has_lead_time=has_lead_time,
-            has_condition=has_condition,
-        )
-        # Map the 0-100 raw score into the 70-95 confidence range
-        pct = int(70 + (raw_score / 100.0) * 25)
-        pct = max(70, min(95, pct))
-        logger.debug("score_unified live: raw={} pct={}", raw_score, pct)
-        return {
-            "score": raw_score,
-            "source_badge": "Live Stock",
-            "confidence_pct": pct,
-            "confidence_color": confidence_color(pct),
-            "components": components,
-        }
-
-    # -- Historical sightings ---------------------------------------------
-    if st == "historical":
-        base = 80.0
-        # Decay 5% per month (30 * 24 = 720 hours)
-        if age_hours is not None and age_hours > 0:
-            months_old = age_hours / 720.0
-            base = base - (5.0 * months_old)
-        # Repeat-sighting boost: +2% each, max +10%
-        boost = min(10.0, repeat_sighting_count * 2.0)
-        raw = max(0.0, min(100.0, base + boost))
-        pct = int(round(raw))
-        pct = max(0, min(100, pct))
-        logger.debug(
-            "score_unified historical: base={} boost={} pct={}",
-            round(base, 1),
-            boost,
-            pct,
-        )
-        return {
-            "score": round(raw, 1),
-            "source_badge": "Historical",
-            "confidence_pct": pct,
-            "confidence_color": confidence_color(pct),
-            "components": {
-                "base": 80.0,
-                "age_decay": round(80.0 - base, 1),
-                "repeat_boost": boost,
-            },
-        }
-
-    # -- Vendor affinity --------------------------------------------------
-    if st == "vendor_affinity":
-        conf = (claude_confidence or 0.0) * 100.0
-        pct = int(round(max(0.0, min(100.0, conf))))
-        logger.debug("score_unified vendor_affinity: pct={}", pct)
-        return {
-            "score": round(conf, 1),
-            "source_badge": "Vendor Match",
-            "confidence_pct": pct,
-            "confidence_color": confidence_color(pct),
-            "components": {"claude_confidence": claude_confidence or 0.0},
-        }
-
-    # -- AI research (only remaining source_type after the guard above) ----
-    conf = (claude_confidence or 0.0) * 100.0
-    capped = min(60.0, conf)
-    pct = int(round(max(0.0, capped)))
-    logger.debug("score_unified ai_live_web: raw={} capped={}", conf, pct)
-    return {
-        "score": round(capped, 1),
-        "source_badge": "AI Found",
-        "confidence_pct": pct,
-        "confidence_color": confidence_color(pct),
-        "components": {
-            "claude_confidence": claude_confidence or 0.0,
-            "capped_at": 60,
-        },
-    }
-
-    # Unreachable: the guard above routes every source_type that is not one of
-    # the three special types into the live-API branch, and each special type
-    # returns from its own branch. Kept intentionally empty to make that clear.
+def source_badge(source_type: str | None) -> str:
+    """Human-readable badge for a search-result row's source_type."""
+    return _SOURCE_BADGES.get((source_type or "").lower(), "Live Stock")

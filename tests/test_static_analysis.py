@@ -55,7 +55,11 @@ def test_htmx_ajax_calls_have_indicator():
     """Every htmx.ajax(...) call site in templates and JS must pass an
     indicator: option (HTMX 2.x does not auto-read hx-indicator for
     imperative calls)."""
-    paths = list(Path("app/templates").rglob("*.html")) + [Path("app/static/htmx_app.js")]
+    paths = (
+        list(Path("app/templates").rglob("*.html"))
+        + [Path("app/static/htmx_app.js")]
+        + sorted(Path("app/static/modules").glob("*.js"))
+    )
     # Pre-existing call sites grandfathered in. Adding new sites without an
     # indicator: option will fail this test — fix the call site, don't extend
     # the allowlist. Drain the list as those sites get fixed.
@@ -417,7 +421,8 @@ def test_materials_fold_state_defaults_pinned():
     would override a new `true` default on the same key. htmx_app.js must keep removing
     the legacy key so a revert can't resurrect those stale values.
     """
-    src = Path("app/static/htmx_app.js").read_text()
+    # W4.4: materialsFilter (and its persistOr + legacy-key removal) lives in its own module.
+    src = Path("app/static/modules/materials_filter.js").read_text()
     assert re.search(r"confidenceOpen:\s*persistOr\(true,\s*'mat_confidence_open2'\)", src), (
         "Data-confidence fold must default OPEN under the rotated key "
         "'mat_confidence_open2' — trust is the headline filter, expanded by default."
@@ -429,7 +434,7 @@ def test_materials_fold_state_defaults_pinned():
         "More-attributes fold must default CLOSED per the collapse policy."
     )
     assert "localStorage.removeItem('mat_confidence_open')" in src, (
-        "htmx_app.js must drop the legacy 'mat_confidence_open' localStorage key — "
+        "modules/materials_filter.js must drop the legacy 'mat_confidence_open' localStorage key — "
         "prior visitors carry a persisted `false` under it that would re-collapse the "
         "trust fold if the key were ever reused."
     )
@@ -762,7 +767,8 @@ def test_resizable_modal_review_fixes_locked_in():
     """
     base = Path("app/templates/htmx/base.html").read_text()
     css = Path("app/static/styles.css").read_text()
-    js = Path("app/static/htmx_app.js").read_text()
+    # W4.4: resizableModal lives in the layout-components module of the split bundle.
+    js = Path("app/static/modules/layout_components.js").read_text()
     geom = Path("app/static/modal_geometry.js").read_text()
     unified = Path("app/templates/htmx/partials/requisitions/unified_modal.html").read_text()
 

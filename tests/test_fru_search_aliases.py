@@ -73,7 +73,7 @@ def _make_requirement(db: Session, user, primary_mpn: str, substitutes=None) -> 
 
 def _patch_fetch_fresh():
     """Patch the supplier fan-out to return no offers/sightings."""
-    return patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], [])))
+    return patch("app.search_service.fanout._fetch_fresh", new=AsyncMock(return_value=([], [])))
 
 
 class TestGetSearchAliases:

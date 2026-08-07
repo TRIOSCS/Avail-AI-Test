@@ -21,6 +21,15 @@ from pathlib import Path
 _TEMPLATES_DIR = Path("app/templates")
 _HTMX_APP_JS = Path("app/static/htmx_app.js")
 
+
+def _frontend_js() -> str:
+    """The bundle's first-party JS sources as one string: the entry plus its side-effect
+    modules (W4.4 split of htmx_app.js into app/static/modules/)."""
+    parts = [_HTMX_APP_JS.read_text()]
+    parts += [p.read_text() for p in sorted(Path("app/static/modules").glob("*.js"))]
+    return "\n".join(parts)
+
+
 # Mutating HTTP verbs that starlette_csrf (app/main.py) requires an x-csrftoken header for.
 _MUTATING_METHOD_RX = re.compile(r"method:\s*['\"](?:POST|PUT|PATCH|DELETE)['\"]")
 # URL fragments whose endpoints are CSRF-exempt in app/main.py exempt_urls — a raw
@@ -69,7 +78,7 @@ def test_trouble_report_submit_is_hardened():
     x-csrftoken onto every htmx request, postJSON's included. Either an inline header OR
     delegating to postJSON/htmx is a hardened site.
     """
-    js = _HTMX_APP_JS.read_text()
+    js = _frontend_js()
     start = js.index("function submitTroubleReport")
     body = js[start : start + 1200]
     uses_postjson_or_htmx = "postJSON(" in body or "htmx.ajax(" in body

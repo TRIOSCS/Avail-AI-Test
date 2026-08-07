@@ -117,7 +117,7 @@ class TestSearchRequirementCooldown:
         db_session.commit()
 
         with patch(
-            "app.search_service._fetch_fresh",
+            "app.search_service.fanout._fetch_fresh",
             new=AsyncMock(return_value=([], [])),
         ) as fetch_mock:
             result = await search_requirement(item, db_session)
@@ -142,7 +142,7 @@ class TestSearchRequirementCooldown:
         db_session.commit()
 
         with patch(
-            "app.search_service._fetch_fresh",
+            "app.search_service.fanout._fetch_fresh",
             new=AsyncMock(return_value=([], [])),
         ):
             await search_requirement(item, db_session)
@@ -168,9 +168,9 @@ class TestSearchRequirementCooldown:
         # (should be called even on the all-cached short-circuit path)
         fake_match = {"vendor_name": "FakeVendor", "score": 80}
         with (
-            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock,
+            patch("app.search_service.fanout._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock,
             patch(
-                "app.search_service.find_vendor_affinity",
+                "app.search_service.pipeline.find_vendor_affinity",
                 return_value=[fake_match],
             ) as affinity_mock,
         ):
@@ -203,9 +203,9 @@ class TestIcsNcEnqueueOnRefresh:
         db_session.commit()
 
         with (
-            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.search_service.enqueue_for_ics_search") as ics_mock,
-            patch("app.search_service.enqueue_for_nc_search") as nc_mock,
+            patch("app.search_service.fanout._fetch_fresh", new=AsyncMock(return_value=([], []))),
+            patch("app.search_service.pipeline.enqueue_for_ics_search") as ics_mock,
+            patch("app.search_service.pipeline.enqueue_for_nc_search") as nc_mock,
         ):
             await search_requirement(item, db_session)
 
@@ -227,9 +227,9 @@ class TestIcsNcEnqueueOnRefresh:
         db_session.commit()
 
         with (
-            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.search_service.enqueue_for_ics_search") as ics_mock,
-            patch("app.search_service.enqueue_for_nc_search") as nc_mock,
+            patch("app.search_service.fanout._fetch_fresh", new=AsyncMock(return_value=([], []))),
+            patch("app.search_service.pipeline.enqueue_for_ics_search") as ics_mock,
+            patch("app.search_service.pipeline.enqueue_for_nc_search") as nc_mock,
         ):
             await search_requirement(item, db_session)
 
