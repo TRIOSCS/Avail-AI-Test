@@ -157,6 +157,16 @@ async def delete_quote_htmx(
     if quote.status != QuoteStatus.DRAFT:
         raise HTTPException(400, "Only draft quotes can be deleted")
 
+    # Same guard as the JSON path (routers/crm/quotes.py): deleting a quote
+    # CASCADEs into its buy plan -> lines -> quality plan -> prepayments
+    # (including PAID ones). A reopened-to-draft quote must never take that
+    # chain down silently (QC 2026-08-08).
+    from ...models import BuyPlan
+
+    linked_buy_plans = db.query(BuyPlan).filter(BuyPlan.quote_id == quote.id).count()
+    if linked_buy_plans:
+        raise HTTPException(400, f"Cannot delete quote with {linked_buy_plans} linked buy plans.")
+
     db.delete(quote)
     db.commit()
     logger.info("Quote {} deleted by {}", quote_id, user.email)
