@@ -13,8 +13,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.approvals,
 """
 
 import json
-import secrets
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -391,7 +390,6 @@ async def prepay_request_decide(
     # committed. APPROVE → approved + mint the single-use pay_token (the "OK TO WIRE" email
     # link); REJECT → void + the "DO NOT WIRE" stand-down.
     if ar.subject_id is not None and action in ("approve", "reject"):
-        from ...constants import PrepaymentStatus
         from ...models.quality_plan import Prepayment
         from ...services.prepayment_notifications import (
             notify_prepayment_approved,
@@ -399,20 +397,13 @@ async def prepay_request_decide(
             run_prepayment_notify_bg,
         )
 
+        # svc_decide() now stamps the prepayment lifecycle (status + pay_token /
+        # void) atomically for every path (QC 2026-08-08); this endpoint only
+        # fans out the accounting/AP notice + the reject note thread.
         pp = db.get(Prepayment, ar.subject_id)
         if action == "approve":
-            if pp is not None:
-                pp.status = PrepaymentStatus.APPROVED.value
-                pp.approved_by_id = user.id
-                pp.approved_at = datetime.now(UTC)
-                pp.pay_token = secrets.token_urlsafe(32)
-                db.commit()
             await run_prepayment_notify_bg(notify_prepayment_approved, ar.subject_id)
-        elif pp is not None:  # reject
-            pp.status = PrepaymentStatus.VOID.value
-            pp.void_reason = "rejected by approver"
-            pp.voided_at = datetime.now(UTC)
-            pp.voided_by_id = user.id
+        elif pp is not None:  # reject — decide() already set VOID; add the note thread
             # Note-to-the-fixer (2.2): the (required) reject reason lands on the
             # prepayment's notes thread tagged with the decision, and the requester
             # (the fixer) gets an in-app notification.

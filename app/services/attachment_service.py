@@ -48,6 +48,32 @@ def _safe_name(name: str) -> str:
     return (name or "unnamed_file").replace("/", "_").replace("\\", "_")
 
 
+# Trusted content type derived from the (validated) extension — the client's
+# UploadFile.content_type is attacker-controlled and must never drive serving
+# (QC 2026-08-08 stored-XSS fix). Only images + PDF are safe to render inline;
+# everything else is forced to download.
+_EXT_CONTENT_TYPE = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".zip": "application/zip",
+}
+_INLINE_SAFE_TYPES = {"application/pdf", "image/png", "image/jpeg"}
+
+
+def _trusted_content_type(file_name: str | None) -> str:
+    """Content type from the file extension, never the client-supplied header."""
+    ext = os.path.splitext(file_name or "")[1].lower()
+    return _EXT_CONTENT_TYPE.get(ext, "application/octet-stream")
+
+
 def _validate(file: UploadFile, content: bytes) -> None:
     """Raise HTTPException(400) if the file exceeds the size limit or has a disallowed
     extension."""
@@ -208,7 +234,9 @@ async def store_and_attach(
         library_item_id=item_id,
         library_drive_id=drive_id,
         library_web_url=web_url,
-        content_type=file.content_type,
+        # Store the extension-derived type, NOT the attacker-controlled client
+        # header — the stored value drives inline serving (QC 2026-08-08).
+        content_type=_trusted_content_type(safe),
         size_bytes=len(content),
         uploaded_by_id=user.id,
     )
@@ -301,10 +329,19 @@ async def open_attachment(att, user) -> StreamingResponse | RedirectResponse:
             )
             raise HTTPException(404, "Attachment file not found in library")
         safe = "".join(c for c in (att.file_name or "") if c.isalnum() or c in "._- ") or "file"
+        # Re-derive from the filename so a legacy row carrying a spoofed stored
+        # content_type can't render inline either; only images + PDF inline, and
+        # nosniff blocks MIME-sniffing an HTML payload out of a .txt/.csv/.zip
+        # (QC 2026-08-08 stored-XSS fix).
+        media_type = _trusted_content_type(att.file_name)
+        disposition = "inline" if media_type in _INLINE_SAFE_TYPES else "attachment"
         return StreamingResponse(
             BytesIO(data),
-            media_type=att.content_type or "application/octet-stream",
-            headers={"Content-Disposition": f'inline; filename="{safe}"'},
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'{disposition}; filename="{safe}"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     # OneDrive fallback — redirect

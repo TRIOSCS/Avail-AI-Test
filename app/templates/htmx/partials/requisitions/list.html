@@ -6,7 +6,11 @@
    (input-focus / .btn / .card — see styles.css).
 #}
 
-<div class="page-fluid" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}', collapsed: $persist({}).as('saleshub-group-collapse') }">
+<div class="page-fluid"
+     {# XSS fix (QC 2026-08-08): filter params seed Alpine state via data-* /
+        $el.dataset (HTML-escaped, never evaluated), not single-quoted interpolation. #}
+     data-status="{{ status }}" data-sort="{{ sort }}" data-dir="{{ dir }}"
+     x-data="{ selectedIds: new Set(), rStatus: $el.dataset.status, rSort: $el.dataset.sort, rDir: $el.dataset.dir, collapsed: $persist({}).as('saleshub-group-collapse') }">
 
   {# Refresh hook — the create-requisition modal fires `reqListRefresh` on success; on this
      surface (no #parts-list) reload the list into #main-content so the new req appears. #}
@@ -160,7 +164,7 @@
         <span class="text-xs text-gray-600 self-center mr-1">Urgency:</span>
         <input type="hidden" name="urgency" value="{{ urgency }}">
         {% for u_val, u_label in [('hot', 'Hot'), ('critical', 'Critical')] %}
-        <button type="button" x-data="{ active: '{{ urgency }}' === '{{ u_val }}' }"
+        <button type="button" data-urgency="{{ urgency }}" x-data="{ active: $el.dataset.urgency === '{{ u_val }}' }"
                 @click="let inp=$el.closest('form').querySelector('[name=urgency]'); inp.value = inp.value==='{{ u_val }}' ? '' : '{{ u_val }}'; active=inp.value==='{{ u_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
                 :class="active ? '{{ 'bg-amber-100 text-amber-700' if u_val == 'hot' else 'bg-rose-100 text-rose-700' }}' : 'bg-white text-gray-700 border border-gray-200 hover:bg-accent-50'"
                 class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
