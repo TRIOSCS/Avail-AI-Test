@@ -168,6 +168,10 @@ def get_matches_for_user(
                 "available_qty": rollup["available_qty"],
                 "low_cost": rollup["low_cost"],
                 "offer_count": rollup["offer_count"],
+                # Equivalence-pooled spellings (2026-08-08): AI guesses are
+                # color-coded in the UI so a human double-checks them.
+                "variants": rollup.get("variants", {}),
+                "has_ai_variants": rollup.get("has_ai_variants", False),
                 # Demand signals
                 "requirement_count": m.requirement_count or 0,
                 "last_asked_at": m.last_asked_at,

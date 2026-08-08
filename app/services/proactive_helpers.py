@@ -51,6 +51,40 @@ def is_throttled(db: Session, mpn: str, site_id: int, days: int | None = None) -
     )
 
 
+def build_batch_dno_set_multi(db: Session, mpns: set[str], company_ids: set[int]) -> set[int]:
+    """build_batch_dno_set across every spelling of an equivalence class."""
+    if not company_ids or not mpns:
+        return set()
+    return {
+        row[0]
+        for row in db.query(ProactiveDoNotOffer.company_id)
+        .filter(
+            ProactiveDoNotOffer.mpn.in_({m.strip().upper() for m in mpns}),
+            ProactiveDoNotOffer.company_id.in_(company_ids),
+        )
+        .all()
+    }
+
+
+def build_batch_throttle_set_multi(
+    db: Session, mpns: set[str], site_ids: set[int], days: int | None = None
+) -> set[int]:
+    """build_batch_throttle_set across every spelling of an equivalence class."""
+    if not site_ids or not mpns:
+        return set()
+    cutoff = _throttle_cutoff(days)
+    return {
+        row[0]
+        for row in db.query(ProactiveThrottle.customer_site_id)
+        .filter(
+            ProactiveThrottle.mpn.in_({m.strip().upper() for m in mpns}),
+            ProactiveThrottle.customer_site_id.in_(site_ids),
+            ProactiveThrottle.last_offered_at > cutoff,
+        )
+        .all()
+    }
+
+
 def build_batch_dno_set(db: Session, mpn: str, company_ids: set[int]) -> set[int]:
     """Batch-load do-not-offer company IDs for a given MPN.
 

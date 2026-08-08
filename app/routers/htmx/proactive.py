@@ -114,8 +114,15 @@ async def proactive_refresh(
     db: Session = Depends(get_db),
 ):
     """Trigger a proactive scan then return the matches list partial."""
+    from ...services.part_equivalence import classify_new_pairs, windowed_spellings_by_key
     from ...services.proactive_matching import run_proactive_scan
 
+    try:
+        spellings = await asyncio.to_thread(windowed_spellings_by_key, db)
+        await classify_new_pairs(db, spellings, limit=10)
+    except Exception as exc:  # classifier down ≠ scan broken
+        logger.warning("Part-equivalence classification on refresh failed: {}", exc)
+        db.rollback()
     await asyncio.to_thread(run_proactive_scan, db)
     return _render_matches_tab(request, user, db)
 
@@ -685,21 +692,30 @@ async def proactive_offers_drilldown(
     if match.salesperson_id != user.id and not is_manager_or_admin(user):
         raise HTTPException(403, "Not your match")
 
-    rollup = compute_offer_rollup(db, part=(match.mpn or "").strip().upper())
+    part = (match.mpn or "").strip().upper()
+    rollup = compute_offer_rollup(db, part=part)
+    variants = rollup.get("variants", {})
     ctx = _base_ctx(request, user, "proactive")
-    ctx["offers"] = [
-        {
-            "vendor_name": o.vendor_name,
-            "qty_available": o.qty_available,
-            "unit_price": float(o.unit_price) if o.unit_price is not None else None,
-            "condition": o.condition,
-            "lead_time": o.lead_time,
-            "created_at_display": f"{o.created_at.month}/{o.created_at.day}/{o.created_at.year}"
-            if o.created_at
-            else "",
-        }
-        for o in rollup["offers"]
-    ]
+    ctx["part"] = part
+    ctx["offers"] = []
+    for o in rollup["offers"]:
+        spelling = (o.mpn or "").strip().upper()
+        variant = variants.get(spelling) if spelling != part else None
+        ctx["offers"].append(
+            {
+                "spelling": spelling,
+                "variant_kind": variant["kind"] if variant else None,
+                "variant_reason": variant["reason"] if variant else "",
+                "vendor_name": o.vendor_name,
+                "qty_available": o.qty_available,
+                "unit_price": float(o.unit_price) if o.unit_price is not None else None,
+                "condition": o.condition,
+                "lead_time": o.lead_time,
+                "created_at_display": f"{o.created_at.month}/{o.created_at.day}/{o.created_at.year}"
+                if o.created_at
+                else "",
+            }
+        )
     return template_response("htmx/partials/proactive/_offers_drilldown.html", ctx)
 
 
@@ -826,6 +842,30 @@ async def proactive_line_tracking(
         "can_edit": can_manage or line.salesperson_id == user.id,
     }
     return template_response("htmx/partials/proactive/_outreach_line_cells.html", ctx)
+
+
+@router.post("/v2/partials/proactive/equivalence/verdict", response_class=HTMLResponse)
+async def proactive_equivalence_verdict(
+    request: Request,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """The double-check affordance: a human confirms or rejects an AI variant pair.
+
+    A 'different' verdict permanently un-pools the pair (outranks the AI)."""
+    from ...services.part_equivalence import record_human_verdict
+
+    form = await request.form()
+    part_a = str(form.get("part_a") or "").strip()
+    part_b = str(form.get("part_b") or "").strip()
+    verdict = str(form.get("verdict") or "").strip().lower()
+    try:
+        record_human_verdict(db, user, part_a, part_b, verdict)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    db.commit()
+    word = "confirmed the same part" if verdict == "same" else "marked as different parts"
+    return _render_matches_tab(request, user, db, success_msg=f"{part_a} / {part_b} {word}.")
 
 
 # ── Process flow: check send/ignore → stage per-customer drafts → review → send ──

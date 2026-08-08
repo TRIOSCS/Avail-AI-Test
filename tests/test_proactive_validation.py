@@ -97,15 +97,24 @@ def test_line_gsot36c(seeded, db_session):
 
 
 def test_line_ltsr15np(seeded, db_session):
+    """2026-08-08 rule change (user-approved): formatting variants pool.
+
+    'LTSR 15-NP' is the same part as LTSR15-NP once spaces/case are ignored, so the
+    2026-08-06 hand-checked 4,850 becomes 5,850 pooled (4,850 exact + 1,000 under the
+    space spelling), flagged as a formatting variant — never a silent merge. Low cost
+    stays $6.44 (the variant's $10 doesn't lower it).
+    """
     r = compute_offer_rollup(db_session, part="LTSR15-NP")
-    assert r["offer_count"] == 3
-    assert r["available_qty"] == 4_850  # 1,000 + 850 + 3,000
+    assert r["offer_count"] == 4  # 3 exact + 1 variant spelling
+    assert r["available_qty"] == 5_850
     assert r["low_cost"] == 6.44
+    assert r["variants"]["LTSR 15-NP"] == {"qty": 1_000, "kind": "formatting", "reason": "formatting variant"}
+    assert r["has_ai_variants"] is False  # formatting is deterministic, not an AI guess
 
     m = _match_for(db_session, "LTSR15-NP")
     assert m.last_asked_at.date() == datetime(2026, 8, 3, tzinfo=UTC).date()
     assert m.last_asked_qty == 3_000
-    assert m.requirement_count == 2  # 8/3 + 6/30 asks — the repeat-demand signal
+    assert m.requirement_count == 3  # 8/3 + 6/30 exact + 3/30 under the variant spelling
     company = db_session.get(Company, m.company_id)
     assert company.name.startswith("Beckhoff Automation")
 
@@ -123,14 +132,13 @@ def test_line_bsm300(seeded, db_session):
     assert company.name.startswith("RES - Renewable Energy Systems")
 
 
-def test_variant_material_stays_separate(seeded, db_session):
-    """'LTSR 15-NP' (space variant) is its own line — 1,000 pcs, never merged into
-    LTSR15-NP's 4,850.
-
-    The digest's duplicate-materials section flags it.
-    """
+def test_variant_material_pools_from_either_spelling(seeded, db_session):
+    """Both spellings resolve to the SAME pooled class (2026-08-08 rule change); the
+    digest's duplicate-materials section still flags the split for cleanup in the system
+    of record."""
     variant = part_key("LTSR 15-NP")
     r = compute_offer_rollup(db_session, part=variant)
-    assert r["offer_count"] == 1
-    assert r["available_qty"] == 1_000
-    assert r["low_cost"] == 10.0
+    assert r["offer_count"] == 4
+    assert r["available_qty"] == 5_850
+    assert r["low_cost"] == 6.44
+    assert "LTSR15-NP" in r["variants"]  # the exact spelling is the variant from this side

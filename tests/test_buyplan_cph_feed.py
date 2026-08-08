@@ -73,7 +73,7 @@ def _completed_plan(db, *, line_specs, so="SO-1"):
         requirement = Requirement(
             requisition_id=req.id,
             primary_mpn=card.display_mpn,
-            normalized_mpn=card.normalized_mpn,
+            # normalized_mpn derives from primary_mpn at the model layer (2026-08-08)
             material_card_id=(card.id if with_card else None),
         )
         db.add(requirement)

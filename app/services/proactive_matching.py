@@ -6,11 +6,14 @@ the dormant demand this feature exists to catch) plus HOTLIST requisitions
 (standing monitors, no window). Purchase history (CPH) no longer seeds matches;
 it enriches them as a context signal ("bought Nx, last paid $X").
 
-Part identity is the verbatim part-number string, trimmed + uppercased —
-interior spaces/hyphens preserved, so spelling variants stay separate until a
-human merges them at source (see part_key). Supply side aggregates per part:
-available qty = SUM across live offers in the offer window, low cost = MIN
-positive unit price (see compute_offer_rollup).
+Part identity (2026-08-08): matching joins on the normalized key
+(normalize_mpn_key), so formatting variants like "LTSR15-NP" / "LTSR 15-NP"
+pool automatically, and stored AI/human 'same' verdicts (part_equivalences)
+pool ordering-suffix variants — color-coded in the UI as guesses to
+double-check; 'different'/'uncertain'/absent never pool. part_key() remains
+the DISPLAY spelling. Supply side aggregates per class: available qty = SUM
+across live offers in the offer window, low cost = MIN positive unit price
+(see compute_offer_rollups).
 
 Active/approved Offers (including mined inbound) seed proactive matches;
 unverified (pending_review) and terminal (rejected/sold/won/expired) offers
@@ -42,7 +45,7 @@ from ..models import (
 )
 from ..models.config import SystemConfig
 from ..models.purchase_history import CustomerPartHistory
-from .proactive_helpers import build_batch_dno_set, build_batch_throttle_set
+from .proactive_helpers import build_batch_dno_set_multi, build_batch_throttle_set_multi
 
 # Live-supply gate shared by the batch scan and the per-part rollup.
 _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
@@ -66,13 +69,13 @@ def _bust_picks_cache() -> None:
 
 
 def part_key(raw: str | None) -> str | None:
-    """Part identity for matching and rollups: verbatim string, trimmed + uppercased.
+    """DISPLAY identity: verbatim string, trimmed + uppercased.
 
-    Interior spacing and punctuation are PRESERVED — "LTSR15-NP" and
-    "LTSR 15-NP" are separate materials with separate demand histories until a
-    human merges them in the system of record. The digest's duplicate-materials
-    section flags suspected variants; nothing here merges them silently.
-    (normalize_mpn is NOT used: it collapses interior whitespace.)
+    Interior spacing/punctuation preserved so the user always sees the exact
+    spelling on file. Pooling identity is the normalized key + the stored
+    equivalence verdicts (see services/part_equivalence) — never a silent
+    string merge; the source records keep their spellings, and pooled AI
+    variants are flagged for a human to double-check.
     """
     if raw is None:
         return None
@@ -94,38 +97,75 @@ def _offer_window_start() -> datetime:
 
 
 def compute_offer_rollups(db: Session, *, parts: set[str]) -> dict[str, dict]:
-    """Batch rollup: aggregate live supply for many parts in ONE query.
+    """Batch rollup: aggregate live supply for many parts, equivalence-aware.
 
-    Per part: available_qty sums every live in-window offer including
-    zero-priced ones; low_cost is the MIN over POSITIVE unit prices only
-    ($0.00 means "price not provided", not free stock). Offers come back
-    newest-first for drill-down display. Callers with a whole match list use
-    this form so query count stays independent of match count.
+    Each part's rollup pools its whole equivalence class (2026-08-08):
+    spellings sharing the same normalized key pool automatically (formatting
+    variants), and keys the stored AI/human verdicts call 'same' pool as
+    flagged AI variants — the UI color-codes those so a human double-checks.
+    available_qty sums every live in-window offer including zero-priced ones;
+    low_cost is the MIN over POSITIVE unit prices only ($0.00 means "price
+    not provided", not free stock). Offers come back newest-first for
+    drill-down display. ``variants`` maps each pooled non-canonical spelling
+    to {qty, kind: formatting|ai, reason}.
     """
-    out: dict[str, dict] = {p: {"offers": [], "offer_count": 0, "available_qty": 0, "low_cost": None} for p in parts}
+    from .part_equivalence import expand_parts, norm_key
+
+    out: dict[str, dict] = {
+        p: {
+            "offers": [],
+            "offer_count": 0,
+            "available_qty": 0,
+            "low_cost": None,
+            "variants": {},
+            "has_ai_variants": False,
+        }
+        for p in parts
+    }
     if not parts:
+        return out
+
+    class_info = expand_parts(db, parts)
+    all_keys = {k for info in class_info.values() for k in info["keys"]}
+    if not all_keys:
         return out
     offers = (
         db.query(Offer)
         .filter(
-            func.upper(Offer.mpn).in_(parts),
+            Offer.normalized_mpn.in_(all_keys),
             Offer.status.in_(_LIVE_STATUSES),
             Offer.created_at >= _offer_window_start(),
         )
         .order_by(Offer.created_at.desc())
         .all()
     )
+    by_key: dict[str, list] = {}
     for o in offers:
-        rollup = out.get(part_key(o.mpn) or "")
-        if rollup is None:
-            continue
-        rollup["offers"].append(o)
-        rollup["offer_count"] += 1
-        rollup["available_qty"] += o.qty_available or 0
-        if o.unit_price is not None and float(o.unit_price) > 0:
-            price = float(o.unit_price)
-            if rollup["low_cost"] is None or price < rollup["low_cost"]:
-                rollup["low_cost"] = price
+        by_key.setdefault(o.normalized_mpn or norm_key(o.mpn), []).append(o)
+
+    for p in parts:
+        info = class_info[p]
+        rollup = out[p]
+        base_key = norm_key(p)
+        for k in info["keys"]:
+            for o in by_key.get(k, []):
+                rollup["offers"].append(o)
+                rollup["offer_count"] += 1
+                rollup["available_qty"] += o.qty_available or 0
+                if o.unit_price is not None and float(o.unit_price) > 0:
+                    price = float(o.unit_price)
+                    if rollup["low_cost"] is None or price < rollup["low_cost"]:
+                        rollup["low_cost"] = price
+                spelling = part_key(o.mpn) or ""
+                if spelling and spelling != p:
+                    kind = "formatting" if k == base_key else "ai"
+                    variant = rollup["variants"].setdefault(
+                        spelling,
+                        {"qty": 0, "kind": kind, "reason": info["ai_variants"].get(k, "formatting variant")},
+                    )
+                    variant["qty"] += o.qty_available or 0
+                    if kind == "ai":
+                        rollup["has_ai_variants"] = True
     return out
 
 
@@ -318,14 +358,16 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
     return req_matches + hot_matches
 
 
-def _existing_match_company_ids(db: Session, part: str) -> set[int | None]:
-    """Company ids (None = back-order lines) that already hold an active match for this
-    part."""
+def _existing_match_company_ids(db: Session, spellings: set[str]) -> set[int | None]:
+    """Company ids (None = back-order lines) holding an active match under ANY spelling
+    of the part's equivalence class."""
+    if not spellings:
+        return set()
     return {
         row[0]
         for row in db.query(ProactiveMatch.company_id)
         .filter(
-            ProactiveMatch.mpn == part,
+            ProactiveMatch.mpn.in_(spellings),
             ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
         )
         .all()
@@ -350,12 +392,20 @@ def _find_requirement_matches(
     """
     # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
     from .activity_service import _update_last_activity
+    from .part_equivalence import expand_part, observed_spellings
     from .pricing_history import last_quote_for_part, last_win_for_part
 
     rollup = compute_offer_rollup(db, part=part)
     if not rollup["offer_count"]:
         return []
     our_cost = rollup["low_cost"] or (float(source_offer.unit_price) if source_offer.unit_price else None)
+
+    # Equivalence class: pooled keys for demand joins + every observed spelling
+    # for suppression/dedup (throttle, do-not-offer, active-match) so a variant
+    # spelling can never sidestep a suppression.
+    eq = expand_part(db, part)
+    class_keys = set(eq["keys"])
+    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
 
     # Price anchors (D5): computed once per part; spread vs today's low cost feeds
     # the score, same-customer wins resolved per company inside the loop.
@@ -370,7 +420,7 @@ def _find_requirement_matches(
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .outerjoin(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
         .filter(
-            func.upper(Requirement.primary_mpn) == part,
+            Requirement.normalized_mpn.in_(class_keys),
             Requirement.created_at >= _requirement_window_start(),
             Requisition.is_scratch.is_(False),
             Requisition.status != RequisitionStatus.HOTLIST.value,
@@ -420,9 +470,11 @@ def _find_requirement_matches(
         ):
             sites.setdefault(s.company_id, s)
 
-    dno_company_ids = build_batch_dno_set(db, part, company_ids) if company_ids else set()
-    throttled_site_ids = build_batch_throttle_set(db, part, {s.id for s in sites.values()}) if sites else set()
-    existing = _existing_match_company_ids(db, part)
+    dno_company_ids = build_batch_dno_set_multi(db, class_spellings, company_ids) if company_ids else set()
+    throttled_site_ids = (
+        build_batch_throttle_set_multi(db, class_spellings, {s.id for s in sites.values()}) if sites else set()
+    )
+    existing = _existing_match_company_ids(db, class_spellings)
 
     # CPH context (purchase history as a signal, not the seed).
     card_ids = {source_offer.material_card_id} | {g["newest_req"].material_card_id for g in groups.values()}
@@ -447,7 +499,7 @@ def _find_requirement_matches(
         if isinstance(k, tuple)
         and db.query(ProactiveMatch.id)
         .filter(
-            ProactiveMatch.mpn == part,
+            ProactiveMatch.mpn.in_(class_spellings),
             ProactiveMatch.company_id.is_(None),
             ProactiveMatch.salesperson_id == g["owner_id"],
             ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
@@ -505,7 +557,9 @@ def _find_requirement_matches(
             requisition_id=newest_requisition.id,
             customer_site_id=site.id if site else None,
             salesperson_id=salesperson_id,
-            mpn=part,
+            # Display identity = the customer's own newest spelling; equivalence
+            # classes make the variants reachable from it.
+            mpn=part_key(newest_req.primary_mpn) or part,
             material_card_id=source_offer.material_card_id or newest_req.material_card_id,
             company_id=company_id,
             match_score=score,
@@ -563,9 +617,15 @@ def _find_hotlist_matches(
     query won't see them) — union them into the existing-match set so dedup
     holds across both passes.
     """
+    from .part_equivalence import expand_part, observed_spellings
+
     fallback_offer_id = source_offer.id if source_offer else None
     if not fallback_offer_id:
         return []
+
+    eq = expand_part(db, part)
+    class_keys = set(eq["keys"])
+    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
 
     rows = (
         db.query(Requisition, CustomerSite, Company)
@@ -574,7 +634,7 @@ def _find_hotlist_matches(
         .join(Company, Company.id == func.coalesce(Requisition.company_id, CustomerSite.company_id))
         .filter(
             Requisition.status == RequisitionStatus.HOTLIST.value,
-            func.upper(Requirement.primary_mpn) == part,
+            Requirement.normalized_mpn.in_(class_keys),
             CustomerSite.is_active.is_(True),
         )
         .all()
@@ -582,10 +642,10 @@ def _find_hotlist_matches(
     if not rows:
         return []
 
-    existing = _existing_match_company_ids(db, part)
+    existing = _existing_match_company_ids(db, class_spellings)
     existing |= skip_company_ids or set()
 
-    dno = build_batch_dno_set(db, part, {c.id for _, _, c in rows})
+    dno = build_batch_dno_set_multi(db, class_spellings, {c.id for _, _, c in rows})
 
     out: list[ProactiveMatch] = []
     for req, site, company in rows:
@@ -688,13 +748,16 @@ def run_proactive_scan(db: Session) -> dict:
     total_matches = 0
 
     # Deduplicate: don't scan the same part twice in one run
+    from .part_equivalence import norm_key
+
     scanned_parts: set[str] = set()
 
     for offer in new_offers:
         part = part_key(offer.mpn)
-        if not part or part in scanned_parts:
+        scan_key = norm_key(offer.mpn)
+        if not part or not scan_key or scan_key in scanned_parts:
             continue
-        scanned_parts.add(part)
+        scanned_parts.add(scan_key)
         matches = find_matches_for_offer(offer.id, db)
         total_matches += len(matches)
 

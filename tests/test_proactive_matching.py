@@ -189,13 +189,15 @@ def test_rollup_excludes_non_live_statuses(db_session):
     assert r["offer_count"] == 1
 
 
-def test_rollup_variant_spelling_stays_separate(db_session):
+def test_rollup_pools_formatting_variants_with_flag(db_session):
+    """2026-08-08: spellings sharing a normalized key pool automatically, flagged."""
     _make_offer(db_session, mpn="LTSR15-NP", qty_available=4850, unit_price=Decimal("6.44"))
     _make_offer(db_session, mpn="LTSR 15-NP", qty_available=1000, unit_price=Decimal("10.00"))
     exact = compute_offer_rollup(db_session, part="LTSR15-NP")
-    variant = compute_offer_rollup(db_session, part="LTSR 15-NP")
-    assert exact["available_qty"] == 4850
-    assert variant["available_qty"] == 1000
+    assert exact["available_qty"] == 5850
+    assert exact["low_cost"] == 6.44
+    assert exact["variants"]["LTSR 15-NP"]["kind"] == "formatting"
+    assert exact["has_ai_variants"] is False
 
 
 # ── Scoring units ────────────────────────────────────────────────────────
@@ -486,13 +488,17 @@ def test_cph_enriches_match_as_context(db_session):
     assert m.margin_pct is not None
 
 
-def test_variant_spelling_does_not_cross_match(db_session):
-    """An offer under 'LTSR 15-NP' must not match a 'LTSR15-NP' requirement."""
+def test_formatting_variant_offer_matches_requirement(db_session):
+    """2026-08-08: an offer under 'LTSR 15-NP' DOES match a 'LTSR15-NP' ask
+    (same normalized key); the customer's own spelling wins the display."""
     data = _setup_scenario(db_session)
     data["requirement"].primary_mpn = "LTSR15-NP"
+    data["requirement"].normalized_mpn = "ltsr15np"
     db_session.commit()
     offer = _make_offer(db_session, mpn="LTSR 15-NP")
-    assert find_matches_for_offer(offer.id, db_session) == []
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1
+    assert matches[0].mpn == "LTSR15-NP"
 
 
 def test_offer_without_material_card_still_matches(db_session):
