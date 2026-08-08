@@ -121,6 +121,18 @@ async def _job_proactive_matching():
 
         loop = asyncio.get_running_loop()
 
+        # Classify any new part-equivalence candidate pairs FIRST so this
+        # scan already pools freshly-judged variants (verdicts are cached
+        # forever; a pass with nothing new is a no-op).
+        try:
+            from ..services.part_equivalence import classify_new_pairs, windowed_spellings_by_key
+
+            spellings = await loop.run_in_executor(None, windowed_spellings_by_key, db)
+            await asyncio.wait_for(classify_new_pairs(db, spellings), timeout=120)
+        except Exception as eq_exc:  # classifier down ≠ matching broken
+            logger.warning("Part-equivalence classification pass failed: {}", eq_exc)
+            db.rollback()
+
         # Requirement-history + hotlist scan over new live offers
         scan_result = await asyncio.wait_for(
             loop.run_in_executor(None, run_proactive_scan, db),

@@ -1,30 +1,58 @@
 {#
   proactive/_offers_drilldown.html — The individual live offers behind one rolled-up match line.
-  Receives: offers (list of dicts: vendor_name, qty_available, unit_price, created_at_display,
-            condition, lead_time).
+  Variant-spelling offers are color-coded: amber = AI-judged equivalent (double-check;
+  one tap rejects the pair permanently), gray = formatting variant of the same number.
+  Receives: offers (dicts: vendor_name, qty_available, unit_price, created_at_display,
+            condition, lead_time, spelling, variant_kind, variant_reason), part (canonical).
   Called by: GET /v2/partials/proactive/{match_id}/offers (row expand).
-  Depends on: Tailwind CSS.
+  Depends on: Tailwind CSS, HTMX.
 #}
 <table class="w-full text-xs">
   <thead>
     <tr class="text-gray-500">
+      <th class="text-left py-1 font-medium">Part #</th>
       <th class="text-left py-1 font-medium">Vendor</th>
       <th class="text-right py-1 font-medium">Qty</th>
       <th class="text-right py-1 font-medium">Unit price</th>
       <th class="text-left py-1 pl-4 font-medium">Condition</th>
       <th class="text-left py-1 font-medium">Lead time</th>
       <th class="text-right py-1 font-medium">Seen</th>
+      <th class="py-1"></th>
     </tr>
   </thead>
   <tbody>
     {% for o in offers %}
-    <tr class="border-t border-line-base text-gray-700">
+    <tr class="border-t border-line-base {{ 'bg-amber-50 text-amber-900' if o.variant_kind == 'ai' else 'bg-gray-50 text-gray-600' if o.variant_kind == 'formatting' else 'text-gray-700' }}">
+      <td class="py-1 font-mono">
+        {{ o.spelling }}
+        {% if o.variant_kind == 'ai' %}
+        <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 ml-1"
+              title="{{ o.variant_reason | e }}">AI — verify</span>
+        {% elif o.variant_kind == 'formatting' %}
+        <span class="badge-mini bg-gray-100 text-gray-600 ml-1" title="Formatting variant of the same number">variant</span>
+        {% endif %}
+      </td>
       <td class="py-1">{{ o.vendor_name }}</td>
       <td class="py-1 text-right tabular-nums">{{ "{:,}".format(o.qty_available|int) if o.qty_available else '--' }}</td>
       <td class="py-1 text-right tabular-nums">{% if o.unit_price is not none %}${{ "%.4f"|format(o.unit_price) }}{% if o.unit_price == 0 %} <span class="text-gray-400">(no price)</span>{% endif %}{% else %}--{% endif %}</td>
       <td class="py-1 pl-4">{{ o.condition or '--' }}</td>
       <td class="py-1">{{ o.lead_time or '--' }}</td>
       <td class="py-1 text-right">{{ o.created_at_display }}</td>
+      <td class="py-1 text-right">
+        {% if o.variant_kind == 'ai' %}
+        <form hx-post="/v2/partials/proactive/equivalence/verdict"
+              hx-target="#main-content"
+              hx-confirm="Mark {{ o.spelling | e }} as NOT the same part as {{ part | e }}? This removes it from the pooled availability permanently."
+              class="inline">
+          <input type="hidden" name="part_a" value="{{ part }}">
+          <input type="hidden" name="part_b" value="{{ o.spelling }}">
+          <input type="hidden" name="verdict" value="different">
+          <button type="submit" class="text-[11px] text-amber-800 underline hover:text-rose-600 transition-colors">
+            Not the same part
+          </button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>

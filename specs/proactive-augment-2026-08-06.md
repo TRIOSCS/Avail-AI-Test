@@ -252,3 +252,32 @@ adds 1,000 pcs + one 3/30/2026 ask, incl. an apparent double-entered offer —
 same vendor/qty/price/date, different SRC#), and near-twin MPNs
 `GSOT36C-E3-08` / `PSOT36C` (the latter with a 500K-pc offer at $0.01 —
 possible typo'd part). Detection lists these for a human; nothing merges.
+
+## Addendum 2026-08-08 — AI part-equivalence (user-requested)
+
+User: catch false negatives from formatting differences and benign ordering
+suffixes (packaging codes) without false positives; AI guesses color-coded so
+the user double-checks. Design shipped:
+
+- **Formatting tier (deterministic):** matching joins on normalize_mpn_key,
+  so spacing/hyphen/case variants pool automatically, labeled "variants
+  pooled" (gray). This supersedes the 08-06 verbatim-identity rule; the
+  hand-checked LTSR15-NP line becomes 5,850 pooled (4,850 + 1,000 under
+  'LTSR 15-NP') with the split still flagged for cleanup at source.
+  normalized_mpn is now derived at the model layer (Offer.mpn /
+  Requirement.primary_mpn validators) so no creation path can miss it.
+- **AI tier (part_equivalences, migration 206):** candidate key pairs
+  (suffix shape ≤6 extra chars, or same-length one-char near-miss) are
+  classified ONCE by Claude (Haiku, conservative prompt: packaging/reel/RoHS
+  = same; voltage/grade/family = different; else uncertain) and stored.
+  Only verdict=same pools — amber "AI match — verify" chip on the row, amber
+  rows + reasoning in the offers drill-down, textual "AI variant match,
+  VERIFY" note on digest lines. different/uncertain/absent never pool
+  (PSOT36C can never contaminate GSOT36C without a human saying so).
+- **Human override:** one tap ("Not the same part") writes a source=human
+  verdict that permanently outranks the AI; suppression (throttle,
+  do-not-offer, active-match dedup) applies across the whole class so a
+  variant spelling can't sidestep it.
+- Classification runs before each scan (and lightly on manual refresh),
+  capped per pass; matching itself never calls the model — deterministic,
+  auditable, and free at read time.

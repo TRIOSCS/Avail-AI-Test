@@ -451,6 +451,39 @@ class ProactiveDoNotOffer(Base):
     __table_args__ = (Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),)
 
 
+class PartEquivalence(Base):
+    """AI/human verdict: are two part-number spellings the same orderable part?
+
+    Keys are normalize_mpn_key values (stable, formatting-independent), with key_a <
+    key_b so each pair stores once. Verdicts: same (safe to pool supply/demand —
+    packaging/reel/RoHS-style ordering suffixes), different (never pool — functional
+    suffixes like voltage/grade, or distinct parts), uncertain (never pooled, surfaced
+    for a human). A human verdict (source='human') always outranks the AI's. Matching
+    consults THIS TABLE, never the model, so results stay deterministic and auditable.
+    """
+
+    __tablename__ = "part_equivalences"
+    id = Column(Integer, primary_key=True)
+    key_a = Column(String(255), nullable=False)
+    key_b = Column(String(255), nullable=False)
+    example_a = Column(String(255))  # raw spelling seen for key_a
+    example_b = Column(String(255))
+    verdict = Column(String(20), nullable=False)  # same | different | uncertain
+    confidence = Column(Float)
+    reason = Column(Text)
+    source = Column(String(20), nullable=False, default="ai")  # ai | human
+    decided_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(UTCDateTime)
+
+    decided_by = relationship("User", foreign_keys=[decided_by_id])
+
+    __table_args__ = (
+        Index("ix_peq_pair", "key_a", "key_b", unique=True),
+        Index("ix_peq_key_b", "key_b"),
+    )
+
+
 class ProactiveDigest(Base):
     """A per-salesperson outreach digest: generated as a draft, reviewed by a
     manager, sent manually with the reviewer's token. Nothing sends automatically.

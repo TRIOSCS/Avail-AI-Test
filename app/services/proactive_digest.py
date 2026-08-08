@@ -146,6 +146,11 @@ def _render_line(line: dict) -> list[str]:
         rep_part = f", {win['rep']}" if win["rep"] else ""
         at_part = f" at {win['company']}" if win["company"] else ""
         out.append(f"      won ${fmt_price(win['price'])} on {fmt_date(win['at'])}{rep_part}{at_part}")
+    for spelling, v in (line.get("variants") or {}).items():
+        if v.get("kind") == "ai":
+            out.append(f"      includes {fmt_qty(v['qty'])} pcs under {spelling} — AI variant match, VERIFY")
+        else:
+            out.append(f"      includes {fmt_qty(v['qty'])} pcs under {spelling} (formatting variant)")
     return out
 
 
@@ -228,6 +233,7 @@ def generate_digests(db: Session) -> dict:
             "requirement_count": m.requirement_count or 0,
             "available_qty": rollup["available_qty"],
             "low_cost": rollup["low_cost"],
+            "variants": rollup.get("variants", {}),
             "quote_anchor": last_quote_for_part(db, part=m.mpn),
             "win_anchor": last_win_for_part(db, part=m.mpn),
         }

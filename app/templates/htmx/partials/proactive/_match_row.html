@@ -44,6 +44,15 @@
     {% elif match.match_source == 'hotlist' %}
     <p class="text-secondary mt-0.5">hotlist</p>
     {% endif %}
+    {% if match.has_ai_variants %}
+    <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 mt-0.5"
+          title="Availability includes AI-matched variant part numbers — expand the offers to verify">
+      AI match — verify
+    </span>
+    {% elif match.variants %}
+    <span class="badge-mini bg-gray-100 text-gray-600 mt-0.5"
+          title="Availability includes formatting variants of the same part number">variants pooled</span>
+    {% endif %}
     {% if match.customer_purchase_count %}
     <span class="inline-flex items-center gap-0.5 text-secondary mt-0.5"
           title="Customer bought {{ match.customer_purchase_count }}x{% if match.customer_last_purchased_at %}, last {{ match.customer_last_purchased_at }}{% endif %}">

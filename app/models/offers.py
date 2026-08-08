@@ -108,6 +108,16 @@ class Offer(Base):
     attribution_status = Column(String(20), default="active")  # active, expired, converted
 
     # --- Validators ---
+    @validates("mpn")
+    def _derive_normalized_mpn(self, _key, value):
+        # normalized_mpn can never be missing — key-based proactive matching
+        # (2026-08-08) joins on it, and a NULL would hide the offer until the
+        # next startup backfill. Deriving here covers every creation path.
+        from ..utils.normalization import normalize_mpn_key
+
+        self.normalized_mpn = normalize_mpn_key(value) if value else None  # type: ignore[assignment]
+        return value
+
     @validates("unit_price")
     def _validate_unit_price(self, _key, value):
         if value is not None and value < 0:

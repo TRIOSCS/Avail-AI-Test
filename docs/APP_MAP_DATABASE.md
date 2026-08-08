@@ -1029,6 +1029,14 @@ sales_order_number (external ERP reference only). Feeds the weekly
 contact-rate summary.
 **`proactive_throttle`** — Rate limit: MPN + site (unique), last_offered_at
 **`proactive_do_not_offer`** — Blacklist: MPN + company (unique)
+**`part_equivalences`** — AI/human verdicts on part-spelling pairs (migration
+206): key_a/key_b (normalize_mpn_key, sorted, unique), verdict
+same\|different\|uncertain, confidence, reason, source ai\|human. Matching
+pools supply/demand only across verdict=same pairs (color-coded in the UI as
+AI guesses to double-check); formatting variants pool automatically via the
+shared normalized key; human verdicts outrank AI; absent/uncertain never
+pools. Classified once per pair (Haiku) by the scan job — matching reads the
+table, never the model.
 
 ---
 

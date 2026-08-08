@@ -167,6 +167,7 @@ class Requirement(Base):
     requisition = relationship("Requisition", back_populates="requirements")
     material_card = relationship("MaterialCard", foreign_keys=[material_card_id], lazy="joined")
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
+
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
 
@@ -190,6 +191,13 @@ class Requirement(Base):
 
     @validates("primary_mpn", "customer_pn", "oem_pn", "oem_hint")
     def _uppercase_mpn_fields(self, _key, value):
+        if _key == "primary_mpn":
+            # normalized_mpn can never be missing — key-based proactive matching
+            # (2026-08-08) joins on it, and a NULL would hide the ask until the
+            # next startup backfill. Deriving here covers every creation path.
+            from ..utils.normalization import normalize_mpn_key
+
+            self.normalized_mpn = normalize_mpn_key(value) if value else None  # type: ignore[assignment]
         return value.upper().strip() if value else value
 
     __table_args__ = (
