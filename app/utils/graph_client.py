@@ -156,9 +156,7 @@ class GraphClient:
             "$top": str(max_results),
             "$orderby": "sentDateTime desc",
         }
-        data = await self.get_json(path, params=params)
-        if isinstance(data, dict) and "error" in data:
-            raise RuntimeError(f"Graph API error searching sent messages: {data}")
+        data = await self.get_json(path, params=params)  # raises GraphAPIError on failure
         messages: list[dict] = data.get("value", [])  # Graph JSON boundary
         return messages
 
