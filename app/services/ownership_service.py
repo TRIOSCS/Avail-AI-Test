@@ -278,19 +278,9 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
 
     days_remaining = max(0, inactivity_limit - days_inactive)
 
-    # Log the warning as a system activity (also serves as dedup + dashboard notification)
-    warning_record = ActivityLog(
-        user_id=owner.id,
-        activity_type="ownership_warning",
-        channel="system",
-        company_id=company.id,
-        contact_name=company.name,
-        subject=f"Ownership warning: {days_remaining} days remaining on {company.name}",
-    )
-    db.add(warning_record)
-    db.flush()
-
-    # Send email alert
+    # Send email alert FIRST — the ActivityLog row below doubles as the daily
+    # dedup guard, so writing it before a send that then fails would silently
+    # suppress every retry for the rest of the day (QC 2026-08-08).
     try:
         from app.scheduler import get_valid_token
         from app.utils.graph_client import GraphClient
@@ -328,6 +318,19 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
         }
         await gc.post_json("/me/sendMail", payload)
         logger.info(f"Warning email sent to {owner.email} for {company.name} ({days_remaining} days remaining)")
+
+        # Delivered — NOW record the warning (dedup + dashboard notification).
+        db.add(
+            ActivityLog(
+                user_id=owner.id,
+                activity_type="ownership_warning",
+                channel="system",
+                company_id=company.id,
+                contact_name=company.name,
+                subject=f"Ownership warning: {days_remaining} days remaining on {company.name}",
+            )
+        )
+        db.flush()
 
     except Exception as e:
         logger.error(f"Failed to send warning email to {owner.email} for {company.name}: {e}")

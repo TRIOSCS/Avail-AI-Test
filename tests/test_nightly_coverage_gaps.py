@@ -73,8 +73,10 @@ class TestGraphClientSearchSentMessages:
         mock_http.get = AsyncMock(
             return_value=MagicMock(status_code=200, json=lambda: {"error": {"code": "AccessDenied"}})
         )
+        from app.utils.graph_client import GraphAPIError
+
         gc = GraphClient("token-abc")
-        with pytest.raises(RuntimeError, match="Graph API error"):
+        with pytest.raises(GraphAPIError, match="Graph API error"):
             await gc.search_sent_messages("LM317T")
 
     @pytest.mark.asyncio

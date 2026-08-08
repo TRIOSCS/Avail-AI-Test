@@ -719,6 +719,7 @@ async def poll_inbox(
                     "$orderby": "receivedDateTime desc",
                     "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
                 },
+                raise_on_error=False,
             )
             if data and "error" in data:
                 # The retry layer signals exhausted retries / non-retryable 4xx

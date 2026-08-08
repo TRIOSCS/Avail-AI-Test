@@ -889,7 +889,7 @@ async def attach_from_onedrive(
     if not user.access_token:
         raise HTTPException(401, "Microsoft account not connected")
     gc = GraphClient(user.access_token)
-    item = await gc.get_json(f"/me/drive/items/{item_id}")
+    item = await gc.get_json(f"/me/drive/items/{item_id}", raise_on_error=False)
     if "error" in item:
         raise HTTPException(404, "OneDrive item not found")
     att = OfferAttachment(
@@ -946,6 +946,7 @@ async def browse_onedrive(
             "$top": "50",
             "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime",
         },
+        raise_on_error=False,
     )
     if "error" in data:
         raise HTTPException(502, "Failed to browse OneDrive")

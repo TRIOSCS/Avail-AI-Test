@@ -130,7 +130,7 @@ async def send_quote_email(
             },
             "saveToSentItems": "true",
         }
-        result = await gc.post_json("/me/sendMail", payload)
+        result = await gc.post_json("/me/sendMail", payload, raise_on_error=False)
         if "error" in result:
             raise QuoteSendError(f"Failed to send quote email: {result.get('detail', '')}")
 

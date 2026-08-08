@@ -487,6 +487,11 @@ async def send_proactive_offer(
         logger.error(f"Failed to send proactive offer email: {e}")
         for m in matches:
             m.status = ProactiveMatchStatus.FAILED
+        # The row was created with the model's 'sent'/sent_at defaults so the
+        # subject tag could carry its id — make it honest (QC 2026-08-08): a
+        # rejected send is FAILED, never counted or shown as delivered.
+        po.status = ProactiveOfferStatus.FAILED
+        po.sent_at = None
         send_succeeded = False
 
     # Upsert throttle entries only if the email was actually sent
@@ -704,7 +709,7 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     entries as the prepare-page send. Raises ValueError on wrong status / no recipients
     / no permission.
     """
-    from ..utils.graph_client import GraphClient
+    from ..utils.graph_client import GraphAPIError, GraphClient
 
     po = db.get(ProactiveOffer, po_id)
     if not po or po.status != ProactiveOfferStatus.DRAFT:
@@ -717,17 +722,22 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
 
     tagged_subject = f"[AVAIL-PROACTIVE-{po.id}] {po.subject}"
     gc = GraphClient(token)
-    await gc.post_json(
-        "/me/sendMail",
-        {
-            "message": {
-                "subject": tagged_subject,
-                "body": {"contentType": "HTML", "content": po.email_body_html},
-                "toRecipients": [{"emailAddress": {"address": e}} for e in recipient_emails],
+    try:
+        await gc.post_json(
+            "/me/sendMail",
+            {
+                "message": {
+                    "subject": tagged_subject,
+                    "body": {"contentType": "HTML", "content": po.email_body_html},
+                    "toRecipients": [{"emailAddress": {"address": e}} for e in recipient_emails],
+                },
+                "saveToSentItems": "true",
             },
-            "saveToSentItems": "true",
-        },
-    )
+        )
+    except GraphAPIError as exc:
+        # Draft stays DRAFT, matches stay NEW, no throttle — retry is one click.
+        logger.error("Proactive draft #{} send rejected by Graph: {}", po.id, exc)
+        raise ValueError("Send failed — Microsoft rejected the message; the draft is untouched, try again") from exc
     now = datetime.now(UTC)
     po.status = ProactiveOfferStatus.SENT
     po.sent_at = now
@@ -965,8 +975,9 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             0,
         )
 
-    # Base filter — staged Process drafts are not outreach yet, never counted.
-    base_filter = [ProactiveOffer.status != ProactiveOfferStatus.DRAFT]
+    # Base filter — staged drafts aren't outreach yet and FAILED sends never
+    # reached the customer; neither may inflate the sent counts.
+    base_filter = [ProactiveOffer.status.notin_([ProactiveOfferStatus.DRAFT, ProactiveOfferStatus.FAILED])]
     if salesperson_id:
         base_filter.append(ProactiveOffer.salesperson_id == salesperson_id)
 
