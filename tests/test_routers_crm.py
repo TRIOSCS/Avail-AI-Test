@@ -149,16 +149,16 @@ def test_quote_to_dict_sent():
 
 
 def _mock_db_with_last_quote(last_quote_number):
-    """Build a mock db whose query chain returns a Quote with the given number (or
-    None)."""
-    last = None
-    if last_quote_number is not None:
-        last = MagicMock()
-        last.quote_number = last_quote_number
+    """Build a mock db for next_quote_number (QC 2026-08-08 contract).
+
+    The generator now takes a lock via the newest-row chain (result unused) and computes
+    the MAX sequence from a quote_number column scan — feed the number through .all() as
+    (number,) rows.
+    """
     db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
-        last
-    )
+    chain = db.query.return_value.filter.return_value
+    chain.order_by.return_value.with_for_update.return_value.first.return_value = None
+    chain.all.return_value = [(last_quote_number,)] if last_quote_number is not None else []
     return db
 
 

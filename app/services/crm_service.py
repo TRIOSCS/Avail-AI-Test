@@ -11,6 +11,7 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
     app/models/auth (User), app/utils/search_builder
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select
@@ -32,25 +33,31 @@ STALENESS_DUE_SOON_DAYS = 14
 def next_quote_number(db: Session) -> str:
     """Generate next sequential quote number: Q-YYYY-NNNN.
 
-    Uses SELECT FOR UPDATE to prevent race conditions.
+    Takes the MAX numeric sequence across the year's quote numbers rather than
+    trusting the newest row: revising a non-latest quote re-issues its
+    canonical number on a NEW row (the old one becomes ...-R{n}), so
+    newest-by-id can lag the real maximum and every subsequent create would
+    collide on the unique constraint (QC 2026-08-08). The newest-row SELECT
+    FOR UPDATE is retained as the concurrency mutex it always was.
     """
     year = datetime.now(UTC).year
     prefix = f"Q-{year}-"
-    last = (
-        db.query(Quote)
+    # Serialize concurrent generators (same lock target as before).
+    (
+        db.query(Quote.id)
         .filter(Quote.quote_number.like(f"{prefix}%"))
         .order_by(Quote.id.desc())
         .with_for_update()
         .first()
     )
-    if last:
-        try:
-            seq = int(last.quote_number.split("-")[-1]) + 1
-        except ValueError:
-            seq = 1
-    else:
-        seq = 1
-    return f"{prefix}{seq:04d}"
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)")
+    numbers = db.query(Quote.quote_number).filter(Quote.quote_number.like(f"{prefix}%")).all()
+    seq = 0
+    for (number,) in numbers:
+        match = pattern.match(number or "")
+        if match:
+            seq = max(seq, int(match.group(1)))
+    return f"{prefix}{seq + 1:04d}"
 
 
 # ═══════════════════════════════════════════════════════════════════════
