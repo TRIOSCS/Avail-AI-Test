@@ -79,8 +79,17 @@ def test_gate_matches_matrix_shard_names():
     assert 'select(.name==\\"$1\\") | (if .status' not in text
 
 
-def test_deploy_yml_parses():
-    assert yaml.safe_load(DEPLOY_YML.read_text()) is not None
+def test_deploy_yml_structure_intact():
+    """The gate edit must keep deploy.yml a valid workflow with the verify-ci gate still
+    guarding the deploy job."""
+    wf = yaml.safe_load(DEPLOY_YML.read_text())
+    jobs = wf["jobs"]
+    assert "verify-ci" in jobs, "the CI gate job was removed"
+    assert "deploy" in jobs, "the deploy job was removed"
+    # The deploy job must still depend on the gate (needs: verify-ci).
+    needs = jobs["deploy"].get("needs")
+    needs = [needs] if isinstance(needs, str) else (needs or [])
+    assert "verify-ci" in needs, "deploy no longer waits on the CI gate"
 
 
 def test_rollback_is_db_aware():
