@@ -48,7 +48,7 @@ async def safe_background_task(
     coro: Coroutine[Any, Any, Any],
     *,
     task_name: str = "background_task",
-    suppress_in_testing: bool = False,
+    suppress_in_testing: bool = True,
 ) -> None:
     """Fire-and-forget an async coroutine with error isolation.
 
@@ -70,10 +70,17 @@ async def safe_background_task(
         internally via hold_bg_task(), so no caller needs it back.
     """
     # Under the test suite, fire-and-forget tasks that open real async DB sessions
-    # cause nondeterministic xdist worker segfaults during teardown.  Close the
+    # cause nondeterministic xdist worker segfaults during teardown. Close the
     # coroutine immediately (suppresses "coroutine never awaited" warnings) and
     # schedule a trivial no-op task instead. Production (TESTING unset) is
     # completely unchanged.
+    # QC 2026-08-08: suppress_in_testing now DEFAULTS to True (see the signature).
+    # The old default False meant only the ~3 call sites that opted in were
+    # safe; the rest ran real coroutines that opened async DB sessions and
+    # crashed xdist workers at teardown, cross-attributing the failure to
+    # whatever test ran next (the long-standing flake). Default-safe fixes every
+    # caller; a test that needs the coroutine to actually run passes
+    # suppress_in_testing=False explicitly.
     if suppress_in_testing and os.environ.get("TESTING"):
         coro.close()
 

@@ -52,7 +52,10 @@ _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
 
 # Per-user top-picks cache namespace (proactive_service.get_top_picks) — busted
 # here whenever new matches land so a 24h-cached strip never hides fresh work.
-PICKS_CACHE_PREFIX = "proactive_picks:"
+# QC 2026-08-08: no trailing colon — invalidate_prefix appends ":*", so a
+# trailing colon here produced "intel:proactive_picks::*" which matched
+# nothing and left the 24h picks cache never invalidated.
+PICKS_CACHE_PREFIX = "proactive_picks"
 
 
 def _bust_picks_cache() -> None:

@@ -242,11 +242,17 @@ async def classify_new_pairs(db: Session, spellings_by_key: dict[str, str], *, l
                     source="ai",
                 )
             )
+            # Commit each verdict as it lands (QC 2026-08-08): the scan job caps
+            # this pass with a hard timeout, and a single end-of-loop commit
+            # discarded every already-paid Claude verdict when the timeout fired
+            # mid-pass — then re-paid the identical calls next run. Per-verdict
+            # commits make paid work durable.
+            db.commit()
             stored += 1
         except Exception as exc:  # noqa: BLE001 — model down ≠ matching broken; pair retries next pass
+            db.rollback()
             logger.warning("Part-equivalence classification failed for {} / {}: {}", raw_a, raw_b, exc)
     if stored:
-        db.commit()
         logger.info("Part-equivalence: classified {} new pair(s)", stored)
     return stored
 

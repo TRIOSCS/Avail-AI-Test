@@ -236,7 +236,10 @@ def get_match_count(db: Session, user_id: int) -> int:
     )
 
 
-PICKS_CACHE_PREFIX = "proactive_picks:"
+# QC 2026-08-08: no trailing colon — invalidate_prefix appends ":*", so a
+# trailing colon here produced "intel:proactive_picks::*" which matched
+# nothing and left the 24h picks cache never invalidated.
+PICKS_CACHE_PREFIX = "proactive_picks"
 
 
 def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
@@ -249,7 +252,7 @@ def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
     from ..cache.intel_cache import get_cached, set_cached
     from .proactive_matching import compute_offer_rollups
 
-    cache_key = f"{PICKS_CACHE_PREFIX}{user_id}"
+    cache_key = f"{PICKS_CACHE_PREFIX}:{user_id}"
     cached = get_cached(cache_key)
     if isinstance(cached, dict) and isinstance(cached.get("picks"), list):
         return list(cached["picks"])
@@ -309,7 +312,17 @@ def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, 
         if not offer:
             continue
         cost = float(offer.unit_price) if offer.unit_price else 0
-        sell = sell_prices.get(str(m.id), cost * 1.3)
+        # QC 2026-08-08: a missing cost made the default 0*1.3=0, so a draft went
+        # out quoting the customer $0.00. A seeded sell_price (incl. an
+        # intentional 0) is honored; otherwise fall back to cost x 1.3 — and if
+        # there is NO price basis at all (no anchor, no cost) skip the line
+        # rather than stage a priceless offer. The match stays NEW and resurfaces.
+        sell = sell_prices.get(str(m.id))
+        if sell is None:
+            if not cost:
+                logger.warning("Proactive: skipping match {} ({}) — no price basis for a sell price", m.id, m.mpn)
+                continue
+            sell = cost * 1.3
         target = m.requirement.target_qty if m.requirement else 0
         avail = offer.qty_available or 0
         qty = min(avail, target) if target > 0 else avail

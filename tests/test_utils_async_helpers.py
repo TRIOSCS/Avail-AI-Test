@@ -77,8 +77,11 @@ class TestSafeBackgroundTask:
         assert task.get_name() == "my_named_task"
         await task
 
-    async def test_default_suppress_false_runs(self):
-        """Default suppress_in_testing=False runs coro even in TESTING mode."""
+    async def test_default_suppresses_under_testing(self):
+        """QC 2026-08-08: suppress_in_testing now DEFAULTS to True, so an
+        unflagged real coroutine does NOT run under TESTING (the fix for the
+        xdist worker crashes). Callers that need it to run pass
+        suppress_in_testing=False explicitly."""
         result = []
 
         async def my_coro():
@@ -88,7 +91,7 @@ class TestSafeBackgroundTask:
         await safe_background_task(my_coro(), task_name="test")
         task = _new_task(before)
         await task
-        assert result == [1]
+        assert result == []  # suppressed by default under TESTING
 
     async def test_returns_none(self):
         """safe_background_task always returns None (fire-and-forget)."""

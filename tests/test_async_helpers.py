@@ -30,7 +30,7 @@ async def test_happy_path_completes():
         return 42
 
     before = set(async_helpers._bg_tasks)
-    await safe_background_task(_work(), task_name="test_happy")
+    await safe_background_task(_work(), task_name="test_happy", suppress_in_testing=False)
     task = _new_task(before)
     result = await task
     assert result == 42
@@ -47,7 +47,7 @@ async def test_exception_is_caught_and_logged():
             raise ValueError("kaboom")
 
         before = set(async_helpers._bg_tasks)
-        await safe_background_task(_boom(), task_name="test_boom")
+        await safe_background_task(_boom(), task_name="test_boom", suppress_in_testing=False)
         task = _new_task(before)
         result = await task
         assert result is None
@@ -64,7 +64,7 @@ async def test_cancellation_is_reraised():
         await asyncio.sleep(100)
 
     before = set(async_helpers._bg_tasks)
-    await safe_background_task(_slow(), task_name="test_cancel")
+    await safe_background_task(_slow(), task_name="test_cancel", suppress_in_testing=False)
     task = _new_task(before)
     await asyncio.sleep(0)  # Let the task start running before cancelling
     task.cancel()
@@ -143,7 +143,7 @@ async def test_cancellation_logged():
             await asyncio.sleep(100)
 
         before = set(async_helpers._bg_tasks)
-        await safe_background_task(_slow(), task_name="cancel_log_test")
+        await safe_background_task(_slow(), task_name="cancel_log_test", suppress_in_testing=False)
         task = _new_task(before)
         await asyncio.sleep(0)  # Let the task start running before cancelling
         task.cancel()

@@ -5,6 +5,8 @@ Called by: app/jobs/__init__.py via register_maintenance_jobs()
 Depends on: app.database, app.models, app.services.*
 """
 
+import asyncio
+
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -94,7 +96,14 @@ async def _job_auto_dedup():
 
     db = SessionLocal()
     try:
-        stats = run_auto_dedup(db)
+        # QC 2026-08-08: run_auto_dedup is SYNC and makes sequential Claude calls
+        # (via _run_coro_sync, which .result()-blocks the calling thread up to
+        # ~90s each, uncapped). Called directly it froze the whole event loop and
+        # every other job/request. Run it off the loop in a thread — inside that
+        # thread _run_coro_sync sees no running loop and uses asyncio.run
+        # directly — bounded by a hard timeout so a hung batch can't run forever.
+        loop = asyncio.get_running_loop()
+        stats = await asyncio.wait_for(loop.run_in_executor(None, run_auto_dedup, db), timeout=900)
         total = stats["vendors_merged"] + stats["companies_merged"]
         if total:
             logger.info(
