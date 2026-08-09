@@ -88,7 +88,7 @@ async def attach_requisition_from_onedrive(
     from ...utils.graph_client import GraphClient
 
     gc = GraphClient(token)
-    item = await gc.get_json(f"/me/drive/items/{item_id}")
+    item = await gc.get_json(f"/me/drive/items/{item_id}", raise_on_error=False)
     if "error" in item:
         error_code = item.get("error", {}).get("code", "") if isinstance(item.get("error"), dict) else ""
         if error_code in ("InvalidAuthenticationToken", "TokenExpired"):

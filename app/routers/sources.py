@@ -744,14 +744,14 @@ async def parse_response_attachments(
         raise HTTPException(400, "No message ID — cannot fetch attachments")
 
     from ..scheduler import get_valid_token
-    from ..utils.graph_client import GraphClient
+    from ..utils.graph_client import GraphAPIError, GraphClient
 
     token = await get_valid_token(user, db) or user.access_token
     gc = GraphClient(token)
 
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
-    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
+    except (GraphAPIError, ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         raise HTTPException(502, "Graph API error. Please try again.") from e
 
     attachments = att_data.get("value", []) if att_data else []

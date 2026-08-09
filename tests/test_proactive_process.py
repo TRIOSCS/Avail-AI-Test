@@ -336,3 +336,64 @@ def test_sales_cannot_use_scope_all(db_session):
         assert "LTSR15-NP" in r.text
     finally:
         _clear_overrides()
+
+
+# ── QC 2026-08-08: Graph failures never fake success ─────────────────────
+
+
+@pytest.mark.anyio
+async def test_failed_draft_send_leaves_everything_untouched(db_session):
+    from app.utils.graph_client import GraphAPIError
+
+    s = _scenario(db_session)
+    build_draft_offers(db_session, s["rep"], [s["m1"].id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+
+    with patch(
+        "app.utils.graph_client.GraphClient.post_json",
+        new_callable=AsyncMock,
+        side_effect=GraphAPIError(401, "token expired"),
+    ):
+        with pytest.raises(ValueError, match="draft is untouched"):
+            await send_draft_offer(db_session, s["rep"], "tok", draft.id)
+
+    db_session.rollback()
+    db_session.refresh(draft)
+    assert draft.status == ProactiveOfferStatus.DRAFT
+    db_session.refresh(s["m1"])
+    assert s["m1"].status == ProactiveMatchStatus.NEW
+    assert db_session.query(ProactiveThrottle).count() == 0
+
+
+@pytest.mark.anyio
+async def test_failed_oneshot_send_marks_offer_failed_not_sent(db_session):
+    from app.services.proactive_service import get_scorecard, send_proactive_offer
+    from app.utils.graph_client import GraphAPIError
+
+    s = _scenario(db_session)
+    from app.models import SiteContact
+
+    contact = db_session.query(SiteContact).filter(SiteContact.email == "buyer@beckhoff.com").one()
+
+    with patch(
+        "app.utils.graph_client.GraphClient.post_json",
+        new_callable=AsyncMock,
+        side_effect=GraphAPIError(503, "graph down"),
+    ):
+        await send_proactive_offer(
+            db=db_session,
+            user=s["rep"],
+            token="tok",
+            match_ids=[s["m1"].id],
+            contact_ids=[contact.id],
+            sell_prices={},
+        )
+
+    po = db_session.query(ProactiveOffer).one()
+    assert po.status == ProactiveOfferStatus.FAILED  # never a phantom 'sent'
+    assert po.sent_at is None
+    db_session.refresh(s["m1"])
+    assert s["m1"].status == ProactiveMatchStatus.FAILED
+    assert db_session.query(ProactiveThrottle).count() == 0  # retry not suppressed
+    assert get_scorecard(db_session)["total_sent"] == 0  # never counted as outreach

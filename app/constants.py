@@ -452,6 +452,7 @@ class ProactiveOfferStatus(StrEnum):
 
     DRAFT = "draft"
     SENT = "sent"
+    FAILED = "failed"  # Graph rejected the send — matches FAILED too, never throttled
     CONVERTED = "converted"
     EXPIRED = "expired"
 

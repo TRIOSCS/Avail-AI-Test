@@ -335,7 +335,7 @@ def test_401_not_retried():
 
     with patch("app.utils.graph_client.http") as mock_http:
         mock_http.get = mock_get
-        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages"))
+        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages", raise_on_error=False))
 
     # Should only be called once (no retries for 401)
     assert call_count == 1
@@ -363,7 +363,7 @@ def test_429_returns_error_in_test_mode():
 
     with patch("app.utils.graph_client.http") as mock_http:
         mock_http.get = mock_get
-        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages"))
+        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages", raise_on_error=False))
 
     # In test mode MAX_RETRIES=0, so only 1 attempt total
     assert call_count == 1

@@ -14,7 +14,7 @@ from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
 
-async def post_teams_channel(message: str) -> None:
+async def post_teams_channel(message: str) -> bool:
     """Post a message to the configured Teams channel via webhook.
 
     Uses an Adaptive Card wrapper so the message renders with markdown formatting in
@@ -23,7 +23,7 @@ async def post_teams_channel(message: str) -> None:
     webhook_url = get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
     if not webhook_url:
         logger.debug("Teams webhook not configured — skipping channel post")
-        return
+        return False
     try:
         resp = await http.post(
             webhook_url,
@@ -45,17 +45,21 @@ async def post_teams_channel(message: str) -> None:
         )
         if resp.status_code not in (200, 202):
             logger.warning("Teams webhook returned {}: {}", resp.status_code, resp.text[:200])
+            return False
+        return True
     except Exception as e:
         logger.error("Teams channel post failed: {}", e)
+        return False
 
 
-async def post_teams_channel_card(card: dict, webhook_url: str | None = None) -> None:
+async def post_teams_channel_card(card: dict, webhook_url: str | None = None) -> bool:
     """Post a FULL Adaptive Card to the configured Teams channel via webhook.
 
     Sibling of :func:`post_teams_channel`, but the caller supplies the entire Adaptive
     Card ``content`` dict (so it can carry a FactSet, an ``Action.OpenUrl`` button, colored
     TextBlocks, etc.) rather than a single markdown string. The card is wrapped verbatim in
-    the same message envelope. Silently skips if no webhook URL is configured.
+    the same message envelope. Returns True only on a confirmed 200/202 delivery;
+    not-configured and every failure return False (never raises).
 
     ``webhook_url`` lets a caller target a specific channel webhook (e.g. the prepayment
     accounting/AP channel) instead of the shared ``TEAMS_WEBHOOK_URL`` credential. When
@@ -64,7 +68,7 @@ async def post_teams_channel_card(card: dict, webhook_url: str | None = None) ->
     webhook_url = webhook_url or get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
     if not webhook_url:
         logger.debug("Teams webhook not configured — skipping channel card post")
-        return
+        return False
     try:
         resp = await http.post(
             webhook_url,
@@ -81,8 +85,11 @@ async def post_teams_channel_card(card: dict, webhook_url: str | None = None) ->
         )
         if resp.status_code not in (200, 202):
             logger.warning("Teams webhook (card) returned {}: {}", resp.status_code, resp.text[:200])
+            return False
+        return True
     except Exception as e:
         logger.error("Teams channel card post failed: {}", e)
+        return False
 
 
 async def _find_self_chat(gc, sender_id: str) -> str | None:

@@ -156,7 +156,7 @@ async def _deliver_follow_up(
         "saveToSentItems": "true",
     }
     try:
-        result = await gc.post_json("/me/sendMail", payload)
+        result = await gc.post_json("/me/sendMail", payload, raise_on_error=False)
     except Exception as exc:
         logger.warning("Follow-up email send failed for contact {}: {}", contact.id, exc)
         return "failed"

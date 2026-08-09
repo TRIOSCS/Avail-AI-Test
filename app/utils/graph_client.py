@@ -27,13 +27,17 @@ class GraphSyncStateExpired(Exception):
 
 
 class GraphAPIError(Exception):
-    """Raised when a paged request (delta_query / get_all_pages) hits an error page.
+    """Raised when a Graph request fails after retries.
 
-    _request_with_retry returns ``{"error": <status>, "detail": ...}`` dicts for
-    non-retryable failures (401/4xx/max_retries) — a contract webhook_service
-    branches on, so it stays. Pagination helpers must NOT treat those dicts as
-    empty pages (that silently ends the round and lets callers persist a token
-    past unfetched data), so they raise this instead.
+    2026-08-08 QC fix: get_json/post_json/patch_json now RAISE this by default
+    instead of returning ``{"error": <status>, "detail": ...}`` dicts — nine
+    send paths were discarding those dicts and recording success (approval
+    outbox, prepayment wire notices, proactive offers, vendor replies...).
+    Callers that legitimately branch on the dict (webhook_service's
+    subscription contract) pass ``raise_on_error=False`` explicitly, which
+    keeps the old shape visible at the call site instead of as a foot-gun.
+    Pagination helpers (delta_query / get_all_pages) have always raised so a
+    token can never be persisted past unfetched data.
     """
 
     def __init__(self, status: int | str, detail: str = ""):
@@ -62,23 +66,41 @@ class GraphClient:
             **IMMUTABLE_ID_HEADER,
         }
 
-    async def get_json(self, path: str, params: dict | None = None, timeout: int = 30) -> dict:
+    @staticmethod
+    def _checked(data: dict, raise_on_error: bool) -> dict:
+        """Convert the retry layer's error dict into GraphAPIError unless opted out."""
+        if raise_on_error and isinstance(data, dict) and "error" in data:
+            raise GraphAPIError(data["error"], str(data.get("detail", "")))
+        return data
+
+    async def get_json(
+        self, path: str, params: dict | None = None, timeout: int = 30, *, raise_on_error: bool = True
+    ) -> dict:
         """GET → parsed JSON.
 
-        Raises on non-200 after retries.
+        Raises GraphAPIError on failure after retries.
         """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        return await self._request_with_retry("GET", url, params=params, timeout=timeout)
+        data = await self._request_with_retry("GET", url, params=params, timeout=timeout)
+        return self._checked(data, raise_on_error)
 
-    async def post_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
-        """POST → parsed JSON or empty dict on 202."""
-        url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        return await self._request_with_retry("POST", url, json_data=json_data, timeout=timeout)
+    async def post_json(self, path: str, json_data: dict, timeout: int = 30, *, raise_on_error: bool = True) -> dict:
+        """POST → parsed JSON or empty dict on 202.
 
-    async def patch_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
-        """PATCH → parsed JSON or empty dict on 204."""
+        Raises GraphAPIError on failure.
+        """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        return await self._request_with_retry("PATCH", url, json_data=json_data, timeout=timeout)
+        data = await self._request_with_retry("POST", url, json_data=json_data, timeout=timeout)
+        return self._checked(data, raise_on_error)
+
+    async def patch_json(self, path: str, json_data: dict, timeout: int = 30, *, raise_on_error: bool = True) -> dict:
+        """PATCH → parsed JSON or empty dict on 204.
+
+        Raises GraphAPIError on failure.
+        """
+        url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
+        data = await self._request_with_retry("PATCH", url, json_data=json_data, timeout=timeout)
+        return self._checked(data, raise_on_error)
 
     async def get_all_pages(
         self,
@@ -134,9 +156,7 @@ class GraphClient:
             "$top": str(max_results),
             "$orderby": "sentDateTime desc",
         }
-        data = await self.get_json(path, params=params)
-        if isinstance(data, dict) and "error" in data:
-            raise RuntimeError(f"Graph API error searching sent messages: {data}")
+        data = await self.get_json(path, params=params)  # raises GraphAPIError on failure
         messages: list[dict] = data.get("value", [])  # Graph JSON boundary
         return messages
 

@@ -494,9 +494,11 @@ class TestSendWarningAlert:
             mock_settings.app_url = "http://localhost:8000"
             await _send_warning_alert(test_company, 25, 30, db_session)
 
-        # Warning still logged even without email
+        # QC 2026-08-08: the ActivityLog row doubles as the daily dedup guard,
+        # so it is written ONLY after a successful send — no token, no record,
+        # and the next cycle retries instead of being silently suppressed.
         warnings = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "ownership_warning").count()
-        assert warnings == 1
+        assert warnings == 0
 
     @pytest.mark.asyncio
     async def test_handles_email_send_failure(self, db_session: Session, test_company: Company, sales_user: User):
@@ -517,6 +519,11 @@ class TestSendWarningAlert:
             mock_settings.app_url = "http://localhost:8000"
             # Should NOT raise
             await _send_warning_alert(test_company, 25, 30, db_session)
+
+        # And the dedup/dashboard record must NOT exist — a failed send may not
+        # suppress the retry on the next sweep (QC 2026-08-08).
+        failed_warnings = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "ownership_warning").count()
+        assert failed_warnings == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

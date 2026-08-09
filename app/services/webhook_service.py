@@ -227,9 +227,13 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
 
     gc = GraphClient(token)
     try:
+        # raise_on_error=False is load-bearing: a 404/410 ERROR DICT means Graph
+        # confirmed the subscription is gone (delete + recreate), while a raised
+        # exception means transient (keep + retry). See the branch below.
         result = await gc.patch_json(
             f"/subscriptions/{sub.subscription_id}",
             {"expirationDateTime": new_expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")},
+            raise_on_error=False,
         )
     except Exception as e:
         # Network/timeout error — Graph has not confirmed the subscription is gone.

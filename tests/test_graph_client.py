@@ -130,9 +130,15 @@ class TestGraphClientRetry:
         mock_http.get = AsyncMock(return_value=_mock_response(status_code, text=text))
 
         gc = GraphClient("test-token")
-        result = await gc.get_json("/me/messages")
-        assert result["error"] == status_code
+        # QC 2026-08-08: the JSON verbs RAISE on failure by default — nine send
+        # paths were persisting success off discarded error dicts.
+        with pytest.raises(GraphAPIError, match=str(status_code)):
+            await gc.get_json("/me/messages")
         mock_sleep.assert_not_called()
+
+        # Explicit opt-out preserves the legacy dict contract (webhook_service).
+        result = await gc.get_json("/me/messages", raise_on_error=False)
+        assert result["error"] == status_code
 
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
@@ -587,15 +593,18 @@ class TestGraphClientAdditional:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.graph_client.http")
-    async def test_max_retries_exhausted_5xx_returns_error(self, mock_http, mock_sleep):
-        """After max retries on 5xx, returns error dict (line 189)."""
+    async def test_max_retries_exhausted_5xx_raises(self, mock_http, mock_sleep):
+        """After max retries on 5xx, the JSON verbs raise GraphAPIError."""
         mock_http.get = AsyncMock(return_value=_mock_response(503, text="Service Unavailable"))
 
         gc = GraphClient("test-token")
-        result = await gc.get_json("/me/messages")
-        # After MAX_RETRIES+1 attempts of 503, should return error dict
-        assert result["error"] == "max_retries" or result["error"] == 503
+        with pytest.raises(GraphAPIError):
+            await gc.get_json("/me/messages")
         assert mock_http.get.call_count >= 2  # At least initial + retries
+
+        # Opt-out still yields the dict for callers that branch on it.
+        result = await gc.get_json("/me/messages", raise_on_error=False)
+        assert result["error"] in ("max_retries", 503)
 
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")

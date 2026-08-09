@@ -103,7 +103,7 @@ async def send_email_reply(
             },
             "saveToSentItems": "true",
         }
-        result = await gc.post_json("/me/sendMail", mail_payload)
+        result = await gc.post_json("/me/sendMail", mail_payload, raise_on_error=False)
         if "error" in result:
             error = f"Send failed: {result.get('detail', 'Unknown error')}"
     except HTTPException:

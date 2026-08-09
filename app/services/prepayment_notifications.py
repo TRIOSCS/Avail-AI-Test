@@ -265,8 +265,10 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str
     if webhook:
         card = _card(prepayment, event, approver=approver_name, decided_at=decided_at, reason=effective_reason)
         try:
-            await post_teams_channel_card(card, webhook)
-            result["teams_sent"] = True
+            # post_teams_channel_card returns True only on confirmed 200/202
+            # delivery — a swallowed webhook failure must NOT count as sent, or
+            # the both-channels-failed honesty alert below can never fire.
+            result["teams_sent"] = bool(await post_teams_channel_card(card, webhook))
         except Exception as e:
             logger.error("Prepayment {} Teams channel failed: {}", prepayment_id, e)
 

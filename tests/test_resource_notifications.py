@@ -181,7 +181,8 @@ class TestPostTeamsChannelCard:
 
                 result = await post_teams_channel_card({"type": "AdaptiveCard"})
 
-        assert result is None
+        # QC 2026-08-08: helpers report delivery honestly — unconfigured = False.
+        assert result is False
         mock_http.post.assert_not_called()
         assert any("not configured" in m for m in captured)
 
