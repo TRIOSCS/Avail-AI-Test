@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from ..constants import RESTRICTED_ROLES, ApprovalRecipientStatus
+from ..constants import RESTRICTED_ROLES, ApprovalGateType, ApprovalRecipientStatus
 from ..database import get_db
 from ..dependencies import require_approval_gatekeeper, require_user
 from ..models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
@@ -116,7 +116,7 @@ def _can_view_request(db: Session, request: ApprovalRequest, user: User) -> bool
 
 
 @router.post("/v2/approvals/requests/{id}/decision")
-def post_decision(
+async def post_decision(
     id: int,
     action: str = Form(...),
     comment: str | None = Form(default=None),
@@ -136,6 +136,20 @@ def post_decision(
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
+
+    # svc_decide() already stamped the prepayment lifecycle (status + pay_token /
+    # void) atomically; fan out the accounting/AP notice here so this JSON path
+    # is no longer silent about wire authorizations (QC 2026-08-08). Best-effort,
+    # isolated by the runner — a failed notice never unwinds the committed decision.
+    if request.gate_type == ApprovalGateType.PREPAYMENT and request.subject_id is not None:
+        from ..services.prepayment_notifications import (
+            notify_prepayment_approved,
+            notify_prepayment_voided,
+            run_prepayment_notify_bg,
+        )
+
+        notifier = notify_prepayment_approved if action == "approve" else notify_prepayment_voided
+        await run_prepayment_notify_bg(notifier, request.subject_id)
 
     return {"id": request.id, "status": request.status}
 

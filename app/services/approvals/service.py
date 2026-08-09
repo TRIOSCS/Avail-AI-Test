@@ -249,4 +249,35 @@ def decide(
                 _run_reject_side_effects(plan, user, db, reason=comment or "Rejected")
             db.flush()
 
+    # Prepayment lifecycle side effects (QC 2026-08-08): previously only the
+    # HTMX prepay endpoint stamped these, so a prepayment decided via the JSON
+    # /decision endpoint closed APPROVED yet stayed 'requested' forever — no
+    # pay_token, no OK-TO-WIRE, and the duplicate-request guard permanently
+    # blocked re-request. Stamping here makes EVERY decide() path atomic; the
+    # accounting/AP notification stays a router concern (both endpoints fan it
+    # out after commit).
+    if (
+        request.gate_type == ApprovalGateType.PREPAYMENT
+        and request.subject_type == ApprovalSubjectType.PREPAYMENT
+        and request.subject_id is not None
+    ):
+        import secrets
+
+        from ...constants import PrepaymentStatus
+
+        prepayment = db.get(Prepayment, request.subject_id)
+        if prepayment is not None:
+            if approved:
+                prepayment.status = PrepaymentStatus.APPROVED.value
+                prepayment.approved_by_id = user.id
+                prepayment.approved_at = datetime.now(UTC)
+                if not prepayment.pay_token:  # single-use; don't rotate on a repeat call
+                    prepayment.pay_token = secrets.token_urlsafe(32)
+            else:
+                prepayment.status = PrepaymentStatus.VOID.value
+                prepayment.void_reason = "rejected by approver"
+                prepayment.voided_at = datetime.now(UTC)
+                prepayment.voided_by_id = user.id
+            db.flush()
+
     return request

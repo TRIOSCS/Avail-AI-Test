@@ -183,6 +183,8 @@ def test_decide_writes_exactly_one_activity_log(db_session, open_request, approv
 def test_reassign_marks_from_recipient_reassigned(db_session, open_request, approver, delegate):
     """Reassign() sets the from-user's recipient status to REASSIGNED with
     reassigned_to_id."""
+    delegate.can_approve_prepayments = True  # QC 2026-08-08: reassign target must be eligible
+    db_session.flush()
     reassign(db_session, open_request.id, from_user=approver, to_user=delegate, actor=approver)
 
     from_recipient = db_session.execute(
@@ -199,6 +201,8 @@ def test_reassign_marks_from_recipient_reassigned(db_session, open_request, appr
 
 def test_reassign_adds_new_pending_recipient(db_session, open_request, approver, delegate):
     """Reassign() adds a new PENDING recipient row for to_user."""
+    delegate.can_approve_prepayments = True  # QC 2026-08-08: reassign target must be eligible
+    db_session.flush()
     reassign(db_session, open_request.id, from_user=approver, to_user=delegate, actor=approver)
 
     new_recipient = db_session.execute(
@@ -215,6 +219,8 @@ def test_reassign_adds_new_pending_recipient(db_session, open_request, approver,
 
 def test_reassign_records_event(db_session, open_request, approver, delegate):
     """Reassign() records one ApprovalEvent + one ActivityLog."""
+    delegate.can_approve_prepayments = True  # QC 2026-08-08: reassign target must be eligible
+    db_session.flush()
     reassign(db_session, open_request.id, from_user=approver, to_user=delegate, actor=approver)
     events = (
         db_session.execute(select(ApprovalEvent).where(ApprovalEvent.request_id == open_request.id)).scalars().all()

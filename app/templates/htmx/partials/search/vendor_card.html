@@ -23,10 +23,14 @@
   <div class="min-w-0">
     <div class="flex items-center gap-1.5 flex-wrap">
       {# Shortlist checkbox — at the row-left (existing $store.shortlist). #}
+      {# XSS fix (QC 2026-08-08): external vendor_name/mpn/source_type flow through
+         data-* (HTML-escaped, never evaluated) and are read via $el.dataset —
+         single-quoted Alpine interpolation was HTML-decode-then-eval injectable. #}
       <input aria-label="Shortlist {{ card.vendor_name }}" type="checkbox"
              class="accent-brand-500 mr-1"
-             :checked="$store.shortlist.has('{{ card.vendor_name }}', '{{ card.mpn_matched }}')"
-             @change="$store.shortlist.toggle({vendor_name: '{{ card.vendor_name }}', mpn: '{{ card.mpn_matched }}', unit_price: {{ card.unit_price or 0 }}, qty_available: {{ card.qty_available or 0 }}, source_type: '{{ card.source_type }}'})">
+             data-vn="{{ card.vendor_name }}" data-mpn="{{ card.mpn_matched }}" data-st="{{ card.source_type }}"
+             :checked="$store.shortlist.has($el.dataset.vn, $el.dataset.mpn)"
+             @change="$store.shortlist.toggle({vendor_name: $el.dataset.vn, mpn: $el.dataset.mpn, unit_price: {{ card.unit_price or 0 }}, qty_available: {{ card.qty_available or 0 }}, source_type: $el.dataset.st})">
       <span class="lg:hidden h-2.5 w-2.5 rounded-full {% if conf == 'green' %}bg-emerald-500{% elif conf == 'amber' %}bg-amber-500{% else %}bg-rose-500{% endif %}"></span>
       <span class="text-sm font-semibold text-brand-900 truncate">{{ card.vendor_name }}</span>
       {% if card.is_authorized %}

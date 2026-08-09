@@ -128,6 +128,32 @@ def reassign(
     if from_recipient is None:
         raise ValueError(f"User {from_user.id} has no pending recipient row on request {request_id}")
 
+    # Row-locked read (matches decide()): serializes against a concurrent decide()
+    # that could move the request to a terminal status, which would otherwise leave
+    # a new PENDING recipient orphaned on an already-resolved request. SQLite
+    # ignores FOR UPDATE; the status guard below is what enforces correctness there.
+    # Read BEFORE any mutation so an ineligible target aborts cleanly.
+    request = db.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == request_id).with_for_update()
+    ).scalar_one_or_none()
+    if request is None:
+        raise ValueError(f"ApprovalRequest {request_id} not found")
+    if request.status != ApprovalRequestStatus.REQUESTED:
+        raise ValueError(f"ApprovalRequest {request_id} is not open (status={request.status!r})")
+
+    # Authority gate (QC 2026-08-08): reassignment may only hand a slot to a user
+    # who is genuinely eligible for THIS gate at THIS amount — the same
+    # per-user toggle + amount-limit rule route_request enforces. Without this a
+    # single reassign could grant wire/PO approval authority to anyone.
+    from .routing import _eligible_approvers
+
+    eligible_ids = {u.id for u in _eligible_approvers(db, request.gate_type, request.amount)}
+    if to_user.id not in eligible_ids:
+        raise ValueError(
+            f"User {to_user.id} is not eligible to approve gate {request.gate_type} "
+            f"for amount {request.amount} — reassignment refused"
+        )
+
     # Mark the original slot as reassigned.
     from_recipient.status = ApprovalRecipientStatus.REASSIGNED
     from_recipient.reassigned_to_id = to_user.id
@@ -140,18 +166,6 @@ def reassign(
     )
     db.add(new_recipient)
     db.flush()
-
-    # Row-locked read (matches decide()): serializes against a concurrent decide()
-    # that could move the request to a terminal status, which would otherwise leave
-    # this new PENDING recipient orphaned on an already-resolved request. SQLite
-    # ignores FOR UPDATE; the status guard below is what enforces correctness there.
-    request = db.execute(
-        select(ApprovalRequest).where(ApprovalRequest.id == request_id).with_for_update()
-    ).scalar_one_or_none()
-    if request is None:
-        raise ValueError(f"ApprovalRequest {request_id} not found")
-    if request.status != ApprovalRequestStatus.REQUESTED:
-        raise ValueError(f"ApprovalRequest {request_id} is not open (status={request.status!r})")
 
     record(
         db,
