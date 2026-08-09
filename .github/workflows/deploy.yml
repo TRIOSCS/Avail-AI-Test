@@ -17,23 +17,35 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          # Echo a check's status (if running) or conclusion (if completed),
-          # or empty if it has not reported for this commit yet.
-          check_state() {
+          # Aggregate state across EVERY check-run whose name is BASE or a matrix
+          # shard "BASE (N)". QC 2026-08-08: the test job is a 2-way matrix, so
+          # GitHub emits "test (0)" / "test (1)" — the old exact-match on "test"
+          # found nothing, so `T` stayed missing and every release-published
+          # deploy waited the full window then refused. Returns:
+          #   success  — >=1 matching run, all completed, all success
+          #   failure  — any matching run in a failing terminal state
+          #   pending  — none reported yet, or some still running
+          agg_state() {
             gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
-              --jq ".check_runs[] | select(.name==\"$1\") | (if .status!=\"completed\" then .status else .conclusion end)" \
-              2>/dev/null | head -1
+              --jq ".check_runs[] | select(.name==\"$1\" or (.name|startswith(\"$1 (\"))) | (if .status!=\"completed\" then \"pending\" else .conclusion end)" \
+              2>/dev/null \
+            | awk '
+                { n++
+                  if ($0=="failure"||$0=="cancelled"||$0=="timed_out"||$0=="action_required"||$0=="stale") bad=1
+                  if ($0!="success") notdone=1 }
+                END { if (n==0) print "pending"; else if (bad) print "failure"; else if (notdone) print "pending"; else print "success" }'
           }
-          # NOTE: check-runs are named after the JOB (test, security), not the
-          # workflow ("CI — Tests" / "Security Scanning"). Match the job names.
+          # Match the JOB names (test, security), not the workflow display names.
           for attempt in $(seq 1 40); do
-            T=$(check_state "test")
-            S=$(check_state "security")
-            echo "attempt $attempt — test=${T:-missing}  security=${S:-missing}"
-            case "$T" in failure|cancelled|timed_out|action_required|stale)
-              echo "ERROR: 'CI — Tests' for $SHA = $T — refusing to deploy." >&2; exit 1;; esac
-            case "$S" in failure|cancelled|timed_out|action_required|stale)
-              echo "ERROR: 'Security Scanning' for $SHA = $S — refusing to deploy." >&2; exit 1;; esac
+            T=$(agg_state "test")
+            S=$(agg_state "security")
+            echo "attempt $attempt — test=$T  security=$S"
+            if [ "$T" = failure ]; then
+              echo "ERROR: 'CI — Tests' shards for $SHA = failure — refusing to deploy." >&2; exit 1
+            fi
+            if [ "$S" = failure ]; then
+              echo "ERROR: 'Security Scanning' for $SHA = failure — refusing to deploy." >&2; exit 1
+            fi
             if [ "$T" = success ] && [ "$S" = success ]; then
               echo "All required checks green for $SHA — deploy may proceed."
               exit 0

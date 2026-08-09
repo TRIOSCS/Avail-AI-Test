@@ -119,6 +119,14 @@ else
     echo "==> No running app container found — no rollback target (first deploy?)."
 fi
 
+# Capture the DB's alembic revision BEFORE the new container migrates on startup.
+# QC 2026-08-08: a migration-bearing deploy that then fails health used to roll
+# back only the app IMAGE, leaving the DB at the NEW head — the old image's
+# entrypoint `alembic upgrade head` then hits "Can't locate revision" and crash
+# loops. On rollback we downgrade the DB back to this revision first.
+PREV_DB_REVISION="$(docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB" -tAc "select version_num from alembic_version"' 2>/dev/null | tr -d '[:space:]' || true)"
+echo "==> Recorded pre-deploy DB revision for rollback: ${PREV_DB_REVISION:-unknown}"
+
 # rollback_app: restore the previously-running app image and recreate the container
 # from it, then re-wait for health. Idempotent (safe to run even if the tag already
 # resolves to the previous image) and best-effort (each fallible step is guarded so the
@@ -130,6 +138,23 @@ rollback_app() {
         echo "==> ROLLBACK: no previous app image was recorded — cannot roll back automatically." >&2
         echo "==>          The failed container is left running for inspection; fix and redeploy." >&2
         return 1
+    fi
+    # DB first (QC 2026-08-08): if the failed deploy advanced the schema, downgrade
+    # it back to the pre-deploy revision using the NEW image's alembic (still the
+    # tagged `app` image at this point — it alone has the new migration files),
+    # so the restored OLD image's `alembic upgrade head` finds a revision it knows
+    # instead of crash-looping on "Can't locate revision".
+    if [ -n "$PREV_DB_REVISION" ]; then
+        CUR_DB_REVISION="$(docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB" -tAc "select version_num from alembic_version"' 2>/dev/null | tr -d '[:space:]' || true)"
+        if [ -n "$CUR_DB_REVISION" ] && [ "$CUR_DB_REVISION" != "$PREV_DB_REVISION" ]; then
+            echo "==> ROLLBACK: DB advanced ${PREV_DB_REVISION} -> ${CUR_DB_REVISION}; downgrading before restoring the old image."
+            if ! docker compose run --rm --no-deps app alembic downgrade "$PREV_DB_REVISION"; then
+                echo "==> ROLLBACK CRITICAL: DB downgrade to ${PREV_DB_REVISION} FAILED — do NOT restart the old image (it will crash-loop); manual intervention required." >&2
+                return 1
+            fi
+        fi
+    else
+        echo "==> ROLLBACK WARNING: no pre-deploy DB revision recorded — if this deploy ran a migration, the old image may crash-loop; verify alembic_version manually." >&2
     fi
     echo "==> ROLLBACK: restoring previous app image ${PREV_APP_IMAGE_REF} -> ${PREV_APP_IMAGE_ID}"
     # Re-point the compose image tag back to the previous image, then force-recreate the
