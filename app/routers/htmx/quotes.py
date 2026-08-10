@@ -579,11 +579,13 @@ async def quote_result_htmx(
     result = form.get("result", "")
     if result not in ("won", "lost"):
         raise HTTPException(400, "Result must be 'won' or 'lost'")
-    quote.result = result
-    require_valid_transition("quote", quote.status, result)
-    quote.status = result
-    quote.result_at = datetime.now(UTC)
-    quote.result_reason = form.get("result_reason", "")
+    # QC 2026-08-10 P2 (process-review D5): use the shared service so a won quote
+    # ALSO closes every contributing requisition + records won_revenue + the
+    # outcome activity — the workspace path used to set only the quote's status,
+    # so the owner's win metrics never recorded the win.
+    from ...services.quote_requisitions import apply_quote_result
+
+    apply_quote_result(db, quote, result=result, reason=form.get("result_reason") or None)
     db.commit()
     logger.info("Quote {} marked as {} by {}", quote.quote_number, result, user.email)
     return await quote_detail_partial(request, quote_id, user, db)

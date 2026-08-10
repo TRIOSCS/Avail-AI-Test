@@ -175,3 +175,70 @@ def quotes_for_requisition(db: Session, req_id: int) -> Query:
         .join(QuoteRequisition, QuoteRequisition.quote_id == Quote.id)
         .filter(QuoteRequisition.requisition_id == req_id)
     )
+
+
+def apply_quote_result(db: Session, quote, *, result: str, reason: str | None = None, notes: str | None = None) -> None:
+    """Record a won/lost outcome on a quote AND every contributing requisition.
+
+    The SINGLE source of truth for both quote-result routes (the HTMX Approvals
+    workspace and the JSON API). They had diverged: the workspace path set only the
+    quote's status, leaving the requisition open and won_revenue unset — so the owner's
+    win metrics never recorded the win (process-review D5). This also transitions EVERY
+    contributing requisition (combined quotes span several), never clobbering one
+    already WON/LOST, and writes the outcome ActivityLog the JSON twin did.
+
+    Caller commits.
+    """
+    from datetime import UTC, datetime
+
+    from app.constants import QuoteStatus, RequisitionStatus
+    from app.models import ActivityLog, CustomerSite, Requisition
+    from app.services.status_machine import require_valid_transition
+
+    if result not in (QuoteStatus.WON, QuoteStatus.LOST):
+        raise ValueError("Result must be 'won' or 'lost'")
+
+    require_valid_transition("quote", quote.status, result)
+    quote.result = result
+    quote.result_reason = reason
+    quote.result_notes = notes
+    quote.result_at = datetime.now(UTC)
+    quote.status = result
+    if result == QuoteStatus.WON:
+        quote.won_revenue = quote.subtotal
+
+    # Every contributing requisition — combined quotes span 2+. Never clobber one
+    # already terminal.
+    for rid in requisition_ids_for_quote(db, quote.id) or [quote.requisition_id]:
+        req = db.get(Requisition, rid)
+        if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
+            req.status = result
+
+    # Outcome notification on the PRIMARY requisition's creator (one row).
+    primary = db.get(Requisition, quote.requisition_id)
+    if primary and primary.created_by:
+        customer = primary.customer_name or primary.name or ""
+        if result == QuoteStatus.WON:
+            subj = f"Quote won: {customer} — ${quote.subtotal or 0:,.0f}"
+        else:
+            subj = f"Quote lost: {customer} — {reason or 'no reason'}"
+        company_id = None
+        if primary.customer_site_id:
+            site = db.get(CustomerSite, primary.customer_site_id)
+            company_id = site.company_id if site else None
+        db.add(
+            ActivityLog(
+                user_id=primary.created_by,
+                activity_type=f"quote_{result}",
+                channel="system",
+                requisition_id=primary.id,
+                quote_id=quote.id,
+                contact_name=customer,
+                subject=subj,
+                company_id=company_id,
+            )
+        )
+        if company_id:
+            from app.services.activity_service import _update_last_activity
+
+            _update_last_activity({"type": "company", "id": company_id}, db)

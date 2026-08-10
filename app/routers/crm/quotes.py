@@ -4,8 +4,6 @@ reopen) and pricing history.
 Extracted from routers/crm.py.
 """
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy import select
@@ -14,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
+from ...models import CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
 from ...services.status_machine import require_valid_transition
@@ -479,51 +477,13 @@ async def quote_result(
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
-    quote.result = payload.result
-    quote.result_reason = payload.reason
-    quote.result_notes = payload.notes
-    quote.result_at = datetime.now(UTC)
-    require_valid_transition("quote", quote.status, payload.result)
-    quote.status = payload.result
-    if payload.result == QuoteStatus.WON:
-        quote.won_revenue = quote.subtotal
+    # QC 2026-08-10 P2 (process-review D5): both quote-result routes now share
+    # one service so they can't diverge again (the HTMX workspace twin had
+    # stopped closing the requisition + recording won_revenue).
+    from ...services.quote_requisitions import apply_quote_result
+
+    apply_quote_result(db, quote, result=payload.result, reason=payload.reason, notes=payload.notes)
     req = db.get(Requisition, quote.requisition_id)
-    if req:
-        req.status = payload.result
-
-    # Notify requisition creator about quote outcome
-    notify_user_id = req.created_by if req else None
-    if notify_user_id and payload.result in ("won", "lost"):
-        customer = req.customer_name or (req.name if req else "") or ""
-        if payload.result == "won":
-            subj = f"Quote won: {customer} — ${quote.subtotal or 0:,.0f}"
-        else:
-            subj = f"Quote lost: {customer} — {payload.reason or 'no reason'}"
-        # Resolve company_id for activity tracking
-        quote_company_id = None
-        if req and req.customer_site_id:
-            _site = db.get(CustomerSite, req.customer_site_id)
-            if _site:
-                quote_company_id = _site.company_id
-
-        db.add(
-            ActivityLog(
-                user_id=notify_user_id,
-                activity_type=f"quote_{payload.result}",
-                channel="system",
-                requisition_id=req.id if req else None,
-                quote_id=quote.id,
-                contact_name=customer,
-                subject=subj,
-                company_id=quote_company_id,
-            )
-        )
-
-        if quote_company_id:
-            from app.services.activity_service import _update_last_activity
-
-            _update_last_activity({"type": "company", "id": quote_company_id}, db)
-
     db.commit()
     return {
         "ok": True,
