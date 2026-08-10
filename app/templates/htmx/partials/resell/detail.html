@@ -103,6 +103,18 @@
           Close (no bid)
         </button>
         {% endif %}
+        {# QC 2026-08-10 P2/D4: a bid_out list (e.g. the customer bid was rejected) had no
+           exit and stranded here. The owner closes it to the terminal CLOSED state. #}
+        {% if can_see_customer and el.status == 'bid_out' %}
+        <button hx-post="/api/resell/{{ el.id }}/close-bid-out"
+                hx-target="closest [data-resell-detail-root]"
+                hx-swap="outerHTML"
+                hx-confirm="Close this list? The bid is resolved and the list ends for good (no reopen)."
+                data-loading-disable
+                class="btn-secondary btn-sm">
+          Close list
+        </button>
+        {% endif %}
         {% if can_offer %}
         <button @click="$dispatch('open-modal')"
                 hx-get="/v2/partials/resell/{{ el.id }}/offer-form"

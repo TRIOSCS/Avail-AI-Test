@@ -1789,6 +1789,43 @@ async def resell_close_without_bid(
     return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
+@router.post("/api/resell/{list_id}/close-bid-out", response_class=HTMLResponse)
+async def resell_close_bid_out(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Close a stranded ``bid_out`` list into the terminal ``closed`` state (owner-
+    only).
+
+    QC 2026-08-10 P2/D4: a bid_out list (e.g. after a rejected customer bid) had no
+    exit. The service enforces owner-only + the bid_out guard and refuses while a live
+    offer is still winnable (409).
+    """
+    el = excess_service.close_bid_out_list(db, list_id, user)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
+@router.post("/api/resell/{list_id}/lines/{line_id}/withdraw", response_class=HTMLResponse)
+async def resell_withdraw_line(
+    request: Request,
+    list_id: int,
+    line_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Withdraw a posted line (owner or manager/admin) so a partially-sold list can
+    resolve.
+
+    QC 2026-08-10 P2/D4b: ``WITHDRAWN`` had no writer. The service enforces the
+    owner/manager gate and refuses an already-awarded line (409).
+    """
+    excess_service.withdraw_line(db, line_id, user)
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
+
+
 @router.post("/api/resell/{list_id}/offers", response_class=HTMLResponse)
 async def resell_submit_offer(
     request: Request,

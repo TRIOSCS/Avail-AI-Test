@@ -1966,6 +1966,89 @@ def close_list_without_bid(db: Session, list_id: int, owner: User) -> ExcessList
     return _end_posting_window(db, list_id, owner, target_status=ExcessListStatus.CLOSED)
 
 
+def withdraw_line(db: Session, line_id: int, user: User) -> ExcessLineItem:
+    """Withdraw a posted resell line — the missing WITHDRAWN writer (QC 2026-08-10
+    P2/D4b).
+
+    ``ExcessLineItemStatus.WITHDRAWN`` existed but nothing ever wrote it, so a line that
+    would never sell could not be taken off the table — and a list only flips to
+    ``awarded`` once EVERY line is decided (awarded or withdrawn), so a partially-sold
+    list stranded in ``bid_out`` forever. Per the owner's decision the LIST OWNER or a
+    manager/admin may withdraw a line. Mirrors ``award_offer``: lock the list, refuse an
+    already-awarded line (unaward first), set WITHDRAWN, recompute the rollup, retire the
+    line from the Sighting live-mirror, then re-derive the list status. Idempotent on an
+    already-withdrawn line. Commits.
+    """
+    from ..dependencies import is_manager_or_admin
+
+    line = db.get(ExcessLineItem, line_id)
+    if not line:
+        raise HTTPException(404, f"ExcessLineItem {line_id} not found")
+    excess_list = get_excess_list(db, line.excess_list_id)
+    if not (excess_list.owner_id == user.id or is_manager_or_admin(user)):
+        raise HTTPException(403, "Only the list owner or a manager can withdraw a line")
+
+    _lock_list_and_lines(db, excess_list.id)
+    if line.status == ExcessLineItemStatus.WITHDRAWN:
+        return line  # idempotent
+    if line.status == ExcessLineItemStatus.AWARDED:
+        raise HTTPException(409, f"Line '{line.part_number}' is awarded — unaward it first")
+
+    line.status = ExcessLineItemStatus.WITHDRAWN
+    db.flush()
+    recompute_line_rollup(db, line.id)
+
+    from . import excess_mirror
+
+    excess_mirror.sync_list_mirror(db, excess_list)
+    _apply_award_list_status(excess_list)
+    _safe_commit(db, entity="excess line withdraw")
+    db.refresh(line)
+    logger.info("Withdrew ExcessLineItem id={} (list={}) by user={}", line_id, excess_list.id, user.id)
+    return line
+
+
+def close_bid_out_list(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a ``bid_out`` list into the terminal ``closed`` state (QC 2026-08-10
+    P2/D4).
+
+    A list whose customer bid was rejected (or that otherwise won't resolve) stranded in
+    ``bid_out`` with no exit — the posting-window close only accepts open/collecting. Per
+    the owner's decision the owner is PROMPTED to close or re-bid; this is the manual
+    close. Owner-only. Refuses anything but ``bid_out`` (404/409), and refuses while an
+    offer is still awardable-and-undecided so a live award is never orphaned. ``closed``
+    is terminal (no reopen, not swept by expiry); retires the Sighting mirror. Commits.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can close it")
+    _lock_list_and_lines(db, list_id)
+    if excess_list.status != ExcessListStatus.BID_OUT.value:
+        raise HTTPException(409, "Only a bid-out list is closed from here.")
+    # Don't strand a still-winnable offer: if any line is still undecided AND an actionable
+    # offer covers it, the owner should award/withdraw first (or unaward), not force-close.
+    if any(it.status not in _DECIDED_LINE_STATUSES for it in excess_list.line_items):
+        undecided_has_live_offer = any(
+            o.status in {st.value for st in _ACTIONABLE_OFFER_STATUSES} for o in excess_list.offers
+        )
+        if undecided_has_live_offer:
+            raise HTTPException(
+                409, "Some lines still have live offers — award or withdraw them (or unaward) before closing."
+            )
+
+    excess_list.status = ExcessListStatus.CLOSED.value
+    excess_list.close_at = excess_list.close_at or datetime.now(UTC)
+    db.flush()
+
+    from . import excess_mirror
+
+    excess_mirror.sync_list_mirror(db, excess_list)
+    _safe_commit(db, entity="excess list close from bid_out")
+    db.refresh(excess_list)
+    logger.info("Closed bid_out ExcessList id={} -> closed by owner={}", list_id, owner.id)
+    return excess_list
+
+
 # List statuses that are still "in flight" (the posting window has not resolved) and so
 # are eligible for auto-expiry once past ``close_at`` (M5 nightly job).
 _UNRESOLVED_LIST_STATUSES = (ExcessListStatus.OPEN, ExcessListStatus.COLLECTING)
