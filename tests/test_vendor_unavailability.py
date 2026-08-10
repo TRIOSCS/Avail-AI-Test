@@ -2300,7 +2300,8 @@ class TestOfferHookExcludedPaths:
         db_session.commit()
 
         offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).one()
-        assert offer.status == "active"  # would have released if this path were hooked
+        # QC 2026-08-10 P0-2: email-parsed offers are pending_review (never auto-active).
+        assert offer.status == "pending_review"  # would have released if this path were hooked
         assert offer.requirement_id == test_requisition.requirements[0].id
         _assert_not_released(db_session, rec)
 

@@ -345,10 +345,16 @@ def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, 
     return line_items, total_sell, total_cost
 
 
-def _template_email_html(salesperson_name: str, contacts: list, line_items: list, notes: str | None) -> str:
-    """Deterministic customer-offer email body (no AI).
+def _template_email_html(
+    salesperson_name: str, contacts: list, line_items: list, notes: str | None, intro_html: str | None = None
+) -> str:
+    """Customer-offer email body.
 
-    Shared template fallback.
+    The parts table + closing + signature ALWAYS render. ``intro_html`` (an
+    AI-drafted or user-edited opening the rep reviewed) replaces the default
+    greeting + boilerplate intro when supplied — so a customer never receives an
+    offer whose parts table was dropped (QC 2026-08-10 P0-1). Callers must pass
+    intro_html already sanitized/wrapped.
     """
     rows_html = ""
     for item in line_items:
@@ -371,10 +377,18 @@ def _template_email_html(salesperson_name: str, contacts: list, line_items: list
 
     notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
 
+    if intro_html:
+        intro = intro_html
+    else:
+        intro = (
+            f"<p>{greeting}</p>"
+            "<p>We have the following parts available that may be of interest based on "
+            "your previous requirements:</p>"
+        )
+
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:700px">
-        <p>{greeting}</p>
-        <p>We have the following parts available that may be of interest based on your previous requirements:</p>
+        {intro}
         <table style="border-collapse:collapse;width:100%;margin:16px 0">
             <thead><tr style="background:#f3f4f6">
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Part Number</th>
@@ -450,12 +464,10 @@ async def send_proactive_offer(
     if not subject:
         subject = f"Parts Available — {company_name}"
 
-    if email_html:
-        # Use AI-drafted or user-edited HTML
-        html_body = email_html
-    else:
-        salesperson_name = owner.name or owner.email.split("@")[0]
-        html_body = _template_email_html(salesperson_name, contacts, line_items, notes)
+    # QC 2026-08-10 P0-1: the parts table ALWAYS renders. An AI-drafted / edited
+    # body becomes the intro; it no longer replaces (and drops) the whole email.
+    salesperson_name = owner.name or owner.email.split("@")[0]
+    html_body = _template_email_html(salesperson_name, contacts, line_items, notes, intro_html=email_html)
 
     # Create ProactiveOffer record first to get ID for subject tag
     po = ProactiveOffer(
@@ -472,7 +484,9 @@ async def send_proactive_offer(
     db.add(po)
     db.flush()
 
-    tagged_subject = f"[AVAIL-PROACTIVE-{po.id}] {subject}"
+    # QC 2026-08-10 P0-1: no internal tracking tag in the customer subject
+    # (nothing parsed it back; it just leaked "[AVAIL-PROACTIVE-123]" to buyers).
+    tagged_subject = subject
 
     # Send email via Graph API
     try:
@@ -733,7 +747,8 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     if not recipient_emails:
         raise ValueError("No contact on file — open Prepare to pick or add one")
 
-    tagged_subject = f"[AVAIL-PROACTIVE-{po.id}] {po.subject}"
+    # QC 2026-08-10 P0-1: no internal tracking tag in the customer subject.
+    tagged_subject = po.subject
     gc = GraphClient(token)
     try:
         await gc.post_json(

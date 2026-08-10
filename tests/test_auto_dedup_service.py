@@ -80,6 +80,13 @@ def _candidate(keep_id: int, remove_id: int, score: int = 99, *, auto_keep_id: i
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture(autouse=True)
+def _enable_dedup_merge(monkeypatch):
+    # QC 2026-08-10 P0-3: production default is OFF (no unattended irreversible
+    # merges). This whole module tests the MERGE mechanics, so enable the flag.
+    monkeypatch.setattr("app.services.auto_dedup_service.settings.auto_dedup_merge_enabled", True)
+
+
 class TestRunAutoDedup:
     def test_returns_stats_dict(self, db_session):
         """Should return a dict with vendors_merged and companies_merged."""

@@ -26,6 +26,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import VendorCard
 
 
@@ -118,7 +119,16 @@ def _dedup_vendors(db: Session) -> int:
             elif score >= 92:
                 should_merge = _ai_confirm_vendor_merge(a.display_name, b.display_name, score)
 
-            if should_merge:
+            if should_merge and not settings.auto_dedup_merge_enabled:
+                # QC 2026-08-10 P0-3: irreversible merge is gated OFF by default —
+                # surface the candidate for human review instead of merging.
+                logger.info(
+                    "Auto-dedup gated: would merge vendor '{}' into '{}' (score={}) — review in Data Ops",
+                    remove.display_name,
+                    keep.display_name,
+                    score,
+                )
+            elif should_merge:
                 try:
                     merge_vendor_cards(keep_id, remove_id, db)
                     db.commit()
@@ -175,7 +185,14 @@ def _dedup_companies(db: Session) -> int:
         elif score >= 92:
             should_merge = _ai_confirm_company_merge(keep.name, remove.name, keep.domain, remove.domain, score)
 
-        if should_merge:
+        if should_merge and not settings.auto_dedup_merge_enabled:
+            logger.info(
+                "Auto-dedup gated: would merge company '{}' into '{}' (score={}) — review in Data Ops",
+                remove.name,
+                keep.name,
+                score,
+            )
+        elif should_merge:
             try:
                 merge_companies(keep_id, remove_id, db)
                 db.commit()

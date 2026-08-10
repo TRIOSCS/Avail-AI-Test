@@ -1573,7 +1573,14 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                 moq=draft.get("moq"),
                 notes=draft.get("notes"),
                 source="email_parse",
-                status=OfferStatus.ACTIVE if vr.confidence >= 0.8 else OfferStatus.PENDING_REVIEW,
+                # QC 2026-08-10 P0-2: email-parsed offers ALWAYS wait for human
+                # review — never auto-ACTIVE on the model's self-reported
+                # confidence. The parse reads untrusted vendor email text, and
+                # confidence was both the injectable field AND the gate: a crafted
+                # email could mint an ACTIVE offer that feeds customer quotes +
+                # buy plans (quote_builder/buyplan filter status==ACTIVE). The
+                # existing pending-review queue promotes with one click.
+                status=OfferStatus.PENDING_REVIEW,
                 vendor_response_id=vr.id,
                 evidence_tier=tier_for_parsed_offer(vr.confidence),
                 parse_confidence=vr.confidence,

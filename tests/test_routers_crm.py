@@ -1865,6 +1865,7 @@ class TestBuildQuoteEmailHtml:
             payment_terms="Net 30",
             shipping_terms="FOB",
             notes="Rush order",
+            customer_message="Rush order",  # QC 2026-08-10 P0-4: customer note now lives here (notes is internal)
             validity_days=14,
             created_by_id=test_user.id,
             created_at=datetime.now(UTC),

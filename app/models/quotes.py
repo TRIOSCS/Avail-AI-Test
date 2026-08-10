@@ -43,7 +43,8 @@ class Quote(Base):
     payment_terms = Column(String(100))
     shipping_terms = Column(String(100))
     validity_days = Column(Integer, default=7)
-    notes = Column(Text)
+    notes = Column(Text)  # INTERNAL only — never rendered into the customer email (QC 2026-08-10 P0-4)
+    customer_message = Column(Text)  # customer-facing note shown in the quote email
 
     status = Column(String(20), default="draft")
     sent_at = Column(UTCDateTime)
