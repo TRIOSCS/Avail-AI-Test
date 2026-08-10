@@ -210,6 +210,7 @@ async def rfq_send(
 
     sent = []
     failed = []
+    not_sent = []  # QC P2: real no-token run — recorded but NOT emailed
 
     if token and not is_testing:
         # Real email send via Graph API
@@ -268,7 +269,12 @@ async def rfq_send(
                     sent.append({"vendor": name, "email": email, "status": "draft"})
                 db.commit()
     else:
-        # Test mode or no token — create Contact records without sending
+        # QC 2026-08-10 P2 (success-theater): a MISSING Graph token means these RFQs
+        # were NOT emailed — recording them SENT + showing a green "sent" banner was a
+        # lie (the vendors never got them). Only TESTING mode records SENT (the harness
+        # skips the real POST but the send is otherwise real); a real no-token run stamps
+        # PENDING and reports them as "not sent — reconnect Microsoft 365".
+        status_val = ContactStatus.SENT if is_testing else ContactStatus.PENDING
         for name, email in zip(vendor_names, vendor_emails):
             if not email:
                 continue
@@ -281,11 +287,12 @@ async def rfq_send(
                 vendor_contact=email,
                 parts_included=parts_text,
                 subject=subject,
-                status=ContactStatus.SENT,
+                status=status_val,
                 status_updated_at=datetime.now(UTC),
             )
             db.add(contact)
-            sent.append({"vendor": name, "email": email, "status": "sent"})
+            entry = {"vendor": name, "email": email, "status": "sent" if is_testing else "not_sent"}
+            (sent if is_testing else not_sent).append(entry)
         db.commit()
 
     logger.info("RFQ: {} sent, {} failed for req {} by {}", len(sent), len(failed), req_id, user.email)
@@ -296,6 +303,8 @@ async def rfq_send(
     ctx["failed_results"] = failed
     ctx["total_sent"] = len(sent)
     ctx["total_failed"] = len(failed)
+    ctx["not_sent_results"] = not_sent
+    ctx["total_not_sent"] = len(not_sent)
     return template_response("htmx/partials/requisitions/rfq_results.html", ctx)
 
 
