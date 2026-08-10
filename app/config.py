@@ -140,6 +140,12 @@ class Settings(BaseSettings):
 
     # --- Customer enrichment ---
     customer_enrichment_enabled: bool = True
+    # QC 2026-08-10 P0-3: the nightly auto-dedup job performs IRREVERSIBLE company
+    # + vendor merges (hard-deletes the losing row, no snapshot) on the model's own
+    # confidence. Default OFF — the job logs the candidate pairs it would merge for
+    # human review in Data Ops instead of merging unattended. Flip to true only with
+    # a merge-undo/snapshot in place.
+    auto_dedup_merge_enabled: bool = False
     customer_enrichment_cooldown_days: int = 90
     customer_enrichment_contacts_per_account: int = 5
 

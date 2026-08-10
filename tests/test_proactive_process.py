@@ -208,7 +208,8 @@ async def test_send_draft_marks_everything_and_throttles(db_session):
         result = await send_draft_offer(db_session, s["rep"], "tok", draft.id)
 
     assert mock_send.call_args.args[1]["message"]["toRecipients"][0]["emailAddress"]["address"] == "buyer@beckhoff.com"
-    assert f"[AVAIL-PROACTIVE-{draft.id}]" in mock_send.call_args.args[1]["message"]["subject"]
+    # QC 2026-08-10 P0-1: internal tracking tag no longer leaks into the customer subject.
+    assert "[AVAIL-PROACTIVE-" not in mock_send.call_args.args[1]["message"]["subject"]
     assert result["status"] == ProactiveOfferStatus.SENT
     db_session.refresh(s["m1"])
     db_session.refresh(s["m2"])

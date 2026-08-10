@@ -226,7 +226,15 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         if not v:
             return "—"
         v = float(v)
-        return f"${v:,.2f}" if v % 1 >= 0.005 else f"${v:,.0f}"
+        # QC 2026-08-10 P0-4: show the unit price at the SAME precision used to
+        # compute the extended price (up to 4dp), with a 2dp floor — never round a
+        # real sub-cent price down to "$0", and keep printed unit x qty == Ext.
+        s = f"{v:,.4f}".rstrip("0").rstrip(".")
+        if "." not in s:
+            s += ".00"
+        elif len(s) - s.index(".") - 1 == 1:
+            s += "0"
+        return f"${s}"
 
     def _fmt_lead(s):
         if not s:
@@ -280,8 +288,8 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
 
     greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
     notes_block = (
-        f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>'
-        if quote.notes
+        f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.customer_message)}</div>'
+        if quote.customer_message  # QC 2026-08-10 P0-4: internal notes never leak to the customer
         else ""
     )
     signature = user.email_signature or user.name or "Trio Supply Chain Solutions"

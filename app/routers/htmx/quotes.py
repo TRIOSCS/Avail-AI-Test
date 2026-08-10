@@ -318,6 +318,10 @@ async def edit_quote_metadata(
         quote.shipping_terms = shipping_terms or None
     if "notes" in form:
         quote.notes = str(form["notes"]).strip() or None
+    if "customer_message" in form:
+        # QC 2026-08-10 P0-4: the customer-facing message (rendered in the quote
+        # email); internal `notes` above never reaches the customer.
+        quote.customer_message = str(form["customer_message"]).strip() or None
     if form.get("valid_until"):
         target = _parse_date_safe(str(form["valid_until"]).strip(), date)
         if target is None:

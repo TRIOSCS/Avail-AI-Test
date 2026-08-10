@@ -1433,6 +1433,13 @@ class TestAutoAttributionExtra:
 
 
 class TestAutoDedupExtra:
+    @pytest.fixture(autouse=True)
+    def _enable_dedup_merge(self, monkeypatch):
+        # QC 2026-08-10 P0-3: the production default is OFF (no unattended
+        # irreversible merges); these tests verify the merge mechanics, so
+        # enable the flag explicitly.
+        monkeypatch.setattr("app.services.auto_dedup_service.settings.auto_dedup_merge_enabled", True)
+
     """Extra tests for auto_dedup_service to boost coverage."""
 
     def test_dedup_vendors_no_rapidfuzz(self, db_session: Session):

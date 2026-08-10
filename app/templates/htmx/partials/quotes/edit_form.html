@@ -51,7 +51,13 @@
     </div>
 
     <div>
-      <label class='form-label'>Internal Notes</label>
+      <label class='form-label'>Customer Message <span class='text-xs font-normal text-secondary'>— shown to the customer on the quote</span></label>
+      <textarea name='customer_message' rows='3'
+                class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'>{{ quote.customer_message or "" }}</textarea>
+    </div>
+
+    <div>
+      <label class='form-label'>Internal Notes <span class='text-xs font-normal text-secondary'>— never shown to the customer</span></label>
       <textarea name='notes' rows='3'
                 class='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm input-focus'>{{ quote.notes or "" }}</textarea>
     </div>
