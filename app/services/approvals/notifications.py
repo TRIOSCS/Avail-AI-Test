@@ -63,14 +63,38 @@ async def send_email(user, subject: str, html_body: str, db: Session) -> None:
 
 
 def _build_email_html(payload: dict) -> tuple[str, str]:
-    """Build subject + HTML body from an outbox payload dict."""
-    decision = payload.get("decision", "decided")
-    subject = f"Approval request {decision}"
-    html = (
-        f"<p>Your approval request has been <strong>{decision}</strong>.</p>"
-        f'<p style="color:#6b7280;font-size:12px">This is an automated alert from AVAIL.</p>'
-    )
-    return subject, html
+    """Build subject + HTML body from an outbox payload dict.
+
+    QC 2026-08-10 P1-4: tell the requester WHAT was decided, the amount, the
+    reason (the rejection reason was previously discarded — the acute case is a
+    prepayment requester whose only notice this is), and a link back to the
+    workspace. All interpolated values are HTML-escaped.
+    """
+    import html as _html
+
+    from ...config import settings
+
+    decision = str(payload.get("decision", "decided"))
+    gate = str(payload.get("gate_type") or "approval").replace("_", " ").title()
+    req_id = payload.get("request_id")
+    amount = payload.get("amount")
+    comment = payload.get("comment")
+
+    subject = f"[AVAIL] {gate} request {decision}" + (f" — #{req_id}" if req_id else "")
+    color = "#16a34a" if decision == "approved" else "#dc2626"
+    parts = [
+        f"<p>Your <strong>{_html.escape(gate)}</strong> request "
+        f'has been <strong style="color:{color}">{_html.escape(decision.upper())}</strong>.</p>'
+    ]
+    if amount:
+        parts.append(f"<p>Amount: <strong>${_html.escape(str(amount))}</strong></p>")
+    if comment:
+        label = "Reason" if decision == "rejected" else "Note"
+        parts.append(f"<p>{label}: {_html.escape(str(comment))}</p>")
+    base = (settings.app_url or "").rstrip("/")
+    parts.append(f'<p><a href="{base}/v2/approvals">Open in AVAIL</a></p>')
+    parts.append('<p style="color:#6b7280;font-size:12px">Automated alert from AVAIL.</p>')
+    return subject, "".join(parts)
 
 
 def _build_in_app(payload: dict) -> tuple[str, str, str | None]:

@@ -207,7 +207,17 @@ def decide(
     # Notify the request owner (fall back to requester, then the decider) on BOTH the
     # in-app and email channels — Mike's locked decision. recipient_user_id is NOT NULL.
     notify_user_id = request.owner_id or request.requested_by_id or user.id
-    payload = {"event_type": "decided", "decision": event_type, "comment": comment}
+    # QC 2026-08-10 P1-4: carry gate + id + amount so the requester's email can
+    # say WHAT was decided, why, and link back (the bare "decided" email dropped
+    # the mandatory rejection reason — the acute case is a prepayment requester).
+    payload = {
+        "event_type": "decided",
+        "decision": event_type,
+        "comment": comment,
+        "gate_type": request.gate_type,
+        "request_id": request.id,
+        "amount": str(request.amount) if request.amount is not None else None,
+    }
     db.add(
         ApprovalOutbox(
             request_id=request.id,

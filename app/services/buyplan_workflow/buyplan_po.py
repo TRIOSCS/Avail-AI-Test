@@ -242,6 +242,14 @@ def verify_po(
         # to re-issue the PO without waiting out a stale (ops-stamped) nudge window.
         line.last_nudge_at = None
         logger.info("PO rejected for line {}: {}", line_id, rejection_note)
+        # QC 2026-08-10 P1-1: sending a PO back invalidates any wire authorised
+        # against it. Void THIS line's live prepayment (the money-safety sweep —
+        # REQUESTED->CANCELLED, APPROVED-but-unwired->void + DO-NOT-WIRE notice,
+        # PAID untouched, sibling lines untouched) so accounting can't wire to a
+        # pulled PO. PO reject was the one payable-exit transition not wired to it.
+        from .buyplan_approval import _cancel_open_prepayment_requests_for_plan
+
+        _cancel_open_prepayment_requests_for_plan(plan_id, db, "PO sent back — prepayment voided", line_ids=[line_id])
     else:
         raise ValueError(f"Invalid PO verification action: {action}")
 

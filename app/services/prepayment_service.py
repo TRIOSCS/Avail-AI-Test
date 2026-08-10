@@ -25,9 +25,8 @@ from sqlalchemy.orm import Session
 
 from ..constants import (
     ApprovalGateType,
-    ApprovalRequestStatus,
-    ApprovalSubjectType,
     BuyPlanLineStatus,
+    PrepaymentStatus,
 )
 from ..dependencies import PREPAYMENT_BLOCKED_PLAN_STATUSES, get_buyplan_for_user
 from ..models.approvals import ApprovalRequest
@@ -169,24 +168,31 @@ def create_prepayment(
     ):
         raise ValueError("This PO is not ready for a prepayment request.")
 
-    # One live prepayment per PO: block a second prepayment that is still REQUESTED *or*
-    # already APPROVED on this line — an approved (about-to-be-wired) prepayment must also
-    # block a duplicate, else the same PO gets paid twice (finding #1). Enum members (no
-    # .value) match the ApprovalRequest comparison convention in
-    # services/approvals/queue.py + service.py.
+    # One live prepayment per PO: block a second prepayment while one is still
+    # REQUESTED, APPROVED (about-to-be-wired), or PAID on this line.
+    #
+    # QC 2026-08-10 P1-1: key this on the PREPAYMENT's own lifecycle status, not
+    # the ApprovalRequest row. Teardown (cancel/halt/reject) voids the prepayment
+    # but leaves its ApprovalRequest APPROVED forever, so the old ApprovalRequest
+    # -status guard blocked EVERY future request on a line whose prepayment was
+    # voided — the button 400'd permanently (process-review D3). A VOID prepayment
+    # is dead and must not block; live + paid still do.
     existing = (
-        db.query(ApprovalRequest.id)
-        .join(Prepayment, Prepayment.id == ApprovalRequest.subject_id)
+        db.query(Prepayment.id)
         .filter(
-            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
-            ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
-            ApprovalRequest.status.in_([ApprovalRequestStatus.REQUESTED, ApprovalRequestStatus.APPROVED]),
             Prepayment.buy_plan_line_id == buy_plan_line_id,
+            Prepayment.status.in_(
+                [
+                    PrepaymentStatus.REQUESTED.value,
+                    PrepaymentStatus.APPROVED.value,
+                    PrepaymentStatus.PAID.value,
+                ]
+            ),
         )
         .first()
     )
     if existing:
-        raise ValueError("A prepayment for this PO is already awaiting approval or approved.")
+        raise ValueError("A prepayment for this PO is already awaiting approval, approved, or paid.")
 
     # Snapshot the payee so the approver / AP always see who is being paid even if the line
     # or offer later changes (finding #3): prefer authoritative server sources (never let a
