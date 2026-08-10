@@ -426,7 +426,8 @@ class TestAutoParseOffers:
         offers = db_session.query(Offer).filter(Offer.vendor_response_id == vr.id).all()
         assert len(offers) == 1
         assert offers[0].mpn == "LM317T"
-        assert offers[0].status == "active"  # confidence 0.85 >= 0.8 threshold
+        # QC 2026-08-10 P0-2: email-parsed offers are pending_review regardless of confidence.
+        assert offers[0].status == "pending_review"
         assert offers[0].source == "email_parse"
         assert offers[0].vendor_name == "Vendor XYZ"
         assert float(offers[0].unit_price) == 0.55
