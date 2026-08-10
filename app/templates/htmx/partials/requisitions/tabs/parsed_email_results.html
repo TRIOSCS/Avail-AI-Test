@@ -84,6 +84,14 @@
                    class="input input-sm">
           </div>
           <div>
+            {# QC 2026-08-10 P4: the reviewer can see/correct the currency the AI parsed —
+               it used to be hidden, so every save silently stamped USD. #}
+            <label class="text-xs text-gray-600 uppercase block mb-0.5">Currency</label>
+            <input type="text" name="offers[{{ loop.index0 }}].currency" maxlength="3"
+                   value="{{ q.currency or 'USD' }}"
+                   class="input input-sm uppercase">
+          </div>
+          <div>
             <label class="text-xs text-gray-600 uppercase block mb-0.5">Lead Time</label>
             <input type="text" name="offers[{{ loop.index0 }}].lead_time"
                    value="{{ q.lead_time_text or '' }}"
