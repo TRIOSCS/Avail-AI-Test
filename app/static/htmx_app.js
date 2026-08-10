@@ -135,6 +135,42 @@ htmx.on('htmx:afterRequest', function(evt) {
     });
 });
 
+// ── Global error surface (QC 2026-08-10 cross-cutting) ────────
+// A failed HTMX request (non-2xx, or a network/timeout error) otherwise swaps
+// NOTHING and shows NOTHING — the user believes the action worked. This is the
+// "success theater" the UX review flagged across RFQ send, the Process bar,
+// resell bids and more. Surface every UNHANDLED failure as an error toast.
+// Endpoints that route errors to their OWN inline target (response-targets:
+// hx-target-error / -4xx / -5xx / -NNN) keep rendering that and are skipped here,
+// so there is no double-notify.
+htmx.on('htmx:responseError', function(evt) {
+    const el = evt.detail && evt.detail.elt;
+    if (el && el.closest && el.closest('[hx-target-error],[hx-target-4xx],[hx-target-5xx],[hx-target-422]')) {
+        return;
+    }
+    const xhr = evt.detail && evt.detail.xhr;
+    const status = xhr ? xhr.status : 0;
+    let msg = 'Something went wrong — your action did not complete.';
+    try {
+        const body = xhr && xhr.responseText;
+        if (body && body.length < 400) {
+            const parsed = JSON.parse(body);
+            if (parsed && (parsed.error || parsed.detail)) msg = parsed.error || parsed.detail;
+        }
+    } catch (_e) { /* not JSON — keep the generic message */ }
+    const t = Alpine.store('toast');
+    t.message = status ? (msg + ' (' + status + ')') : msg;
+    t.type = 'error';
+    t.show = true;
+});
+
+htmx.on('htmx:sendError', function() {
+    const t = Alpine.store('toast');
+    t.message = 'Network error — check your connection and try again.';
+    t.type = 'error';
+    t.show = true;
+});
+
 // ── Trouble-ticket capture & reporting ───────────────────────
 // Recent HTMX-pushed URLs — a breadcrumb trail for bug repro. Capped at 8.
 window._ttNavHistory = [];
