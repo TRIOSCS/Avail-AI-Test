@@ -167,7 +167,9 @@ class Prepayment(Base):
     id = Column(Integer, primary_key=True)
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
-    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="CASCADE"), nullable=False)
+    # QC 2026-08-10 P1-2: RESTRICT, not CASCADE — a buy plan carrying prepayments
+    # (incl. PAID wire records) must not be deletable out from under them.
+    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="RESTRICT"), nullable=False)
     # The specific PO line this prepayment is against (migration 178). Nullable +
     # ondelete=SET NULL: a prepayment record outlives the line it prepaid (audit trail).
     buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="SET NULL"), nullable=True)
