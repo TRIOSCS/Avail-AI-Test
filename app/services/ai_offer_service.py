@@ -391,6 +391,11 @@ def parse_offer_form_rows(form, vendor_name: str) -> list[dict]:
                 "manufacturer": form.get(f"offers[{idx}].manufacturer"),
                 "qty_available": safe_int(form.get(f"offers[{idx}].qty_available")),
                 "unit_price": safe_float(form.get(f"offers[{idx}].unit_price")),
+                # QC 2026-08-10 P4 (AI provenance): collect the currency the reviewer
+                # sees/edits — it was dropped here, so save stamped every offer USD even
+                # when the vendor priced in EUR/GBP. None falls through to the o.currency
+                # or "USD" default at save, unchanged.
+                "currency": form.get(f"offers[{idx}].currency") or None,
                 "lead_time": form.get(f"offers[{idx}].lead_time"),
                 "date_code": form.get(f"offers[{idx}].date_code"),
                 "condition": form.get(f"offers[{idx}].condition", OfferCondition.NEW),
@@ -457,6 +462,7 @@ def save_form_parsed_offers(
             manufacturer=o.get("manufacturer"),
             qty_available=o.get("qty_available"),
             unit_price=o.get("unit_price"),
+            currency=o.get("currency") or "USD",  # QC 2026-08-10 P4: honor the reviewed currency, not a blanket USD
             lead_time=o.get("lead_time"),
             date_code=o.get("date_code"),
             condition=o.get("condition") or OfferCondition.NEW,
