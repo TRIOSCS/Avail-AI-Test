@@ -162,3 +162,21 @@ def test_po_reject_voids_the_lines_prepayment(db_session, test_user):
     db_session.refresh(pp)
     # Sending the PO back must stand the wire down — a manager can't wire to a pulled PO.
     assert pp.status == PrepaymentStatus.VOID.value
+
+
+# ── P1-2 · quote-delete FK guard (model metadata; behavior proven by the
+#          migration round-trip on real PG — SQLite won't enforce ondelete) ──
+
+
+def test_quote_id_fk_is_set_null_not_cascade():
+    from app.models.buy_plan import BuyPlan
+
+    fk = next(iter(BuyPlan.__table__.c.quote_id.foreign_keys))
+    assert fk.ondelete == "SET NULL"  # deleting a quote orphans the plan, never destroys it
+
+
+def test_prepayment_buy_plan_fk_is_restrict_not_cascade():
+    from app.models.quality_plan import Prepayment
+
+    fk = next(iter(Prepayment.__table__.c.buy_plan_id.foreign_keys))
+    assert fk.ondelete == "RESTRICT"  # a plan with prepayments (incl. PAID) can't be deleted

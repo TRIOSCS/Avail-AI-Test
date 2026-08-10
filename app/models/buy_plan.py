@@ -79,7 +79,9 @@ class BuyPlan(Base):
     id = Column(Integer, primary_key=True)
 
     # ── Quote / Deal linkage
-    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=True)
+    quote_id = Column(
+        Integer, ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+    )  # QC 2026-08-10 P1-2: deleting a quote ORPHANS the plan, never destroys the approved deal
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
 
     # ── Acctivate references
