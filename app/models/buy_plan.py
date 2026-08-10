@@ -131,6 +131,11 @@ class BuyPlan(Base):
     cancellation_reason = Column(Text)
     halted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     halted_at = Column(UTCDateTime)
+    # QC 2026-08-10 P2/D2: the exact pre-halt state, snapshotted on halt so resume
+    # restores it (was: resume forced ACTIVE + left so_status REJECTED → the plan
+    # could never complete, and a PENDING-halted plan came back ACTIVE unapproved).
+    status_before_halt = Column(String(30))
+    so_status_before_halt = Column(String(30))
 
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)

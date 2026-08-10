@@ -279,7 +279,11 @@
   {% set _resumable = bp.status == 'halted' %}
   {% set _cancellable = bp.status not in ('completed', 'cancelled') %}
   {% set _resettable = bp.status in ('halted', 'cancelled') %}
-  {% if _haltable or _resumable or _cancellable or _resettable %}
+  {# QC 2026-08-10 P2/D1: Testing Service / Comps carry no lines, so they never
+     auto-complete — the deal's creator (or a manager) marks them done. Service
+     enforces the creator/manager gate (403 otherwise), mirroring halt/resume. #}
+  {% set _completable_lite = bp.status == 'active' and bp.order_type in ('testing_service', 'comps') and not bp.lines %}
+  {% if _haltable or _resumable or _cancellable or _resettable or _completable_lite %}
   <div class="rounded-lg border border-line-base bg-white p-3" x-data="{ panel: '' }">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <span class="text-sm font-semibold text-gray-800">Plan controls</span>
@@ -292,6 +296,14 @@
           <input type="hidden" name="origin" value="approvals_workspace">
           <input type="hidden" name="lens" value="{{ lens }}">
           <button type="submit" data-loading-disable class="btn-primary btn-sm">Resume</button>
+        </form>
+        {% endif %}
+        {% if _completable_lite %}
+        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/complete-lite" hx-target="#aw-pane" hx-swap="innerHTML" class="inline"
+              hx-confirm="Mark this {{ bp.order_type|replace('_', ' ')|title }} order complete?">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="lens" value="{{ lens }}">
+          <button type="submit" data-loading-disable class="btn-primary btn-sm">Mark complete</button>
         </form>
         {% endif %}
         {% if _resettable %}
