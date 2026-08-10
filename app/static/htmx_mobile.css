@@ -126,3 +126,28 @@
         display: none;
     }
 }
+
+
+/* ============================================================
+   N. Touch devices: reveal hover-only row actions (QC 2026-08-10 P3)
+   ------------------------------------------------------------
+   ~20 row actions use Tailwind `opacity-0 group-hover:opacity-100`
+   (hidden until the row is hovered). A touch device has NO hover, so
+   those Edit/Delete/Withdraw/etc. controls were PERMANENTLY invisible
+   and unreachable on a phone. Under `hover: none`, force every
+   hover-revealed utility to its shown state so the actions are tappable.
+   ============================================================ */
+@media (hover: none) {
+    [class*="group-hover:opacity-100"] {
+        opacity: 1 !important;
+    }
+    [class*="group-hover:flex"] {
+        display: flex !important;
+    }
+    [class*="group-hover:block"] {
+        display: block !important;
+    }
+    [class*="group-hover:inline-flex"] {
+        display: inline-flex !important;
+    }
+}
