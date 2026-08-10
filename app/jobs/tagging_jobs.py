@@ -23,14 +23,24 @@ async def _run_threaded_db_job(label, fn):
     from ..database import SessionLocal
 
     db = SessionLocal()
+    # QC 2026-08-10 P4: CancelledError is a BaseException, so `except Exception`
+    # missed it — on scheduler shutdown the finally then closed the session while
+    # the asyncio.to_thread WORKER was still using it (Sentry AVAILAI-TH). On
+    # cancellation, don't close under the running thread; the pool is torn down at
+    # process exit anyway.
+    cancelled = False
     try:
         result = await asyncio.to_thread(fn, db)
         logger.info(f"{label}: {result}")
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     except Exception:
         db.rollback()
         raise
     finally:
-        db.close()
+        if not cancelled:
+            db.close()
 
 
 def register_tagging_jobs(scheduler, settings):
