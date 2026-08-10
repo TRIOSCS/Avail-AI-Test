@@ -471,6 +471,11 @@ def halt_plan(plan_id: int, user: User, db: Session, *, reason: str | None = Non
     # Void any pending prepayment (wire) approval — a halted deal must not leave a wire an
     # approver could still authorise (finding #2, Task 9 extended).
     _cancel_open_prepayment_requests_for_plan(plan.id, db, "buy plan halted — prepayment voided")
+    # QC 2026-08-10 P2/D2: snapshot the exact pre-halt state BEFORE overwriting it, so
+    # resume restores it (else the plan is stuck at so_status=REJECTED and can never
+    # complete, and a PENDING-halted plan resurfaces ACTIVE with approval never granted).
+    plan.status_before_halt = plan.status
+    plan.so_status_before_halt = plan.so_status
     plan.so_status = SOVerificationStatus.REJECTED.value
     plan.so_rejection_note = reason
     plan.status = BuyPlanStatus.HALTED.value
@@ -879,11 +884,62 @@ def resume_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
     if plan.status != BuyPlanStatus.HALTED.value:
         raise ValueError(f"Only a halted plan can be resumed (current: {plan.status}).")
 
-    plan.status = BuyPlanStatus.ACTIVE.value
+    # QC 2026-08-10 P2/D2: restore the EXACT pre-halt state, not a blanket ACTIVE.
+    # A PENDING-halted plan returns to PENDING (approval still owed); an ACTIVE one
+    # returns to ACTIVE with its so_status (usually APPROVED) intact so completion can
+    # run. Legacy HALTED rows with no snapshot fall back to the pre-fix behaviour
+    # (ACTIVE + so APPROVED) so they can still complete.
+    plan.status = plan.status_before_halt or BuyPlanStatus.ACTIVE.value
+    plan.so_status = plan.so_status_before_halt or SOVerificationStatus.APPROVED.value
+    plan.status_before_halt = None
+    plan.so_status_before_halt = None
     plan.updated_at = datetime.now(UTC)
     # halted_by_id / halted_at are intentionally LEFT in place as the halt→resume audit trail.
     db.flush()
-    logger.info("Buy plan {} RESUMED to active by {} (halt audit preserved)", plan_id, user.email)
+    logger.info(
+        "Buy plan {} RESUMED to {} (so_status={}) by {} (halt audit preserved)",
+        plan_id,
+        plan.status,
+        plan.so_status,
+        user.email,
+    )
+    # The plan may already be complete-able (all lines terminal + so_status APPROVED) —
+    # the halt→resume wedge was the only thing stopping it. Run the check now.
+    check_completion(plan_id, db)
+    return plan
+
+
+def complete_lite_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
+    """Manually complete a zero-line lite plan (Testing Service / Comps).
+
+    QC 2026-08-10 P2/D1 dead-end: these order types carry no buy-plan lines, so
+    ``check_completion``'s ``if not plan.lines: return`` AND the stock-sale-only
+    auto-complete job both skip them — a Testing/Comps deal could never leave
+    ACTIVE and never counted as completed. The deal's creator (its requisition's
+    ``created_by``) OR a manager/admin marks it done, per the owner's decision.
+    Caller commits.
+    """
+    from ...constants import SalesOrderType
+    from ...models import Requisition
+
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.ACTIVE.value:
+        raise ValueError(f"Only an active plan can be completed (current: {plan.status}).")
+    if plan.lines:
+        raise ValueError("This plan has lines — it completes automatically once every line verifies.")
+    if plan.order_type not in (SalesOrderType.TESTING_SERVICE.value, SalesOrderType.COMPS.value):
+        raise ValueError("Only Testing Service / Comps plans are completed manually (others auto-complete).")
+
+    req = db.get(Requisition, plan.requisition_id)
+    is_creator = bool(req and req.created_by == user.id)
+    if not (is_creator or _is_manager_or_admin(user)):
+        raise PermissionError("Only the deal's creator or a manager can mark this complete.")
+
+    _complete_plan(plan, db)
+    db.flush()
+    logger.info("Lite plan {} ({}) manually completed by {}", plan_id, plan.order_type, user.email)
     return plan
 
 

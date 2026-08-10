@@ -1278,6 +1278,37 @@ async def buy_plan_resume_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
+@router.post("/v2/partials/buy-plans/{plan_id}/complete-lite", response_class=HTMLResponse)
+async def buy_plan_complete_lite_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a zero-line lite plan (Testing Service / Comps) complete.
+
+    QC 2026-08-10 P2/D1: these order types carry no buy-plan lines, so neither
+    check_completion nor the stock-sale auto-complete job ever finished them — the deal
+    stranded ACTIVE. The service authorises the deal's creator OR a manager (403
+    otherwise) and refuses a plan with lines / of the wrong type / not active (400).
+    """
+    from ...services.buyplan_workflow import complete_lite_plan
+
+    get_buyplan_for_user(db, user, plan_id)
+    try:
+        complete_lite_plan(plan_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    form = await request.form()
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
 @router.post("/v2/partials/buy-plans/{plan_id}/so-number", response_class=HTMLResponse)
 async def buy_plan_set_so_partial(
     request: Request,
