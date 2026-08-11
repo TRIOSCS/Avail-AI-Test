@@ -176,6 +176,27 @@ class TestMergeContactsService:
         assert result["kept"] == keeper.id
         assert result["removed"] == loser.id
 
+    def test_dnc_and_archived_preserved_from_loser(self, db_session: Session, keeper: SiteContact, loser: SiteContact):
+        """Loser's do_not_contact / is_archived survive the merge (OR semantics).
+
+        Regression: merging a do-not-contact loser into an active keeper used to
+        drop the flag, silently re-enabling outreach to a contact someone had
+        marked do-not-contact.
+        """
+        keeper.do_not_contact = False
+        keeper.is_archived = False
+        loser.do_not_contact = True
+        loser.is_archived = True
+        db_session.commit()
+
+        from app.services.contact_merge_service import merge_contacts
+
+        merge_contacts(keeper.id, loser.id, db_session)
+        db_session.commit()
+        db_session.refresh(keeper)
+        assert keeper.do_not_contact is True
+        assert keeper.is_archived is True
+
     def test_loser_deleted(self, db_session: Session, keeper: SiteContact, loser: SiteContact):
         """Loser row is deleted after merge."""
         loser_id = loser.id

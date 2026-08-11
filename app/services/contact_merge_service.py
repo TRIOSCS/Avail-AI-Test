@@ -84,8 +84,13 @@ def merge_contacts(keep_id: int, remove_id: int, db: Session) -> dict:
         sep = f"\n\n--- Merged from {remove.full_name} ---\n"
         keep.notes = (keep.notes or "") + sep + remove.notes
 
-    # 4. Boolean merge (OR semantics for is_priority; explicit states preserved)
+    # 4. Boolean merge — OR semantics across all three disposition flags (they are
+    #    documented peers on the model). do_not_contact and is_archived are
+    #    suppression signals: dropping the loser's TRUE silently re-enabled outreach
+    #    to a contact someone had marked do-not-contact / archived.
     keep.is_priority = bool(keep.is_priority) or bool(remove.is_priority)
+    keep.do_not_contact = bool(keep.do_not_contact) or bool(remove.do_not_contact)
+    keep.is_archived = bool(keep.is_archived) or bool(remove.is_archived)
 
     # 5. Expire the loser's attachments relationship so ORM cascade doesn't
     #    delete the rows we just reassigned.
