@@ -1752,6 +1752,8 @@ def add_line(
         raise HTTPException(400, "Part number is required")
     if quantity is None or quantity <= 0:
         raise HTTPException(400, "Quantity must be a positive whole number")
+    if quantity > PG_INT4_MAX:
+        raise HTTPException(400, f"Quantity is too large (max {PG_INT4_MAX:,}).")
 
     item = ExcessLineItem(
         excess_list_id=el.id,
@@ -1817,6 +1819,8 @@ def update_line(
         raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
     if quantity is None or quantity <= 0:
         raise HTTPException(400, "Quantity must be a positive whole number")
+    if quantity > PG_INT4_MAX:
+        raise HTTPException(400, f"Quantity is too large (max {PG_INT4_MAX:,}).")
 
     identity_changed = (part_number or "").strip() != (line.part_number or "") or (manufacturer or None) != (
         line.manufacturer or None

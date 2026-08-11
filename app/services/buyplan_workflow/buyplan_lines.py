@@ -20,7 +20,7 @@ from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import OfferStatus, UserRole
+from ...constants import PG_INT4_MAX, OfferStatus, UserRole
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 from ..buyplan_scoring import assign_buyer, score_offer
@@ -422,14 +422,18 @@ def _require_int_quantity(value: object) -> int:
     if isinstance(value, bool):
         raise ValueError("Quantity must be a whole number.")
     if isinstance(value, int):
-        return value
-    try:
-        as_float = float(value)
-    except (TypeError, ValueError) as e:
-        raise ValueError("Quantity must be a whole number.") from e
-    if not as_float.is_integer():
-        raise ValueError("Quantity must be a whole number.")
-    return int(as_float)
+        result = value
+    else:
+        try:
+            as_float = float(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError("Quantity must be a whole number.") from e
+        if not as_float.is_integer():
+            raise ValueError("Quantity must be a whole number.")
+        result = int(as_float)
+    if result > PG_INT4_MAX:
+        raise ValueError(f"Quantity is too large (max {PG_INT4_MAX:,}).")
+    return result
 
 
 def _coerce_known_line_ids(known_line_ids: list[int] | None) -> set[int] | None:

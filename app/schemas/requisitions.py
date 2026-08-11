@@ -18,6 +18,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.constants import PG_INT4_MAX
 from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
 
 
@@ -101,7 +102,7 @@ class RequisitionUpdate(BaseModel):
 class RequirementCreate(BaseModel):
     primary_mpn: str
     manufacturer: str
-    target_qty: int = Field(default=1, ge=1)
+    target_qty: int = Field(default=1, ge=1, le=PG_INT4_MAX)
     target_price: float | None = Field(default=None, ge=0)
     brand: str | None = None
     substitutes: list[str] = Field(default_factory=list, max_length=20)
@@ -154,7 +155,7 @@ class RequirementCreate(BaseModel):
 class RequirementUpdate(BaseModel):
     primary_mpn: str | None = None
     manufacturer: str | None = None
-    target_qty: int | None = Field(default=None, ge=1)
+    target_qty: int | None = Field(default=None, ge=1, le=PG_INT4_MAX)
     target_price: float | None = Field(default=None, ge=0)
     brand: str | None = None
     substitutes: list[str] | None = None
