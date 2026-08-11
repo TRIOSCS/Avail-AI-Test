@@ -271,3 +271,33 @@ def test_verdict_endpoint(db_session):
         assert row.source == "human"
     finally:
         app.dependency_overrides.clear()
+
+
+# ── QC 2026-08-10 P4: human 'different' is a HARD kill-switch, even transitively ──
+
+
+def test_human_different_blocks_transitive_repool(db_session):
+    """A~C and C~B via AI 'same', but A vs B is human 'different'.
+
+    A must NOT pool B transitively (the kill-switch bug: the human override was silently
+    bypassed).
+    """
+    from app.services.part_equivalence import expand_part, norm_key, record_human_verdict
+
+    # AI says A~C and C~B (a chain).
+    _eq(db_session, "LM317T", "LM317TX", "same", source="ai")
+    _eq(db_session, "LM317TX", "LM317TY", "same", source="ai")
+    # A human ruled A ('LM317T') != B ('LM317TY').
+    from app.models import User
+
+    user = User(email="h@x.com", name="H", role="admin", azure_id="az-h")
+    db_session.add(user)
+    db_session.flush()
+    record_human_verdict(db_session, user, "LM317T", "LM317TY", "different")
+    db_session.commit()  # fixture is autoflush=False — the verdict must be visible to _load_verdicts
+
+    eq = expand_part(db_session, "LM317T")
+    keys = set(eq["keys"])
+    assert norm_key("LM317TX") in keys  # the AI 'same' variant still pools
+    assert norm_key("LM317TY") not in keys  # but NOT the human-'different' one, transitively
+    assert norm_key("LM317T") in keys

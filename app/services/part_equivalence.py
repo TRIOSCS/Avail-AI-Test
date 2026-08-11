@@ -127,6 +127,12 @@ def expand_parts(db: Session, parts: set[str]) -> dict[str, dict]:
         state[p] = {"keys": {base}, "ai_variants": {}}
         frontier.add(base)
 
+    # Human 'different' verdicts are a HARD kill-switch (QC 2026-08-10 P4): a key
+    # may never join a class that already contains a key a human ruled it different
+    # from — NOT EVEN transitively. The bug: A≠B (human), but A~C and C~B (AI 'same')
+    # pooled A and B anyway, silently overriding the human's "not the same part".
+    blocked: set[tuple[str, str]] = set()
+
     # Verdicts form a tiny graph; walk 'same' edges (a variant of a variant
     # pools too), loading each round's edges for EVERY part in one query.
     for _ in range(3):  # bounded — ordering-code chains are short
@@ -135,6 +141,8 @@ def expand_parts(db: Session, parts: set[str]) -> dict[str, dict]:
             break
         best: dict[tuple[str, str], PartEquivalence] = {}
         for r in rows:
+            if r.verdict == "different" and r.source == "human":
+                blocked.add((r.key_a, r.key_b))  # stored key_a<key_b, matches _ordered()
             pair = (r.key_a, r.key_b)
             cur = best.get(pair)
             if cur is None or (r.source == "human" and cur.source != "human"):
@@ -150,6 +158,10 @@ def expand_parts(db: Session, parts: set[str]) -> dict[str, dict]:
                 elif r.key_b in keys and r.key_a not in keys:
                     other = r.key_a
                 else:
+                    continue
+                # Kill-switch: refuse the pool if a human ruled `other` different from
+                # ANY key already in this class (direct or transitive).
+                if any(_ordered(other, k) in blocked for k in keys):
                     continue
                 keys.add(other)
                 info["ai_variants"][other] = r.reason or "AI: same part, ordering-code variant"
