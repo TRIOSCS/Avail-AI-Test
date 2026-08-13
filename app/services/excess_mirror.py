@@ -508,9 +508,14 @@ def publish_list(db: Session, list_id: int, user) -> ExcessList:
     then runs ``sync_list_mirror`` so the posted lines surface to the matcher. Commits.
     Returns the refreshed list.
     """
-    from .excess_service import get_excess_list
+    from .excess_service import _lock_list_row, get_excess_list
 
     excess_list = get_excess_list(db, list_id)
+    # M9 row lock (QC 2026-08-13): every other status writer takes it; publish did not,
+    # so two concurrent publishes both passed the DRAFT check and each created scratch
+    # requisitions + mirror Sightings that are never retired. populate_existing refreshes
+    # excess_list's status so the second caller sees OPEN and 409s.
+    _lock_list_row(db, list_id)
     if excess_list.status != ExcessListStatus.DRAFT:
         raise HTTPException(409, "Only a draft list can be published")
     now = datetime.now(UTC)

@@ -750,3 +750,56 @@ class TestRecordResponse:
         offers = db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).all()
         assert len(offers) == 1
         assert offers[0].id is not None
+
+
+# ── QC 2026-08-13: resell concurrency / idempotency fixes ─────────────────
+
+
+class TestResellQCMediums:
+    def _make_outreach(self, db, excess_list, buyer_card, trader, status="sent"):
+        o = ExcessOutreach(
+            excess_list_id=excess_list.id,
+            target_vendor_card_id=buyer_card.id,
+            submitted_by=trader.id,
+            channel="email",
+            status=status,
+            graph_message_id="msg-1",
+            graph_conversation_id="conv-1",
+        )
+        db.add(o)
+        db.commit()
+        db.refresh(o)
+        return o
+
+    def test_replayed_reply_with_offer_makes_no_duplicate(
+        self,
+        db_session: Session,
+        excess_list: ExcessList,
+        line_item: ExcessLineItem,
+        buyer_card: VendorCard,
+        trader: User,
+    ):
+        """A second inbound reply carrying a bid on an already-BID row must NOT mint a
+        second ExcessOffer (record_response now gates the link on the terminal
+        snapshot)."""
+        self._make_outreach(db_session, excess_list, buyer_card, trader)
+        lines = [{"mpn_raw": "LM358N", "quantity": 500, "unit_price": "1.25"}]
+        svc.record_response(db_session, conversation_id="conv-1", has_offer=True, offer_lines=lines)
+        svc.record_response(db_session, conversation_id="conv-1", has_offer=True, offer_lines=lines)
+        offers = db_session.query(ExcessOffer).filter(ExcessOffer.excess_list_id == excess_list.id).all()
+        assert len(offers) == 1  # was 2 before the fix
+
+    def test_publish_takes_the_list_lock(self, db_session: Session, excess_list: ExcessList, trader: User):
+        """publish_list now takes the M9 row lock (like every other status writer)."""
+        from unittest.mock import patch
+
+        from app.services import excess_mirror, excess_service
+
+        excess_list.status = ExcessListStatus.DRAFT
+        db_session.commit()
+
+        # publish_list does `from .excess_service import _lock_list_row`, so patch the
+        # source module where the name is resolved at call time.
+        with patch.object(excess_service, "_lock_list_row") as lock:
+            excess_mirror.publish_list(db_session, excess_list.id, trader)
+        lock.assert_called_once_with(db_session, excess_list.id)

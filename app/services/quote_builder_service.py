@@ -477,7 +477,11 @@ def _save_quote_from_builder_core(
     from app.constants import QuoteStatus, RequisitionStatus
     from app.models import Quote, QuoteLine, Requisition
     from app.services.crm_service import next_quote_number
-    from app.services.quote_requisitions import link_quote_to_requisitions, validate_same_customer
+    from app.services.quote_requisitions import (
+        link_quote_to_requisitions,
+        requisition_ids_for_quote,
+        validate_same_customer,
+    )
     from app.services.requisition_state import transition as req_transition
 
     if not req_ids:
@@ -521,6 +525,14 @@ def _save_quote_from_builder_core(
     revision = 1
     old_quote = db.get(Quote, payload.quote_id) if payload.quote_id else None
     if old_quote:
+        # Authz + integrity guard (QC 2026-08-13): you may only revise a quote whose
+        # requisitions are all within the set you're re-quoting (req_ids is already
+        # access-checked upstream). Without this, any quote_id could be passed to
+        # revise a quote on another rep's requisition (hijack), or a combined quote
+        # could be revised from a partial req set, silently stranding its siblings.
+        old_req_ids = set(requisition_ids_for_quote(db, old_quote.id))
+        if old_req_ids and not old_req_ids.issubset(set(req_ids)):
+            raise ValueError("This revision must include all of the original quote's requisitions.")
         old_revision = old_quote.revision or 1
         quote_number = old_quote.quote_number
         revision = old_revision + 1
