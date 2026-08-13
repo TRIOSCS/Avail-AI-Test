@@ -383,3 +383,29 @@ async def test_email_dispatch_path_committing_session_does_not_abort_batch(db_se
 
     notifs = db_session.execute(select(Notification).where(Notification.user_id == other.id)).scalars().all()
     assert len(notifs) == 1, "the in_app sibling's Notification must be written"
+
+
+@pytest.mark.asyncio
+async def test_email_channel_no_token_is_failure_not_sent(db_session):
+    """No Graph token → the row is a FAILURE (fail_count++, sent_at NULL), not a silent
+    'sent'.
+
+    The requester's only notice of the decision must not be lost.
+    """
+    from app.jobs.approval_outbox import dispatch_pending
+
+    user = _make_user(db_session, "notok@example.com")
+    req = _make_request(db_session, user)
+    row = _pending_outbox(db_session, req, user, channel="email")
+    db_session.commit()
+
+    with patch(
+        "app.services.approvals.notifications.get_valid_token",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        await dispatch_pending(db_session)
+
+    db_session.refresh(row)
+    assert row.sent_at is None, "no-token email must NOT be marked sent"
+    assert row.fail_count == 1, "fail_count must increment so retry/dead-letter engages"

@@ -315,6 +315,11 @@ def _cancel_open_prepayment_requests_for_plan(
     )
     if line_ids is not None:
         stmt = stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
+    # Row lock (QC 2026-08-13): serialize the teardown sweep against a concurrent
+    # approve/mark-paid on the same prepayment, so it can't leave an APPROVED
+    # prepayment with a live pay link on a torn-down plan. FOR UPDATE re-checks the
+    # status WHERE against the latest committed row. (SQLite no-ops FOR UPDATE.)
+    stmt = stmt.with_for_update()
     open_requests = db.execute(stmt).scalars().all()
     for ar in open_requests:
         ar.status = ApprovalRequestStatus.CANCELLED
@@ -328,6 +333,7 @@ def _cancel_open_prepayment_requests_for_plan(
     )
     if line_ids is not None:
         pp_stmt = pp_stmt.where(Prepayment.buy_plan_line_id.in_(line_ids))
+    pp_stmt = pp_stmt.with_for_update()  # lock the approved prepayments before voiding (QC 2026-08-13)
     approved_prepayments = db.execute(pp_stmt).scalars().all()
     for pp in approved_prepayments:
         pp.status = PrepaymentStatus.VOID.value
