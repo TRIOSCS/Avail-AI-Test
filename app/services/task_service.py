@@ -751,8 +751,13 @@ def on_buy_plan_assigned(
 
 
 def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: str):
-    """Auto-generate 'Bid due' alert task for a requisition approaching deadline."""
-    auto_create_task(
+    """Auto-generate 'Bid due' alert task for a requisition approaching deadline.
+
+    Returns the task (QC 2026-08-13): the caller counts non-None results to honor the
+    per-run cap and log how many it created — without the return it was always None, so
+    the cap and success logging were dead code.
+    """
+    return auto_create_task(
         db,
         requisition_id=requisition_id,
         title=f"Bid due {deadline} — {req_name}",
