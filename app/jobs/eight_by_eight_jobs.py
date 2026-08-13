@@ -91,6 +91,7 @@ async def _process_cdrs(db, settings) -> dict:
     from ..models.config import SystemConfig
     from ..services.activity_service import log_call_activity, match_phone_to_entity
     from ..services.eight_by_eight_service import (
+        CdrFetchError,
         get_access_token,
         get_cdrs,
         normalize_cdr,
@@ -114,7 +115,13 @@ async def _process_cdrs(db, settings) -> dict:
         logger.error(f"8x8 auth failed, skipping poll: {e}")
         return {"processed": 0, "matched": 0, "skipped": 0}
 
-    cdrs = await get_cdrs(token, settings, since, until)
+    try:
+        cdrs = await get_cdrs(token, settings, since, until)
+    except CdrFetchError as e:
+        # Fetch failed (QC 2026-08-13): do NOT advance the watermark, or the window's
+        # unfetched call records are lost forever. Retry the same window next poll.
+        logger.warning("8x8 CDR fetch failed — leaving watermark at {} for retry: {}", since, e)
+        return {"processed": 0, "matched": 0, "skipped": 0}
     if not cdrs:
         _update_watermark(db, watermark_row, until)
         return {"processed": 0, "matched": 0, "skipped": 0}
