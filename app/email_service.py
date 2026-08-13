@@ -464,7 +464,27 @@ class SentMessageLookupError(RuntimeError):
     """
 
 
-async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None:
+def _sent_at_or_after(raw: str | None, floor: datetime) -> bool:
+    """True if the message's sentDateTime is at/after ``floor`` (or unparseable/absent,
+    in which case we don't exclude it).
+
+    Used to ignore a prior campaign's message that shares a subject+recipient with the
+    one we're looking for (QC 2026-08-13).
+    """
+    if not raw:
+        return True
+    try:
+        ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    if floor.tzinfo is None:
+        floor = floor.replace(tzinfo=UTC)  # SQLite returns naive datetimes
+    return ts >= floor
+
+
+async def _find_sent_message(gc, subject: str, vendor_email: str, sent_after: datetime | None = None) -> dict | None:
     """Find the just-sent message in Sent Items to get its ID and conversationId.
 
     Vendor-discriminating (F1): every vendor group in a batch shares an IDENTICAL tagged
@@ -498,13 +518,18 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
                 params={
                     "$top": "50",
                     "$orderby": "sentDateTime desc",
-                    "$select": "id,conversationId,subject,toRecipients",
+                    "$select": "id,conversationId,subject,toRecipients,sentDateTime",
                 },
             )
             msgs: list[dict] = data.get("value", []) if data else []  # Graph JSON boundary
             scanned = len(msgs)
             for m in msgs:
                 if m.get("subject", "").strip() != subject.strip():
+                    continue
+                # Time floor (QC 2026-08-13): a retry must not match a PRIOR campaign's
+                # message that happens to share this subject+recipient. RFQ callers pass
+                # sent_after=None (no floor); the resell retry passes its row's send time.
+                if sent_after is not None and not _sent_at_or_after(m.get("sentDateTime"), sent_after):
                     continue
                 recipients = {
                     (r.get("emailAddress", {}).get("address") or "").lower() for r in m.get("toRecipients", [])

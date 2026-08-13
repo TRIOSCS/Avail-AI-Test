@@ -558,7 +558,7 @@ class TestRunOutreachEmailSend:
         )
         row_id = rows[0].id
 
-        async def _found(_gc, _subject, _email):
+        async def _found(_gc, _subject, _email, sent_after=None):
             return {"id": "m1", "conversationId": "c1"}
 
         real_commit = db_session.commit
@@ -816,7 +816,7 @@ class TestRunOutreachEmailSend:
                 {"vendor_email": "ops@secondbuyer.com", "status": "sent"},
             ]
 
-        async def _lookup(_gc, _subject, _email):
+        async def _lookup(_gc, _subject, _email, sent_after=None):
             return {"id": f"m-{_email}", "conversationId": f"c-{_email}"}
 
         with (
@@ -870,7 +870,7 @@ class TestCommitAfterSendAndActivityGating:
         )
         row_id = rows[0].id
 
-        async def _lookup(_gc, _subject, _email):
+        async def _lookup(_gc, _subject, _email, sent_after=None):
             return {"id": "msg-bk-1", "conversationId": "conv-bk-1"}
 
         def _explode_bookkeeping(*_args, **_kwargs):
@@ -920,7 +920,7 @@ class TestCommitAfterSendAndActivityGating:
             body="surplus",
         )
 
-        async def _lookup(_gc, _subject, _email):
+        async def _lookup(_gc, _subject, _email, sent_after=None):
             return {"id": "m", "conversationId": "c"}
 
         with (
@@ -1025,7 +1025,7 @@ class TestRetryOutreachSend:
 
         send_mock = AsyncMock()
 
-        async def _found(_gc, _subject, _email):
+        async def _found(_gc, _subject, _email, sent_after=None):
             return {"id": "already-sent-1", "conversationId": "conv-already-1"}
 
         with (
@@ -1066,7 +1066,7 @@ class TestRetryOutreachSend:
         send_mock = AsyncMock(return_value=[{"vendor_email": "sales@asyncbuyer.com", "status": "sent"}])
         calls: list[int] = []
 
-        async def _lookup(_gc, _subject, _email):
+        async def _lookup(_gc, _subject, _email, sent_after=None):
             # 1st call = the pre-send reconcile guard (not delivered → None);
             # 2nd call = the post-send stamp inside _finalize_outreach_send.
             calls.append(1)
@@ -1125,7 +1125,7 @@ class TestRetryOutreachSend:
         send_mock = AsyncMock()
         seen_subjects: list[str] = []
 
-        async def _found(_gc, subject, _email):
+        async def _found(_gc, subject, _email, sent_after=None):
             seen_subjects.append(subject)
             # Only the REAL (customized) subject matches the delivered message.
             return {"id": "already-1", "conversationId": "conv-1"} if subject == custom_subject else None
@@ -1193,7 +1193,7 @@ class TestRetryOutreachSend:
 
         seen_emails: list[str] = []
 
-        async def _found(_gc, _subject, email):
+        async def _found(_gc, _subject, email, sent_after=None):
             seen_emails.append(email)
             return {"id": "already-2", "conversationId": "conv-already-2"}
 
@@ -1237,7 +1237,7 @@ class TestRetryOutreachSend:
 
         seen_emails: list[str] = []
 
-        async def _found(_gc, _subject, email):
+        async def _found(_gc, _subject, email, sent_after=None):
             seen_emails.append(email)
             return {"id": "legacy-1", "conversationId": "conv-legacy-1"}
 
