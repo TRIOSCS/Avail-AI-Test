@@ -422,3 +422,33 @@ class TestBuyPlanGuard:
 
 def _payload(lines: list[dict]) -> QuoteBuilderSaveRequest:
     return QuoteBuilderSaveRequest(lines=lines)
+
+
+# ── QC 2026-08-13: revise-hijack / combined-quote-collapse guard ──────────────
+
+
+def test_revise_rejects_partial_req_set(db_session: Session, test_user: User, combo):
+    """Revising a combined quote from a PARTIAL req set is rejected — otherwise a caller
+    could hijack another rep's quote by id, or strand a combined quote's sibling
+    requisitions."""
+    from app.schemas.quote_builder import QuoteBuilderSaveRequest
+    from app.services.quote_builder_service import save_quote_from_builder_multi
+
+    r1, i1, o1 = combo["r1"]
+    r2, i2, o2 = combo["r2"]
+
+    created = save_quote_from_builder_multi(
+        db_session,
+        [r1.id, r2.id],
+        QuoteBuilderSaveRequest(lines=[_line(i1, o1, "LM317T", 0.60, 0.40), _line(i2, o2, "NE555P", 0.30, 0.20)]),
+        test_user,
+    )
+    qid = created["quote_id"]
+
+    with pytest.raises(ValueError, match="all of the original quote"):
+        save_quote_from_builder_multi(
+            db_session,
+            [r1.id],  # missing r2 — would strand it / is a hijack of the combined quote
+            QuoteBuilderSaveRequest(lines=[_line(i1, o1, "LM317T", 0.65, 0.40)], quote_id=qid),
+            test_user,
+        )
